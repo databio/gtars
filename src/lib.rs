@@ -57,6 +57,7 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
         if regions.is_empty() {
             continue;
         }
+        
         let region_set = RegionSet::from(regions);
         let tokens = tokenizer.tokenize_region_set(&region_set).unwrap();
 
