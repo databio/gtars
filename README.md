@@ -4,6 +4,8 @@
 ## Installation
 To install `genimtools`, you must have the rust toolchain installed. You can install it by following the instructions [here](https://www.rust-lang.org/tools/install).
 
+You may build the binary locally using `cargo build --release`. This will create a binary in `target/release/genimtools`. You can then add this to your path, or run it directly.
+
 ## Usage
 `genimtools` is very early in development, and as such, it does not have a lot of functionality yet. However, it does have a few useful tools. To see the available tools, run `genimtools --help`. To see the help for a specific tool, run `genimtools <tool> --help`.
 
