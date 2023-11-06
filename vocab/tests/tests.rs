@@ -1,5 +1,5 @@
-use rstest::{rstest, fixture};
-use genimtools::vocab::create_count_map;
+use vocab::create_count_map;
+use rstest::{fixture, rstest};
 
 #[fixture]
 fn data_path() -> &'static str {
@@ -12,20 +12,14 @@ fn universe_path() -> &'static str {
 }
 
 #[rstest]
-fn total_overlaps(
-    data_path: &'static str,
-    universe_path: &'static str
-) {
+fn total_overlaps(data_path: &'static str, universe_path: &'static str) {
     let cnt_map = create_count_map(data_path, universe_path).unwrap();
     // all of our data only intersects with three regions in the universe
     assert_eq!(cnt_map.len(), 3);
 }
 
 #[rstest]
-fn overlap_count(
-    data_path: &'static str,
-    universe_path: &'static str
-) {
+fn overlap_count(data_path: &'static str, universe_path: &'static str) {
     let cnt_map = create_count_map(data_path, universe_path).unwrap();
 
     // two duplicate files, so each counted overlap should be 2

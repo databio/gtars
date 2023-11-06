@@ -9,7 +9,12 @@ use gtokenizers::models::region_set::RegionSet;
 use gtokenizers::io::extract_regions_from_bed_file;
 use gtokenizers::tokenizers::traits::{Tokenizer, UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
 
-const FILE_EXTENSION: &str = ".bed";
+pub mod consts {
+    pub const FILE_EXTENSION: &str = ".bed";
+    pub const DEFAULT_OUTPUT: &str = "output.bed";
+    pub const DEFAULT_MIN_COUNT: u32 = 0;
+    pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+}
 
 ///
 /// Creates a count map for how many times each universe token appears in the training data.
@@ -42,8 +47,7 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
     for path in paths {
 
         if let Some(extension) = path.as_ref().unwrap().path().extension() {
-            if extension != FILE_EXTENSION.trim_start_matches('.') {
-                println!("Skipping file: {:?}", path?.path());
+            if extension != crate::consts::FILE_EXTENSION.trim_start_matches('.') {
                 continue;
             }
         }
