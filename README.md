@@ -26,7 +26,7 @@ cargo new --lib <tool_name>
 Then, add the following to the root `Cargo.toml`
 ```toml
 [dependencies]
-...
+# others
 <tool_name> = { path = "<tool_name>" }
 ```
 
