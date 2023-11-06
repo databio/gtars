@@ -27,7 +27,7 @@ Then, add the following to the root `Cargo.toml`
 ```toml
 [dependencies]
 # others
-<tool_name> = { path = "<tool_name>" }
+tool_name = { path = "<tool_name>" }
 ```
 
 ### New public library crate tools
