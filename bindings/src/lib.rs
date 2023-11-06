@@ -1,14 +1,11 @@
 use pyo3::prelude::*;
 
-/// Formats the sum of two numbers as string.
-#[pyfunction]
-fn sum_as_string(a: usize, b: usize) -> PyResult<String> {
-    Ok((a + b).to_string())
-}
+use crate::functions::prune_universe;
 
-/// A Python module implemented in Rust.
+mod functions;
+
 #[pymodule]
 fn genimtools(_py: Python, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(sum_as_string, m)?)?;
+    m.add_function(wrap_pyfunction!(prune_universe, m)?)?;
     Ok(())
 }
