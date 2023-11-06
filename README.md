@@ -57,3 +57,15 @@ pub fn new_tool_wrapper() -> Result<(), Box<dyn Error>> {
 ```
 
 Please make sure you update the changelog and bump the version number in `Cargo.toml` when you add a new tool.
+
+### VSCode users
+If you are using VSCode, make sure you link to the `Cargo.toml` inside the `.vscode` folder, so that `rust-analyzer` can link it all together:
+```json
+{
+    "rust-analyzer.linkedProjects": [
+        "./vocab/Cargo.toml",
+        "./Cargo.toml"
+        "./new-tool/Cargo.toml"
+    ]
+}
+```
