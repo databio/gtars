@@ -2,7 +2,7 @@ use std::{fs::File, io::Write};
 use std::path::Path;
 
 use clap::{arg, Command};
-use bedtools_rs::create_count_map;
+use genimtools::vocab::create_count_map;
 
 const DEFAULT_OUTPUT: &str = "output.bed";
 const DEFAULT_MIN_COUNT: u32 = 0;

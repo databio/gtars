@@ -1,5 +1,5 @@
 use rstest::{rstest, fixture};
-use bedtools_rs::create_count_map;
+use genimtools::vocab::create_count_map;
 
 #[fixture]
 fn data_path() -> &'static str {

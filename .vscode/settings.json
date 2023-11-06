@@ -1,0 +1,6 @@
+{
+    "rust-analyzer.linkedProjects": [
+        "./vocab/Cargo.toml",
+        "./Cargo.toml"
+    ]
+}
