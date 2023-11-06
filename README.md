@@ -16,3 +16,44 @@ genimtools = { git = "https://github.com/databio/genimtools" }
 ## Testing
 To run the tests, run `cargo test`.
 
+## Contributing
+### New internal library crate tools
+If you'd like to add a new tool, you can do so by creating a new library crate at the root of this repository:
+```bash
+cargo new --lib <tool_name>
+```
+
+Then, add the following to the root `Cargo.toml`
+```toml
+[dependencies]
+...
+<tool_name> = { path = "<tool_name>" }
+```
+
+### New public library crate tools
+If you want this to be available to users of `genimtools`, you can add it to the `genimtools` library crate as well. To do so, add the following to `src/lib.rs`:
+```rust
+pub mod <tool_name>;
+```
+
+### New binary crate tools
+Finally, if you want to have command-line functionality, you can add it to the `genimtools` binary crate. This requires two steps:
+1. Create a new `cli` using `clap` inside the `interfaces` module of `src/cli.rs`:
+```rust
+pub fn make_new_tool_cli() -> Command {
+
+}
+```
+
+2. Write your logic in a wrapper function. This will live inside the `functions` module of `src/cli.rs`:
+```rust
+// top of file:
+use tool_name::{ ... }
+
+// inside the module:
+pub fn new_tool_wrapper() -> Result<(), Box<dyn Error>> {
+    // your logic here
+}
+```
+
+Please make sure you update the changelog and bump the version number in `Cargo.toml` when you add a new tool.
