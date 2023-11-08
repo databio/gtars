@@ -1,11 +1,13 @@
 use clap::Command;
 
-pub mod cli;
+// go through the library crate to get the interfaces
+use genimtools::vocab;
+// use genimtools::uniwig;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-    pub const BIN_NAME: &str = "genim";
-    pub const PRUNE_CMD: &str = "prune";
+    pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
+    pub const BIN_NAME: &str = env!("CARGO_PKG_NAME");
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
@@ -17,11 +19,11 @@ fn build_parser() -> Command {
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
         .subcommand(
-            cli::interfaces::make_prune_cli()
+            vocab::cli::make_prune_cli()
         )
-        .subcommand(
-            cli::interfaces::make_uniwig_cli()
-        )
+        // .subcommand(
+        //     uniwig::cli::interfaces::make_uniwig_cli()
+        // )
 }
 
 fn main() {
@@ -29,11 +31,12 @@ fn main() {
     let matches = app.get_matches();
 
     match matches.subcommand() {
-        Some((consts::PRUNE_CMD, matches)) => {
-            cli::functions::prune_universe(matches);
+        Some((vocab::consts::PRUNE_CMD, matches)) => {
+
+            vocab::cli::handlers::prune_universe(matches);
         }
-        Some((consts::UNIWIG_CMD, matches)) => {
-            cli::functions::uniwig(matches);
+        Some((consts::UNIWIG_CMD, _matches)) => {
+            println!("uniwig");
         }
 
         _ => unreachable!("Subcommand not found"),

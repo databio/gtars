@@ -1,8 +1,6 @@
 {
     "rust-analyzer.linkedProjects": [
-        "./vocab/Cargo.toml",
         "./Cargo.toml",
         "./bindings/Cargo.toml",
-        "./bindings/Cargo.toml"
     ]
 }

@@ -32,17 +32,7 @@ To run the tests, run `cargo test`.
 
 ## Contributing
 ### New internal library crate tools
-If you'd like to add a new tool, you can do so by creating a new library crate at the root of this repository:
-```bash
-cargo new --lib <tool_name>
-```
-
-Then, add the following to the root `Cargo.toml`
-```toml
-[dependencies]
-# others
-tool_name = { path = "<tool_name>" }
-```
+If you'd like to add a new tool, you can do so by creating a new module within the src folder.
 
 ### New public library crate tools
 If you want this to be available to users of `genimtools`, you can add it to the `genimtools` library crate as well. To do so, add the following to `src/lib.rs`:
