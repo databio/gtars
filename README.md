@@ -1,4 +1,7 @@
-# genimtools
+<div align="center">
+<img src="docs/logo.svg" alt="genimtools logo" height="100px">
+<h1>genimtools</h1>
+</div>
 `genimtools` is a rust crate that provides a set of tools for working with genomic interval data. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a libary for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well.
 
 `genimtools` is three things:
