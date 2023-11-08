@@ -1,6 +1,14 @@
 # genimtools
 `genimtools` is a rust crate that provides a set of tools for working with genomic interval data. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a libary for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well.
 
+`genimtools` is three things:
+
+1. A rust crate that provides functions, traits, and structs for working with genomic interval data.
+2. A rust binary that acts as a command-line interface for the rust crate.
+3. A python package that provides python bindings for the rust crate, so that it can be used within python.
+
+This repository is a work in progress, and still in early development. As such, it is not yet available on `crates.io`. However, you can still use it by building it locally.
+
 ## Installation
 To install `genimtools`, you must have the rust toolchain installed. You can install it by following the instructions [here](https://www.rust-lang.org/tools/install).
 
