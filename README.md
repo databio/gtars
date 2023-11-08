@@ -1,5 +1,5 @@
 <div align="center">
-<img src="docs/logo.svg" alt="genimtools logo" height="100px">
+<img src="genimtools/docs/logo.svg" alt="genimtools logo" height="100px">
 <h1 style="margin-top: 0x;">genimtools</h1>
 </div>
 
