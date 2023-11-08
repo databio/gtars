@@ -4,12 +4,13 @@ use std::fs::File;
 use pyo3::prelude::*;
 
 use genimtools::vocab::create_count_map;
+use genimtools::vocab::consts::{DEFAULT_MIN_COUNT, DEFAULT_OUTPUT};
 
 #[pyfunction]
-pub fn prune_universe(universe: &str, data: &str, min_count: Option<u32>, output: Option<&str>) -> PyResult<()> {
+pub fn prune_universe(data: &str, universe: &str, min_count: Option<u32>, output: Option<&str>) -> PyResult<()> {
     
-    let min_count = min_count.unwrap_or(1);
-    let output = output.unwrap_or("output.bed");
+    let min_count = min_count.unwrap_or(DEFAULT_MIN_COUNT);
+    let output = output.unwrap_or(DEFAULT_OUTPUT);
 
     let cnt_map = create_count_map(data, universe).unwrap();
 
