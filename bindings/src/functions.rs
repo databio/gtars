@@ -29,3 +29,8 @@ pub fn prune_universe(data: &str, universe: &str, min_count: Option<u32>, output
 
     Ok(())
 }
+
+#[pyfunction]
+pub fn print_uniwig() {
+    println!("Running uniwig.");
+}
