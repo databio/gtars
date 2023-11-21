@@ -1,32 +1,29 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::path::Path;
 
-use super::models::Region;
+use polars::prelude::*;
+use polars::datatypes::DataType;
+use super::consts::{
+    CHR_COL_NAME,
+    START_COL_NAME,
+    END_COL_NAME,
+    DELIMITER
+};
 
 pub fn extract_regions_from_bed_file(
     path: &Path,
-) -> Result<Vec<Region>, Box<dyn std::error::Error>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
+) -> Result<DataFrame, Box<dyn std::error::Error>> {
 
-    let mut regions = Vec::new();
+    let schema = Schema::from_iter(vec![
+        Field::new(CHR_COL_NAME, DataType::Utf8),
+        Field::new(START_COL_NAME, DataType::UInt32),
+        Field::new(END_COL_NAME, DataType::UInt32),
+    ]);
 
-    for line in reader.lines() {
-        let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
+    let df = CsvReader::from_path(path)?
+        .has_header(false)
+        .with_schema(Some(Arc::new(schema)))
+        .with_separator(DELIMITER as u8) // the [0] is needed to convert from 
+        .finish()?;
 
-        let chr = fields[0];
-        let start = fields[1].parse::<u32>()?;
-        let end = fields[2].parse::<u32>()?;
-
-        let region = Region {
-            chr: chr.to_string(),
-            start,
-            end,
-        };
-
-        regions.push(region);
-    }
-    Ok(regions)
+    Ok(df)
 }

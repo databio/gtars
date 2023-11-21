@@ -11,6 +11,8 @@ license = "MIT"
 clap = { version = "4.4.7", features = ["derive"] }
 gtokenizers = "0.0.18"
 indicatif = "0.17.7"
+polars = "0.35.4"
 
 [dev-dependencies]
 rstest = "0.18.2"
+tempfile = "3.8.1"
