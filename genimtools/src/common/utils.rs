@@ -9,7 +9,7 @@ use super::consts::{
     DELIMITER
 };
 
-pub fn extract_regions_from_bed_file(
+pub fn bed_file_to_df(
     path: &Path,
 ) -> Result<DataFrame, Box<dyn std::error::Error>> {
 

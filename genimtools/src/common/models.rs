@@ -1,5 +1,4 @@
-use super::utils::extract_regions_from_bed_file;
-use core::panic;
+use super::utils::bed_file_to_df;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -21,7 +20,7 @@ impl TryFrom<&Path> for RegionSet {
     type Error = Box<dyn std::error::Error>;
 
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let regions = extract_regions_from_bed_file(value)?;
+        let regions = bed_file_to_df(value)?;
         Ok(RegionSet { regions })
     }
 }
