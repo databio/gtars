@@ -21,9 +21,9 @@ fn build_parser() -> Command {
         .subcommand(
             vocab::cli::make_prune_cli()
         )
-        // .subcommand(
-        //     uniwig::cli::interfaces::make_uniwig_cli()
-        // )
+    // .subcommand(
+    //     uniwig::cli::interfaces::make_uniwig_cli()
+    // )
 }
 
 fn main() {
@@ -32,7 +32,6 @@ fn main() {
 
     match matches.subcommand() {
         Some((vocab::consts::PRUNE_CMD, matches)) => {
-
             vocab::cli::handlers::prune_universe(matches);
         }
         Some((consts::UNIWIG_CMD, _matches)) => {

@@ -1,13 +1,13 @@
-use std::path::Path;
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 
-use indicatif::{ProgressBar, ProgressStyle};
-use gtokenizers::tokenizers::TreeTokenizer;
+use gtokenizers::io::extract_regions_from_bed_file;
 use gtokenizers::models::region::Region;
 use gtokenizers::models::region_set::RegionSet;
-use gtokenizers::io::extract_regions_from_bed_file;
-use gtokenizers::tokenizers::traits::{Tokenizer, UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
+use gtokenizers::tokenizers::traits::{Tokenizer, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use gtokenizers::tokenizers::TreeTokenizer;
+use indicatif::{ProgressBar, ProgressStyle};
 
 pub mod cli;
 
@@ -21,13 +21,15 @@ pub mod consts {
 
 ///
 /// Creates a count map for how many times each universe token appears in the training data.
-/// 
+///
 /// # Arguments
 /// - `data_path` - Path to the training data. This should be a folder of bed files.
 /// - `universe_path` - Path to the universe file we want to prune.
 /// - `output_path` - Path to the output file (the pruned universe).
-pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<Region, u32>, Box<dyn std::error::Error>> {
-
+pub fn create_count_map(
+    data_path: &str,
+    universe_path: &str,
+) -> Result<HashMap<Region, u32>, Box<dyn std::error::Error>> {
     // set up the tokenizer
     let universe_path = Path::new(universe_path);
     let tokenizer = TreeTokenizer::from(universe_path);
@@ -42,13 +44,16 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
     // iterate over the paths
     let num_paths = paths.count();
     let bar = ProgressBar::new(num_paths as u64);
-    bar.set_style(ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+    bar.set_style(
+        ProgressStyle::with_template(
+            "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+        )
         .unwrap()
-        .progress_chars("##-"));
+        .progress_chars("##-"),
+    );
 
     let paths = fs::read_dir(data_path)?;
     for path in paths {
-
         if let Some(extension) = path.as_ref().unwrap().path().extension() {
             if extension != consts::FILE_EXTENSION.trim_start_matches('.') {
                 continue;
@@ -64,7 +69,7 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
         if regions.is_empty() {
             continue;
         }
-        
+
         let region_set = RegionSet::from(regions);
         let tokens = tokenizer.tokenize_region_set(&region_set).unwrap();
 
@@ -80,7 +85,6 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
         });
 
         bar.inc(1);
-
     }
 
     // drop unknown token from hashmap, that is not needed
@@ -90,6 +94,5 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
         end: UNKNOWN_END as u32,
     });
 
-            
     Ok(counter)
 }
