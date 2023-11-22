@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
-use gtokenizers::io::extract_regions_from_bed_file;
-use gtokenizers::models::region::Region;
-use gtokenizers::models::region_set::RegionSet;
-use gtokenizers::tokenizers::traits::{Tokenizer, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
-use gtokenizers::tokenizers::TreeTokenizer;
 use indicatif::{ProgressBar, ProgressStyle};
+
+use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
+use crate::common::models::{Region, RegionSet}; 
+use crate::tokenizers::{TreeTokenizer, Tokenizer};
 
 pub mod cli;
 
@@ -30,6 +29,7 @@ pub fn create_count_map(
     data_path: &str,
     universe_path: &str,
 ) -> Result<HashMap<Region, u32>, Box<dyn std::error::Error>> {
+
     // set up the tokenizer
     let universe_path = Path::new(universe_path);
     let tokenizer = TreeTokenizer::from(universe_path);
@@ -54,6 +54,7 @@ pub fn create_count_map(
 
     let paths = fs::read_dir(data_path)?;
     for path in paths {
+        
         if let Some(extension) = path.as_ref().unwrap().path().extension() {
             if extension != consts::FILE_EXTENSION.trim_start_matches('.') {
                 continue;
@@ -63,23 +64,25 @@ pub fn create_count_map(
         // get regions from the file
         let path = path?.path();
         let path = Path::new(&path);
-        let regions = extract_regions_from_bed_file(path)?;
+
+        let region_set = RegionSet::try_from(path)?;
 
         // skip if there are no regions
-        if regions.is_empty() {
+        if region_set.is_empty() {
             continue;
         }
 
-        let region_set = RegionSet::from(regions);
         let tokens = tokenizer.tokenize_region_set(&region_set).unwrap();
 
         // count the tokens
         tokens.into_iter().for_each(|region| {
+
             let region = Region {
                 chr: region.chr,
                 start: region.start,
                 end: region.end,
             };
+            
             let cnt = counter.entry(region).or_insert_with(|| 0);
             *cnt += 1;
         });
@@ -89,7 +92,7 @@ pub fn create_count_map(
 
     // drop unknown token from hashmap, that is not needed
     counter.remove(&Region {
-        chr: String::from(UNKNOWN_CHR),
+        chr: UNKNOWN_CHR.to_string(),
         start: UNKNOWN_START as u32,
         end: UNKNOWN_END as u32,
     });

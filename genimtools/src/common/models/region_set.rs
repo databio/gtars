@@ -1,16 +1,15 @@
-use super::utils::bed_file_to_df;
+use crate::common::utils::bed_file_to_df;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use super::consts::CHR_COL_NAME;
-use polars::prelude::*;
+use crate::common::consts::{
+    CHR_COL_NAME, 
+    START_COL_NAME, 
+    END_COL_NAME, 
+};
 
-pub struct Region {
-    pub chr: String,
-    pub start: u32,
-    pub end: u32,
-}
+use polars::prelude::*;
 
 pub struct RegionSet {
     pub regions: DataFrame,
@@ -30,8 +29,8 @@ impl RegionSet {
         let mut file = File::create(path)?;
 
         let chrs = self.regions.column(CHR_COL_NAME).unwrap();
-        let starts = self.regions.column("start").unwrap();
-        let ends = self.regions.column("end").unwrap();
+        let starts = self.regions.column(START_COL_NAME).unwrap();
+        let ends = self.regions.column(END_COL_NAME).unwrap();
         
         // is there a better way to do this?
         for i in 0..self.regions.height() {
@@ -64,9 +63,25 @@ impl RegionSet {
 
         Ok(())
     }
-}
 
+    pub fn len(&self) -> usize {
+        self.regions.height()
+    }
 
-pub struct BedSet {
-    pub region_sets: Vec<RegionSet>,
+    pub fn is_empty(&self) -> bool {
+        self.regions.is_empty()
+    }
+
+    pub fn chrs(&self) -> &Series {
+        self.regions.column(CHR_COL_NAME).unwrap()
+    }
+
+    pub fn starts(&self) -> &Series {
+        self.regions.column(START_COL_NAME).unwrap()
+    }
+
+    pub fn ends(&self) -> &Series {
+        self.regions.column(END_COL_NAME).unwrap()
+    }
+
 }

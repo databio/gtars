@@ -48,7 +48,11 @@ pub mod handlers {
                 continue;
             }
 
-            let line = format!("{}\t{}\t{}\n", region.chr, region.start, region.end);
+            let chr = region.chr;
+            let start = region.start;
+            let end = region.end;
+
+            let line = format!("{}\t{}\t{}\n", chr, start, end);
 
             // push to stdout
             stdout.write_all(line.as_bytes()).unwrap();

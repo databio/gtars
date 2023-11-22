@@ -4,3 +4,4 @@
 pub mod common;
 pub mod uniwig;
 pub mod vocab;
+pub mod tokenizers;
