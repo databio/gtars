@@ -1,24 +1,16 @@
-use std::path::Path;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::File;
-use std::io::{BufReader, BufRead};
-use std::collections::HashMap;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
-use polars::prelude::*;
 use polars::datatypes::DataType;
+use polars::prelude::*;
 
+use crate::common::consts::{CHR_COL_NAME, DELIMITER, END_COL_NAME, START_COL_NAME};
 use crate::common::models::region::Region;
-use crate::common::consts::{
-    CHR_COL_NAME,
-    START_COL_NAME,
-    END_COL_NAME,
-    DELIMITER
-};
 
-pub fn bed_file_to_df(
-    path: &Path,
-) -> Result<DataFrame, Box<dyn std::error::Error>> {
-
+pub fn bed_file_to_df(path: &Path) -> Result<DataFrame, Box<dyn std::error::Error>> {
     let schema = Schema::from_iter(vec![
         Field::new(CHR_COL_NAME, DataType::Utf8),
         Field::new(START_COL_NAME, DataType::UInt32),
@@ -28,7 +20,7 @@ pub fn bed_file_to_df(
     let df = CsvReader::from_path(path)?
         .has_header(false)
         .with_schema(Some(Arc::new(schema)))
-        .with_separator(DELIMITER as u8) // the [0] is needed to convert from 
+        .with_separator(DELIMITER as u8) // the [0] is needed to convert from
         .finish()?;
 
     Ok(df)
@@ -67,7 +59,7 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
             start,
             end,
         };
-        
+
         regions.push(region);
     }
 

@@ -4,9 +4,9 @@ use std::path::Path;
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
-use crate::common::models::{Region, RegionSet}; 
-use crate::tokenizers::{TreeTokenizer, Tokenizer};
+use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::models::{Region, RegionSet};
+use crate::tokenizers::{Tokenizer, TreeTokenizer};
 
 pub mod cli;
 
@@ -29,7 +29,6 @@ pub fn create_count_map(
     data_path: &str,
     universe_path: &str,
 ) -> Result<HashMap<Region, u32>, Box<dyn std::error::Error>> {
-
     // set up the tokenizer
     let universe_path = Path::new(universe_path);
     let tokenizer = TreeTokenizer::from(universe_path);
@@ -54,7 +53,6 @@ pub fn create_count_map(
 
     let paths = fs::read_dir(data_path)?;
     for path in paths {
-        
         if let Some(extension) = path.as_ref().unwrap().path().extension() {
             if extension != consts::FILE_EXTENSION.trim_start_matches('.') {
                 continue;
@@ -76,13 +74,12 @@ pub fn create_count_map(
 
         // count the tokens
         tokens.into_iter().for_each(|region| {
-
             let region = Region {
                 chr: region.chr,
                 start: region.start,
                 end: region.end,
             };
-            
+
             let cnt = counter.entry(region).or_insert_with(|| 0);
             *cnt += 1;
         });

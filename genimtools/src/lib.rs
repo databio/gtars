@@ -2,6 +2,6 @@
 // and expose the vocab module to users of this crate
 // when they are using it as a library, and not as a binary
 pub mod common;
+pub mod tokenizers;
 pub mod uniwig;
 pub mod vocab;
-pub mod tokenizers;

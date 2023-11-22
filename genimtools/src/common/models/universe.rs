@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::common::consts::{PAD_CHR, PAD_START, PAD_END, UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
+use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::region::Region;
-use crate::common::utils::{generate_region_to_id_map, extract_regions_from_bed_file};
+use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
 
 pub struct Universe {
     pub regions: Vec<Region>,
@@ -60,8 +60,6 @@ impl Universe {
             end: UNKNOWN_END as u32,
         }
     }
-
-    
 }
 
 impl From<Vec<Region>> for Universe {
@@ -96,7 +94,7 @@ impl From<Vec<Region>> for Universe {
         } else {
             regions.push(unk.to_owned());
         }
-        
+
         // notify if the Pad token is already in the vocab
         if region_to_id.contains_key(&pad) {
             // pass
@@ -122,7 +120,6 @@ impl From<Vec<Region>> for Universe {
 
 impl From<&Path> for Universe {
     fn from(value: &Path) -> Self {
-
         let regions = extract_regions_from_bed_file(value);
 
         let mut regions = match regions {
@@ -159,7 +156,7 @@ impl From<&Path> for Universe {
         } else {
             regions.push(unk.to_owned());
         }
-        
+
         // notify if the Pad token is already in the vocab
         if region_to_id.contains_key(&pad) {
             // pass

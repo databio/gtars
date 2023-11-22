@@ -1,6 +1,6 @@
 use genimtools::common::models::{Region, RegionSet};
-use tempfile::NamedTempFile;
 use rstest::*;
+use tempfile::NamedTempFile;
 
 use std::path::Path;
 
@@ -45,12 +45,10 @@ mod tests {
 
         // write the region set to the temporary file
         rs.to_bed(tmp_path).unwrap();
-        
+
         // read the temporary file back in as a region set
         let rs2 = RegionSet::try_from(tmp_path).unwrap();
 
         assert!(rs2.regions.height() == 25);
     }
-
-
 }

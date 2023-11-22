@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use polars::prelude::*;
-use rust_lapper::{Lapper, Interval};
+use rust_lapper::{Interval, Lapper};
 
-use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END};
-use crate::common::models::{Region, RegionSet, Universe, TokenizedRegionSet};
+use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::tokenizers::traits::Tokenizer;
-
 
 pub struct TreeTokenizer {
     pub universe: Universe,
@@ -22,7 +21,6 @@ impl From<&Path> for TreeTokenizer {
     /// # Returns
     /// A new TreeTokenizer
     fn from(value: &Path) -> Self {
-
         let universe = Universe::from(value);
 
         let mut tree: HashMap<String, Lapper<u32, ()>> = HashMap::new();
@@ -54,19 +52,18 @@ impl From<&Path> for TreeTokenizer {
 
 impl Tokenizer for TreeTokenizer {
     fn tokenize_region(&self, region: &Region) -> Option<TokenizedRegionSet> {
-
         let lapper = self.tree.get(&region.chr);
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let regions: Vec<Region> = intervals.map(|interval| {
-                    Region {
+                let regions: Vec<Region> = intervals
+                    .map(|interval| Region {
                         chr: region.chr.to_owned(),
                         start: interval.start,
                         end: interval.stop,
-                    }
-                }).collect();
-                
+                    })
+                    .collect();
+
                 if regions.is_empty() {
                     let regions = vec![self.unknown_token()];
                     return Some(TokenizedRegionSet {
@@ -77,24 +74,21 @@ impl Tokenizer for TreeTokenizer {
 
                 Some(TokenizedRegionSet {
                     regions,
-                    universe: &self.universe,  
-                })
-            },
-            None => {
-                Some(TokenizedRegionSet {
-                    regions: vec![Region {
-                        chr: UNKNOWN_CHR.to_string(),
-                        start: UNKNOWN_START as u32,
-                        end: UNKNOWN_END as u32,
-                    }],
                     universe: &self.universe,
                 })
             }
+            None => Some(TokenizedRegionSet {
+                regions: vec![Region {
+                    chr: UNKNOWN_CHR.to_string(),
+                    start: UNKNOWN_START as u32,
+                    end: UNKNOWN_END as u32,
+                }],
+                universe: &self.universe,
+            }),
         }
     }
 
     fn tokenize_region_set(&self, region_set: &RegionSet) -> Option<TokenizedRegionSet> {
-
         let chrs = region_set.chrs();
         let starts = region_set.starts();
         let ends = region_set.ends();
@@ -102,7 +96,6 @@ impl Tokenizer for TreeTokenizer {
         let mut tokenized_regions: Vec<Region> = Vec::new();
 
         for i in 0..region_set.len() {
-
             let chr: String;
             let start: u32;
             let end: u32;
@@ -124,36 +117,31 @@ impl Tokenizer for TreeTokenizer {
             } else {
                 panic!("end column must be of type UInt32");
             }
-            
+
             let lapper = self.tree.get(&chr);
             match lapper {
                 Some(tree) => {
-
                     let intervals = tree.find(start, end);
 
-                    let regions: Vec<Region> = intervals.map(|interval| {
-                        Region {
+                    let regions: Vec<Region> = intervals
+                        .map(|interval| Region {
                             chr: chr.to_owned(),
                             start: interval.start,
                             end: interval.stop,
-                        }
-                    }).collect();
+                        })
+                        .collect();
 
                     tokenized_regions.extend(regions);
-                },
+                }
                 None => {
                     tokenized_regions.push(self.unknown_token());
                 }
             }
-        
         }
 
         Some(TokenizedRegionSet {
             regions: tokenized_regions,
             universe: &self.universe,
         })
-
-
     }
-
 }

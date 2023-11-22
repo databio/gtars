@@ -3,11 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use crate::common::consts::{
-    CHR_COL_NAME, 
-    START_COL_NAME, 
-    END_COL_NAME, 
-};
+use crate::common::consts::{CHR_COL_NAME, END_COL_NAME, START_COL_NAME};
 
 use polars::prelude::*;
 
@@ -31,13 +27,13 @@ impl RegionSet {
         let chrs = self.regions.column(CHR_COL_NAME).unwrap();
         let starts = self.regions.column(START_COL_NAME).unwrap();
         let ends = self.regions.column(END_COL_NAME).unwrap();
-        
+
         // is there a better way to do this?
         for i in 0..self.regions.height() {
             let chr: String;
             let start: u32;
             let end: u32;
-            
+
             // extract out the chr, start, and end values
             if let AnyValue::Utf8(v) = chrs.get(i)? {
                 chr = v.to_string();
@@ -83,5 +79,4 @@ impl RegionSet {
     pub fn ends(&self) -> &Series {
         self.regions.column(END_COL_NAME).unwrap()
     }
-
 }
