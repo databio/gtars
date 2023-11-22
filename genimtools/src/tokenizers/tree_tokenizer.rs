@@ -131,6 +131,11 @@ impl Tokenizer for TreeTokenizer {
                         })
                         .collect();
 
+                    if regions.is_empty() {
+                        tokenized_regions.push(self.unknown_token());
+                        continue;
+                    }
+
                     tokenized_regions.extend(regions);
                 }
                 None => {

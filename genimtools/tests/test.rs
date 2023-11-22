@@ -1,12 +1,19 @@
-use genimtools::common::models::{Region, RegionSet};
+use std::path::Path;
+
 use rstest::*;
 use tempfile::NamedTempFile;
 
-use std::path::Path;
+use genimtools::common::models::{Region, RegionSet};
+use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
 #[fixture]
 fn path_to_bed_file() -> &'static str {
     "tests/data/peaks.bed"
+}
+
+#[fixture]
+fn path_to_tokenize_bed_file() -> &'static str {
+    "tests/data/to_tokenize.bed"
 }
 
 mod tests {
@@ -50,5 +57,26 @@ mod tests {
         let rs2 = RegionSet::try_from(tmp_path).unwrap();
 
         assert!(rs2.regions.height() == 25);
+    }
+
+    #[rstest]
+    fn test_create_tokenizer(path_to_bed_file: &str) {
+        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        println!("{}", tokenizer.universe.len());
+        assert!(tokenizer.universe.len() == 27); // 25 regions + 2 special tokens
+    }
+
+    #[rstest]
+    fn test_tokenize_bed_file(path_to_bed_file: &str, path_to_tokenize_bed_file: &str) {
+        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
+        let tokenized_regions = tokenizer.tokenize_region_set(&rs).unwrap();
+        
+        println!("{}", tokenized_regions.len());
+        assert!(tokenized_regions.len() == 4);
+
+        // last should be the unknown token
+        let unknown_token = tokenized_regions.regions[3].clone();
+        assert!(unknown_token.chr == "chrUNK");
     }
 }
