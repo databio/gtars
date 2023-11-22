@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - create `tokenize` cli
 - add tests for core utils and tokenizers
 - RegionSet is now backed by a polars DataFrame
+- new python bindings for core utils and tokenizers
 
 ## [0.0.4]
 - add type annotations to the python bindings
