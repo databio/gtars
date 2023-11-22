@@ -2,6 +2,7 @@ use clap::Command;
 
 // go through the library crate to get the interfaces
 use genimtools::vocab;
+use genimtools::tokenizers;
 // use genimtools::uniwig;
 
 pub mod consts {
@@ -18,12 +19,8 @@ fn build_parser() -> Command {
         .author("Databio")
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
-        .subcommand(
-            vocab::cli::make_prune_cli()
-        )
-    // .subcommand(
-    //     uniwig::cli::interfaces::make_uniwig_cli()
-    // )
+        .subcommand(vocab::cli::make_prune_cli())
+        .subcommand(tokenizers::cli::make_tokenization_cli())
 }
 
 fn main() {
@@ -34,8 +31,8 @@ fn main() {
         Some((vocab::consts::PRUNE_CMD, matches)) => {
             vocab::cli::handlers::prune_universe(matches);
         }
-        Some((consts::UNIWIG_CMD, _matches)) => {
-            println!("uniwig");
+        Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
+            tokenizers::cli::handlers::tokenize_bed_file(matches);
         }
 
         _ => unreachable!("Subcommand not found"),

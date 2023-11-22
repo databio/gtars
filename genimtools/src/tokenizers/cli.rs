@@ -25,6 +25,7 @@ pub fn make_tokenization_cli() -> Command {
                 .help("Path to the universe file we want to use.")
                 .required(true)
         )
+        
 }
 
 pub mod handlers {
@@ -57,9 +58,9 @@ pub mod handlers {
             let chr = tokenized_region.chr;
             let start = tokenized_region.start;
             let end = tokenized_region.end;
-            let id = tokenized_region.id;
-
-            let line = format!("{}\t{}\t{}\t{}\n", chr, start, end, id);
+            
+            
+            let line = format!("{}\t{}\t{}\n", chr, start, end);
 
             // push to stdout
             stdout.write_all(line.as_bytes()).unwrap();
