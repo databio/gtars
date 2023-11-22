@@ -20,7 +20,7 @@ pub fn bed_file_to_df(path: &Path) -> Result<DataFrame, Box<dyn std::error::Erro
     let df = CsvReader::from_path(path)?
         .has_header(false)
         .with_schema(Some(Arc::new(schema)))
-        .with_separator(DELIMITER as u8) // the [0] is needed to convert from
+        .with_separator(DELIMITER as u8)
         .finish()?;
 
     Ok(df)
