@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+use crate::common::models::Region;
 use crate::common::consts::{CHR_COL_NAME, END_COL_NAME, START_COL_NAME};
 
 use polars::prelude::*;
@@ -17,6 +18,29 @@ impl TryFrom<&Path> for RegionSet {
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
         let regions = bed_file_to_df(value)?;
         Ok(RegionSet { regions })
+    }
+}
+
+impl From<Vec<Region>> for RegionSet {
+    fn from(regions: Vec<Region>) -> Self {
+        let mut chrs = Vec::new();
+        let mut starts = Vec::new();
+        let mut ends = Vec::new();
+
+        for region in regions {
+            chrs.push(region.chr);
+            starts.push(region.start);
+            ends.push(region.end);
+        }
+
+        let regions = DataFrame::new(vec![
+            Series::new(CHR_COL_NAME, chrs),
+            Series::new(START_COL_NAME, starts),
+            Series::new(END_COL_NAME, ends),
+        ])
+        .unwrap();
+
+        RegionSet { regions }
     }
 }
 
