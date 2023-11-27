@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.0.6]
+- update python bindings to support the module/submodule structure (https://github.com/PyO3/pyo3/issues/759#issuecomment-1828431711)
+- change name of some submodules
+- remove `consts` submodule, just add to base
+- expose a `__version__` attribute in the python bindings
+
 ## [0.0.5]
 - add many "core utils"
 - move `gtokenizers` into this package inside `genimtools::tokenizers`
