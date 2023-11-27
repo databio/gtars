@@ -1,6 +1,6 @@
 [package]
 name = "genimtools"
-version = "0.0.5"
+version = "0.0.6"
 edition = "2021"
 description = "Performance-critical tools to manipulate, analyze, and process genomic interval data. Primarily focused on building tools for geniml - our genomic machine learning python package."
 license = "MIT"
