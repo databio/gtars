@@ -10,7 +10,7 @@
 2. A rust binary crate (in `/genimtools/main.rs`), a small, wrapper command-line interface for the library crate.
 3. A rust crate (in `/bindings`) that provides Python bindings, and a resulting Python package, so that it can be used within Python.
 
-This repository is a work in progress, and still in early development. As such, it is not yet available on `crates.io`. However, you can still use it by building it locally.
+This repository is a work in progress, and still in early development.
 
 ## Installation
 To install `genimtools`, you must have the rust toolchain installed. You can install it by following the instructions [here](https://www.rust-lang.org/tools/install).
