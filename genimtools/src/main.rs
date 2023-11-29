@@ -37,4 +37,5 @@ fn main() {
 
         _ => unreachable!("Subcommand not found"),
     };
+
 }
