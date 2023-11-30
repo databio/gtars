@@ -51,7 +51,7 @@ impl From<&Path> for TreeTokenizer {
 }
 
 impl Tokenizer for TreeTokenizer {
-    fn tokenize_region(&self, region: &Region) -> Option<TokenizedRegionSet> {
+    fn tokenize_region(&self, region: &Region) -> TokenizedRegionSet {
         let lapper = self.tree.get(&region.chr);
         match lapper {
             Some(lapper) => {
@@ -66,25 +66,25 @@ impl Tokenizer for TreeTokenizer {
 
                 if regions.is_empty() {
                     let regions = vec![self.unknown_token()];
-                    return Some(TokenizedRegionSet {
+                    return TokenizedRegionSet {
                         regions,
                         universe: &self.universe,
-                    });
+                    };
                 }
 
-                Some(TokenizedRegionSet {
+                TokenizedRegionSet {
                     regions,
                     universe: &self.universe,
-                })
+                }
             }
-            None => Some(TokenizedRegionSet {
+            None => TokenizedRegionSet {
                 regions: vec![Region {
                     chr: UNKNOWN_CHR.to_string(),
                     start: UNKNOWN_START as u32,
                     end: UNKNOWN_END as u32,
                 }],
                 universe: &self.universe,
-            }),
+            },
         }
     }
 

@@ -21,6 +21,7 @@ pub fn bed_file_to_df(path: &Path) -> Result<DataFrame, Box<dyn std::error::Erro
         .has_header(false)
         .with_schema(Some(Arc::new(schema)))
         .with_separator(DELIMITER as u8)
+        .truncate_ragged_lines(true)
         .finish()?;
 
     Ok(df)

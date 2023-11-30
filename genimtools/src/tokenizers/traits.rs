@@ -13,7 +13,7 @@ pub trait Tokenizer {
     /// # Returns
     /// A new region that corresponds to a region in the tokenizers vocab (or universe).
     ///
-    fn tokenize_region(&self, region: &Region) -> Option<TokenizedRegionSet>;
+    fn tokenize_region(&self, region: &Region) -> TokenizedRegionSet;
 
     /// Tokenize a region set into the vocabulary of the tokenizer
     ///
