@@ -1,14 +1,18 @@
-use std::io::Write;
 use std::fs::File;
+use std::io::Write;
 
 use pyo3::prelude::*;
 
-use genimtools::vocab::create_count_map;
 use genimtools::vocab::consts::{DEFAULT_MIN_COUNT, DEFAULT_OUTPUT};
+use genimtools::vocab::create_count_map;
 
 #[pyfunction]
-pub fn prune_universe(data: &str, universe: &str, min_count: Option<u32>, output: Option<&str>) -> PyResult<()> {
-    
+pub fn prune_universe(
+    data: &str,
+    universe: &str,
+    min_count: Option<u32>,
+    output: Option<&str>,
+) -> PyResult<()> {
     let min_count = min_count.unwrap_or(DEFAULT_MIN_COUNT);
     let output = output.unwrap_or(DEFAULT_OUTPUT);
 
