@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use crate::common::models::Region;
 use crate::common::consts::{CHR_COL_NAME, END_COL_NAME, START_COL_NAME};
+use crate::common::models::Region;
 
 use polars::prelude::*;
 
