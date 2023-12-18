@@ -1,7 +1,7 @@
 use std::io;
 use std::io::Write;
 
-use clap::{ArgMatches, Command, Arg};
+use clap::{Arg, ArgMatches, Command};
 
 use super::*;
 use crate::common::models::region_set::RegionSet;
@@ -16,20 +16,19 @@ pub fn make_tokenization_cli() -> Command {
                 .long("bed")
                 .short('b')
                 .help("Path to the bed file we want to tokenize.")
-                .required(true)
+                .required(true),
         )
         .arg(
             Arg::new("universe")
                 .long("universe")
                 .short('u')
                 .help("Path to the universe file we want to use.")
-                .required(true)
+                .required(true),
         )
-        
 }
 
 pub mod handlers {
-    
+
     use std::path::Path;
 
     use super::*;
@@ -49,17 +48,18 @@ pub mod handlers {
 
         let bed = Path::new(&bed);
         let regions = RegionSet::try_from(bed).expect("Failed to read bed file");
-        
+
         let mut stdout = io::stdout().lock();
 
-        let tokenized_regions = tokenizer.tokenize_region_set(&regions).expect("Could not tokenize region set.");
+        let tokenized_regions = tokenizer
+            .tokenize_region_set(&regions)
+            .expect("Could not tokenize region set.");
 
         for tokenized_region in tokenized_regions.into_iter() {
             let chr = tokenized_region.chr;
             let start = tokenized_region.start;
             let end = tokenized_region.end;
-            
-            
+
             let line = format!("{}\t{}\t{}\n", chr, start, end);
 
             // push to stdout

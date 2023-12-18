@@ -71,7 +71,7 @@ mod tests {
         let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
         let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
         let tokenized_regions = tokenizer.tokenize_region_set(&rs).unwrap();
-        
+
         println!("{}", tokenized_regions.len());
         assert!(tokenized_regions.len() == 4);
 

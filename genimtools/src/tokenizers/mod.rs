@@ -1,9 +1,9 @@
 //! # Tokenizers - tokenize new genomic intervals into a known universe for machine-learning pipelines
-//! 
+//!
 //! There is currently only one tokenizer - the `TreeTokenizer`
+pub mod cli;
 pub mod traits;
 pub mod tree_tokenizer;
-pub mod cli;
 
 /// constants for the tokenizer module.
 pub mod consts {

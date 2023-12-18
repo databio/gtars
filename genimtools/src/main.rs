@@ -1,8 +1,8 @@
 use clap::Command;
 
 // go through the library crate to get the interfaces
-use genimtools::vocab;
 use genimtools::tokenizers;
+use genimtools::vocab;
 // use genimtools::uniwig;
 
 pub mod consts {
@@ -37,5 +37,4 @@ fn main() {
 
         _ => unreachable!("Subcommand not found"),
     };
-
 }
