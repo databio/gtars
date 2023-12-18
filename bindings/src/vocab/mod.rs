@@ -30,7 +30,8 @@ pub fn prune_universe(data: &str, universe: &str, min_count: Option<u32>, output
     Ok(())
 }
 
-#[pyfunction]
-pub fn print_uniwig() {
-    println!("Running uniwig.");
+#[pymodule]
+pub fn vocab(_py: Python, m: &PyModule) -> PyResult<()> {
+    m.add_wrapped(wrap_pyfunction!(prune_universe))?;
+    Ok(())
 }
