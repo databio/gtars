@@ -4,11 +4,11 @@ use pyo3::types::PyList;
 use std::collections::HashMap;
 use std::path::Path;
 
-use genimtools::tokenizers::{TreeTokenizer, Tokenizer};
-use genimtools::common::models::{Region, RegionSet};
 use genimtools::common::consts::{
-    UNKNOWN_CHR, UNKNOWN_START, UNKNOWN_END, PAD_CHR, PAD_START, PAD_END,
+    PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START,
 };
+use genimtools::common::models::{Region, RegionSet};
+use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
 use crate::models::{PyRegion, PyTokenizedRegion, PyTokenizedRegionSet, PyUniverse};
 
@@ -29,16 +29,18 @@ impl PyTreeTokenizer {
 
     #[getter]
     pub fn unknown_token(&self) -> PyResult<PyTokenizedRegion> {
-        
         let region = PyRegion {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
         };
 
-        let id = self.tokenizer.universe.convert_region_to_id(&region.to_region());
+        let id = self
+            .tokenizer
+            .universe
+            .convert_region_to_id(&region.to_region());
 
-        Ok(PyTokenizedRegion {region, id})
+        Ok(PyTokenizedRegion { region, id })
     }
 
     #[getter]
@@ -49,9 +51,15 @@ impl PyTreeTokenizer {
             end: PAD_END as u32,
         };
 
-        let id = self.tokenizer.universe.region_to_id.get(&region.to_region()).unwrap().to_owned();
+        let id = self
+            .tokenizer
+            .universe
+            .region_to_id
+            .get(&region.to_region())
+            .unwrap()
+            .to_owned();
 
-        Ok(PyTokenizedRegion {region, id })
+        Ok(PyTokenizedRegion { region, id })
     }
 
     #[getter]
@@ -121,12 +129,15 @@ impl PyTreeTokenizer {
         // create pytokenizedregionset
         match tokenized_regions {
             Some(tokenized_regions) => {
-                
                 let regions = tokenized_regions
-                  .into_iter()
-                  .map(|x| PyRegion {chr: x.chr, start: x.start, end: x.end })
-                  .collect::<Vec<_>>();
- 
+                    .into_iter()
+                    .map(|x| PyRegion {
+                        chr: x.chr,
+                        start: x.start,
+                        end: x.end,
+                    })
+                    .collect::<Vec<_>>();
+
                 let ids = tokenized_regions.to_region_ids();
 
                 Ok(PyTokenizedRegionSet::new(regions, ids))
@@ -137,6 +148,4 @@ impl PyTreeTokenizer {
             )),
         }
     }
-
-
 }

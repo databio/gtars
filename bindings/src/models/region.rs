@@ -73,10 +73,7 @@ pub struct PyTokenizedRegion {
 impl PyTokenizedRegion {
     #[new]
     pub fn new(region: PyRegion, id: u32) -> Self {
-        PyTokenizedRegion {
-            region,
-            id,
-        }
+        PyTokenizedRegion { region, id }
     }
 
     #[getter]

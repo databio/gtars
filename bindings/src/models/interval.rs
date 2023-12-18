@@ -1,15 +1,15 @@
 use pyo3::prelude::*;
 
 #[pyclass(name = "Interval")]
-pub struct PyInterval{
+pub struct PyInterval {
     #[pyo3(get, set)]
     pub start: u32,
     #[pyo3(get, set)]
-    pub end: u32
+    pub end: u32,
 }
 
 #[pymethods]
-impl PyInterval{
+impl PyInterval {
     #[new]
     pub fn new(start: u32, end: u32) -> PyInterval {
         PyInterval { start, end }
