@@ -11,9 +11,8 @@ impl fmt::Display for Interval {
     }
 }
 
-
 pub struct AIList {
-    starts: Vec<u32>, 
+    starts: Vec<u32>,
     ends: Vec<u32>,
     max_ends: Vec<u32>,
     header_list: Vec<usize>,
@@ -23,16 +22,15 @@ impl AIList {
     pub fn new(intervals: &mut Vec<Interval>, minimum_coverage_length: usize) -> AIList {
         // in the future, clone and sort...
         intervals.sort_by_key(|key| key.start);
-       
+
         let mut starts: Vec<u32> = Vec::new();
         let mut ends: Vec<u32> = Vec::new();
         let mut max_ends: Vec<u32> = Vec::new();
         let mut header_list: Vec<usize> = vec![0];
 
         loop {
-            
             let mut results = Self::decompose(intervals, minimum_coverage_length);
-            
+
             starts.append(&mut results.0);
             ends.append(&mut results.1);
             max_ends.append(&mut results.2);
@@ -44,29 +42,35 @@ impl AIList {
             } else {
                 header_list.push(starts.len());
             }
-               
         }
 
         AIList {
-            starts, 
+            starts,
             ends,
             max_ends,
-            header_list
+            header_list,
         }
     }
 
-    fn decompose(intervals: &mut Vec<Interval>, minimum_coverage_length: usize) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<Interval>) {
+    fn decompose(
+        intervals: &mut Vec<Interval>,
+        minimum_coverage_length: usize,
+    ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<Interval>) {
         // look at the next minL*2 intervals
         let mut starts: Vec<u32> = Vec::new();
         let mut ends: Vec<u32> = Vec::new();
         let mut max_ends: Vec<u32> = Vec::new();
         let mut l2: Vec<Interval> = Vec::new();
-        
+
         for (index, interval) in intervals.iter().enumerate() {
             let mut count = 0;
-            for i in 1..(minimum_coverage_length*2) {
-                match intervals.get(index+i) {
-                    Some(interval2) => if interval.end > interval2.end { count += 1; },
+            for i in 1..(minimum_coverage_length * 2) {
+                match intervals.get(index + i) {
+                    Some(interval2) => {
+                        if interval.end > interval2.end {
+                            count += 1;
+                        }
+                    }
                     None => break,
                 }
             }
@@ -81,24 +85,31 @@ impl AIList {
             }
         }
 
-        let mut max: u32 = 0; 
+        let mut max: u32 = 0;
 
         for end in ends.iter() {
             max = if max > *end { max } else { *end };
-            max_ends.push(max); 
+            max_ends.push(max);
         }
 
         (starts, ends, max_ends, l2)
     }
 
-    fn query_slice(interval: &Interval, starts: &[u32], ends: &[u32], max_ends: &[u32]) -> Vec<Interval>{
+    fn query_slice(
+        interval: &Interval,
+        starts: &[u32],
+        ends: &[u32],
+        max_ends: &[u32],
+    ) -> Vec<Interval> {
         let mut results_list: Vec<Interval> = Vec::new();
         let mut i = starts.partition_point(|&x| x < interval.end);
 
         while i > 0 {
-            i-=1;
-            if interval.start > ends[i] { //this means that there is no intersection
-                if interval.start > max_ends[i] { //there is no further intersection
+            i -= 1;
+            if interval.start > ends[i] {
+                //this means that there is no intersection
+                if interval.start > max_ends[i] {
+                    //there is no further intersection
                     return results_list;
                 }
             } else {
@@ -113,38 +124,31 @@ impl AIList {
 
     pub fn query(&self, interval: &Interval) -> Vec<Interval> {
         let mut results_list: Vec<Interval> = Vec::new();
-        
-        for i in 0..(self.header_list.len()-1) {
-            results_list.append(
-                &mut Self::query_slice(
-                    interval, 
-                    &self.starts[self.header_list[i]..self.header_list[i+1]],
-                    &self.ends[self.header_list[i]..self.header_list[i+1]],
-                    &self.max_ends[self.header_list[i]..self.header_list[i+1]],
-                )
-            );
+
+        for i in 0..(self.header_list.len() - 1) {
+            results_list.append(&mut Self::query_slice(
+                interval,
+                &self.starts[self.header_list[i]..self.header_list[i + 1]],
+                &self.ends[self.header_list[i]..self.header_list[i + 1]],
+                &self.max_ends[self.header_list[i]..self.header_list[i + 1]],
+            ));
         }
         // now do the last decomposed ailist
-        let i = self.header_list.len()-1;
-        results_list.extend(
-            Self::query_slice(
-                interval, 
-                &self.starts[self.header_list[i]..],
-                &self.ends[self.header_list[i]..],
-                &self.max_ends[self.header_list[i]..],
-            )
-        );
-        
+        let i = self.header_list.len() - 1;
+        results_list.extend(Self::query_slice(
+            interval,
+            &self.starts[self.header_list[i]..],
+            &self.ends[self.header_list[i]..],
+            &self.max_ends[self.header_list[i]..],
+        ));
+
         return results_list;
     }
-
-  
-
 
     pub fn print(&self) {
         println!("");
         for element in self.starts.iter() {
-           print!("{}, ", element);
+            print!("{}, ", element);
         }
         println!("");
         for element in self.ends.iter() {
@@ -159,8 +163,5 @@ impl AIList {
             print!("{}, ", element);
         }
         println!("");
-
-
     }
-
 }

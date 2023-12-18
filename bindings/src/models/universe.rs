@@ -20,7 +20,6 @@ impl PyUniverse {
         Ok(self.regions.to_owned())
     }
     pub fn region_to_id(&self, region: &PyAny) -> PyResult<u32> {
-        
         // get the chr, start, end (use can provide anything that has these attributes)
         let chr: String = region.getattr("chr")?.extract()?;
         let start: u32 = region.getattr("start")?.extract()?;
