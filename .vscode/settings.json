@@ -2,5 +2,6 @@
     "rust-analyzer.linkedProjects": [
         "./genimtools/Cargo.toml",
         "./bindings/Cargo.toml",
+        "./genimtools/Cargo.toml"
     ]
 }

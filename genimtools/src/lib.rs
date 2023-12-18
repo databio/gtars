@@ -8,3 +8,4 @@ pub mod common;
 pub mod tokenizers;
 pub mod uniwig;
 pub mod vocab;
+pub mod ailist;
