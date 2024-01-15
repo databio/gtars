@@ -36,6 +36,9 @@ fn main() {
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches);
         }
+        Some((igd::consts::IGD_CMD, matches)) => {
+            igd::create::create_igd_f(matches);
+        }
 
         _ => unreachable!("Subcommand not found"),
     };
