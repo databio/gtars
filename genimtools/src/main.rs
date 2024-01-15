@@ -3,6 +3,7 @@ use clap::Command;
 // go through the library crate to get the interfaces
 use genimtools::tokenizers;
 use genimtools::vocab;
+use genimtools::igd;
 // use genimtools::uniwig;
 
 pub mod consts {
@@ -21,6 +22,7 @@ fn build_parser() -> Command {
         .subcommand_required(true)
         .subcommand(vocab::cli::make_prune_cli())
         .subcommand(tokenizers::cli::make_tokenization_cli())
+        .subcommand(igd::cli::create_igd_cli())
 }
 
 fn main() {

@@ -6,6 +6,7 @@
 //!
 pub mod ailist;
 pub mod common;
+pub mod igd;
 pub mod tokenizers;
 pub mod uniwig;
 pub mod vocab;
