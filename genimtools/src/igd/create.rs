@@ -1,6 +1,10 @@
 use clap::ArgMatches;
 use std::fs;
+use std::fs::File;
+use std::io::BufReader;
 use std::path::Path;
+//use clap::error::ContextValue::String;
+use polars::export::arrow::buffer::Buffer;
 use crate::vocab::consts;
 
 #[derive(Default)]
@@ -38,6 +42,9 @@ pub fn create_igd_f(matches: &ArgMatches){
     //Check that file path exists and get number of files
     let mut all_bed_files  = Vec::new();
 
+    let mut ix = 0;
+    let (mut start, mut end) = (0,0);
+
     for entry in fs::read_dir(filelist).unwrap() {
 
         // For now only take .bed files
@@ -51,13 +58,27 @@ pub fn create_igd_f(matches: &ArgMatches){
         let file_type = entry.file_type().unwrap();
 
         if file_type.is_file() {
-            all_bed_files.push(entry.path());
+
+            // open bed file
+            let file = File::open(entry.path()).unwrap();
+            let reader = BufReader::new(file);
+            // attempt to parse
+            let ctg = parse_bed(reader.buffer(), start, end);
+            // if it parses, add it, increment ix
+
+            if ctg != ParseBedResult::Int(0){
+                all_bed_files.push(entry.path());
+                ix +=1;
+
+            }
+
+
 
         }
     }
     println!("ALL BED FILES:\n{:?}", all_bed_files);
 
-    let n_files = all_bed_files.len();
+    let n_files = ix;//all_bed_files.len();
 
     println!("Number of Bed Files found:\n{}", n_files);
 
@@ -108,5 +129,22 @@ pub fn create_igd_f(matches: &ArgMatches){
 
 
 
+
+}
+
+#[derive(PartialEq)] // So that we can do comparisons with equality operator
+pub enum ParseBedResult {
+    Str(String),
+    Int(i32),
+}
+pub fn parse_bed(content: &[u8], start: i32, end: i32) -> ParseBedResult {
+
+    let str = String::from("Hello");
+
+    if !str.is_empty() {
+        ParseBedResult::Str(str)
+    }else{
+        ParseBedResult::Int(0)
+    }
 
 }
