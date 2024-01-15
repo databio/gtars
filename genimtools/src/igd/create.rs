@@ -57,7 +57,47 @@ pub fn create_igd_f(matches: &ArgMatches){
     }
     println!("ALL BED FILES:\n{:?}", all_bed_files);
 
-    //Check that there is more than 0 files
+    let n_files = all_bed_files.len();
+
+    println!("Number of Bed Files found:\n{}", n_files);
+
+    //Check that there is more than 0 files?
+
+    //Prep memory allocation in a Rust-like manner
+    // TODO original code checks that the bed file can be parsed BEFORE memory allocation
+    // TODO but then re-parses the bed file again later.
+    // TODO use something like avg.shrink_to_fit(); after we've collected all the files?
+    // og C code:
+    //    int32_t *nr = calloc(n_files, sizeof(int32_t));
+    //     double *avg = calloc(n_files, sizeof(double));
+    let mut avg: Vec<f64> = Vec::with_capacity(n_files);
+    avg.resize(n_files, 0.0);
+
+    let mut nr: Vec<i32> = Vec::with_capacity(n_files);
+    nr.resize(n_files, 0);
+
+    // READ FILES
+
+    // Initialize required variables
+
+    let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
+    let (mut  va, mut i, mut j, mut k, mut ig, mut m, mut nL, mut nf10) =
+        (0,0,0,0,0,0,0,n_files/10);
+    while i0 < n_files{
+
+        println!("{}", i0);
+        i0+=1;
+
+
+    }
+
+    for path in all_bed_files{
+
+        println!("PATH: {:?}",path);
+
+
+
+    }
     // Get file ids
 
     //Open files
