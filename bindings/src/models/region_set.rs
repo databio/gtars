@@ -34,6 +34,19 @@ impl PyTokenizedRegionSet {
         Ok(self.ids.clone())
     }
 
+    // gensim needs strings as input, so to speed up
+    // iterating over datasets, lets provide a rust
+    // interface to directly convert to strings
+    #[getter]
+    pub fn ids_as_strs(&self) -> PyResult<Vec<String>> {
+        Ok(self
+            .ids
+            .to_owned()
+            .iter()
+            .map(|id| id.to_string())
+            .collect())
+    }
+
     // this is wrong: the padding token might not be in the universe
     pub fn pad(&mut self, len: usize) {
         let pad_region = PyRegion {
