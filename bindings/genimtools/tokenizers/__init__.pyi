@@ -21,6 +21,13 @@ class TokenizedRegionSet:
         """
         Get the list of IDs in this set.
         """
+    
+    def ids_as_strs(self) -> List[str]:
+        """
+        Get the list of IDs in this set as strings. This
+        is specifically meant for geniml workflows which requires
+        strings
+        """
 
 class TreeTokenizer:
     def __init__(self, universe: str) -> None:
