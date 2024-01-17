@@ -43,3 +43,12 @@ class TreeTokenizer:
         """
         Tokenize a list of regions.
         """
+    
+    def tokenize_bed_file(self, bed_file: str) -> TokenizedRegionSet:
+        """
+        Tokenize a bed file directly.
+
+        This was added to create a more performant tokenization strategy
+        that could tokenize directly from disk in rust instead of using
+        pandas.
+        """
