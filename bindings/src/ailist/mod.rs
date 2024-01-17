@@ -1,5 +1,5 @@
 use genimtools::ailist::{AIList, Interval};
-use pyo3::{prelude::*, pyclass, PyNativeType};
+use pyo3::{prelude::*, pyclass};
 
 use crate::models::PyInterval;
 
