@@ -5,14 +5,16 @@ pub fn make_tools_cli() -> Command {
     Command::new(consts::DATA_DIR_STAT_CMD)
         .author("Nathan LeRoy")
         .about("Collect data statistics on all bed files in a directory.")
-        .arg(arg!(<VALUE> "Path to the data directory.").required(true))
         .arg(
             arg!(--out <VALUE> "Path to the output file.")
                 .required(false),
         )
+        // positional path
+        .arg(arg!(<path> "Path to the data directory.").required(true))
 }
 
 pub mod handlers {
+    
     use super::*;
 
     pub fn data_dir_stat_handler(matches: &ArgMatches) {
