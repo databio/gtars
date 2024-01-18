@@ -12,11 +12,18 @@ fn path_to_bed_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_bed_file_gzipped() -> &'static str {
+    "tests/data/peaks.bed.gz"
+}
+
+#[fixture]
 fn path_to_tokenize_bed_file() -> &'static str {
     "tests/data/to_tokenize.bed"
 }
 
 mod tests {
+    use genimtools::common::utils::extract_regions_from_bed_file;
+
     use super::*;
 
     #[rstest]
@@ -30,6 +37,24 @@ mod tests {
         assert_eq!(region.chr, "chr1");
         assert_eq!(region.start, 100);
         assert_eq!(region.end, 200);
+    }
+
+    #[rstest]
+    fn test_extract_regions_from_bed_file(path_to_bed_file: &str) {
+        let path = Path::new(path_to_bed_file);
+        let regions = extract_regions_from_bed_file(path);
+        assert!(regions.is_ok(), "Failed to extract regions from BED file");
+        let regions = regions.unwrap();
+        assert!(regions.len() == 25);
+    }
+    
+    #[rstest]
+    fn test_extract_regions_from_bed_file_gzipped(path_to_bed_file_gzipped: &str) {
+        let path = Path::new(path_to_bed_file_gzipped);
+        let regions = extract_regions_from_bed_file(path);
+        assert!(regions.is_ok(), "Failed to extract regions from BED file");
+        let regions = regions.unwrap();
+        assert!(regions.len() == 25);
     }
 
     #[rstest]
