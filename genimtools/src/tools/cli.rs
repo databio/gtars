@@ -1,11 +1,11 @@
 use super::*;
 use clap::{arg, ArgMatches, Command};
 
-pub fn make_prune_cli() -> Command {
+pub fn make_tools_cli() -> Command {
     Command::new(consts::DATA_DIR_STAT_CMD)
         .author("Nathan LeRoy")
         .about("Collect data statistics on all bed files in a directory.")
-        .arg(arg!(<PATH> "Path to the data directory.").required(true))
+        .arg(arg!(<VALUE> "Path to the data directory.").required(true))
         .arg(
             arg!(--out <VALUE> "Path to the output file.")
                 .required(false),
