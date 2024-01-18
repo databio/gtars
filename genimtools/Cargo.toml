@@ -9,6 +9,7 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "4.4.7", features = ["derive"] }
+flate2 = "1.0.28"
 indicatif = "0.17.7"
 polars = "0.35.4"
 rust-lapper = "1.1.0"

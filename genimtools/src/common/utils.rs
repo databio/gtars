@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use flate2::read::GzDecoder;
 use polars::datatypes::DataType;
 use polars::prelude::*;
 
@@ -42,26 +43,48 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
 }
 
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn Error>> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-
+    let file = File::open(path)?; 
     let mut regions = Vec::new();
 
-    for line in reader.lines() {
-        let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
+    if path.ends_with(".gz") {
+        let decoder = GzDecoder::new(file);
+        let reader = BufReader::new(decoder);
 
-        let chr = fields[0];
-        let start = fields[1].parse::<u32>()?;
-        let end = fields[2].parse::<u32>()?;
+        for line in reader.lines() {
+            let line = line?;
+            let fields: Vec<&str> = line.split('\t').collect();
+    
+            let chr = fields[0];
+            let start = fields[1].parse::<u32>()?;
+            let end = fields[2].parse::<u32>()?;
+    
+            let region = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+    
+            regions.push(region);
+        }
+    } else {
+        let reader = BufReader::new(file);
 
-        let region = Region {
-            chr: chr.to_string(),
-            start,
-            end,
-        };
-
-        regions.push(region);
+        for line in reader.lines() {
+            let line = line?;
+            let fields: Vec<&str> = line.split('\t').collect();
+    
+            let chr = fields[0];
+            let start = fields[1].parse::<u32>()?;
+            let end = fields[2].parse::<u32>()?;
+    
+            let region = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+    
+            regions.push(region);
+        }
     }
 
     Ok(regions)
