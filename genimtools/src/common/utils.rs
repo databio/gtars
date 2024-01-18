@@ -4,6 +4,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use clap::builder::OsStr;
 use flate2::read::GzDecoder;
 use polars::datatypes::DataType;
 use polars::prelude::*;
@@ -46,7 +47,13 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
     let file = File::open(path)?; 
     let mut regions = Vec::new();
 
-    if path.ends_with(".gz") {
+    // determine if the file is gzipped; default to extension is bed
+    // because we dont truly care what the extension is
+    // we just want to know if it is gzipped or not, and we dont want to
+    // fail if the extension is not present (e.g. a user passes in a file without an extension)
+    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+
+    if is_gzipped {
         let decoder = GzDecoder::new(file);
         let reader = BufReader::new(decoder);
 
