@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{BufReader, Write, BufRead};
 
+use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 
 pub mod cli;
@@ -29,7 +30,19 @@ pub fn data_dir_stat(path: &str, out: &str) {
     // create the writer
     let mut writer = File::create(out).unwrap();
 
+    // get num files in dir
+    println!("Counting files in directory...");
+    let num_files = WalkDir::new(path).into_iter().filter_map(|e| e.ok()).count();
+
+    // create the progress bar
+    let pb = ProgressBar::new(num_files as u64);
+    pb.set_style(ProgressStyle::with_template("[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}")
+        .unwrap()
+        .progress_chars("##-")
+    );
+
     // iterate over the files in the directory
+    println!("Iterating over files in directory...");
     for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
         if entry.file_type().is_file() {
 
@@ -44,5 +57,7 @@ pub fn data_dir_stat(path: &str, out: &str) {
             // write the line
             writer.write_all(line.as_bytes()).unwrap();
         }
+
+        pb.inc(1);
     }
 }
