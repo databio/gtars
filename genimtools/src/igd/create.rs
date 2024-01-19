@@ -1,7 +1,7 @@
 use clap::ArgMatches;
 use std::fs;
 use std::fs::File;
-use std::io::BufReader;
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 //use clap::error::ContextValue::String;
 use polars::export::arrow::buffer::Buffer;
@@ -60,19 +60,26 @@ pub fn create_igd_f(matches: &ArgMatches){
         if file_type.is_file() {
 
             // open bed file
+            // TODO original code uses gzopen (I assume for .gz files?)
             let file = File::open(entry.path()).unwrap();
+
             let reader = BufReader::new(file);
+
+            let mut buf = String::new();
+            reader.buffer().read_to_string(&mut buf).expect("Cannot read buf string");
             // attempt to parse
-            let ctg = parse_bed(reader.buffer(), start, end);
+            let ctg = parse_bed(buf, start, end);
             // if it parses, add it, increment ix
 
-            if ctg != ParseBedResult::Int(0){
-                all_bed_files.push(entry.path());
-                ix +=1;
 
+            match Some(ctg){
+
+                Some(ctg) =>{
+                    all_bed_files.push(entry.path());
+                    ix +=1;
+                } ,
+                None => continue,
             }
-
-
 
         }
     }
@@ -100,10 +107,10 @@ pub fn create_igd_f(matches: &ArgMatches){
     // READ FILES
 
     // Initialize required variables
-
     let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
     let (mut  va, mut i, mut j, mut k, mut ig, mut m, mut nL, mut nf10) =
         (0,0,0,0,0,0,0,n_files/10);
+
     while i0 < n_files{
 
         println!("{}", i0);
@@ -137,14 +144,38 @@ pub enum ParseBedResult {
     Str(String),
     Int(i32),
 }
-pub fn parse_bed(content: &[u8], start: i32, end: i32) -> ParseBedResult {
+
+pub fn parse_bed<R: BufRead>(buf: String, start: i32, end: i32) -> Option<&str> {
 
     let str = String::from("Hello");
 
-    if !str.is_empty() {
-        ParseBedResult::Str(str)
-    }else{
-        ParseBedResult::Int(0)
+    let mut fields = buf.split('\t');
+
+    let ctg = fields.next()?;
+
+    let st = fields.next().and_then(|s| s.parse().ok())?;
+    let en = fields.next().and_then(|s| s.parse().ok())?;
+
+    if fields.next().is_some() || !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
+        return None;
     }
 
+    *start = st;
+    *end = en;
+
+    Some(ctg)
+
 }
+// pub fn parse_bed(content: &[u8], start: i32, end: i32) -> ParseBedResult {
+//
+//     let str = String::from("Hello");
+//
+//
+//
+//     if !str.is_empty() {
+//         ParseBedResult::Str(str)
+//     }else{
+//         ParseBedResult::Int(0)
+//     }
+//
+// }
