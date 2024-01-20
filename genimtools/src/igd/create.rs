@@ -32,18 +32,20 @@ pub fn create_igd_f(matches: &ArgMatches){
         .get_one::<String>("filelist")
         .expect("File list path is required");
 
-
-    // println!("Collected the following:");
-    // println!("{0} \n {1} ",output_path, filelist)
-
     //Initialize IGD into Memory
     let mut igd = IGD::new();
 
     //Check that file path exists and get number of files
     let mut all_bed_files: Vec<String>  = Vec::new();
+    let mut all_bed_buffers = Vec::new();
 
     let mut ix = 0;
     let (mut start, mut end) = (0,0);
+
+    ///--------------------
+    /// Check each file and only keep the validated BED files
+    ///
+    /// -------------------
 
     for entry in fs::read_dir(filelist).unwrap() {
 
@@ -63,24 +65,25 @@ pub fn create_igd_f(matches: &ArgMatches){
             // TODO original code uses gzopen (I assume for .gz files?)
             let file = File::open(entry.path()).unwrap();
 
-            let reader = BufReader::new(file);
+            let mut reader = BufReader::new(file);
 
-            let mut buf = String::new();
-            reader.buffer().read_to_string(&mut buf).expect("Cannot read buf string");
+            /// Read the very first line and see if it meets our criteria
+            /// MUST USE by_ref() otherwise borrow checker won't let code compile
+            /// ALSO bec careful to call by_ref() BEFORE .lines()
+            ///
+            let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+            let mut lines = reader.lines();
 
-            // Read the very first line and see if it meets our criteria
-            let line = reader.lines().next().unwrap().expect("cannot read line");
-
-            // attempt to parse a line of the BedFile
             // TODO Better name for og function?
             // TODO parse_bed -> parse_bed_file_line
-            let ctg = parse_bed(&line, start, end);
+            let ctg = parse_bed(&first_line, start, end);
             // if it parses, add it to collected lines, increment ix
             match ctg{
 
                 Some(ctg) =>{
                     //all_bed_files.push(entry.path());
-                    all_bed_files.push(line);
+                    //all_bed_files.push(line);
+                    all_bed_buffers.push(lines);
                     ix +=1;
                 } ,
                 None => continue,
@@ -88,7 +91,8 @@ pub fn create_igd_f(matches: &ArgMatches){
 
         }
     }
-    println!("ALL PARSED Lines from BED FILES:\n{:?}", all_bed_files);
+
+    //println!("ALL PARSED Lines from BED FILES:\n{:?}", all_bed_files);
 
     let n_files = ix;//all_bed_files.len();
 
@@ -109,36 +113,33 @@ pub fn create_igd_f(matches: &ArgMatches){
     let mut nr: Vec<i32> = Vec::with_capacity(n_files);
     nr.resize(n_files, 0);
 
-    // READ FILES
-
+    ///--------------------
+    /// READ FILES
+    /// -------------------
     // Initialize required variables
     let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
-    let (mut  va, mut i, mut j, mut k, mut ig, mut m, mut nL, mut nf10) =
+    let (mut  va, mut i, mut j, mut k,
+        mut ig, mut m, mut nL, mut nf10) =
         (0,0,0,0,0,0,0,n_files/10);
 
-    while i0 < n_files{
-
-        println!("{}", i0);
-        i0+=1;
-
-
-    }
-
-    for path in all_bed_files{
-
-        println!("PATH: {:?}",path);
-
-
+    /// Debug check if first line is consumed...
+    for mut buf in all_bed_buffers{
+        // CHECK IF first line consumed...
+        for line in buf{
+            println!("{:?}", line);
+        }
 
     }
-    // Get file ids
-
-    //Open files
-    //Parse bed files
-    //Close files
-
-    // set number_of_files to the number of successfully opened and parsed files.
-
+    // while i0 < n_files{
+    //     //from og code: 2.1 Start from (i0, L0): read till (i1, L1)
+    //     ig = i0;
+    //     m = 0;
+    //     //from og code: 2.2 Read ~4GB data from files
+    //
+    //
+    //
+    //
+    // }
 
 
 
