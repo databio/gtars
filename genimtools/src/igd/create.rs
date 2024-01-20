@@ -40,7 +40,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     let mut igd = IGD::new();
 
     //Check that file path exists and get number of files
-    let mut all_bed_files  = Vec::new();
+    let mut all_bed_files: Vec<String>  = Vec::new();
 
     let mut ix = 0;
     let (mut start, mut end) = (0,0);
@@ -68,25 +68,19 @@ pub fn create_igd_f(matches: &ArgMatches){
             let mut buf = String::new();
             reader.buffer().read_to_string(&mut buf).expect("Cannot read buf string");
 
-            for line in reader.lines() {
-                let line = line.unwrap();
-                println!("{}", line)
-            }
+            // Read the very first line and see if it meets our criteria
+            let line = reader.lines().next().unwrap().expect("cannot read line");
 
-            // // Debug looking at lines
-            // for line in reader2.lines() {
-            //     println!("{}", line.unwrap());
-
-
-            // attempt to parse
-            let ctg = parse_bed(&buf, start, end);
-            // if it parses, add it, increment ix
-
-
-            match Some(ctg){
+            // attempt to parse a line of the BedFile
+            // TODO Better name for og function?
+            // TODO parse_bed -> parse_bed_file_line
+            let ctg = parse_bed(&line, start, end);
+            // if it parses, add it to collected lines, increment ix
+            match ctg{
 
                 Some(ctg) =>{
-                    all_bed_files.push(entry.path());
+                    //all_bed_files.push(entry.path());
+                    all_bed_files.push(line);
                     ix +=1;
                 } ,
                 None => continue,
@@ -94,7 +88,7 @@ pub fn create_igd_f(matches: &ArgMatches){
 
         }
     }
-    println!("ALL BED FILES:\n{:?}", all_bed_files);
+    println!("ALL PARSED Lines from BED FILES:\n{:?}", all_bed_files);
 
     let n_files = ix;//all_bed_files.len();
 
@@ -156,45 +150,32 @@ pub enum ParseBedResult {
     Int(i32),
 }
 
-pub fn parse_bed(buf: &String, mut start: i32, mut end: i32) -> Option<String> {
+pub fn parse_bed(line: &String, mut start: i32, mut end: i32) -> Option<String> {
 
-    println!("HERE IS BUF: {}", buf);
-
-    let mut fields = buf.split('\t');
-
+    println!("HERE IS THE LINE TO PARSE: {}", line);
+    let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?; // Why is ctg used as variable name in og code?
-
     println!("GOT CHR: {}", ctg);
-    // Parse 2nd and 3rd string as integers or return None if failure
-    let st = fields.next().and_then(|s| s.parse().ok())?;
-    let en = fields.next().and_then(|s| s.parse().ok())?;
+    // Parse 2nd and 3rd string as integers or return -1 if failure
+    let st = fields.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
     println!("GOT st: {}", st);
+    let en = fields.next().and_then(|s| s.parse::<i32>().ok()).unwrap_or(-1);
     println!("GOT en: {}", en);
 
-    if fields.next().is_some() || !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
+    // if fields.next().is_some() || !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
+    //     return None;
+    // }
+    if !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
+        println!("RETURNING NONE");
         return None;
     }
 
-    //*start = st;
+    //*start = st; //Compiler said no.
     start = st;
-    //*end = en;
     end = en;
 
-    println!("FINISHING PARSE");
+    println!("SUCCESSFULLY FINISHING PARSE");
     Some(ctg.parse().unwrap())
 
 }
-// pub fn parse_bed(content: &[u8], start: i32, end: i32) -> ParseBedResult {
-//
-//     let str = String::from("Hello");
-//
-//
-//
-//     if !str.is_empty() {
-//         ParseBedResult::Str(str)
-//     }else{
-//         ParseBedResult::Int(0)
-//     }
-//
-// }
