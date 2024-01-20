@@ -67,8 +67,19 @@ pub fn create_igd_f(matches: &ArgMatches){
 
             let mut buf = String::new();
             reader.buffer().read_to_string(&mut buf).expect("Cannot read buf string");
+
+            for line in reader.lines() {
+                let line = line.unwrap();
+                println!("{}", line)
+            }
+
+            // // Debug looking at lines
+            // for line in reader2.lines() {
+            //     println!("{}", line.unwrap());
+
+
             // attempt to parse
-            let ctg = parse_bed(buf, start, end);
+            let ctg = parse_bed(&buf, start, end);
             // if it parses, add it, increment ix
 
 
@@ -145,25 +156,33 @@ pub enum ParseBedResult {
     Int(i32),
 }
 
-pub fn parse_bed<R: BufRead>(buf: String, start: i32, end: i32) -> Option<&str> {
+pub fn parse_bed(buf: &String, mut start: i32, mut end: i32) -> Option<String> {
 
-    let str = String::from("Hello");
+    println!("HERE IS BUF: {}", buf);
 
     let mut fields = buf.split('\t');
 
-    let ctg = fields.next()?;
+    // Get the first field which should be chromosome.
+    let ctg = fields.next()?; // Why is ctg used as variable name in og code?
 
+    println!("GOT CHR: {}", ctg);
+    // Parse 2nd and 3rd string as integers or return None if failure
     let st = fields.next().and_then(|s| s.parse().ok())?;
     let en = fields.next().and_then(|s| s.parse().ok())?;
+    println!("GOT st: {}", st);
+    println!("GOT en: {}", en);
 
     if fields.next().is_some() || !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
         return None;
     }
 
-    *start = st;
-    *end = en;
+    //*start = st;
+    start = st;
+    //*end = en;
+    end = en;
 
-    Some(ctg)
+    println!("FINISHING PARSE");
+    Some(ctg.parse().unwrap())
 
 }
 // pub fn parse_bed(content: &[u8], start: i32, end: i32) -> ParseBedResult {
