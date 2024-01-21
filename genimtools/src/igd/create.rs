@@ -1,8 +1,8 @@
 use clap::ArgMatches;
 use std::fs;
-use std::fs::File;
+use std::fs::{DirEntry, File};
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 //use clap::error::ContextValue::String;
 use polars::export::arrow::buffer::Buffer;
 use crate::vocab::consts;
@@ -36,8 +36,8 @@ pub fn create_igd_f(matches: &ArgMatches){
     let mut igd = IGD::new();
 
     //Check that file path exists and get number of files
-    let mut all_bed_files: Vec<String>  = Vec::new();
-    let mut all_bed_buffers = Vec::new();
+    let mut all_bed_files: Vec<DirEntry>  = Vec::new();
+    //let mut all_bed_buffers = Vec::new();
 
     let mut ix = 0;
     let (mut start, mut end) = (0,0);
@@ -56,6 +56,7 @@ pub fn create_igd_f(matches: &ArgMatches){
                 continue;
             }
         }
+
         let entry = entry.unwrap();
         let file_type = entry.file_type().unwrap();
 
@@ -83,7 +84,8 @@ pub fn create_igd_f(matches: &ArgMatches){
                 Some(ctg) =>{
                     //all_bed_files.push(entry.path());
                     //all_bed_files.push(line);
-                    all_bed_buffers.push(lines);
+                    //all_bed_buffers.push(lines);
+                    all_bed_files.push(entry);
                     ix +=1;
                 } ,
                 None => continue,
@@ -114,7 +116,9 @@ pub fn create_igd_f(matches: &ArgMatches){
     nr.resize(n_files, 0);
 
     ///--------------------
-    /// READ FILES
+    /// READ VALIDATED FILES
+    /// Note: this seems wasteful to load the file *again* using BufReader
+    /// Is there a better way than below?
     /// -------------------
     // Initialize required variables
     let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
@@ -122,14 +126,21 @@ pub fn create_igd_f(matches: &ArgMatches){
         mut ig, mut m, mut nL, mut nf10) =
         (0,0,0,0,0,0,0,n_files/10);
 
-    /// Debug check if first line is consumed...
-    for mut buf in all_bed_buffers{
-        // CHECK IF first line consumed...
-        for line in buf{
-            println!("{:?}", line);
-        }
+    for path in all_bed_files{
+
+        // let file_path = path.unwrap()?;
+
+        println!("FIle path: {:?}", path);
 
     }
+    // /// Debug check if first line is consumed...
+    // for mut buf in all_bed_buffers{
+    //     // CHECK IF first line consumed...
+    //     for line in buf{
+    //         println!("{:?}", line);
+    //     }
+    //
+    // }
     // while i0 < n_files{
     //     //from og code: 2.1 Start from (i0, L0): read till (i1, L1)
     //     ig = i0;
