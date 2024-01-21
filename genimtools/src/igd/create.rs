@@ -36,7 +36,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     let mut igd = IGD::new();
 
     //Check that file path exists and get number of files
-    let mut all_bed_files: Vec<DirEntry>  = Vec::new();
+    let mut all_bed_files: Vec<PathBuf>  = Vec::new();
     //let mut all_bed_buffers = Vec::new();
 
     let mut ix = 0;
@@ -85,7 +85,7 @@ pub fn create_igd_f(matches: &ArgMatches){
                     //all_bed_files.push(entry.path());
                     //all_bed_files.push(line);
                     //all_bed_buffers.push(lines);
-                    all_bed_files.push(entry);
+                    all_bed_files.push(entry.path());
                     ix +=1;
                 } ,
                 None => continue,
@@ -126,13 +126,43 @@ pub fn create_igd_f(matches: &ArgMatches){
         mut ig, mut m, mut nL, mut nf10) =
         (0,0,0,0,0,0,0,n_files/10);
 
-    for path in all_bed_files{
 
-        // let file_path = path.unwrap()?;
+    while i0 < n_files {
+        //from og code: 2.1 Start from (i0, L0): read till (i1, L1)
+        ig = i0;
+        m = 0;
+        //from og code: 2.2 Read ~4GB data from files
+        // og code skips first line (since its already in the vec but we need to reread the file.
+        while m==0 && ig<n_files{
 
-        println!("FIle path: {:?}", path);
+            // Have to take ref and then clone the PathBuf
+            // TODO Is this the proper way to do it??
+            let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to thr DirEntry
+            let fp = file_path_buf.clone();
+
+            let file = File::open(fp).unwrap();
+            let mut reader = BufReader::new(file);
+
+            let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+
+            println!("Confirm reading first line: {}",first_line);
+            // Get file from vec via index
+            // read file
+            ig +=1
+
+        }
+
+    i0=ig;
 
     }
+
+    // for path in all_bed_files{
+    //
+    //     // let file_path = path.unwrap()?;
+    //
+    //     println!("FIle path: {:?}", path);
+    //
+    // }
     // /// Debug check if first line is consumed...
     // for mut buf in all_bed_buffers{
     //     // CHECK IF first line consumed...
