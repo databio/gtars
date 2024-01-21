@@ -7,10 +7,14 @@ use std::path::{Path, PathBuf};
 use polars::export::arrow::buffer::Buffer;
 use crate::vocab::consts;
 
+
+pub const maxCount: i32 = 268435456;		//16* = 4GB memory
+
 #[derive(Default)]
 pub struct IGD {
     // TODO create attributes for the IGD
     pub placeholder: String,
+    pub total: i32,
 }
 
 impl IGD{
@@ -109,8 +113,8 @@ pub fn create_igd_f(matches: &ArgMatches){
     // og C code:
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
-    let mut avg: Vec<f64> = Vec::with_capacity(n_files);
-    avg.resize(n_files, 0.0);
+    let mut avg: Vec<i32> = Vec::with_capacity(n_files);
+    avg.resize(n_files, 0);
 
     let mut nr: Vec<i32> = Vec::with_capacity(n_files);
     nr.resize(n_files, 0);
@@ -133,26 +137,78 @@ pub fn create_igd_f(matches: &ArgMatches){
         m = 0;
         //from og code: 2.2 Read ~4GB data from files
         // og code skips first line (since its already in the vec but we need to reread the file.
-        while m==0 && ig<n_files{
+        while m==0 && ig<n_files{ //og comment: m>0 defines breaks when reading maxCount
 
             // Have to take ref and then clone the PathBuf
             // TODO Is this the proper way to do it??
-            let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to thr DirEntry
+            let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to the PathBuf
             let fp = file_path_buf.clone();
 
             let file = File::open(fp).unwrap();
             let mut reader = BufReader::new(file);
 
-            let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+            nL=0;
 
-            println!("Confirm reading first line: {}",first_line);
+            let mut buffer = String::new();
+
+            while m==0 && reader.read_line(&mut buffer).unwrap() != 0{
+
+                let ctg = parse_bed(&buffer, start, end);
+
+                match ctg{
+
+                    Some(ctg) =>{
+                        // check that st>=0 and end <321000000   NOTE: these values taken from og code.
+                        if start>=0 && end<321000000{
+                            /// igd_add not yet implemented
+                            igd_add(&igd, ctg, start, end, va, ig);
+                            nr[ig] +=1;
+                            avg[ig]+=end-start;
+                            println!("DEBUG: after igd add");
+
+                        }
+                    } ,
+                    None => continue,
+                }
+
+                nL+=1;
+
+                if igd.total > maxCount{
+
+                    m=1;
+                    i1 =ig;
+                    L1= nL;
+
+                }
+
+
+            }
+
+            if m==0 {
+                ig+=1;
+            }
+            // if ig%nf10 == 0{
+            //     println!(".") // og code: appears to be a debug line
+            // }
+
+
+            //
+            // let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+            // println!("Confirm reading first line: {}",first_line);
             // Get file from vec via index
             // read file
             ig +=1
 
         }
 
-    i0=ig;
+        ///og: 2.3 save/append tiles to disc, add cnts to cnts
+        ///
+
+        igd_saveT(&igd, output_path);
+
+        i0 = ig;
+        L0 = L1;
+        L1 = 0;
 
     }
 
@@ -183,6 +239,17 @@ pub fn create_igd_f(matches: &ArgMatches){
     // }
 
 
+
+}
+
+fn igd_saveT(p0: &IGD, p1: &String) {
+    println!("HELLO from igd_saveT");
+    //todo!()
+}
+
+fn igd_add(p0: &IGD, p1: String, p2: i32, p3: i32, p4: i32, p5: usize) {
+    println!("HELLO from igd_add");
+    //todo!()
 
 }
 
