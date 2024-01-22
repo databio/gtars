@@ -89,6 +89,16 @@ pub fn pre_tokenize_data(
         let bed_file_path = Path::new(path_to_data).join("**/*.bed");
         let zipped_bed_file_path = Path::new(path_to_data).join("**/*.bed.gz");
 
+        let num_beds = glob::glob(bed_file_path.to_str().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .count();
+        
+        let num_zipped = glob::glob(zipped_bed_file_path.to_str().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .count();
+
         let bed_file_matches = glob::glob(bed_file_path.to_str().unwrap())
             .unwrap()
             .filter_map(|e| e.ok());
@@ -97,14 +107,27 @@ pub fn pre_tokenize_data(
             .unwrap()
             .filter_map(|e| e.ok());
 
+        let num_files = num_beds + num_zipped;
+
+        let pb = ProgressBar::new(num_files as u64);
+        pb.set_style(
+            ProgressStyle::with_template(
+                "[{elapsed_precise}] {bar:40.cyan/blue} {pos:>7}/{len:7} {msg}",
+            )
+            .unwrap()
+            .progress_chars("##-"),
+        );
+
         for entry in bed_file_matches {
             let path = entry;
             pre_tokenize_file(&path, outdir, tokenizer)?;
+            pb.inc(1);
         }
 
         for entry in zipped_bed_file_matches {
             let path = entry;
             pre_tokenize_file(&path, outdir, tokenizer)?;
+            pb.inc(1);
         }
     }
 
@@ -136,7 +159,7 @@ fn pre_tokenize_file(
     let tokens = tokenizer
         .tokenize_region_set(&regions)
         .expect("Could not tokenize region set.");
-    
+
     write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
 
     Ok(())
