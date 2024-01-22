@@ -2,8 +2,8 @@ use clap::Command;
 
 // go through the library crate to get the interfaces
 use genimtools::tokenizers;
-use genimtools::vocab;
 use genimtools::tools;
+use genimtools::vocab;
 // use genimtools::uniwig;
 
 pub mod consts {

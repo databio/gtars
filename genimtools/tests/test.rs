@@ -47,7 +47,7 @@ mod tests {
         let regions = regions.unwrap();
         assert!(regions.len() == 25);
     }
-    
+
     #[rstest]
     fn test_extract_regions_from_bed_file_gzipped(path_to_bed_file_gzipped: &str) {
         let path = Path::new(path_to_bed_file_gzipped);

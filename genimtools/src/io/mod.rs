@@ -1,12 +1,12 @@
 use std::fs::File;
-use std::io::{Write, Read, BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Read, Write};
 
 ///
 /// Writes a vector of tokens to a file in the `.gtok` format.
 /// # Arguments
 /// - filename: the file to save the tokens to
 /// - tokens: tokens to save
-/// 
+///
 pub fn write_tokens_to_gtok(filename: &str, tokens: &[u32]) -> std::io::Result<()> {
     let file = File::create(filename)?;
     let mut writer = BufWriter::new(file);
@@ -22,7 +22,7 @@ pub fn write_tokens_to_gtok(filename: &str, tokens: &[u32]) -> std::io::Result<(
 /// Read in a vector of tokens from a file in the `.gtok` format.
 /// # Arguments
 /// - filename: filename to read the tokens from
-/// 
+///
 /// # Returns
 /// - vector of tokens in u32 format
 pub fn read_tokens_from_gtok(filename: &str) -> std::io::Result<Vec<u32>> {
