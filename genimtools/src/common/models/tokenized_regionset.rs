@@ -7,6 +7,7 @@ use crate::common::consts::{PAD_CHR, PAD_END, PAD_START};
 use crate::common::models::region::Region;
 use crate::common::models::tokenized_region::TokenizedRegion;
 use crate::common::models::universe::Universe;
+use crate::io::write_tokens_to_gtok;
 
 pub struct TokenizedRegionSet<'a> {
     pub regions: Vec<Region>,
@@ -72,14 +73,9 @@ impl<'a> TokenizedRegionSet<'a> {
     /// Write a TokenizedRegionSet to a .gtok file
     /// * `path` - A PathBuf to write the .gtok file to
     /// 
-    pub fn to_gtok_file(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
-        let mut file = File::create(path)?;
-        for region in self.regions.iter() {
-            let id = self.universe.convert_region_to_id(region);
-            let line = format!("{}\n", id);
-            file.write_all(line.as_bytes())?;
-        }
-
+    pub fn to_gtok_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
+        let tokens = self.to_region_ids();
+        write_tokens_to_gtok(path, &tokens)?;
         Ok(())
     }
 
