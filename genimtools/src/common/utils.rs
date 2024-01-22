@@ -44,7 +44,7 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
 }
 
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn Error>> {
-    let file = File::open(path)?; 
+    let file = File::open(path)?;
     let mut regions = Vec::new();
 
     // determine if the file is gzipped; default to extension is bed
@@ -60,17 +60,17 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
         for line in reader.lines() {
             let line = line?;
             let fields: Vec<&str> = line.split('\t').collect();
-    
+
             let chr = fields[0];
             let start = fields[1].parse::<u32>()?;
             let end = fields[2].parse::<u32>()?;
-    
+
             let region = Region {
                 chr: chr.to_string(),
                 start,
                 end,
             };
-    
+
             regions.push(region);
         }
     } else {
@@ -79,17 +79,17 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
         for line in reader.lines() {
             let line = line?;
             let fields: Vec<&str> = line.split('\t').collect();
-    
+
             let chr = fields[0];
             let start = fields[1].parse::<u32>()?;
             let end = fields[2].parse::<u32>()?;
-    
+
             let region = Region {
                 chr: chr.to_string(),
                 start,
                 end,
             };
-    
+
             regions.push(region);
         }
     }

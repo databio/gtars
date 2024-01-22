@@ -159,9 +159,8 @@ impl TreeTokenizer {
             Ok(regions) => {
                 let rs = RegionSet::from(regions);
                 self.tokenize_region_set(&rs)
-            },
-            Err(e) => panic!("Error reading bedfile: {}", e)
+            }
+            Err(e) => panic!("Error reading bedfile: {}", e),
         }
-        
     }
 }

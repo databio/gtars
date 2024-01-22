@@ -72,7 +72,7 @@ impl<'a> TokenizedRegionSet<'a> {
     ///
     /// Write a TokenizedRegionSet to a .gtok file
     /// * `path` - A PathBuf to write the .gtok file to
-    /// 
+    ///
     pub fn to_gtok_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
         let tokens = self.to_region_ids();
         write_tokens_to_gtok(path, &tokens)?;

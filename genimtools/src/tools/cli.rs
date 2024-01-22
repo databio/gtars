@@ -5,10 +5,7 @@ fn make_data_dir_stat_cli() -> Command {
     Command::new(consts::DATA_DIR_STAT_CMD)
         .author("Nathan LeRoy")
         .about("Collect data statistics on all bed files in a directory.")
-        .arg(
-            arg!(--out <VALUE> "Path to the output file.")
-                .required(false),
-        )
+        .arg(arg!(--out <VALUE> "Path to the output file.").required(false))
         // positional path
         .arg(arg!(<path> "Path to the data directory.").required(true))
 }
@@ -16,10 +13,8 @@ fn make_data_dir_stat_cli() -> Command {
 fn make_pre_tokenization_cli() -> Command {
     Command::new(consts::PRE_TOKENIZATION_CMD)
         .about("Pre-tokenize a bed file or folder of bed files into a specific universe.")
-        .arg(
-            arg!(--universe <VALUE> "Path to the output folder or file.")
-                .required(true),
-        )
+        .arg(arg!(--universe <VALUE> "Path to the output folder or file.").required(true))
+        .arg(arg!(--out <VALUUE> "Path to output the new data.").required(false))
         // positional path
         .arg(arg!(<path> "Path to the data directory.").required(true))
 }
@@ -33,29 +28,33 @@ pub fn make_tools_cli() -> Command {
 }
 
 pub mod handlers {
-    
-    use std::path::Path;
 
-    use crate::{tokenizers::{self, Tokenizer}, common::models::RegionSet};
+    use std::{ffi::OsStr, path::Path};
+
+    use crate::io::write_tokens_to_gtok;
+    use crate::{
+        common::models::RegionSet,
+        tokenizers::{self, Tokenizer, TreeTokenizer},
+    };
 
     use super::*;
 
-    pub fn tools_handler(matches: &ArgMatches) {
+    pub fn tools_handler(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
         match matches.subcommand() {
             Some((consts::DATA_DIR_STAT_CMD, matches)) => {
-                data_dir_stat_handler(matches);
-            },
+                data_dir_stat_handler(matches)?;
+            }
             Some((consts::PRE_TOKENIZATION_CMD, matches)) => {
-                pre_tokenization_handler(matches);
+                pre_tokenization_handler(matches)?;
             }
             _ => unreachable!("Subcommand not found"),
         }
+
+        Ok(())
     }
 
-    pub fn data_dir_stat_handler(matches: &ArgMatches) {
-        let path = matches
-            .get_one::<String>("path")
-            .expect("Path is required");
+    pub fn data_dir_stat_handler(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+        let path = matches.get_one::<String>("path").expect("Path is required");
 
         let out = matches
             .get_one::<String>("out")
@@ -64,9 +63,11 @@ pub mod handlers {
 
         // core logic/algorithm here
         data_dir_stat(path, out.as_str());
+
+        Ok(())
     }
 
-    pub fn pre_tokenization_handler(matches: &ArgMatches) {
+    pub fn pre_tokenization_handler(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
         let path = matches
             .get_one::<String>("path")
             .expect("Path to either a data file or a directory with data is required");
@@ -75,30 +76,64 @@ pub mod handlers {
             .get_one::<String>("universe")
             .expect("Path to the universe file is required");
 
+        let binding = consts::DEFAULT_PRETOKENIZE_OUT.to_string();
+        let out_path = matches.get_one::<String>("out").unwrap_or(&binding);
+
         // check if the path is a file or a directory
         let path_to_data = Path::new(&path);
         let universe = Path::new(&universe);
 
+        // create the tokenizer
+        let tokenizer = tokenizers::TreeTokenizer::from(universe);
+
         if path_to_data.is_file() {
-            let file_name = path_to_data.file_stem();
-            match file_name {
-                Some(file_name) => {
-                    let new_file = format!("{}.{}", file_name.to_str().unwrap(), consts::PRE_TOKENIZATION_EXT);
-                    let new_file = Path::new(&new_file);
-                    let tokenizer = tokenizers::TreeTokenizer::from(universe);
-                    let data = RegionSet::try_from(path_to_data);
-                    match data {
-                        Ok(data) => {
-                            let result = tokenizer.tokenize_region_set(&data).expect("Data couldn't be tokenized.");
-                            let _ = result.to_gtok_file(new_file.to_str().unwrap());
-                        },
-                        Err(e) => panic!("There was an error readig the data file: {}", e)
-                    }
-                },
-                None => panic!("There was an issue extracting the name of the file.")
-            }
-            
+            pre_tokenize_file(path_to_data, out_path, &tokenizer)?;
+        } else {
+            pre_tokenize_dir(path_to_data, out_path, &tokenizer)?;
         }
+
+        Ok(())
+    }
+
+    fn pre_tokenize_file(path_to_bedfile: &Path, outdir: &str, tokenizer: &TreeTokenizer) -> Result<(), Box<dyn std::error::Error>> {
+
+        // make sure the file ends in .bed or .bed.gz
+        let ext = path_to_bedfile.extension().unwrap();
+        if ext != OsStr::new("bed") && ext != OsStr::new("bed.gz") {
+            println!("Skipping file: {}", path_to_bedfile.display());
+            return Ok(())
+        }
+
+        let out_file = Path::new(outdir)
+            .join(path_to_bedfile.file_name().unwrap())
+            .join(crate::common::consts::GTOK_EXT);
         
+        let out_file = out_file.to_str().unwrap();
+
+        let regions = RegionSet::try_from(path_to_bedfile).expect("Failed to read bed file");
+
+        let tokens = tokenizer
+            .tokenize_region_set(&regions)
+            .expect("Could not tokenize region set.");
+
+        write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
+        
+        Ok(())
+    }
+
+    fn pre_tokenize_dir(path_to_data: &Path, outdir: &str, tokenizer: &TreeTokenizer) -> Result<(), Box<dyn std::error::Error>> {
+        for file in walkdir::WalkDir::new(path_to_data) {
+            if let Ok(file) = file {
+                if file.path().is_dir() {
+                    pre_tokenize_dir(path_to_data, outdir, tokenizer)?;
+                } else {
+                    pre_tokenize_file(path_to_data, outdir, tokenizer)?;
+                }
+            } else {
+                println!("Error reading file: {}", file.err().unwrap());
+            }
+        }
+
+        Ok(())
     }
 }
