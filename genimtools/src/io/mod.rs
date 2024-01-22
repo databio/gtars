@@ -8,6 +8,16 @@ use std::io::{BufReader, BufWriter, Read, Write};
 /// - tokens: tokens to save
 ///
 pub fn write_tokens_to_gtok(filename: &str, tokens: &[u32]) -> std::io::Result<()> {
+    // make sure the path exists
+    let path = std::path::Path::new(filename);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    } else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "Failed to create directory",
+        ));
+    }
     let file = File::create(filename)?;
     let mut writer = BufWriter::new(file);
 
