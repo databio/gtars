@@ -34,7 +34,7 @@ pub fn make_tools_cli() -> Command {
 
 pub mod handlers {
     
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
     use crate::{tokenizers::{self, Tokenizer}, common::models::RegionSet};
 
@@ -90,7 +90,7 @@ pub mod handlers {
                     match data {
                         Ok(data) => {
                             let result = tokenizer.tokenize_region_set(&data).expect("Data couldn't be tokenized.");
-                            let _ = result.to_gtok_file(&PathBuf::from(new_file));
+                            let _ = result.to_gtok_file(new_file.to_str().unwrap());
                         },
                         Err(e) => panic!("There was an error readig the data file: {}", e)
                     }
