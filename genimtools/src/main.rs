@@ -36,8 +36,8 @@ fn main() {
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches);
         }
-        Some((tools::consts::DATA_DIR_STAT_CMD, matches)) => {
-            tools::cli::handlers::data_dir_stat_handler(matches);
+        Some((tools::consts::TOOLS_CMD, matches)) => {
+            tools::cli::handlers::tools_handler(matches);
         }
 
         _ => unreachable!("Subcommand not found"),

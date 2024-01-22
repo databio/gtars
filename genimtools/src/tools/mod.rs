@@ -7,8 +7,11 @@ use walkdir::WalkDir;
 pub mod cli;
 
 pub mod consts {
+    pub const TOOLS_CMD: &str = "tools";
     pub const DATA_DIR_STAT_CMD: &str = "dir-stat";
-    pub const DEFAULT_OUTPUT: &str = "output.tsv";
+    pub const PRE_TOKENIZATION_CMD: &str = "pretokenize";
+    pub const DEFAULT_DATA_DIR_STAT_OUTPUT: &str = "output.tsv";
+    pub const PRE_TOKENIZATION_EXT: &str = "gtok";
 }
 
 ///
