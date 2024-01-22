@@ -157,10 +157,16 @@ fn pre_tokenize_file(
     let regions = RegionSet::try_from(path_to_bedfile).expect("Failed to read bed file");
 
     let tokens = tokenizer
-        .tokenize_region_set(&regions)
-        .expect("Could not tokenize region set.");
+        .tokenize_region_set(&regions);
 
-    write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
+    match tokens {
+        Some(tokens) => {
+            write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
+        },
+        None => {
+            println!("Failed to tokenize file: {}", path_to_bedfile.display());
+        }
+    }
 
     Ok(())
 }
