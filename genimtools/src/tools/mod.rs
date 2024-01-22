@@ -1,8 +1,14 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
+use std::path::Path;
 
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
+
+use crate::common::models::RegionSet;
+use crate::io::write_tokens_to_gtok;
+use crate::tokenizers::{Tokenizer, TreeTokenizer};
 
 pub mod cli;
 
@@ -70,4 +76,68 @@ pub fn data_dir_stat(path: &str, out: &str) {
 
         pb.inc(1);
     }
+}
+
+pub fn pre_tokenize_data(
+    path_to_data: &Path,
+    outdir: &str,
+    tokenizer: &TreeTokenizer,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if path_to_data.is_file() {
+        pre_tokenize_file(path_to_data, outdir, tokenizer)?;
+    } else {
+        let bed_file_path = Path::new(path_to_data).join("**/*.bed");
+        let zipped_bed_file_path = Path::new(path_to_data).join("**/*.bed.gz");
+
+        let bed_file_matches = glob::glob(bed_file_path.to_str().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok());
+
+        let zipped_bed_file_matches = glob::glob(zipped_bed_file_path.to_str().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok());
+
+        for entry in bed_file_matches {
+            let path = entry;
+            pre_tokenize_file(&path, outdir, tokenizer)?;
+        }
+
+        for entry in zipped_bed_file_matches {
+            let path = entry;
+            pre_tokenize_file(&path, outdir, tokenizer)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn pre_tokenize_file(
+    path_to_bedfile: &Path,
+    outdir: &str,
+    tokenizer: &TreeTokenizer,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // make sure the file ends in .bed or .bed.gz
+    let ext = path_to_bedfile.extension().unwrap();
+    if ext != OsStr::new("bed") && ext != OsStr::new("bed.gz") {
+        println!("Skipping file: {}", path_to_bedfile.display());
+        return Ok(());
+    }
+
+    let out_file = Path::new(outdir).join(format!(
+        "{}.{}",
+        path_to_bedfile.file_stem().unwrap().to_str().unwrap(),
+        crate::common::consts::GTOK_EXT
+    ));
+
+    let out_file = out_file.to_str().unwrap();
+
+    let regions = RegionSet::try_from(path_to_bedfile).expect("Failed to read bed file");
+
+    let tokens = tokenizer
+        .tokenize_region_set(&regions)
+        .expect("Could not tokenize region set.");
+    
+    write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
+
+    Ok(())
 }

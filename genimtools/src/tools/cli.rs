@@ -67,7 +67,9 @@ pub mod handlers {
         Ok(())
     }
 
-    pub fn pre_tokenization_handler(matches: &ArgMatches) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn pre_tokenization_handler(
+        matches: &ArgMatches,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let path = matches
             .get_one::<String>("path")
             .expect("Path to either a data file or a directory with data is required");
@@ -77,7 +79,7 @@ pub mod handlers {
             .expect("Path to the universe file is required");
 
         let binding = consts::DEFAULT_PRETOKENIZE_OUT.to_string();
-        let out_path = matches.get_one::<String>("out").unwrap_or(&binding);
+        let outdir = matches.get_one::<String>("out").unwrap_or(&binding);
 
         // check if the path is a file or a directory
         let path_to_data = Path::new(&path);
@@ -86,53 +88,7 @@ pub mod handlers {
         // create the tokenizer
         let tokenizer = tokenizers::TreeTokenizer::from(universe);
 
-        if path_to_data.is_file() {
-            pre_tokenize_file(path_to_data, out_path, &tokenizer)?;
-        } else {
-            pre_tokenize_dir(path_to_data, out_path, &tokenizer)?;
-        }
-
-        Ok(())
-    }
-
-    fn pre_tokenize_file(path_to_bedfile: &Path, outdir: &str, tokenizer: &TreeTokenizer) -> Result<(), Box<dyn std::error::Error>> {
-
-        // make sure the file ends in .bed or .bed.gz
-        let ext = path_to_bedfile.extension().unwrap();
-        if ext != OsStr::new("bed") && ext != OsStr::new("bed.gz") {
-            println!("Skipping file: {}", path_to_bedfile.display());
-            return Ok(())
-        }
-
-        let out_file = Path::new(outdir)
-            .join(path_to_bedfile.file_name().unwrap())
-            .join(crate::common::consts::GTOK_EXT);
-        
-        let out_file = out_file.to_str().unwrap();
-
-        let regions = RegionSet::try_from(path_to_bedfile).expect("Failed to read bed file");
-
-        let tokens = tokenizer
-            .tokenize_region_set(&regions)
-            .expect("Could not tokenize region set.");
-
-        write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
-        
-        Ok(())
-    }
-
-    fn pre_tokenize_dir(path_to_data: &Path, outdir: &str, tokenizer: &TreeTokenizer) -> Result<(), Box<dyn std::error::Error>> {
-        for file in walkdir::WalkDir::new(path_to_data) {
-            if let Ok(file) = file {
-                if file.path().is_dir() {
-                    pre_tokenize_dir(path_to_data, outdir, tokenizer)?;
-                } else {
-                    pre_tokenize_file(path_to_data, outdir, tokenizer)?;
-                }
-            } else {
-                println!("Error reading file: {}", file.err().unwrap());
-            }
-        }
+        pre_tokenize_data(path_to_data, outdir, &tokenizer)?;
 
         Ok(())
     }

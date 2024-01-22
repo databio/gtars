@@ -7,6 +7,11 @@ use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
 #[fixture]
+fn path_to_data() -> &'static str {
+    "tests/data"
+}
+
+#[fixture]
 fn path_to_bed_file() -> &'static str {
     "tests/data/peaks.bed"
 }
@@ -103,5 +108,25 @@ mod tests {
         // last should be the unknown token
         let unknown_token = tokenized_regions.regions[3].clone();
         assert!(unknown_token.chr == "chrUNK");
+    }
+
+    #[rstest]
+    fn test_pretokenization_folder(path_to_data: &str, path_to_bed_file: &str) {
+        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let path_to_data = Path::new(path_to_data);
+        let outdir = "tests/data/out";
+
+        let res = genimtools::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
+        assert!(res.is_ok());
+    }
+
+    #[rstest]
+    fn test_pretokenization_file(path_to_tokenize_bed_file: &str, path_to_bed_file: &str) {
+        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let path_to_data = Path::new(path_to_tokenize_bed_file);
+        let outdir = "tests/data/out";
+
+        let res = genimtools::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
+        assert!(res.is_ok());
     }
 }
