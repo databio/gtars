@@ -69,6 +69,21 @@ impl<'a> TokenizedRegionSet<'a> {
     }
 
     ///
+    /// Write a TokenizedRegionSet to a .gtok file
+    /// * `path` - A PathBuf to write the .gtok file to
+    /// 
+    pub fn to_gtok_file(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+        let mut file = File::create(path)?;
+        for region in self.regions.iter() {
+            let id = self.universe.convert_region_to_id(region);
+            let line = format!("{}\n", id);
+            file.write_all(line.as_bytes())?;
+        }
+
+        Ok(())
+    }
+
+    ///
     /// Convert a TokenizedRegionSet to a vector of region IDs
     ///
     pub fn to_region_ids(&self) -> Vec<u32> {
