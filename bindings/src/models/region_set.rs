@@ -5,6 +5,7 @@ use genimtools::common::consts::{PAD_CHR, PAD_END, PAD_START};
 
 use crate::models::{PyRegion, PyTokenizedRegion};
 
+
 #[pyclass(name = "TokenizedRegionSet")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
