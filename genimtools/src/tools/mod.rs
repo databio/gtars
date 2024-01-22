@@ -143,6 +143,7 @@ fn pre_tokenize_file(
     let ext = path_to_bedfile.extension().unwrap();
     if ext != OsStr::new("bed") && ext != OsStr::new("bed.gz") {
         println!("Skipping file: {}", path_to_bedfile.display());
+        println!("File must end in .bed or .bed.gz, ends with .{}", ext.to_str().unwrap());
         return Ok(());
     }
 
