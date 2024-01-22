@@ -141,7 +141,7 @@ fn pre_tokenize_file(
 ) -> Result<(), Box<dyn std::error::Error>> {
     // make sure the file ends in .bed or .bed.gz
     let ext = path_to_bedfile.extension().unwrap();
-    if ext != OsStr::new("bed") && ext != OsStr::new("bed.gz") {
+    if ext != OsStr::new("bed") && ext != OsStr::new("gz") {
         println!("Skipping file: {}", path_to_bedfile.display());
         println!("File must end in .bed or .bed.gz, ends with .{}", ext.to_str().unwrap());
         return Ok(());
