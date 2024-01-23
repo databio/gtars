@@ -29,13 +29,7 @@ pub fn make_tools_cli() -> Command {
 
 pub mod handlers {
 
-    use std::{ffi::OsStr, path::Path};
-
-    use crate::io::write_tokens_to_gtok;
-    use crate::{
-        common::models::RegionSet,
-        tokenizers::{self, Tokenizer, TreeTokenizer},
-    };
+    use std::path::Path;
 
     use super::*;
 
@@ -86,7 +80,7 @@ pub mod handlers {
         let universe = Path::new(&universe);
 
         // create the tokenizer
-        let tokenizer = tokenizers::TreeTokenizer::from(universe);
+        let tokenizer = crate::tokenizers::TreeTokenizer::from(universe);
 
         pre_tokenize_data(path_to_data, outdir, &tokenizer)?;
 
