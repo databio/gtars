@@ -8,16 +8,44 @@ use polars::export::arrow::buffer::Buffer;
 use crate::vocab::consts;
 
 
-pub const maxCount: i32 = 268435456;		//16* = 4GB memory
+pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had this as i32
+
+
 
 #[derive(Default)]
-pub struct IGD {
-    // TODO create attributes for the IGD
-    pub placeholder: String,
-    pub total: i32,
+pub struct gdata_t {
+    pub idx: i32,
+    pub start: i32,
+    pub end: i32,
+    pub value: i32,
 }
 
-impl IGD{
+#[derive(Default)]
+pub struct tile_t {
+    pub ncnts: i32, // batch counts
+    pub nCnts: i32, // total (batch) counts
+    pub mcnts: i32, //  max counts
+    pub gList: gdata_t,
+}
+#[derive(Default)]
+pub struct ctg_t {
+    pub name: String,
+    pub mTiles: i32,
+    pub gTile: tile_t,
+}
+
+#[derive(Default)]
+pub struct igd_t {
+    // TODO create attributes for the IGD
+    pub nbp: i32,
+    pub gType: i32,
+    pub nctg: i32,
+    pub mctg: i32,
+    pub total: i64,
+    pub ctg: ctg_t, // this might need to be a reference
+}
+
+impl igd_t{
 
     /// Constructs new instance of IGD
     pub fn new() -> Self {Self::default()}
@@ -37,7 +65,7 @@ pub fn create_igd_f(matches: &ArgMatches){
         .expect("File list path is required");
 
     //Initialize IGD into Memory
-    let mut igd = IGD::new();
+    let mut igd = igd_t::new();
 
     //Check that file path exists and get number of files
     let mut all_bed_files: Vec<PathBuf>  = Vec::new();
@@ -242,12 +270,12 @@ pub fn create_igd_f(matches: &ArgMatches){
 
 }
 
-fn igd_saveT(p0: &IGD, p1: &String) {
+fn igd_saveT(p0: &igd_t, p1: &String) {
     println!("HELLO from igd_saveT");
     //todo!()
 }
 
-fn igd_add(p0: &IGD, p1: String, p2: i32, p3: i32, p4: i32, p5: usize) {
+fn igd_add(p0: &igd_t, p1: String, p2: i32, p3: i32, p4: i32, p5: usize) {
     println!("HELLO from igd_add");
     //todo!()
 
