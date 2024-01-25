@@ -281,6 +281,8 @@ fn igd_add(igd: &igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) 
     /// og code: layers: igd->ctg->gTile->gdata(list)
 
     if start>= end {
+
+        println!("Start: {0} greater than End: {1}, returning from igd_add", start, end);
         return
     }
     let absent: i32;
@@ -288,12 +290,22 @@ fn igd_add(igd: &igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) 
     // Original code used typedef unsigned int khint32_t;
     // typedef khint32_t khint_t;
     // khint32_t k;
-    let k: u32;
+    let mut key = String::new();
 
     // create hash table
     // og code: strhash_t *h = (strhash_t*)hc;
     // og code: hashmap is global
     let mut hash_table:HashMap<String, i32> = HashMap::new();
+
+    let key_check = hash_table.contains_key(&key);
+
+    println!("BEFORE KEY CHECK");
+    if key_check == false{
+        println!("Key not present");
+
+
+    }
+
 
     //let k = hash_table.insert()
 
