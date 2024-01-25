@@ -110,7 +110,7 @@ pub fn create_igd_f(matches: &ArgMatches){
 
             // TODO Better name for og function?
             // TODO parse_bed -> parse_bed_file_line
-            let ctg = parse_bed(&first_line, start, end);
+            let ctg = parse_bed(&first_line, &mut start, &mut end);
             // if it parses, add it to collected lines, increment ix
             match ctg{
 
@@ -182,7 +182,7 @@ pub fn create_igd_f(matches: &ArgMatches){
 
             while m==0 && reader.read_line(&mut buffer).unwrap() != 0{
 
-                let ctg = parse_bed(&buffer, start, end);
+                let ctg = parse_bed(&buffer, &mut start, &mut end);
 
                 match ctg{
 
@@ -322,7 +322,7 @@ pub enum ParseBedResult {
     Int(i32),
 }
 
-pub fn parse_bed(line: &String, mut start: i32, mut end: i32) -> Option<String> {
+pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32) -> Option<String> {
 
     println!("HERE IS THE LINE TO PARSE: {}", line);
     let mut fields = line.split('\t');
@@ -343,9 +343,9 @@ pub fn parse_bed(line: &String, mut start: i32, mut end: i32) -> Option<String> 
         return None;
     }
 
-    //*start = st; //Compiler said no.
-    start = st;
-    end = en;
+
+    *start = st;
+    *end = en;
 
     println!("SUCCESSFULLY FINISHING PARSE");
     Some(ctg.parse().unwrap())
