@@ -1,3 +1,5 @@
+#![allow(nonstandard_style)]
+
 pub mod cli;
 pub mod create;
 
