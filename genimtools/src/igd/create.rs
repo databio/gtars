@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use clap::ArgMatches;
 use std::fs;
 use std::fs::{DirEntry, File};
@@ -275,7 +276,29 @@ fn igd_saveT(p0: &igd_t, p1: &String) {
     //todo!()
 }
 
-fn igd_add(p0: &igd_t, p1: String, p2: i32, p3: i32, p4: i32, p5: usize) {
+fn igd_add(igd: &igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
+    ///Add an interval
+    /// og code: layers: igd->ctg->gTile->gdata(list)
+
+    if start>= end {
+        return
+    }
+    let absent: i32;
+    let i: i32;
+    // Original code used typedef unsigned int khint32_t;
+    // typedef khint32_t khint_t;
+    // khint32_t k;
+    let k: u32;
+
+    // create hash table
+    // og code: strhash_t *h = (strhash_t*)hc;
+    // og code: hashmap is global
+    let mut hash_table:HashMap<String, i32> = HashMap::new();
+
+    //let k = hash_table.insert()
+
+
+
     println!("HELLO from igd_add");
     //todo!()
 
