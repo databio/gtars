@@ -34,6 +34,12 @@ pub struct ctg_t {
     pub mTiles: i32,
     pub gTile: tile_t,
 }
+impl ctg_t{
+
+    /// Constructs new instance of IGD
+    pub fn new() -> Self {Self::default()}
+
+}
 
 #[derive(Default)]
 pub struct igd_t {
@@ -43,7 +49,7 @@ pub struct igd_t {
     pub nctg: i32,
     pub mctg: i32,
     pub total: i64,
-    pub ctg: ctg_t, // this might need to be a reference
+    pub ctg: Vec<ctg_t>, // this might need to be a reference
 }
 
 impl igd_t{
@@ -190,7 +196,7 @@ pub fn create_igd_f(matches: &ArgMatches){
                         // check that st>=0 and end <321000000   NOTE: these values taken from og code.
                         if start>=0 && end<321000000{
                             /// igd_add not yet implemented
-                            igd_add(&igd, ctg, start, end, va, ig);
+                            igd_add(&mut igd, ctg, start, end, va, ig);
                             nr[ig] +=1;
                             avg[ig]+=end-start;
                             println!("DEBUG: after igd add");
@@ -276,7 +282,7 @@ fn igd_saveT(p0: &igd_t, p1: &String) {
     //todo!()
 }
 
-fn igd_add(igd: &igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
+fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
 
@@ -287,32 +293,37 @@ fn igd_add(igd: &igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) 
     }
     let absent: i32;
     let i: i32;
-    // Original code used typedef unsigned int khint32_t;
-    // typedef khint32_t khint_t;
-    // khint32_t k;
-    let mut key = String::new();
+
+    let mut key= chrm.clone();
+
+    // Original code sets n1 and n2 but....currently igd.nbp default to 0 which is problematic for division
+    //let n1 = start/igd.nbp;
+    //let n2 = (end-1)/igd.nbp; // this might divivde by zero...
 
     // create hash table
-    // og code: strhash_t *h = (strhash_t*)hc;
-    // og code: hashmap is global
     let mut hash_table:HashMap<String, i32> = HashMap::new();
 
     let key_check = hash_table.contains_key(&key);
 
-    println!("BEFORE KEY CHECK");
-    if key_check == false{
-        println!("Key not present");
 
+    if key_check == false{
+
+        // Insert key and value (igd.nctg)
+        hash_table.insert(key, igd.nctg);
+        // initialize ctg
+        igd.nctg+=1;
+        let mut p = ctg_t::new();
+        p.name = chrm;
+        //p.mTiles = 1 + n2;
+        igd.ctg.push(p);
 
     }
 
-
+    println!("Here is hash map{:?}", hash_table);
     //let k = hash_table.insert()
 
-
-
     println!("HELLO from igd_add");
-    //todo!()
+
 
 }
 
