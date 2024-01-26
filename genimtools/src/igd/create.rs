@@ -74,6 +74,12 @@ pub fn create_igd_f(matches: &ArgMatches){
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
 
+    igd.gType = 1;
+    igd.nbp = 16384; // from og code tile_size = 16384;
+    igd.nctg = 0;
+    igd.mctg = 32;
+    igd.total=0;
+
     //Check that file path exists and get number of files
     let mut all_bed_files: Vec<PathBuf>  = Vec::new();
     //let mut all_bed_buffers = Vec::new();
@@ -296,9 +302,8 @@ fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usi
 
     let mut key= chrm.clone();
 
-    // Original code sets n1 and n2 but....currently igd.nbp default to 0 which is problematic for division
-    //let n1 = start/igd.nbp;
-    //let n2 = (end-1)/igd.nbp; // this might divivde by zero...
+    let n1 = start/igd.nbp;
+    let n2 = (end-1)/igd.nbp;
 
     // create hash table
     let mut hash_table:HashMap<String, i32> = HashMap::new();
@@ -314,8 +319,11 @@ fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usi
         igd.nctg+=1;
         let mut p = ctg_t::new();
         p.name = chrm;
-        //p.mTiles = 1 + n2;
+        p.mTiles = 1 + n2;
+        //p.gTile original code mallocs mTiles*sizeof title_t
         igd.ctg.push(p);
+
+        // set key to name kh_key(h, k) = p->name;
 
     }
 
