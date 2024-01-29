@@ -222,27 +222,15 @@ pub fn create_igd_f(matches: &ArgMatches){
 
                 }
 
-
             }
 
             if m==0 {
                 ig+=1;
             }
-            // if ig%nf10 == 0{
-            //     println!(".") // og code: appears to be a debug line
-            // }
-
-
-            //
-            // let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
-            // println!("Confirm reading first line: {}",first_line);
-            // Get file from vec via index
-            // read file
-            ig +=1
 
         }
 
-        ///og: 2.3 save/append tiles to disc, add cnts to cnts
+        ///og: 2.3 save/append tiles to disc, add cnts to Cnts
         ///
 
         igd_saveT(&igd, output_path);
@@ -253,33 +241,9 @@ pub fn create_igd_f(matches: &ArgMatches){
 
     }
 
-    // for path in all_bed_files{
-    //
-    //     // let file_path = path.unwrap()?;
-    //
-    //     println!("FIle path: {:?}", path);
-    //
-    // }
-    // /// Debug check if first line is consumed...
-    // for mut buf in all_bed_buffers{
-    //     // CHECK IF first line consumed...
-    //     for line in buf{
-    //         println!("{:?}", line);
-    //     }
-    //
-    // }
-    // while i0 < n_files{
-    //     //from og code: 2.1 Start from (i0, L0): read till (i1, L1)
-    //     ig = i0;
-    //     m = 0;
-    //     //from og code: 2.2 Read ~4GB data from files
-    //
-    //
-    //
-    //
-    // }
+//TODO CODE TO save _index.tsv (part 3)
 
-
+//TODO COde to sort tile data and save into single files per ctg (part 4)
 
 }
 
