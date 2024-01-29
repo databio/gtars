@@ -32,7 +32,7 @@ pub struct tile_t {
 pub struct ctg_t {
     pub name: String,
     pub mTiles: i32,
-    pub gTile: tile_t,
+    pub gTile: Vec<tile_t>,
 }
 impl ctg_t{
 
@@ -55,6 +55,13 @@ pub struct igd_t {
 impl igd_t{
 
     /// Constructs new instance of IGD
+    pub fn new() -> Self {Self::default()}
+
+}
+
+impl tile_t{
+
+    /// Constructs new instance of tile
     pub fn new() -> Self {Self::default()}
 
 }
@@ -264,6 +271,7 @@ fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usi
     let absent: i32;
     let i: i32;
 
+    // Cloning chrm String because the hash table will own the key after insertion
     let mut key= chrm.clone();
 
     let n1 = start/igd.nbp;
@@ -279,12 +287,24 @@ fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usi
 
         // Insert key and value (igd.nctg)
         hash_table.insert(key, igd.nctg);
-        // initialize ctg
         igd.nctg+=1;
+        // initialize ctg
         let mut p = ctg_t::new();
         p.name = chrm;
         p.mTiles = 1 + n2;
         //p.gTile original code mallocs mTiles*sizeof title_t
+        //p.gTile = Vec::with_capacity()
+
+        for i in 0..p.mTiles{
+            let mut new_tile: tile_t = tile_t::new();
+            new_tile.ncnts = 0; //each batch
+            new_tile.nCnts = 0; //total
+            new_tile.mcnts =2 ;
+            //new_tile.gList //tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
+            p.gTile.push(new_tile);
+
+        }
+
         igd.ctg.push(p);
 
         // set key to name kh_key(h, k) = p->name;
