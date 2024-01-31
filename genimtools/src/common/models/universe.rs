@@ -96,6 +96,13 @@ impl From<Vec<Region>> for Universe {
             end: PAD_END as u32,
         };
 
+        // do the same with the mask token
+        let mask = Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32
+        };
+
         // notify if the Unk token is already in the vocab
         if region_to_id.contains_key(&unk) {
             // pass
@@ -110,12 +117,23 @@ impl From<Vec<Region>> for Universe {
             regions.push(pad.to_owned());
         }
 
+        // notify if the Mask token is already in the vocab
+        if region_to_id.contains_key(&mask) {
+            // pass
+        } else {
+            regions.push(mask.to_owned());
+        }
+
         // add the Unk token to the region to id map
         region_to_id.entry(unk).or_insert(total_regions as u32);
         let total_regions = region_to_id.len();
 
         // add the Pad token to the region to id map
         region_to_id.entry(pad).or_insert(total_regions as u32);
+        let total_regions = region_to_id.len();
+
+        // add the Mask token to the region to id map
+        region_to_id.entry(mask).or_insert(total_regions as u32);
         let total_regions = region_to_id.len();
 
         Universe {
