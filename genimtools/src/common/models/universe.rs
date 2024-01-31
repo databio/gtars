@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, MASK_CHR, MASK_START, MASK_END, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::region::Region;
 use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
 
@@ -50,6 +50,14 @@ impl Universe {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
+        }
+    }
+
+    pub fn mask_token(&self) -> Region {
+        Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32,
         }
     }
 

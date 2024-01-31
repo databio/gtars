@@ -38,6 +38,21 @@ class TreeTokenizer:
         :param universe: The universe of characters to use for tokenization.
         """
         pass
+
+    def unknown_token(self) -> int:
+        """
+        Get the ID of the unknown token.
+        """
+    
+    def padding_token(self) -> int:
+        """
+        Get the ID of the padding token.
+        """
+    
+    def mask_token(self) -> int:
+        """
+        Get the ID of the mask token.
+        """
     
     def tokenize(self, regions: List[Region]) -> TokenizedRegionSet:
         """
@@ -51,4 +66,14 @@ class TreeTokenizer:
         This was added to create a more performant tokenization strategy
         that could tokenize directly from disk in rust instead of using
         pandas.
+        """
+    
+    def token_to_id(self, token: Region) -> int:
+        """
+        Convert a token to an ID.
+        """
+    
+    def tokens_to_id(self, tokens: List[Region]) -> List[int]:
+        """
+        Convert a list of tokens to a list of IDs.
         """
