@@ -1,7 +1,7 @@
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
 // use crate::common::models::bed_set::BedSet;
-use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, MASK_CHR, MASK_START, MASK_END, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::tokenized_regionset::TokenizedRegionSet;
 
 pub trait Tokenizer {
@@ -57,4 +57,14 @@ pub trait Tokenizer {
             end: PAD_END as u32,
         }
     }
+
+    fn mask_token(&self) -> Region {
+        Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32,
+        }
+    }
+
+
 }
