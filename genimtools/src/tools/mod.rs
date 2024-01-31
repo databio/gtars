@@ -93,7 +93,7 @@ pub fn pre_tokenize_data(
             .unwrap()
             .filter_map(|e| e.ok())
             .count();
-        
+
         let num_zipped = glob::glob(zipped_bed_file_path.to_str().unwrap())
             .unwrap()
             .filter_map(|e| e.ok())
@@ -143,7 +143,10 @@ fn pre_tokenize_file(
     let ext = path_to_bedfile.extension().unwrap();
     if ext != OsStr::new("bed") && ext != OsStr::new("gz") {
         println!("Skipping file: {}", path_to_bedfile.display());
-        println!("File must end in .bed or .bed.gz, ends with .{}", ext.to_str().unwrap());
+        println!(
+            "File must end in .bed or .bed.gz, ends with .{}",
+            ext.to_str().unwrap()
+        );
         return Ok(());
     }
 
@@ -157,13 +160,12 @@ fn pre_tokenize_file(
 
     let regions = RegionSet::try_from(path_to_bedfile).expect("Failed to read bed file");
 
-    let tokens = tokenizer
-        .tokenize_region_set(&regions);
+    let tokens = tokenizer.tokenize_region_set(&regions);
 
     match tokens {
         Some(tokens) => {
             write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
-        },
+        }
         None => {
             println!("Failed to tokenize file: {}", path_to_bedfile.display());
         }
