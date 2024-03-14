@@ -52,6 +52,13 @@ pub struct igd_t {
     pub ctg: Vec<ctg_t>, // this might need to be a reference
 }
 
+
+// impl Default for igd_t{
+//     pub fn default() -> Self {
+//         todo!()
+//     }
+// }
+
 impl igd_t{
 
     /// Constructs new instance of IGD
@@ -107,7 +114,7 @@ pub fn create_igd_f(matches: &ArgMatches){
             if extension != consts::FILE_EXTENSION.trim_start_matches('.') {
                 continue;
             }
-        }
+        } else {continue} // This will skip files that do not have an extension
 
         let entry = entry.unwrap();
         let file_type = entry.file_type().unwrap();
@@ -125,6 +132,8 @@ pub fn create_igd_f(matches: &ArgMatches){
             /// ALSO bec careful to call by_ref() BEFORE .lines()
             ///
             let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+
+            //TODO Need to do error handling to ensure we gracefully continue if there is no data in the file.
             let mut lines = reader.lines();
 
             // TODO Better name for og function?
@@ -161,7 +170,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     // og C code:
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
-    let mut avg: Vec<i32> = Vec::with_capacity(n_files);
+    let mut avg: Vec<i32> = Vec::with_capacity(n_files); //Can we use arrays? Is this an array? no, can we put a array on files.
     avg.resize(n_files, 0);
 
     let mut nr: Vec<i32> = Vec::with_capacity(n_files);
