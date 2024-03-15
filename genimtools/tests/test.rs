@@ -144,12 +144,11 @@ mod tests {
 
         let result = parse_bed_file(&first_line);
 
-        if let Some((ctg, st, en, r)) = result {
+        if let Some((ctg, st, en)) = result {
 
             println!("ctg: {}", ctg);
             println!("st: {}", st);
             println!("en: {}", en);
-            println!("r: {:?}", r);
             assert_eq!(st, 7915738);
         } else {
             println!("Failed to parse BED record");
