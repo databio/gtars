@@ -54,7 +54,7 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
 
 
 pub fn run_uniwig(matches: &ArgMatches) {
-    println!("Im running. Here are the arguments: {:?}", matches);
+    println!("I am running. Here are the arguments: {:?}", matches);
 
 
     // Placeholder Arguments
@@ -77,16 +77,16 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath:
 
     println!("Hello from Uniwig main");
 
-    match read_chromosome_sizes(combinedbedpath) {
-        Ok(chrom_sizes) => {
-            println!("Chromosome sizes:");
-            for (chrom, size) in chrom_sizes.iter() {
-                println!("{}: {}", chrom, size);
-            }
-        }
-        Err(err) => println!("Error reading chromosome sizes: {}", err),
-    }
 
+    let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
+        Ok(chrom_sizes) => chrom_sizes,
+        Err(err) => {
+            println!("Error reading chromosome sizes: {}", err);
+            return; // Exit the main function on error
+        }
+    };
+
+    println!("{:?}", chrom_sizes);
 
 }
 
