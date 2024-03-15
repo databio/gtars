@@ -31,6 +31,7 @@ fn path_to_tokenize_bed_file() -> &'static str {
 
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
+    use genimtools::uniwig::read_bed_vec;
 
     use super::*;
 
@@ -153,6 +154,14 @@ mod tests {
         } else {
             println!("Failed to parse BED record");
         }
+
+    }
+
+    #[rstest]
+    fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
+
+        read_bed_vec(path_to_bed_file);
+        read_bed_vec(path_to_bed_file_gzipped);
 
     }
 }
