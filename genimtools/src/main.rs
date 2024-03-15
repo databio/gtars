@@ -4,6 +4,7 @@ use clap::Command;
 use genimtools::tokenizers;
 use genimtools::tools;
 use genimtools::vocab;
+use genimtools::igd;
 // use genimtools::uniwig;
 
 pub mod consts {
@@ -22,6 +23,7 @@ fn build_parser() -> Command {
         .subcommand_required(true)
         .subcommand(vocab::cli::make_prune_cli())
         .subcommand(tokenizers::cli::make_tokenization_cli())
+        .subcommand(igd::cli::create_igd_cli())
         .subcommand(tools::cli::make_tools_cli())
 }
 
@@ -35,6 +37,9 @@ fn main() {
         }
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches);
+        }
+        Some((igd::consts::IGD_CMD, matches)) => {
+            igd::create::create_igd_f(matches);
         }
         Some((tools::consts::TOOLS_CMD, matches)) => {
             let _ = tools::cli::handlers::tools_handler(matches);
