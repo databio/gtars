@@ -3,6 +3,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::fs::{File};
 use std::error::Error;
+use clap::builder::OsStr;
+use flate2::read::GzDecoder;
 
 
 pub mod cli;
@@ -36,6 +38,23 @@ pub fn read_bed_map(combinedbedpath: &str){
 }
 
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+
+    let path = Path::new(combinedbedpath);
+
+    let file = File::open(path).unwrap();
+
+    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+
+    if is_gzipped {
+        let decoder = GzDecoder::new(file);
+        let reader = BufReader::new(decoder);
+    }  else {
+        let reader = BufReader::new(file);
+    }
+
+
+
+
 
 
     let chr1 = Chromosome{
