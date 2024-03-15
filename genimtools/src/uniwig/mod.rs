@@ -45,15 +45,24 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
 
-    if is_gzipped {
-        let decoder = GzDecoder::new(file);
-        let reader = BufReader::new(decoder);
-    }  else {
-        let reader = BufReader::new(file);
+    let reader: Box<dyn Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(file)), // Handle potential decoding errors
+        false => Box::new(file),
+    };
+
+    let reader = BufReader::new(reader);
+
+    let chromosome = Chromosome{
+        chrom: "".to_string(),
+        starts: vec![],
+        ends: vec![],
+    };
+
+    let mut chromosomes: Vec<Chromosome> = Vec::new();
+
+    for line in reader.lines() {
+        println!("Here is line{:?}", line)
     }
-
-
-
 
 
 
