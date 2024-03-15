@@ -4,6 +4,8 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use clap::builder::OsStr;
+use flate2::read::GzDecoder;
 use polars::datatypes::DataType;
 use polars::prelude::*;
 
@@ -43,25 +45,53 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
 
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn Error>> {
     let file = File::open(path)?;
-    let reader = BufReader::new(file);
-
     let mut regions = Vec::new();
 
-    for line in reader.lines() {
-        let line = line?;
-        let fields: Vec<&str> = line.split('\t').collect();
+    // determine if the file is gzipped; default to extension is bed
+    // because we dont truly care what the extension is
+    // we just want to know if it is gzipped or not, and we dont want to
+    // fail if the extension is not present (e.g. a user passes in a file without an extension)
+    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
 
-        let chr = fields[0];
-        let start = fields[1].parse::<u32>()?;
-        let end = fields[2].parse::<u32>()?;
+    if is_gzipped {
+        let decoder = GzDecoder::new(file);
+        let reader = BufReader::new(decoder);
 
-        let region = Region {
-            chr: chr.to_string(),
-            start,
-            end,
-        };
+        for line in reader.lines() {
+            let line = line?;
+            let fields: Vec<&str> = line.split('\t').collect();
 
-        regions.push(region);
+            let chr = fields[0];
+            let start = fields[1].parse::<u32>()?;
+            let end = fields[2].parse::<u32>()?;
+
+            let region = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+
+            regions.push(region);
+        }
+    } else {
+        let reader = BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+            let fields: Vec<&str> = line.split('\t').collect();
+
+            let chr = fields[0];
+            let start = fields[1].parse::<u32>()?;
+            let end = fields[2].parse::<u32>()?;
+
+            let region = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+
+            regions.push(region);
+        }
     }
 
     Ok(regions)

@@ -1,3 +1,4 @@
+use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
@@ -146,6 +147,29 @@ impl PyTreeTokenizer {
             None => Err(pyo3::exceptions::PyValueError::new_err(
                 "Failed to tokenize regions",
             )),
+        }
+    }
+
+    pub fn tokenize_bed_file(&self, path: String) -> PyResult<PyTokenizedRegionSet> {
+        let bed_file = Path::new(&path);
+        let tokens = self.tokenizer.tokenize_bed_file(bed_file);
+
+        match tokens {
+            Some(tokens) => {
+                let regions = tokens
+                    .into_iter()
+                    .map(|x| PyRegion {
+                        chr: x.chr,
+                        start: x.start,
+                        end: x.end,
+                    })
+                    .collect::<Vec<_>>();
+
+                let ids = tokens.to_region_ids();
+
+                Ok(PyTokenizedRegionSet::new(regions, ids))
+            },
+            None => Err(PyErr::new::<PyRuntimeError, _>(format!("Error parsing the bedfile: {}", path)))
         }
     }
 }

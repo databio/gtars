@@ -10,3 +10,4 @@ pub const PAD_END: u8 = 0;
 pub const UNKNOWN_CHR: &str = "chrUNK";
 pub const UNKNOWN_START: u8 = 0;
 pub const UNKNOWN_END: u8 = 0;
+pub const GTOK_EXT: &str = "gtok";

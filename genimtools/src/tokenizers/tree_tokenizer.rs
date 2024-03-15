@@ -6,6 +6,7 @@ use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
+use crate::common::utils::extract_regions_from_bed_file;
 use crate::tokenizers::traits::Tokenizer;
 
 pub struct TreeTokenizer {
@@ -103,19 +104,22 @@ impl Tokenizer for TreeTokenizer {
             if let AnyValue::Utf8(v) = chrs.get(i).unwrap() {
                 chr = v.to_string();
             } else {
-                panic!("chr column must be of type Utf8");
+                println!("chr column must be of type Utf8, instead found {:?}", chrs.get(i).unwrap());
+                return None;
             }
 
             if let AnyValue::UInt32(v) = starts.get(i).unwrap() {
                 start = v;
             } else {
-                panic!("start column must be of type UInt32");
+                println!("start column must be of type UInt32, instead found {:?}", starts.get(i).unwrap());
+                return None;
             }
 
             if let AnyValue::UInt32(v) = ends.get(i).unwrap() {
                 end = v;
             } else {
-                panic!("end column must be of type UInt32");
+                println!("end column must be of type UInt32, instead found {:?}", ends.get(i).unwrap());
+                return None;
             }
 
             let lapper = self.tree.get(&chr);
@@ -148,5 +152,18 @@ impl Tokenizer for TreeTokenizer {
             regions: tokenized_regions,
             universe: &self.universe,
         })
+    }
+}
+
+impl TreeTokenizer {
+    pub fn tokenize_bed_file(&self, bed_file: &Path) -> Option<TokenizedRegionSet> {
+        let regions = extract_regions_from_bed_file(bed_file);
+        match regions {
+            Ok(regions) => {
+                let rs = RegionSet::from(regions);
+                self.tokenize_region_set(&rs)
+            }
+            Err(e) => panic!("Error reading bedfile: {}", e),
+        }
     }
 }
