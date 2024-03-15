@@ -5,6 +5,7 @@ use genimtools::common::consts::{PAD_CHR, PAD_END, PAD_START};
 
 use crate::models::{PyRegion, PyTokenizedRegion};
 
+
 #[pyclass(name = "TokenizedRegionSet")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
@@ -32,6 +33,19 @@ impl PyTokenizedRegionSet {
     #[getter]
     pub fn ids(&self) -> PyResult<Vec<u32>> {
         Ok(self.ids.clone())
+    }
+
+    // gensim needs strings as input, so to speed up
+    // iterating over datasets, lets provide a rust
+    // interface to directly convert to strings
+    #[getter]
+    pub fn ids_as_strs(&self) -> PyResult<Vec<String>> {
+        Ok(self
+            .ids
+            .to_owned()
+            .iter()
+            .map(|id| id.to_string())
+            .collect())
     }
 
     // this is wrong: the padding token might not be in the universe

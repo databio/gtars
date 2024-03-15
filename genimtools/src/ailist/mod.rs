@@ -37,7 +37,7 @@ impl AIList {
 
             *intervals = results.3;
 
-            if intervals.len() == 0 {
+            if intervals.is_empty() {
                 break;
             } else {
                 header_list.push(starts.len());
@@ -53,7 +53,7 @@ impl AIList {
     }
 
     fn decompose(
-        intervals: &mut Vec<Interval>,
+        intervals: &mut [Interval],
         minimum_coverage_length: usize,
     ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<Interval>) {
         // look at the next minL*2 intervals
@@ -119,7 +119,7 @@ impl AIList {
                 })
             }
         }
-        return results_list;
+        results_list
     }
 
     pub fn query(&self, interval: &Interval) -> Vec<Interval> {
@@ -142,7 +142,7 @@ impl AIList {
             &self.max_ends[self.header_list[i]..],
         ));
 
-        return results_list;
+        results_list
     }
 
     pub fn print(&self) {
