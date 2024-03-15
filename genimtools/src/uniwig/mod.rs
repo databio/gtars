@@ -20,18 +20,34 @@ pub struct Chromosome {
 
 pub fn show_chromosomes_map(){
 
+    // This is a helper/debug func and is a nice to have
+
 }
 
 pub fn show_chromosomes_vec(){
 
+    // This is a helper/debug func and is a nice to have
 
 }
 
-pub fn read_bed_map(){
+pub fn read_bed_map(combinedbedpath: &str){
+
 
 }
 
-pub fn read_bed_vec(){
+pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+
+
+    let chr1 = Chromosome{
+        chrom: "".to_string(),
+        starts: vec![],
+        ends: vec![],
+    };
+
+    let mut chromosomes: Vec<Chromosome> = Vec::new();
+    chromosomes.push(chr1);
+
+    return chromosomes
 
 }
 
@@ -77,6 +93,13 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath:
 
     println!("Hello from Uniwig main");
 
+    // Set up output file names
+
+    let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
+
+    file_names[0] = format!("{}_{}", bwfileheader, "start.bw");
+    file_names[1] = format!("{}_{}", bwfileheader, "end.bw");
+    file_names[2] = format!("{}_{}", bwfileheader, "core.bw");
 
     let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
         Ok(chrom_sizes) => chrom_sizes,
@@ -86,7 +109,24 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath:
         }
     };
 
-    println!("{:?}", chrom_sizes);
+    //println!("{:?}", chrom_sizes);
+
+    if sorted {
+
+        println!("Sorted is true");
+
+        let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+
+
+    } else{
+        println!("read_bed_map goes here if sorted is untrue");
+        // std::map<std::string, chromosome> chromosomes;
+        // chromosomes = read_bed_map(combinedbedpath);
+
+
+    }
+
+
 
 }
 
