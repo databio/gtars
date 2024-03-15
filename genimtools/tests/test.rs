@@ -1,10 +1,13 @@
-use std::path::Path;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::fs::{File};
 
 use rstest::*;
 use tempfile::NamedTempFile;
 
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
+use genimtools::uniwig::parse_bed_file;
 
 #[fixture]
 fn path_to_data() -> &'static str {
@@ -128,5 +131,29 @@ mod tests {
 
         let res = genimtools::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
         assert!(res.is_ok());
+    }
+
+    #[rstest]
+    fn test_parsed_bed_file(path_to_bed_file: &str) {
+        let path = Path::new(path_to_bed_file);
+        let file = File::open(path).unwrap();
+
+        let mut reader = BufReader::new(file);
+        let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
+        println!("{:?}", first_line);
+
+        let result = parse_bed_file(&first_line);
+
+        if let Some((ctg, st, en, r)) = result {
+
+            println!("ctg: {}", ctg);
+            println!("st: {}", st);
+            println!("en: {}", en);
+            println!("r: {:?}", r);
+            assert_eq!(st, 7915738);
+        } else {
+            println!("Failed to parse BED record");
+        }
+
     }
 }
