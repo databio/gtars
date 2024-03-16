@@ -16,8 +16,17 @@ pub mod consts {
 
 pub struct Chromosome {
     chrom: String,
-    starts: Vec<u32>,
-    ends: Vec<u32>,
+    starts: Vec<i32>,
+    ends: Vec<i32>,
+}
+impl Clone for Chromosome {
+    fn clone(&self) -> Self {
+        Self {
+            chrom: self.chrom.clone(), // Clone the string
+            starts: self.starts.clone(), // Clone the vector
+            ends: self.ends.clone(),   // Clone the vector
+        }
+    }
 }
 
 pub fn show_chromosomes_map(){
@@ -45,37 +54,70 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
 
+    // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)), // Handle potential decoding errors
+        true => Box::new(GzDecoder::new(file)),
         false => Box::new(file),
     };
 
     let reader = BufReader::new(reader);
 
-    let chromosome = Chromosome{
+    let mut chromosome = Chromosome{
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
     };
 
-    let mut chromosomes: Vec<Chromosome> = Vec::new();
+    let mut chromosome_vec: Vec<Chromosome> = Vec::new();
+
+    let mut chrom = String::new();
 
     for line in reader.lines() {
-        println!("Here is line{:?}", line)
+        println!("Here is line{:?}", line);
+        //let s = line.unwrap().as_str();
+
+        // Must use a 2nd let statement to appease the borrow-checker
+        let line_string = line.unwrap();
+        let s = line_string.as_str();
+        //let parsed_line = parse_bed_file(s);
+        let (parsed_chr, parsed_start, parsed_end) = parse_bed_file(s).unwrap();
+
+        if chrom.is_empty(){
+            // Initial chromosome
+            chromosome.chrom = parsed_chr.clone();
+            chrom = parsed_chr.clone();
+            chromosome.starts.push(parsed_start);
+            chromosome.ends.push(parsed_end);
+        }
+
+
+        if parsed_chr != chrom{
+
+            // If the parsed chrom is not the same as the current, sort, and then push to vector
+            // then reset chromosome struct using the newest parsed_chr
+            chromosome.starts.sort_unstable();
+            chromosome.ends.sort_unstable();
+
+            chromosome_vec.push(chromosome.clone());
+
+            chromosome.chrom =parsed_chr;
+
+            chromosome.starts = vec![];
+            chromosome.ends = vec![]
+        }
+
+        chromosome.starts.push(parsed_start);
+        chromosome.ends.push(parsed_end);
+
     }
 
+    // Is this final sort and push actually necessary?
+    chromosome.starts.sort_unstable();
+    chromosome.ends.sort_unstable();
+    chromosome_vec.push(chromosome.clone());
 
 
-    let chr1 = Chromosome{
-        chrom: "".to_string(),
-        starts: vec![],
-        ends: vec![],
-    };
-
-    let mut chromosomes: Vec<Chromosome> = Vec::new();
-    chromosomes.push(chr1);
-
-    return chromosomes
+    return chromosome_vec
 
 }
 
