@@ -29,17 +29,6 @@ impl Clone for Chromosome {
     }
 }
 
-pub fn show_chromosomes_map(){
-
-    // This is a helper/debug func and is a nice to have
-
-}
-
-pub fn show_chromosomes_vec(){
-
-    // This is a helper/debug func and is a nice to have
-
-}
 
 pub fn read_bed_map(combinedbedpath: &str){
 
@@ -73,13 +62,12 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     let mut chrom = String::new();
 
     for line in reader.lines() {
-        println!("Here is line{:?}", line);
-        //let s = line.unwrap().as_str();
+        //println!("Here is line{:?}", line);
 
         // Must use a 2nd let statement to appease the borrow-checker
         let line_string = line.unwrap();
         let s = line_string.as_str();
-        //let parsed_line = parse_bed_file(s);
+
         let (parsed_chr, parsed_start, parsed_end) = parse_bed_file(s).unwrap();
 
         if chrom.is_empty(){
@@ -116,6 +104,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome.ends.sort_unstable();
     chromosome_vec.push(chromosome.clone());
 
+    println!("Reading Bed file complete.");
 
     return chromosome_vec
 
@@ -158,7 +147,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
 }
 
-pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath: &str,chromsizerefpath:String,bwfileheader: &str){
+pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str){
     // Main Function
 
     println!("Hello from Uniwig main");
@@ -171,7 +160,7 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath:
     file_names[1] = format!("{}_{}", bwfileheader, "end.bw");
     file_names[2] = format!("{}_{}", bwfileheader, "core.bw");
 
-    let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
+    let _chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
         Ok(chrom_sizes) => chrom_sizes,
         Err(err) => {
             println!("Error reading chromosome sizes: {}", err);
@@ -179,19 +168,18 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, writesize:i32, combinedbedpath:
         }
     };
 
-    //println!("{:?}", chrom_sizes);
 
     if sorted {
 
         println!("Sorted is true");
 
-        let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+        let mut _chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
 
 
     } else{
         println!("read_bed_map goes here if sorted is untrue");
         // std::map<std::string, chromosome> chromosomes;
-        // chromosomes = read_bed_map(combinedbedpath);
+        read_bed_map(combinedbedpath);
 
 
     }
