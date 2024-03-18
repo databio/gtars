@@ -15,6 +15,7 @@ indicatif = "0.17.7"
 polars = { version = "0.35.4", features = ["decompress", "decompress-fast"] }
 rust-lapper = "1.1.0"
 walkdir = "2.4.0"
+bigtools = "0.4.2"
 
 [dev-dependencies]
 rstest = "0.18.2"

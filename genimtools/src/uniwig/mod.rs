@@ -139,7 +139,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let writesize: i32 = 1;
     let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/peaks.bed";
     let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
-    let bwfileheader: &str = "test";
+    let bwfileheader: &str = "/home/drc/Downloads/test";
 
 
     uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader)
@@ -184,9 +184,9 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
             let chrom_name = chromosome.chrom.clone();
             chroms.push(chrom_name);
             chr_lens.push(chrom_sizes[&chromosome.chrom]); // retrieve size from hashmap
-
-
         }
+
+
 
 
     } else{
