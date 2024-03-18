@@ -151,7 +151,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
 }
 
-pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str){
+pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str){
     // Main Function
 
     println!("Hello from Uniwig main");
@@ -206,7 +206,36 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
         // let vals_iter = BedParser::from_bed_file(combinedbedpath);
         // let vals = BedParserStreamingIterator::new(vals_iter, false);
 
-        let out = BigWigWrite::create_file(file_names[0].clone());
+        // Iterate 3 times to output the three different files.
+        for j in 0..3 {
+            // Original code uses:
+            // bwOpen, then bwCreateChromList, then bwWriteHdr
+
+            let mut success_count  = 0;
+            let mut failure_count = 0;
+
+            println!("Processing each chromosome...");
+
+            let out = BigWigWrite::create_file(file_names[j].clone());
+
+            if smoothsize!=0 {
+                match j {
+                    0 => {
+                        println!("Write Starts Here")
+                    },
+                    1 => {
+                        println!("Write Ends Here")
+                    },
+                    2 => {
+                        println!("Write Core Here")
+                    },
+                    _ => println!("Unexpected value: {}", j), // Handle unexpected values
+                }
+            }
+
+
+
+        }
 
         //out.options.block_size = 5;
         // out.write(chrom_sizes, vals, runtime).unwrap();
