@@ -3,8 +3,12 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::fs::{File};
 use std::error::Error;
+use bigtools::BBIFile::BigWig;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
+use bigtools::BigWigWrite;
+use bigtools::bedchromdata::BedParserStreamingIterator;
+use bigtools::bed::bedparser::BedParser;
 
 
 pub mod cli;
@@ -183,8 +187,30 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
         for chromosome in chromosomes.iter(){
             let chrom_name = chromosome.chrom.clone();
             chroms.push(chrom_name);
-            chr_lens.push(chrom_sizes[&chromosome.chrom]); // retrieve size from hashmap
+            chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
         }
+
+        // Original Steps
+        // Create bigwig file
+        // Create header from chroms and chr lens
+        // write to bigwig file with smoothing IF smoothsize is set
+        // original code skips this if smoothsize is not set
+        // Close bigwig file
+
+        // Using BigTools
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(6)
+            .build()
+            .expect("Unable to create runtime.");
+
+        // let vals_iter = BedParser::from_bed_file(combinedbedpath);
+        // let vals = BedParserStreamingIterator::new(vals_iter, false);
+
+        let out = BigWigWrite::create_file(file_names[0].clone());
+
+        //out.options.block_size = 5;
+        // out.write(chrom_sizes, vals, runtime).unwrap();
+
 
 
 
@@ -201,7 +227,7 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
 
 }
 
-fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::HashMap<String, i32>, Box<dyn Error>> {
+fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::HashMap<String, u32>, Box<dyn Error>> {
     let chrom_size_file = File::open(Path::new(chrom_size_path))?;
     let mut chrom_sizes = std::collections::HashMap::new();
     let reader = BufReader::new(chrom_size_file);
@@ -211,7 +237,7 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
         let mut iter = line.split('\t');
         let chrom_name = iter.next().unwrap().to_owned();
         let size_str = iter.next().unwrap();
-        let size = size_str.parse::<i32>()?;
+        let size = size_str.parse::<u32>()?;
 
         chrom_sizes.insert(chrom_name, size);
     }
