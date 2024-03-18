@@ -160,7 +160,7 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
     file_names[1] = format!("{}_{}", bwfileheader, "end.bw");
     file_names[2] = format!("{}_{}", bwfileheader, "core.bw");
 
-    let _chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
+    let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
         Ok(chrom_sizes) => chrom_sizes,
         Err(err) => {
             println!("Error reading chromosome sizes: {}", err);
@@ -173,7 +173,20 @@ pub fn uniwig_main(sorted: bool, _smoothsize:i32, _writesize:i32, combinedbedpat
 
         println!("Sorted is true");
 
-        let mut _chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+        let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+
+        let num_chromosomes = chromosomes.len();
+        // Preallocate memory based on number of chromsomes from previous step
+        let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
+        let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
+
+        for chromosome in chromosomes.iter(){
+            let chrom_name = chromosome.chrom.clone();
+            chroms.push(chrom_name);
+            chr_lens.push(chrom_sizes[&chromosome.chrom]); // retrieve size from hashmap
+
+
+        }
 
 
     } else{
