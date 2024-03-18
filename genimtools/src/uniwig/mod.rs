@@ -1,6 +1,6 @@
 use clap::ArgMatches;
 use std::io::{BufRead, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::fs::{File};
 use std::error::Error;
 use bigtools::BBIFile::BigWig;
@@ -216,18 +216,18 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
             println!("Processing each chromosome...");
 
-            let out = BigWigWrite::create_file(file_names[j].clone());
+            let mut out = BigWigWrite::create_file(file_names[j].clone());
 
             if smoothsize!=0 {
                 match j {
                     0 => {
-                        println!("Write Starts Here")
+                        println!("Write Starts Here");
                     },
                     1 => {
-                        println!("Write Ends Here")
+                        println!("Write Ends Here");
                     },
                     2 => {
-                        println!("Write Core Here")
+                        println!("Write Core Here");
                     },
                     _ => println!("Unexpected value: {}", j), // Handle unexpected values
                 }
@@ -237,8 +237,33 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
         }
 
-        //out.options.block_size = 5;
-        // out.write(chrom_sizes, vals, runtime).unwrap();
+
+
+        // Using BigTools Bed Parsing as Alternative
+
+        //let path = Path::new(combinedbedpath);
+        let path = PathBuf::from(combinedbedpath);
+
+        let file = File::open(path).unwrap();
+
+        // let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+        //
+        // // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
+        // let reader: Box<dyn Read> = match is_gzipped {
+        //     true => Box::new(GzDecoder::new(file)),
+        //     false => Box::new(file),
+        // };
+
+        //let reader = BufReader::new(file);
+
+        let vals_iter = BedParser::from_bed_file(file);
+
+        let vals = BedParserStreamingIterator::new(vals_iter, false);
+
+        let mut out = BigWigWrite::create_file(file_names[0].clone());
+        //
+        // out.options.block_size = 5;
+        out.write(chrom_sizes, vals, runtime).unwrap();
 
 
 
