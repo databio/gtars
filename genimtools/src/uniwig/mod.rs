@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use clap::ArgMatches;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -242,28 +243,37 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
         // Using BigTools Bed Parsing as Alternative
 
         //let path = Path::new(combinedbedpath);
-        let path = PathBuf::from(combinedbedpath);
-
-        let file = File::open(path).unwrap();
-
-        // let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+        // let path = PathBuf::from(combinedbedpath);
         //
-        // // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
-        // let reader: Box<dyn Read> = match is_gzipped {
-        //     true => Box::new(GzDecoder::new(file)),
-        //     false => Box::new(file),
-        // };
-
-        //let reader = BufReader::new(file);
-
-        let vals_iter = BedParser::from_bed_file(file);
-
-        let vals = BedParserStreamingIterator::new(vals_iter, false);
-
-        let mut out = BigWigWrite::create_file(file_names[0].clone());
+        // let file = File::open(path).unwrap();
+        //
+        // // let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+        // //
+        // // // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
+        // // let reader: Box<dyn Read> = match is_gzipped {
+        // //     true => Box::new(GzDecoder::new(file)),
+        // //     false => Box::new(file),
+        // // };
+        //
+        // //let reader = BufReader::new(file);
+        //
+        // let vals_iter = BedParser::from_bed_file(file);
+        //
+        // let vals = BedParserStreamingIterator::new(vals_iter, true);
+        //
+        // println!("DONE");
+        // let mut out = BigWigWrite::create_file(file_names[0].clone());
         //
         // out.options.block_size = 5;
-        out.write(chrom_sizes, vals, runtime).unwrap();
+
+        // WHen opening bed file using the bed parser, the func returns Ok((chrom, BedEntry { start, end, rest })
+        // from the testing case, the bigtools crate opens from a bedgraph which returns Some(Ok((chrom, Value { start, end, value })))
+        // Value is required (not BedEntry) when writing to a BigWig file (it throws a compiler error).
+        // out.write(chrom_sizes, vals, runtime).unwrap();
+        // let mut chrom_map = HashMap::new();
+        // chrom_map.insert("chr17".to_string(), 83257441);
+
+        //out.write(chrom_map, vals, runtime).unwrap();
 
 
 
