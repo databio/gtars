@@ -31,7 +31,7 @@ fn path_to_tokenize_bed_file() -> &'static str {
 
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
-    use genimtools::uniwig::read_bed_vec;
+    use genimtools::uniwig::{read_bed_vec, run_uniwig, uniwig_main};
 
     use super::*;
 
@@ -162,6 +162,19 @@ mod tests {
 
         read_bed_vec(path_to_bed_file);
         read_bed_vec(path_to_bed_file_gzipped);
+
+    }
+    #[rstest]
+    fn test_run_uniwig_main(path_to_bed_file: &str) {
+
+        let sorted: bool = true;
+        let smoothsize: i32 = 5;
+        let writesize: i32 = 1;
+        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/peaks.bed";
+        let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
+        let bwfileheader: &str = "/home/drc/Downloads/test";
+
+        uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader)
 
     }
 }
