@@ -1,15 +1,11 @@
 use std::collections::HashMap;
 use clap::ArgMatches;
 use std::io::{BufRead, BufReader, Read};
-use std::path::{Path, PathBuf};
-use std::fs::{File};
+use std::path::Path;
+use std::fs::File;
 use std::error::Error;
-use bigtools::BBIFile::BigWig;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
-use bigtools::BigWigWrite;
-use bigtools::bedchromdata::BedParserStreamingIterator;
-use bigtools::bed::bedparser::BedParser;
 
 
 pub mod cli;
@@ -198,15 +194,6 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
         // original code skips this if smoothsize is not set
         // Close bigwig file
 
-        // Using BigTools
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(6)
-            .build()
-            .expect("Unable to create runtime.");
-
-        // let vals_iter = BedParser::from_bed_file(combinedbedpath);
-        // let vals = BedParserStreamingIterator::new(vals_iter, false);
-
         // Iterate 3 times to output the three different files.
         for j in 0..3 {
             // Original code uses:
@@ -216,8 +203,6 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
             let mut failure_count = 0;
 
             println!("Processing each chromosome...");
-
-            let mut out = BigWigWrite::create_file(file_names[j].clone());
 
             if smoothsize!=0 {
                 match j {
@@ -237,45 +222,6 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
 
         }
-
-
-
-        // Using BigTools Bed Parsing as Alternative
-
-        //let path = Path::new(combinedbedpath);
-        // let path = PathBuf::from(combinedbedpath);
-        //
-        // let file = File::open(path).unwrap();
-        //
-        // // let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
-        // //
-        // // // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
-        // // let reader: Box<dyn Read> = match is_gzipped {
-        // //     true => Box::new(GzDecoder::new(file)),
-        // //     false => Box::new(file),
-        // // };
-        //
-        // //let reader = BufReader::new(file);
-        //
-        // let vals_iter = BedParser::from_bed_file(file);
-        //
-        // let vals = BedParserStreamingIterator::new(vals_iter, true);
-        //
-        // println!("DONE");
-        // let mut out = BigWigWrite::create_file(file_names[0].clone());
-        //
-        // out.options.block_size = 5;
-
-        // WHen opening bed file using the bed parser, the func returns Ok((chrom, BedEntry { start, end, rest })
-        // from the testing case, the bigtools crate opens from a bedgraph which returns Some(Ok((chrom, Value { start, end, value })))
-        // Value is required (not BedEntry) when writing to a BigWig file (it throws a compiler error).
-        // out.write(chrom_sizes, vals, runtime).unwrap();
-        // let mut chrom_map = HashMap::new();
-        // chrom_map.insert("chr17".to_string(), 83257441);
-
-        //out.write(chrom_map, vals, runtime).unwrap();
-
-
 
 
 
