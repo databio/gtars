@@ -138,7 +138,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let sorted: bool = true;
     let smoothsize: i32 = 5;
     let writesize: i32 = 1;
-    let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/peaks.bed";
+    let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
     let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
     let bwfileheader: &str = "/home/drc/Downloads/test";
 
@@ -171,7 +171,6 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
 
     if sorted {
-
         println!("Sorted is true");
 
         let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
@@ -181,46 +180,50 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
         let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
         let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
 
-        for chromosome in chromosomes.iter(){
+        println!("Processing each chromosome...");
+        for chromosome in chromosomes.iter() {
+
             let chrom_name = chromosome.chrom.clone();
+            println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
             chroms.push(chrom_name);
             chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
-        }
 
-        // Original Steps
-        // Create bigwig file
-        // Create header from chroms and chr lens
-        // write to bigwig file with smoothing IF smoothsize is set
-        // original code skips this if smoothsize is not set
-        // Close bigwig file
 
-        // Iterate 3 times to output the three different files.
-        for j in 0..3 {
-            // Original code uses:
-            // bwOpen, then bwCreateChromList, then bwWriteHdr
+            // Original Steps
+            // Create bigwig file
+            // Create header from chroms and chr lens
+            // write to bigwig file with smoothing IF smoothsize is set
+            // original code skips this if smoothsize is not set
+            // Close bigwig file
 
-            let mut success_count  = 0;
-            let mut failure_count = 0;
+            // Iterate 3 times to output the three different files.
+            for j in 0..3 {
+                // Original code uses:
+                // bwOpen, then bwCreateChromList, then bwWriteHdr
 
-            println!("Processing each chromosome...");
+                let mut success_count = 0;
+                let mut failure_count = 0;
 
-            if smoothsize!=0 {
-                match j {
-                    0 => {
-                        println!("Write Starts Here");
-                    },
-                    1 => {
-                        println!("Write Ends Here");
-                    },
-                    2 => {
-                        println!("Write Core Here");
-                    },
-                    _ => println!("Unexpected value: {}", j), // Handle unexpected values
+
+
+                if smoothsize != 0 {
+                    match j {
+                        0 => {
+                            println!("Write Starts Here");
+                            println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
+                            let result = count_coordinate_reads(&chromosome.starts);
+                            println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+                        },
+                        1 => {
+                            //println!("Write Ends Here");
+                        },
+                        2 => {
+                            //println!("Write Core Here");
+                        },
+                        _ => println!("Unexpected value: {}", j), // Handle unexpected values
+                    }
                 }
             }
-
-
-
         }
 
 
@@ -253,4 +256,52 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
     }
 
     Ok(chrom_sizes)
+}
+
+pub fn count_coordinate_reads(input_vector: &Vec<i32>) -> Vec<u8> {
+    // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
+    // else place a 0 at the position if no counts exist.
+
+    println!("DEBUG: Executing count_coordinate_reads");
+
+    let vin_iter = input_vector.iter();
+    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    let mut coordinate_position = 1;
+    let mut count = 0;
+
+    let mut coordinate_value = 0;
+    let mut prev_coordinate_value = 0;
+
+    for coord in vin_iter{
+
+        coordinate_value = *coord;
+
+        if coordinate_value == prev_coordinate_value
+        {
+            count +=1;
+            continue;
+
+        }
+        while prev_coordinate_value > coordinate_position {
+            // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
+            v_coord_counts.push(0);
+            coordinate_position +=1;
+        }
+
+        v_coord_counts.push(count);
+        prev_coordinate_value = coordinate_value;
+        count = 1;
+        coordinate_position +=1;
+    }
+
+    // Must finish out final value
+    while coordinate_value > coordinate_position{
+        v_coord_counts.push(0);
+        coordinate_position += 1;
+    }
+
+    v_coord_counts.push(count);
+
+    return v_coord_counts
 }
