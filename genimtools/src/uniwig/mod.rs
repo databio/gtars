@@ -73,14 +73,15 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
         if chrom.is_empty(){
             // Initial chromosome
-            chromosome.chrom = parsed_chr.clone();
-            chrom = parsed_chr.clone();
+            chromosome.chrom = String::from(parsed_chr.trim());
+            chrom = String::from(parsed_chr.trim());
             chromosome.starts.push(parsed_start);
             chromosome.ends.push(parsed_end);
+            continue;
         }
 
 
-        if parsed_chr != chrom{
+        if String::from(parsed_chr.trim()) != chrom{
 
             // If the parsed chrom is not the same as the current, sort, and then push to vector
             // then reset chromosome struct using the newest parsed_chr
@@ -89,7 +90,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
             chromosome_vec.push(chromosome.clone());
 
-            chromosome.chrom =parsed_chr;
+            chromosome.chrom =String::from(parsed_chr.trim());
+            chrom = String::from(parsed_chr.trim());
 
             chromosome.starts = vec![];
             chromosome.ends = vec![]
