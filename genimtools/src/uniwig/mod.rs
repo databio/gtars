@@ -141,14 +141,15 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
     let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
     let bwfileheader: &str = "/home/drc/Downloads/test";
+    let output_type: &str = "wig";
 
 
-    uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader)
+    uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader, output_type)
 
 
 }
 
-pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str){
+pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str, output_type: &str){
     // Main Function
 
     println!("Hello from Uniwig main");
@@ -157,9 +158,10 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
     let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
 
-    file_names[0] = format!("{}_{}", bwfileheader, "start.bw");
-    file_names[1] = format!("{}_{}", bwfileheader, "end.bw");
-    file_names[2] = format!("{}_{}", bwfileheader, "core.bw");
+    // TODO determine potential file types
+    file_names[0] = format!("{}_{}", bwfileheader, "start.wig");
+    file_names[1] = format!("{}_{}", bwfileheader, "end.wig");
+    file_names[2] = format!("{}_{}", bwfileheader, "core.wig");
 
     let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
         Ok(chrom_sizes) => chrom_sizes,
@@ -176,6 +178,9 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
         let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
 
         let num_chromosomes = chromosomes.len();
+
+        println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
+
         // Preallocate memory based on number of chromsomes from previous step
         let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
         let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
@@ -185,7 +190,7 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
             let chrom_name = chromosome.chrom.clone();
             println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-            chroms.push(chrom_name);
+            chroms.push(chrom_name.clone());
             chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
 
 
@@ -201,8 +206,8 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                 // Original code uses:
                 // bwOpen, then bwCreateChromList, then bwWriteHdr
 
-                let mut success_count = 0;
-                let mut failure_count = 0;
+                let mut _success_count = 0;
+                let mut _failure_count = 0;
 
 
 
@@ -210,9 +215,21 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                     match j {
                         0 => {
                             println!("Write Starts Here");
-                            println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
-                            let result = count_coordinate_reads(&chromosome.starts);
-                            println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+                            //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
+                            let count_result = count_coordinate_reads(&chromosome.starts);
+                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                            match output_type {
+                                "wig" => {
+
+                                    println!("Writing to wig file!");
+                                    write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
+
+
+                                },
+                                "csv" => {println!("Write to CSV. Not Implemented");},
+                                _ => {println!("Default to wig file.")},
+                            }
                         },
                         1 => {
                             //println!("Write Ends Here");
@@ -237,6 +254,16 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
     }
 
 
+
+}
+
+fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String, chromname: String) {
+
+
+    println!("{:?}", coordinates);
+    println!("{:?}", counts);
+    println!("{:?}", filename);
+    println!("{:?}", chromname);
 
 }
 
