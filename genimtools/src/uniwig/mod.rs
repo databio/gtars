@@ -1,8 +1,7 @@
-use std::collections::HashMap;
 use clap::ArgMatches;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::error::Error;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
@@ -161,9 +160,11 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
     let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
 
     // TODO determine potential file types
-    file_names[0] = format!("{}_{}", bwfileheader, "start.wig");
-    file_names[1] = format!("{}_{}", bwfileheader, "end.wig");
-    file_names[2] = format!("{}_{}", bwfileheader, "core.wig");
+    file_names[0] = format!("{}_{}.{}", bwfileheader, "start", output_type);
+    file_names[1] = format!("{}_{}.{}", bwfileheader, "end", output_type);
+    file_names[2] = format!("{}_{}.{}", bwfileheader, "core", output_type);
+
+
 
     let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
         Ok(chrom_sizes) => chrom_sizes,
@@ -234,7 +235,20 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                             }
                         },
                         1 => {
-                            //println!("Write Ends Here");
+                            println!("Write Ends Here");
+                            let count_result = count_coordinate_reads(&chromosome.ends);
+                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                            match output_type {
+                                "wig" => {
+
+                                    println!("Writing to wig file!");
+                                    write_to_wig_file(&chromosome.ends, &count_result, file_names[1].clone(), chrom_name.clone());
+
+                                },
+                                "csv" => {println!("Write to CSV. Not Implemented");},
+                                _ => {println!("Default to wig file.")},
+                            }
                         },
                         2 => {
                             //println!("Write Core Here");
@@ -261,11 +275,49 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
 fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String, chromname: String) {
 
+    // the coordinate vector is also the index of the counts BUT we must remove duplicates
+    // let dedup_coord_vec = coordinates
+    //     .into_iter()
+    //     .collect::<HashSet<_>>()
+    //     .into_iter()
+    //     .collect::<Vec<_>>();
+    //
+    // for coord in dedup_coord_vec.iter(){
+    //
+    //     let index = **coord as usize;
+    //     counts.iter().position()
+    //     println!("DEBUG {}", coord);
+    //     println!("DEBUG {}", counts[index]);
+    //
+    // }
+    let mut file = OpenOptions::new()
+        .create(true)  // Create the file if it doesn't exist
+        .append(true)  // Append data to the existing file if it does exist
+        .open(filename).unwrap();
 
-    println!("{:?}", coordinates);
-    println!("{:?}", counts);
-    println!("{:?}", filename);
-    println!("{:?}", chromname);
+    println!("DEBUG: variableStep chrom={}",chromname.clone());
+    let wig_header = "variableStep chrom=".to_string() + chromname.as_str();
+    file.write_all(wig_header.as_ref()).unwrap();
+    file.write_all(b"\n").unwrap();
+
+    let mut position = 0;
+
+    for count in counts.iter(){
+        //TODO THis is inefficient to iterate over ALL counts when the above coordinate vecs could act as an index
+        if *count == 0 {
+            position += 1;
+            continue
+        } else{
+
+            println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
+            let wig_line = position.to_string() + " " + count.to_string().as_str();
+            file.write_all(wig_line.as_ref()).unwrap();
+            file.write_all(b"\n").unwrap();
+            position+=1;
+        }
+
+    }
+
 
 }
 
