@@ -20,6 +20,11 @@ fn path_to_bed_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_sorted_small_bed_file() -> &'static str {
+    "tests/data/test_sorted_small.bed"
+}
+
+#[fixture]
 fn path_to_bed_file_gzipped() -> &'static str {
     "tests/data/peaks.bed.gz"
 }
@@ -31,7 +36,7 @@ fn path_to_tokenize_bed_file() -> &'static str {
 
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
-    use genimtools::uniwig::{read_bed_vec, run_uniwig, uniwig_main};
+    use genimtools::uniwig::{Chromosome, read_bed_vec, run_uniwig, uniwig_main};
 
     use super::*;
 
@@ -164,6 +169,16 @@ mod tests {
         read_bed_vec(path_to_bed_file_gzipped);
 
     }
+
+    #[rstest]
+    fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
+
+        let mut chromosomes: Vec<Chromosome>  = read_bed_vec(path_to_sorted_small_bed_file);
+        let num_chromosomes = chromosomes.len();
+
+        assert_eq!(num_chromosomes, 5);
+
+    }
     #[rstest]
     fn test_run_uniwig_main(path_to_bed_file: &str) {
 
@@ -173,8 +188,9 @@ mod tests {
         let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/peaks.bed";
         let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
         let bwfileheader: &str = "/home/drc/Downloads/test";
+        let output_type ="wig";
 
-        uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader)
+        uniwig_main(sorted, smoothsize, writesize, combinedbedpath, chromsizerefpath, bwfileheader, output_type)
 
     }
 
