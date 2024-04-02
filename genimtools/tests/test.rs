@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
-use genimtools::uniwig::{parse_bed_file, count_coordinate_reads};
+use genimtools::uniwig::{parse_bed_file, count_coordinate_reads, count_coordinate_reads_start_end};
 
 #[fixture]
 fn path_to_data() -> &'static str {
@@ -202,6 +202,19 @@ mod tests {
         // example output, counting number of reads at each position
         let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
         assert_eq!(res, answer);
+
+    }
+
+    #[rstest]
+    fn test_count_coordinate_reads_start_end() {
+        // example input, marking read alignment locations
+        let starts: Vec<i32> = vec![1,4,4,7,9,9];
+        let ends: Vec<i32> = vec![3,6,6,9,10,11];
+        let res = count_coordinate_reads_start_end(&starts, &ends);
+
+        // example output, counting number of reads at each position
+        // let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
+        // assert_eq!(res, answer);
 
     }
 }
