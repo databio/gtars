@@ -155,6 +155,8 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
     println!("Hello from Uniwig main");
 
+    let stepsize = 1;
+
     // Set up output file names
 
     let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
@@ -194,8 +196,9 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
             let chrom_name = chromosome.chrom.clone();
             println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
             chroms.push(chrom_name.clone());
-            chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
 
+            //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
+            let current_chrom_size =chrom_sizes[&chromosome.chrom] as i32;
 
             // Original Steps
             // Create bigwig file
@@ -221,6 +224,8 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                             //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
                             let count_result = count_coordinate_reads(&chromosome.starts);
                             //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                            let count_result2 = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
 
                             match output_type {
                                 "wig" => {
@@ -440,4 +445,20 @@ pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &
     v_coord_counts.push(count);
 
     return v_coord_counts
+}
+
+pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32){
+    // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
+    // It allows the user to accumulate reads of either starts or ends
+    // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
+    // the level of smoothing.
+    // counts are reported over a stepsize (with a defualt of stepsize = 1)
+    // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
+    // Like the original function is essentially reporting any values until it reaches the first start position
+    // It does place 0's after the last coordinate up until the reported chromosome length.
+
+
+
+
+
 }
