@@ -452,11 +452,31 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     // It allows the user to accumulate reads of either starts or ends
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
     // the level of smoothing.
-    // counts are reported over a stepsize (with a defualt of stepsize = 1)
+    // counts are reported over a stepsize (with a default of stepsize = 1)
     // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
     // Like the original function is essentially reporting any values until it reaches the first start position
     // It does place 0's after the last coordinate up until the reported chromosome length.
 
+
+
+    println!("BEGIN smooth_Fixed_Start_End_Wiggle");
+
+    let vin_iter = starts_vector.iter();
+
+    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    let mut coordinate_position = 1;
+
+    let mut count = 0;
+
+    let mut coordinate_value = 0;
+    let mut prev_coordinate_value = 0;
+
+
+    let adjusted_start_site =0;
+    let current_end_site = 0;
+
+    let collected_end_sites: Vec<u8> = Vec::new();
 
 
 
