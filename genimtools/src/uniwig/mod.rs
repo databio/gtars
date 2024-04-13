@@ -139,9 +139,12 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let sorted: bool = true;
     let smoothsize: i32 = 5;
     let writesize: i32 = 1;
-    let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
-    let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
-    let bwfileheader: &str = "/home/drc/Downloads/test";
+    //let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
+    let combinedbedpath: &str = "/Users/drcwork/GITHUB/uniwig/test/test5.bed";
+    //let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
+    let chromsizerefpath: String = "/Users/drcwork/GITHUB/uniwig/test/hg38.chrom.sizes".to_string();
+    //let bwfileheader: &str = "/home/drc/Downloads/test";
+    let bwfileheader: &str = "/Users/drcwork/Downloads/uniwig_test";
     let output_type: &str = "wig";
 
 
@@ -473,11 +476,69 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     let mut prev_coordinate_value = 0;
 
 
-    let adjusted_start_site =0;
-    let current_end_site = 0;
+    let mut adjusted_start_site =0;
+    let mut current_end_site = 0;
 
-    let collected_end_sites: Vec<u8> = Vec::new();
+    let mut collected_end_sites: Vec<u32> = Vec::new();
 
+    adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
+    adjusted_start_site = adjusted_start_site - smoothsize; // adjust based on smoothing
+
+    //Check endsite generation
+    //current_end_site = adjusted_start_site + 1 + smoothsize*2;
+
+    if (adjusted_start_site<1){
+        adjusted_start_site=1;
+    }
+
+    while(coordinate_position<adjusted_start_site){
+        // Just skip until we reach the initial adjusted start position
+        coordinate_position = coordinate_position + stepsize;
+    }
+
+    prev_coordinate_value = adjusted_start_site;
+
+    for coord in vin_iter {
+        coordinate_value = *coord;
+        adjusted_start_site = coordinate_value - smoothsize;
+        count += 1;
+
+        if (adjusted_start_site<1){
+            adjusted_start_site=1;
+        }
+
+        current_end_site = adjusted_start_site + 1 + smoothsize*2; //
+
+        collected_end_sites.push(current_end_site);
+
+        if adjusted_start_site == prev_coordinate_value
+        {
+            count +=1;
+            continue;
+
+        }
+
+        while (coordinate_position< adjusted_start_site){
+
+            while (current_end_site==coordinate_position){
+
+                count = count -1;
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0; // From original code. Double check this is the proper way.
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+            }
+
+
+
+
+
+        }
+
+
+    }
 
 
 
