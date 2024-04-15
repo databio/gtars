@@ -156,7 +156,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str, output_type: &str){
     // Main Function
 
-    println!("Hello from Uniwig main");
+    //println!("Hello from Uniwig main");
 
     let stepsize = 1;
 
@@ -204,7 +204,7 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
             }
 
             let chrom_name = chromosome.chrom.clone();
-            println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
+            //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
             chroms.push(chrom_name.clone());
 
             //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
@@ -308,27 +308,12 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
 
 fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String, chromname: String) {
 
-    // the coordinate vector is also the index of the counts BUT we must remove duplicates
-    // let dedup_coord_vec = coordinates
-    //     .into_iter()
-    //     .collect::<HashSet<_>>()
-    //     .into_iter()
-    //     .collect::<Vec<_>>();
-    //
-    // for coord in dedup_coord_vec.iter(){
-    //
-    //     let index = **coord as usize;
-    //     counts.iter().position()
-    //     println!("DEBUG {}", coord);
-    //     println!("DEBUG {}", counts[index]);
-    //
-    // }
     let mut file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
         .append(true)  // Append data to the existing file if it does exist
         .open(filename).unwrap();
 
-    println!("DEBUG: fixedStep chrom={}",chromname.clone());
+    //println!("DEBUG: fixedStep chrom={}",chromname.clone());
     let wig_header = "fixedStep chrom=".to_string() + chromname.as_str();
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
@@ -342,7 +327,7 @@ fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String,
             continue
         } else{
 
-            println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
+            //println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
             let wig_line = position.to_string() + " " + count.to_string().as_str();
             file.write_all(wig_line.as_ref()).unwrap();
             file.write_all(b"\n").unwrap();
@@ -378,7 +363,7 @@ pub fn count_coordinate_reads(input_vector: &Vec<i32>) -> Vec<u8> {
 
     // based on smoothFixedStarEndBW from orig uniwig but does not use a stepsize nor perform any smoothing
 
-    println!("DEBUG: Executing count_coordinate_reads");
+    //println!("DEBUG: Executing count_coordinate_reads");
 
     let vin_iter = input_vector.iter();
     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -431,7 +416,7 @@ pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &
 
     // TODO in progress
 
-    println!("DEBUG: Executing count_coordinate_reads");
+    //println!("DEBUG: Executing count_coordinate_reads");
 
     let vin_iter = starts_vector.iter();
     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -485,7 +470,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
 
 
-    println!("BEGIN smooth_Fixed_Start_End_Wiggle");
+    //println!("BEGIN smooth_Fixed_Start_End_Wiggle");
 
     let vin_iter = starts_vector.iter();
 
@@ -561,11 +546,11 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count);
                 v_coordinate_positions.push(coordinate_position);
-                println!("DEBUG: Reporting count: {} at position: {}",count, coordinate_position);
+                //println!("DEBUG: Reporting count: {} at position: {}",count, coordinate_position);
 
             }
 
-            println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+            //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
             coordinate_position = coordinate_position + 1;
 
 
@@ -577,7 +562,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
     // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
 
-    println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
+    //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     return (v_coord_counts, v_coordinate_positions)
 }
 
@@ -589,9 +574,9 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
     // Counts are reported over a stepsize (with a default of stepsize = 1)
     // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 
-    println!("BEGIN Fixed_Core_Wiggle");
+    //println!("BEGIN Fixed_Core_Wiggle");
 
-    println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
+    //println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
 
     // TODO STARTS AND ENDS MUST BE EQUAL
 
@@ -670,11 +655,11 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count);
                 v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-                println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
+                //println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
 
             }
 
-            println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+            //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
             coordinate_position = coordinate_position + 1;
 
 
@@ -686,6 +671,6 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
 
     // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
 
-    println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
+    //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     return (v_coord_counts, v_coordinate_positions)
 }
