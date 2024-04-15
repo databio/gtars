@@ -190,7 +190,7 @@ mod tests {
         let bwfileheader: &str = "/home/drc/Downloads/test";
         let output_type ="wig";
 
-        uniwig_main(sorted, smoothsize, writesize, combinedbedpath, chromsizerefpath, bwfileheader, output_type)
+        uniwig_main(sorted, smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
 
     }
 

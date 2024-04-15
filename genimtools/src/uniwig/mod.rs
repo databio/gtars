@@ -134,26 +134,53 @@ pub fn run_uniwig(matches: &ArgMatches) {
     println!("I am running. Here are the arguments: {:?}", matches);
 
 
-    // Placeholder Arguments
 
-    let sorted: bool = true;
-    let smoothsize: i32 = 5;
-    let writesize: i32 = 1;
-    let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
+    let combinedbedpath = matches
+        .get_one::<String>("bed")
+        .expect("combined bed path is required");
+
+    // let filelist = matches
+    //     .get_one::<String>("filelist")
+    //     .expect("File list path is required");
+
+    let chromsizerefpath = matches
+        .get_one::<String>("chromref")
+        .expect("chromref path path is required");
+
+    let bwfileheader = matches
+        .get_one::<String>("fileheader")
+        .expect("fileheader is required");
+
+    let sorted = matches
+        .get_one::<bool>("sorted")
+        .expect("is the combined bedfile sorted? this information is required");
+
+    let smoothsize = matches
+        .get_one::<i32>("smoothsize")
+        .expect("smoothsize required");
+
+    let output_type = matches
+        .get_one::<String>("outputtype")
+        .expect("output type is required");
+
+    //let sorted: bool = true;
+    //let smoothsize: i32 = 5;
+    //let writesize: i32 = 1;
+    //let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
     //let combinedbedpath: &str = "/Users/drcwork/GITHUB/uniwig/test/test5.bed";
-    let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
+    //let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
     //let chromsizerefpath: String = "/Users/drcwork/GITHUB/uniwig/test/hg38.chrom.sizes".to_string();
-    let bwfileheader: &str = "/home/drc/Downloads/test";
+    //let bwfileheader: &str = "/home/drc/Downloads/test";
     //let bwfileheader: &str = "/Users/drcwork/Downloads/uniwig_test";
-    let output_type: &str = "wig";
+    //let output_type: &str = "wig";
 
 
-    uniwig_main(sorted, smoothsize, writesize, combinedbedpath,chromsizerefpath,bwfileheader, output_type)
+    uniwig_main(*sorted, *smoothsize, combinedbedpath, chromsizerefpath, bwfileheader, output_type)
 
 
 }
 
-pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath: &str, _chromsizerefpath:String, bwfileheader: &str, output_type: &str){
+pub fn uniwig_main(sorted: bool, smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &String, bwfileheader: &str, output_type: &str){
     // Main Function
 
     //println!("Hello from Uniwig main");
