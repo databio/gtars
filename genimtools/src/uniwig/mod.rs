@@ -196,6 +196,13 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
         println!("Processing each chromosome...");
         for chromosome in chromosomes.iter() {
 
+            //TODO CHECK HERE TO DETERMINE IF THE CHROMOSOME STARTS AND ENDS ARE THE SAME LENGTH
+
+            if chromosome.starts.len() != chromosome.ends.len(){
+                println!("Chromosome starts and ends are not equal!");
+                break
+            }
+
             let chrom_name = chromosome.chrom.clone();
             println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
             chroms.push(chrom_name.clone());
@@ -259,7 +266,24 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                             }
                         },
                         2 => {
-                            //println!("Write Core Here");
+
+                                println!("Write Core Here");
+
+                                let core_results = Fixed_Core_Wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
+
+                                match output_type {
+                                    "wig" => {
+
+                                        println!("Writing to CORE RESULTS wig file!");
+                                        //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
+                                        write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone());
+
+
+                                    },
+                                    "csv" => {println!("Write to CSV. Not Implemented");},
+                                    _ => {println!("Default to wig file.")},
+                                }
+
                         },
                         _ => println!("Unexpected value: {}", j), // Handle unexpected values
                     }
@@ -457,8 +481,6 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     // the level of smoothing.
     // counts are reported over a stepsize (with a default of stepsize = 1)
     // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
-    // Like the original function is essentially reporting any values until it reaches the first start position
-    // It does place 0's after the last coordinate up until the reported chromosome length.
 
 
 
@@ -520,9 +542,9 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
         }
 
-        while (coordinate_position < adjusted_start_site){
+        while coordinate_position < adjusted_start_site{
 
-            while (current_end_site==coordinate_position){
+            while current_end_site==coordinate_position{
 
                 count = count - 1;
 
@@ -549,6 +571,115 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
         }
 
         prev_coordinate_value = adjusted_start_site;
+
+    }
+
+    // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
+
+    println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
+    return (v_coord_counts, v_coordinate_positions)
+}
+
+pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u8>, Vec<i32>) {
+    // This function is a more direct port of fixedCoreBW from uniwig written in CPP
+    // It allows the user to accumulate reads of across paired starts and ends.
+    // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
+    // the paired ends.
+    // Counts are reported over a stepsize (with a default of stepsize = 1)
+    // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
+
+    println!("BEGIN Fixed_Core_Wiggle");
+
+    println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
+
+    // TODO STARTS AND ENDS MUST BE EQUAL
+
+    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    let mut coordinate_position = 1;
+
+    let mut count = 0;
+
+    let mut coordinate_value = 0;
+    let mut prev_coordinate_value = 0;
+
+
+    let mut current_start_site =0;
+    let mut current_end_site = 0;
+
+    let mut collected_end_sites: Vec<i32> = Vec::new();
+
+    current_start_site = starts_vector[0].clone(); // get first coordinate position
+
+    //Check endsite generation
+    //current_end_site = adjusted_start_site + 1 + smoothsize*2;
+
+    if current_start_site < 1{
+        current_start_site = 1;
+    }
+
+    while coordinate_position < current_start_site{
+        // Just skip until we reach the initial adjusted start position
+        // Note that this function will not return 0s at locations before the initial start site
+        coordinate_position = coordinate_position + stepsize;
+    }
+
+    prev_coordinate_value = current_start_site;
+
+    for (coord, index) in starts_vector.iter().enumerate() {
+        coordinate_value = coord as i32;
+
+        current_start_site = coordinate_value;
+
+        count += 1;
+
+        if current_start_site < 1{
+            current_start_site = 1;
+        }
+
+        let current_index =  *index as usize;
+
+        current_end_site = ends_vector[current_index];
+
+        collected_end_sites.push(current_end_site);
+
+        if current_start_site == prev_coordinate_value
+        {
+            count +=1;
+            continue;
+
+        }
+
+        while coordinate_position < current_start_site{
+
+            while current_end_site==coordinate_position{
+
+                count = count - 1;
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0; // From original code. Double check this is the proper way.
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+
+            }
+
+            if coordinate_position % stepsize == 0{
+                // Step size defaults to 1, so report every value
+                v_coord_counts.push(count);
+                v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
+                println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
+
+            }
+
+            println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+            coordinate_position = coordinate_position + 1;
+
+
+        }
+
+        prev_coordinate_value = current_start_site;
 
     }
 
