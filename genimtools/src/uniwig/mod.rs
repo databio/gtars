@@ -108,6 +108,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     println!("Reading Bed file complete.");
 
+    //chromosome_vec.sort_by_key(|c| c.chrom.clone());
+
     return chromosome_vec
 
 }
