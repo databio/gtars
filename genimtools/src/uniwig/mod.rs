@@ -450,7 +450,7 @@ pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &
     return v_coord_counts
 }
 
-pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> Vec<u8> {
+pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u8>, Vec<i32>) {
     // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
     // It allows the user to accumulate reads of either starts or ends
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
@@ -466,6 +466,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
     let vin_iter = starts_vector.iter();
 
+    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     let mut coordinate_position = 1;
@@ -536,7 +537,8 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
             if coordinate_position%stepsize == 0{
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count);
-                println!("DEBUG: Reporting count: {}",count);
+                v_coordinate_positions.push(coordinate_position);
+                println!("DEBUG: Reporting count: {} at position: {}",count, coordinate_position);
 
             }
 
@@ -552,5 +554,6 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
     // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
 
-    return v_coord_counts
+    println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
+    return (v_coord_counts, v_coordinate_positions)
 }
