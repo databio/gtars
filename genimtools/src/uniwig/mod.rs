@@ -232,16 +232,16 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                         0 => {
                             println!("Write Starts Here");
                             //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
-                            let count_result = count_coordinate_reads(&chromosome.starts);
+                            //let count_result = count_coordinate_reads(&chromosome.starts);
                             //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
-                            let count_result2 = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
+                            let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
 
                             match output_type {
                                 "wig" => {
 
                                     println!("Writing to wig file!");
-                                    write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
+                                    write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone());
 
 
                                 },
@@ -251,14 +251,15 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, _writesize:i32, combinedbedpath
                         },
                         1 => {
                             println!("Write Ends Here");
-                            let count_result = count_coordinate_reads(&chromosome.ends);
+                            //let count_result = count_coordinate_reads(&chromosome.ends);
+                            let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
                             //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
                             match output_type {
                                 "wig" => {
 
                                     println!("Writing to wig file!");
-                                    write_to_wig_file(&chromosome.ends, &count_result, file_names[1].clone(), chrom_name.clone());
+                                    write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone());
 
                                 },
                                 "csv" => {println!("Write to CSV. Not Implemented");},
@@ -327,8 +328,8 @@ fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String,
         .append(true)  // Append data to the existing file if it does exist
         .open(filename).unwrap();
 
-    println!("DEBUG: variableStep chrom={}",chromname.clone());
-    let wig_header = "variableStep chrom=".to_string() + chromname.as_str();
+    println!("DEBUG: fixedStep chrom={}",chromname.clone());
+    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str();
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
 
