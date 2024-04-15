@@ -627,8 +627,8 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
 
     prev_coordinate_value = current_start_site;
 
-    for (coord, index) in starts_vector.iter().enumerate() {
-        coordinate_value = coord as i32;
+    for (index, coord) in starts_vector.iter().enumerate() {
+        coordinate_value = *coord;
 
         current_start_site = coordinate_value;
 
@@ -638,7 +638,7 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
             current_start_site = 1;
         }
 
-        let current_index =  *index as usize;
+        let current_index =  index;
 
         current_end_site = ends_vector[current_index];
 

@@ -185,7 +185,7 @@ mod tests {
         let sorted: bool = true;
         let smoothsize: i32 = 5;
         let writesize: i32 = 1;
-        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/peaks.bed";
+        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
         let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
         let bwfileheader: &str = "/home/drc/Downloads/test";
         let output_type ="wig";
