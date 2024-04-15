@@ -1,4 +1,4 @@
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
@@ -10,8 +10,53 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("sorted")
                 .long("sorted")
                 .short('s')
+                .action(ArgAction::SetTrue)
                 .help("Specify if the provided bed file is already sorted by the chromosome number.")
                 .required(false)
+        )
+        .arg(
+            Arg::new("bed")
+                .long("bed")
+                .short('b')
+                .help("Path to the combined bed file we want to tranforms")
+                .required(true),
+        )
+        .arg(
+            Arg::new("chromref")
+                .long("chromref")
+                .short('c')
+                .help("Path to chromreference")
+                .required(true),
+        )
+        .arg(
+            Arg::new("smoothsize")
+                .long("smoothsize")
+                .short('m')
+                .value_parser(clap::value_parser!(i32))
+                .help("Integer value for smoothing")
+                .required(true),
+        )
+        .arg(
+            Arg::new("stepsize")
+                .long("stepsize")
+                .short('t')
+                .value_parser(clap::value_parser!(i32))
+                .help("Integer value for stepsize")
+                .required(true),
+        )
+        .arg(
+            Arg::new("fileheader")
+                .long("fileheader")
+                .short('l')
+                .help("Name of the file")
+                .required(true),
+        )
+        .arg(
+            Arg::new("outputtype")
+                .long("outputtype")
+                .short('y')
+                .help("Output as wiggle or CSV")
+                .required(true),
         )
 
 }

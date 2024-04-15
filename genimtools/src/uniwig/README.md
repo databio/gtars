@@ -1,8 +1,9 @@
 # Current Manual testing
 
-Full command:
+Full command example:
 ```
-cargo run uniwig
+cargo run uniwig -s -b /home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed -c /home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes -m 5 -t 1 -l /home/drc/Downloads/test -y wig
+
 ```
 
 # Uniwig
