@@ -9,5 +9,6 @@ name = "genimtools"
 crate-type = ["cdylib"]
 
 [dependencies]
+anyhow = "1.0.82"
 genimtools = { path = "../genimtools" }
 pyo3 = "0.20.0"
