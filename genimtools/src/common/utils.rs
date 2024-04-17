@@ -1,9 +1,9 @@
 use std::collections::HashMap;
-use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
 
+use anyhow::{Context, Result};
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
 use polars::datatypes::DataType;
@@ -12,7 +12,7 @@ use polars::prelude::*;
 use crate::common::consts::{CHR_COL_NAME, DELIMITER, END_COL_NAME, START_COL_NAME};
 use crate::common::models::region::Region;
 
-pub fn bed_file_to_df(path: &Path) -> Result<DataFrame, Box<dyn std::error::Error>> {
+pub fn bed_file_to_df(path: &Path) -> Result<DataFrame> {
     let schema = Schema::from_iter(vec![
         Field::new(CHR_COL_NAME, DataType::Utf8),
         Field::new(START_COL_NAME, DataType::UInt32),
@@ -43,8 +43,8 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     region_to_id
 }
 
-pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn Error>> {
-    let file = File::open(path)?;
+pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
+    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
     let mut regions = Vec::new();
 
     // determine if the file is gzipped; default to extension is bed
@@ -58,12 +58,16 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
         let reader = BufReader::new(decoder);
 
         for line in reader.lines() {
-            let line = line?;
+            let line = line.with_context(|| "Failed parsing line in BED file")?;
             let fields: Vec<&str> = line.split('\t').collect();
 
             let chr = fields[0];
-            let start = fields[1].parse::<u32>()?;
-            let end = fields[2].parse::<u32>()?;
+            let start = fields[1].parse::<u32>().with_context(|| {
+                format!("Failed to parse start position in BED file line: {}", line)
+            })?;
+            let end = fields[2].parse::<u32>().with_context(|| {
+                format!("Failed to parse end position in BED file line: {}", line)
+            })?;
 
             let region = Region {
                 chr: chr.to_string(),
@@ -81,8 +85,12 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>, Box<dyn
             let fields: Vec<&str> = line.split('\t').collect();
 
             let chr = fields[0];
-            let start = fields[1].parse::<u32>()?;
-            let end = fields[2].parse::<u32>()?;
+            let start = fields[1].parse::<u32>().with_context(|| {
+                format!("Failed to parse start position in BED file line: {}", line)
+            })?;
+            let end = fields[2].parse::<u32>().with_context(|| {
+                format!("Failed to parse end position in BED file line: {}", line)
+            })?;
 
             let region = Region {
                 chr: chr.to_string(),
