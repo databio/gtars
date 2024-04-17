@@ -1,6 +1,7 @@
 use std::io;
 use std::io::Write;
 
+use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 
 use super::*;
@@ -31,9 +32,11 @@ pub mod handlers {
 
     use std::path::Path;
 
+    use anyhow::Context;
+
     use super::*;
 
-    pub fn tokenize_bed_file(matches: &ArgMatches) {
+    pub fn tokenize_bed_file(matches: &ArgMatches) -> Result<()> {
         let bed = matches
             .get_one::<String>("bed")
             .expect("Bed file path is required");
@@ -44,10 +47,11 @@ pub mod handlers {
 
         // core logic/algorithm here
         let universe = Path::new(&universe);
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = TreeTokenizer::try_from(universe)?;
 
         let bed = Path::new(&bed);
-        let regions = RegionSet::try_from(bed).expect("Failed to read bed file");
+        let regions = RegionSet::try_from(bed)
+            .with_context(|| "There was an error reading in the bedfile to be tokenized!")?;
 
         let mut stdout = io::stdout().lock();
 
@@ -65,5 +69,7 @@ pub mod handlers {
             // push to stdout
             stdout.write_all(line.as_bytes()).unwrap();
         }
+
+        Ok(())
     }
 }

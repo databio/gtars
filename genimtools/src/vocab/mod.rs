@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
@@ -25,13 +26,10 @@ pub mod consts {
 /// - `data_path` - Path to the training data. This should be a folder of bed files.
 /// - `universe_path` - Path to the universe file we want to prune.
 /// - `output_path` - Path to the output file (the pruned universe).
-pub fn create_count_map(
-    data_path: &str,
-    universe_path: &str,
-) -> Result<HashMap<Region, u32>, Box<dyn std::error::Error>> {
+pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<Region, u32>> {
     // set up the tokenizer
     let universe_path = Path::new(universe_path);
-    let tokenizer = TreeTokenizer::from(universe_path);
+    let tokenizer = TreeTokenizer::try_from(universe_path)?;
 
     // set up the counter
     let mut counter: HashMap<Region, u32> = HashMap::new();

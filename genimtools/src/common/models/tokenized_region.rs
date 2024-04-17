@@ -1,3 +1,4 @@
+#[derive(Eq, PartialEq, Clone)]
 pub struct TokenizedRegion {
     pub chr: String,
     pub start: u32,
