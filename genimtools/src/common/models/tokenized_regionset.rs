@@ -1,7 +1,8 @@
-use std::error::Error;
 use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
+
+use anyhow::Result;
 
 use crate::common::consts::special_tokens::{PAD_CHR, PAD_END, PAD_START};
 use crate::common::models::region::Region;
@@ -9,9 +10,23 @@ use crate::common::models::tokenized_region::TokenizedRegion;
 use crate::common::models::universe::Universe;
 use crate::io::write_tokens_to_gtok;
 
+use super::RegionSet;
+
 pub struct TokenizedRegionSet<'a> {
-    pub regions: Vec<Region>,
+    pub ids: Vec<u32>,
     pub universe: &'a Universe,
+}
+
+impl Into<RegionSet> for TokenizedRegionSet<'_> {
+    fn into(self) -> RegionSet {
+        let regions: Vec<Region> = self
+            .ids
+            .iter()
+            .map(|id| self.universe.regions[*id as usize])
+            .collect();
+
+        RegionSet::from(regions)
+    }
 }
 
 impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
@@ -56,7 +71,7 @@ impl<'a> TokenizedRegionSet<'a> {
     /// # Arguments
     /// * `path` - A PathBuf to write the BED file to
     ///
-    pub fn to_bed_file(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    pub fn to_bed_file(&self, path: &PathBuf) -> Result<()> {
         let mut file = File::create(path)?;
         for region in self.regions.iter() {
             let line = format!(
@@ -74,42 +89,18 @@ impl<'a> TokenizedRegionSet<'a> {
     /// Write a TokenizedRegionSet to a .gtok file
     /// * `path` - A PathBuf to write the .gtok file to
     ///
-    pub fn to_gtok_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
+    pub fn to_gtok_file(&self, path: &str) -> Result<()> {
         let tokens = self.to_region_ids();
         write_tokens_to_gtok(path, &tokens)?;
         Ok(())
     }
 
-    ///
-    /// Convert a TokenizedRegionSet to a vector of region IDs
-    ///
-    pub fn to_region_ids(&self) -> Vec<u32> {
-        let mut region_ids = Vec::new();
-        // TODO: is unwrapping here the smartest thing to do?
-        for region in &self.regions {
-            region_ids.push(
-                self.universe
-                    .convert_chr_start_end_to_id(&region.chr, region.start, region.end)
-                    .unwrap(),
-            );
-        }
-        region_ids
+    pub fn ids(&self) -> Vec<u32> {
+        self.ids
     }
 
-    ///
-    /// Pad a tokenized region set
-    ///
-    pub fn pad(&mut self, len: usize) {
-        // this is wrong: the padding token might not be in the universe
-        let pad_region = Region {
-            chr: PAD_CHR.to_string(),
-            start: PAD_START as u32,
-            end: PAD_END as u32,
-        };
-
-        while self.regions.len() < len {
-            self.regions.push(pad_region.clone());
-        }
+    pub fn into_region_set(self) -> RegionSet {
+        self.into()
     }
 }
 
@@ -119,10 +110,10 @@ impl<'a> TokenizedRegionSet<'a> {
     }
 
     pub fn len(&self) -> usize {
-        self.regions.len()
+        self.ids.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.regions.is_empty()
+        self.ids.is_empty()
     }
 }

@@ -8,7 +8,7 @@ use rust_lapper::{Interval, Lapper};
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
-use crate::tokenizers::traits::{SpecialTokens, Tokenizer};
+use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
     pub universe: Universe,
@@ -204,6 +204,28 @@ impl Tokenizer for TreeTokenizer {
             universe: &self.universe,
         }
     }
+
+    fn vocab_size(&self) -> usize {
+        self.universe.len()
+    }
+
+    fn convert_token_to_id(&self, token: &crate::common::models::TokenizedRegion) -> u32 {
+        self.universe
+            .convert_region_to_id(&Region::from(token))
+            .unwrap()
+    }
+
+    fn convert_id_to_token(&self, id: u32) -> crate::common::models::TokenizedRegion {
+        // TODO: this is a slow, naive approach, but I'll put it here anyways...
+        let regions: Vec<Region> = self
+            .universe
+            .region_to_id
+            .iter()
+            .filter_map(|(key, &val)| if val == id { Some(key.clone()) } else { None })
+            .collect();
+
+        regions.0
+    }
 }
 
 impl SpecialTokens for TreeTokenizer {
@@ -272,3 +294,6 @@ impl TreeTokenizer {
         Ok(self.tokenize_region_set(&rs))
     }
 }
+
+// use default implementation
+impl Pad for TreeTokenizer {}
