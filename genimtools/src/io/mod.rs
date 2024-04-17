@@ -64,7 +64,7 @@ pub fn write_tokens_to_gtok(filename: &str, tokens: &[u32]) -> Result<()> {
 ///
 /// # Returns
 /// - vector of tokens in u32 format
-pub fn read_tokens_from_gtok(filename: &str) -> std::io::Result<Vec<u32>> {
+pub fn read_tokens_from_gtok(filename: &str) -> Result<Vec<u32>> {
     let file = File::open(filename)?;
     let mut reader = BufReader::new(file);
 
@@ -73,10 +73,7 @@ pub fn read_tokens_from_gtok(filename: &str) -> std::io::Result<Vec<u32>> {
     reader.read_exact(&mut header)?;
 
     if &header != GTOK_HEADER {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "File doesn't appear to be a valid .gtok file.",
-        ));
+        anyhow::bail!("File doesn't appear to be a valid .gtok file.")
     }
 
     let mut size_flag = [0; 1];
@@ -98,10 +95,7 @@ pub fn read_tokens_from_gtok(filename: &str) -> std::io::Result<Vec<u32>> {
             }
         }
         _ => {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Invalid data format flag",
-            ))
+            anyhow::bail!("Invalid data format flag found in gtok file")
         }
     }
 
