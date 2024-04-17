@@ -1,12 +1,14 @@
-use pyo3::exceptions::PyRuntimeError;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
+
+use anyhow::Result;
 
 use std::collections::HashMap;
 use std::path::Path;
 
 use genimtools::common::consts::{
-    PAD_CHR, PAD_END, PAD_START, MASK_CHR, MASK_START, MASK_END, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START,
+    MASK_CHR, MASK_END, MASK_START, PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END,
+    UNKNOWN_START,
 };
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
@@ -21,7 +23,7 @@ pub struct PyTreeTokenizer {
 #[pymethods]
 impl PyTreeTokenizer {
     #[new]
-    pub fn new(path: String) -> anyhow::Result<Self> {
+    pub fn new(path: String) -> Result<Self> {
         let path = Path::new(&path);
         let tokenizer = TreeTokenizer::try_from(path)?;
 
@@ -29,7 +31,7 @@ impl PyTreeTokenizer {
     }
 
     #[getter]
-    pub fn unknown_token(&self) -> PyResult<PyTokenizedRegion> {
+    pub fn unknown_token(&self) -> Result<PyTokenizedRegion> {
         let region = PyRegion {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
@@ -41,11 +43,16 @@ impl PyTreeTokenizer {
             .universe
             .convert_region_to_id(&region.to_region());
 
-        Ok(PyTokenizedRegion { region, id })
+        match id {
+            Some(id) => Ok(PyTokenizedRegion { region, id }),
+            None => {
+                anyhow::bail!("Something went wrong -- could not find an id for the unknown token!")
+            }
+        }
     }
 
     #[getter]
-    pub fn padding_token(&self) -> PyResult<PyTokenizedRegion> {
+    pub fn padding_token(&self) -> Result<PyTokenizedRegion> {
         let region = PyRegion {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
@@ -64,11 +71,11 @@ impl PyTreeTokenizer {
     }
 
     #[getter]
-    pub fn mask_token(&self) -> PyResult<PyTokenizedRegion> {
+    pub fn mask_token(&self) -> Result<PyTokenizedRegion> {
         let region = PyRegion {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
-            end: MASK_END as u32
+            end: MASK_END as u32,
         };
 
         let id = self
@@ -79,11 +86,11 @@ impl PyTreeTokenizer {
             .unwrap()
             .to_owned();
 
-        Ok(PyTokenizedRegion { region, id})
+        Ok(PyTokenizedRegion { region, id })
     }
 
     #[getter]
-    pub fn universe(&self) -> PyResult<PyUniverse> {
+    pub fn universe(&self) -> Result<PyUniverse> {
         let regions = self
             .tokenizer
             .universe
@@ -110,9 +117,12 @@ impl PyTreeTokenizer {
         let region = Region {
             chr: region.chr.to_string(),
             start: region.start,
-            end: region.end
+            end: region.end,
         };
-        self.tokenizer.universe.convert_region_to_id(&region) as usize
+        self.tokenizer
+            .universe
+            .convert_region_to_id(&region)
+            .unwrap() as usize
     }
 
     pub fn tokens_to_id(&self, regions: &PyList) -> Vec<usize> {
@@ -127,10 +137,13 @@ impl PyTreeTokenizer {
 
                 let region = Region { chr, start, end };
 
-                self.tokenizer.universe.convert_region_to_id(&region) as usize
+                self.tokenizer
+                    .universe
+                    .convert_region_to_id(&region)
+                    .unwrap() as usize
             })
             .collect::<Vec<_>>();
-        
+
         ids
     }
 
@@ -153,7 +166,7 @@ impl PyTreeTokenizer {
     ///
     /// # Returns
     /// A PyTokenizedRegionSet that contains regions, and ids
-    pub fn tokenize(&self, regions: &PyList) -> PyResult<PyTokenizedRegionSet> {
+    pub fn tokenize(&self, regions: &PyList) -> Result<PyTokenizedRegionSet> {
         // attempt to map the list to a vector of regions
         let regions = regions
             .iter()
@@ -191,13 +204,11 @@ impl PyTreeTokenizer {
                 Ok(PyTokenizedRegionSet::new(regions, ids))
             }
             // return error if tokenized_regions is None
-            None => Err(pyo3::exceptions::PyValueError::new_err(
-                "Failed to tokenize regions",
-            )),
+            None => anyhow::bail!("Failed to tokenize regions",),
         }
     }
 
-    pub fn tokenize_bed_file(&self, path: String) -> PyResult<PyTokenizedRegionSet> {
+    pub fn tokenize_bed_file(&self, path: String) -> Result<PyTokenizedRegionSet> {
         let bed_file = Path::new(&path);
         let tokens = self.tokenizer.tokenize_bed_file(bed_file);
 
@@ -215,8 +226,8 @@ impl PyTreeTokenizer {
                 let ids = tokens.to_region_ids();
 
                 Ok(PyTokenizedRegionSet::new(regions, ids))
-            },
-            None => Err(PyErr::new::<PyRuntimeError, _>(format!("Error parsing the bedfile: {}", path)))
+            }
+            None => anyhow::bail!(format!("Error parsing the bedfile: {}", path)),
         }
     }
 }
