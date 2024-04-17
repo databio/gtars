@@ -25,23 +25,6 @@ pub trait Tokenizer {
     ///
     fn tokenize_region_set(&self, region_set: &RegionSet) -> Option<TokenizedRegionSet>;
 
-    /// Tokenize a bed set into the vocabulary of the tokenizer
-    ///
-    /// # Arguments
-    /// - `bed_set` - the bed set to be tokenized
-    ///
-    /// # Returns
-    /// A vector of vectors of regions that correspond to regions in the tokenizers vocab (or universe).
-    ///
-    // fn tokenize_bed_set(&self, bed_set: &BedSet) -> Option<Vec<TokenizedRegionSet>> {
-    //     let mut tokenized_region_sets = Vec::new();
-    //     for region_set in bed_set.into_iter() {
-    //         let tokenized_region_set = self.tokenize_region_set(&region_set)?;
-    //         tokenized_region_sets.push(tokenized_region_set);
-    //     }
-    //     Some(tokenized_region_sets)
-    // }
-
     fn unknown_token(&self) -> Region {
         Region {
             chr: UNKNOWN_CHR.to_string(),
