@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use crate::common::models::region::Region;
 use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
 
+#[derive(Clone, Eq, PartialEq)]
 pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
