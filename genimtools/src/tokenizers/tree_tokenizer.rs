@@ -12,7 +12,7 @@ use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
     pub universe: Universe,
-    pub tree: HashMap<String, Lapper<u32, ()>>,
+    pub tree: HashMap<String, Lapper<u32, u32>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
@@ -25,29 +25,6 @@ impl TryFrom<&Path> for TreeTokenizer {
     /// A new TreeTokenizer
     fn try_from(value: &Path) -> Result<Self> {
         let mut universe = Universe::try_from(value)?;
-
-        let mut tree: HashMap<String, Lapper<u32, ()>> = HashMap::new();
-        let mut intervals: HashMap<String, Vec<Interval<u32, ()>>> = HashMap::new();
-
-        for region in universe.regions.iter() {
-            // create interval
-            let interval = Interval {
-                start: region.start,
-                stop: region.end,
-                val: (),
-            };
-
-            // use chr to get the vector of intervals
-            let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
-
-            // push interval to vector
-            chr_intervals.push(interval);
-        }
-
-        for (chr, chr_intervals) in intervals.iter() {
-            let lapper: Lapper<u32, ()> = Lapper::new(chr_intervals.to_owned());
-            tree.insert(chr.to_string(), lapper);
-        }
 
         // add special tokens to the universe
         // unk
@@ -92,6 +69,29 @@ impl TryFrom<&Path> for TreeTokenizer {
             end: CLS_END as u32,
         });
 
+        let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+        let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+
+        for region in universe.regions.iter() {
+            // create interval
+            let interval = Interval {
+                start: region.start,
+                stop: region.end,
+                val: universe.convert_region_to_id(region).unwrap(),
+            };
+
+            // use chr to get the vector of intervals
+            let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
+
+            // push interval to vector
+            chr_intervals.push(interval);
+        }
+
+        for (chr, chr_intervals) in intervals.iter() {
+            let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
+            tree.insert(chr.to_string(), lapper);
+        }
+
         Ok(TreeTokenizer { universe, tree })
     }
 }
@@ -102,24 +102,11 @@ impl Tokenizer for TreeTokenizer {
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let ids: Vec<u32> = intervals
-                    .map(|interval| {
-                        self.universe
-                            .convert_region_to_id(&Region {
-                                chr: region.chr.to_owned(),
-                                start: interval.start,
-                                end: interval.stop,
-                            })
-                            .unwrap()
-                    })
-                    .collect();
+                let ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                 if ids.is_empty() {
-                    let ids = vec![self
-                        .universe
-                        .convert_region_to_id(&self.unknown_token())
-                        .unwrap()];
-                    TokenizedRegionSet {
+                    let ids = vec![self.unknown_token_id()];
+                    return TokenizedRegionSet {
                         ids,
                         universe: &self.universe,
                     };
@@ -131,10 +118,7 @@ impl Tokenizer for TreeTokenizer {
                 }
             }
             None => TokenizedRegionSet {
-                ids: vec![self
-                    .universe
-                    .convert_region_to_id(&self.unknown_token())
-                    .unwrap()],
+                ids: vec![self.unknown_token_id()],
                 universe: &self.universe,
             },
         }
@@ -145,7 +129,7 @@ impl Tokenizer for TreeTokenizer {
         let starts = region_set.starts();
         let ends = region_set.ends();
 
-        let mut tokenized_regions: Vec<Region> = Vec::new();
+        let mut tokenized_regions: Vec<u32> = Vec::new();
 
         for i in 0..region_set.len() {
             let chr: String;
@@ -184,58 +168,29 @@ impl Tokenizer for TreeTokenizer {
                 Some(tree) => {
                     let intervals = tree.find(start, end);
 
-                    let regions: Vec<Region> = intervals
-                        .map(|interval| Region {
-                            chr: chr.to_owned(),
-                            start: interval.start,
-                            end: interval.stop,
-                        })
-                        .collect();
+                    let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                     if regions.is_empty() {
-                        tokenized_regions.push(self.unknown_token());
+                        tokenized_regions.push(self.unknown_token_id());
                         continue;
                     }
 
                     tokenized_regions.extend(regions);
                 }
                 None => {
-                    tokenized_regions.push(self.unknown_token());
+                    tokenized_regions.push(self.unknown_token_id());
                 }
             }
         }
 
-        let ids = tokenized_regions
-            .iter()
-            .map(|r| self.universe.convert_region_to_id(r).unwrap())
-            .collect();
-
         TokenizedRegionSet {
-            ids,
+            ids: tokenized_regions,
             universe: &self.universe,
         }
     }
 
     fn vocab_size(&self) -> usize {
         self.universe.len()
-    }
-
-    fn convert_token_to_id(&self, token: &crate::common::models::TokenizedRegion) -> u32 {
-        self.universe
-            .convert_region_to_id(&Region::from(token))
-            .unwrap()
-    }
-
-    fn convert_id_to_token(&self, id: u32) -> crate::common::models::TokenizedRegion {
-        // TODO: this is a slow, naive approach, but I'll put it here anyways...
-        let regions: Vec<Region> = self
-            .universe
-            .region_to_id
-            .iter()
-            .filter_map(|(key, &val)| if val == id { Some(key.clone()) } else { None })
-            .collect();
-
-        regions[0]
     }
 }
 
@@ -294,6 +249,48 @@ impl SpecialTokens for TreeTokenizer {
             start: SEP_START as u32,
             end: SEP_END as u32,
         }
+    }
+
+    fn unknown_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.unknown_token())
+            .unwrap()
+    }
+
+    fn padding_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.padding_token())
+            .unwrap()
+    }
+
+    fn mask_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.mask_token())
+            .unwrap()
+    }
+
+    fn cls_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.cls_token())
+            .unwrap()
+    }
+
+    fn bos_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.bos_token())
+            .unwrap()
+    }
+
+    fn eos_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.eos_token())
+            .unwrap()
+    }
+
+    fn sep_token_id(&self) -> u32 {
+        self.universe
+            .convert_region_to_id(&self.sep_token())
+            .unwrap()
     }
 }
 

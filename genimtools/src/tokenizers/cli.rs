@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 
 use super::*;
-use crate::common::models::region_set::RegionSet;
+use crate::common::models::{Region, RegionSet};
 use crate::tokenizers::TreeTokenizer;
 
 pub fn make_tokenization_cli() -> Command {
@@ -58,11 +58,8 @@ pub mod handlers {
         let tokenized_regions = tokenizer.tokenize_region_set(&regions);
 
         for tokenized_region in tokenized_regions.into_iter() {
-            let chr = tokenized_region.chr;
-            let start = tokenized_region.start;
-            let end = tokenized_region.end;
-
-            let line = format!("{}\t{}\t{}\n", chr, start, end);
+            let region: Region = tokenized_region.into();
+            let line = format!("{}\t{}\t{}\n", region.chr, region.start, region.end);
 
             // push to stdout
             stdout.write_all(line.as_bytes()).unwrap();

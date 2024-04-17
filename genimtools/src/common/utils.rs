@@ -44,6 +44,20 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     region_to_id
 }
 
+pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
+    let mut current_id = 0;
+    let mut id_to_region: HashMap<u32, Region> = HashMap::new();
+
+    for region in regions.iter() {
+        id_to_region.entry(current_id).or_insert_with(|| {
+            current_id += 1;
+            region.clone()
+        });
+    }
+
+    id_to_region
+}
+
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
     let mut regions = Vec::new();
 

@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
 use crate::common::models::tokenized_regionset::TokenizedRegionSet;
-use crate::common::models::TokenizedRegion;
 use crate::tokenizers::special_tokens::SpecialToken;
 
 pub trait Tokenizer {
@@ -27,10 +26,6 @@ pub trait Tokenizer {
     ///
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet;
 
-    fn convert_token_to_id(&self, token: &TokenizedRegion) -> u32;
-
-    fn convert_id_to_token(&self, id: u32) -> TokenizedRegion;
-
     fn vocab_size(&self) -> usize;
 }
 
@@ -42,6 +37,13 @@ pub trait SpecialTokens: Tokenizer {
     fn bos_token(&self) -> Region;
     fn eos_token(&self) -> Region;
     fn sep_token(&self) -> Region;
+    fn unknown_token_id(&self) -> u32;
+    fn padding_token_id(&self) -> u32;
+    fn mask_token_id(&self) -> u32;
+    fn cls_token_id(&self) -> u32;
+    fn bos_token_id(&self) -> u32;
+    fn eos_token_id(&self) -> u32;
+    fn sep_token_id(&self) -> u32;
     fn special_tokens_map(&self) -> HashMap<SpecialToken, Region> {
         let mut map: HashMap<SpecialToken, Region> = HashMap::new();
 
@@ -63,7 +65,7 @@ pub trait AtttentionMask: SpecialTokens {
         let pad_token = self.padding_token();
 
         for token in tokens {
-            if Region::from(token) == pad_token {
+            if token.into_region() == pad_token {
                 mask.push(1)
             } else {
                 mask.push(0)
@@ -76,12 +78,12 @@ pub trait AtttentionMask: SpecialTokens {
 
 pub trait Pad: SpecialTokens {
     fn pad(&self, tokens_list: &mut Vec<TokenizedRegionSet>) {
-        let pad_token = self.padding_token();
+        let pad_token = self.padding_token_id();
         let longest = tokens_list.iter().map(|t| t.len()).max().unwrap();
 
         for token in tokens_list.iter_mut() {
             while token.len() < longest {
-                token.regions.push(pad_token.clone());
+                token.ids.push(pad_token);
             }
         }
     }
