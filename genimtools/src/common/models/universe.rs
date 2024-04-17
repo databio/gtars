@@ -4,18 +4,22 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::common::models::region::Region;
-use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
+use crate::common::utils::{
+    extract_regions_from_bed_file, generate_id_to_region_map, generate_region_to_id_map,
+};
 
 #[derive(Clone, Eq, PartialEq)]
 pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
+    pub id_to_region: HashMap<u32, Region>,
 }
 
 impl Universe {
     pub fn insert_token(&mut self, region: &Region) {
         let new_id = self.region_to_id.len() + 1;
         self.region_to_id.insert(region.to_owned(), new_id as u32);
+        self.id_to_region.insert(new_id as u32, region.to_owned());
     }
 
     pub fn convert_region_to_id(&self, region: &Region) -> Option<u32> {
@@ -30,6 +34,10 @@ impl Universe {
             end,
         };
         self.convert_region_to_id(&region)
+    }
+
+    pub fn convert_id_to_region(&self, id: u32) -> Option<Region> {
+        self.id_to_region.get(&id).cloned()
     }
 
     pub fn len(&self) -> usize {
@@ -48,10 +56,12 @@ impl From<Vec<Region>> for Universe {
 
         // create the region to id map and add the Unk token if it doesn't exist
         let region_to_id = generate_region_to_id_map(&regions);
+        let id_to_region = generate_id_to_region_map(&regions);
 
         Universe {
             regions,
             region_to_id,
+            id_to_region,
         }
     }
 }
@@ -64,10 +74,12 @@ impl TryFrom<&Path> for Universe {
             .with_context(|| "There was an error reading the universe file!")?;
 
         let region_to_id = generate_region_to_id_map(&regions);
+        let id_to_region = generate_id_to_region_map(&regions);
 
         Ok(Universe {
             regions,
             region_to_id,
+            id_to_region,
         })
     }
 }

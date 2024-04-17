@@ -1,3 +1,5 @@
+use std::fs::File;
+use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -14,23 +16,23 @@ pub struct TokenizedRegionSet<'a> {
     pub universe: &'a Universe,
 }
 
-impl Into<RegionSet> for TokenizedRegionSet<'_> {
-    fn into(self) -> RegionSet {
-        let regions: Vec<Region> = self
+impl From<TokenizedRegionSet<'_>> for RegionSet {
+    fn from(val: TokenizedRegionSet<'_>) -> Self {
+        let regions: Vec<Region> = val
             .ids
             .iter()
-            .map(|id| self.universe.regions[*id as usize])
+            .map(|id| val.universe.regions[*id as usize].clone())
             .collect();
 
         RegionSet::from(regions)
     }
 }
 
-impl Into<Vec<u8>> for TokenizedRegionSet<'_> {
-    fn into(self) -> Vec<u8> {
-        let mut bit_vector: Vec<u8> = Vec::with_capacity(self.universe.len());
+impl From<TokenizedRegionSet<'_>> for Vec<u8> {
+    fn from(val: TokenizedRegionSet<'_>) -> Self {
+        let mut bit_vector: Vec<u8> = Vec::with_capacity(val.universe.len());
 
-        for id in self.ids {
+        for id in val.ids {
             bit_vector[id as usize] = 1;
         }
 
@@ -46,7 +48,7 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
         let mut tokenized_regions = Vec::with_capacity(self.ids.len());
         for id in self.ids.iter() {
             let tokenized_region: TokenizedRegion = TokenizedRegion {
-                universe: &self.universe,
+                universe: self.universe,
                 id: *id,
             };
 
@@ -76,7 +78,14 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `path` - A PathBuf to write the BED file to
     ///
     pub fn to_bed_file(&self, path: &PathBuf) -> Result<()> {
-        self.into_region_set().to_bed(path)
+        let mut file = File::create(path)?;
+        for id in self.ids.iter() {
+            let r = self.universe.id_to_region.get(id).unwrap();
+            let line = format!("{}\t{}\t{}\n", r.chr, r.start, r.end);
+            file.write_all(line.as_bytes())?;
+        }
+
+        Ok(())
     }
 
     ///
@@ -84,13 +93,13 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `path` - A PathBuf to write the .gtok file to
     ///
     pub fn to_gtok_file(&self, path: &str) -> Result<()> {
-        let tokens = self.ids;
-        write_tokens_to_gtok(path, &tokens)?;
+        let tokens = &self.ids;
+        write_tokens_to_gtok(path, tokens)?;
         Ok(())
     }
 
     pub fn ids(&self) -> Vec<u32> {
-        self.ids
+        self.ids.clone()
     }
 
     pub fn into_region_set(self) -> RegionSet {

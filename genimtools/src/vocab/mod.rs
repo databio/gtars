@@ -72,11 +72,7 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
 
         // count the tokens
         tokens.into_iter().for_each(|region| {
-            let region = Region {
-                chr: region.chr,
-                start: region.start,
-                end: region.end,
-            };
+            let region: Region = region.into();
 
             let cnt = counter.entry(region).or_insert_with(|| 0);
             *cnt += 1;
