@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::{Context, Result};
+
 use crate::common::consts::{
     MASK_CHR, MASK_END, MASK_START, PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END,
     UNKNOWN_START,
@@ -76,7 +78,7 @@ impl Universe {
 impl From<Vec<Region>> for Universe {
     fn from(value: Vec<Region>) -> Self {
         // make a copy of the regions
-        let mut regions = value.clone();
+        let mut regions = value;
 
         // create the region to id map and add the Unk token if it doesn't exist
         let mut region_to_id = generate_region_to_id_map(&regions);
@@ -147,17 +149,12 @@ impl From<Vec<Region>> for Universe {
     }
 }
 
-impl From<&Path> for Universe {
-    fn from(value: &Path) -> Self {
-        let regions = extract_regions_from_bed_file(value);
+impl TryFrom<&Path> for Universe {
+    type Error = anyhow::Error;
 
-        let mut regions = match regions {
-            Ok(r) => r,
-            // should probably change this to something else,
-            // but couldn't figure out how to return a `Result`
-            // from a trait implementation
-            Err(e) => panic!("{e}"),
-        };
+    fn try_from(value: &Path) -> Result<Self> {
+        let mut regions = extract_regions_from_bed_file(value)
+            .with_context(|| "There was an error reading the universe file!")?;
 
         let mut region_to_id = generate_region_to_id_map(&regions);
         let total_regions = region_to_id.len();
@@ -219,10 +216,10 @@ impl From<&Path> for Universe {
         region_to_id.entry(mask).or_insert(total_regions as u32);
         let total_regions = region_to_id.len();
 
-        Universe {
+        Ok(Universe {
             regions,
             region_to_id,
             length: total_regions as u32,
-        }
+        })
     }
 }

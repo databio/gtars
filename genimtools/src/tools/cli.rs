@@ -80,7 +80,7 @@ pub mod handlers {
         let universe = Path::new(&universe);
 
         // create the tokenizer
-        let tokenizer = crate::tokenizers::TreeTokenizer::from(universe);
+        let tokenizer = crate::tokenizers::TreeTokenizer::try_from(universe)?;
 
         pre_tokenize_data(path_to_data, outdir, &tokenizer)?;
 

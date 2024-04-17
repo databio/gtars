@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anyhow::Result;
 use polars::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
@@ -14,15 +15,16 @@ pub struct TreeTokenizer {
     pub tree: HashMap<String, Lapper<u32, ()>>,
 }
 
-impl From<&Path> for TreeTokenizer {
+impl TryFrom<&Path> for TreeTokenizer {
+    type Error = anyhow::Error;
     ///
     /// # Arguments
     /// - `value` - the path to the bed file
     ///
     /// # Returns
     /// A new TreeTokenizer
-    fn from(value: &Path) -> Self {
-        let universe = Universe::from(value);
+    fn try_from(value: &Path) -> Result<Self> {
+        let universe = Universe::try_from(value)?;
 
         let mut tree: HashMap<String, Lapper<u32, ()>> = HashMap::new();
         let mut intervals: HashMap<String, Vec<Interval<u32, ()>>> = HashMap::new();
@@ -47,7 +49,7 @@ impl From<&Path> for TreeTokenizer {
             tree.insert(chr.to_string(), lapper);
         }
 
-        TreeTokenizer { universe, tree }
+        Ok(TreeTokenizer { universe, tree })
     }
 }
 

@@ -21,11 +21,11 @@ pub struct PyTreeTokenizer {
 #[pymethods]
 impl PyTreeTokenizer {
     #[new]
-    pub fn new(path: String) -> Self {
+    pub fn new(path: String) -> anyhow::Result<Self> {
         let path = Path::new(&path);
-        let tokenizer = TreeTokenizer::from(path);
+        let tokenizer = TreeTokenizer::try_from(path)?;
 
-        PyTreeTokenizer { tokenizer }
+        Ok(PyTreeTokenizer { tokenizer })
     }
 
     #[getter]

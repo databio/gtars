@@ -1,6 +1,5 @@
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
-// use crate::common::models::bed_set::BedSet;
 use crate::common::consts::{
     MASK_CHR, MASK_END, MASK_START, PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END,
     UNKNOWN_START,

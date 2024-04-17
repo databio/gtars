@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
 use std::io::prelude::*;
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};

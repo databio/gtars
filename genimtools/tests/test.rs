@@ -91,14 +91,14 @@ mod tests {
 
     #[rstest]
     fn test_create_tokenizer(path_to_bed_file: &str) {
-        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
         println!("{}", tokenizer.universe.len());
         assert!(tokenizer.universe.len() == 27); // 25 regions + 2 special tokens
     }
 
     #[rstest]
     fn test_tokenize_bed_file(path_to_bed_file: &str, path_to_tokenize_bed_file: &str) {
-        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
         let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
         let tokenized_regions = tokenizer.tokenize_region_set(&rs).unwrap();
 
@@ -112,7 +112,7 @@ mod tests {
 
     #[rstest]
     fn test_pretokenization_folder(path_to_data: &str, path_to_bed_file: &str) {
-        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
         let path_to_data = Path::new(path_to_data);
         let outdir = "tests/data/out";
 
@@ -122,7 +122,7 @@ mod tests {
 
     #[rstest]
     fn test_pretokenization_file(path_to_tokenize_bed_file: &str, path_to_bed_file: &str) {
-        let tokenizer = TreeTokenizer::from(Path::new(path_to_bed_file));
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
         let path_to_data = Path::new(path_to_tokenize_bed_file);
         let outdir = "tests/data/out";
 
