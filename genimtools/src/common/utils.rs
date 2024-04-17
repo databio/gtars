@@ -1,10 +1,11 @@
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::io::prelude::*;
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use clap::builder::OsStr;
 use flate2::read::GzDecoder;
 use polars::datatypes::DataType;
 use polars::prelude::*;
@@ -44,62 +45,37 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
 }
 
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
-    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
     let mut regions = Vec::new();
 
-    // determine if the file is gzipped; default to extension is bed
-    // because we dont truly care what the extension is
-    // we just want to know if it is gzipped or not, and we dont want to
-    // fail if the extension is not present (e.g. a user passes in a file without an extension)
-    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
+    let is_gzipped = path.extension() == Some(OsStr::new("gz"));
+    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
 
-    if is_gzipped {
-        let decoder = GzDecoder::new(file);
-        let reader = BufReader::new(decoder);
+    let file: Box<dyn Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(file)),
+        false => Box::new(file),
+    };
 
-        for line in reader.lines() {
-            let line = line.with_context(|| "Failed parsing line in BED file")?;
-            let fields: Vec<&str> = line.split('\t').collect();
+    let reader = BufReader::new(file);
 
-            let chr = fields[0];
-            let start = fields[1].parse::<u32>().with_context(|| {
-                format!("Failed to parse start position in BED file line: {}", line)
-            })?;
-            let end = fields[2].parse::<u32>().with_context(|| {
-                format!("Failed to parse end position in BED file line: {}", line)
-            })?;
+    for line in reader.lines() {
+        let line = line.with_context(|| "Failed parsing line in BED file")?;
+        let fields: Vec<&str> = line.split('\t').collect();
 
-            let region = Region {
-                chr: chr.to_string(),
-                start,
-                end,
-            };
+        let chr = fields[0];
+        let start = fields[1].parse::<u32>().with_context(|| {
+            format!("Failed to parse start position in BED file line: {}", line)
+        })?;
+        let end = fields[2]
+            .parse::<u32>()
+            .with_context(|| format!("Failed to parse end position in BED file line: {}", line))?;
 
-            regions.push(region);
-        }
-    } else {
-        let reader = BufReader::new(file);
+        let region = Region {
+            chr: chr.to_string(),
+            start,
+            end,
+        };
 
-        for line in reader.lines() {
-            let line = line?;
-            let fields: Vec<&str> = line.split('\t').collect();
-
-            let chr = fields[0];
-            let start = fields[1].parse::<u32>().with_context(|| {
-                format!("Failed to parse start position in BED file line: {}", line)
-            })?;
-            let end = fields[2].parse::<u32>().with_context(|| {
-                format!("Failed to parse end position in BED file line: {}", line)
-            })?;
-
-            let region = Region {
-                chr: chr.to_string(),
-                start,
-                end,
-            };
-
-            regions.push(region);
-        }
+        regions.push(region);
     }
 
     Ok(regions)
