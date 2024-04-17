@@ -21,7 +21,9 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
     fn into_iter(self) -> Self::IntoIter {
         let mut tokenized_regions = Vec::with_capacity(self.regions.len());
         for region in self.regions.iter() {
-            let id = self.universe.convert_region_to_id(region);
+
+            // TODO: is unwrapping here the smartest thing in the world?
+            let id = self.universe.convert_region_to_id(region).unwrap();
 
             let tokenized_region: TokenizedRegion = TokenizedRegion {
                 chr: region.chr.to_owned(),
@@ -84,12 +86,13 @@ impl<'a> TokenizedRegionSet<'a> {
     ///
     pub fn to_region_ids(&self) -> Vec<u32> {
         let mut region_ids = Vec::new();
+        // TODO: is unwrapping here the smartest thing to do?
         for region in &self.regions {
             region_ids.push(self.universe.convert_chr_start_end_to_id(
                 &region.chr,
                 region.start,
                 region.end,
-            ));
+            ).unwrap());
         }
         region_ids
     }

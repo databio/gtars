@@ -1,6 +1,5 @@
 use pyo3::prelude::*;
 
-
 #[pyfunction]
 pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
     genimtools::io::write_tokens_to_gtok(filename, &tokens)?;

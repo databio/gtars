@@ -17,23 +17,12 @@ pub struct Universe {
 }
 
 impl Universe {
-    pub fn convert_region_to_id(&self, region: &Region) -> u32 {
+    pub fn convert_region_to_id(&self, region: &Region) -> Option<u32> {
         let id = self.region_to_id.get(region);
-        match id {
-            Some(id) => id.to_owned(),
-            None => self
-                .region_to_id
-                .get(&Region {
-                    chr: UNKNOWN_CHR.to_string(),
-                    start: UNKNOWN_START as u32,
-                    end: UNKNOWN_END as u32,
-                })
-                .unwrap()
-                .to_owned(),
-        }
+        id.map(|id| id.to_owned())
     }
 
-    pub fn convert_chr_start_end_to_id(&self, chr: &str, start: u32, end: u32) -> u32 {
+    pub fn convert_chr_start_end_to_id(&self, chr: &str, start: u32, end: u32) -> Option<u32> {
         let region = Region {
             chr: chr.to_string(),
             start,
