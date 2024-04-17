@@ -1,7 +1,7 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
 
-use genimtools::common::consts::{PAD_CHR, PAD_END, PAD_START};
+use genimtools::common::consts::special_tokens::*;
 
 use crate::models::{PyRegion, PyTokenizedRegion};
 

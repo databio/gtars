@@ -162,14 +162,7 @@ fn pre_tokenize_file(
 
     let tokens = tokenizer.tokenize_region_set(&regions);
 
-    match tokens {
-        Some(tokens) => {
-            write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
-        }
-        None => {
-            println!("Failed to tokenize file: {}", path_to_bedfile.display());
-        }
-    }
+    write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
 
     Ok(())
 }

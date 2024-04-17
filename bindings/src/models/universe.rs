@@ -10,7 +10,6 @@ use crate::models::PyRegion;
 pub struct PyUniverse {
     pub regions: Vec<PyRegion>,
     pub region_to_id: HashMap<PyRegion, u32>,
-    pub length: u32,
 }
 
 #[pymethods]
@@ -35,6 +34,6 @@ impl PyUniverse {
         }
     }
     pub fn __len__(&self) -> usize {
-        self.length as usize
+        self.regions.len()
     }
 }

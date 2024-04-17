@@ -55,9 +55,7 @@ pub mod handlers {
 
         let mut stdout = io::stdout().lock();
 
-        let tokenized_regions = tokenizer
-            .tokenize_region_set(&regions)
-            .expect("Could not tokenize region set.");
+        let tokenized_regions = tokenizer.tokenize_region_set(&regions);
 
         for tokenized_region in tokenized_regions.into_iter() {
             let chr = tokenized_region.chr;

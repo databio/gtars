@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 
-use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::consts::special_tokens::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::{Region, RegionSet};
 use crate::tokenizers::{Tokenizer, TreeTokenizer};
 
@@ -68,7 +68,7 @@ pub fn create_count_map(data_path: &str, universe_path: &str) -> Result<HashMap<
             continue;
         }
 
-        let tokens = tokenizer.tokenize_region_set(&region_set).unwrap();
+        let tokens = tokenizer.tokenize_region_set(&region_set);
 
         // count the tokens
         tokens.into_iter().for_each(|region| {

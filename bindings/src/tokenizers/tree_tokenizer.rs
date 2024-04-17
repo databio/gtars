@@ -6,10 +6,7 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::Path;
 
-use genimtools::common::consts::{
-    MASK_CHR, MASK_END, MASK_START, PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END,
-    UNKNOWN_START,
-};
+use genimtools::common::consts::special_tokens::*;
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
@@ -105,11 +102,10 @@ impl PyTreeTokenizer {
             .iter()
             .map(|(k, v)| (PyRegion::new(k.chr.clone(), k.start, k.end), v.to_owned()))
             .collect::<HashMap<_, _>>();
-        let length = self.tokenizer.universe.len();
+
         Ok(PyUniverse {
             regions,
             region_to_id,
-            length,
         })
     }
 
@@ -148,7 +144,7 @@ impl PyTreeTokenizer {
     }
 
     pub fn __len__(&self) -> usize {
-        self.tokenizer.universe.len() as usize
+        self.tokenizer.universe.len()
     }
 
     pub fn __repr__(&self) -> String {
@@ -188,46 +184,35 @@ impl PyTreeTokenizer {
         let tokenized_regions = self.tokenizer.tokenize_region_set(&rs);
 
         // create pytokenizedregionset
-        match tokenized_regions {
-            Some(tokenized_regions) => {
-                let regions = tokenized_regions
-                    .into_iter()
-                    .map(|x| PyRegion {
-                        chr: x.chr,
-                        start: x.start,
-                        end: x.end,
-                    })
-                    .collect::<Vec<_>>();
+        let regions = tokenized_regions
+            .into_iter()
+            .map(|x| PyRegion {
+                chr: x.chr,
+                start: x.start,
+                end: x.end,
+            })
+            .collect::<Vec<_>>();
 
-                let ids = tokenized_regions.to_region_ids();
+        let ids = tokenized_regions.to_region_ids();
 
-                Ok(PyTokenizedRegionSet::new(regions, ids))
-            }
-            // return error if tokenized_regions is None
-            None => anyhow::bail!("Failed to tokenize regions",),
-        }
+        Ok(PyTokenizedRegionSet::new(regions, ids))
     }
 
     pub fn tokenize_bed_file(&self, path: String) -> Result<PyTokenizedRegionSet> {
         let bed_file = Path::new(&path);
-        let tokens = self.tokenizer.tokenize_bed_file(bed_file);
+        let tokens = self.tokenizer.tokenize_bed_file(bed_file)?;
 
-        match tokens {
-            Some(tokens) => {
-                let regions = tokens
-                    .into_iter()
-                    .map(|x| PyRegion {
-                        chr: x.chr,
-                        start: x.start,
-                        end: x.end,
-                    })
-                    .collect::<Vec<_>>();
+        let regions = tokens
+            .into_iter()
+            .map(|x| PyRegion {
+                chr: x.chr,
+                start: x.start,
+                end: x.end,
+            })
+            .collect::<Vec<_>>();
 
-                let ids = tokens.to_region_ids();
+        let ids = tokens.to_region_ids();
 
-                Ok(PyTokenizedRegionSet::new(regions, ids))
-            }
-            None => anyhow::bail!(format!("Error parsing the bedfile: {}", path)),
-        }
+        Ok(PyTokenizedRegionSet::new(regions, ids))
     }
 }

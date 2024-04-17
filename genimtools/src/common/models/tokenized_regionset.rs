@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use crate::common::consts::{PAD_CHR, PAD_END, PAD_START};
+use crate::common::consts::special_tokens::{PAD_CHR, PAD_END, PAD_START};
 use crate::common::models::region::Region;
 use crate::common::models::tokenized_region::TokenizedRegion;
 use crate::common::models::universe::Universe;
@@ -21,7 +21,6 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
     fn into_iter(self) -> Self::IntoIter {
         let mut tokenized_regions = Vec::with_capacity(self.regions.len());
         for region in self.regions.iter() {
-
             // TODO: is unwrapping here the smartest thing in the world?
             let id = self.universe.convert_region_to_id(region).unwrap();
 
@@ -88,11 +87,11 @@ impl<'a> TokenizedRegionSet<'a> {
         let mut region_ids = Vec::new();
         // TODO: is unwrapping here the smartest thing to do?
         for region in &self.regions {
-            region_ids.push(self.universe.convert_chr_start_end_to_id(
-                &region.chr,
-                region.start,
-                region.end,
-            ).unwrap());
+            region_ids.push(
+                self.universe
+                    .convert_chr_start_end_to_id(&region.chr, region.start, region.end)
+                    .unwrap(),
+            );
         }
         region_ids
     }

@@ -5,10 +5,10 @@ use anyhow::Result;
 use polars::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
-use crate::common::consts::{UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
+use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
-use crate::tokenizers::traits::Tokenizer;
+use crate::tokenizers::traits::{SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
     pub universe: Universe,
@@ -24,7 +24,7 @@ impl TryFrom<&Path> for TreeTokenizer {
     /// # Returns
     /// A new TreeTokenizer
     fn try_from(value: &Path) -> Result<Self> {
-        let universe = Universe::try_from(value)?;
+        let mut universe = Universe::try_from(value)?;
 
         let mut tree: HashMap<String, Lapper<u32, ()>> = HashMap::new();
         let mut intervals: HashMap<String, Vec<Interval<u32, ()>>> = HashMap::new();
@@ -48,6 +48,49 @@ impl TryFrom<&Path> for TreeTokenizer {
             let lapper: Lapper<u32, ()> = Lapper::new(chr_intervals.to_owned());
             tree.insert(chr.to_string(), lapper);
         }
+
+        // add special tokens to the universe
+        // unk
+        universe.insert_token(&Region {
+            chr: UNKNOWN_CHR.to_string(),
+            start: UNKNOWN_START as u32,
+            end: UNKNOWN_END as u32,
+        });
+
+        // pad
+        universe.insert_token(&Region {
+            chr: PAD_CHR.to_string(),
+            start: PAD_START as u32,
+            end: PAD_END as u32,
+        });
+
+        // mask
+        universe.insert_token(&Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32,
+        });
+
+        // eos
+        universe.insert_token(&Region {
+            chr: EOS_CHR.to_string(),
+            start: EOS_START as u32,
+            end: EOS_END as u32,
+        });
+
+        // bos
+        universe.insert_token(&Region {
+            chr: BOS_CHR.to_string(),
+            start: BOS_START as u32,
+            end: BOS_END as u32,
+        });
+
+        // cls
+        universe.insert_token(&Region {
+            chr: CLS_CHR.to_string(),
+            start: CLS_START as u32,
+            end: CLS_END as u32,
+        });
 
         Ok(TreeTokenizer { universe, tree })
     }
@@ -91,7 +134,7 @@ impl Tokenizer for TreeTokenizer {
         }
     }
 
-    fn tokenize_region_set(&self, region_set: &RegionSet) -> Option<TokenizedRegionSet> {
+    fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet {
         let chrs = region_set.chrs();
         let starts = region_set.starts();
         let ends = region_set.ends();
@@ -106,31 +149,28 @@ impl Tokenizer for TreeTokenizer {
             if let AnyValue::Utf8(v) = chrs.get(i).unwrap() {
                 chr = v.to_string();
             } else {
-                println!(
+                panic!(
                     "chr column must be of type Utf8, instead found {:?}",
                     chrs.get(i).unwrap()
                 );
-                return None;
             }
 
             if let AnyValue::UInt32(v) = starts.get(i).unwrap() {
                 start = v;
             } else {
-                println!(
+                panic!(
                     "start column must be of type UInt32, instead found {:?}",
                     starts.get(i).unwrap()
                 );
-                return None;
             }
 
             if let AnyValue::UInt32(v) = ends.get(i).unwrap() {
                 end = v;
             } else {
-                println!(
+                panic!(
                     "end column must be of type UInt32, instead found {:?}",
                     ends.get(i).unwrap()
                 );
-                return None;
             }
 
             let lapper = self.tree.get(&chr);
@@ -159,22 +199,76 @@ impl Tokenizer for TreeTokenizer {
             }
         }
 
-        Some(TokenizedRegionSet {
+        TokenizedRegionSet {
             regions: tokenized_regions,
             universe: &self.universe,
-        })
+        }
+    }
+}
+
+impl SpecialTokens for TreeTokenizer {
+    fn unknown_token(&self) -> Region {
+        Region {
+            chr: UNKNOWN_CHR.to_string(),
+            start: UNKNOWN_START as u32,
+            end: UNKNOWN_END as u32,
+        }
+    }
+
+    fn padding_token(&self) -> Region {
+        Region {
+            chr: PAD_CHR.to_string(),
+            start: PAD_START as u32,
+            end: PAD_END as u32,
+        }
+    }
+
+    fn mask_token(&self) -> Region {
+        Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32,
+        }
+    }
+
+    fn cls_token(&self) -> Region {
+        Region {
+            chr: CLS_CHR.to_string(),
+            start: CLS_START as u32,
+            end: CLS_END as u32,
+        }
+    }
+
+    fn bos_token(&self) -> Region {
+        Region {
+            chr: BOS_CHR.to_string(),
+            start: BOS_START as u32,
+            end: BOS_END as u32,
+        }
+    }
+
+    fn eos_token(&self) -> Region {
+        Region {
+            chr: EOS_CHR.to_string(),
+            start: EOS_START as u32,
+            end: EOS_END as u32,
+        }
+    }
+
+    fn sep_token(&self) -> Region {
+        Region {
+            chr: SEP_CHR.to_string(),
+            start: SEP_START as u32,
+            end: SEP_END as u32,
+        }
     }
 }
 
 impl TreeTokenizer {
-    pub fn tokenize_bed_file(&self, bed_file: &Path) -> Option<TokenizedRegionSet> {
-        let regions = extract_regions_from_bed_file(bed_file);
-        match regions {
-            Ok(regions) => {
-                let rs = RegionSet::from(regions);
-                self.tokenize_region_set(&rs)
-            }
-            Err(e) => panic!("Error reading bedfile: {}", e),
-        }
+    pub fn tokenize_bed_file(&self, bed_file: &Path) -> Result<TokenizedRegionSet> {
+        let regions = extract_regions_from_bed_file(bed_file)?;
+        let rs = RegionSet::from(regions);
+
+        Ok(self.tokenize_region_set(&rs))
     }
 }
