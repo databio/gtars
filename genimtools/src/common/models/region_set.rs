@@ -47,7 +47,7 @@ impl From<Vec<Region>> for RegionSet {
 }
 
 impl RegionSet {
-    pub fn to_bed(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn to_bed(&self, path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
 
         let chrs = self.regions.column(CHR_COL_NAME).unwrap();

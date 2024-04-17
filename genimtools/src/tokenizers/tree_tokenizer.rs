@@ -102,33 +102,39 @@ impl Tokenizer for TreeTokenizer {
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let regions: Vec<Region> = intervals
-                    .map(|interval| Region {
-                        chr: region.chr.to_owned(),
-                        start: interval.start,
-                        end: interval.stop,
+                let ids: Vec<u32> = intervals
+                    .map(|interval| {
+                        self.universe
+                            .convert_region_to_id(&Region {
+                                chr: region.chr.to_owned(),
+                                start: interval.start,
+                                end: interval.stop,
+                            })
+                            .unwrap()
                     })
                     .collect();
 
-                if regions.is_empty() {
-                    let regions = vec![self.unknown_token()];
-                    return TokenizedRegionSet {
-                        regions,
+                if ids.is_empty() {
+                    let ids = vec![self
+                        .universe
+                        .convert_region_to_id(&self.unknown_token())
+                        .unwrap()];
+                    TokenizedRegionSet {
+                        ids,
                         universe: &self.universe,
                     };
                 }
 
                 TokenizedRegionSet {
-                    regions,
+                    ids,
                     universe: &self.universe,
                 }
             }
             None => TokenizedRegionSet {
-                regions: vec![Region {
-                    chr: UNKNOWN_CHR.to_string(),
-                    start: UNKNOWN_START as u32,
-                    end: UNKNOWN_END as u32,
-                }],
+                ids: vec![self
+                    .universe
+                    .convert_region_to_id(&self.unknown_token())
+                    .unwrap()],
                 universe: &self.universe,
             },
         }
@@ -199,8 +205,13 @@ impl Tokenizer for TreeTokenizer {
             }
         }
 
+        let ids = tokenized_regions
+            .iter()
+            .map(|r| self.universe.convert_region_to_id(r).unwrap())
+            .collect();
+
         TokenizedRegionSet {
-            regions: tokenized_regions,
+            ids,
             universe: &self.universe,
         }
     }
@@ -224,7 +235,7 @@ impl Tokenizer for TreeTokenizer {
             .filter_map(|(key, &val)| if val == id { Some(key.clone()) } else { None })
             .collect();
 
-        regions.0
+        regions[0]
     }
 }
 
