@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use pyo3::prelude::*;
 
@@ -15,17 +15,17 @@ pub struct PyUniverse {
 
 impl From<Universe> for PyUniverse {
     fn from(value: Universe) -> Self {
-        let regions = value.regions.iter().map(|r| (*r).into()).collect();
+        let regions = value.regions.iter().map(|r| r.to_owned().into()).collect();
 
-        let mut region_to_id = value
+        let region_to_id = value
             .region_to_id
             .iter()
-            .map(|(k, v)| ((*k).into(), *v))
+            .map(|(k, v)| (k.to_owned().into(), *v))
             .collect();
-        let mut id_to_region = value
+        let id_to_region = value
             .id_to_region
             .iter()
-            .map(|(k, v)| (*k, (*v).into()))
+            .map(|(k, v)| (*k, v.to_owned().into()))
             .collect();
 
         PyUniverse {
