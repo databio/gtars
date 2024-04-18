@@ -18,7 +18,7 @@ impl From<TokenizedRegionSet<'_>> for PyTokenizedRegionSet {
     fn from(value: TokenizedRegionSet) -> Self {
         PyTokenizedRegionSet {
             ids: value.ids,
-            universe: (*value.universe).into(),
+            universe: value.universe.to_owned().into(),
             curr: 0,
         }
     }
@@ -33,7 +33,7 @@ impl PyTokenizedRegionSet {
 
     #[getter]
     pub fn to_bit_vector(&self) -> Result<Vec<u8>> {
-        let mut bit_vector = Vec::with_capacity(self.universe.len() as usize);
+        let mut bit_vector = Vec::with_capacity(self.universe.len());
 
         for id in &self.ids {
             bit_vector[*id as usize] = 1;
@@ -82,7 +82,7 @@ impl PyTokenizedRegionSet {
             self.curr += 1;
 
             Some(PyTokenizedRegion {
-                universe: self.universe,
+                universe: self.universe.to_owned(),
                 id,
             })
         } else {
@@ -100,7 +100,7 @@ impl PyTokenizedRegionSet {
             anyhow::bail!(PyIndexError::new_err("Index out of bounds"));
         } else {
             Ok(PyTokenizedRegion {
-                universe: self.universe,
+                universe: self.universe.to_owned(),
                 id: self.ids[indx as usize],
             })
         }

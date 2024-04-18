@@ -143,6 +143,24 @@ impl PyTreeTokenizer {
         Ok(tokenized.ids)
     }
 
+    pub fn decode(&self, ids: Vec<u32>) -> Result<Vec<PyRegion>> {
+        let regions = ids
+            .iter()
+            .map(|id| self.tokenizer.universe.id_to_region[id].clone().into())
+            .collect();
+
+        Ok(regions)
+    }
+
+    pub fn vocab(&self) -> Vec<(PyRegion, u32)> {
+        self.tokenizer
+            .universe
+            .regions
+            .iter()
+            .map(|r| (r.clone().into(), self.tokenizer.universe.region_to_id[r]))
+            .collect()
+    }
+
     pub fn __len__(&self) -> usize {
         self.tokenizer.universe.len()
     }
