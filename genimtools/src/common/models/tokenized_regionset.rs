@@ -41,6 +41,16 @@ impl From<TokenizedRegionSet<'_>> for Vec<u8> {
     }
 }
 
+impl From<TokenizedRegionSet<'_>> for Vec<Region> {
+    fn from(value: TokenizedRegionSet<'_>) -> Self {
+        value
+            .ids
+            .iter()
+            .map(|id| value.universe.id_to_region[&id].to_owned())
+            .collect()
+    }
+}
+
 impl <'a> Index<usize> for TokenizedRegionSet<'a> {
     type Output = u32;
 
@@ -125,6 +135,13 @@ impl<'a> TokenizedRegionSet<'a> {
     /// Get the tokenized regions as a vector of u8
     /// * Returns a vector of u8
     pub fn into_bit_vector(self) -> Vec<u8> {
+        self.into()
+    }
+
+    ///
+    /// Get the tokenized regions as a vector of regions
+    /// * Returns a vector of regions
+    pub fn into_region_vec(self) -> Vec<Region> {
         self.into()
     }
 }
