@@ -1,10 +1,39 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
+use std::{path::Path, vec};
+
+use numpy::ndarray::Array;
+use numpy::{IntoPyArray, PyArray1};
 
 use anyhow::Result;
-use genimtools::common::models::TokenizedRegionSet;
+use genimtools::common::{models::TokenizedRegionSet, utils::extract_regions_from_bed_file};
 
 use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
+
+#[pyclass(name = "RegionSet")]
+#[derive(Clone, Debug)]
+pub struct PyRegionSet {
+    pub regions: Vec<PyRegion>,
+}
+
+impl From<Vec<PyRegion>> for PyRegionSet {
+    fn from(value: Vec<PyRegion>) -> Self {
+        PyRegionSet { regions: value }
+    }
+}
+
+#[pymethods]
+impl PyRegionSet {
+    #[new]
+    pub fn new(path: String) -> Result<Self> {
+        let path = Path::new(&path);
+        let regions = extract_regions_from_bed_file(path)?;
+
+        Ok(PyRegionSet {
+            regions: regions.into_iter().map(|region| region.into()).collect(),
+        })
+    }
+}
 
 #[pyclass(name = "TokenizedRegionSet")]
 #[derive(Clone, Debug)]
@@ -31,9 +60,14 @@ impl PyTokenizedRegionSet {
         Ok(self.ids.clone())
     }
 
-    #[getter]
+    fn to_numpy<'py>(&self, py: Python<'py>) -> Result<Bound<'py, PyArray1<u32>>> {
+        let array = Array::from_vec(self.ids.clone()).into_pyarray_bound(py);
+
+        Ok(array)
+    }
+
     pub fn to_bit_vector(&self) -> Result<Vec<u8>> {
-        let mut bit_vector = Vec::with_capacity(self.universe.len());
+        let mut bit_vector = vec![0; self.universe.id_to_region.len()];
 
         for id in &self.ids {
             bit_vector[*id as usize] = 1;
@@ -42,7 +76,6 @@ impl PyTokenizedRegionSet {
         Ok(bit_vector)
     }
 
-    #[getter]
     pub fn to_regions(&self) -> Result<Vec<PyRegion>> {
         Ok(self
             .ids
@@ -65,7 +98,7 @@ impl PyTokenizedRegionSet {
     }
 
     pub fn __repr__(&self) -> String {
-        format!("TokenizedRegionSet({} regions)", self.ids.len())
+        format!("TokenizedRegionSet({:?})", self.ids)
     }
 
     pub fn __len__(&self) -> usize {

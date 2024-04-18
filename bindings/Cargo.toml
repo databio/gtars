@@ -11,4 +11,5 @@ crate-type = ["cdylib"]
 [dependencies]
 anyhow = "1.0.82"
 genimtools = { path = "../genimtools" }
-pyo3 = { version = "0.20.0", features=["anyhow"] }
+pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
+numpy = "0.21"

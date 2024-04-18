@@ -93,6 +93,17 @@ impl PyTreeTokenizer {
         Ok(regions.into_iter().map(|r| r.into()).collect())
     }
 
+    pub fn tokenize_bed_file(&self, path: String) -> Result<Vec<PyRegion>> {
+        let path = Path::new(&path);
+        let regions = RegionSet::try_from(path)?;
+
+        let tokenized = self.tokenizer.tokenize_region_set(&regions);
+
+        let regions = tokenized.into_region_vec();
+
+        Ok(regions.into_iter().map(|r| r.into()).collect())
+    }
+
     // __call__ returns a TokenizedRegionSet
     pub fn __call__(&self, regions: &PyList) -> Result<PyTokenizedRegionSet> {
         // attempt to map the list to a vector of regions
