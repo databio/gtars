@@ -61,60 +61,13 @@ impl PyTreeTokenizer {
         Ok(self.tokenizer.sep_token().into())
     }
 
-    pub fn token_to_id(&self, region: &PyRegion) -> usize {
-        let region = Region {
-            chr: region.chr.to_string(),
-            start: region.start,
-            end: region.end,
-        };
-        self.tokenizer
-            .universe
-            .convert_region_to_id(&region)
-            .unwrap() as usize
+    #[getter]
+    pub fn vocab_size(&self) -> usize {
+        self.tokenizer.vocab_size()
     }
 
-    pub fn tokens_to_id(&self, regions: &PyList) -> Vec<usize> {
-        let ids = regions
-            .iter()
-            .map(|x| {
-                // extract chr, start, end
-                // this lets us interface any python object with chr, start, end attributes
-                let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
-                let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
-                let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
-
-                let region = Region { chr, start, end };
-
-                self.tokenizer
-                    .universe
-                    .convert_region_to_id(&region)
-                    .unwrap() as usize
-            })
-            .collect::<Vec<_>>();
-
-        ids
-    }
-
-    pub fn __len__(&self) -> usize {
-        self.tokenizer.universe.len()
-    }
-
-    pub fn __repr__(&self) -> String {
-        format!(
-            "TreeTokenizer({} total regions)",
-            self.tokenizer.universe.len()
-        )
-    }
-
-    ///
-    /// Tokenize a list of regions
-    ///
-    /// # Arguments
-    /// - `regions` - a list of regions
-    ///
-    /// # Returns
-    /// A PyTokenizedRegionSet that contains regions, and ids
-    pub fn tokenize(&self, regions: &PyList) -> Result<PyTokenizedRegionSet> {
+    // tokenize just returns a list of regions
+    pub fn tokenize(&self, regions: &PyList) -> Result<Vec<PyRegion>> {
         // attempt to map the list to a vector of regions
         let regions = regions
             .iter()
@@ -132,39 +85,72 @@ impl PyTreeTokenizer {
         // create RegionSet
         let rs = RegionSet::from(regions);
 
-        // tokenize
-        let tokenized_regions = self.tokenizer.tokenize_region_set(&rs);
+        // tokenize the RegionSet
+        let tokenized = self.tokenizer.tokenize_region_set(&rs);
 
-        // create pytokenizedregionset
-        let regions = tokenized_regions
-            .into_iter()
-            .map(|x| PyRegion {
-                chr: x.chr,
-                start: x.start,
-                end: x.end,
-            })
-            .collect::<Vec<_>>();
+        let regions = tokenized.into_region_vec();
 
-        let ids = tokenized_regions.to_region_ids();
-
-        Ok(PyTokenizedRegionSet::new(regions, ids))
+        Ok(regions.into_iter().map(|r| r.into()).collect())
     }
 
-    pub fn tokenize_bed_file(&self, path: String) -> Result<PyTokenizedRegionSet> {
-        let bed_file = Path::new(&path);
-        let tokens = self.tokenizer.tokenize_bed_file(bed_file)?;
+    // __call__ returns a TokenizedRegionSet
+    pub fn __call__(&self, regions: &PyList) -> Result<PyTokenizedRegionSet> {
+        // attempt to map the list to a vector of regions
+        let regions = regions
+            .iter()
+            .map(|x| {
+                // extract chr, start, end
+                // this lets us interface any python object with chr, start, end attributes
+                let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
+                let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
+                let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
 
-        let regions = tokens
-            .into_iter()
-            .map(|x| PyRegion {
-                chr: x.chr,
-                start: x.start,
-                end: x.end,
+                Region { chr, start, end }
             })
             .collect::<Vec<_>>();
 
-        let ids = tokens.to_region_ids();
+        // create RegionSet
+        let rs = RegionSet::from(regions);
 
-        Ok(PyTokenizedRegionSet::new(regions, ids))
+        // tokenize the RegionSet
+        let tokenized = self.tokenizer.tokenize_region_set(&rs);
+
+        Ok(tokenized.into())
+    }
+
+    // encode returns a list of ids
+    pub fn encode(&self, regions: &PyList) -> Result<Vec<u32>> {
+        // attempt to map the list to a vector of regions
+        let regions = regions
+            .iter()
+            .map(|x| {
+                // extract chr, start, end
+                // this lets us interface any python object with chr, start, end attributes
+                let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
+                let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
+                let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
+
+                Region { chr, start, end }
+            })
+            .collect::<Vec<_>>();
+
+        // create RegionSet
+        let rs = RegionSet::from(regions);
+
+        // tokenize the RegionSet
+        let tokenized = self.tokenizer.tokenize_region_set(&rs);
+
+        Ok(tokenized.ids)
+    }
+
+    pub fn __len__(&self) -> usize {
+        self.tokenizer.universe.len()
+    }
+
+    pub fn __repr__(&self) -> String {
+        format!(
+            "TreeTokenizer({} total regions)",
+            self.tokenizer.universe.len()
+        )
     }
 }

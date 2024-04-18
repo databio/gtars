@@ -4,7 +4,10 @@ use pyo3::class::basic::CompareOp;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
+use anyhow::Result;
 use genimtools::common::models::region::Region;
+
+use crate::models::PyUniverse;
 
 #[pyclass(name = "Region")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -75,8 +78,14 @@ impl PyRegion {
 #[pyclass(name = "TokenizedRegion")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
-    pub region: PyRegion,
     pub id: u32,
+    pub universe: PyUniverse,
+}
+
+impl From<PyTokenizedRegion> for PyRegion {
+    fn from(value: PyTokenizedRegion) -> Self {
+        value.universe.convert_id_to_region(value.id).unwrap()
+    }
 }
 
 #[pymethods]
