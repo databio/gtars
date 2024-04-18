@@ -35,7 +35,7 @@ pub fn prune_universe(
 }
 
 #[pymodule]
-pub fn vocab(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn vocab(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(prune_universe))?;
     Ok(())
 }

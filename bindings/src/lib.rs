@@ -11,7 +11,7 @@ mod vocab;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[pymodule]
-fn genimtools(py: Python, m: &PyModule) -> PyResult<()> {
+fn genimtools(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let vocab_module = pyo3::wrap_pymodule!(vocab::vocab);
     let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
     let ailist_module = pyo3::wrap_pymodule!(ailist::ailist);
@@ -24,8 +24,9 @@ fn genimtools(py: Python, m: &PyModule) -> PyResult<()> {
     m.add_wrapped(utils_module)?;
     m.add_wrapped(models_modeule)?;
 
-    let sys = PyModule::import(py, "sys")?;
-    let sys_modules: &PyDict = sys.getattr("modules")?.downcast()?;
+    let sys = PyModule::import_bound(py, "sys")?;
+    let binding = sys.getattr("modules")?;
+    let sys_modules: &Bound<'_, PyDict> = binding.downcast()?;
 
     // set names of submodules
     sys_modules.set_item("genimtools.vocab", m.getattr("vocab")?)?;

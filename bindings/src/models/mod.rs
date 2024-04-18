@@ -11,7 +11,7 @@ pub use self::region_set::{PyRegionSet, PyTokenizedRegionSet};
 pub use self::universe::PyUniverse;
 
 #[pymodule]
-pub fn models(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRegion>()?;
     m.add_class::<PyTokenizedRegion>()?;
     m.add_class::<PyTokenizedRegionSet>()?;

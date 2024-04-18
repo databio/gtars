@@ -67,7 +67,7 @@ impl PyTreeTokenizer {
     }
 
     // tokenize just returns a list of regions
-    pub fn tokenize(&self, regions: &PyList) -> Result<Vec<PyRegion>> {
+    pub fn tokenize(&self, regions: &Bound<'_, PyList>) -> Result<Vec<PyRegion>> {
         // attempt to map the list to a vector of regions
         let regions = regions
             .iter()
@@ -105,7 +105,7 @@ impl PyTreeTokenizer {
     }
 
     // __call__ returns a TokenizedRegionSet
-    pub fn __call__(&self, regions: &PyList) -> Result<PyTokenizedRegionSet> {
+    pub fn __call__(&self, regions: &Bound<'_, PyList>) -> Result<PyTokenizedRegionSet> {
         // attempt to map the list to a vector of regions
         let regions = regions
             .iter()
@@ -130,7 +130,7 @@ impl PyTreeTokenizer {
     }
 
     // encode returns a list of ids
-    pub fn encode(&self, regions: &PyList) -> Result<Vec<u32>> {
+    pub fn encode(&self, regions: &Bound<'_, PyList>) -> Result<Vec<u32>> {
         // attempt to map the list to a vector of regions
         let regions = regions
             .iter()

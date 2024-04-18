@@ -6,7 +6,7 @@ pub use self::tree_tokenizer::PyTreeTokenizer;
 pub use crate::models::{PyRegion, PyTokenizedRegion, PyTokenizedRegionSet, PyUniverse};
 
 #[pymodule]
-pub fn tokenizers(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn tokenizers(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyTreeTokenizer>()?;
     m.add_class::<PyRegion>()?;
     m.add_class::<PyTokenizedRegionSet>()?;
