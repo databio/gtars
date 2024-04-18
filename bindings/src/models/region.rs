@@ -14,6 +14,16 @@ pub struct PyRegion {
     pub end: u32,
 }
 
+impl From<Region> for PyRegion {
+    fn from(region: Region) -> Self {
+        PyRegion {
+            chr: region.chr,
+            start: region.start,
+            end: region.end,
+        }
+    }
+}
+
 impl PyRegion {
     pub fn to_region(&self) -> Region {
         Region {

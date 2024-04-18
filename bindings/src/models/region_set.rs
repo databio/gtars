@@ -1,16 +1,24 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
 
-use genimtools::common::consts::special_tokens::*;
+use genimtools::common::{consts::special_tokens::*, models::TokenizedRegionSet};
 
-use crate::models::{PyRegion, PyTokenizedRegion};
+use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 
 #[pyclass(name = "TokenizedRegionSet")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
-    pub regions: Vec<PyRegion>,
     pub ids: Vec<u32>,
-    curr: usize,
+    pub universe: PyUniverse,
+}
+
+impl From<TokenizedRegionSet<'_>> for PyTokenizedRegionSet {
+    fn from(value: TokenizedRegionSet) -> Self {
+        PyTokenizedRegionSet {
+            ids: value.ids,
+            universe: (*value.universe).into(),
+        }
+    }
 }
 
 #[pymethods]

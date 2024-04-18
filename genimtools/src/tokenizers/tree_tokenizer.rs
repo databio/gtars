@@ -69,6 +69,13 @@ impl TryFrom<&Path> for TreeTokenizer {
             end: CLS_END as u32,
         });
 
+        // sep
+        universe.insert_token(&Region {
+            chr: SEP_CHR.to_string(),
+            start: SEP_START as u32,
+            end: SEP_END as u32,
+        });
+
         let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
         let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
 
