@@ -1,16 +1,15 @@
+use genimtools::tokenizers::traits::SpecialTokens;
 use pyo3::prelude::*;
 use pyo3::types::PyList;
 
 use anyhow::Result;
 
-use std::collections::HashMap;
 use std::path::Path;
 
-use genimtools::common::consts::special_tokens::*;
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
-use crate::models::{PyRegion, PyTokenizedRegion, PyTokenizedRegionSet, PyUniverse};
+use crate::models::{PyRegion, PyTokenizedRegionSet};
 
 #[pyclass(name = "TreeTokenizer")]
 pub struct PyTreeTokenizer {
@@ -28,85 +27,38 @@ impl PyTreeTokenizer {
     }
 
     #[getter]
-    pub fn unknown_token(&self) -> Result<PyTokenizedRegion> {
-        let region = PyRegion {
-            chr: UNKNOWN_CHR.to_string(),
-            start: UNKNOWN_START as u32,
-            end: UNKNOWN_END as u32,
-        };
-
-        let id = self
-            .tokenizer
-            .universe
-            .convert_region_to_id(&region.to_region());
-
-        match id {
-            Some(id) => Ok(PyTokenizedRegion { region, id }),
-            None => {
-                anyhow::bail!("Something went wrong -- could not find an id for the unknown token!")
-            }
-        }
+    pub fn unknown_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.unknown_token().into())
     }
 
     #[getter]
-    pub fn padding_token(&self) -> Result<PyTokenizedRegion> {
-        let region = PyRegion {
-            chr: PAD_CHR.to_string(),
-            start: PAD_START as u32,
-            end: PAD_END as u32,
-        };
-
-        let id = self
-            .tokenizer
-            .universe
-            .region_to_id
-            .get(&region.to_region())
-            .unwrap()
-            .to_owned();
-
-        Ok(PyTokenizedRegion { region, id })
+    pub fn padding_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.padding_token().into())
     }
 
     #[getter]
-    pub fn mask_token(&self) -> Result<PyTokenizedRegion> {
-        let region = PyRegion {
-            chr: MASK_CHR.to_string(),
-            start: MASK_START as u32,
-            end: MASK_END as u32,
-        };
-
-        let id = self
-            .tokenizer
-            .universe
-            .region_to_id
-            .get(&region.to_region())
-            .unwrap()
-            .to_owned();
-
-        Ok(PyTokenizedRegion { region, id })
+    pub fn mask_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.mask_token().into())
     }
 
     #[getter]
-    pub fn universe(&self) -> Result<PyUniverse> {
-        let regions = self
-            .tokenizer
-            .universe
-            .regions
-            .iter()
-            .map(|x| PyRegion::new(x.chr.clone(), x.start, x.end))
-            .collect::<Vec<_>>();
-        let region_to_id = self
-            .tokenizer
-            .universe
-            .region_to_id
-            .iter()
-            .map(|(k, v)| (PyRegion::new(k.chr.clone(), k.start, k.end), v.to_owned()))
-            .collect::<HashMap<_, _>>();
+    pub fn cls_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.cls_token().into())
+    }
 
-        Ok(PyUniverse {
-            regions,
-            region_to_id,
-        })
+    #[getter]
+    pub fn bos_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.bos_token().into())
+    }
+
+    #[getter]
+    pub fn eos_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.eos_token().into())
+    }
+
+    #[getter]
+    pub fn sep_token(&self) -> Result<PyRegion> {
+        Ok(self.tokenizer.sep_token().into())
     }
 
     pub fn token_to_id(&self, region: &PyRegion) -> usize {

@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::io::Write;
+use std::ops::Index;
 use std::path::PathBuf;
 
 use anyhow::Result;
@@ -37,6 +38,14 @@ impl From<TokenizedRegionSet<'_>> for Vec<u8> {
         }
 
         bit_vector
+    }
+}
+
+impl <'a> Index<usize> for TokenizedRegionSet<'a> {
+    type Output = u32;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.ids[index]
     }
 }
 
@@ -98,14 +107,23 @@ impl<'a> TokenizedRegionSet<'a> {
         Ok(())
     }
 
+    ///
+    /// Get the tokenized regions as a vector of ids
+    /// * Returns a vector of u32
     pub fn ids(&self) -> Vec<u32> {
         self.ids.clone()
     }
 
+    ///
+    /// Get the tokenized regions into a dedicated RegionSet
+    /// * Returns a RegionSet
     pub fn into_region_set(self) -> RegionSet {
         self.into()
     }
 
+    ///
+    /// Get the tokenized regions as a vector of u8
+    /// * Returns a vector of u8
     pub fn into_bit_vector(self) -> Vec<u8> {
         self.into()
     }
