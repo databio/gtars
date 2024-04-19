@@ -12,9 +12,6 @@ class Universe:
         """
         The regions in the universe.
         """
-    
-
-
 
 class Region:
     def __new__(cls, chrom: str, start: int, end: int) -> Region:
@@ -46,6 +43,48 @@ class Region:
 
     def __repr__(self) -> str: ...
 
+class TokenizedRegion:
+    """
+    A TokenizedRegion object represents a tokenized region.
+    """
+
+    @property
+    def chr(self) -> str:
+        """
+        The chromosome name for this region.
+        """
+    
+    @property
+    def start(self) -> int:
+        """
+        The start position for this region.
+        """
+    
+    @property
+    def end(self) -> int:
+        """
+        The end position for this region.
+        """
+
+    @property
+    def id(self) -> int:
+        """
+        The integer representation of the tokenized region.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
+        """
+    
+    def to_region(self) -> Region:
+        """
+        Convert the tokenized region back to the original region.
+        """
+    
+    def __repr__(self) -> str: ...
+
 class TokenizedRegionSet:
     def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
         """
@@ -75,6 +114,13 @@ class TokenizedRegionSet:
     def to_regions(self) -> List[Region]:
         """
         Convert the tokenized regions back to the original regions.
+        """
+    
+    def ids_as_strs(self) -> List[str]:
+        """
+        Get the integer representations of the tokenized regions as strings. This
+        is useful for applications that require string representations of the
+        tokenized regions.
         """
     
     def __len__(self) -> int: ...

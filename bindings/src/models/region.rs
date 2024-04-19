@@ -105,7 +105,6 @@ impl PyTokenizedRegion {
         Ok(self.universe.convert_id_to_region(self.id).unwrap().end)
     }
 
-    #[getter]
     pub fn to_region(&self) -> Result<PyRegion> {
         Ok(self.universe.convert_id_to_region(self.id).unwrap())
     }
