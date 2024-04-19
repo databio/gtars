@@ -4,6 +4,7 @@ use pyo3::types::{PyAny, PyIterator};
 use anyhow::Result;
 use genimtools::common::models::{Region, RegionSet};
 
+// this is for internal use only
 pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionSet> {
     let regions = PyIterator::from_bound_object(regions)?;
 

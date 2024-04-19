@@ -1,0 +1,1 @@
+from genimtools.vocab import *  # noqa: F403
