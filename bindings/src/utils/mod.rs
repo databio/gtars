@@ -13,7 +13,7 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
         .map(|x| {
             let x = match x {
                 Ok(x) => x,
-                Err(_) => anyhow::bail!("Error iterating over regions"),
+                Err(e) => anyhow::bail!("There was an error iterating over regions: {}", e),
             };
 
             // extract chr, start, end
