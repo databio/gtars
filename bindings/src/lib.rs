@@ -36,12 +36,6 @@ fn genimtools(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     sys_modules.set_item("genimtools.models", m.getattr("models")?)?;
 
     // add constants
-    m.add("PAD_CHR", consts::special_tokens::PAD_CHR)?;
-    m.add("PAD_START", consts::special_tokens::PAD_START)?;
-    m.add("PAD_END", consts::special_tokens::PAD_END)?;
-    m.add("UNKNOWN_CHR", consts::special_tokens::UNKNOWN_CHR)?;
-    m.add("UNKNOWN_START", consts::special_tokens::UNKNOWN_START)?;
-    m.add("UNKNOWN_END", consts::special_tokens::UNKNOWN_END)?;
     m.add("__version__", VERSION)?;
 
     Ok(())
