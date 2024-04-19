@@ -1,0 +1,192 @@
+from typing import List, Tuple
+
+class Universe:
+    """
+    A Universe object represents a set of regions.
+    
+    All tokenizers are created from a Universe object.
+    """
+
+    @property
+    def regions(self) -> List[Region]:
+        """
+        The regions in the universe.
+        """
+    
+
+
+
+class Region:
+    def __new__(cls, chrom: str, start: int, end: int) -> Region:
+        """
+        Construct a new Region object.
+
+        :param chrom: The chromosome name.
+        :param start: The start position.
+        :param end: The end position.
+        """
+    
+    @property
+    def chr(self) -> str:
+        """
+        The chromosome name for this region.
+        """
+
+    @property
+    def start(self) -> int:
+        """
+        The start position for this region.
+        """
+
+    @property
+    def end(self) -> int:
+        """
+        The end position for this region.
+        """
+
+    def __repr__(self) -> str: ...
+
+class TokenizedRegionSet:
+    def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
+        """
+        Construct a new TokenizedRegionSet object.
+
+        :param regions: The original regions.
+        :param tokens: The tokenized regions.
+        """
+    
+    @property
+    def ids(self) -> List[int]:
+        """
+        Integer representation of the tokenized regions.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
+        """
+
+    def to_bit_vector(self) -> List[int]:
+        """
+        Convert the tokenized regions to a bit vector.
+        """
+    
+    def to_regions(self) -> List[Region]:
+        """
+        Convert the tokenized regions back to the original regions.
+        """
+    
+    def __len__(self) -> int: ...
+
+    def __repr__(self) -> str: ...
+
+class TreeTokenizer:
+    def __new__(cls, path: str) -> TreeTokenizer:
+        """
+        Construct a new TreeTokenize from a universe file.
+
+        :param path: The path to the universe file. This should be a BED file.
+        """
+    
+    def unknown_token(self) -> Region:
+        """
+        Get the unknown token.
+        """
+
+    def padding_token(self) -> Region:
+        """
+        Get the padding token.
+        """
+
+    def mask_token(self) -> Region:
+        """
+        Get the mask token.
+        """
+
+    def cls_token(self) -> Region:
+        """
+        Get the CLS token.
+        """
+
+    def bos_token(self) -> Region:
+        """
+        Get the BOS token.
+        """
+
+    def eos_token(self) -> Region:
+        """
+        Get the EOS token.
+        """
+
+    def sep_token(self) -> Region:
+        """
+        Get the SEP token.
+        """
+
+    def vocab_size(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def tokenize(self, regions: List[Region]) -> List[Region]:
+        """
+        Tokenize a list of regions. This will only return the tokenized regions.
+
+        :param regions: The regions to tokenize.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def tokenize_bed_file(self, path: str) -> List[Region]:
+        """
+        Tokenize a BED file directly.
+
+        :param path: The path to the BED file.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def encode(self, regions: List[Region]) -> List[int]:
+        """
+        Encode a list of regions. This will return the integer representation of the tokenized regions.
+
+        :param regions: The regions to encode.
+
+        :return: The integer representation of the tokenized regions.
+        """
+
+    def decode(self, ids: List[int]) -> List[Region]:
+        """
+        Decode a list of integer representations of the tokenized regions.
+
+        :param ids: The integer representations of the tokenized regions.
+
+        :return: The decoded regions.
+        """
+
+    def vocab(self) -> List[Tuple[Region, int]]:
+        """
+        Get the vocabulary.
+
+        :return: The vocabulary as a list of tuples.
+        """
+
+    def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
+        """
+        Tokenize a list of regions.
+
+        :param regions: The regions to tokenize.
+
+        :return: A TokenizedRegionSet object.
+        """
+
+    def __len__(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def __repr__(self) -> str:
+        """
+        Get a string representation of the tokenizer.
+        """
