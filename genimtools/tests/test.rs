@@ -26,7 +26,6 @@ fn path_to_tokenize_bed_file() -> &'static str {
     "tests/data/to_tokenize.bed"
 }
 
-
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
 
@@ -107,11 +106,14 @@ mod tests {
         assert!(tokenized_regions.len() == 4);
 
         // last should be the unknown token
-        let unknown_token = tokenizer.universe.convert_id_to_region(tokenized_regions[3]).unwrap();
+        let unknown_token = tokenizer
+            .universe
+            .convert_id_to_region(tokenized_regions[3])
+            .unwrap();
         assert!(unknown_token.chr == "chrUNK");
     }
 
-    // 
+    //
     // Cant get these to run because the polars CsvReader isnt working for gzipped files right now.
     //
     // #[rstest]
