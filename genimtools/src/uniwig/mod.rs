@@ -335,7 +335,7 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, combinedbedpath: &str, _chromsi
 
 }
 
-fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String, chromname: String) {
+fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String) {
 
     let mut file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
@@ -343,7 +343,7 @@ fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String,
         .open(filename).unwrap();
 
     //println!("DEBUG: fixedStep chrom={}",chromname.clone());
-    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str();
+    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str() + " start=1 step=1";
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
 
@@ -357,7 +357,8 @@ fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u8>, filename: String,
         } else{
 
             //println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
-            let wig_line = position.to_string() + " " + count.to_string().as_str();
+            //let wig_line = position.to_string() + " " + count.to_string().as_str();
+            let wig_line = count.to_string();
             file.write_all(wig_line.as_ref()).unwrap();
             file.write_all(b"\n").unwrap();
             position+=1;
@@ -489,7 +490,7 @@ pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &
     return v_coord_counts
 }
 
-pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u8>, Vec<i32>) {
+pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
     // It allows the user to accumulate reads of either starts or ends
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
@@ -504,11 +505,11 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     let vin_iter = starts_vector.iter();
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     let mut coordinate_position = 1;
 
-    let mut count = 0;
+    let mut count:u32 = 0;
 
     let mut coordinate_value = 0;
     let mut prev_coordinate_value = 0;
@@ -595,7 +596,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     return (v_coord_counts, v_coordinate_positions)
 }
 
-pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u8>, Vec<i32>) {
+pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of fixedCoreBW from uniwig written in CPP
     // It allows the user to accumulate reads of across paired starts and ends.
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
@@ -610,7 +611,7 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
     // TODO STARTS AND ENDS MUST BE EQUAL
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     let mut coordinate_position = 1;
 
