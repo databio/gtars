@@ -43,7 +43,7 @@ impl Bbclient {
 impl Default for Bbclient {
     fn default() -> Self {
         Bbclient {
-            bedbase_api: "https://bedbase.org/api".to_string(),
+            bedbase_api: "https://api.bedbase.org/v1".to_string(),
         }
     }
 }

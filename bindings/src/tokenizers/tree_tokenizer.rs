@@ -1,6 +1,6 @@
 use genimtools::tokenizers::traits::SpecialTokens;
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
+use pyo3::types::{PyAny, PyType};
 
 use anyhow::Result;
 
@@ -23,6 +23,13 @@ impl PyTreeTokenizer {
     pub fn new(path: String) -> Result<Self> {
         let path = Path::new(&path);
         let tokenizer = TreeTokenizer::try_from(path)?;
+
+        Ok(PyTreeTokenizer { tokenizer })
+    }
+
+    #[classmethod]
+    pub fn from_pretrained(_cls: &Bound<'_, PyType>, model: String) -> Result<Self> {
+        let tokenizer = TreeTokenizer::from_pretrained(&model)?;
 
         Ok(PyTreeTokenizer { tokenizer })
     }
