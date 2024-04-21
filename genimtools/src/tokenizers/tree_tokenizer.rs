@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use anndata::{AnnData, Backend};
+use anndata_hdf5::H5;
 use anyhow::Result;
 use hf_hub::api::sync::Api;
 use polars::prelude::*;
@@ -11,7 +13,9 @@ use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
 use crate::tokenizers::consts::UNIVERSE_FILE_NAME;
-use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
+use crate::tokenizers::traits::{FromPretrained, Pad, SpecialTokens, Tokenizer};
+
+use super::traits::SingleCellTokenizer;
 
 pub struct TreeTokenizer {
     pub universe: Universe,
@@ -204,6 +208,17 @@ impl Tokenizer for TreeTokenizer {
     }
 }
 
+impl SingleCellTokenizer for TreeTokenizer {
+    fn tokenize_anndata(&self, anndata: &Path) -> Result<Vec<TokenizedRegionSet>> {
+        let file = H5::open(anndata)?;
+        let adata = AnnData::<H5>::open(file)?;
+
+        let adata_vocab = adata.get_var();
+
+        Ok(vec![])
+    }
+}
+
 impl SpecialTokens for TreeTokenizer {
     fn unknown_token(&self) -> Region {
         Region {
@@ -312,14 +327,6 @@ impl TreeTokenizer {
         Ok(self.tokenize_region_set(&rs))
     }
 
-    pub fn from_pretrained(model: &str) -> Result<Self> {
-        let hf_api = Api::new().unwrap();
-        let repo = hf_api.model(model.to_string());
-        let universe_file = repo.get(UNIVERSE_FILE_NAME)?;
-
-        TreeTokenizer::try_from(universe_file.as_path())
-    }
-
     pub fn from_bedbase(id: &str) -> Result<Self> {
         let bedbase = Bbclient::default();
         let bed_file = bedbase.get_bed_file(id)?;
@@ -330,3 +337,16 @@ impl TreeTokenizer {
 
 // use default implementation
 impl Pad for TreeTokenizer {}
+
+impl FromPretrained for TreeTokenizer {
+    fn from_pretrained(model: &str) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        let hf_api = Api::new().unwrap();
+        let repo = hf_api.model(model.to_string());
+        let universe_file = repo.get(UNIVERSE_FILE_NAME)?;
+
+        TreeTokenizer::try_from(universe_file.as_path())
+    }
+}

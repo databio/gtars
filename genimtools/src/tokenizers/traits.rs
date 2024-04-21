@@ -1,4 +1,7 @@
 use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::Result;
 
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
@@ -29,7 +32,19 @@ pub trait Tokenizer {
     fn vocab_size(&self) -> usize;
 }
 
-pub trait SpecialTokens: Tokenizer {
+pub trait SingleCellTokenizer {
+    ///
+    /// Tokenize an AnnData object, this is single-cell data
+    ///
+    /// # Arguments
+    /// - `anndata` - the path to the AnnData object
+    ///
+    /// # Returns
+    /// A vector of TokenizedRegionSets
+    fn tokenize_anndata(&self, anndata: &Path) -> Result<Vec<TokenizedRegionSet>>;
+}
+
+pub trait SpecialTokens {
     fn unknown_token(&self) -> Region;
     fn padding_token(&self) -> Region;
     fn mask_token(&self) -> Region;
@@ -87,4 +102,10 @@ pub trait Pad: SpecialTokens {
             }
         }
     }
+}
+
+pub trait FromPretrained: Tokenizer {
+    fn from_pretrained(models: &str) -> Result<Self>
+    where
+        Self: Sized;
 }
