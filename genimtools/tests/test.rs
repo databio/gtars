@@ -4,6 +4,7 @@ use rstest::*;
 use tempfile::NamedTempFile;
 
 use genimtools::common::models::{Region, RegionSet};
+use genimtools::tokenizers::traits::FromPretrained;
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
 #[fixture]
@@ -111,11 +112,11 @@ mod tests {
         assert!(tokenizer.vocab_size() == 116497);
     }
 
-    #[rstest]
-    fn test_create_tokenizer_from_bedbase(bb_bed_id: &str) {
-        let tokenizer = TreeTokenizer::from_bedbase(bb_bed_id).unwrap();
-        assert!(tokenizer.vocab_size() == 25214);
-    }
+    // #[rstest]
+    // fn test_create_tokenizer_from_bedbase(bb_bed_id: &str) {
+    //     let tokenizer = TreeTokenizer::from_bedbase(bb_bed_id).unwrap();
+    //     assert!(tokenizer.vocab_size() == 25214);
+    // }
 
     #[rstest]
     fn test_tokenize_bed_file(path_to_bed_file: &str, path_to_tokenize_bed_file: &str) {

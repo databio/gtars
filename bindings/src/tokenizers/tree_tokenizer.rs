@@ -1,4 +1,4 @@
-use genimtools::tokenizers::traits::SpecialTokens;
+use genimtools::tokenizers::traits::{SpecialTokens, FromPretrained};
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyType};
 
