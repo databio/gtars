@@ -26,6 +26,11 @@ fn path_to_tokenize_bed_file() -> &'static str {
     "tests/data/to_tokenize.bed"
 }
 
+#[fixture]
+fn path_to_r2v_repo() -> &'static str {
+    "databio/r2v-luecken2021-hg38-v2"
+}
+
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
 
@@ -92,8 +97,13 @@ mod tests {
     #[rstest]
     fn test_create_tokenizer(path_to_bed_file: &str) {
         let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
-        println!("{}", tokenizer.vocab_size());
         assert!(tokenizer.vocab_size() == 32); // 25 regions + 7 special tokens
+    }
+
+    #[rstest]
+    fn test_create_tokenizer_from_hf_repo(path_to_r2v_repo: &str) {
+        let tokenizer = TreeTokenizer::from_pretrained(path_to_r2v_repo).unwrap();
+        assert!(tokenizer.vocab_size() == 116497);
     }
 
     #[rstest]
