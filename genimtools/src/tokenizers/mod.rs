@@ -10,6 +10,7 @@ pub mod tree_tokenizer;
 pub mod consts {
     /// command for the `genimtools` cli
     pub const TOKENIZE_CMD: &str = "tokenize";
+    pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
 }
 
 // expose the TreeTokenizer struct to users of this crate

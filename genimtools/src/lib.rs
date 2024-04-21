@@ -5,6 +5,7 @@
 //! However, it can be used as a standalone library for working with genomic intervals as well.
 //!
 pub mod ailist;
+pub mod bbclient;
 pub mod common;
 pub mod io;
 pub mod tokenizers;

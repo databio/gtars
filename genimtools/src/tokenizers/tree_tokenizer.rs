@@ -2,12 +2,15 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::Result;
+use hf_hub::api::sync::Api;
 use polars::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
+use crate::bbclient::{Bbclient, BedbaseFileCache};
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
+use crate::tokenizers::consts::UNIVERSE_FILE_NAME;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
@@ -307,6 +310,21 @@ impl TreeTokenizer {
         let rs = RegionSet::from(regions);
 
         Ok(self.tokenize_region_set(&rs))
+    }
+
+    pub fn from_pretrained(model: &str) -> Result<Self> {
+        let hf_api = Api::new().unwrap();
+        let repo = hf_api.model(model.to_string());
+        let universe_file = repo.get(UNIVERSE_FILE_NAME)?;
+
+        TreeTokenizer::try_from(universe_file.as_path())
+    }
+
+    pub fn from_bedbase(id: &str) -> Result<Self> {
+        let bedbase = Bbclient::default();
+        let bed_file = bedbase.get_bed_file(id)?;
+
+        TreeTokenizer::try_from(bed_file.as_path())
     }
 }
 
