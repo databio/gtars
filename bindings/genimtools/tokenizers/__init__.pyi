@@ -135,6 +135,14 @@ class TreeTokenizer:
         :param path: The path to the universe file. This should be a BED file.
         """
     
+    @classmethod
+    def from_pretrained(cls, path: str) -> TreeTokenizer:
+        """
+        Load a pretrained TreeTokenizer from a model on huggingface.
+
+        :param path: The path to the pretrained model on huggingface.
+        """
+    
     def unknown_token(self) -> Region:
         """
         Get the unknown token.

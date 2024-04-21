@@ -31,6 +31,11 @@ fn path_to_r2v_repo() -> &'static str {
     "databio/r2v-luecken2021-hg38-v2"
 }
 
+#[fixture]
+fn bb_bed_id() -> &'static str {
+    "fa09672b962809b408b356728d81640e"
+}
+
 mod tests {
     use genimtools::common::utils::extract_regions_from_bed_file;
 
@@ -104,6 +109,12 @@ mod tests {
     fn test_create_tokenizer_from_hf_repo(path_to_r2v_repo: &str) {
         let tokenizer = TreeTokenizer::from_pretrained(path_to_r2v_repo).unwrap();
         assert!(tokenizer.vocab_size() == 116497);
+    }
+
+    #[rstest]
+    fn test_create_tokenizer_from_bedbase(bb_bed_id: &str) {
+        let tokenizer = TreeTokenizer::from_bedbase(bb_bed_id).unwrap();
+        assert!(tokenizer.vocab_size() == 25214);
     }
 
     #[rstest]
