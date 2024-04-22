@@ -2,7 +2,6 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 mod ailist;
-mod consts;
 mod models;
 mod tokenizers;
 mod utils;
