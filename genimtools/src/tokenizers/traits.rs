@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::Result;
+
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
-// use crate::common::models::bed_set::BedSet;
-use crate::common::consts::{PAD_CHR, PAD_END, PAD_START, UNKNOWN_CHR, UNKNOWN_END, UNKNOWN_START};
 use crate::common::models::tokenized_regionset::TokenizedRegionSet;
+use crate::tokenizers::special_tokens::SpecialToken;
 
 pub trait Tokenizer {
     /// Tokenize a region into the vocabulary of the tokenizer
@@ -23,38 +27,85 @@ pub trait Tokenizer {
     /// # Returns
     /// A vector of regions that correspond to regions in the tokenizers vocab (or universe).
     ///
-    fn tokenize_region_set(&self, region_set: &RegionSet) -> Option<TokenizedRegionSet>;
+    fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet;
 
-    /// Tokenize a bed set into the vocabulary of the tokenizer
+    fn vocab_size(&self) -> usize;
+}
+
+pub trait SingleCellTokenizer {
+    ///
+    /// Tokenize an AnnData object, this is single-cell data
     ///
     /// # Arguments
-    /// - `bed_set` - the bed set to be tokenized
+    /// - `anndata` - the path to the AnnData object
     ///
     /// # Returns
-    /// A vector of vectors of regions that correspond to regions in the tokenizers vocab (or universe).
-    ///
-    // fn tokenize_bed_set(&self, bed_set: &BedSet) -> Option<Vec<TokenizedRegionSet>> {
-    //     let mut tokenized_region_sets = Vec::new();
-    //     for region_set in bed_set.into_iter() {
-    //         let tokenized_region_set = self.tokenize_region_set(&region_set)?;
-    //         tokenized_region_sets.push(tokenized_region_set);
-    //     }
-    //     Some(tokenized_region_sets)
-    // }
+    /// A vector of TokenizedRegionSets
+    fn tokenize_anndata(&self, anndata: &Path) -> Result<Vec<TokenizedRegionSet>>;
+}
 
-    fn unknown_token(&self) -> Region {
-        Region {
-            chr: UNKNOWN_CHR.to_string(),
-            start: UNKNOWN_START as u32,
-            end: UNKNOWN_END as u32,
+pub trait SpecialTokens {
+    fn unknown_token(&self) -> Region;
+    fn padding_token(&self) -> Region;
+    fn mask_token(&self) -> Region;
+    fn cls_token(&self) -> Region;
+    fn bos_token(&self) -> Region;
+    fn eos_token(&self) -> Region;
+    fn sep_token(&self) -> Region;
+    fn unknown_token_id(&self) -> u32;
+    fn padding_token_id(&self) -> u32;
+    fn mask_token_id(&self) -> u32;
+    fn cls_token_id(&self) -> u32;
+    fn bos_token_id(&self) -> u32;
+    fn eos_token_id(&self) -> u32;
+    fn sep_token_id(&self) -> u32;
+    fn special_tokens_map(&self) -> HashMap<SpecialToken, Region> {
+        let mut map: HashMap<SpecialToken, Region> = HashMap::new();
+
+        map.insert(SpecialToken::Unk, self.unknown_token());
+        map.insert(SpecialToken::Pad, self.padding_token());
+        map.insert(SpecialToken::Mask, self.mask_token());
+        map.insert(SpecialToken::Cls, self.cls_token());
+        map.insert(SpecialToken::Bos, self.bos_token());
+        map.insert(SpecialToken::Eos, self.eos_token());
+        map.insert(SpecialToken::Sep, self.sep_token());
+
+        map
+    }
+}
+
+pub trait AtttentionMask: SpecialTokens {
+    fn attention_mask(&self, tokens: &TokenizedRegionSet) -> Vec<u8> {
+        let mut mask: Vec<u8> = Vec::with_capacity(tokens.len());
+        let pad_token = self.padding_token();
+
+        for token in tokens {
+            if token.into_region() == pad_token {
+                mask.push(1)
+            } else {
+                mask.push(0)
+            }
+        }
+
+        mask
+    }
+}
+
+pub trait Pad: SpecialTokens {
+    fn pad(&self, tokens_list: &mut Vec<TokenizedRegionSet>) {
+        let pad_token = self.padding_token_id();
+        let longest = tokens_list.iter().map(|t| t.len()).max().unwrap();
+
+        for token in tokens_list.iter_mut() {
+            while token.len() < longest {
+                token.ids.push(pad_token);
+            }
         }
     }
+}
 
-    fn padding_token(&self) -> Region {
-        Region {
-            chr: PAD_CHR.to_string(),
-            start: PAD_START as u32,
-            end: PAD_END as u32,
-        }
-    }
+pub trait FromPretrained: Tokenizer {
+    fn from_pretrained(models: &str) -> Result<Self>
+    where
+        Self: Sized;
 }

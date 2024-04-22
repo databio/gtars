@@ -2,6 +2,7 @@
 //!
 //! There is currently only one tokenizer - the `TreeTokenizer`
 pub mod cli;
+pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
 
@@ -9,8 +10,10 @@ pub mod tree_tokenizer;
 pub mod consts {
     /// command for the `genimtools` cli
     pub const TOKENIZE_CMD: &str = "tokenize";
+    pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
 }
 
 // expose the TreeTokenizer struct to users of this crate
-pub use traits::Tokenizer;
+pub use traits::{Tokenizer, SingleCellTokenizer};
 pub use tree_tokenizer::TreeTokenizer;
+
