@@ -5,6 +5,7 @@ pub mod cli;
 pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
+pub mod soft_tokenizer;
 
 /// constants for the tokenizer module.
 pub mod consts {
