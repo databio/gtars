@@ -43,6 +43,8 @@ fn bb_bed_id() -> &'static str {
 }
 
 mod tests {
+    use std::io::Read;
+
     use genimtools::common::utils::extract_regions_from_bed_file;
 
     use super::*;
@@ -84,6 +86,23 @@ mod tests {
         let rs = RegionSet::try_from(path).unwrap();
 
         assert!(rs.len() == 25);
+    }
+
+    #[rstest]
+    fn test_region_set_from_bytes(path_to_bed_file: &str) {
+        let path = Path::new(path_to_bed_file);
+        let rs = RegionSet::try_from(path).unwrap();
+
+        let mut bytes: Vec<u8> = Vec::new();
+        
+        std::fs::File::open(path)
+            .unwrap()
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        let rs2 = RegionSet::from(bytes.as_slice());
+
+        assert!(rs2.len() == rs.len());
     }
 
     #[rstest]
