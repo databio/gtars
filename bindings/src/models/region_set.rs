@@ -14,11 +14,12 @@ use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
     pub regions: Vec<PyRegion>,
+    curr: usize
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
     fn from(value: Vec<PyRegion>) -> Self {
-        PyRegionSet { regions: value }
+        PyRegionSet { regions: value, curr: 0 }
     }
 }
 
@@ -31,8 +32,55 @@ impl PyRegionSet {
 
         Ok(PyRegionSet {
             regions: regions.into_iter().map(|region| region.into()).collect(),
+            curr: 0
         })
     }
+
+    pub fn __repr__(&self) -> String {
+        format!("RegionSet({} regions)", self.regions.len())
+    }
+
+    pub fn __len__(&self) -> usize {
+        self.regions.len()
+    }
+
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    pub fn __next__(&mut self) -> Option<PyRegion> {
+        if self.curr < self.regions.len() {
+            let region = self.regions[self.curr].clone();
+            self.curr += 1;
+
+            Some(PyRegion {
+                chr: region.chr,
+                start: region.start,
+                end: region.end
+            })
+        } else {
+            None
+        }
+    }
+
+    pub fn __getitem__(&self, indx: isize) -> Result<PyRegion> {
+        let indx = if indx < 0 {
+            self.regions.len() as isize + indx
+        } else {
+            indx
+        };
+        if indx < 0 || indx >= self.regions.len() as isize {
+            anyhow::bail!(PyIndexError::new_err("Index out of bounds"));
+        } else {
+            let r = self.regions[indx as usize].clone();
+            Ok(PyRegion {
+                chr: r.chr,
+                start: r.start,
+                end: r.end
+            })
+        }
+    }
+
 }
 
 #[pyclass(name = "TokenizedRegionSet")]

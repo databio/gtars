@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Iterator
 
 class Universe:
     """
@@ -84,6 +84,27 @@ class TokenizedRegion:
         """
     
     def __repr__(self) -> str: ...
+
+class RegionSet:
+    def __new__(cls, path: str) -> RegionSet:
+        """
+        Construct a new RegionSet object.
+
+        :param path: The path to the BED file.
+        """
+    
+    def __repr__(self) -> str: ...
+
+    def __len__(self) -> int: ...
+
+    def __iter__(self) -> Iterator[Region]: ...
+
+    def __next__(self) -> Region: ...
+
+    def __getitem__(self, indx: int) -> Region: ...
+    
+
+    
 
 class TokenizedRegionSet:
     def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
@@ -176,6 +197,41 @@ class TreeTokenizer:
     def sep_token(self) -> Region:
         """
         Get the SEP token.
+        """
+    
+    def unknown_token_id(self) -> int:
+        """
+        Get the ID of the unknown token.
+        """
+
+    def padding_token_id(self) -> int:
+        """
+        Get the ID of the padding token.
+        """
+
+    def mask_token_id(self) -> int:
+        """
+        Get the ID of the mask token.
+        """
+
+    def cls_token_id(self) -> int:
+        """
+        Get the ID of the CLS token.
+        """
+
+    def bos_token_id(self) -> int:
+        """
+        Get the ID of the BOS token.
+        """
+
+    def eos_token_id(self) -> int:
+        """
+        Get the ID of the EOS token.
+        """
+
+    def sep_token_id(self) -> int:
+        """
+        Get the ID of the SEP token.
         """
 
     def vocab_size(self) -> int:
