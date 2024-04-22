@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anndata::{AnnData, Backend};
-use anndata_hdf5::H5;
 use anyhow::Result;
 use hf_hub::api::sync::Api;
 use polars::prelude::*;
@@ -14,8 +12,6 @@ use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
 use crate::tokenizers::consts::UNIVERSE_FILE_NAME;
 use crate::tokenizers::traits::{FromPretrained, Pad, SpecialTokens, Tokenizer};
-
-use super::traits::SingleCellTokenizer;
 
 pub struct TreeTokenizer {
     pub universe: Universe,
@@ -205,17 +201,6 @@ impl Tokenizer for TreeTokenizer {
 
     fn vocab_size(&self) -> usize {
         self.universe.len()
-    }
-}
-
-impl SingleCellTokenizer for TreeTokenizer {
-    fn tokenize_anndata(&self, anndata: &Path) -> Result<Vec<TokenizedRegionSet>> {
-        let file = H5::open(anndata)?;
-        let adata = AnnData::<H5>::open(file)?;
-
-        let adata_vocab = adata.get_var();
-
-        Ok(vec![])
     }
 }
 

@@ -28,6 +28,11 @@ fn path_to_tokenize_bed_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_anndata_file() -> &'static str {
+    "tests/data/pbmc_hg38.h5ad"
+}
+
+#[fixture]
 fn path_to_r2v_repo() -> &'static str {
     "databio/r2v-luecken2021-hg38-v2"
 }
@@ -109,6 +114,12 @@ mod tests {
     #[rstest]
     fn test_create_tokenizer_from_hf_repo(path_to_r2v_repo: &str) {
         let tokenizer = TreeTokenizer::from_pretrained(path_to_r2v_repo).unwrap();
+        assert!(tokenizer.vocab_size() == 116497);
+    }
+
+    #[rstest]
+    fn test_create_anndata_tokenizer(path_to_bed_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
         assert!(tokenizer.vocab_size() == 116497);
     }
 
