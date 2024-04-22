@@ -378,7 +378,8 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
         let line = line?; // Propagate the potential error
         let mut iter = line.split('\t');
         let chrom_name = iter.next().unwrap().to_owned();
-        let size_str = iter.next().unwrap();
+        let _ = iter.next().unwrap();
+        let size_str = iter.next().unwrap(); // we really want the 3rd column which is the end column.
         let size = size_str.parse::<u32>()?;
 
         chrom_sizes.insert(chrom_name, size);
@@ -524,7 +525,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     adjusted_start_site = adjusted_start_site - smoothsize; // adjust based on smoothing
 
     //Check endsite generation
-    //current_end_site = adjusted_start_site + 1 + smoothsize*2;
+    current_end_site = adjusted_start_site + 1 + smoothsize*2;
 
     if adjusted_start_site < 1{
         adjusted_start_site = 1;
@@ -536,7 +537,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
         coordinate_position = coordinate_position + stepsize;
     }
 
-    prev_coordinate_value = adjusted_start_site;
+    //prev_coordinate_value = adjusted_start_site;
 
     for coord in vin_iter {
         coordinate_value = *coord;
@@ -547,9 +548,9 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
             adjusted_start_site = 1;
         }
 
-        current_end_site = adjusted_start_site + 1 + smoothsize*2; //
+        //current_end_site = adjusted_start_site + 1 + smoothsize*2; //
 
-        collected_end_sites.push(current_end_site);
+        collected_end_sites.push(adjusted_start_site + 1 + smoothsize*2);
 
         if adjusted_start_site == prev_coordinate_value
         {
@@ -590,7 +591,38 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
     }
 
-    // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+    //
+
+    while coordinate_position <= chrom_size{
+
+        while current_end_site==coordinate_position{
+
+            count = count - 1;
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0; // From original code. Double check this is the proper way.
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+
+        }
+
+        if coordinate_position % stepsize == 0{
+            // Step size defaults to 1, so report every value
+            v_coord_counts.push(count);
+            v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
+            //println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
+
+        }
+
+        //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+        coordinate_position = coordinate_position + 1;
+
+
+    }
+
 
     //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     return (v_coord_counts, v_coordinate_positions)
@@ -627,6 +659,7 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
     current_start_site = starts_vector[0].clone(); // get first coordinate position
+    current_end_site = ends_vector[0];
 
     //Check endsite generation
     //current_end_site = adjusted_start_site + 1 + smoothsize*2;
@@ -641,7 +674,7 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
         coordinate_position = coordinate_position + stepsize;
     }
 
-    prev_coordinate_value = current_start_site;
+    //prev_coordinate_value = current_start_site;
 
     for (index, coord) in starts_vector.iter().enumerate() {
         coordinate_value = *coord;
@@ -656,9 +689,9 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
 
         let current_index =  index;
 
-        current_end_site = ends_vector[current_index];
+        //current_end_site = ends_vector[current_index];
 
-        collected_end_sites.push(current_end_site);
+        collected_end_sites.push(ends_vector[current_index]);
 
         if current_start_site == prev_coordinate_value
         {
@@ -697,9 +730,42 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
 
         prev_coordinate_value = current_start_site;
 
+
     }
 
-    // TODO Finish out chromosome by writing 0 for the remainder of the Chromosome. Is this actually necessary?
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+    //
+
+    while coordinate_position <= chrom_size{
+
+        while current_end_site==coordinate_position{
+
+            count = count - 1;
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0; // From original code. Double check this is the proper way.
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+
+        }
+
+        if coordinate_position % stepsize == 0{
+            // Step size defaults to 1, so report every value
+            v_coord_counts.push(count);
+            v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
+            //println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
+
+        }
+
+        //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+        coordinate_position = coordinate_position + 1;
+
+
+    }
+
+
 
     //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     return (v_coord_counts, v_coordinate_positions)
