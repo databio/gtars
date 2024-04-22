@@ -182,15 +182,13 @@ mod tests {
     #[rstest]
     fn test_run_uniwig_main(path_to_bed_file: &str) {
 
-        let sorted: bool = true;
         let smoothsize: i32 = 5;
-        let writesize: i32 = 1;
         let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test5.bed";
         let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
         let bwfileheader: &str = "/home/drc/Downloads/test_rust_wig/";
         let output_type ="wig";
 
-        uniwig_main(sorted, smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
+        uniwig_main(smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
 
     }
 
@@ -211,10 +209,6 @@ mod tests {
         let starts: Vec<i32> = vec![1,4,4,7,9,9];
         let ends: Vec<i32> = vec![3,6,6,9,10,11];
         let res = count_coordinate_reads_start_end(&starts, &ends);
-
-        // example output, counting number of reads at each position
-        // let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
-        // assert_eq!(res, answer);
 
     }
 }

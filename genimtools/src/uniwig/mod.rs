@@ -135,15 +135,9 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
 pub fn run_uniwig(matches: &ArgMatches) {
     println!("I am running. Here are the arguments: {:?}", matches);
 
-
-
     let combinedbedpath = matches
         .get_one::<String>("bed")
         .expect("combined bed path is required");
-
-    // let filelist = matches
-    //     .get_one::<String>("filelist")
-    //     .expect("File list path is required");
 
     let chromsizerefpath = matches
         .get_one::<String>("chromref")
@@ -153,10 +147,6 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<String>("fileheader")
         .expect("fileheader is required");
 
-    let sorted = matches
-        .get_one::<bool>("sorted")
-        .expect("is the combined bedfile sorted? this information is required");
-
     let smoothsize = matches
         .get_one::<i32>("smoothsize")
         .expect("smoothsize required");
@@ -165,24 +155,13 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<String>("outputtype")
         .expect("output type is required");
 
-    //let sorted: bool = true;
-    //let smoothsize: i32 = 5;
-    //let writesize: i32 = 1;
-    //let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test_sorted_small.bed";
-    //let combinedbedpath: &str = "/Users/drcwork/GITHUB/uniwig/test/test5.bed";
-    //let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
-    //let chromsizerefpath: String = "/Users/drcwork/GITHUB/uniwig/test/hg38.chrom.sizes".to_string();
-    //let bwfileheader: &str = "/home/drc/Downloads/test";
-    //let bwfileheader: &str = "/Users/drcwork/Downloads/uniwig_test";
-    //let output_type: &str = "wig";
 
-
-    uniwig_main(*sorted, *smoothsize, combinedbedpath, chromsizerefpath, bwfileheader, output_type)
+    uniwig_main(*smoothsize, combinedbedpath, chromsizerefpath, bwfileheader, output_type)
 
 
 }
 
-pub fn uniwig_main(sorted: bool, smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &String, bwfileheader: &str, output_type: &str){
+pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &String, bwfileheader: &str, output_type: &str){
     // Main Function
 
     //println!("Hello from Uniwig main");
@@ -201,6 +180,10 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, combinedbedpath: &str, _chromsi
 
 
     let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
+        // original program gets chromosome size from a .sizes file, e.g. chr1 248956422
+        // the original program simply pushes 0's until the end of the chromosome length and writes these to file.
+        // can we instead just use the last endsite for each chromosome to save space in th wiggle file?
+
         Ok(chrom_sizes) => chrom_sizes,
         Err(err) => {
             println!("Error reading chromosome sizes: {}", err);
@@ -209,127 +192,114 @@ pub fn uniwig_main(sorted: bool, smoothsize:i32, combinedbedpath: &str, _chromsi
     };
 
 
-    if sorted {
-        println!("Sorted is true");
-
-        let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
-
-        let num_chromosomes = chromosomes.len();
-
-        println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
-
-        // Preallocate memory based on number of chromsomes from previous step
-        let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
-        let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
-
-        println!("Processing each chromosome...");
-        for chromosome in chromosomes.iter() {
-
-            //TODO CHECK HERE TO DETERMINE IF THE CHROMOSOME STARTS AND ENDS ARE THE SAME LENGTH
-
-            if chromosome.starts.len() != chromosome.ends.len(){
-                println!("Chromosome starts and ends are not equal!");
-                break
-            }
-
-            let chrom_name = chromosome.chrom.clone();
-            //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-            chroms.push(chrom_name.clone());
-
-            //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
-            let current_chrom_size =chrom_sizes[&chromosome.chrom] as i32;
-
-            // Original Steps
-            // Create bigwig file
-            // Create header from chroms and chr lens
-            // write to bigwig file with smoothing IF smoothsize is set
-            // original code skips this if smoothsize is not set
-            // Close bigwig file
-
-            // Iterate 3 times to output the three different files.
-            for j in 0..3 {
-                // Original code uses:
-                // bwOpen, then bwCreateChromList, then bwWriteHdr
-
-                let mut _success_count = 0;
-                let mut _failure_count = 0;
 
 
 
-                if smoothsize != 0 {
-                    match j {
-                        0 => {
-                            println!("Write Starts Here");
-                            //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
-                            //let count_result = count_coordinate_reads(&chromosome.starts);
-                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+    let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
 
-                            let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
+    let num_chromosomes = chromosomes.len();
+
+    println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
+
+    // Preallocate memory based on number of chromsomes from previous step
+    let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
+    let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
+
+    println!("Processing each chromosome...");
+    for chromosome in chromosomes.iter() {
+
+
+        if chromosome.starts.len() != chromosome.ends.len(){
+            println!("Chromosome starts and ends are not equal!");
+            break
+        }
+
+        let chrom_name = chromosome.chrom.clone();
+        //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
+        chroms.push(chrom_name.clone());
+
+        //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
+        let current_chrom_size =chrom_sizes[&chromosome.chrom] as i32;
+
+
+        // Iterate 3 times to output the three different files.
+        for j in 0..3 {
+            // Original code uses:
+            // bwOpen, then bwCreateChromList, then bwWriteHdr
+
+            let mut _success_count = 0;
+            let mut _failure_count = 0;
+
+
+
+            if smoothsize != 0 {
+                match j {
+                    0 => {
+                        println!("Write Starts Here");
+                        //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
+                        //let count_result = count_coordinate_reads(&chromosome.starts);
+                        //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                        let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
+
+                        match output_type {
+                            "wig" => {
+
+                                println!("Writing to wig file!");
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone());
+
+
+                            },
+                            "csv" => {println!("Write to CSV. Not Implemented");},
+                            _ => {println!("Default to wig file.")},
+                        }
+                    },
+                    1 => {
+                        println!("Write Ends Here");
+                        //let count_result = count_coordinate_reads(&chromosome.ends);
+                        let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
+                        //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                        match output_type {
+                            "wig" => {
+
+                                println!("Writing to wig file!");
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone());
+
+                            },
+                            "csv" => {println!("Write to CSV. Not Implemented");},
+                            _ => {println!("Default to wig file.")},
+                        }
+                    },
+                    2 => {
+
+                            println!("Write Core Here");
+
+                            let core_results = Fixed_Core_Wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
 
                             match output_type {
                                 "wig" => {
 
-                                    println!("Writing to wig file!");
-                                    write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone());
+                                    println!("Writing to CORE RESULTS wig file!");
+                                    //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
+                                    write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone());
 
 
                                 },
                                 "csv" => {println!("Write to CSV. Not Implemented");},
                                 _ => {println!("Default to wig file.")},
                             }
-                        },
-                        1 => {
-                            println!("Write Ends Here");
-                            //let count_result = count_coordinate_reads(&chromosome.ends);
-                            let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
-                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
-                            match output_type {
-                                "wig" => {
-
-                                    println!("Writing to wig file!");
-                                    write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone());
-
-                                },
-                                "csv" => {println!("Write to CSV. Not Implemented");},
-                                _ => {println!("Default to wig file.")},
-                            }
-                        },
-                        2 => {
-
-                                println!("Write Core Here");
-
-                                let core_results = Fixed_Core_Wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
-
-                                match output_type {
-                                    "wig" => {
-
-                                        println!("Writing to CORE RESULTS wig file!");
-                                        //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
-                                        write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone());
-
-
-                                    },
-                                    "csv" => {println!("Write to CSV. Not Implemented");},
-                                    _ => {println!("Default to wig file.")},
-                                }
-
-                        },
-                        _ => println!("Unexpected value: {}", j), // Handle unexpected values
-                    }
+                    },
+                    _ => println!("Unexpected value: {}", j), // Handle unexpected values
                 }
             }
         }
-
-
-
-    } else{
-        println!("read_bed_map goes here if sorted is untrue");
-        // std::map<std::string, chromosome> chromosomes;
-        read_bed_map(combinedbedpath);
-
-
     }
+
+
+
+
 
 
 
