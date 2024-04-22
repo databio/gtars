@@ -83,7 +83,7 @@ mod tests {
         let path = Path::new(path_to_bed_file);
         let rs = RegionSet::try_from(path).unwrap();
 
-        assert!(rs.regions.height() == 25);
+        assert!(rs.len() == 25);
     }
 
     #[rstest]
@@ -102,7 +102,7 @@ mod tests {
         // read the temporary file back in as a region set
         let rs2 = RegionSet::try_from(tmp_path).unwrap();
 
-        assert!(rs2.regions.height() == 25);
+        assert!(rs2.len() == 25);
     }
 
     #[rstest]

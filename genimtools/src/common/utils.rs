@@ -7,28 +7,8 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
-use polars::datatypes::DataType;
-use polars::prelude::*;
 
-use crate::common::consts::{CHR_COL_NAME, DELIMITER, END_COL_NAME, START_COL_NAME};
 use crate::common::models::region::Region;
-
-pub fn bed_file_to_df(path: &Path) -> Result<DataFrame> {
-    let schema = Schema::from_iter(vec![
-        Field::new(CHR_COL_NAME, DataType::Utf8),
-        Field::new(START_COL_NAME, DataType::UInt32),
-        Field::new(END_COL_NAME, DataType::UInt32),
-    ]);
-
-    let df = CsvReader::from_path(path)?
-        .has_header(false)
-        .with_schema(Some(Arc::new(schema)))
-        .with_separator(DELIMITER as u8)
-        .truncate_ragged_lines(true)
-        .finish()?;
-
-    Ok(df)
-}
 
 pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     let mut current_id = 0;
