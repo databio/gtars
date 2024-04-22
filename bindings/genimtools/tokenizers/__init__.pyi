@@ -1,54 +1,299 @@
-from typing import List
+from typing import List, Tuple, Iterator
+
+class Universe:
+    """
+    A Universe object represents a set of regions.
+    
+    All tokenizers are created from a Universe object.
+    """
+
+    @property
+    def regions(self) -> List[Region]:
+        """
+        The regions in the universe.
+        """
 
 class Region:
-    chr: str
-    start: int
-    end: int
+    def __new__(cls, chrom: str, start: int, end: int) -> Region:
+        """
+        Construct a new Region object.
+
+        :param chrom: The chromosome name.
+        :param start: The start position.
+        :param end: The end position.
+        """
+    
+    @property
+    def chr(self) -> str:
+        """
+        The chromosome name for this region.
+        """
+
+    @property
+    def start(self) -> int:
+        """
+        The start position for this region.
+        """
+
+    @property
+    def end(self) -> int:
+        """
+        The end position for this region.
+        """
+
+    def __repr__(self) -> str: ...
 
 class TokenizedRegion:
-    chr: str
-    start: int
-    end: int
-    id: int
+    """
+    A TokenizedRegion object represents a tokenized region.
+    """
+
+    @property
+    def chr(self) -> str:
+        """
+        The chromosome name for this region.
+        """
+    
+    @property
+    def start(self) -> int:
+        """
+        The start position for this region.
+        """
+    
+    @property
+    def end(self) -> int:
+        """
+        The end position for this region.
+        """
+
+    @property
+    def id(self) -> int:
+        """
+        The integer representation of the tokenized region.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
+        """
+    
+    def to_region(self) -> Region:
+        """
+        Convert the tokenized region back to the original region.
+        """
+    
+    def __repr__(self) -> str: ...
+
+class RegionSet:
+    def __new__(cls, path: str) -> RegionSet:
+        """
+        Construct a new RegionSet object.
+
+        :param path: The path to the BED file.
+        """
+    
+    def __repr__(self) -> str: ...
+
+    def __len__(self) -> int: ...
+
+    def __iter__(self) -> Iterator[Region]: ...
+
+    def __next__(self) -> Region: ...
+
+    def __getitem__(self, indx: int) -> Region: ...
 
 class TokenizedRegionSet:
-    def regions(self) -> List[TokenizedRegion]:
+    def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
         """
-        Get the list of regions in this set.
+        Construct a new TokenizedRegionSet object.
+
+        :param regions: The original regions.
+        :param tokens: The tokenized regions.
         """
-        
+    
+    @property
     def ids(self) -> List[int]:
         """
-        Get the list of IDs in this set.
+        Integer representation of the tokenized regions.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
+        """
+
+    def to_bit_vector(self) -> List[int]:
+        """
+        Convert the tokenized regions to a bit vector.
+        """
+    
+    def to_regions(self) -> List[Region]:
+        """
+        Convert the tokenized regions back to the original regions.
         """
     
     def ids_as_strs(self) -> List[str]:
         """
-        Get the list of IDs in this set as strings. This
-        is specifically meant for geniml workflows which requires
-        strings
+        Get the integer representations of the tokenized regions as strings. This
+        is useful for applications that require string representations of the
+        tokenized regions.
         """
+    
+    def __len__(self) -> int: ...
+
+    def __repr__(self) -> str: ...
 
 class TreeTokenizer:
-    def __init__(self, universe: str) -> None:
+    def __new__(cls, path: str) -> TreeTokenizer:
         """
-        Instatiate a new TreeTokenizer. This tokenizer takes advantage of
-        interval trees to compute genomic interval overlaps efficiently.
-        
-        :param universe: The universe of characters to use for tokenization.
+        Construct a new TreeTokenize from a universe file.
+
+        :param path: The path to the universe file. This should be a BED file.
         """
-        pass
     
-    def tokenize(self, regions: List[Region]) -> TokenizedRegionSet:
+    @classmethod
+    def from_pretrained(cls, path: str) -> TreeTokenizer:
+        """
+        Load a pretrained TreeTokenizer from a model on huggingface.
+
+        :param path: The path to the pretrained model on huggingface.
+        """
+    
+    def unknown_token(self) -> Region:
+        """
+        Get the unknown token.
+        """
+
+    def padding_token(self) -> Region:
+        """
+        Get the padding token.
+        """
+
+    def mask_token(self) -> Region:
+        """
+        Get the mask token.
+        """
+
+    def cls_token(self) -> Region:
+        """
+        Get the CLS token.
+        """
+
+    def bos_token(self) -> Region:
+        """
+        Get the BOS token.
+        """
+
+    def eos_token(self) -> Region:
+        """
+        Get the EOS token.
+        """
+
+    def sep_token(self) -> Region:
+        """
+        Get the SEP token.
+        """
+    
+    def unknown_token_id(self) -> int:
+        """
+        Get the ID of the unknown token.
+        """
+
+    def padding_token_id(self) -> int:
+        """
+        Get the ID of the padding token.
+        """
+
+    def mask_token_id(self) -> int:
+        """
+        Get the ID of the mask token.
+        """
+
+    def cls_token_id(self) -> int:
+        """
+        Get the ID of the CLS token.
+        """
+
+    def bos_token_id(self) -> int:
+        """
+        Get the ID of the BOS token.
+        """
+
+    def eos_token_id(self) -> int:
+        """
+        Get the ID of the EOS token.
+        """
+
+    def sep_token_id(self) -> int:
+        """
+        Get the ID of the SEP token.
+        """
+
+    def vocab_size(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def tokenize(self, regions: List[Region]) -> List[Region]:
+        """
+        Tokenize a list of regions. This will only return the tokenized regions.
+
+        :param regions: The regions to tokenize.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def tokenize_bed_file(self, path: str) -> List[Region]:
+        """
+        Tokenize a BED file directly.
+
+        :param path: The path to the BED file.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def encode(self, regions: List[Region]) -> List[int]:
+        """
+        Encode a list of regions. This will return the integer representation of the tokenized regions.
+
+        :param regions: The regions to encode.
+
+        :return: The integer representation of the tokenized regions.
+        """
+
+    def decode(self, ids: List[int]) -> List[Region]:
+        """
+        Decode a list of integer representations of the tokenized regions.
+
+        :param ids: The integer representations of the tokenized regions.
+
+        :return: The decoded regions.
+        """
+
+    def vocab(self) -> List[Tuple[Region, int]]:
+        """
+        Get the vocabulary.
+
+        :return: The vocabulary as a list of tuples.
+        """
+
+    def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
         """
         Tokenize a list of regions.
-        """
-    
-    def tokenize_bed_file(self, bed_file: str) -> TokenizedRegionSet:
-        """
-        Tokenize a bed file directly.
 
-        This was added to create a more performant tokenization strategy
-        that could tokenize directly from disk in rust instead of using
-        pandas.
+        :param regions: The regions to tokenize.
+
+        :return: A TokenizedRegionSet object.
+        """
+
+    def __len__(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def __repr__(self) -> str:
+        """
+        Get a string representation of the tokenizer.
         """

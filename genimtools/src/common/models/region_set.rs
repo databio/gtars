@@ -3,6 +3,8 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
+use anyhow::Result;
+
 use crate::common::consts::{CHR_COL_NAME, END_COL_NAME, START_COL_NAME};
 use crate::common::models::Region;
 
@@ -13,9 +15,9 @@ pub struct RegionSet {
 }
 
 impl TryFrom<&Path> for RegionSet {
-    type Error = Box<dyn std::error::Error>;
+    type Error = anyhow::Error;
 
-    fn try_from(value: &Path) -> Result<Self, Self::Error> {
+    fn try_from(value: &Path) -> Result<Self> {
         let regions = bed_file_to_df(value)?;
         Ok(RegionSet { regions })
     }
@@ -45,7 +47,7 @@ impl From<Vec<Region>> for RegionSet {
 }
 
 impl RegionSet {
-    pub fn to_bed(&self, path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn to_bed(&self, path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
 
         let chrs = self.regions.column(CHR_COL_NAME).unwrap();

@@ -1,1 +1,1 @@
-from .genimtools.ailist import *
+from .genimtools.ailist import *  # noqa: F403

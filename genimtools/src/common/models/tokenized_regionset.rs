@@ -1,33 +1,74 @@
-use std::error::Error;
 use std::fs::File;
 use std::io::Write;
+use std::ops::Index;
 use std::path::PathBuf;
 
-use crate::common::consts::{PAD_CHR, PAD_END, PAD_START};
+use anyhow::Result;
+
 use crate::common::models::region::Region;
 use crate::common::models::tokenized_region::TokenizedRegion;
 use crate::common::models::universe::Universe;
 use crate::io::write_tokens_to_gtok;
 
+use super::RegionSet;
+
 pub struct TokenizedRegionSet<'a> {
-    pub regions: Vec<Region>,
+    pub ids: Vec<u32>,
     pub universe: &'a Universe,
 }
 
+impl From<TokenizedRegionSet<'_>> for RegionSet {
+    fn from(val: TokenizedRegionSet<'_>) -> Self {
+        let regions: Vec<Region> = val
+            .ids
+            .iter()
+            .map(|id| val.universe.regions[*id as usize].clone())
+            .collect();
+
+        RegionSet::from(regions)
+    }
+}
+
+impl From<TokenizedRegionSet<'_>> for Vec<u8> {
+    fn from(val: TokenizedRegionSet<'_>) -> Self {
+        let mut bit_vector: Vec<u8> = Vec::with_capacity(val.universe.len());
+
+        for id in val.ids {
+            bit_vector[id as usize] = 1;
+        }
+
+        bit_vector
+    }
+}
+
+impl From<TokenizedRegionSet<'_>> for Vec<Region> {
+    fn from(value: TokenizedRegionSet<'_>) -> Self {
+        value
+            .ids
+            .iter()
+            .map(|id| value.universe.id_to_region[&id].to_owned())
+            .collect()
+    }
+}
+
+impl<'a> Index<usize> for TokenizedRegionSet<'a> {
+    type Output = u32;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.ids[index]
+    }
+}
+
 impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
-    type Item = TokenizedRegion;
-    type IntoIter = std::vec::IntoIter<TokenizedRegion>;
+    type Item = TokenizedRegion<'a>;
+    type IntoIter = std::vec::IntoIter<TokenizedRegion<'a>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut tokenized_regions = Vec::with_capacity(self.regions.len());
-        for region in self.regions.iter() {
-            let id = self.universe.convert_region_to_id(region);
-
+        let mut tokenized_regions = Vec::with_capacity(self.ids.len());
+        for id in self.ids.iter() {
             let tokenized_region: TokenizedRegion = TokenizedRegion {
-                chr: region.chr.to_owned(),
-                start: region.start,
-                end: region.end,
-                id,
+                universe: self.universe,
+                id: *id,
             };
 
             tokenized_regions.push(tokenized_region);
@@ -45,8 +86,8 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `regions` - A vector of regions
     /// * `universe` - A reference to a Universe
     ///
-    pub fn new(regions: Vec<Region>, universe: &'a Universe) -> Self {
-        TokenizedRegionSet { regions, universe }
+    pub fn new(ids: Vec<u32>, universe: &'a Universe) -> Self {
+        TokenizedRegionSet { ids, universe }
     }
 
     ///
@@ -55,17 +96,14 @@ impl<'a> TokenizedRegionSet<'a> {
     /// # Arguments
     /// * `path` - A PathBuf to write the BED file to
     ///
-    pub fn to_bed_file(&self, path: &PathBuf) -> Result<(), Box<dyn Error>> {
+    pub fn to_bed_file(&self, path: &PathBuf) -> Result<()> {
         let mut file = File::create(path)?;
-        for region in self.regions.iter() {
-            let line = format!(
-                "{}\t{}\t{}\n",
-                region.chr.to_owned(),
-                region.start,
-                region.end
-            );
+        for id in self.ids.iter() {
+            let r = self.universe.id_to_region.get(id).unwrap();
+            let line = format!("{}\t{}\t{}\n", r.chr, r.start, r.end);
             file.write_all(line.as_bytes())?;
         }
+
         Ok(())
     }
 
@@ -73,54 +111,47 @@ impl<'a> TokenizedRegionSet<'a> {
     /// Write a TokenizedRegionSet to a .gtok file
     /// * `path` - A PathBuf to write the .gtok file to
     ///
-    pub fn to_gtok_file(&self, path: &str) -> Result<(), Box<dyn Error>> {
-        let tokens = self.to_region_ids();
-        write_tokens_to_gtok(path, &tokens)?;
+    pub fn to_gtok_file(&self, path: &str) -> Result<()> {
+        let tokens = &self.ids;
+        write_tokens_to_gtok(path, tokens)?;
         Ok(())
     }
 
     ///
-    /// Convert a TokenizedRegionSet to a vector of region IDs
-    ///
-    pub fn to_region_ids(&self) -> Vec<u32> {
-        let mut region_ids = Vec::new();
-        for region in &self.regions {
-            region_ids.push(self.universe.convert_chr_start_end_to_id(
-                &region.chr,
-                region.start,
-                region.end,
-            ));
-        }
-        region_ids
+    /// Get the tokenized regions as a vector of ids
+    /// * Returns a vector of u32
+    pub fn ids(&self) -> Vec<u32> {
+        self.ids.clone()
     }
 
     ///
-    /// Pad a tokenized region set
-    ///
-    pub fn pad(&mut self, len: usize) {
-        // this is wrong: the padding token might not be in the universe
-        let pad_region = Region {
-            chr: PAD_CHR.to_string(),
-            start: PAD_START as u32,
-            end: PAD_END as u32,
-        };
+    /// Get the tokenized regions into a dedicated RegionSet
+    /// * Returns a RegionSet
+    pub fn into_region_set(self) -> RegionSet {
+        self.into()
+    }
 
-        while self.regions.len() < len {
-            self.regions.push(pad_region.clone());
-        }
+    ///
+    /// Get the tokenized regions as a vector of u8
+    /// * Returns a vector of u8
+    pub fn into_bit_vector(self) -> Vec<u8> {
+        self.into()
+    }
+
+    ///
+    /// Get the tokenized regions as a vector of regions
+    /// * Returns a vector of regions
+    pub fn into_region_vec(self) -> Vec<Region> {
+        self.into()
     }
 }
 
 impl<'a> TokenizedRegionSet<'a> {
-    pub fn from(regions: Vec<Region>, universe: &'a Universe) -> Self {
-        TokenizedRegionSet { regions, universe }
-    }
-
     pub fn len(&self) -> usize {
-        self.regions.len()
+        self.ids.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.regions.is_empty()
+        self.ids.is_empty()
     }
 }
