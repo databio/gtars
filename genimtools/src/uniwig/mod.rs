@@ -30,10 +30,10 @@ impl Clone for Chromosome {
 }
 
 
-pub fn read_bed_map(combinedbedpath: &str){
-
-
-}
+// pub fn read_bed_map(combinedbedpath: &str){
+//
+//
+// }
 
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
@@ -358,108 +358,108 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
     Ok(chrom_sizes)
 }
 
-pub fn count_coordinate_reads(input_vector: &Vec<i32>) -> Vec<u8> {
-    // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
-    // else place a 0 at the position if no counts exist.
+// pub fn count_coordinate_reads(input_vector: &Vec<i32>) -> Vec<u8> {
+//     // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
+//     // else place a 0 at the position if no counts exist.
+//
+//     // based on smoothFixedStarEndBW from orig uniwig but does not use a stepsize nor perform any smoothing
+//
+//     //println!("DEBUG: Executing count_coordinate_reads");
+//
+//     let vin_iter = input_vector.iter();
+//     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+//
+//     let mut coordinate_position = 1;
+//     let mut count = 0;
+//
+//     let mut coordinate_value = 0;
+//     let mut prev_coordinate_value = 0;
+//
+//     for coord in vin_iter{
+//
+//         coordinate_value = *coord;
+//
+//         if coordinate_value == prev_coordinate_value
+//         {
+//             count +=1;
+//             continue;
+//
+//         }
+//         while prev_coordinate_value > coordinate_position {
+//             // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
+//             v_coord_counts.push(0);
+//             coordinate_position +=1;
+//         }
+//
+//         v_coord_counts.push(count);
+//         prev_coordinate_value = coordinate_value;
+//         count = 1;
+//         coordinate_position +=1;
+//     }
+//
+//     // Must finish out final value
+//     while coordinate_value > coordinate_position{
+//         v_coord_counts.push(0);
+//         coordinate_position += 1;
+//     }
+//
+//     v_coord_counts.push(count);
+//
+//     return v_coord_counts
+// }
 
-    // based on smoothFixedStarEndBW from orig uniwig but does not use a stepsize nor perform any smoothing
-
-    //println!("DEBUG: Executing count_coordinate_reads");
-
-    let vin_iter = input_vector.iter();
-    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-
-    let mut coordinate_position = 1;
-    let mut count = 0;
-
-    let mut coordinate_value = 0;
-    let mut prev_coordinate_value = 0;
-
-    for coord in vin_iter{
-
-        coordinate_value = *coord;
-
-        if coordinate_value == prev_coordinate_value
-        {
-            count +=1;
-            continue;
-
-        }
-        while prev_coordinate_value > coordinate_position {
-            // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
-            v_coord_counts.push(0);
-            coordinate_position +=1;
-        }
-
-        v_coord_counts.push(count);
-        prev_coordinate_value = coordinate_value;
-        count = 1;
-        coordinate_position +=1;
-    }
-
-    // Must finish out final value
-    while coordinate_value > coordinate_position{
-        v_coord_counts.push(0);
-        coordinate_position += 1;
-    }
-
-    v_coord_counts.push(count);
-
-    return v_coord_counts
-}
-
-pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>) -> Vec<u8> {
-    // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
-    // within a window based on the end point
-    // else place a 0 at the position if no counts exist.
-
-    // based on fixedCoreBW from orig uniwig but does not use a stepsize
-
-    // TODO in progress
-
-    //println!("DEBUG: Executing count_coordinate_reads");
-
-    let vin_iter = starts_vector.iter();
-    let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-
-    let mut coordinate_position = 1;
-    let mut count = 0;
-
-    let mut coordinate_value = 0;
-    let mut prev_coordinate_value = 0;
-
-    for coord in vin_iter{
-
-        coordinate_value = *coord;
-
-        if coordinate_value == prev_coordinate_value
-        {
-            count +=1;
-            continue;
-
-        }
-        while prev_coordinate_value > coordinate_position {
-            // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
-            v_coord_counts.push(0);
-            coordinate_position +=1;
-        }
-
-        v_coord_counts.push(count);
-        prev_coordinate_value = coordinate_value;
-        count = 1;
-        coordinate_position +=1;
-    }
-
-    // Must finish out final value
-    while coordinate_value > coordinate_position{
-        v_coord_counts.push(0);
-        coordinate_position += 1;
-    }
-
-    v_coord_counts.push(count);
-
-    return v_coord_counts
-}
+// pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>) -> Vec<u8> {
+//     // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
+//     // within a window based on the end point
+//     // else place a 0 at the position if no counts exist.
+//
+//     // based on fixedCoreBW from orig uniwig but does not use a stepsize
+//
+//
+//
+//     //println!("DEBUG: Executing count_coordinate_reads");
+//
+//     let vin_iter = starts_vector.iter();
+//     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+//
+//     let mut coordinate_position = 1;
+//     let mut count = 0;
+//
+//     let mut coordinate_value = 0;
+//     let mut prev_coordinate_value = 0;
+//
+//     for coord in vin_iter{
+//
+//         coordinate_value = *coord;
+//
+//         if coordinate_value == prev_coordinate_value
+//         {
+//             count +=1;
+//             continue;
+//
+//         }
+//         while prev_coordinate_value > coordinate_position {
+//             // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
+//             v_coord_counts.push(0);
+//             coordinate_position +=1;
+//         }
+//
+//         v_coord_counts.push(count);
+//         prev_coordinate_value = coordinate_value;
+//         count = 1;
+//         coordinate_position +=1;
+//     }
+//
+//     // Must finish out final value
+//     while coordinate_value > coordinate_position{
+//         v_coord_counts.push(0);
+//         coordinate_position += 1;
+//     }
+//
+//     v_coord_counts.push(count);
+//
+//     return v_coord_counts
+// }
 
 pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
