@@ -14,7 +14,7 @@ use crate::tokenizers::traits::{FromPretrained, Pad, SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
     pub universe: Universe,
-    pub tree: HashMap<String, Lapper<u32, u32>>,
+    tree: HashMap<String, Lapper<u32, u32>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
