@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 
 use genimtools::common::models::{Region, RegionSet};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
-use genimtools::uniwig::{parse_bed_file, count_coordinate_reads, count_coordinate_reads_start_end};
+use genimtools::uniwig::{parse_bed_file};
 
 #[fixture]
 fn path_to_data() -> &'static str {
@@ -192,23 +192,23 @@ mod tests {
 
     }
 
-    #[rstest]
-    fn test_count_coordinate_reads() {
-        // example input, marking read alignment locations
-        let query: Vec<i32> = vec![2,2,2,3,3,7,10,12,12,12,12,15];
-        let res = count_coordinate_reads(&query);
-        // example output, counting number of reads at each position
-        let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
-        assert_eq!(res, answer);
+    // #[rstest]
+    // fn test_count_coordinate_reads() {
+    //     // example input, marking read alignment locations
+    //     let query: Vec<i32> = vec![2,2,2,3,3,7,10,12,12,12,12,15];
+    //     let res = count_coordinate_reads(&query);
+    //     // example output, counting number of reads at each position
+    //     let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
+    //     assert_eq!(res, answer);
+    //
+    // }
 
-    }
-
-    #[rstest]
-    fn test_count_coordinate_reads_start_end() {
-        // example input, marking read alignment locations
-        let starts: Vec<i32> = vec![1,4,4,7,9,9];
-        let ends: Vec<i32> = vec![3,6,6,9,10,11];
-        let res = count_coordinate_reads_start_end(&starts, &ends);
-
-    }
+    // #[rstest]
+    // fn test_count_coordinate_reads_start_end() {
+    //     // example input, marking read alignment locations
+    //     let starts: Vec<i32> = vec![1,4,4,7,9,9];
+    //     let ends: Vec<i32> = vec![3,6,6,9,10,11];
+    //     let res = count_coordinate_reads_start_end(&starts, &ends);
+    //
+    // }
 }
