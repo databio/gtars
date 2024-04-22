@@ -102,9 +102,6 @@ class RegionSet:
     def __next__(self) -> Region: ...
 
     def __getitem__(self, indx: int) -> Region: ...
-    
-
-    
 
 class TokenizedRegionSet:
     def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
