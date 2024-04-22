@@ -3,7 +3,6 @@ use std::path::Path;
 
 use anyhow::Result;
 use hf_hub::api::sync::Api;
-use polars::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
 use crate::bbclient::{Bbclient, BedbaseFileCache};
@@ -135,48 +134,15 @@ impl Tokenizer for TreeTokenizer {
     }
 
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet {
-        let chrs = region_set.chrs();
-        let starts = region_set.starts();
-        let ends = region_set.ends();
-
         let mut tokenized_regions: Vec<u32> = Vec::new();
 
-        for i in 0..region_set.len() {
-            let chr: String;
-            let start: u32;
-            let end: u32;
+        for region in region_set {
 
-            if let AnyValue::Utf8(v) = chrs.get(i).unwrap() {
-                chr = v.to_string();
-            } else {
-                panic!(
-                    "chr column must be of type Utf8, instead found {:?}",
-                    chrs.get(i).unwrap()
-                );
-            }
+            let lapper = self.tree.get(&region.chr);
 
-            if let AnyValue::UInt32(v) = starts.get(i).unwrap() {
-                start = v;
-            } else {
-                panic!(
-                    "start column must be of type UInt32, instead found {:?}",
-                    starts.get(i).unwrap()
-                );
-            }
-
-            if let AnyValue::UInt32(v) = ends.get(i).unwrap() {
-                end = v;
-            } else {
-                panic!(
-                    "end column must be of type UInt32, instead found {:?}",
-                    ends.get(i).unwrap()
-                );
-            }
-
-            let lapper = self.tree.get(&chr);
             match lapper {
                 Some(tree) => {
-                    let intervals = tree.find(start, end);
+                    let intervals = tree.find(region.start, region.end);
 
                     let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
