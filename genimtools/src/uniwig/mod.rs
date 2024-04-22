@@ -240,7 +240,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                         //let count_result = count_coordinate_reads(&chromosome.starts);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
-                        let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
+                        let count_result = smooth_fixed_start_end_wiggle(&chromosome.starts,current_chrom_size,smoothsize, stepsize);
 
                         match output_type {
                             "wig" => {
@@ -257,7 +257,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                     1 => {
                         println!("Write Ends Here");
                         //let count_result = count_coordinate_reads(&chromosome.ends);
-                        let count_result = smooth_Fixed_Start_End_Wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
+                        let count_result = smooth_fixed_start_end_wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
                         match output_type {
@@ -275,7 +275,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                             println!("Write Core Here");
 
-                            let core_results = Fixed_Core_Wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
+                            let core_results = fixed_core_wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
 
                             match output_type {
                                 "wig" => {
@@ -461,7 +461,7 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
 //     return v_coord_counts
 // }
 
-pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
+pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
     // It allows the user to accumulate reads of either starts or ends
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
@@ -598,7 +598,7 @@ pub fn smooth_Fixed_Start_End_Wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     return (v_coord_counts, v_coordinate_positions)
 }
 
-pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
+pub fn fixed_core_wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of fixedCoreBW from uniwig written in CPP
     // It allows the user to accumulate reads of across paired starts and ends.
     // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
@@ -609,8 +609,6 @@ pub fn Fixed_Core_Wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
     //println!("BEGIN Fixed_Core_Wiggle");
 
     //println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
-
-    // TODO STARTS AND ENDS MUST BE EQUAL
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
