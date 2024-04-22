@@ -4,7 +4,7 @@ use clap::Command;
 use genimtools::tokenizers;
 use genimtools::tools;
 use genimtools::vocab;
-// use genimtools::uniwig;
+use genimtools::uniwig;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -23,6 +23,7 @@ fn build_parser() -> Command {
         .subcommand(vocab::cli::make_prune_cli())
         .subcommand(tokenizers::cli::make_tokenization_cli())
         .subcommand(tools::cli::make_tools_cli())
+        .subcommand(uniwig::cli::create_uniwig_cli())
 }
 
 fn main() {
@@ -38,6 +39,9 @@ fn main() {
         }
         Some((tools::consts::TOOLS_CMD, matches)) => {
             let _ = tools::cli::handlers::tools_handler(matches);
+        }
+        Some((uniwig::consts::UNIWIG_CMD, matches)) => {
+            uniwig::run_uniwig(matches);
         }
 
         _ => unreachable!("Subcommand not found"),
