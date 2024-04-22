@@ -18,7 +18,7 @@ flate2 = "1.0.28"
 glob = "0.3.1"
 hf-hub = "0.3.2"
 indicatif = "0.17.7"
-polars = { version = "0.35.4", features = ["decompress", "decompress-fast"] }
+polars = { version = "0.35.4", features = ["decompress", "decompress-fast", "ndarray"] }
 reqwest = { version = "0.12.4", features = ["blocking", "json"] }
 rust-lapper = "1.1.0"
 walkdir = "2.4.0"

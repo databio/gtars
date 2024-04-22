@@ -14,5 +14,6 @@ pub mod consts {
 }
 
 // expose the TreeTokenizer struct to users of this crate
-pub use traits::Tokenizer;
+pub use traits::{Tokenizer, SingleCellTokenizer};
 pub use tree_tokenizer::TreeTokenizer;
+
