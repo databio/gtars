@@ -2,7 +2,10 @@
 
 ### Input Bed File
 
-Currently, Uniwig accepts a single `.bed` file. It should be sorted by chromosome.
+Currently, Uniwig accepts a single `.bed` file. It should be sorted by chromosome. This single bed file will be used to create 3 wiggle files (`.wig`):
+`_start.wig` -> accumulations of start coordinates
+`_end.wig` -> accumulations of end coordinates
+`_core.wig` -> accumulations of peaks (bewtween starts and ends)
 
 The below script can be used to create a sorted bed file from a directory of bed files:
 
