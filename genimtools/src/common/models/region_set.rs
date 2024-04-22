@@ -31,6 +31,24 @@ impl From<Vec<Region>> for RegionSet {
     }
 }
 
+impl From<&[u8]> for RegionSet {
+    fn from(value: &[u8]) -> Self {
+        let region_str = String::from_utf8_lossy(value);
+        let regions: Vec<Region> = region_str.split('\n').map(|line| {
+            let parts = line.split('\t').collect::<Vec<&str>>();
+
+            let chr = parts[0].to_string();
+            let start = parts[1].parse::<u32>().unwrap();
+            let end = parts[2].parse::<u32>().unwrap();
+
+            Region { chr, start, end }
+
+        }).collect();
+
+        RegionSet { regions }
+    }
+}
+
 impl<'a> Iterator for RegionSetIterator<'a> {
     type Item = &'a Region;
 
