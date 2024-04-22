@@ -203,7 +203,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
-    let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
+    //let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
 
     println!("Processing each chromosome...");
     for chromosome in chromosomes.iter() {
@@ -213,6 +213,10 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
             println!("Chromosome starts and ends are not equal!");
             break
         }
+
+        // Need these for setting wiggle header
+        let primary_start = chromosome.starts[0].clone();
+        let primary_end = chromosome.ends[0].clone();
 
         let chrom_name = chromosome.chrom.clone();
         //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
@@ -246,7 +250,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone());
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), primary_start, stepsize);
 
 
                             },
@@ -264,7 +268,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone());
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), primary_end, stepsize);
 
                             },
                             "csv" => {println!("Write to CSV. Not Implemented");},
@@ -282,7 +286,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                                     println!("Writing to CORE RESULTS wig file!");
                                     //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
-                                    write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone());
+                                    write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize);
 
 
                                 },
@@ -305,7 +309,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 }
 
-fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String) {
+fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32) {
 
     let mut file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
@@ -313,7 +317,7 @@ fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String
         .open(filename).unwrap();
 
     //println!("DEBUG: fixedStep chrom={}",chromname.clone());
-    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str() + " start=1 step=1";
+    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str() + " start="+start_position.to_string().as_str() +" step="+stepsize.to_string().as_str();
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
 
