@@ -161,6 +161,12 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
 }
 
+fn clamped_start_position(start:i32, smoothsize: i32) -> i32{
+    // This is for ensuring that the start position for every wiggle file is at a minimum equal to `1`
+    std::cmp::max(1, start - smoothsize)
+
+}
+
 pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &String, bwfileheader: &str, output_type: &str){
     // Main Function
 
@@ -250,7 +256,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), primary_start, stepsize);
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize);
 
 
                             },
@@ -268,7 +274,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), primary_end, stepsize);
+                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_end, smoothsize), stepsize);
 
                             },
                             "csv" => {println!("Write to CSV. Not Implemented");},
@@ -533,7 +539,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
         }
 
-        while coordinate_position < adjusted_start_site{
+        while coordinate_position <= adjusted_start_site{
 
             while current_end_site==coordinate_position{
 
@@ -672,7 +678,7 @@ pub fn fixed_core_wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom
 
         }
 
-        while coordinate_position < current_start_site{
+        while coordinate_position <= current_start_site{
 
             while current_end_site==coordinate_position{
 
