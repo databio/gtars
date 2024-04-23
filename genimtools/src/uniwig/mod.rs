@@ -569,7 +569,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
     //
 
-    while coordinate_position <= chrom_size{
+    while coordinate_position <= chrom_size + 1 + smoothsize*2{ // Apply an bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site==coordinate_position{
 
