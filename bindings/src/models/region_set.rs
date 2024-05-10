@@ -132,6 +132,10 @@ impl PyTokenizedRegionSet {
             .collect())
     }
 
+    pub fn to_ids(&self) -> Result<Vec<u32>> {
+        Ok(self.ids.clone())
+    }
+
     // gensim needs strings as input, so to speed up
     // iterating over datasets, lets provide a rust
     // interface to directly convert to strings

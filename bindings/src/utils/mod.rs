@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyIterator};
 
@@ -6,6 +8,14 @@ use genimtools::common::models::{Region, RegionSet};
 
 // this is for internal use only
 pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionSet> {
+
+    // is a string?
+    if let Ok(regions) = regions.extract::<String>() {
+        let regions = Path::new(&regions);
+        let regions = genimtools::common::utils::extract_regions_from_bed_file(regions)?;
+        return Ok(RegionSet::from(regions));
+    }
+
     let regions = PyIterator::from_bound_object(regions)?;
 
     // attempt to map the list to a vector of regions

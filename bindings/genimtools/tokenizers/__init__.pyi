@@ -12,6 +12,82 @@ class Universe:
         """
         The regions in the universe.
         """
+    
+    def insert_token(self, region: Region) -> None:
+        """
+        Insert a token into the universe.
+
+        :param region: The region to insert.
+        """
+        new_id = len(self.regions) + 1
+        self.region_to_id[region] = new_id
+        self.id_to_region[new_id] = region
+
+    def convert_region_to_id(self, region: Region) -> int:
+        """
+        Convert a region to its corresponding ID.
+
+        :param region: The region to convert.
+
+        :return: The ID of the region, or None if the region is not found.
+        """
+        return self.region_to_id.get(region)
+
+    def convert_chr_start_end_to_id(self, chrom: str, start: int, end: int) -> int:
+        """
+        Convert chromosome, start, and end positions to the corresponding ID.
+
+        :param chrom: The chromosome name.
+        :param start: The start position.
+        :param end: The end position.
+
+        :return: The ID of the region, or None if the region is not found.
+        """
+        region = Region(chrom, start, end)
+        return self.convert_region_to_id(region)
+
+    def convert_id_to_region(self, id: int) -> Region:
+        """
+        Convert an ID to its corresponding region.
+
+        :param id: The ID to convert.
+
+        :return: The region corresponding to the ID, or None if the ID is not found.
+        """
+        return self.id_to_region.get(id)
+
+    def __len__(self) -> int:
+        """
+        Get the number of regions in the universe.
+
+        :return: The number of regions.
+        """
+        return len(self.regions)
+
+    def is_empty(self) -> bool:
+        """
+        Check if the universe is empty.
+
+        :return: True if the universe is empty, False otherwise.
+        """
+        return len(self.regions) == 0
+
+    @property
+    def regions(self) -> List[Region]:
+        """
+        Get the regions in the universe.
+
+        :return: The regions.
+        """
+        return self.regions
+
+    def __repr__(self) -> str:
+        """
+        Get a string representation of the universe.
+
+        :return: The string representation.
+        """
+        return f"Universe with {len(self)} regions"
 
 class Region:
     def __new__(cls, chrom: str, start: int, end: int) -> Region:
@@ -132,6 +208,11 @@ class TokenizedRegionSet:
     def to_regions(self) -> List[Region]:
         """
         Convert the tokenized regions back to the original regions.
+        """
+    
+    def to_ids(self) -> List[int]:
+        """
+        Get the integer representations of the tokenized regions.
         """
     
     def ids_as_strs(self) -> List[str]:
@@ -277,6 +358,12 @@ class TreeTokenizer:
         Get the vocabulary.
 
         :return: The vocabulary as a list of tuples.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
         """
 
     def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
