@@ -9,7 +9,7 @@ use std::path::Path;
 use genimtools::common::models::RegionSet;
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
-use crate::models::{PyRegion, PyTokenizedRegionSet};
+use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;
 
 #[pyclass(name = "TreeTokenizer")]
@@ -70,8 +70,48 @@ impl PyTreeTokenizer {
     }
 
     #[getter]
+    pub fn padding_token_id(&self) -> u32 {
+        self.tokenizer.padding_token_id()
+    }
+
+    #[getter]
+    pub fn mask_token_id(&self) -> u32 {
+        self.tokenizer.mask_token_id()
+    }
+
+    #[getter]
+    pub fn cls_token_id(&self) -> u32 {
+        self.tokenizer.cls_token_id()
+    }
+
+    #[getter]
+    pub fn bos_token_id(&self) -> u32 {
+        self.tokenizer.bos_token_id()
+    }
+
+    #[getter]
+    pub fn eos_token_id(&self) -> u32 {
+        self.tokenizer.eos_token_id()
+    }
+
+    #[getter]
+    pub fn sep_token_id(&self) -> u32 {
+        self.tokenizer.sep_token_id()
+    }
+
+    #[getter]
+    pub fn unknown_token_id(&self) -> u32 {
+        self.tokenizer.unknown_token_id()
+    }
+    
+    #[getter]
     pub fn vocab_size(&self) -> usize {
         self.tokenizer.vocab_size()
+    }
+
+    #[getter]
+    pub fn universe(&self) -> PyUniverse {
+        self.tokenizer.universe.clone().into()
     }
 
     // tokenize just returns a list of regions

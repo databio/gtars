@@ -2,6 +2,8 @@ use std::collections::HashMap;
 
 use pyo3::prelude::*;
 
+use anyhow::Result;
+
 use crate::models::PyRegion;
 use genimtools::common::models::Universe;
 
@@ -68,5 +70,18 @@ impl PyUniverse {
 
     pub fn is_empty(&self) -> bool {
         self.region_to_id.len() == 0
+    }
+
+    #[getter]
+    pub fn regions(&self) -> Result<Vec<PyRegion>> {
+        Ok(self.regions.clone())
+    }
+
+    pub fn __len__(&self) -> usize {
+        self.len()
+    }
+
+    pub fn __repr__(&self) -> String {
+        format!("Universe with {} regions", self.len())
     }
 }
