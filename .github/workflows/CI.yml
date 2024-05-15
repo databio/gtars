@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        target: [x86_64, x86]
+        target: [x86_64, x86, aarch64]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
@@ -35,8 +35,8 @@ jobs:
             elif command -v apt-get &> /dev/null; then
               echo "Detected apt-get package manager"
               apt-get update
-              echo "Installing libssl-dev"
-              apt-get install -y libssl-dev pkg-config openssl
+              echo "Installing libssl-dev pkg-config openssl musl-dev"
+              apt-get install -y libssl-dev pkg-config openssl musl-dev
             else
               echo "No supported package manager found (yum or apt-get)"
               exit 1
