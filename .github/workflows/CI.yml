@@ -35,6 +35,9 @@ jobs:
             if [ "$ARCH" == "x86_64" ]; then
               echo "Detected architecture: x86_64"
               yum -y install openssl-devel
+            elif [ "$ARCH" == "i686" ]; then
+              echo "Detected architecture: x86"
+              yum -y install openssl-devel
             elif [ "$ARCH" == "aarch64" ]; then
               echo "Detected architecture: ARM/aarch64"
               apt-get update
