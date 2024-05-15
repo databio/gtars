@@ -34,11 +34,11 @@ jobs:
             # Install packages based on architecture
             if [ "$ARCH" == "x86_64" ]; then
               echo "Detected architecture: x86_64"
-              sudo yum -y install openssl-devel
+              yum -y install openssl-devel
             elif [ "$ARCH" == "aarch64" ]; then
               echo "Detected architecture: ARM/aarch64"
-              sudo apt-get update
-              sudo apt-get install -y libssl-dev
+              apt-get update
+              apt-get install -y libssl-dev
             else
               echo "Unsupported architecture: $ARCH"
               exit 1
