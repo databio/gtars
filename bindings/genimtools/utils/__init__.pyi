@@ -1,11 +1,18 @@
 from typing import List
 
-def write_tokens_to_gtok(filename: str, tokens: List[int]) -> None:
+def write_tokens_to_gtok(filename: str, tokens: List[str]):
     """
-    Write a list of tokens to a gtok file.
-    """
+    Write tokens to a GTOK file.
 
-def read_tokens_from_gtok(filename: str) -> List[int]:
+    :param filename: The filename of the GTOK file.
+    :param tokens: The tokens to write.
     """
-    Read a list of tokens from a gtok file.
+    pass
+
+def read_tokens_from_gtok(filename: str) -> List[str]:
     """
+    Read tokens from a GTOK file.
+
+    :param filename: The filename of the GTOK file.
+    """
+    pass

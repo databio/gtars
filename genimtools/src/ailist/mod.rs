@@ -144,24 +144,28 @@ impl AIList {
 
         results_list
     }
+}
 
-    pub fn print(&self) {
-        println!("");
+impl fmt::Display for AIList {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut string = String::new();
+        string.push('\n');
         for element in self.starts.iter() {
-            print!("{}, ", element);
+            string.push_str(format!("{element}").as_str());
         }
-        println!("");
+        string.push('\n');
         for element in self.ends.iter() {
-            print!("{}, ", element);
+            string.push_str(format!("{element}").as_str());
         }
-        println!("");
+        string.push('\n');
         for element in self.max_ends.iter() {
-            print!("{}, ", element);
+            string.push_str(format!("{element}").as_str());
         }
-        println!("");
+        string.push('\n');
         for element in self.header_list.iter() {
-            print!("{}, ", element);
+            string.push_str(format!("{element}").as_str());
         }
-        println!("");
+        string.push('\n');
+        write!(f, "{string}")
     }
 }

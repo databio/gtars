@@ -1,1 +1,1 @@
-from .genimtools.tokenizers import *
+from .genimtools.tokenizers import *  # noqa: F403

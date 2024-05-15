@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
 
+use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 use walkdir::WalkDir;
 
@@ -82,7 +83,7 @@ pub fn pre_tokenize_data(
     path_to_data: &Path,
     outdir: &str,
     tokenizer: &TreeTokenizer,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     if path_to_data.is_file() {
         pre_tokenize_file(path_to_data, outdir, tokenizer)?;
     } else {
@@ -138,7 +139,7 @@ fn pre_tokenize_file(
     path_to_bedfile: &Path,
     outdir: &str,
     tokenizer: &TreeTokenizer,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // make sure the file ends in .bed or .bed.gz
     let ext = path_to_bedfile.extension().unwrap();
     if ext != OsStr::new("bed") && ext != OsStr::new("gz") {
@@ -162,14 +163,7 @@ fn pre_tokenize_file(
 
     let tokens = tokenizer.tokenize_region_set(&regions);
 
-    match tokens {
-        Some(tokens) => {
-            write_tokens_to_gtok(out_file, &tokens.to_region_ids())?;
-        }
-        None => {
-            println!("Failed to tokenize file: {}", path_to_bedfile.display());
-        }
-    }
+    write_tokens_to_gtok(out_file, &tokens.ids)?;
 
     Ok(())
 }
