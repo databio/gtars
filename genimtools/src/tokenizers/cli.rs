@@ -1,10 +1,11 @@
 use std::io;
 use std::io::Write;
 
+use anyhow::Result;
 use clap::{Arg, ArgMatches, Command};
 
 use super::*;
-use crate::common::models::region_set::RegionSet;
+use crate::common::models::{Region, RegionSet};
 use crate::tokenizers::TreeTokenizer;
 
 pub fn make_tokenization_cli() -> Command {
@@ -31,9 +32,11 @@ pub mod handlers {
 
     use std::path::Path;
 
+    use anyhow::Context;
+
     use super::*;
 
-    pub fn tokenize_bed_file(matches: &ArgMatches) {
+    pub fn tokenize_bed_file(matches: &ArgMatches) -> Result<()> {
         let bed = matches
             .get_one::<String>("bed")
             .expect("Bed file path is required");
@@ -44,26 +47,24 @@ pub mod handlers {
 
         // core logic/algorithm here
         let universe = Path::new(&universe);
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = TreeTokenizer::try_from(universe)?;
 
         let bed = Path::new(&bed);
-        let regions = RegionSet::try_from(bed).expect("Failed to read bed file");
+        let regions = RegionSet::try_from(bed)
+            .with_context(|| "There was an error reading in the bedfile to be tokenized!")?;
 
         let mut stdout = io::stdout().lock();
 
-        let tokenized_regions = tokenizer
-            .tokenize_region_set(&regions)
-            .expect("Could not tokenize region set.");
+        let tokenized_regions = tokenizer.tokenize_region_set(&regions);
 
         for tokenized_region in tokenized_regions.into_iter() {
-            let chr = tokenized_region.chr;
-            let start = tokenized_region.start;
-            let end = tokenized_region.end;
-
-            let line = format!("{}\t{}\t{}\n", chr, start, end);
+            let region: Region = tokenized_region.into();
+            let line = format!("{}\t{}\t{}\n", region.chr, region.start, region.end);
 
             // push to stdout
             stdout.write_all(line.as_bytes()).unwrap();
         }
+
+        Ok(())
     }
 }

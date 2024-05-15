@@ -1,3 +1,4 @@
+use anyhow::Result;
 use clap::Command;
 
 // go through the library crate to get the interfaces
@@ -25,7 +26,7 @@ fn build_parser() -> Command {
         .subcommand(tools::cli::make_tools_cli())
 }
 
-fn main() {
+fn main() -> Result<()> {
     let app = build_parser();
     let matches = app.get_matches();
 
@@ -34,7 +35,7 @@ fn main() {
             vocab::cli::handlers::prune_universe(matches);
         }
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
-            tokenizers::cli::handlers::tokenize_bed_file(matches);
+            tokenizers::cli::handlers::tokenize_bed_file(matches)?;
         }
         Some((tools::consts::TOOLS_CMD, matches)) => {
             let _ = tools::cli::handlers::tools_handler(matches);
@@ -42,4 +43,6 @@ fn main() {
 
         _ => unreachable!("Subcommand not found"),
     };
+
+    Ok(())
 }

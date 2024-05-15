@@ -1,1 +1,1 @@
-from .genimtools.vocab import *
+from .genimtools.vocab import *  # noqa: F403
