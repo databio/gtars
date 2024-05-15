@@ -41,6 +41,17 @@ jobs:
               echo "No supported package manager found (yum or apt-get)"
               exit 1
             fi
+
+            # Set the OPENSSL_DIR environment variable
+            export OPENSSL_DIR=/usr
+
+            # Verify the installation
+            if [ -f /usr/include/openssl/opensslv.h ]; then
+              echo "OpenSSL header found"
+            else
+              echo "OpenSSL header not found"
+              exit 1
+            fi
           working-directory: ./bindings
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
