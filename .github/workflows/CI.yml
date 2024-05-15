@@ -28,22 +28,16 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           before-script-linux: |
-            # Detect system architecture
-            ARCH=$(uname -m)
-
-            # Install packages based on architecture
-            if [ "$ARCH" == "x86_64" ]; then
-              echo "Detected architecture: x86_64"
+            # Check for yum and use it if available, otherwise use apt-get
+            if command -v yum &> /dev/null; then
+              echo "Detected yum package manager"
               yum -y install openssl-devel
-            elif [ "$ARCH" == "i686" ]; then
-              echo "Detected architecture: x86"
-              yum -y install openssl-devel
-            elif [ "$ARCH" == "aarch64" ]; then
-              echo "Detected architecture: ARM/aarch64"
+            elif command -v apt-get &> /dev/null; then
+              echo "Detected apt-get package manager"
               apt-get update
               apt-get install -y libssl-dev
             else
-              echo "Unsupported architecture: $ARCH"
+              echo "No supported package manager found (yum or apt-get)"
               exit 1
             fi
           working-directory: ./bindings
