@@ -35,6 +35,7 @@ jobs:
             elif command -v apt-get &> /dev/null; then
               echo "Detected apt-get package manager"
               apt-get update
+              echo "Installing libssl-dev"
               apt-get install -y libssl-dev
             else
               echo "No supported package manager found (yum or apt-get)"
