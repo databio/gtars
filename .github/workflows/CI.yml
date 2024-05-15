@@ -27,7 +27,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          before-script-linux: yum install -y install libssl-dev
+          before-script-linux: yum install -y install openssl-devel
           working-directory: ./bindings
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
