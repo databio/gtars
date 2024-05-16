@@ -34,12 +34,12 @@ jobs:
             # Check for yum and use it if available, otherwise use apt-get
             if command -v yum &> /dev/null; then
               echo "Detected yum package manager"
-              yum -y install openssl-devel perl-IPC-Cmd perl-core libatomic
+              yum -y install openssl-devel perl-IPC-Cmd perl-core libatomic make
             elif command -v apt-get &> /dev/null; then
               echo "Detected apt-get package manager"
               apt-get update
               echo "Installing libssl-dev pkg-config openssl musl-dev"
-              apt-get install -y libssl-dev pkg-config openssl musl-dev perl libatomic1
+              apt-get install -y libssl-dev pkg-config openssl musl-dev perl libatomic1 make
             else
               echo "No supported package manager found (yum or apt-get)"
               exit 1
