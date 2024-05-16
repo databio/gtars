@@ -26,6 +26,9 @@ jobs:
           python-version: '3.10'
       - name: Build wheels
         uses: PyO3/maturin-action@v1
+        env:
+          # support for lionux aarch64 - see here: https://github.com/apache/opendal/issues/3673
+          CFLAGS_aarch64_unknown_linux_gnu: "-D__ARM_ARCH=8"
         with:
           before-script-linux: |
             # Check for yum and use it if available, otherwise use apt-get
