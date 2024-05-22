@@ -8,7 +8,6 @@ use genimtools::common::models::{Region, RegionSet};
 
 // this is for internal use only
 pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionSet> {
-
     // is a string?
     if let Ok(regions) = regions.extract::<String>() {
         let regions = Path::new(&regions);

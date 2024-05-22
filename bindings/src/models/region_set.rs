@@ -14,12 +14,15 @@ use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
     pub regions: Vec<PyRegion>,
-    curr: usize
+    curr: usize,
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
     fn from(value: Vec<PyRegion>) -> Self {
-        PyRegionSet { regions: value, curr: 0 }
+        PyRegionSet {
+            regions: value,
+            curr: 0,
+        }
     }
 }
 
@@ -32,7 +35,7 @@ impl PyRegionSet {
 
         Ok(PyRegionSet {
             regions: regions.into_iter().map(|region| region.into()).collect(),
-            curr: 0
+            curr: 0,
         })
     }
 
@@ -56,7 +59,7 @@ impl PyRegionSet {
             Some(PyRegion {
                 chr: region.chr,
                 start: region.start,
-                end: region.end
+                end: region.end,
             })
         } else {
             None
@@ -76,11 +79,10 @@ impl PyRegionSet {
             Ok(PyRegion {
                 chr: r.chr,
                 start: r.start,
-                end: r.end
+                end: r.end,
             })
         }
     }
-
 }
 
 #[pyclass(name = "TokenizedRegionSet")]

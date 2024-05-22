@@ -134,7 +134,6 @@ impl Tokenizer for TreeTokenizer {
         let mut tokenized_regions: Vec<u32> = Vec::new();
 
         for region in region_set {
-
             let lapper = self.tree.get(&region.chr);
 
             match lapper {

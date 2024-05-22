@@ -96,7 +96,7 @@ impl PyTreeTokenizer {
     pub fn unknown_token_id(&self) -> u32 {
         self.tokenizer.unknown_token_id()
     }
-    
+
     #[getter]
     pub fn vocab_size(&self) -> usize {
         self.tokenizer.vocab_size()
