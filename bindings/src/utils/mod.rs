@@ -13,7 +13,7 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
         let regions = Path::new(&regions);
 
         if !regions.exists() {
-            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+            return Err(pyo3::exceptions::PyFileNotFoundError::new_err(format!(
                 "The file {} does not exist.",
                 regions.display()
             ))
