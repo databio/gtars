@@ -72,15 +72,6 @@ class Universe:
         """
         return len(self.regions) == 0
 
-    @property
-    def regions(self) -> List[Region]:
-        """
-        Get the regions in the universe.
-
-        :return: The regions.
-        """
-        return self.regions
-
     def __repr__(self) -> str:
         """
         Get a string representation of the universe.
@@ -232,14 +223,6 @@ class TreeTokenizer:
         Construct a new TreeTokenize from a universe file.
 
         :param path: The path to the universe file. This should be a BED file.
-        """
-    
-    @classmethod
-    def from_pretrained(cls, path: str) -> TreeTokenizer:
-        """
-        Load a pretrained TreeTokenizer from a model on huggingface.
-
-        :param path: The path to the pretrained model on huggingface.
         """
     
     def unknown_token(self) -> Region:
