@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - implemented new traits for tokenizers to allow for more flexibility when creating new tokenizers.
 - bumped the version `pyo3` to `0.21.0`
 - added `rust-numpy` dependency to the python bindings for exporting tokenized regions as numpy arrays.
+- overall stability improvements to the tokenizers and the python bindings.
 
 ## [0.0.10]
 - update file format specifications
