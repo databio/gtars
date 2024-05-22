@@ -93,7 +93,7 @@ mod tests {
         let rs = RegionSet::try_from(path).unwrap();
 
         let mut bytes: Vec<u8> = Vec::new();
-        
+
         std::fs::File::open(path)
             .unwrap()
             .read_to_end(&mut bytes)

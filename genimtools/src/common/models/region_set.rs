@@ -34,16 +34,18 @@ impl From<Vec<Region>> for RegionSet {
 impl From<&[u8]> for RegionSet {
     fn from(value: &[u8]) -> Self {
         let region_str = String::from_utf8_lossy(value);
-        let regions: Vec<Region> = region_str.split('\n').map(|line| {
-            let parts = line.split('\t').collect::<Vec<&str>>();
+        let regions: Vec<Region> = region_str
+            .split('\n')
+            .map(|line| {
+                let parts = line.split('\t').collect::<Vec<&str>>();
 
-            let chr = parts[0].to_string();
-            let start = parts[1].parse::<u32>().unwrap();
-            let end = parts[2].parse::<u32>().unwrap();
+                let chr = parts[0].to_string();
+                let start = parts[1].parse::<u32>().unwrap();
+                let end = parts[2].parse::<u32>().unwrap();
 
-            Region { chr, start, end }
-
-        }).collect();
+                Region { chr, start, end }
+            })
+            .collect();
 
         RegionSet { regions }
     }
@@ -63,7 +65,7 @@ impl<'a> Iterator for RegionSetIterator<'a> {
     }
 }
 
-impl<'a> IntoIterator for  &'a RegionSet {
+impl<'a> IntoIterator for &'a RegionSet {
     type Item = &'a Region;
     type IntoIter = RegionSetIterator<'a>;
 
@@ -80,11 +82,10 @@ impl RegionSet {
         let mut file = File::create(path)?;
         // is there a better way to do this?
         for region in self.regions.iter() {
-
             let chr = region.chr.clone();
             let start = region.start;
             let end = region.end;
-            
+
             let line = format!("{}\t{}\t{}\n", chr, start, end);
             file.write_all(line.as_bytes())?;
         }
