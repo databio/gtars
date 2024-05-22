@@ -11,6 +11,15 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
     // is a string?
     if let Ok(regions) = regions.extract::<String>() {
         let regions = Path::new(&regions);
+
+        if !regions.exists() {
+            return Err(pyo3::exceptions::PyValueError::new_err(format!(
+                "The file {} does not exist.",
+                regions.display()
+            ))
+            .into());
+        }
+
         let regions = genimtools::common::utils::extract_regions_from_bed_file(regions);
         match regions {
             Ok(regions) => return Ok(RegionSet::from(regions)),
