@@ -55,6 +55,11 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
         let line = line.with_context(|| "Failed parsing line in BED file")?;
         let fields: Vec<&str> = line.split('\t').collect();
 
+        // check length of fields
+        if fields.len() < 3 {
+            anyhow::bail!("BED file line does not have at least 3 fields: {}", line);
+        }
+
         let chr = fields[0];
         let start = fields[1].parse::<u32>().with_context(|| {
             format!("Failed to parse start position in BED file line: {}", line)
