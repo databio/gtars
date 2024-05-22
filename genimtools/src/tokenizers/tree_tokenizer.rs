@@ -4,7 +4,6 @@ use std::path::Path;
 use anyhow::Result;
 use rust_lapper::{Interval, Lapper};
 
-use crate::bbclient::{Bbclient, BedbaseFileCache};
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
@@ -274,13 +273,6 @@ impl TreeTokenizer {
         let rs = RegionSet::from(regions);
 
         Ok(self.tokenize_region_set(&rs))
-    }
-
-    pub fn from_bedbase(id: &str) -> Result<Self> {
-        let bedbase = Bbclient::default();
-        let bed_file = bedbase.get_bed_file(id)?;
-
-        TreeTokenizer::try_from(bed_file.as_path())
     }
 }
 

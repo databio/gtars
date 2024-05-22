@@ -29,21 +29,21 @@ jobs:
         # env:
         #   # support for lionux aarch64 - see here: https://github.com/apache/opendal/issues/3673
         #   CFLAGS_aarch64_unknown_linux_gnu: "-D__ARM_ARCH=8"
-        with:
-          before-script-linux: |
-            # Check for yum and use it if available, otherwise use apt-get
-            if command -v yum &> /dev/null; then
-              echo "Detected yum package manager"
-              yum -y install openssl-devel perl-IPC-Cmd perl-core # <--- new package added
-            elif command -v apt-get &> /dev/null; then
-              echo "Detected apt-get package manager"
-              apt-get update
-              echo "Installing libssl-dev pkg-config openssl musl-dev"
-              apt-get install -y libssl-dev pkg-config openssl musl-dev perl # <--- new package added
-            else
-              echo "No supported package manager found (yum or apt-get)"
-              exit 1
-            fi
+        # with:
+        #   before-script-linux: |
+        #     # Check for yum and use it if available, otherwise use apt-get
+        #     if command -v yum &> /dev/null; then
+        #       echo "Detected yum package manager"
+        #       yum -y install openssl-devel perl-IPC-Cmd perl-core # <--- new package added
+        #     elif command -v apt-get &> /dev/null; then
+        #       echo "Detected apt-get package manager"
+        #       apt-get update
+        #       echo "Installing libssl-dev pkg-config openssl musl-dev"
+        #       apt-get install -y libssl-dev pkg-config openssl musl-dev perl # <--- new package added
+        #     else
+        #       echo "No supported package manager found (yum or apt-get)"
+        #       exit 1
+        #     fi
           working-directory: ./bindings
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
