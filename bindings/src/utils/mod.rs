@@ -12,8 +12,11 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
     // is a string?
     if let Ok(regions) = regions.extract::<String>() {
         let regions = Path::new(&regions);
-        let regions = genimtools::common::utils::extract_regions_from_bed_file(regions)?;
-        return Ok(RegionSet::from(regions));
+        let regions = genimtools::common::utils::extract_regions_from_bed_file(regions);
+        match regions {
+            Ok(regions) => return Ok(RegionSet::from(regions)),
+            Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(e.to_string()).into()),
+        }
     }
 
     let regions = PyIterator::from_bound_object(regions)?;
