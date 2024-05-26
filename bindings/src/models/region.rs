@@ -79,12 +79,18 @@ impl PyRegion {
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
     pub id: u32,
-    pub universe: PyUniverse,
+    pub universe: Py<PyUniverse>,
 }
 
 impl From<PyTokenizedRegion> for PyRegion {
     fn from(value: PyTokenizedRegion) -> Self {
-        value.universe.convert_id_to_region(value.id).unwrap()
+        Python::with_gil(|py| {
+            value
+                .universe
+                .borrow(py)
+                .convert_id_to_region(value.id)
+                .unwrap()
+        })
     }
 }
 
@@ -92,21 +98,48 @@ impl From<PyTokenizedRegion> for PyRegion {
 impl PyTokenizedRegion {
     #[getter]
     pub fn chr(&self) -> Result<String> {
-        Ok(self.universe.convert_id_to_region(self.id).unwrap().chr)
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .chr)
+        })
     }
 
     #[getter]
     pub fn start(&self) -> Result<u32> {
-        Ok(self.universe.convert_id_to_region(self.id).unwrap().start)
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .start)
+        })
     }
 
     #[getter]
     pub fn end(&self) -> Result<u32> {
-        Ok(self.universe.convert_id_to_region(self.id).unwrap().end)
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .end)
+        })
     }
 
     pub fn to_region(&self) -> Result<PyRegion> {
-        Ok(self.universe.convert_id_to_region(self.id).unwrap())
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap())
+        })
     }
     #[getter]
     pub fn id(&self) -> Result<u32> {

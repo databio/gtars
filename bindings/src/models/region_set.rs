@@ -89,17 +89,22 @@ impl PyRegionSet {
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
     pub ids: Vec<u32>,
-    pub universe: PyUniverse,
+    pub universe: Py<PyUniverse>,
     curr: usize,
 }
 
 impl From<TokenizedRegionSet<'_>> for PyTokenizedRegionSet {
     fn from(value: TokenizedRegionSet) -> Self {
-        PyTokenizedRegionSet {
-            ids: value.ids,
-            universe: value.universe.to_owned().into(),
-            curr: 0,
-        }
+        Python::with_gil(|py| {
+            let universe = value.universe;
+            let py_universe: PyUniverse = universe.to_owned().into();
+            let py_universe_bound = Py::new(py, py_universe).unwrap();
+            PyTokenizedRegionSet {
+                ids: value.ids,
+                universe: py_universe_bound,
+                curr: 0,
+            }
+        })
     }
 }
 
@@ -117,21 +122,25 @@ impl PyTokenizedRegionSet {
     }
 
     pub fn to_bit_vector(&self) -> Result<Vec<u8>> {
-        let mut bit_vector = vec![0; self.universe.id_to_region.len()];
+        Python::with_gil(|py| {
+            let mut bit_vector = vec![0; self.universe.borrow(py).id_to_region.len()];
 
-        for id in &self.ids {
-            bit_vector[*id as usize] = 1;
-        }
+            for id in &self.ids {
+                bit_vector[*id as usize] = 1;
+            }
 
-        Ok(bit_vector)
+            Ok(bit_vector)
+        })
     }
 
     pub fn to_regions(&self) -> Result<Vec<PyRegion>> {
-        Ok(self
-            .ids
-            .iter()
-            .map(|id| self.universe.id_to_region[&id].clone())
-            .collect())
+        Python::with_gil(|py| {
+            Ok(self
+                .ids
+                .iter()
+                .map(|id| self.universe.borrow(py).id_to_region[&id].clone())
+                .collect())
+        })
     }
 
     pub fn to_ids(&self) -> Result<Vec<u32>> {
@@ -164,17 +173,19 @@ impl PyTokenizedRegionSet {
     }
 
     pub fn __next__(&mut self) -> Option<PyTokenizedRegion> {
-        if self.curr < self.ids.len() {
-            let id = self.ids[self.curr];
-            self.curr += 1;
+        Python::with_gil(|py| {
+            if self.curr < self.ids.len() {
+                let id = self.ids[self.curr];
+                self.curr += 1;
 
-            Some(PyTokenizedRegion {
-                universe: self.universe.to_owned(),
-                id,
-            })
-        } else {
-            None
-        }
+                Some(PyTokenizedRegion {
+                    universe: self.universe.clone_ref(py),
+                    id,
+                })
+            } else {
+                None
+            }
+        })
     }
 
     pub fn __getitem__(&self, indx: isize) -> Result<PyTokenizedRegion> {
