@@ -6,7 +6,7 @@ use numpy::ndarray::Array;
 use numpy::{IntoPyArray, PyArray1};
 
 use anyhow::Result;
-use genimtools::common::{models::TokenizedRegionSet, utils::extract_regions_from_bed_file};
+use genimtools::common::utils::extract_regions_from_bed_file;
 
 use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 
