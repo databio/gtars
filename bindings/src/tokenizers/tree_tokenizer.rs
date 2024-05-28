@@ -15,16 +15,24 @@ use crate::utils::extract_regions_from_py_any;
 #[pyclass(name = "TreeTokenizer")]
 pub struct PyTreeTokenizer {
     pub tokenizer: TreeTokenizer,
+    pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons
 }
 
 #[pymethods]
 impl PyTreeTokenizer {
     #[new]
     pub fn new(path: String) -> Result<Self> {
-        let path = Path::new(&path);
-        let tokenizer = TreeTokenizer::try_from(path)?;
+        Python::with_gil(|py| {
+            let path = Path::new(&path);
+            let tokenizer = TreeTokenizer::try_from(path)?;
+            let py_universe: PyUniverse = tokenizer.universe.to_owned().into();
+            let py_universe_bound = Py::new(py, py_universe)?;
 
-        Ok(PyTreeTokenizer { tokenizer })
+            Ok(PyTreeTokenizer {
+                tokenizer,
+                universe: py_universe_bound,
+            })
+        })
     }
 
     #[getter]
@@ -138,7 +146,16 @@ impl PyTreeTokenizer {
         // tokenize the RegionSet
         let tokenized = self.tokenizer.tokenize_region_set(&rs);
 
-        Ok(tokenized.into())
+        Python::with_gil(|py| {
+            let py_tokenized_region_set = PyTokenizedRegionSet {
+                ids: tokenized.ids,
+                curr: 0,
+                universe: self.universe.clone_ref(py),
+            };
+
+            Ok(py_tokenized_region_set)
+        })
+
     }
 
     // encode returns a list of ids
