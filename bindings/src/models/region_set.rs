@@ -90,22 +90,7 @@ impl PyRegionSet {
 pub struct PyTokenizedRegionSet {
     pub ids: Vec<u32>,
     pub universe: Py<PyUniverse>,
-    curr: usize,
-}
-
-impl From<TokenizedRegionSet<'_>> for PyTokenizedRegionSet {
-    fn from(value: TokenizedRegionSet) -> Self {
-        Python::with_gil(|py| {
-            let universe = value.universe;
-            let py_universe: PyUniverse = universe.to_owned().into();
-            let py_universe_bound = Py::new(py, py_universe).unwrap();
-            PyTokenizedRegionSet {
-                ids: value.ids,
-                universe: py_universe_bound,
-                curr: 0,
-            }
-        })
-    }
+    pub curr: usize,
 }
 
 #[pymethods]
