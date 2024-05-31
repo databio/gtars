@@ -1,14 +1,11 @@
 use std::collections::{HashMap, HashSet};
-use std::ffi::OsStr;
-use std::fs::File;
-use std::io::prelude::*;
-use std::io::{BufRead, BufReader};
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
-use flate2::read::GzDecoder;
-
 use crate::common::models::Region;
-use crate::io::{init_gtok_file, append_tokens_to_gtok_file};
+use crate::common::utils::get_dynamic_reader;
+use crate::io::consts::{GTOK_HEADER, GTOK_U32_FLAG};
 use crate::tokenizers::TreeTokenizer;
 use anyhow::{Context, Result};
 
@@ -33,6 +30,63 @@ impl TryFrom<&Path> for FragmentTokenizer {
 }
 
 impl FragmentTokenizer {
+    fn parse_fragment_file_line(line: String) -> Result<(String, u32, u32, String, u32)> {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+
+        if fields.len() < 4 {
+            anyhow::bail!("Detected improper number of fields detected");
+        }
+
+        let chr = fields[0];
+        let start = fields[1].parse::<u32>()?;
+        let end = fields[2].parse::<u32>()?;
+        let barcode = fields[3];
+        let _read_support = fields[4].parse::<u32>()?;
+
+        Ok((
+            chr.to_string(),
+            start,
+            end,
+            barcode.to_string(),
+            _read_support,
+        ))
+    }
+
+    fn init_gtok_file(filename: &str) -> Result<()> {
+        // make sure the path exists
+        let path = std::path::Path::new(filename);
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        } else {
+            anyhow::bail!("Failed to create parent directories for gtok file!")
+        }
+
+        let file = File::create(filename).with_context(|| "Failed to create gtok file!")?;
+        let mut writer = BufWriter::new(file);
+
+        writer
+            .write_all(GTOK_HEADER)
+            .with_context(|| "Failed to write GTOK header to file!")?;
+
+        // assume large and write u32 flag
+        writer
+            .write_all(&GTOK_U32_FLAG.to_le_bytes())
+            .with_context(|| "Failed to write GTOK size flag to file!")?;
+
+        Ok(())
+    }
+
+    fn append_tokens_to_gtok_file(writer: &mut BufWriter<File>, tokens: &[u32]) -> Result<()> {
+        for token in tokens.iter() {
+            writer
+                .write_all(&token.to_le_bytes())
+                .with_context(|| "Failed to write token to gtok file")?;
+        }
+
+        Ok(())
+    }
+
     ///
     /// Tokenize a fragments file into a known universe.
     ///
@@ -50,53 +104,17 @@ impl FragmentTokenizer {
     ///
     /// # Arguments
     /// - `fragments_file_path` - the path to the fragments file
-    pub fn tokenize_fragments(&self, fragments_file_path: &Path) -> Result<()> {
-        let is_gzipped = fragments_file_path.extension() == Some(OsStr::new("gz"));
-        let file = File::open(fragments_file_path).with_context(|| "Failed to open bed file.")?;
+    pub fn tokenize_fragments(&self, fragments_file_path: &Path, out_path: &Path) -> Result<()> {
+        let reader = get_dynamic_reader(fragments_file_path)?;
 
-        let file: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(file)),
-            false => Box::new(file),
-        };
-
-        let reader = BufReader::new(file);
-
-        let mut file_map: HashMap<String, String> = HashMap::new();
+        let mut file_map: HashMap<String, BufWriter<File>> = HashMap::new();
 
         for (line_num, line) in reader.lines().enumerate() {
             let line = line
                 .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
 
-            let fields: Vec<&str> = line.split('\t').collect();
-
-            if fields.len() != 5 {
-                anyhow::bail!(
-                    "Detected improper number of fields in fragments file line {}: {}",
-                    line_num,
-                    line
-                );
-            }
-
-            let chr = fields[0];
-            let start = fields[1].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse start position in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
-            let end = fields[2].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse end position in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
-            let barcode = fields[3];
-            let _read_support = fields[4].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse read support in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
+            let (chr, start, end, barcode, _read_support) = Self::parse_fragment_file_line(line)
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
 
             let r = Region {
                 chr: chr.to_string(),
@@ -108,22 +126,31 @@ impl FragmentTokenizer {
             let tokens = self.tokenizer.tokenize_region(&r);
 
             // get file path
-            let file = file_map.get(barcode);
+            let file = file_map.get_mut(&barcode);
+
+            // determine if we need to create a new file or append to an existing one
             match file {
                 Some(fh) => {
                     // append to file
-                    append_tokens_to_gtok_file(fh, &tokens.ids)?;
+                    Self::append_tokens_to_gtok_file(fh, &tokens.ids)?;
                 }
                 None => {
                     // create new file
-                    let new_file_name = format!("{}.gtok", barcode);
-                    init_gtok_file(new_file_name.as_str())?;
+                    let new_file_name = out_path.join(format!("{}.gtok", barcode));
+                    let new_file_name = new_file_name.to_str().unwrap();
+                    Self::init_gtok_file(new_file_name)?;
+
+                    // append to file -- need to open file again in append mode
+                    let file = OpenOptions::new()
+                        .append(true)
+                        .open(new_file_name)
+                        .with_context(|| "Failed to open gtok file for appending")?;
+
+                    let mut writer = BufWriter::new(file);
+                    Self::append_tokens_to_gtok_file(&mut writer, &tokens.ids)?;
 
                     // insert into map
-                    file_map.insert(barcode.to_string(), new_file_name.clone());
-
-                    // append to file
-                    append_tokens_to_gtok_file(&new_file_name, &tokens.ids)?;
+                    file_map.insert(barcode.to_string(), writer);
                 }
             }
         }
@@ -148,60 +175,34 @@ impl FragmentTokenizer {
     ///
     /// # Arguments
     /// - `fragments_file_path` - the path to the fragments file
-    pub fn tokenize_fragments_with_filter(&self, fragments_file_path: &Path, filter: Vec<String>) -> Result<()> {
-        let is_gzipped = fragments_file_path.extension() == Some(OsStr::new("gz"));
-        let file = File::open(fragments_file_path).with_context(|| "Failed to open bed file.")?;
+    pub fn tokenize_fragments_with_filter(
+        &self,
+        fragments_file_path: &Path,
+        out_path: &Path,
+        filter: Vec<String>,
+    ) -> Result<()> {
+        let reader = get_dynamic_reader(fragments_file_path)?;
 
-        let file: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(file)),
-            false => Box::new(file),
-        };
-
-        let reader = BufReader::new(file);
-
-        let mut file_map: HashMap<String, String> = HashMap::new();
+        let mut file_map: HashMap<String, BufWriter<File>> = HashMap::new();
         let filter: HashSet<String> = HashSet::from_iter(filter);
 
         for (line_num, line) in reader.lines().enumerate() {
+
+            // print progress every 10,000 lines
+            if line_num % 10_000 == 0 {
+                println!("Processed {} lines", line_num);
+            }
+
             let line = line
                 .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
 
-            let fields: Vec<&str> = line.split('\t').collect();
+            let (chr, start, end, barcode, _read_support) = Self::parse_fragment_file_line(line)
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
 
-            if fields.len() != 5 {
-                anyhow::bail!(
-                    "Detected improper number of fields in fragments file line {}: {}",
-                    line_num,
-                    line
-                );
-            }
-
-            let chr = fields[0];
-            let start = fields[1].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse start position in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
-            let end = fields[2].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse end position in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
-            let barcode = fields[3];
-
-            if !filter.contains(barcode) {
+            if !filter.contains(&barcode) {
                 // skip! -- barcode not in filter
                 continue;
             }
-
-            let _read_support = fields[4].parse::<u32>().with_context(|| {
-                format!(
-                    "Failed to parse read support in fragments file line {}: {}",
-                    line_num, line
-                )
-            })?;
 
             let r = Region {
                 chr: chr.to_string(),
@@ -213,22 +214,29 @@ impl FragmentTokenizer {
             let tokens = self.tokenizer.tokenize_region(&r);
 
             // get file path
-            let file = file_map.get(barcode);
+            let file = file_map.get_mut(&barcode);
             match file {
                 Some(fh) => {
                     // append to file
-                    append_tokens_to_gtok_file(fh, &tokens.ids)?;
+                    Self::append_tokens_to_gtok_file(fh, &tokens.ids)?;
                 }
                 None => {
                     // create new file
-                    let new_file_name = format!("{}.gtok", barcode);
-                    init_gtok_file(new_file_name.as_str())?;
+                    let new_file_name = out_path.join(format!("{}.gtok", barcode));
+                    let new_file_name = new_file_name.to_str().unwrap();
+                    Self::init_gtok_file(new_file_name)?;
+
+                    // append to file -- need to open file again in append mode
+                    let file = OpenOptions::new()
+                        .append(true)
+                        .open(new_file_name)
+                        .with_context(|| "Failed to open gtok file for appending")?;
+
+                    let mut writer = BufWriter::new(file);
+                    Self::append_tokens_to_gtok_file(&mut writer, &tokens.ids)?;
 
                     // insert into map
-                    file_map.insert(barcode.to_string(), new_file_name.clone());
-
-                    // append to file
-                    append_tokens_to_gtok_file(&new_file_name, &tokens.ids)?;
+                    file_map.insert(barcode.to_string(), writer);
                 }
             }
         }
