@@ -10,6 +10,20 @@ use flate2::read::GzDecoder;
 
 use crate::common::models::region::Region;
 
+pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
+    let is_gzipped = path.extension() == Some(OsStr::new("gz"));
+    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
+
+    let file: Box<dyn Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(file)),
+        false => Box::new(file),
+    };
+
+    let reader = BufReader::new(file);
+
+    Ok(reader)
+}
+
 pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     let mut current_id = 0;
     let mut region_to_id: HashMap<Region, u32> = HashMap::new();
@@ -39,17 +53,9 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
 }
 
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
+    let reader = get_dynamic_reader(path)?;
+
     let mut regions = Vec::new();
-
-    let is_gzipped = path.extension() == Some(OsStr::new("gz"));
-    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
-
-    let file: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
-        false => Box::new(file),
-    };
-
-    let reader = BufReader::new(file);
 
     for line in reader.lines() {
         let line = line.with_context(|| "Failed parsing line in BED file")?;
