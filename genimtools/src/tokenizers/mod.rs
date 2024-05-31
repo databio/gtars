@@ -2,6 +2,7 @@
 //!
 //! There is currently only one tokenizer - the `TreeTokenizer`
 pub mod cli;
+pub mod fragment_tokenizer;
 pub mod soft_tokenizer;
 pub mod special_tokens;
 pub mod traits;
