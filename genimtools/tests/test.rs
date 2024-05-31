@@ -177,6 +177,27 @@ mod tests {
         std::fs::remove_file(path).expect("Failed to delete the gtok file.");
     }
 
+
+
+    #[rstest]
+    fn test_append_to_gtok(path_to_gtok_file: &str) {
+        let res = init_gtok_file(path_to_gtok_file);
+        assert!(res.is_ok());
+
+        let tokens = vec![1, 2, 3, 4, 5];
+        let res = append_tokens_to_gtok_file(path_to_gtok_file, &tokens);
+        assert!(res.is_ok());
+
+        let tokens = read_tokens_from_gtok(path_to_gtok_file);
+        assert!(tokens.is_ok());
+        let tokens = tokens.unwrap();
+        assert!(tokens.len() == 5);
+
+        // delete the file
+        let path = Path::new(path_to_gtok_file);
+        std::fs::remove_file(path).expect("Failed to delete the gtok file.");
+    }
+    
     //
     // Cant get these to run because the polars CsvReader isnt working for gzipped files right now.
     //

@@ -1,3 +1,4 @@
+use std::fs::OpenOptions;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 
@@ -153,7 +154,10 @@ pub fn append_tokens_to_gtok_file(filename: &str, tokens: &[u32]) -> Result<()> 
 
     // start appending to the open file
     // must reopen beacause `Bufreader` takes ownership of `file`.
-    let file = File::open(filename).with_context(|| "Failed to open gtok file!")?;
+    let file = OpenOptions::new()
+        .append(true)
+        .open(filename)
+        .with_context(|| "Failed to open gtok file for appending")?;
     let mut writer = BufWriter::new(file);
 
     match size_flag {
