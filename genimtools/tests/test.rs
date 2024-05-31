@@ -4,6 +4,7 @@ use rstest::*;
 use tempfile::NamedTempFile;
 
 use genimtools::common::models::{Region, RegionSet};
+use genimtools::io::{append_tokens_to_gtok_file, init_gtok_file, read_tokens_from_gtok};
 use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
 
 #[fixture]
@@ -39,6 +40,11 @@ fn path_to_r2v_repo() -> &'static str {
 #[fixture]
 fn bb_bed_id() -> &'static str {
     "fa09672b962809b408b356728d81640e"
+}
+
+#[fixture]
+fn path_to_gtok_file() -> &'static str {
+    "tests/data/out/tokens.gtok"
 }
 
 mod tests {
@@ -156,6 +162,19 @@ mod tests {
             .convert_id_to_region(tokenized_regions[3])
             .unwrap();
         assert!(unknown_token.chr == "chrUNK");
+    }
+
+    #[rstest]
+    fn test_init_gtok_file(path_to_gtok_file: &str) {
+        let res = init_gtok_file(path_to_gtok_file);
+        assert!(res.is_ok());
+
+        // check that the file was created
+        let path = Path::new(path_to_gtok_file);
+        assert!(path.exists());
+
+        // delete the file
+        std::fs::remove_file(path).expect("Failed to delete the gtok file.");
     }
 
     //
