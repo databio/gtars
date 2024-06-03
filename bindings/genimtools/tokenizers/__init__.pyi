@@ -367,3 +367,20 @@ class TreeTokenizer:
         """
         Get a string representation of the tokenizer.
         """
+
+class FragmentTokenizer:
+    def __new__(cls, path: str) -> FragmentTokenizer:
+        """
+        Construct a new FragmentTokenizer from a universe file.
+
+        :param path: The path to the universe file. This should be a BED file.
+        """
+    
+    def tokenize_fragments(self, file_path: str, out_path: str = None, filter: List[str] = None) -> None:
+        """
+        Tokenize a file containing fragments.
+
+        :param file_path: The path to the file containing fragments.
+        :param out_path: The path to the output file. If None, the output is written to the standard output.
+        :param filter: A list of chromosomes to filter. If None, all chromosomes are included.
+        """
