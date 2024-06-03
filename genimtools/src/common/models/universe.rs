@@ -17,7 +17,7 @@ pub struct Universe {
 
 impl Universe {
     pub fn insert_token(&mut self, region: &Region) {
-        let new_id = self.region_to_id.len() + 1;
+        let new_id = self.region_to_id.len();
         self.region_to_id.insert(region.to_owned(), new_id as u32);
         self.id_to_region.insert(new_id as u32, region.to_owned());
     }

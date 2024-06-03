@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-#[pyclass(name="FragmentTokenizer")]
+#[pyclass(name = "FragmentTokenizer")]
 pub struct PyFragmentTokenizer {
     pub tokenizer: genimtools::tokenizers::FragmentTokenizer,
 }
@@ -14,12 +14,19 @@ impl PyFragmentTokenizer {
         Ok(PyFragmentTokenizer { tokenizer })
     }
 
-    pub fn tokenize_fragments(&self, file: String, out_path: Option<String>, filter: Option<Vec<String>>) -> PyResult<()> {
+    pub fn tokenize_fragments(
+        &self,
+        file: String,
+        out_path: Option<String>,
+        filter: Option<Vec<String>>,
+    ) -> PyResult<()> {
         let path = std::path::Path::new(&file);
         let out_path = out_path.unwrap_or("".to_string());
         let out_path = std::path::Path::new(&out_path);
         match filter {
-            Some(filter) => self.tokenizer.tokenize_fragments_with_filter(path, out_path, filter),
+            Some(filter) => self
+                .tokenizer
+                .tokenize_fragments_with_filter(path, out_path, filter),
             None => self.tokenizer.tokenize_fragments(path, out_path),
         }?;
         Ok(())

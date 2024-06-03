@@ -187,7 +187,6 @@ impl FragmentTokenizer {
         let filter: HashSet<String> = HashSet::from_iter(filter);
 
         for (line_num, line) in reader.lines().enumerate() {
-
             // print progress every 10,000 lines
             if line_num % 10_000 == 0 {
                 println!("Processed {} lines", line_num);
