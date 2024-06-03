@@ -155,7 +155,6 @@ impl PyTreeTokenizer {
 
             Ok(py_tokenized_region_set)
         })
-
     }
 
     // encode returns a list of ids

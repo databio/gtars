@@ -15,13 +15,13 @@ fn genimtools(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
     let ailist_module = pyo3::wrap_pymodule!(ailist::ailist);
     let utils_module = pyo3::wrap_pymodule!(utils::utils);
-    let models_modeule = pyo3::wrap_pymodule!(models::models);
+    let models_module = pyo3::wrap_pymodule!(models::models);
 
     m.add_wrapped(vocab_module)?;
     m.add_wrapped(tokenize_module)?;
     m.add_wrapped(ailist_module)?;
     m.add_wrapped(utils_module)?;
-    m.add_wrapped(models_modeule)?;
+    m.add_wrapped(models_module)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let binding = sys.getattr("modules")?;
