@@ -6,6 +6,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.0.13]
 - implemented a fragment file tokenizer that will generate `.gtok` files directly from `fragments.tsv.gz` files.
+- fix an off-by-one error in the `region-to-id` maps in the `Universe` structs. This was leading to critical bugs in our models.
 
 ## [0.0.12]
 - optimize creation of `PyRegionSet` to reduce expensive cloning of `Universe` structs.
