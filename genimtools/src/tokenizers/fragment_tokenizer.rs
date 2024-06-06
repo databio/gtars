@@ -191,9 +191,9 @@ impl FragmentTokenizer {
         let filter: HashSet<String> = HashSet::from_iter(filter);
 
         for (line_num, line) in reader.lines().enumerate() {
-            // print progress every 10,000 lines
             if line_num % 10_000 == 0 {
-                println!("Processed {} lines", line_num);
+                print!("Processed {} lines\r", line_num);
+                std::io::stdout().flush().unwrap();
             }
 
             let line = line
@@ -265,8 +265,18 @@ impl FragmentTokenizer {
         let mut barcode_ids_map: HashMap<String, Vec<u32>> = HashMap::new();
 
         for (line_num, line) in reader.lines().enumerate() {
+            if line_num % 10_000 == 0 {
+                print!("Processed {} lines\r", line_num);
+                std::io::stdout().flush().unwrap();
+            }
+
             let line = line
                 .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
+
+            if line_num % 10_000 == 0 {
+                print!("Processed {} lines\r", line_num);
+                std::io::stdout().flush().unwrap();
+            }
 
             let (chr, start, end, barcode, _read_support) = Self::parse_fragment_file_line(line)
                 .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
@@ -279,8 +289,6 @@ impl FragmentTokenizer {
 
             // get actual tokens
             let tokens = self.tokenizer.tokenize_region(&r);
-
-            // get current vector of tokens for barcode
 
             let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
 
@@ -304,6 +312,11 @@ impl FragmentTokenizer {
         let filter: HashSet<String> = HashSet::from_iter(filter);
 
         for (line_num, line) in reader.lines().enumerate() {
+            if line_num % 10_000 == 0 {
+                print!("Processed {} lines\r", line_num);
+                std::io::stdout().flush().unwrap();
+            }
+
             let line = line
                 .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
 
@@ -323,8 +336,6 @@ impl FragmentTokenizer {
 
             // get actual tokens
             let tokens = self.tokenizer.tokenize_region(&r);
-
-            // get current vector of tokens for barcode
 
             let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
 
