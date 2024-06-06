@@ -3,7 +3,7 @@ use std::fs::{File, OpenOptions};
 use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 
-use crate::common::models::Region;
+use crate::common::models::{Region, TokenizedRegionSet};
 use crate::common::utils::get_dynamic_reader;
 use crate::io::consts::{GTOK_HEADER, GTOK_U32_FLAG};
 use crate::tokenizers::TreeTokenizer;
@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use super::Tokenizer;
 
 pub struct FragmentTokenizer {
-    tokenizer: TreeTokenizer,
+    pub tokenizer: TreeTokenizer,
 }
 
 impl TryFrom<&Path> for FragmentTokenizer {
@@ -104,7 +104,11 @@ impl FragmentTokenizer {
     ///
     /// # Arguments
     /// - `fragments_file_path` - the path to the fragments file
-    pub fn tokenize_fragments(&self, fragments_file_path: &Path, out_path: &Path) -> Result<()> {
+    pub fn tokenize_fragments_to_gtoks(
+        &self,
+        fragments_file_path: &Path,
+        out_path: &Path,
+    ) -> Result<()> {
         let reader = get_dynamic_reader(fragments_file_path)?;
 
         let mut file_map: HashMap<String, BufWriter<File>> = HashMap::new();
@@ -175,7 +179,7 @@ impl FragmentTokenizer {
     ///
     /// # Arguments
     /// - `fragments_file_path` - the path to the fragments file
-    pub fn tokenize_fragments_with_filter(
+    pub fn tokenize_fragments_to_gtoks_with_filter(
         &self,
         fragments_file_path: &Path,
         out_path: &Path,
@@ -241,5 +245,95 @@ impl FragmentTokenizer {
         }
 
         Ok(())
+    }
+
+    ///
+    /// Tokenize a fragments file into a vector of TokenizedRegionSets. A fragments file represents a collection of cells,
+    /// therefore we need to demultiplex the reads and tokenize each cell separately.
+    ///
+    /// This function will consume more memory than the `tokenize_fragments_to_gtoks` function, because it
+    /// will store all cells and their tokens in memory.
+    ///
+    /// # Arguments
+    /// - `fragments_file_path` - the path to the fragments file
+    pub fn tokenize_fragments(
+        &self,
+        fragments_file_path: &Path,
+    ) -> Result<Vec<TokenizedRegionSet>> {
+        let reader = get_dynamic_reader(fragments_file_path)?;
+
+        let mut barcode_ids_map: HashMap<String, Vec<u32>> = HashMap::new();
+
+        for (line_num, line) in reader.lines().enumerate() {
+            let line = line
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
+
+            let (chr, start, end, barcode, _read_support) = Self::parse_fragment_file_line(line)
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
+
+            let r = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+
+            // get actual tokens
+            let tokens = self.tokenizer.tokenize_region(&r);
+
+            // get current vector of tokens for barcode
+
+            let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
+
+            barcode_tokens.extend(tokens.ids);
+        }
+
+        Ok(barcode_ids_map
+            .into_values()
+            .map(|ids| TokenizedRegionSet::new(ids, &self.tokenizer.universe))
+            .collect())
+    }
+
+    pub fn tokenize_fragments_with_filter(
+        &self,
+        fragments_file_path: &Path,
+        filter: Vec<String>,
+    ) -> Result<Vec<TokenizedRegionSet>> {
+        let reader = get_dynamic_reader(fragments_file_path)?;
+
+        let mut barcode_ids_map: HashMap<String, Vec<u32>> = HashMap::new();
+        let filter: HashSet<String> = HashSet::from_iter(filter);
+
+        for (line_num, line) in reader.lines().enumerate() {
+            let line = line
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
+
+            let (chr, start, end, barcode, _read_support) = Self::parse_fragment_file_line(line)
+                .with_context(|| format!("Failed parsing line {} in fragments file", line_num))?;
+
+            if !filter.contains(&barcode) {
+                // skip! -- barcode not in filter
+                continue;
+            }
+
+            let r = Region {
+                chr: chr.to_string(),
+                start,
+                end,
+            };
+
+            // get actual tokens
+            let tokens = self.tokenizer.tokenize_region(&r);
+
+            // get current vector of tokens for barcode
+
+            let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
+
+            barcode_tokens.extend(tokens.ids);
+        }
+
+        Ok(barcode_ids_map
+            .into_values()
+            .map(|ids| TokenizedRegionSet::new(ids, &self.tokenizer.universe))
+            .collect())
     }
 }

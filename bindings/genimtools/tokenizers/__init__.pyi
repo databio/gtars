@@ -376,7 +376,7 @@ class FragmentTokenizer:
         :param path: The path to the universe file. This should be a BED file.
         """
     
-    def tokenize_fragments(self, file_path: str, out_path: str = None, filter: List[str] = None) -> None:
+    def tokenize_fragments_to_gtoks(self, file_path: str, out_path: str = None, filter: List[str] = None) -> None:
         """
         Tokenize a file containing fragments.
 
