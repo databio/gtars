@@ -1,3 +1,5 @@
+use genimtools::tokenizers::FragmentTokenizer;
+use genimtools::tokenizers::TreeTokenizer;
 use pyo3::prelude::*;
 
 use super::PyTokenizedRegionSet;
@@ -5,7 +7,7 @@ use super::PyUniverse;
 
 #[pyclass(name = "FragmentTokenizer")]
 pub struct PyFragmentTokenizer {
-    pub tokenizer: genimtools::tokenizers::FragmentTokenizer,
+    pub tokenizer: genimtools::tokenizers::FragmentTokenizer<TreeTokenizer>,
     pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons
 }
 
@@ -15,11 +17,12 @@ impl PyFragmentTokenizer {
     pub fn new(path: String) -> PyResult<Self> {
         Python::with_gil(|py| {
             let path = std::path::Path::new(&path);
-            let tokenizer = genimtools::tokenizers::FragmentTokenizer::try_from(path)?;
-            let py_universe: PyUniverse = tokenizer.tokenizer.universe.to_owned().into();
+            let tokenizer = genimtools::tokenizers::TreeTokenizer::try_from(path)?;
+            let frag_tokenizer = FragmentTokenizer::new(tokenizer);
+            let py_universe: PyUniverse = frag_tokenizer.tokenizer.universe.to_owned().into();
             let py_universe_bound = Py::new(py, py_universe)?;
             Ok(PyFragmentTokenizer {
-                tokenizer,
+                tokenizer: frag_tokenizer,
                 universe: py_universe_bound,
             })
         })

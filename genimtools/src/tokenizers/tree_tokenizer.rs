@@ -164,6 +164,10 @@ impl Tokenizer for TreeTokenizer {
     fn vocab_size(&self) -> usize {
         self.universe.len()
     }
+
+    fn get_universe(&self) -> &Universe {
+        &self.universe
+    }
 }
 
 impl SpecialTokens for TreeTokenizer {
