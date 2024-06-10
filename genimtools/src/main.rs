@@ -4,7 +4,6 @@ use clap::Command;
 // go through the library crate to get the interfaces
 use genimtools::tokenizers;
 use genimtools::tools;
-use genimtools::vocab;
 // use genimtools::uniwig;
 
 pub mod consts {
@@ -21,7 +20,6 @@ fn build_parser() -> Command {
         .author("Databio")
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
-        .subcommand(vocab::cli::make_prune_cli())
         .subcommand(tokenizers::cli::make_tokenization_cli())
         .subcommand(tools::cli::make_tools_cli())
 }
@@ -31,9 +29,6 @@ fn main() -> Result<()> {
     let matches = app.get_matches();
 
     match matches.subcommand() {
-        Some((vocab::consts::PRUNE_CMD, matches)) => {
-            vocab::cli::handlers::prune_universe(matches);
-        }
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches)?;
         }
