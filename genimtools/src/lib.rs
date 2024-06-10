@@ -10,4 +10,3 @@ pub mod io;
 pub mod tokenizers;
 pub mod tools;
 pub mod uniwig;
-pub mod vocab;
