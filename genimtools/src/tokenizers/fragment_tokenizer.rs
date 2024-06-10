@@ -12,13 +12,15 @@ use anyhow::{Context, Result};
 use super::Tokenizer;
 
 pub struct FragmentTokenizer<T>
-where T: Tokenizer
+where
+    T: Tokenizer,
 {
     pub tokenizer: T,
 }
 
 impl<T> FragmentTokenizer<T>
-where T: Tokenizer
+where
+    T: Tokenizer,
 {
     pub fn new(tokenizer: T) -> Self {
         Self { tokenizer }
@@ -26,7 +28,8 @@ where T: Tokenizer
 }
 
 impl<T> FragmentTokenizer<T>
-where T: Tokenizer
+where
+    T: Tokenizer,
 {
     fn parse_fragment_file_line(line: String) -> Result<(String, u32, u32, String, u32)> {
         let fields: Vec<&str> = line.split_whitespace().collect();
