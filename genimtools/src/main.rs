@@ -9,7 +9,6 @@ pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
     pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
     pub const BIN_NAME: &str = env!("CARGO_PKG_NAME");
-    pub const UNIWIG_CMD: &str = "uniwig";
 }
 
 fn build_parser() -> Command {
