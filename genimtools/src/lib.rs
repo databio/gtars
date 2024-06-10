@@ -8,5 +8,4 @@ pub mod ailist;
 pub mod common;
 pub mod io;
 pub mod tokenizers;
-pub mod tools;
 pub mod uniwig;
