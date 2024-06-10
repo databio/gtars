@@ -7,6 +7,7 @@ pub mod soft_tokenizer;
 pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
+pub mod config;
 
 /// constants for the tokenizer module.
 pub mod consts {
@@ -19,3 +20,4 @@ pub mod consts {
 pub use fragment_tokenizer::FragmentTokenizer;
 pub use traits::{SingleCellTokenizer, Tokenizer};
 pub use tree_tokenizer::TreeTokenizer;
+pub use config::TokenizerConfig;
