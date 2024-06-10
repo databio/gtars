@@ -6,30 +6,28 @@ use std::path::Path;
 use crate::common::models::{Region, TokenizedRegionSet};
 use crate::common::utils::get_dynamic_reader;
 use crate::io::consts::{GTOK_HEADER, GTOK_U32_FLAG};
-use crate::tokenizers::TreeTokenizer;
+
 use anyhow::{Context, Result};
 
 use super::Tokenizer;
 
-pub struct FragmentTokenizer {
-    pub tokenizer: TreeTokenizer,
+pub struct FragmentTokenizer<T>
+where T: Tokenizer
+{
+    pub tokenizer: T,
 }
 
-impl TryFrom<&Path> for FragmentTokenizer {
-    type Error = anyhow::Error;
-    ///
-    /// # Arguments
-    /// - `value` - the path to the bed file
-    ///
-    /// # Returns
-    /// A new FragmentTokenizer
-    fn try_from(value: &Path) -> Result<Self> {
-        let tokenizer = TreeTokenizer::try_from(value)?;
-        Ok(Self { tokenizer })
+impl<T> FragmentTokenizer<T>
+where T: Tokenizer
+{
+    pub fn new(tokenizer: T) -> Self {
+        Self { tokenizer }
     }
 }
 
-impl FragmentTokenizer {
+impl<T> FragmentTokenizer<T>
+where T: Tokenizer
+{
     fn parse_fragment_file_line(line: String) -> Result<(String, u32, u32, String, u32)> {
         let fields: Vec<&str> = line.split_whitespace().collect();
 
@@ -297,7 +295,7 @@ impl FragmentTokenizer {
 
         Ok(barcode_ids_map
             .into_values()
-            .map(|ids| TokenizedRegionSet::new(ids, &self.tokenizer.universe))
+            .map(|ids| TokenizedRegionSet::new(ids, self.tokenizer.get_universe()))
             .collect())
     }
 
@@ -344,7 +342,7 @@ impl FragmentTokenizer {
 
         Ok(barcode_ids_map
             .into_values()
-            .map(|ids| TokenizedRegionSet::new(ids, &self.tokenizer.universe))
+            .map(|ids| TokenizedRegionSet::new(ids, self.tokenizer.get_universe()))
             .collect())
     }
 }

@@ -6,6 +6,7 @@ use anyhow::Result;
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
 use crate::common::models::tokenized_regionset::TokenizedRegionSet;
+use crate::common::models::universe::Universe;
 use crate::tokenizers::special_tokens::SpecialToken;
 
 pub trait Tokenizer {
@@ -30,6 +31,8 @@ pub trait Tokenizer {
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet;
 
     fn vocab_size(&self) -> usize;
+
+    fn get_universe(&self) -> &Universe;
 }
 
 pub trait SingleCellTokenizer {
