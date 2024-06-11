@@ -1,0 +1,10 @@
+universe: peaks.bed.gz
+exclude_ranges: excluderanges.bed.gz
+special_tokens: 
+  unk: 0
+  pad: 1
+  mask: 2
+  eos: 3
+  bos: 4
+  cls: 5
+  sep: 6

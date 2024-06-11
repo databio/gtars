@@ -5,7 +5,7 @@ use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
 use anyhow::Result;
-use genimtools::common::models::region::Region;
+use gtars::common::models::region::Region;
 
 use crate::models::PyUniverse;
 
