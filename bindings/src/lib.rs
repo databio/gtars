@@ -9,7 +9,7 @@ mod utils;
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[pymodule]
-fn genimtools(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
     let ailist_module = pyo3::wrap_pymodule!(ailist::ailist);
     let utils_module = pyo3::wrap_pymodule!(utils::utils);
@@ -25,10 +25,10 @@ fn genimtools(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sys_modules: &Bound<'_, PyDict> = binding.downcast()?;
 
     // set names of submodules
-    sys_modules.set_item("genimtools.tokenizers", m.getattr("tokenizers")?)?;
-    sys_modules.set_item("genimtools.ailist", m.getattr("ailist")?)?;
-    sys_modules.set_item("genimtools.utils", m.getattr("utils")?)?;
-    sys_modules.set_item("genimtools.models", m.getattr("models")?)?;
+    sys_modules.set_item("gtars.tokenizers", m.getattr("tokenizers")?)?;
+    sys_modules.set_item("gtars.ailist", m.getattr("ailist")?)?;
+    sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
+    sys_modules.set_item("gtars.models", m.getattr("models")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;
