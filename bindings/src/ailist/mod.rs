@@ -1,4 +1,4 @@
-use genimtools::ailist::{AIList, Interval};
+use gtars::ailist::{AIList, Interval};
 use pyo3::{prelude::*, pyclass};
 
 use crate::models::PyInterval;

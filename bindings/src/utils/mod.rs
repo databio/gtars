@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyIterator};
 
 use anyhow::Result;
-use genimtools::common::models::{Region, RegionSet};
+use gtars::common::models::{Region, RegionSet};
 
 // this is for internal use only
 pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionSet> {
@@ -20,7 +20,7 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
             .into());
         }
 
-        let regions = genimtools::common::utils::extract_regions_from_bed_file(regions);
+        let regions = gtars::common::utils::extract_regions_from_bed_file(regions);
         match regions {
             Ok(regions) => return Ok(RegionSet::from(regions)),
             Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(e.to_string()).into()),
@@ -55,13 +55,13 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
 
 #[pyfunction]
 pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
-    genimtools::io::write_tokens_to_gtok(filename, &tokens)?;
+    gtars::io::write_tokens_to_gtok(filename, &tokens)?;
     Ok(())
 }
 
 #[pyfunction]
 pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
-    let tokens = genimtools::io::read_tokens_from_gtok(filename)?;
+    let tokens = gtars::io::read_tokens_from_gtok(filename)?;
     Ok(tokens)
 }
 

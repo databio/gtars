@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use anyhow::Result;
 
 use crate::models::PyRegion;
-use genimtools::common::models::Universe;
+use gtars::common::models::Universe;
 
 #[pyclass(name = "Universe")]
 #[derive(Clone, Debug)]
