@@ -3,9 +3,9 @@ use std::path::Path;
 use rstest::*;
 use tempfile::NamedTempFile;
 
-use genimtools::common::models::{Region, RegionSet};
-use genimtools::io::{append_tokens_to_gtok_file, init_gtok_file, read_tokens_from_gtok};
-use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
+use gtars::common::models::{Region, RegionSet};
+use gtars::io::{append_tokens_to_gtok_file, init_gtok_file, read_tokens_from_gtok};
+use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 
 #[fixture]
 fn path_to_data() -> &'static str {
@@ -50,7 +50,7 @@ fn path_to_gtok_file() -> &'static str {
 mod tests {
     use std::io::Read;
 
-    use genimtools::common::utils::extract_regions_from_bed_file;
+    use gtars::common::utils::extract_regions_from_bed_file;
 
     use super::*;
 
@@ -205,7 +205,7 @@ mod tests {
     //     let path_to_data = Path::new(path_to_data);
     //     let outdir = "tests/data/out";
 
-    //     let res = genimtools::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
+    //     let res = gtars::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
     //     assert!(res.is_ok());
     // }
 
@@ -215,7 +215,7 @@ mod tests {
     //     let path_to_data = Path::new(path_to_tokenize_bed_file);
     //     let outdir = "tests/data/out";
 
-    //     let res = genimtools::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
+    //     let res = gtars::tools::pre_tokenize_data(path_to_data, outdir, &tokenizer);
     //     assert!(res.is_ok());
     // }
 }

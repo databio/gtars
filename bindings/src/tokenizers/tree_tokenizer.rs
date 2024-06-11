@@ -1,4 +1,4 @@
-use genimtools::tokenizers::traits::SpecialTokens;
+use gtars::tokenizers::traits::SpecialTokens;
 use pyo3::prelude::*;
 use pyo3::types::PyAny;
 
@@ -6,8 +6,8 @@ use anyhow::Result;
 
 use std::path::Path;
 
-use genimtools::common::models::RegionSet;
-use genimtools::tokenizers::{Tokenizer, TreeTokenizer};
+use gtars::common::models::RegionSet;
+use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;

@@ -11,7 +11,7 @@ pub mod config;
 
 /// constants for the tokenizer module.
 pub mod consts {
-    /// command for the `genimtools` cli
+    /// command for the `gtars` cli
     pub const TOKENIZE_CMD: &str = "tokenize";
     pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
 }

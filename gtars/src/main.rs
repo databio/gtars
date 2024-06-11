@@ -2,8 +2,8 @@ use anyhow::Result;
 use clap::Command;
 
 // go through the library crate to get the interfaces
-use genimtools::tokenizers;
-// use genimtools::uniwig;
+use gtars::tokenizers;
+// use gtars::uniwig;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
