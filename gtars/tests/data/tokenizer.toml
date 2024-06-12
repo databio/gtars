@@ -1,0 +1,6 @@
+universe = "peaks.bed.gz"
+
+[[hierarchical_universe]]
+file = "chroms.bed"
+
+exclude_ranges = "excluderanges.bed.gz"

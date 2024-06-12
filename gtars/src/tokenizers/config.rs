@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize, Serialize, Debug, PartialEq )]
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct TokenizerConfig {
     pub universe: String,
-    pub excluderanges: Option<String>,
+    pub hierarchical_universes: Option<Vec<String>>,
+    pub exclude_ranges: Option<String>,
 }
