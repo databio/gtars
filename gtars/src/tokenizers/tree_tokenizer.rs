@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fs::read_to_string;
 use std::path::Path;
 
 use anyhow::Result;
@@ -7,11 +8,14 @@ use rust_lapper::{Interval, Lapper};
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::extract_regions_from_bed_file;
+use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
 pub struct TreeTokenizer {
     pub universe: Universe,
     tree: HashMap<String, Lapper<u32, u32>>,
+    secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
+    exclude_ranges: Option<Vec<HashMap<String, Vec<Interval<u32, u32>>>>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
@@ -23,7 +27,100 @@ impl TryFrom<&Path> for TreeTokenizer {
     /// # Returns
     /// A new TreeTokenizer
     fn try_from(value: &Path) -> Result<Self> {
-        let mut universe = Universe::try_from(value)?;
+        // read in yaml from file
+        let yaml_str = read_to_string(value)?;
+        let config: TokenizerConfig = toml::from_str(&yaml_str)?;
+
+        // create initial universe from the *required* universe field
+        let mut universe = Universe::try_from(Path::new(&config.universe))?;
+
+        let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+        let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+
+        for region in universe.regions.iter() {
+            // create interval
+            let interval = Interval {
+                start: region.start,
+                stop: region.end,
+                val: universe.convert_region_to_id(region).unwrap(),
+            };
+
+            // use chr to get the vector of intervals
+            let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
+
+            // push interval to vector
+            chr_intervals.push(interval);
+        }
+
+        for (chr, chr_intervals) in intervals.iter() {
+            let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
+            tree.insert(chr.to_string(), lapper);
+        }
+
+        // create secondary trees if they exist
+        let mut secondary_trees: Vec<HashMap<String, Lapper<u32, u32>>> = Vec::new();
+        if let Some(hierarchical_universes) = config.hierarchical_universes {
+            for universe_path in hierarchical_universes {
+                let tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+
+                // extract regions from the bed file
+                let path_to_bed = Path::new(&universe_path);
+                let regions = extract_regions_from_bed_file(path_to_bed)?;
+
+                // insert these into the universe so they can get id's assigned
+                for region in regions {
+                    universe.insert_token(&region);
+
+                    // create interval
+                    let interval = Interval {
+                        start: region.start,
+                        stop: region.end,
+                        val: universe.convert_region_to_id(&region).unwrap(),
+                    };
+
+                    // use chr to get the vector of intervals
+                    let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
+
+                    // push interval to vector
+                    chr_intervals.push(interval);
+                }
+
+                let mut s_tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+                for (chr, chr_intervals) in intervals.iter() {
+                    let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
+                    s_tree.insert(chr.to_string(), lapper);
+                }
+
+                secondary_trees.push(tree);
+            }
+        };
+
+        // create exclude ranges if they exist (no need to increment universe, since these are completely ignored)
+        let mut exclude_ranges: Vec<HashMap<String, Vec<Interval<u32, u32>>>> = Vec::new();
+
+        if let Some(exclude_ranges_path) = config.exclude_ranges {
+            let path_to_bed = Path::new(&exclude_ranges_path);
+            let regions = extract_regions_from_bed_file(path_to_bed)?;
+
+            let mut exclude_intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+
+            for region in regions {
+                // create interval
+                let interval = Interval {
+                    start: region.start,
+                    stop: region.end,
+                    val: 0,
+                };
+
+                // use chr to get the vector of intervals
+                let chr_intervals = exclude_intervals.entry(region.chr.to_owned()).or_default();
+
+                // push interval to vector
+                chr_intervals.push(interval);
+            }
+
+            exclude_ranges.push(exclude_intervals);
+        }
 
         // add special tokens to the universe
         // unk
@@ -75,30 +172,20 @@ impl TryFrom<&Path> for TreeTokenizer {
             end: SEP_END as u32,
         });
 
-        let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
-        let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
-
-        for region in universe.regions.iter() {
-            // create interval
-            let interval = Interval {
-                start: region.start,
-                stop: region.end,
-                val: universe.convert_region_to_id(region).unwrap(),
-            };
-
-            // use chr to get the vector of intervals
-            let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
-
-            // push interval to vector
-            chr_intervals.push(interval);
-        }
-
-        for (chr, chr_intervals) in intervals.iter() {
-            let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
-            tree.insert(chr.to_string(), lapper);
-        }
-
-        Ok(TreeTokenizer { universe, tree })
+        Ok(TreeTokenizer {
+            universe,
+            tree,
+            secondary_trees: if !secondary_trees.is_empty() {
+                Some(secondary_trees)
+            } else {
+                None
+            },
+            exclude_ranges: if !exclude_ranges.is_empty() {
+                Some(exclude_ranges)
+            } else {
+                None
+            },
+        })
     }
 }
 
