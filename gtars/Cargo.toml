@@ -18,8 +18,7 @@ serde = {version = "1.0.203", features=["derive"]}
 toml = "0.8.14"
 # polars = { version = "0.35.4", features = ["decompress", "decompress-fast", "ndarray"] }
 
-
-
 [dev-dependencies]
 rstest = "0.18.2"
 tempfile = "3.8.1"
+pretty_assertions = "1.4.0"
