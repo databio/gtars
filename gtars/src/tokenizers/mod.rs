@@ -25,7 +25,7 @@ pub use tree_tokenizer::TreeTokenizer;
 #[cfg(test)]
 mod tests {
 
-    use crate::common::models::RegionSet;
+    use crate::common::models::{RegionSet, Region};
     use std::path::Path;
 
     use super::*;
@@ -74,5 +74,49 @@ mod tests {
             .convert_id_to_region(tokenized_regions[3])
             .unwrap();
         assert!(unknown_token.chr == "chrUNK");
+    }
+
+    #[rstest]
+    fn test_hierarchical_universe_hit(path_to_config_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
+        let res = tokenizer.tokenize_region(&Region {
+            chr: "chr1".to_string(),
+            start: 100,
+            end: 200,
+        });
+        assert_eq!(res.len(), 1);
+
+        // check the id, it should be len(primary_universe) + 1 (since its chr1)
+        assert_eq!(res.ids, vec![25]);
+
+        let res = res.into_region_vec();
+        let region = &res[0];
+
+        assert_eq!(region.chr, "chr1");
+        assert_eq!(region.start, 0);
+        assert_eq!(region.end, 248_956_422);
+        
+    }
+
+    #[rstest]
+    fn test_hierarchical_universe_no_hit(path_to_config_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
+        let res = tokenizer.tokenize_region(&Region {
+            chr: "chrFOO".to_string(),
+            start: 100,
+            end: 200,
+        });
+        assert_eq!(res.len(), 1);
+
+        // check the id, it should be the id of the UNK token
+        assert_eq!(res.ids, vec![49]);
+
+        let res = res.into_region_vec();
+        let region = &res[0];
+
+        assert_eq!(region.chr, "chrUNK");
+        assert_eq!(region.start, 0);
+        assert_eq!(region.end, 0);
+        
     }
 }
