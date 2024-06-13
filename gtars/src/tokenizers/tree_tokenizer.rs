@@ -3,11 +3,11 @@ use std::fs::read_to_string;
 use std::path::Path;
 
 use anyhow::Result;
-use rust_lapper::{Interval, Lapper};
+use rust_lapper::Lapper;
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
-use crate::common::utils::extract_regions_from_bed_file;
+use crate::common::utils::{create_interval_tree_from_universe, extract_regions_from_bed_file};
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
@@ -15,112 +15,92 @@ pub struct TreeTokenizer {
     pub universe: Universe,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
-    exclude_ranges: Option<Vec<HashMap<String, Vec<Interval<u32, u32>>>>>,
+    exclude_ranges: Option<HashMap<String, Lapper<u32, u32>>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
     type Error = anyhow::Error;
     ///
     /// # Arguments
-    /// - `value` - the path to the bed file
+    /// - `value` - the path to the tokenizer config file (a TOML) or bed file
     ///
     /// # Returns
     /// A new TreeTokenizer
     fn try_from(value: &Path) -> Result<Self> {
-        // read in yaml from file
-        let yaml_str = read_to_string(value)?;
-        let config: TokenizerConfig = toml::from_str(&yaml_str)?;
+        // detect file type... if ends in toml assume toml otherwise assume its a bed file
+        // and just build the universe + tree from that and move on.
+        //
+        // This maintains backwards compatibility with the old way of creating tokenizers from bed files
+        // and allows for the new way of creating tokenizers from toml files
+        let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        // create initial universe from the *required* universe field
-        let mut universe = Universe::try_from(Path::new(&config.universe))?;
+        let (mut universe, tree, secondary_trees, exclude_ranges) = match file_extension {
+            // parse config file
+            "toml" => {
+                let toml_str = read_to_string(value)?;
+                let config: TokenizerConfig = toml::from_str(&toml_str)?;
 
-        let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
-        let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+                // universe path is relative to the config file
+                let universe_path = value.parent().unwrap().join(&config.universe);
 
-        for region in universe.regions.iter() {
-            // create interval
-            let interval = Interval {
-                start: region.start,
-                stop: region.end,
-                val: universe.convert_region_to_id(region).unwrap(),
-            };
+                // create initial universe from the *required* universe field
+                let mut universe = Universe::try_from(Path::new(&universe_path))?;
 
-            // use chr to get the vector of intervals
-            let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
+                let tree = create_interval_tree_from_universe(&universe);
 
-            // push interval to vector
-            chr_intervals.push(interval);
-        }
+                // create secondary trees if they exist
+                let secondary_trees = match config.hierarchical_universes {
+                    Some(hierarchical_universes) => {
+                        let mut secondary_trees = Vec::new();
+                        for hierarchical_universe in hierarchical_universes {
+                            let hierarchical_universe_path =
+                                value.parent().unwrap().join(&hierarchical_universe);
 
-        for (chr, chr_intervals) in intervals.iter() {
-            let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
-            tree.insert(chr.to_string(), lapper);
-        }
+                            let hierarchical_universe_regions =
+                                extract_regions_from_bed_file(&hierarchical_universe_path)?;
 
-        // create secondary trees if they exist
-        let mut secondary_trees: Vec<HashMap<String, Lapper<u32, u32>>> = Vec::new();
-        if let Some(hierarchical_universes) = config.hierarchical_universes {
-            for universe_path in hierarchical_universes {
-                let tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+                            for region in hierarchical_universe_regions {
+                                universe.insert_token(&region);
+                            }
 
-                // extract regions from the bed file
-                let path_to_bed = Path::new(&universe_path);
-                let regions = extract_regions_from_bed_file(path_to_bed)?;
+                            let hierarchical_tree = create_interval_tree_from_universe(&universe);
 
-                // insert these into the universe so they can get id's assigned
-                for region in regions {
-                    universe.insert_token(&region);
+                            secondary_trees.push(hierarchical_tree);
+                        }
 
-                    // create interval
-                    let interval = Interval {
-                        start: region.start,
-                        stop: region.end,
-                        val: universe.convert_region_to_id(&region).unwrap(),
-                    };
-
-                    // use chr to get the vector of intervals
-                    let chr_intervals = intervals.entry(region.chr.to_owned()).or_default();
-
-                    // push interval to vector
-                    chr_intervals.push(interval);
-                }
-
-                let mut s_tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
-                for (chr, chr_intervals) in intervals.iter() {
-                    let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
-                    s_tree.insert(chr.to_string(), lapper);
-                }
-
-                secondary_trees.push(tree);
-            }
-        };
-
-        // create exclude ranges if they exist (no need to increment universe, since these are completely ignored)
-        let mut exclude_ranges: Vec<HashMap<String, Vec<Interval<u32, u32>>>> = Vec::new();
-
-        if let Some(exclude_ranges_path) = config.exclude_ranges {
-            let path_to_bed = Path::new(&exclude_ranges_path);
-            let regions = extract_regions_from_bed_file(path_to_bed)?;
-
-            let mut exclude_intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
-
-            for region in regions {
-                // create interval
-                let interval = Interval {
-                    start: region.start,
-                    stop: region.end,
-                    val: 0,
+                        Some(secondary_trees)
+                    }
+                    None => None,
                 };
 
-                // use chr to get the vector of intervals
-                let chr_intervals = exclude_intervals.entry(region.chr.to_owned()).or_default();
+                // create exclude ranges if they exist
+                let exclude_ranges = match config.exclude_ranges {
+                    Some(exclude_ranges) => {
+                        let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
 
-                // push interval to vector
-                chr_intervals.push(interval);
+                        // universe gets discarded since its not conasidered a part of the tokenizers universe
+                        let exclude_ranges_universe =
+                            Universe::try_from(exclude_ranges_path.as_path())?;
+
+                        let exclude_ranges_map =
+                            create_interval_tree_from_universe(&exclude_ranges_universe);
+
+                        Some(exclude_ranges_map)
+                    }
+
+                    None => None,
+                };
+
+                (universe, tree, secondary_trees, exclude_ranges)
             }
-
-            exclude_ranges.push(exclude_intervals);
-        }
+            // else assume its a bed file
+            _ => {
+                let regions = extract_regions_from_bed_file(value)?;
+                let universe = Universe::from(regions);
+                let tree = create_interval_tree_from_universe(&universe);
+                (universe, tree, None, None)
+            }
+        };
 
         // add special tokens to the universe
         // unk
@@ -175,16 +155,8 @@ impl TryFrom<&Path> for TreeTokenizer {
         Ok(TreeTokenizer {
             universe,
             tree,
-            secondary_trees: if !secondary_trees.is_empty() {
-                Some(secondary_trees)
-            } else {
-                None
-            },
-            exclude_ranges: if !exclude_ranges.is_empty() {
-                Some(exclude_ranges)
-            } else {
-                None
-            },
+            secondary_trees,
+            exclude_ranges,
         })
     }
 }
