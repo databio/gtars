@@ -3,7 +3,7 @@ use std::fs::read_to_string;
 use std::path::Path;
 
 use anyhow::Result;
-use rust_lapper::{Lapper, Interval};
+use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
@@ -53,8 +53,8 @@ impl TryFrom<&Path> for TreeTokenizer {
                     Some(hierarchical_universes) => {
                         let mut secondary_trees = Vec::new();
                         for hierarchical_universe in hierarchical_universes {
-
-                            let mut hierarchical_tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+                            let mut hierarchical_tree: HashMap<String, Lapper<u32, u32>> =
+                                HashMap::new();
 
                             let hierarchical_universe_path =
                                 value.parent().unwrap().join(&hierarchical_universe);
@@ -62,7 +62,8 @@ impl TryFrom<&Path> for TreeTokenizer {
                             let hierarchical_universe_regions =
                                 extract_regions_from_bed_file(&hierarchical_universe_path)?;
 
-                            let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+                            let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> =
+                                HashMap::new();
                             for region in hierarchical_universe_regions {
                                 universe.insert_token(&region);
                                 let interval = Interval {
@@ -77,12 +78,12 @@ impl TryFrom<&Path> for TreeTokenizer {
                                     .push(interval);
                             }
 
-
                             for (chr, chr_intervals) in intervals.iter() {
-                                let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
+                                let lapper: Lapper<u32, u32> =
+                                    Lapper::new(chr_intervals.to_owned());
                                 hierarchical_tree.insert(chr.to_string(), lapper);
                             }
-                            
+
                             secondary_trees.push(hierarchical_tree);
                         }
 
@@ -181,7 +182,6 @@ impl TryFrom<&Path> for TreeTokenizer {
 
 impl Tokenizer for TreeTokenizer {
     fn tokenize_region(&self, region: &Region) -> TokenizedRegionSet {
-
         let lapper = self.tree.get(&region.chr);
 
         match lapper {
@@ -206,8 +206,9 @@ impl Tokenizer for TreeTokenizer {
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
-                            
+                            let regions: Vec<u32> =
+                                intervals.map(|interval| interval.val).collect();
+
                             // a hit
                             if !regions.is_empty() {
                                 ids = regions;
@@ -239,11 +240,11 @@ impl Tokenizer for TreeTokenizer {
                         if s_lapper.is_none() {
                             continue;
                         }
-                        
+
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
                         let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
-                        
+
                         // a hit
                         if !regions.is_empty() {
                             ids = regions;
@@ -258,7 +259,6 @@ impl Tokenizer for TreeTokenizer {
                     ids,
                     universe: &self.universe,
                 }
-
             }
         }
     }

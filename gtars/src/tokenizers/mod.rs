@@ -25,7 +25,7 @@ pub use tree_tokenizer::TreeTokenizer;
 #[cfg(test)]
 mod tests {
 
-    use crate::common::models::{RegionSet, Region};
+    use crate::common::models::{Region, RegionSet};
     use std::path::Path;
 
     use super::*;
@@ -95,7 +95,6 @@ mod tests {
         assert_eq!(region.chr, "chr1");
         assert_eq!(region.start, 0);
         assert_eq!(region.end, 248_956_422);
-        
     }
 
     #[rstest]
@@ -117,6 +116,5 @@ mod tests {
         assert_eq!(region.chr, "chrUNK");
         assert_eq!(region.start, 0);
         assert_eq!(region.end, 0);
-        
     }
 }
