@@ -10,6 +10,10 @@ use crate::common::utils::{create_interval_tree_from_universe, extract_regions_f
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
+///
+/// The TreeTokenizer is a basic tokenizer that can "tokenize" genomic regions
+/// into a known universe (or vocabulary). This is especially useful as a
+/// pre-processor for machine learning pipelines
 pub struct TreeTokenizer {
     pub universe: Universe,
     tree: HashMap<String, Lapper<u32, u32>>,
