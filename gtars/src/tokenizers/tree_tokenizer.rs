@@ -1,8 +1,7 @@
 use std::collections::HashMap;
-use std::fs::read_to_string;
 use std::path::Path;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
@@ -15,7 +14,6 @@ pub struct TreeTokenizer {
     pub universe: Universe,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
-    exclude_ranges: Option<HashMap<String, Lapper<u32, u32>>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
@@ -34,14 +32,26 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (mut universe, tree, secondary_trees, exclude_ranges) = match file_extension {
+        let (mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
             // parse config file
             "toml" => {
-                let toml_str = read_to_string(value)?;
-                let config: TokenizerConfig = toml::from_str(&toml_str)?;
+                let config = TokenizerConfig::new(value)
+                .with_context(|| {
+                    format!("Invalid tokenizer configuration found for file: {}", value.to_str().unwrap())
+                })?;
+
+                if config.universes.is_empty() {
+                    anyhow::bail!("You must have at least one universe in your universe list. Found zero.")
+                }
+
+                let primary_universe = &config.universes[0];
+                let other_universes = match config.universes.len() {
+                    1 => None,
+                    _ => Some(&config.universes[1..])
+                };
 
                 // universe path is relative to the config file
-                let universe_path = value.parent().unwrap().join(&config.universe);
+                let universe_path = value.parent().unwrap().join(primary_universe);
 
                 // create initial universe from the *required* universe field
                 let mut universe = Universe::try_from(Path::new(&universe_path))?;
@@ -49,7 +59,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let tree = create_interval_tree_from_universe(&universe);
 
                 // create secondary trees if they exist
-                let secondary_trees = match config.hierarchical_universes {
+                let secondary_trees = match other_universes {
                     Some(hierarchical_universes) => {
                         let mut secondary_trees = Vec::new();
                         for hierarchical_universe in hierarchical_universes {
@@ -57,7 +67,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                                 HashMap::new();
 
                             let hierarchical_universe_path =
-                                value.parent().unwrap().join(&hierarchical_universe);
+                                value.parent().unwrap().join(hierarchical_universe);
 
                             let hierarchical_universe_regions =
                                 extract_regions_from_bed_file(&hierarchical_universe_path)?;
@@ -175,7 +185,6 @@ impl TryFrom<&Path> for TreeTokenizer {
             universe,
             tree,
             secondary_trees,
-            exclude_ranges,
         })
     }
 }

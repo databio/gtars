@@ -8,6 +8,7 @@ pub mod soft_tokenizer;
 pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
+pub mod meta_tokenizer;
 
 /// constants for the tokenizer module.
 pub mod consts {
@@ -26,6 +27,7 @@ pub use tree_tokenizer::TreeTokenizer;
 mod tests {
 
     use crate::common::models::{Region, RegionSet};
+    use crate::tokenizers::traits::SpecialTokens;
     use std::path::Path;
 
     use super::*;
@@ -43,6 +45,11 @@ mod tests {
     }
 
     #[fixture]
+    fn path_to_bad_config_file() -> &'static str {
+        "tests/data/tokenizer_bad.toml"
+    }
+
+    #[fixture]
     fn path_to_tokenize_bed_file() -> &'static str {
         "tests/data/to_tokenize.bed"
     }
@@ -57,6 +64,33 @@ mod tests {
     fn test_create_tokenizer_from_config(path_to_config_file: &str) {
         let tokenizer = TreeTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
         assert_eq!(tokenizer.vocab_size(), 56); // 25 regions in main universe + 24 in hierarchical + 7 special tokens
+    }
+
+    #[rstest]
+    #[should_panic]
+    fn test_bad_config_file(path_to_bad_config_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bad_config_file));
+        let _tokenizer = tokenizer.unwrap();
+    }
+
+    #[rstest]
+    fn test_get_special_token_ids(path_to_bed_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
+        let unk_id = tokenizer.unknown_token_id();
+        let pad_id = tokenizer.padding_token_id();
+        let mask_id = tokenizer.mask_token_id();
+        let eos_id = tokenizer.eos_token_id();
+        let bos_id = tokenizer.bos_token_id();
+        let cls_id = tokenizer.cls_token_id();
+        let sep_id = tokenizer.sep_token_id();
+
+        assert_eq!(unk_id, 25);
+        assert_eq!(pad_id, 26);
+        assert_eq!(mask_id, 27);
+        assert_eq!(eos_id, 28);
+        assert_eq!(bos_id, 29);
+        assert_eq!(cls_id, 30);
+        assert_eq!(sep_id, 31);
     }
 
     #[rstest]
