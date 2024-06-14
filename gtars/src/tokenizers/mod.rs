@@ -1,6 +1,24 @@
-//! # Tokenizers - tokenize new genomic intervals into a known universe for machine-learning pipelines
+//! # Genomic data tokenizers and pre-processors to prepare interval data for machine learning pipelines.
 //!
-//! There is currently only one tokenizer - the `TreeTokenizer`
+//! The tokenizers module is the most comprehensive module in `gtars`. It houses all tokenizers that implement
+//! tokenization of genomic data into a known vocabulary. This is especially useful for genomic data machine
+//! learning models that are based on NLP-models like tranformers.
+//! 
+//! ## Example
+//! ### Create a tokenizer and tokenize a bed file
+//! ```rust
+//! use gtars::tokenizers::TreeTokenizer;
+//! use gtars::common::models::RegionSet;
+//! 
+//! let path_to_bed_file = "path/to/screen.bed";
+//! let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
+//! 
+//! let path_to_tokenize_bed_fil = "path/to/peaks.bed";
+//! let let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
+//! 
+//! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
+//! println!(tokenized_regions.ids);
+//! ```
 pub mod cli;
 pub mod config;
 pub mod fragment_tokenizer;
