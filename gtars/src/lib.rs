@@ -10,17 +10,19 @@
 //! ## Examples
 //! ### Create a tokenizer and tokenize a bed file
 //! ```rust
-//! use gtars::tokenizers::TreeTokenizer;
+//! use std::path::Path;
+//! 
+//! use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 //! use gtars::common::models::RegionSet;
 //! 
-//! let path_to_bed_file = "path/to/screen.bed";
+//! let path_to_bed_file = "tests/data/peaks.bed";
 //! let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
 //! 
-//! let path_to_tokenize_bed_fil = "path/to/peaks.bed";
+//! let path_to_tokenize_bed_file = "tests/data/to_tokenize.bed";
 //! let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
 //! 
 //! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
-//! println!(tokenized_regions.ids);
+//! println!("{:?}", tokenized_regions.ids);
 //! ```
 //! 
 //! You can save the result of this tokenization to a file for later use in machine learning model training:
@@ -29,7 +31,7 @@
 //! use gtars::io::write_tokens_to_gtok;
 //! 
 //! let ids = vec![42, 101, 999];
-//! write_tokens_to_gtok("tokens.gtok".as_str(), &ids);
+//! write_tokens_to_gtok("tokens.gtok", &ids);
 //! ```
 pub mod ailist;
 pub mod common;

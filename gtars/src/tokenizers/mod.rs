@@ -7,17 +7,19 @@
 //! ## Example
 //! ### Create a tokenizer and tokenize a bed file
 //! ```rust
-//! use gtars::tokenizers::TreeTokenizer;
+//! use std::path::Path;
+//! 
+//! use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 //! use gtars::common::models::RegionSet;
 //! 
-//! let path_to_bed_file = "path/to/screen.bed";
+//! let path_to_bed_file = "tests/data/peaks.bed.gz";
 //! let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
 //! 
-//! let path_to_tokenize_bed_fil = "path/to/peaks.bed";
-//! let let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
+//! let path_to_tokenize_bed_file = "tests/data/to_tokenize.bed";
+//! let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
 //! 
 //! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
-//! println!(tokenized_regions.ids);
+//! println!("{:?}", tokenized_regions.ids);
 //! ```
 pub mod cli;
 pub mod config;

@@ -11,14 +11,14 @@
 //! use gtars::io::write_tokens_to_gtok;
 //! 
 //! let ids = vec![42, 101, 999];
-//! write_tokens_to_gtok("tokens.gtok".as_str(), &ids);
+//! write_tokens_to_gtok("tokens.gtok", &ids);
 //! ```
 //! ### Read tokens from disk
 //! ```rust
 //! use gtars::io::read_tokens_from_gtok;
-//! let ids = read_tokens_from_gtoK("tokens.gtok".to_str());
+//! let ids = read_tokens_from_gtok("tokens.gtok").unwrap();
 //! 
-//! println!(ids); // [42, 101, 999]
+//! println!("{:?}", ids); // [42, 101, 999]
 //! ```
 pub mod gtok;
 pub mod consts;
