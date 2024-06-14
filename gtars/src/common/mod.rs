@@ -2,19 +2,19 @@
 //! # Common, core utilities for `gtars`
 //! This module contains core utilities across the `gtars` crate. While possible, it's usually not interfaced with directly
 //! unless interacting with any of the [models].
-//! 
+//!
 //! ## Examples
 //! ### Create region set
 //! ```rust
 //! use std::path::Path;
 //! use gtars::common::models::RegionSet;
-//! 
+//!
 //! let path_to_tokenize_bed_file = "tests/data/to_tokenize.bed";
 //! let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
-//! 
+//!
 //! println!("{:?}", rs.regions);
 //! ```
-//! 
+//!
 
 pub mod consts;
 pub mod models;

@@ -39,19 +39,23 @@ impl TryFrom<&Path> for TreeTokenizer {
         let (mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
             // parse config file
             "toml" => {
-                let config = TokenizerConfig::new(value)
-                .with_context(|| {
-                    format!("Invalid tokenizer configuration found for file: {}", value.to_str().unwrap())
+                let config = TokenizerConfig::new(value).with_context(|| {
+                    format!(
+                        "Invalid tokenizer configuration found for file: {}",
+                        value.to_str().unwrap()
+                    )
                 })?;
 
                 if config.universes.is_empty() {
-                    anyhow::bail!("You must have at least one universe in your universe list. Found zero.")
+                    anyhow::bail!(
+                        "You must have at least one universe in your universe list. Found zero."
+                    )
                 }
 
                 let primary_universe = &config.universes[0];
                 let other_universes = match config.universes.len() {
                     1 => None,
-                    _ => Some(&config.universes[1..])
+                    _ => Some(&config.universes[1..]),
                 };
 
                 // universe path is relative to the config file
