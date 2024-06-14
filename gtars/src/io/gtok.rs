@@ -135,10 +135,10 @@ pub fn init_gtok_file(filename: &str) -> Result<()> {
 
 ///
 /// Add tokens to the end of an existing `.gtok` file.
-/// 
+///
 /// # Arguments
 /// - filename: the file to append to
-/// 
+///
 /// # Returns
 /// - Result<(), anyhow::Error>
 pub fn append_tokens_to_gtok_file(filename: &str, tokens: &[u32]) -> Result<()> {

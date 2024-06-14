@@ -13,7 +13,7 @@ impl fmt::Display for Interval {
 
 ///
 /// The Augmented Interval List (AIList), enumerates intersections between a query interval q and an interval set R.
-/// 
+///
 pub struct AIList {
     starts: Vec<u32>,
     ends: Vec<u32>,
@@ -24,10 +24,10 @@ pub struct AIList {
 impl AIList {
     ///
     /// Create a new AIList struct
-    /// 
+    ///
     /// # Arguments
     /// - intervals: list of intervals to create from
-    /// 
+    ///
     /// # Returns
     /// - AIList struct
     pub fn new(intervals: &mut Vec<Interval>, minimum_coverage_length: usize) -> AIList {
