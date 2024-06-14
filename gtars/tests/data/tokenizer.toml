@@ -1,3 +1,2 @@
-universe = "peaks.bed.gz"
+universes = ["peaks.bed.gz", "chroms.bed"]
 exclude_ranges = "excluderanges.bed.gz"
-hierarchical_universes = ["chroms.bed"]
