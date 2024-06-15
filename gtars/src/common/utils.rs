@@ -139,8 +139,8 @@ pub fn create_interval_tree_from_universe(
     }
 
     // build the tree
-    for (chr, chr_intervals) in intervals.iter() {
-        let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals.to_owned());
+    for (chr, chr_intervals) in intervals.into_iter() {
+        let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals);
         tree.insert(chr.to_string(), lapper);
     }
 
