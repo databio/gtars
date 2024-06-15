@@ -8,7 +8,7 @@ use crate::common::utils::{
     extract_regions_from_bed_file, generate_id_to_region_map, generate_region_to_id_map,
 };
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, Default)]
 pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
@@ -20,6 +20,7 @@ impl Universe {
         let new_id = self.region_to_id.len();
         self.region_to_id.insert(region.to_owned(), new_id as u32);
         self.id_to_region.insert(new_id as u32, region.to_owned());
+        self.regions.push(region.to_owned());
     }
 
     pub fn convert_region_to_id(&self, region: &Region) -> Option<u32> {
