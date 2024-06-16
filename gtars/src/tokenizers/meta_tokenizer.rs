@@ -52,8 +52,10 @@ impl TryFrom<&Path> for MetaTokenizer {
             _ => Some(&config.universes[1..]),
         };
 
+        let primary_universe = value.parent().unwrap().join(primary_universe);
+
         // parse first universe
-        let reader = get_dynamic_reader(Path::new(primary_universe))?;
+        let reader = get_dynamic_reader(Path::new(&primary_universe))?;
         let mut universe = Universe::default();
         let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
         let mut region_to_metatoken: HashMap<Region, Region> = HashMap::new();
@@ -139,7 +141,9 @@ impl TryFrom<&Path> for MetaTokenizer {
 
                 for (u_num, other_universe) in other_universes.iter().enumerate() {
 
-                    let reader = get_dynamic_reader(Path::new(other_universe))?;
+                    let other_universe = value.parent().unwrap().join(other_universe);
+
+                    let reader = get_dynamic_reader(Path::new(&other_universe))?;
                     let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
 
                     for line in reader.lines() {
@@ -275,5 +279,31 @@ impl TryFrom<&Path> for MetaTokenizer {
             tree,
             secondary_trees,
         })
+    }
+}
+
+
+// tests
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    fn path_to_config_file() -> &'static str {
+        "tests/data/tokenizer.meta.toml"
+    }
+
+    #[fixture]
+    fn path_to_tokenize_bed_file() -> &'static str {
+        "tests/data/to_tokenize.bed"
+    }
+
+    #[rstest]
+    fn test_create_tokenizer(path_to_config_file: &str) {
+        let tokenizer = MetaTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
+        assert_eq!(tokenizer.universe.len(), 27);
     }
 }
