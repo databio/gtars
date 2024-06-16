@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use rust_lapper::{Interval, Lapper};
 
+use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, Universe};
 use crate::common::utils::get_dynamic_reader;
 use crate::tokenizers::TokenizerConfig;
@@ -57,6 +58,8 @@ impl TryFrom<&Path> for MetaTokenizer {
         let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
         let mut region_to_metatoken: HashMap<Region, Region> = HashMap::new();
 
+        let mut seen_metatokens: HashMap<String, u32> = HashMap::new();
+
         for line in reader.lines() {
             let line = line?;
 
@@ -76,10 +79,22 @@ impl TryFrom<&Path> for MetaTokenizer {
             let end = fields[2].parse::<u32>().with_context(|| {
                 format!("Failed to parse end position in BED file line: {}", line)
             })?;
+            
+            // why is primary_ being prepended to the metatoken id?
+            // - this is a way to ensure that the metatoken id is unique,
+            // imagine a secondary universe that has the same metatoken id
+            let meta_id = format!("primary_{}", fields[3]);
 
-            let meta_id = fields[3]
-                .parse::<u32>()
-                .with_context(|| format!("Failed to parse meta ID in BED file line: {}", line))?;
+            // get the id for the metatoken if we've seen it before
+            // else create a new id and insert it into the hashmap
+            let meta_id = match seen_metatokens.get(&meta_id) {
+                Some(id) => *id,
+                None => {
+                    let id = seen_metatokens.len() as u32;
+                    seen_metatokens.insert(meta_id, id);
+                    id
+                }
+            };            
 
             // construct the actual region
             let region = Region {
@@ -90,7 +105,7 @@ impl TryFrom<&Path> for MetaTokenizer {
 
             // construct the mapped meta token
             let meta_region = Region {
-                chr: meta_id.to_string(),
+                chr: format!("chrM{}", meta_id),
                 start: 0,
                 end: 0,
             };
@@ -122,7 +137,8 @@ impl TryFrom<&Path> for MetaTokenizer {
             Some(other_universes) => {
                 let mut secondary_trees = Vec::new();
 
-                for other_universe in other_universes {
+                for (u_num, other_universe) in other_universes.iter().enumerate() {
+
                     let reader = get_dynamic_reader(Path::new(other_universe))?;
                     let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
 
@@ -149,9 +165,16 @@ impl TryFrom<&Path> for MetaTokenizer {
                             format!("Failed to parse end position in BED file line: {}", line)
                         })?;
 
-                        let meta_id = fields[3].parse::<u32>().with_context(|| {
-                            format!("Failed to parse meta ID in BED file line: {}", line)
-                        })?;
+                        let meta_id = format!("secondary_{}_{}", u_num, fields[3]);
+
+                        let meta_id = match seen_metatokens.get(&meta_id) {
+                            Some(id) => *id,
+                            None => {
+                                let id = seen_metatokens.len() as u32;
+                                seen_metatokens.insert(meta_id, id);
+                                id
+                            }
+                        };
 
                         // construct the actual region
                         let region = Region {
@@ -160,14 +183,9 @@ impl TryFrom<&Path> for MetaTokenizer {
                             end,
                         };
 
-                        // TODO: this is actually not right... secondary universes
-                        // shouldnt have to be aware of others. So, this might
-                        // be the wrong meta token id.
-                        // we need to keep track of meta tokens that
-                        // already exist and increment from there.
-                        // construct the mapped meta token
+                        // extract meta region id
                         let meta_region = Region {
-                            chr: meta_id.to_string(),
+                            chr: format!("chrM{}", meta_id),
                             start: 0,
                             end: 0,
                         };
@@ -200,6 +218,56 @@ impl TryFrom<&Path> for MetaTokenizer {
                 Some(secondary_trees)
             }
         };
+
+        // now we can insert the special tokens
+        // unk
+        universe.insert_token(&Region {
+            chr: UNKNOWN_CHR.to_string(),
+            start: UNKNOWN_START as u32,
+            end: UNKNOWN_END as u32,
+        });
+
+        // pad
+        universe.insert_token(&Region {
+            chr: PAD_CHR.to_string(),
+            start: PAD_START as u32,
+            end: PAD_END as u32,
+        });
+
+        // mask
+        universe.insert_token(&Region {
+            chr: MASK_CHR.to_string(),
+            start: MASK_START as u32,
+            end: MASK_END as u32,
+        });
+
+        // eos
+        universe.insert_token(&Region {
+            chr: EOS_CHR.to_string(),
+            start: EOS_START as u32,
+            end: EOS_END as u32,
+        });
+
+        // bos
+        universe.insert_token(&Region {
+            chr: BOS_CHR.to_string(),
+            start: BOS_START as u32,
+            end: BOS_END as u32,
+        });
+
+        // cls
+        universe.insert_token(&Region {
+            chr: CLS_CHR.to_string(),
+            start: CLS_START as u32,
+            end: CLS_END as u32,
+        });
+
+        // sep
+        universe.insert_token(&Region {
+            chr: SEP_CHR.to_string(),
+            start: SEP_START as u32,
+            end: SEP_END as u32,
+        });
 
         Ok(MetaTokenizer {
             universe,
