@@ -48,6 +48,10 @@ impl Universe {
     pub fn is_empty(&self) -> bool {
         self.region_to_id.len() == 0
     }
+
+    pub fn contains_region(&self, region: &Region) -> bool {
+        self.region_to_id.contains_key(region)
+    }
 }
 
 impl From<Vec<Region>> for Universe {
