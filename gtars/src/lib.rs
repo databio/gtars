@@ -31,7 +31,7 @@
 //! use gtars::io::write_tokens_to_gtok;
 //!
 //! let ids = vec![42, 101, 999];
-//! write_tokens_to_gtok("tokens.gtok", &ids);
+//! write_tokens_to_gtok("tests/data/out/tokens.gtok", &ids);
 //! ```
 pub mod ailist;
 pub mod common;
