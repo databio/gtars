@@ -50,7 +50,7 @@ impl From<TokenizedRegionSet<'_>> for Vec<Region> {
         value
             .ids
             .iter()
-            .map(|id| value.universe.id_to_region[&id].to_owned())
+            .map(|id| value.universe.id_to_region[id].to_owned())
             .collect()
     }
 }

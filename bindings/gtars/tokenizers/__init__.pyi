@@ -220,7 +220,7 @@ class TokenizedRegionSet:
 class TreeTokenizer:
     def __new__(cls, path: str) -> TreeTokenizer:
         """
-        Construct a new TreeTokenize from a universe file.
+        Construct a new TreeTokenizer from a universe file.
 
         :param path: The path to the universe file. This should be a BED file.
         """
@@ -383,4 +383,155 @@ class FragmentTokenizer:
         :param file_path: The path to the file containing fragments.
         :param out_path: The path to the output file. If None, the output is written to the standard output.
         :param filter: A list of chromosomes to filter. If None, all chromosomes are included.
+        """
+
+class MetaTokenizer:
+    def __new__(cls, path: str) -> MetaTokenizer:
+        """
+        Construct a new MetaTokenizer from a universe file.
+
+        :param path: The path to the universe file. This should be a BED file.
+        """
+    
+    def unknown_token(self) -> Region:
+        """
+        Get the unknown token.
+        """
+
+    def padding_token(self) -> Region:
+        """
+        Get the padding token.
+        """
+
+    def mask_token(self) -> Region:
+        """
+        Get the mask token.
+        """
+
+    def cls_token(self) -> Region:
+        """
+        Get the CLS token.
+        """
+
+    def bos_token(self) -> Region:
+        """
+        Get the BOS token.
+        """
+
+    def eos_token(self) -> Region:
+        """
+        Get the EOS token.
+        """
+
+    def sep_token(self) -> Region:
+        """
+        Get the SEP token.
+        """
+    
+    def unknown_token_id(self) -> int:
+        """
+        Get the ID of the unknown token.
+        """
+
+    def padding_token_id(self) -> int:
+        """
+        Get the ID of the padding token.
+        """
+
+    def mask_token_id(self) -> int:
+        """
+        Get the ID of the mask token.
+        """
+
+    def cls_token_id(self) -> int:
+        """
+        Get the ID of the CLS token.
+        """
+
+    def bos_token_id(self) -> int:
+        """
+        Get the ID of the BOS token.
+        """
+
+    def eos_token_id(self) -> int:
+        """
+        Get the ID of the EOS token.
+        """
+
+    def sep_token_id(self) -> int:
+        """
+        Get the ID of the SEP token.
+        """
+
+    def vocab_size(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def tokenize(self, regions: List[Region]) -> List[Region]:
+        """
+        Tokenize a list of regions. This will only return the tokenized regions.
+
+        :param regions: The regions to tokenize.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def tokenize_bed_file(self, path: str) -> List[Region]:
+        """
+        Tokenize a BED file directly.
+
+        :param path: The path to the BED file.
+
+        :return: The tokenized regions as a list.
+        """
+
+    def encode(self, regions: List[Region]) -> List[int]:
+        """
+        Encode a list of regions. This will return the integer representation of the tokenized regions.
+
+        :param regions: The regions to encode.
+
+        :return: The integer representation of the tokenized regions.
+        """
+
+    def decode(self, ids: List[int]) -> List[Region]:
+        """
+        Decode a list of integer representations of the tokenized regions.
+
+        :param ids: The integer representations of the tokenized regions.
+
+        :return: The decoded regions.
+        """
+
+    def vocab(self) -> List[Tuple[Region, int]]:
+        """
+        Get the vocabulary.
+
+        :return: The vocabulary as a list of tuples.
+        """
+    
+    @property
+    def universe(self) -> Universe:
+        """
+        The universe object.
+        """
+
+    def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
+        """
+        Tokenize a list of regions.
+
+        :param regions: The regions to tokenize.
+
+        :return: A TokenizedRegionSet object.
+        """
+
+    def __len__(self) -> int:
+        """
+        Get the vocabulary size.
+        """
+
+    def __repr__(self) -> str:
+        """
+        Get a string representation of the tokenizer.
         """
