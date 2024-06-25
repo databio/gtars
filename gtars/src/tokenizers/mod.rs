@@ -22,6 +22,7 @@
 //! println!("{:?}", tokenized_regions.ids);
 //! ```
 pub mod cli;
+pub mod builder;
 pub mod config;
 pub mod fragment_tokenizer;
 pub mod meta_tokenizer;

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct TokenizerConfig {
+    pub tokenizer_type: Option<String>,
     pub universes: Vec<String>,
     pub exclude_ranges: Option<String>,
 }
