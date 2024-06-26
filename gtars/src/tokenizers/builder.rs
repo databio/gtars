@@ -3,13 +3,12 @@ use std::path::Path;
 use anyhow::{Error, Result};
 
 use super::{
-    Tokenizer,
     MetaTokenizer,
-    TreeTokenizer,
+    Tokenizer,
     // FragmentTokenizer,
     TokenizerConfig,
+    TreeTokenizer,
 };
-
 
 pub struct TokenizerBuilder;
 
@@ -18,21 +17,14 @@ impl TokenizerBuilder {
         let config = TokenizerConfig::new(path)?;
         if let Some(tokenizer_type) = config.tokenizer_type {
             match tokenizer_type.as_str() {
-                "tree" => {
-                    Ok(Box::new(TreeTokenizer::try_from(path)?))
-                },
-                "meta" => {
-                    Ok(Box::new(MetaTokenizer::try_from(path)?))
-                },    
-                _ => {
-                    Err(Error::msg("Tokenizer type not supported"))
-                }
+                "tree" => Ok(Box::new(TreeTokenizer::try_from(path)?)),
+                "meta" => Ok(Box::new(MetaTokenizer::try_from(path)?)),
+                _ => Err(Error::msg("Tokenizer type not supported")),
             }
         } else {
-            println!("No tokenizer type found in config file. Instantiating a default TreeTokenizer. Note that this may lead to unexpected behavior."); 
+            println!("No tokenizer type found in config file. Instantiating a default TreeTokenizer. Note that this may lead to unexpected behavior.");
             Ok(Box::new(TreeTokenizer::try_from(path)?))
         }
-        
     }
 }
 
