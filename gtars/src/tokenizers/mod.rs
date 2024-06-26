@@ -21,8 +21,8 @@
 //! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
 //! println!("{:?}", tokenized_regions.ids);
 //! ```
-pub mod cli;
 pub mod builder;
+pub mod cli;
 pub mod config;
 pub mod fragment_tokenizer;
 pub mod meta_tokenizer;
@@ -39,9 +39,9 @@ pub mod consts {
 }
 
 // expose the TreeTokenizer struct to users of this crate
+pub use builder::TokenizerBuilder;
 pub use config::TokenizerConfig;
 pub use fragment_tokenizer::FragmentTokenizer;
+pub use meta_tokenizer::MetaTokenizer;
 pub use traits::{SingleCellTokenizer, Tokenizer};
 pub use tree_tokenizer::TreeTokenizer;
-pub use meta_tokenizer::MetaTokenizer;
-pub use builder::TokenizerBuilder;

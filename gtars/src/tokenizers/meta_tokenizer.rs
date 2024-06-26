@@ -6,9 +6,9 @@ use anyhow::{Context, Result};
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
-use crate::common::models::{Region, RegionSet, Universe, TokenizedRegionSet};
+use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::get_dynamic_reader;
-use crate::tokenizers::{TokenizerConfig, Tokenizer};
+use crate::tokenizers::{Tokenizer, TokenizerConfig};
 
 use super::traits::SpecialTokens;
 
@@ -83,7 +83,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             let end = fields[2].parse::<u32>().with_context(|| {
                 format!("Failed to parse end position in BED file line: {}", line)
             })?;
-            
+
             // why is primary_ being prepended to the metatoken id?
             // - this is a way to ensure that the metatoken id is unique,
             // imagine a secondary universe that has the same metatoken id
@@ -98,7 +98,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                     seen_metatokens.insert(meta_id, id);
                     id
                 }
-            };            
+            };
 
             // construct the actual region
             let region = Region {
@@ -144,7 +144,6 @@ impl TryFrom<&Path> for MetaTokenizer {
                 let mut secondary_trees = Vec::new();
 
                 for (u_num, other_universe) in other_universes.iter().enumerate() {
-
                     let other_universe = value.parent().unwrap().join(other_universe);
 
                     let reader = get_dynamic_reader(Path::new(&other_universe))?;
@@ -389,7 +388,6 @@ impl SpecialTokens for MetaTokenizer {
 }
 
 impl Tokenizer for MetaTokenizer {
-
     fn vocab_size(&self) -> usize {
         self.universe.len()
     }
@@ -535,22 +533,25 @@ mod tests {
     fn test_tokenize_to_first_second_unk(path_to_config_file: &str) {
         let tokenizer = MetaTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
 
-        let r1 = Region { // tokenize to id 1
+        let r1 = Region {
+            // tokenize to id 1
             chr: "chr4".to_string(),
             start: 16270184,
-            end: 16270240
+            end: 16270240,
         };
 
-        let r2 = Region { // drops through to the secondary and tokenizes to id 13
+        let r2 = Region {
+            // drops through to the secondary and tokenizes to id 13
             chr: "chr10".to_string(),
             start: 705762,
-            end: 705762
+            end: 705762,
         };
 
-        let r3 = Region { // unknown token, so should be id 20
+        let r3 = Region {
+            // unknown token, so should be id 20
             chr: "chrY".to_string(),
             start: 1000000,
-            end: 1000000
+            end: 1000000,
         };
 
         assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![1]);
@@ -562,16 +563,18 @@ mod tests {
     fn test_multiple_regions_to_one_meta_id(path_to_config_file: &str) {
         let tokenizer = MetaTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
 
-        let r1 = Region { // tokenize to 2
+        let r1 = Region {
+            // tokenize to 2
             chr: "chr10".to_string(),
             start: 70576220,
-            end: 70576251
+            end: 70576251,
         };
 
-        let r2 = Region { // tokenize to id 2
+        let r2 = Region {
+            // tokenize to id 2
             chr: "chr2".to_string(),
             start: 203871487,
-            end: 203871688
+            end: 203871688,
         };
 
         assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![2]);

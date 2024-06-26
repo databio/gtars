@@ -7,7 +7,7 @@ use anyhow::Result;
 use std::path::Path;
 
 use gtars::common::models::RegionSet;
-use gtars::tokenizers::{Tokenizer, MetaTokenizer};
+use gtars::tokenizers::{MetaTokenizer, Tokenizer};
 
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;
