@@ -44,3 +44,4 @@ pub use fragment_tokenizer::FragmentTokenizer;
 pub use traits::{SingleCellTokenizer, Tokenizer};
 pub use tree_tokenizer::TreeTokenizer;
 pub use meta_tokenizer::MetaTokenizer;
+pub use builder::TokenizerBuilder;

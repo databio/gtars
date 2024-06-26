@@ -6,7 +6,7 @@ use super::{
     Tokenizer,
     MetaTokenizer,
     TreeTokenizer,
-    FragmentTokenizer,
+    // FragmentTokenizer,
     TokenizerConfig,
 };
 
@@ -23,7 +23,7 @@ impl TokenizerBuilder {
                 },
                 "meta" => {
                     Ok(Box::new(MetaTokenizer::try_from(path)?))
-                },
+                },    
                 _ => {
                     Err(Error::msg("Tokenizer type not supported"))
                 }
@@ -39,8 +39,6 @@ impl TokenizerBuilder {
 #[cfg(test)]
 mod tests {
 
-    use crate::common::models::{Region, RegionSet};
-    use crate::tokenizers::traits::SpecialTokens;
     use std::path::Path;
 
     use super::*;
