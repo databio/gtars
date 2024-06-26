@@ -1,6 +1,7 @@
 mod fragments_tokenizer;
 mod tree_tokenizer;
 mod meta_tokenizer;
+// mod builder;
 
 use pyo3::prelude::*;
 
