@@ -20,6 +20,7 @@ use super::traits::SpecialTokens;
 /// In brief, meta-tokens are tokens that represent *clusters* of genomic intervals.
 pub struct MetaTokenizer {
     pub universe: Universe,
+    config: TokenizerConfig,
     region_to_metatoken: HashMap<Region, Region>,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
@@ -35,7 +36,7 @@ impl TryFrom<&Path> for MetaTokenizer {
     /// # Returns
     /// A new TreeTokenizer
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        let config = TokenizerConfig::new(value).with_context(|| {
+        let config = TokenizerConfig::try_from(value).with_context(|| {
             format!(
                 "Invalid tokenizer configuration found for file: {}",
                 value.to_str().unwrap()
@@ -279,6 +280,7 @@ impl TryFrom<&Path> for MetaTokenizer {
         });
 
         Ok(MetaTokenizer {
+            config,
             universe,
             region_to_metatoken,
             tree,
@@ -394,6 +396,12 @@ impl Tokenizer for MetaTokenizer {
 
     fn get_universe(&self) -> &Universe {
         &self.universe
+    }
+
+    fn export(&self, path: &Path) -> Result<()> {
+        let toml_str = toml::to_string(&self.config)?;
+        std::fs::write(path, toml_str)?;
+        Ok(())
     }
 
     fn tokenize_region(&self, region: &Region) -> TokenizedRegionSet {

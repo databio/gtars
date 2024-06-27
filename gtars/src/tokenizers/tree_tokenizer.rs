@@ -16,6 +16,7 @@ use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 /// pre-processor for machine learning pipelines
 pub struct TreeTokenizer {
     pub universe: Universe,
+    config: TokenizerConfig,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
 }
@@ -36,10 +37,10 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
+        let (config, mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
             // parse config file
             "toml" => {
-                let config = TokenizerConfig::new(value).with_context(|| {
+                let config = TokenizerConfig::try_from(value).with_context(|| {
                     format!(
                         "Invalid tokenizer configuration found for file: {}",
                         value.to_str().unwrap()
@@ -111,7 +112,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                 };
 
                 // create exclude ranges if they exist
-                let exclude_ranges = match config.exclude_ranges {
+                let exclude_ranges = match &config.exclude_ranges {
                     Some(exclude_ranges) => {
                         let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
 
@@ -128,14 +129,20 @@ impl TryFrom<&Path> for TreeTokenizer {
                     None => None,
                 };
 
-                (universe, tree, secondary_trees, exclude_ranges)
+                (config, universe, tree, secondary_trees, exclude_ranges)
             }
             // else assume its a bed file
             _ => {
                 let regions = extract_regions_from_bed_file(value)?;
                 let universe = Universe::from(regions);
                 let tree = create_interval_tree_from_universe(&universe);
-                (universe, tree, None, None)
+                let config = TokenizerConfig::new(
+                    Some("tree".to_string()),
+                    vec![value.to_str().unwrap().to_string()],
+                    None
+
+                );
+                (config, universe, tree, None, None)
             }
         };
 
@@ -190,6 +197,7 @@ impl TryFrom<&Path> for TreeTokenizer {
         });
 
         Ok(TreeTokenizer {
+            config,
             universe,
             tree,
             secondary_trees,
@@ -300,6 +308,12 @@ impl Tokenizer for TreeTokenizer {
 
     fn get_universe(&self) -> &Universe {
         &self.universe
+    }
+
+    fn export(&self, path: &Path) -> Result<()> {
+        let toml_str = toml::to_string(&self.config)?;
+        std::fs::write(path, toml_str)?;
+        Ok(())
     }
 }
 

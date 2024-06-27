@@ -14,7 +14,7 @@ pub struct TokenizerBuilder;
 
 impl TokenizerBuilder {
     pub fn from_toml(path: &Path) -> Result<Box<dyn Tokenizer>> {
-        let config = TokenizerConfig::new(path)?;
+        let config = TokenizerConfig::try_from(path)?;
         if let Some(tokenizer_type) = config.tokenizer_type {
             match tokenizer_type.as_str() {
                 "tree" => Ok(Box::new(TreeTokenizer::try_from(path)?)),

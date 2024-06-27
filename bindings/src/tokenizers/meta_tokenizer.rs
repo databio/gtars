@@ -138,6 +138,11 @@ impl PyMetaTokenizer {
         Ok(regions.into_iter().map(|r| r.into()).collect())
     }
 
+    pub fn export(&self, path: String) -> Result<()> {
+        let path = Path::new(&path);
+        self.tokenizer.export(path)
+    }
+
     // __call__ returns a TokenizedRegionSet
     pub fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyTokenizedRegionSet> {
         // attempt to map the list to a vector of regions
