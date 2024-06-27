@@ -7,28 +7,28 @@ use anyhow::Result;
 use std::path::Path;
 
 use gtars::common::models::RegionSet;
-use gtars::tokenizers::{Tokenizer, TreeTokenizer};
+use gtars::tokenizers::{MetaTokenizer, Tokenizer};
 
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;
 
-#[pyclass(name = "TreeTokenizer")]
-pub struct PyTreeTokenizer {
-    pub tokenizer: TreeTokenizer,
+#[pyclass(name = "MetaTokenizer")]
+pub struct PyMetaTokenizer {
+    pub tokenizer: MetaTokenizer,
     pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons
 }
 
 #[pymethods]
-impl PyTreeTokenizer {
+impl PyMetaTokenizer {
     #[new]
     pub fn new(path: String) -> Result<Self> {
         Python::with_gil(|py| {
             let path = Path::new(&path);
-            let tokenizer = TreeTokenizer::try_from(path)?;
+            let tokenizer = MetaTokenizer::try_from(path)?;
             let py_universe: PyUniverse = tokenizer.universe.to_owned().into();
             let py_universe_bound = Py::new(py, py_universe)?;
 
-            Ok(PyTreeTokenizer {
+            Ok(PyMetaTokenizer {
                 tokenizer,
                 universe: py_universe_bound,
             })
@@ -137,7 +137,7 @@ impl PyTreeTokenizer {
 
         Ok(regions.into_iter().map(|r| r.into()).collect())
     }
-    
+
     pub fn export(&self, path: String) -> Result<()> {
         let path = Path::new(&path);
         self.tokenizer.export(path)
@@ -197,7 +197,7 @@ impl PyTreeTokenizer {
 
     pub fn __repr__(&self) -> String {
         format!(
-            "TreeTokenizer({} total regions)",
+            "MetaTokenizer({} total regions)",
             self.tokenizer.universe.len()
         )
     }

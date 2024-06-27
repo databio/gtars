@@ -12,6 +12,10 @@ use crate::io::write_tokens_to_gtok;
 
 use super::RegionSet;
 
+///
+/// A tokenized region set is a specific representation of a region set. It is
+/// two things: 1) a list of ids, and 2) a pointer to a Universe. The ids correspond
+/// to the regions in that universe this [TokenizedRegionSet] represents.
 pub struct TokenizedRegionSet<'a> {
     pub ids: Vec<u32>,
     pub universe: &'a Universe,
@@ -46,7 +50,7 @@ impl From<TokenizedRegionSet<'_>> for Vec<Region> {
         value
             .ids
             .iter()
-            .map(|id| value.universe.id_to_region[&id].to_owned())
+            .map(|id| value.universe.id_to_region[id].to_owned())
             .collect()
     }
 }

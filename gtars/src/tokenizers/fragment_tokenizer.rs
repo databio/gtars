@@ -291,7 +291,7 @@ where
             // get actual tokens
             let tokens = self.tokenizer.tokenize_region(&r);
 
-            let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
+            let barcode_tokens = barcode_ids_map.entry(barcode).or_default();
 
             barcode_tokens.extend(tokens.ids);
         }
@@ -338,7 +338,7 @@ where
             // get actual tokens
             let tokens = self.tokenizer.tokenize_region(&r);
 
-            let barcode_tokens = barcode_ids_map.entry(barcode).or_insert(vec![]);
+            let barcode_tokens = barcode_ids_map.entry(barcode).or_default();
 
             barcode_tokens.extend(tokens.ids);
         }

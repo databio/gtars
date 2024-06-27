@@ -7,9 +7,17 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
+use rust_lapper::{Interval, Lapper};
 
 use crate::common::models::region::Region;
+use crate::common::models::universe::Universe;
 
+///
+/// Function to return a reader for either a gzip'd or non-gzip'd file.
+///
+/// # Arguments
+/// - path: path to the file to read
+///
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let is_gzipped = path.extension() == Some(OsStr::new("gz"));
     let file = File::open(path).with_context(|| "Failed to open bed file.")?;
@@ -24,6 +32,11 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     Ok(reader)
 }
 
+///
+/// Create a region-to-id hash-map from a list of regions
+///
+/// # Arguments:
+/// - regions: vec![] of [Region] structs
 pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     let mut current_id = 0;
     let mut region_to_id: HashMap<Region, u32> = HashMap::new();
@@ -38,6 +51,11 @@ pub fn generate_region_to_id_map(regions: &[Region]) -> HashMap<Region, u32> {
     region_to_id
 }
 
+///
+/// Generate an id-to-region hash-map from a list of regions
+///
+/// # Arguments:
+/// - regions: vec![] of [Region] structs
 pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     let mut current_id = 0;
     let mut id_to_region: HashMap<u32, Region> = HashMap::new();
@@ -52,6 +70,12 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     id_to_region
 }
 
+///
+/// Read in a bed file into a vector of [Region] structs. It handles detecting
+/// the file-type, verifying each line, and error handling.
+///
+/// # Arguments:
+/// - path: path to the bed file to read in.
 pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
     let reader = get_dynamic_reader(path)?;
 
@@ -84,4 +108,41 @@ pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
     }
 
     Ok(regions)
+}
+
+///
+/// Simple wrapper function that will create a [Lapper] object (an interval tree)
+/// from a [Universe] struct.
+///
+/// # Arguments:
+/// - universe: the universe to create the interval tree for.
+pub fn create_interval_tree_from_universe(
+    universe: &Universe,
+) -> HashMap<String, Lapper<u32, u32>> {
+    // instantiate the tree and list of intervals
+    let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
+    let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+
+    for region in universe.regions.iter() {
+        // create interval
+        let interval = Interval {
+            start: region.start,
+            stop: region.end,
+            val: universe.convert_region_to_id(region).unwrap(),
+        };
+
+        // use chr to get the vector of intervals
+        let chr_intervals = intervals.entry(region.chr.clone()).or_default();
+
+        // push interval to vector
+        chr_intervals.push(interval);
+    }
+
+    // build the tree
+    for (chr, chr_intervals) in intervals.into_iter() {
+        let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals);
+        tree.insert(chr.to_string(), lapper);
+    }
+
+    tree
 }

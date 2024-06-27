@@ -30,9 +30,29 @@ pub trait Tokenizer {
     ///
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet;
 
+    /// 
+    /// Get the vocabulary size of the tokenizer
+    /// 
+    /// # Returns
+    /// The size of the vocabulary as usize
     fn vocab_size(&self) -> usize;
 
+    ///
+    /// Get the universe of the tokenizer
+    /// 
+    /// # Returns
+    /// A reference to the universe of the tokenizer
     fn get_universe(&self) -> &Universe;
+
+    ///
+    /// Export the tokenizer to a toml file
+    /// 
+    /// # Arguments
+    /// - `path` - the path to the toml file
+    /// 
+    /// # Returns
+    /// A Result
+    fn export(&self, path: &Path) -> Result<()>;
 }
 
 pub trait SingleCellTokenizer {

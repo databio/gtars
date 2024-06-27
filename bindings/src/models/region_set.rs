@@ -123,7 +123,7 @@ impl PyTokenizedRegionSet {
             Ok(self
                 .ids
                 .iter()
-                .map(|id| self.universe.borrow(py).id_to_region[&id].clone())
+                .map(|id| self.universe.borrow(py).id_to_region[id].clone())
                 .collect())
         })
     }

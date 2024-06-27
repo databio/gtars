@@ -1,3 +1,6 @@
+[![codecov](https://codecov.io/gh/databio/gtars/branch/master/graph/badge.svg)](https://codecov.io/gh/databio/gtars)
+[![crates.io](https://img.shields.io/crates/v/gtars?&logo=rust)](https://crates.io/crates/gtars)
+
 <h1 align="center">
 <img src="gtars/docs/logo.svg" alt="gtars logo" height="100px">
 </h1>

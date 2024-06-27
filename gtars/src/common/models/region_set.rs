@@ -19,6 +19,11 @@ pub struct RegionSetIterator<'a> {
 impl TryFrom<&Path> for RegionSet {
     type Error = anyhow::Error;
 
+    ///
+    /// Create a new [RegionSet] from a bed file.
+    ///
+    /// # Arguments:
+    /// - value: path to bed file on disk.
     fn try_from(value: &Path) -> Result<Self> {
         let regions = extract_regions_from_bed_file(value)?;
         Ok(RegionSet { regions })
@@ -78,6 +83,11 @@ impl<'a> IntoIterator for &'a RegionSet {
 }
 
 impl RegionSet {
+    ///
+    /// Dump a regionset to disk
+    ///
+    /// # Arguments
+    /// - path: the path to the file to dump to
     pub fn to_bed(&self, path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
         // is there a better way to do this?
