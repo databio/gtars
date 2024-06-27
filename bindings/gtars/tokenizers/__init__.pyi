@@ -348,6 +348,13 @@ class TreeTokenizer:
         """
         The universe object.
         """
+    
+    def export(self, path: str):
+        """
+        Export the tokenizer configuration to a file.
+
+        :param path: The path to the output file.
+        """
 
     def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
         """
@@ -515,6 +522,13 @@ class MetaTokenizer:
     def universe(self) -> Universe:
         """
         The universe object.
+        """
+    
+    def export(self, path: str):
+        """
+        Export the tokenizer configuration to a file.
+
+        :param path: The path to the output file.
         """
 
     def __call__(self, regions: List[Region]) -> TokenizedRegionSet:

@@ -17,10 +17,18 @@ impl TokenizerConfig {
     ///
     /// # Arguments
     /// - path: Path to the config file (a .toml) file.
-    pub fn new(path: &Path) -> Result<TokenizerConfig> {
+    pub fn try_from(path: &Path) -> Result<TokenizerConfig> {
         let toml_str = read_to_string(path)?;
         let config: TokenizerConfig = toml::from_str(&toml_str)?;
 
         Ok(config)
+    }
+
+    pub fn new(tokenizer_type: Option<String>, universes: Vec<String>, exclude_ranges: Option<String>) -> TokenizerConfig {
+        TokenizerConfig {
+            tokenizer_type,
+            universes,
+            exclude_ranges,
+        }
     }
 }
