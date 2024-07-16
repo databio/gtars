@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::fs::{File};
 
 use rstest::*;
-use tempfile::NamedTempFile;
+use tempfile::tempdir;
 
 use gtars::uniwig::{parse_bed_file};
 
@@ -28,6 +28,7 @@ fn path_to_bed_file_gzipped() -> &'static str {
 }
 
 mod tests {
+    use std::env::temp_dir;
     use gtars::uniwig::{Chromosome, read_bed_vec, uniwig_main};
 
     use super::*;
@@ -75,10 +76,18 @@ mod tests {
     #[rstest]
     fn test_run_uniwig_main_wig_type(path_to_bed_file: &str) {
 
+        let path_to_crate= env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = format!("{} {}",path_to_crate, "/tests/data/test5.bed");
+        let combinedbedpath = tempbedpath.as_str();
+
+        let chromsizerefpath: String = format!("{} {}",path_to_crate, "/tests/hg38.chrom.sizes");
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut path = PathBuf::from(&tempdir.path());
+        let bwfileheader: &str = path.into_os_string().into_string().unwrap().as_str();
+
         let smoothsize: i32 = 5;
-        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test5.bed";
-        let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
-        let bwfileheader: &str = "/home/drc/Downloads/test_rust_wig/";
         let output_type ="wig";
 
         uniwig_main(smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
