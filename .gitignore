@@ -20,3 +20,4 @@ Cargo.lock
 /.idea/vcs.xml
 # this is for "act"
 bin/
+/.idea/gtars.iml
