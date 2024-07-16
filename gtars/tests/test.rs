@@ -74,7 +74,7 @@ mod tests {
 
     }
     #[rstest]
-    fn test_run_uniwig_main(path_to_bed_file: &str) {
+    fn test_run_uniwig_main_wig_type(path_to_bed_file: &str) {
 
         let smoothsize: i32 = 5;
         let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test5.bed";
@@ -86,6 +86,18 @@ mod tests {
 
     }
 
+    #[rstest]
+    fn test_run_uniwig_main_npy_type(path_to_bed_file: &str) {
+
+        let smoothsize: i32 = 5;
+        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test5.bed";
+        let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
+        let bwfileheader: &str = "/home/drc/Downloads/test_rust_wig/";
+        let output_type ="npy";
+
+        uniwig_main(smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
+
+    }
     // #[rstest]
     // fn test_count_coordinate_reads() {
     //     // example input, marking read alignment locations

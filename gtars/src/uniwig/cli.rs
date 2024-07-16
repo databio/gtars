@@ -10,7 +10,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("bed")
                 .long("bed")
                 .short('b')
-                .help("Path to the combined bed file we want to tranforms")
+                .help("Path to the combined bed file we want to transform")
                 .required(true),
         )
         .arg(
@@ -47,7 +47,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("outputtype")
                 .long("outputtype")
                 .short('y')
-                .help("Output as wiggle or CSV")
+                .help("Output as wiggle or npy")
                 .required(true),
         )
 
