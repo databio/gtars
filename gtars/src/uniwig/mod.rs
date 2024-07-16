@@ -5,7 +5,7 @@ use std::fs::{File, OpenOptions};
 use std::error::Error;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
-use ndarray::{array, Array};
+use ndarray::Array;
 use ndarray_npy::write_npy;
 
 
@@ -208,7 +208,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
 
-    let mut chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+    let chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
 
     let num_chromosomes = chromosomes.len();
 
@@ -264,7 +264,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize);
+                                write_to_wig_file(&count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize);
 
 
                             },
@@ -274,7 +274,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                                 println!("Writing npy files!");
 
                                 file_names[0] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "start", output_type);
-                                write_to_npy_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize,meta_data_file_names[0].clone());
+                                write_to_npy_file(&count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize,meta_data_file_names[0].clone());
 
 
                             },
@@ -291,7 +291,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             "wig" => {
 
                                 println!("Writing to wig file!");
-                                write_to_wig_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_end, smoothsize), stepsize);
+                                write_to_wig_file(&count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_end, smoothsize), stepsize);
 
                             },
                             "csv" => {println!("Write to CSV. Not Implemented");},
@@ -299,7 +299,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                                 println!("Writing npy files!");
                                 file_names[1] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "end", output_type);
-                                write_to_npy_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize, meta_data_file_names[1].clone());
+                                write_to_npy_file(&count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize, meta_data_file_names[1].clone());
 
 
                             },
@@ -317,7 +317,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                                     println!("Writing to CORE RESULTS wig file!");
                                     //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
-                                    write_to_wig_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize);
+                                    write_to_wig_file(&core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize);
 
 
                                 },
@@ -326,7 +326,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                                     println!("Writing npy files!");
                                     file_names[2] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "core", output_type);
-                                    write_to_npy_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize,meta_data_file_names[2].clone());
+                                    write_to_npy_file(&core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize,meta_data_file_names[2].clone());
 
 
                                 },
@@ -348,7 +348,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 }
 
-fn write_to_npy_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32, metafilename: String) {
+fn write_to_npy_file(counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32, metafilename: String) {
 
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
@@ -360,21 +360,23 @@ fn write_to_npy_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String
     let arr = Array::from_vec(counts.to_vec());
     let _ = write_npy(filename, &arr);
 
-    // Write to the metadata file. Note: there should be a single metadata file for starts, ends and core
+    // Write to the metadata file.
+    // Note: there should be a single metadata file for starts, ends and core
 
     let mut file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
         .append(true)  // Append data to the existing file if it does exist
         .open(metafilename).unwrap();
 
-    //println!("DEBUG: fixedStep chrom={}",chromname.clone());
+    // The original wiggle file header. This can be anything we wish it to be. Currently space delimited.
     let wig_header = "fixedStep chrom=".to_string() + chromname.as_str() + " start="+start_position.to_string().as_str() +" step="+stepsize.to_string().as_str();
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
 
 }
 
-fn write_to_wig_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32) {
+#[allow(unused_variables)]
+fn write_to_wig_file(counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32) {
 
     let mut file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
@@ -427,109 +429,7 @@ fn read_chromosome_sizes(chrom_size_path: &str) -> Result<std::collections::Hash
     Ok(chrom_sizes)
 }
 
-// pub fn count_coordinate_reads(input_vector: &Vec<i32>) -> Vec<u8> {
-//     // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
-//     // else place a 0 at the position if no counts exist.
-//
-//     // based on smoothFixedStarEndBW from orig uniwig but does not use a stepsize nor perform any smoothing
-//
-//     //println!("DEBUG: Executing count_coordinate_reads");
-//
-//     let vin_iter = input_vector.iter();
-//     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-//
-//     let mut coordinate_position = 1;
-//     let mut count = 0;
-//
-//     let mut coordinate_value = 0;
-//     let mut prev_coordinate_value = 0;
-//
-//     for coord in vin_iter{
-//
-//         coordinate_value = *coord;
-//
-//         if coordinate_value == prev_coordinate_value
-//         {
-//             count +=1;
-//             continue;
-//
-//         }
-//         while prev_coordinate_value > coordinate_position {
-//             // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
-//             v_coord_counts.push(0);
-//             coordinate_position +=1;
-//         }
-//
-//         v_coord_counts.push(count);
-//         prev_coordinate_value = coordinate_value;
-//         count = 1;
-//         coordinate_position +=1;
-//     }
-//
-//     // Must finish out final value
-//     while coordinate_value > coordinate_position{
-//         v_coord_counts.push(0);
-//         coordinate_position += 1;
-//     }
-//
-//     v_coord_counts.push(count);
-//
-//     return v_coord_counts
-// }
-
-// pub fn count_coordinate_reads_start_end(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>) -> Vec<u8> {
-//     // Take a pre-sorted vector of potentially repeated positions and count the repeats for each position
-//     // within a window based on the end point
-//     // else place a 0 at the position if no counts exist.
-//
-//     // based on fixedCoreBW from orig uniwig but does not use a stepsize
-//
-//
-//
-//     //println!("DEBUG: Executing count_coordinate_reads");
-//
-//     let vin_iter = starts_vector.iter();
-//     let mut v_coord_counts: Vec<u8> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-//
-//     let mut coordinate_position = 1;
-//     let mut count = 0;
-//
-//     let mut coordinate_value = 0;
-//     let mut prev_coordinate_value = 0;
-//
-//     for coord in vin_iter{
-//
-//         coordinate_value = *coord;
-//
-//         if coordinate_value == prev_coordinate_value
-//         {
-//             count +=1;
-//             continue;
-//
-//         }
-//         while prev_coordinate_value > coordinate_position {
-//             // add zeros in-between reads and increment until we "catch up" to the next coordinate position in the vector
-//             v_coord_counts.push(0);
-//             coordinate_position +=1;
-//         }
-//
-//         v_coord_counts.push(count);
-//         prev_coordinate_value = coordinate_value;
-//         count = 1;
-//         coordinate_position +=1;
-//     }
-//
-//     // Must finish out final value
-//     while coordinate_value > coordinate_position{
-//         v_coord_counts.push(0);
-//         coordinate_position += 1;
-//     }
-//
-//     v_coord_counts.push(count);
-//
-//     return v_coord_counts
-// }
-
+#[allow(unused_variables)]
 pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, smoothsize: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
     // It allows the user to accumulate reads of either starts or ends
@@ -679,7 +579,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     //println!("DEBUG: FINAL LENGTHS... Counts: {:?}  Positions: {:?}", v_coord_counts, v_coordinate_positions);
     return (v_coord_counts, v_coordinate_positions)
 }
-
+#[allow(unused_variables)]
 pub fn fixed_core_wiggle(starts_vector: &Vec<i32>, ends_vector: &Vec<i32>, chrom_size: i32, stepsize:i32) -> (Vec<u32>, Vec<i32>) {
     // This function is a more direct port of fixedCoreBW from uniwig written in CPP
     // It allows the user to accumulate reads of across paired starts and ends.

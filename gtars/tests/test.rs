@@ -28,8 +28,7 @@ fn path_to_bed_file_gzipped() -> &'static str {
 }
 
 mod tests {
-    use gtars::common::utils::extract_regions_from_bed_file;
-    use gtars::uniwig::{Chromosome, read_bed_vec, run_uniwig, uniwig_main};
+    use gtars::uniwig::{Chromosome, read_bed_vec, uniwig_main};
 
     use super::*;
 
@@ -67,7 +66,7 @@ mod tests {
     #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
 
-        let mut chromosomes: Vec<Chromosome>  = read_bed_vec(path_to_sorted_small_bed_file);
+        let chromosomes: Vec<Chromosome>  = read_bed_vec(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
@@ -98,23 +97,4 @@ mod tests {
         uniwig_main(smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
 
     }
-    // #[rstest]
-    // fn test_count_coordinate_reads() {
-    //     // example input, marking read alignment locations
-    //     let query: Vec<i32> = vec![2,2,2,3,3,7,10,12,12,12,12,15];
-    //     let res = count_coordinate_reads(&query);
-    //     // example output, counting number of reads at each position
-    //     let answer = vec![0,3,2,0,0,0,1,0,0,1,0,4,0,0,1];
-    //     assert_eq!(res, answer);
-    //
-    // }
-
-    // #[rstest]
-    // fn test_count_coordinate_reads_start_end() {
-    //     // example input, marking read alignment locations
-    //     let starts: Vec<i32> = vec![1,4,4,7,9,9];
-    //     let ends: Vec<i32> = vec![3,6,6,9,10,11];
-    //     let res = count_coordinate_reads_start_end(&starts, &ends);
-    //
-    // }
 }
