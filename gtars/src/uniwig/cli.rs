@@ -1,4 +1,4 @@
-use clap::{Arg, ArgAction, Command};
+use clap::{Arg,Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
