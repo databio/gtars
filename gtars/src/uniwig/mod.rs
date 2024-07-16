@@ -5,6 +5,8 @@ use std::fs::{File, OpenOptions};
 use std::error::Error;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
+use ndarray::{array, Array};
+use ndarray_npy::write_npy;
 
 
 pub mod cli;
@@ -133,7 +135,7 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
 
 
 pub fn run_uniwig(matches: &ArgMatches) {
-    println!("I am running. Here are the arguments: {:?}", matches);
+    //println!("I am running. Here are the arguments: {:?}", matches);
 
     let combinedbedpath = matches
         .get_one::<String>("bed")
@@ -177,11 +179,16 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
     // Set up output file names
 
     let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
+    let mut meta_data_file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
 
     // TODO determine potential file types
     file_names[0] = format!("{}_{}.{}", bwfileheader, "start", output_type);
     file_names[1] = format!("{}_{}.{}", bwfileheader, "end", output_type);
     file_names[2] = format!("{}_{}.{}", bwfileheader, "core", output_type);
+
+    meta_data_file_names[0] = format!("{}{}.{}", bwfileheader, "start","meta");
+    meta_data_file_names[1] = format!("{}{}.{}", bwfileheader, "end","meta");
+    meta_data_file_names[2] = format!("{}{}.{}", bwfileheader, "core","meta");
 
 
 
@@ -225,12 +232,12 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
         let primary_end = chromosome.ends[0].clone();
 
         let chrom_name = chromosome.chrom.clone();
-        println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
+        //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
         chroms.push(chrom_name.clone());
 
         //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
         let current_chrom_size =chrom_sizes[&chromosome.chrom] as i32;
-        println!("DEBUG: CHROM SIZE -> {}",current_chrom_size.clone());
+        //println!("DEBUG: CHROM SIZE -> {}",current_chrom_size.clone());
 
 
         // Iterate 3 times to output the three different files.
@@ -262,6 +269,15 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                             },
                             "csv" => {println!("Write to CSV. Not Implemented");},
+                            "npy" => {
+
+                                println!("Writing npy files!");
+
+                                file_names[0] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "start", output_type);
+                                write_to_npy_file(&count_result.1, &count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize,meta_data_file_names[0].clone());
+
+
+                            },
                             _ => {println!("Default to wig file.")},
                         }
                     },
@@ -279,6 +295,14 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                             },
                             "csv" => {println!("Write to CSV. Not Implemented");},
+                            "npy" => {
+
+                                println!("Writing npy files!");
+                                file_names[1] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "end", output_type);
+                                write_to_npy_file(&count_result.1, &count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize, meta_data_file_names[1].clone());
+
+
+                            },
                             _ => {println!("Default to wig file.")},
                         }
                     },
@@ -298,6 +322,14 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
                                 },
                                 "csv" => {println!("Write to CSV. Not Implemented");},
+                                "npy" => {
+
+                                    println!("Writing npy files!");
+                                    file_names[2] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "core", output_type);
+                                    write_to_npy_file(&core_results.1, &core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize,meta_data_file_names[2].clone());
+
+
+                                },
                                 _ => {println!("Default to wig file.")},
                             }
 
@@ -313,6 +345,32 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
 
+
+}
+
+fn write_to_npy_file(coordinates: &Vec<i32>, counts: &Vec<u32>, filename: String, chromname: String, start_position: i32, stepsize: i32, metafilename: String) {
+
+    // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
+    // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
+
+    println!("{}", filename);
+    println!("{}", metafilename);
+
+    // Write the NumPy Files
+    let arr = Array::from_vec(counts.to_vec());
+    let _ = write_npy(filename, &arr);
+
+    // Write to the metadata file. Note: there should be a single metadata file for starts, ends and core
+
+    let mut file = OpenOptions::new()
+        .create(true)  // Create the file if it doesn't exist
+        .append(true)  // Append data to the existing file if it does exist
+        .open(metafilename).unwrap();
+
+    //println!("DEBUG: fixedStep chrom={}",chromname.clone());
+    let wig_header = "fixedStep chrom=".to_string() + chromname.as_str() + " start="+start_position.to_string().as_str() +" step="+stepsize.to_string().as_str();
+    file.write_all(wig_header.as_ref()).unwrap();
+    file.write_all(b"\n").unwrap();
 
 }
 
@@ -502,35 +560,35 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
-    println!("DEBUG: START SITE BEFORE ADJUSTMENT -> {}",starts_vector[0].clone());
+    //println!("DEBUG: START SITE BEFORE ADJUSTMENT -> {}",starts_vector[0].clone());
 
     adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
     adjusted_start_site = adjusted_start_site - smoothsize; // adjust based on smoothing
-    println!("DEBUG: START SITE AFTER ADJUSTMENT -> {}",adjusted_start_site.clone());
+    //println!("DEBUG: START SITE AFTER ADJUSTMENT -> {}",adjusted_start_site.clone());
 
     //Check endsite generation
     current_end_site = adjusted_start_site + 1 + smoothsize*2;
 
-    println!("DEBUG: INITIAL ENDSITE -> {}", current_end_site.clone());
+    //println!("DEBUG: INITIAL ENDSITE -> {}", current_end_site.clone());
 
     if adjusted_start_site < 1{
         adjusted_start_site = 1;
     }
 
-    println!("DEBUG: SKIPPING UNTIL COORDINATE_POSITION < ADJUSTEDSTARTSITE -> {}  {}", coordinate_position.clone(), adjusted_start_site.clone());
+    //println!("DEBUG: SKIPPING UNTIL COORDINATE_POSITION < ADJUSTEDSTARTSITE -> {}  {}", coordinate_position.clone(), adjusted_start_site.clone());
     while coordinate_position < adjusted_start_site{
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
         coordinate_position = coordinate_position + stepsize;
     }
 
-    println!("DEBUG: SKIPPING UNTIL COORDINATE_POSITION < ADJUSTEDSTARTSITE -> {}  {}", coordinate_position.clone(), adjusted_start_site.clone());
+    //println!("DEBUG: SKIPPING UNTIL COORDINATE_POSITION < ADJUSTEDSTARTSITE -> {}  {}", coordinate_position.clone(), adjusted_start_site.clone());
 
     //prev_coordinate_value = adjusted_start_site;
 
     for coord in vin_iter.skip(1) {
 
-        println!("DEBUG: BEGIN COORDINATE ITERATION");
+        //println!("DEBUG: BEGIN COORDINATE ITERATION");
         coordinate_value = *coord;
         //println!("DEBUG: COORDINATE VALUE {}", coordinate_value.clone());
         adjusted_start_site = coordinate_value - smoothsize;
@@ -544,7 +602,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
         collected_end_sites.push(adjusted_start_site + 1 + smoothsize*2);
 
-        println!("DEBUG: Coordinate Value: {}, Adjusted Start Site: {}, New Endsite: {} ", coordinate_value.clone(), adjusted_start_site.clone(), adjusted_start_site + 1 + smoothsize*2);
+        //println!("DEBUG: Coordinate Value: {}, Adjusted Start Site: {}, New Endsite: {} ", coordinate_value.clone(), adjusted_start_site.clone(), adjusted_start_site + 1 + smoothsize*2);
 
         if adjusted_start_site == prev_coordinate_value
         {
@@ -571,11 +629,11 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count);
                 v_coordinate_positions.push(coordinate_position);
-                println!("DEBUG: Reporting count: {} at position: {} for adjusted start site: {}",count, coordinate_position, adjusted_start_site);
+                //println!("DEBUG: Reporting count: {} at position: {} for adjusted start site: {}",count, coordinate_position, adjusted_start_site);
 
             }
 
-            println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
+            //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
             coordinate_position = coordinate_position + 1;
 
 
@@ -618,7 +676,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
     }
 
 
-    println!("DEBUG: FINAL LENGTHS... Counts: {:?}  Positions: {:?}", v_coord_counts, v_coordinate_positions);
+    //println!("DEBUG: FINAL LENGTHS... Counts: {:?}  Positions: {:?}", v_coord_counts, v_coordinate_positions);
     return (v_coord_counts, v_coordinate_positions)
 }
 
