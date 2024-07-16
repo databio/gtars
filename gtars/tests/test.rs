@@ -84,8 +84,11 @@ mod tests {
         let chromsizerefpath: String = format!("{} {}",path_to_crate, "/tests/hg38.chrom.sizes");
 
         let tempdir = tempfile::tempdir().unwrap();
-        let mut path = PathBuf::from(&tempdir.path());
-        let bwfileheader: &str = path.into_os_string().into_string().unwrap().as_str();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
 
         let smoothsize: i32 = 5;
         let output_type ="wig";
@@ -97,10 +100,21 @@ mod tests {
     #[rstest]
     fn test_run_uniwig_main_npy_type(path_to_bed_file: &str) {
 
+        let path_to_crate= env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = format!("{} {}",path_to_crate, "/tests/data/test5.bed");
+        let combinedbedpath = tempbedpath.as_str();
+
+        let chromsizerefpath: String = format!("{} {}",path_to_crate, "/tests/hg38.chrom.sizes");
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
         let smoothsize: i32 = 5;
-        let combinedbedpath: &str = "/home/drc/GITHUB/genimtools/genimtools/tests/data/test5.bed";
-        let chromsizerefpath: String = "/home/drc/GITHUB/genimtools/genimtools/tests/hg38.chrom.sizes".to_string();
-        let bwfileheader: &str = "/home/drc/Downloads/test_rust_wig/";
         let output_type ="npy";
 
         uniwig_main(smoothsize, combinedbedpath, &chromsizerefpath, bwfileheader, output_type)
