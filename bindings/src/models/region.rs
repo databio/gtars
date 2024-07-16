@@ -4,7 +4,10 @@ use pyo3::class::basic::CompareOp;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
 
-use genimtools::common::models::region::Region;
+use anyhow::Result;
+use gtars::common::models::region::Region;
+
+use crate::models::PyUniverse;
 
 #[pyclass(name = "Region")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
@@ -12,6 +15,16 @@ pub struct PyRegion {
     pub chr: String,
     pub start: u32,
     pub end: u32,
+}
+
+impl From<Region> for PyRegion {
+    fn from(region: Region) -> Self {
+        PyRegion {
+            chr: region.chr,
+            start: region.start,
+            end: region.end,
+        }
+    }
 }
 
 impl PyRegion {
@@ -32,24 +45,24 @@ impl PyRegion {
     }
 
     #[getter]
-    pub fn chr(&self) -> PyResult<&str> {
+    pub fn chr(&self) -> Result<&str> {
         Ok(&self.chr)
     }
 
     #[getter]
-    pub fn start(&self) -> PyResult<u32> {
+    pub fn start(&self) -> Result<u32> {
         Ok(self.start)
     }
 
     #[getter]
-    pub fn end(&self) -> PyResult<u32> {
+    pub fn end(&self) -> Result<u32> {
         Ok(self.end)
     }
     pub fn __repr__(&self) -> String {
         format!("Region({}, {}, {})", self.chr, self.start, self.end)
     }
 
-    pub fn __richcmp__(&self, other: PyRef<PyRegion>, op: CompareOp) -> PyResult<bool> {
+    pub fn __richcmp__(&self, other: PyRef<PyRegion>, op: CompareOp) -> Result<bool> {
         match op {
             CompareOp::Eq => {
                 Ok(self.chr == other.chr && self.start == other.start && self.end == other.end)
@@ -57,7 +70,7 @@ impl PyRegion {
             CompareOp::Ne => {
                 Ok(self.chr != other.chr || self.start != other.start || self.end != other.end)
             }
-            _ => Err(PyTypeError::new_err("Unsupported comparison operator")),
+            _ => anyhow::bail!(PyTypeError::new_err("Unsupported comparison operator")),
         }
     }
 }
@@ -65,45 +78,80 @@ impl PyRegion {
 #[pyclass(name = "TokenizedRegion")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
-    pub region: PyRegion,
     pub id: u32,
+    pub universe: Py<PyUniverse>,
+}
+
+impl From<PyTokenizedRegion> for PyRegion {
+    fn from(value: PyTokenizedRegion) -> Self {
+        Python::with_gil(|py| {
+            value
+                .universe
+                .borrow(py)
+                .convert_id_to_region(value.id)
+                .unwrap()
+        })
+    }
 }
 
 #[pymethods]
 impl PyTokenizedRegion {
-    #[new]
-    pub fn new(region: PyRegion, id: u32) -> Self {
-        PyTokenizedRegion { region, id }
+    #[getter]
+    pub fn chr(&self) -> Result<String> {
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .chr)
+        })
     }
 
     #[getter]
-    pub fn chr(&self) -> PyResult<&str> {
-        Ok(&self.region.chr)
+    pub fn start(&self) -> Result<u32> {
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .start)
+        })
     }
 
     #[getter]
-    pub fn start(&self) -> PyResult<u32> {
-        Ok(self.region.start)
+    pub fn end(&self) -> Result<u32> {
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap()
+                .end)
+        })
     }
 
-    #[getter]
-    pub fn end(&self) -> PyResult<u32> {
-        Ok(self.region.end)
+    pub fn to_region(&self) -> Result<PyRegion> {
+        Python::with_gil(|py| {
+            Ok(self
+                .universe
+                .borrow(py)
+                .convert_id_to_region(self.id)
+                .unwrap())
+        })
     }
-
     #[getter]
-    pub fn region(&self) -> PyResult<PyRegion> {
-        Ok(self.region.clone())
-    }
-    #[getter]
-    pub fn id(&self) -> PyResult<u32> {
+    pub fn id(&self) -> Result<u32> {
         Ok(self.id)
     }
 
     pub fn __repr__(&self) -> String {
         format!(
             "TokenizedRegion({}, {}, {})",
-            self.region.chr, self.region.start, self.region.end
+            self.chr().unwrap(),
+            self.start().unwrap(),
+            self.end().unwrap()
         )
     }
 }

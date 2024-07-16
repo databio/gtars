@@ -18,3 +18,5 @@ Cargo.lock
 /.idea/modules.xml
 /.idea/.gitignore
 /.idea/vcs.xml
+# this is for "act"
+bin/
