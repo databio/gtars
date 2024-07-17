@@ -1,4 +1,4 @@
-use genimtools::ailist::{AIList, Interval};
+use gtars::ailist::{AIList, Interval};
 use pyo3::{prelude::*, pyclass};
 
 use crate::models::PyInterval;
@@ -43,7 +43,7 @@ impl PyAIList {
 
 /// A Python module implemented in Rust.
 #[pymodule]
-pub fn ailist(_py: Python, m: &PyModule) -> PyResult<()> {
+pub fn ailist(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInterval>()?;
     m.add_class::<PyAIList>()?;
     Ok(())
