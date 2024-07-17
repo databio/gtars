@@ -14,3 +14,10 @@ Cargo.lock
 *.pdb
 
 .venv
+/.idea/genimtools.iml
+/.idea/modules.xml
+/.idea/.gitignore
+/.idea/vcs.xml
+# this is for "act"
+bin/
+/.idea/gtars.iml

@@ -1,13 +1,17 @@
 [package]
-name = "genimtools-py"
-version = "0.0.10"
+name = "gtars-py"
+version = "0.0.14"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "genimtools"
+name = "gtars"
 crate-type = ["cdylib"]
 
 [dependencies]
-genimtools = { path = "../genimtools" }
-pyo3 = "0.20.0"
+anyhow = "1.0.82"
+gtars = { path = "../gtars" }
+pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
+numpy = "0.21"
+# pyo3-tch = { git = "https://github.com/LaurentMazare/tch-rs" }
+# torch-sys = { git = "https://github.com/LaurentMazare/tch-rs" }
