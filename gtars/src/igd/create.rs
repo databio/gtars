@@ -90,7 +90,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     let mut igd = igd_t::new();
 
     igd.gType = 1;
-    igd.nbp = 16384; // from og code tile_size = 16384;
+    igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
     igd.nctg = 0;
     igd.mctg = 32;
     igd.total=0;
@@ -171,7 +171,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     // og C code:
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
-    let mut avg: Vec<i32> = Vec::with_capacity(n_files); //Can we use arrays? Is this an array? no, can we put a array on files.
+    let mut avg: Vec<i32> = Vec::with_capacity(n_files); //Can we use arrays? Is this an array? no, can we put an array on files.
     avg.resize(n_files, 0);
 
     let mut nr: Vec<i32> = Vec::with_capacity(n_files);
@@ -264,12 +264,12 @@ pub fn create_igd_f(matches: &ArgMatches){
 
 }
 
-fn igd_saveT(p0: &igd_t, p1: &String) {
+pub fn igd_saveT(p0: &igd_t, p1: &String) {
     println!("HELLO from igd_saveT");
     //todo!()
 }
 
-fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
+pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
 

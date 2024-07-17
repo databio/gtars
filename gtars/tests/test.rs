@@ -30,11 +30,39 @@ fn path_to_bed_file_gzipped() -> &'static str {
 mod tests {
     use std::env::temp_dir;
     use gtars::uniwig::{Chromosome, read_bed_vec, uniwig_main};
+    use gtars::igd::create::{parse_bed,create_igd_f,igd_add,igd_saveT};
 
     use super::*;
 
+    // IGD TESTS
+
     #[rstest]
-    fn test_parsed_bed_file(path_to_bed_file: &str) {
+    fn test_igd_parse_bed_file() {
+
+        // Given some random line from a  bed file...
+        let bed_file_string = String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+
+        let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap(); // this will return
+
+        let unwrapped_result = result.as_str();
+
+        assert_eq!(unwrapped_result, "chr1");
+
+        // Ensure start and end is modified via parse_bed
+        assert_eq!(start, 32481);
+        assert_eq!(end, 32787);
+
+    }
+
+
+
+    // UNIWIG TESTS
+    #[rstest]
+    fn test_uniwig_parsed_bed_file(path_to_bed_file: &str) {
         let path = Path::new(path_to_bed_file);
         let file = File::open(path).unwrap();
 
@@ -57,7 +85,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
+    fn test_uniwig_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
 
         read_bed_vec(path_to_bed_file);
         read_bed_vec(path_to_bed_file_gzipped);
@@ -65,7 +93,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
+    fn test_uniwig_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
 
         let chromosomes: Vec<Chromosome>  = read_bed_vec(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
