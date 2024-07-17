@@ -4,9 +4,10 @@ use std::fs;
 use std::fs::{DirEntry, File};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use crate::common::consts::BED_FILE_EXTENSION;
 //use clap::error::ContextValue::String;
-use polars::export::arrow::buffer::Buffer;
-use crate::vocab::consts;
+//use polars::export::arrow::buffer::Buffer;
+//use crate::vocab::consts;
 
 
 pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had this as i32
@@ -111,7 +112,7 @@ pub fn create_igd_f(matches: &ArgMatches){
         // For now only take .bed files
         if let Some(extension) = entry.as_ref().unwrap().path().extension() {
 
-            if extension != consts::FILE_EXTENSION.trim_start_matches('.') {
+            if extension != BED_FILE_EXTENSION.trim_start_matches('.') {
                 continue;
             }
         } else {continue} // This will skip files that do not have an extension
