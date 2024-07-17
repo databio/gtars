@@ -16,9 +16,9 @@ pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had t
 
 #[derive(Default)]
 pub struct gdata_t {
-    pub idx: i32,
-    pub start: i32,
-    pub end: i32,
+    pub idx: i32, //genomic object--data set index
+    pub start: i32, //region start
+    pub end: i32, //region end
     pub value: i32,
 }
 
@@ -27,13 +27,13 @@ pub struct tile_t {
     pub ncnts: i32, // batch counts
     pub nCnts: i32, // total (batch) counts
     pub mcnts: i32, //  max counts
-    pub gList: gdata_t,
+    pub gList: gdata_t, //genomic data
 }
 #[derive(Default)]
 pub struct ctg_t {
-    pub name: String,
-    pub mTiles: i32,
-    pub gTile: Vec<tile_t>,
+    pub name: String, //name of the contig
+    pub mTiles: i32,  //determined by the interval start and end
+    pub gTile: Vec<tile_t>, //tile data
 }
 impl ctg_t{
 
@@ -45,12 +45,12 @@ impl ctg_t{
 #[derive(Default)]
 pub struct igd_t {
     // TODO create attributes for the IGD
-    pub nbp: i32,
-    pub gType: i32,
-    pub nctg: i32,
-    pub mctg: i32,
-    pub total: i64,
-    pub ctg: Vec<ctg_t>, // this might need to be a reference
+    pub nbp: i32, //data type: 0, 1, 2 etc; size differs
+    pub gType: i32, //data type: 0, 1, 2 etc; size differs
+    pub nctg: i32, //data type: 0, 1, 2 etc; size differs
+    pub mctg: i32, //data type: 0, 1, 2 etc; size differs
+    pub total: i64, // total region in each ctg
+    pub ctg: Vec<ctg_t>, // this is the list of contigs (of size n-ctg)  // this might need to be a reference
 }
 
 
@@ -303,7 +303,7 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
         p.name = chrm;
         p.mTiles = 1 + n2;
         //p.gTile original code mallocs mTiles*sizeof title_t
-        //p.gTile = Vec::with_capacity()
+        //p.gTile = Vec::with_capacity();
 
         for i in 0..p.mTiles{
             let mut new_tile: tile_t = tile_t::new();
