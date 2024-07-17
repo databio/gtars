@@ -83,7 +83,22 @@ mod tests {
         let chromosome = result;
 
         // Add to the database (hash table)
-        igd_add(&mut igd,chromosome, start, end, 0, 0)
+        igd_add(&mut igd,chromosome, start, end, 0, 0);
+
+        // // Add second string
+        // let bed_file_string = String::from("chr1	629094	630022	SRX4150706.05_peak_2	820	.	3.81936	88.76474	82.09715	743");
+        // //Placeholder start and end values
+        // let mut start = 0;
+        // let mut end = 0;
+        //
+        // // We've now parsed to get the chromosome and the new start and end of the current contig.
+        // let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap();
+        // let chromosome = result;
+        //
+        // // Add to the database (hash table)
+        // igd_add(&mut igd,chromosome, start, end, 0, 0);
+        //
+        // println!("FInished");
 
 
     }
