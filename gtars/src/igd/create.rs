@@ -4,6 +4,8 @@ use std::fs;
 use std::fs::{DirEntry, File};
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::mem;
+use std::mem::size_of;
 use crate::common::consts::BED_FILE_EXTENSION;
 //use clap::error::ContextValue::String;
 //use polars::export::arrow::buffer::Buffer;
@@ -16,10 +18,16 @@ pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had t
 
 #[derive(Default)]
 pub struct gdata_t {
-    pub idx: i32, //genomic object--data set index
+    pub idx: usize, //genomic object--data set index
     pub start: i32, //region start
     pub end: i32, //region end
     pub value: i32,
+}
+impl gdata_t {
+
+    /// Constructs new instance of a gdata_t
+    pub fn new() -> Self {Self::default()}
+
 }
 
 #[derive(Default)]
@@ -27,7 +35,7 @@ pub struct tile_t {
     pub ncnts: i32, // batch counts
     pub nCnts: i32, // total (batch) counts
     pub mcnts: i32, //  max counts
-    pub gList: gdata_t, //genomic data
+    pub gList: Vec<gdata_t>, //genomic data
 }
 #[derive(Default)]
 pub struct ctg_t {
@@ -37,7 +45,7 @@ pub struct ctg_t {
 }
 impl ctg_t{
 
-    /// Constructs new instance of IGD
+    /// Constructs new instance of a ctg
     pub fn new() -> Self {Self::default()}
 
 }
@@ -273,6 +281,8 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
 
+    println!("HELLO from igd_add");
+
     if start>= end {
 
         println!("Start: {0} greater than End: {1}, returning from igd_add", start, end);
@@ -295,18 +305,25 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
 
     if key_check == false{
 
+        println!("Key does not exist in hash map, creating for {}", key.clone());
+
         // Insert key and value (igd.nctg)
-        hash_table.insert(key, igd.nctg);
+        hash_table.insert(key.clone(), igd.nctg);
         igd.nctg+=1;
+
         // initialize ctg
         let mut p = ctg_t::new();
         p.name = chrm;
         p.mTiles = 1 + n2;
         //p.gTile original code mallocs mTiles*sizeof title_t
-        //p.gTile = Vec::with_capacity();
+        // however in Rust, structs have 0 size: https://doc.rust-lang.org/nomicon/exotic-sizes.html#zero-sized-types-zsts
+        //p.gTile = Vec::with_capacity((p.mTiles as usize)*size_of(tile_t()));
+        p.gTile = Vec::with_capacity((p.mTiles as usize));
 
         for i in 0..p.mTiles{
+
             let mut new_tile: tile_t = tile_t::new();
+
             new_tile.ncnts = 0; //each batch
             new_tile.nCnts = 0; //total
             new_tile.mcnts =2 ;
@@ -321,11 +338,75 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
 
     }
 
-    println!("Here is hash map{:?}", hash_table);
+    // Retrieve values from Hash Map
+    // println!("Here is hash map{:?}", hash_table);
     //let k = hash_table.insert()
 
-    println!("HELLO from igd_add");
+    let keycloned = key.clone();
 
+    let index = hash_table.get(&keycloned).unwrap();
+    let cloned_index = index.clone();
+
+
+    let p = &mut igd.ctg[cloned_index as usize];
+
+    if (n2+1>=p.mTiles){
+
+        println!("TRUE:{} vs {}", (n2+1), p.mTiles.clone());
+        let tt = p.mTiles;
+
+        p.mTiles = n2+1;
+        // original code: p->gTile = realloc(p->gTile, p->mTiles*sizeof(tile_t));
+        // Supposedly we may not need to do this ...  p.gTile = Vec::resize()   ???
+
+        for i in tt..p.mTiles{
+
+            let idx = i.clone() as usize;
+            let idx_2 = idx as usize;
+
+            let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
+
+            existing_tile.ncnts = 0;
+            existing_tile.nCnts = 0;
+            existing_tile.mcnts = 2;
+            // og: tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
+            //existing_tile.gList = gdata_t::new(); // TODO Double check this, do we actually want to create a new struct?
+            existing_tile.gList = Vec::with_capacity((existing_tile.mcnts as usize));
+            // for element in existing_tile.gList.iter_mut() {
+            //     //*element = gdata_t::new();  // Add new_value to each element
+            //     existing_tile.gList.push(gdata_t::new());
+            // }
+            existing_tile.gList = Vec::with_capacity(existing_tile.mcnts as usize)
+                .iter_mut()  // Iterate over mutable references (not needed here)
+                .map(|gdata_t: &mut gdata_t| gdata_t::new())  // Create new gdata_t for each element
+                .collect();
+
+        }
+
+    }
+
+    for i in n1..=n2{ //this is inclusive of n1 and n2
+        // Get index as usize
+        let idx_1 = i.clone() as usize;
+        let idx_2 = idx_1 as usize;
+        // get the tile for the contig
+        let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
+        // og code, not necessary in Rust?		if(tile->ncnts == tile->mcnts)
+        // 			EXPAND(tile->gList, tile->mcnts);
+
+        let tile_idx = existing_tile.ncnts.clone() as usize;
+        let gdata = &mut existing_tile.gList[tile_idx];
+        existing_tile.ncnts = existing_tile.ncnts+ 1;
+
+        gdata.start = start;
+        gdata.end = end;
+        gdata.value = v;
+        gdata.idx = idx;
+
+    }
+
+    println!("Finished from igd_add");
+    return
 
 }
 
