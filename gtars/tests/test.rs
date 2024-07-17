@@ -30,7 +30,7 @@ fn path_to_bed_file_gzipped() -> &'static str {
 mod tests {
     use std::env::temp_dir;
     use gtars::uniwig::{Chromosome, read_bed_vec, uniwig_main};
-    use gtars::igd::create::{parse_bed,create_igd_f,igd_add,igd_saveT};
+    use gtars::igd::create::{parse_bed, create_igd_f, igd_add, igd_saveT, igd_t};
 
     use super::*;
 
@@ -55,6 +55,36 @@ mod tests {
         // Ensure start and end is modified via parse_bed
         assert_eq!(start, 32481);
         assert_eq!(end, 32787);
+
+    }
+
+    #[rstest]
+    fn test_igd_add_igd() {
+
+        // First create a new igd struct
+
+        let mut igd = igd_t::new();
+
+        // Set values of struct
+        igd.gType = 1;
+        igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
+        igd.nctg = 0;
+        igd.mctg = 32;
+        igd.total=0;
+
+        // Given some random line from a bed file...
+        let bed_file_string = String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+
+        // We've now parsed to get the chromosome and the new start and end of the current contig.
+        let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap();
+        let chromosome = result;
+
+        // Add to the database (hash table)
+        igd_add(&mut igd,chromosome, start, end, 0, 0)
+
 
     }
 
