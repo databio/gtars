@@ -328,6 +328,17 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
             new_tile.nCnts = 0; //total
             new_tile.mcnts =2 ;
             //new_tile.gList //tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
+            //new_tile.gList = Vec::with_capacity((new_tile.mcnts as usize));
+
+            for j in 0..new_tile.mcnts{
+                new_tile.gList.push(gdata_t::new());
+            }
+            // for element in new_tile.gList.iter_mut() {
+            //     //*element = gdata_t::new();  // Add new_value to each element
+            //     //element.push(gdata_t::new());
+            //     let element = &mut gdata_t::new();
+            // }
+
             p.gTile.push(new_tile);
 
         }
@@ -371,15 +382,19 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
             existing_tile.mcnts = 2;
             // og: tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
             //existing_tile.gList = gdata_t::new(); // TODO Double check this, do we actually want to create a new struct?
-            existing_tile.gList = Vec::with_capacity((existing_tile.mcnts as usize));
+            //existing_tile.gList = Vec::with_capacity((existing_tile.mcnts as usize));
             // for element in existing_tile.gList.iter_mut() {
             //     //*element = gdata_t::new();  // Add new_value to each element
-            //     existing_tile.gList.push(gdata_t::new());
+            //     //element.push(gdata_t::new());
+            //     let element = gdata_t::new();
             // }
-            existing_tile.gList = Vec::with_capacity(existing_tile.mcnts as usize)
-                .iter_mut()  // Iterate over mutable references (not needed here)
-                .map(|gdata_t: &mut gdata_t| gdata_t::new())  // Create new gdata_t for each element
-                .collect();
+            // existing_tile.gList = Vec::with_capacity(existing_tile.mcnts as usize)
+            //     .iter_mut()  // Iterate over mutable references (not needed here)
+            //     .map(|gdata_t: &mut gdata_t| gdata_t::new())  // Create new gdata_t for each element
+            //     .collect();
+            for j in 0..existing_tile.mcnts{
+                existing_tile.gList.push(gdata_t::new());
+            }
 
         }
 
