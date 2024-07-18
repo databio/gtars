@@ -167,6 +167,7 @@ pub fn create_igd_f(matches: &ArgMatches){
     //println!("ALL PARSED Lines from BED FILES:\n{:?}", all_bed_files);
 
     let n_files = ix;//all_bed_files.len();
+    let nf10 = n_files/10;
 
     println!("Number of Bed Files found:\n{}", n_files);
 
@@ -226,7 +227,6 @@ pub fn create_igd_f(matches: &ArgMatches){
                     Some(ctg) =>{
                         // check that st>=0 and end <321000000   NOTE: these values taken from og code.
                         if start>=0 && end<321000000{
-                            /// igd_add not yet implemented
                             igd_add(&mut igd, ctg, start, end, va, ig);
                             nr[ig] +=1;
                             avg[ig]+=end-start;
@@ -251,6 +251,12 @@ pub fn create_igd_f(matches: &ArgMatches){
 
             if m==0 {
                 ig+=1;
+            }
+
+            if nf10>1 {
+                if ig % nf10 == 0 {
+                    println!(".") // SHow progress for every 10 files
+                }
             }
 
         }
