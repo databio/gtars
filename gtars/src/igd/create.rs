@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use clap::ArgMatches;
 use std::fs;
-use std::fs::{DirEntry, File};
-use std::io::{BufRead, BufReader, Read};
+use std::fs::{DirEntry, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
 use std::mem;
 use std::mem::size_of;
@@ -94,6 +94,11 @@ pub fn create_igd_f(matches: &ArgMatches){
         .get_one::<String>("filelist")
         .expect("File list path is required");
 
+    let db_output_name = matches
+        .get_one::<String>("dbname")
+        .expect("File list path is required");
+
+    //println!("{}",db_output_name);
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
 
@@ -278,9 +283,64 @@ pub fn create_igd_f(matches: &ArgMatches){
 
 }
 
-pub fn igd_saveT(p0: &igd_t, p1: &String) {
+pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
     println!("HELLO from igd_saveT");
-    //todo!()
+
+    // From OG COde:
+    // TEMPORARILY save/append tiles to disc, add cnts to Cnts; reset tile.gList
+
+    let mut nt =0;
+
+    for i in 0..igd.nctg{
+
+        let idx = i.clone() as usize;
+        let idx_2 = idx;
+        let current_ctg = &igd.ctg[idx_2];
+        nt = nt + current_ctg.mTiles;
+
+        for j in 0..current_ctg.mTiles{
+
+            let jdx = j.clone() as usize;
+            let jdx_2 = jdx;
+
+            let current_tile = &current_ctg.gTile[jdx_2];
+
+            if current_tile.ncnts>0{
+
+                // Construct specific temp file on disk using this information
+
+                // OG code
+                // sprintf(idFile, "%s%s%s_%i", oPath, "data0/", ctg->name, j);
+                let save_path = format!("{}{}{}_{}",output_file_path,"data0/",current_ctg.name, j);
+                //println!("{}",save_path)
+                let mut file = OpenOptions::new()
+                    .create(true)  // Create the file if it doesn't exist
+                    .append(true)  // Append data to the existing file if it does exist
+                    .open(save_path).unwrap();
+
+                // Because gList is a Vector of structs, we must take each field
+                // and convert it to byte representation before writing to a file...
+                let mut buffer = Vec::new();
+                for data in &current_tile.gList[..current_tile.ncnts as usize] {
+                    buffer.write_all(&data.idx.to_ne_bytes()).unwrap();
+                    buffer.write_all(&data.start.to_ne_bytes()).unwrap();
+                    buffer.write_all(&data.end.to_ne_bytes()).unwrap();
+                    buffer.write_all(&data.value.to_ne_bytes()).unwrap();
+                }
+                file.write_all(&buffer).unwrap();
+
+
+            }
+
+
+
+        }
+
+    }
+
+
+
+
 }
 
 pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {

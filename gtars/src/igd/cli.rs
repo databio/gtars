@@ -11,4 +11,8 @@ pub fn create_igd_cli() -> Command {
             arg!(--filelist <VALUE> "Path to the list of files. This should be a folder of bed files.")
                 .required(true),
         )
+        .arg(
+            arg!(--dbname <VALUE> "Database name")
+                .required(false).default_value("igd_database"),
+        )
 }
