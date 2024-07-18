@@ -59,7 +59,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_igd_add_igd() {
+    fn test_igd_add() {
 
         // First create a new igd struct
 
@@ -85,20 +85,28 @@ mod tests {
         // Add to the database (hash table)
         igd_add(&mut igd,chromosome, start, end, 0, 0);
 
-        // // Add second string
-        // let bed_file_string = String::from("chr1	629094	630022	SRX4150706.05_peak_2	820	.	3.81936	88.76474	82.09715	743");
-        // //Placeholder start and end values
-        // let mut start = 0;
-        // let mut end = 0;
-        //
-        // // We've now parsed to get the chromosome and the new start and end of the current contig.
-        // let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap();
-        // let chromosome = result;
-        //
-        // // Add to the database (hash table)
-        // igd_add(&mut igd,chromosome, start, end, 0, 0);
-        //
-        // println!("FInished");
+
+    }
+
+    #[rstest]
+    fn test_igd_saveT() {
+        let mut igd = igd_t::new();
+
+        // Set values of struct
+        igd.gType = 1;
+        igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
+        igd.nctg = 0;
+        igd.mctg = 32;
+        igd.total=0;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = &db_path_unwrapped;
+
+        igd_saveT(&igd, db_output_path)
 
 
     }
