@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use clap::ArgMatches;
-use std::fs;
-use std::fs::{DirEntry, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::{fs, io};
+use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
+use std::io::{BufRead, BufReader, Read, Write, Error};
 use std::path::{Path, PathBuf};
 use std::mem;
 use std::mem::size_of;
@@ -10,7 +10,7 @@ use crate::common::consts::BED_FILE_EXTENSION;
 //use clap::error::ContextValue::String;
 //use polars::export::arrow::buffer::Buffer;
 //use crate::vocab::consts;
-
+use anyhow::{Context, Result};
 
 pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had this as i32
 
@@ -266,7 +266,7 @@ pub fn create_igd_f(matches: &ArgMatches){
 
         }
 
-        ///og: 2.3 save/append tiles to disc, add cnts to Cnts
+        ///og: 2.3 save/append temp tiles to disc, add cnts to Cnts
         ///
 
         igd_saveT(&igd, output_path);
@@ -311,8 +311,39 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
 
                 // OG code
                 // sprintf(idFile, "%s%s%s_%i", oPath, "data0/", ctg->name, j);
-                let save_path = format!("{}{}{}_{}",output_file_path,"data0/",current_ctg.name, j);
-                //println!("{}",save_path)
+                let save_path = format!("{}{}{}_{}{}",output_file_path,"data0/",current_ctg.name, j,".igd");
+                let parent_path = save_path.clone();
+
+                println!("{}",save_path);
+
+                //todo this needs to create the path if it does not already exist!!!
+
+                let path = std::path::Path::new(&parent_path).parent().unwrap();
+                let result = create_file_with_parents(path);
+
+                match result {
+                    Ok(file) => println!("File created or opened successfully!"),
+                    Err(err) => println!("Error creating file: {}", err),
+                }
+
+                //let _ = create_dir_all(save_path.clone());
+                //if let Ok(ret) = create_dir_all(save_path.clone());
+                //
+                // match result {
+                //     Ok(_) => println!("Directory created successfully!"), // Optional: Print a success message
+                //     Err(ref error) if error.kind() == fs:: => {
+                //         println!("Directory already exists. Ignoring error.");
+                //     },
+                //     Err(error) => println!("Error creating directory: {}", error), // Handle other errors
+                // }
+                // let path = std::path::Path::new(&save_path);
+                //
+                // if let Some(parent) = path.parent() {
+                //     std::fs::create_dir_all(parent).unwrap();
+                // } else {
+                //     anyhow::Error("Failed to create parent directories for gtok file!")
+                // }
+
                 let mut file = OpenOptions::new()
                     .create(true)  // Create the file if it doesn't exist
                     .append(true)  // Append data to the existing file if it does exist
@@ -342,6 +373,44 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
 
 
 }
+
+fn create_file_with_parents(path: &Path) -> Result<File, Error> {
+    // Create all parent directories if they don't exist (ignore errors)
+    let _ = create_dir_all(path);  // Discard the result (success or error)
+
+    // Open the file for creation or append, ignoring errors if it exists
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path);
+
+    match file {
+        Ok(file) => {
+            println!("File created or opened successfully!");
+            Ok(file)
+        }
+        Err(_) => Ok(File::open(path).unwrap_or_else(|_| File::create(path).unwrap())) // Handle existing file or create new one
+    }
+
+}
+
+// fn create_file_with_parents(path: &Path) -> Result<File, Error> {
+//     // Create all parent directories if they don't exist
+//     let result = create_dir_all(path).unwrap();
+//
+//     match result {
+//         Ok(file) => println!("File created or opened successfully!"),
+//         Err(err) => println!("Error creating file: {}", err),
+//     }
+//
+//
+//     // Open the file for creation or append, ignoring errors if it exists
+//     Ok(OpenOptions::new()
+//         .create(true)
+//         .append(true) // Optional: Append to existing file
+//         .open(path)?)
+// }
+
 
 pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
     ///Add an interval
