@@ -322,18 +322,92 @@ pub fn create_igd_f(matches: &ArgMatches){
     file.write_all(&buffer).unwrap();
 
 
-//TODO COde to sort tile data and save into single files per ctg (part 4)
+//TODO Code to sort tile data and save into single files per ctg (part 4)
 
     // Sort tile data and save into single files per ctg
-    //igd_save_db(igd, output_path, db_output_name)
+    igd_save_db(igd, output_path, db_output_name)
 
 }
 
-fn igd_save_db(p0: igd_t, p1: &String, p2: &String) {
-    println!("HELLO from igd_save");
+pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
+    println!("HELLO from igd_save_db");
     // this is the igd_save func from the original c code
 
-    todo!()
+    // sprintf(idFile, "%s%s%s_%i", oPath, "data0/", ctg->name, j);
+    let save_path = format!("{}{}{}",output_path,db_output_name,".igd");
+    let parent_path = save_path.clone();
+
+    let path = std::path::Path::new(&parent_path).parent().unwrap();
+    let result = create_file_with_parents(path);
+
+    match result {
+        Ok(file) => println!("File created or opened successfully!"),
+        Err(err) => println!("Error creating file: {}", err),
+    }
+
+    let mut file = OpenOptions::new()
+        .create(true)  // Create the file if it doesn't exist
+        .append(true)  // Append data to the existing file if it does exist
+        .open(save_path).unwrap();
+
+    let mut buffer = Vec::new();
+
+    // for data in &current_tile.gList[..current_tile.ncnts as usize] {
+    //     buffer.write_all(&data.idx.to_le_bytes()).unwrap();
+    //     buffer.write_all(&data.start.to_le_bytes()).unwrap();
+    //     buffer.write_all(&data.end.to_le_bytes()).unwrap();
+    //     buffer.write_all(&data.value.to_le_bytes()).unwrap();
+    // }
+    //
+    buffer.write_all(&igd.nbp.to_le_bytes()).unwrap();
+    buffer.write_all(&igd.gType.to_le_bytes()).unwrap();
+    buffer.write_all(&igd.nctg.to_le_bytes()).unwrap();
+
+
+    for i in 0..igd.nctg{
+
+        let idx = i.clone() as usize;
+        let current_ctg = &igd.ctg[idx];
+
+
+        buffer.write_all(&current_ctg.mTiles.to_le_bytes()).unwrap();
+
+    }
+
+    for i in 0..igd.nctg{
+        let idx = i.clone() as usize;
+        let current_ctg = &igd.ctg[idx];
+
+        //let j = igd.nctg;
+
+        let n = current_ctg.mTiles;
+
+        for j in 0..n{
+            let jdx = j.clone() as usize;
+
+            buffer.write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes()).unwrap();
+        }
+
+    }
+
+    for i in 0..igd.nctg{
+
+        let idx = i.clone() as usize;
+        let current_ctg = &igd.ctg[idx];
+
+        buffer.write_all((&current_ctg.name).as_ref()).unwrap();
+
+    }
+
+    //2. SOrt and save tiles data
+
+
+
+
+
+    file.write_all(&buffer).unwrap();
+
+
 }
 
 pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
