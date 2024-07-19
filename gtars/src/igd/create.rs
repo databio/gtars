@@ -305,13 +305,13 @@ pub fn create_igd_f(matches: &ArgMatches){
 
     for i in 0..n_files {
 
-        let file_path = &all_bed_files[i];
+        let file_path = &all_bed_files[i].to_str().unwrap();
 
-        // TODO this line doesn't work
-        let filename = file_path.rsplitn('/', 1).next().unwrap_or(file_path);
+        // TODO this line isn't not grabbing the end name as desired
+        let filename = file_path.rsplitn(1, '/',).next().unwrap_or(file_path);
 
         total_regions += nr[i];
-        total_avg_size += avg[i];
+        total_avg_size += avg[i] as f32;
 
         // Write file summary
         //writeln!(fpi, "{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]).expect("Couldn't write to file");
@@ -319,11 +319,21 @@ pub fn create_igd_f(matches: &ArgMatches){
         buffer.write_all((&current_line).as_ref()).unwrap();
     }
 
-    file.write_all(&buffer).unwrap()
+    file.write_all(&buffer).unwrap();
 
 
 //TODO COde to sort tile data and save into single files per ctg (part 4)
 
+    // Sort tile data and save into single files per ctg
+    //igd_save_db(igd, output_path, db_output_name)
+
+}
+
+fn igd_save_db(p0: igd_t, p1: &String, p2: &String) {
+    println!("HELLO from igd_save");
+    // this is the igd_save func from the original c code
+
+    todo!()
 }
 
 pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
