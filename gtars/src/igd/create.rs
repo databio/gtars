@@ -279,6 +279,49 @@ pub fn create_igd_f(matches: &ArgMatches){
 
 //TODO CODE TO save _index.tsv (part 3)
 
+    //sprintf(idFile, "%s%s%s", oPath, igdName, "_index.tsv");
+    let tsv_save_path = format!("{}{}{}",output_path,db_output_name,"_index.tsv");
+    let tsv_parent_path = tsv_save_path.clone();
+    let path = std::path::Path::new(&tsv_parent_path).parent().unwrap();
+    let result = create_file_with_parents(path);
+
+    match result {
+        Ok(file) => println!("TSV File created or opened successfully!"),
+        Err(err) => println!("Error creating file: {}", err),
+    }
+    let mut file = OpenOptions::new()
+        .create(true)  // Create the file if it doesn't exist
+        .append(true)  // Append data to the existing file if it does exist
+        .open(tsv_save_path).unwrap();
+
+    //fprintf(fpi, "Index\tFile\tNumber of regions\tAvg size\n");
+
+    let initial_line = format!("Index\tFile\tNumber of Regions\t Avg size\n");
+    let mut buffer = Vec::new();
+    buffer.write_all((&initial_line).as_ref()).unwrap();
+
+    let mut total_regions = 0;
+    let mut total_avg_size = 0.0;
+
+    for i in 0..n_files {
+
+        let file_path = &all_bed_files[i];
+
+        // TODO this line doesn't work
+        let filename = file_path.rsplitn('/', 1).next().unwrap_or(file_path);
+
+        total_regions += nr[i];
+        total_avg_size += avg[i];
+
+        // Write file summary
+        //writeln!(fpi, "{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]).expect("Couldn't write to file");
+        let current_line = format!("{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]);
+        buffer.write_all((&current_line).as_ref()).unwrap();
+    }
+
+    file.write_all(&buffer).unwrap()
+
+
 //TODO COde to sort tile data and save into single files per ctg (part 4)
 
 }
