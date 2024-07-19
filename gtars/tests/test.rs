@@ -30,7 +30,7 @@ fn path_to_bed_file_gzipped() -> &'static str {
 mod tests {
     use std::env::temp_dir;
     use gtars::uniwig::{Chromosome, read_bed_vec, uniwig_main};
-    use gtars::igd::create::{parse_bed, create_igd_f, igd_add, igd_saveT, igd_t};
+    use gtars::igd::create::{parse_bed, create_igd_f, igd_add, igd_saveT, igd_t, igd_save_db};
 
     use super::*;
 
@@ -89,7 +89,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_igd_saveT() {
+    fn test_igd_saving() {
         let mut igd = igd_t::new();
 
         // Set values of struct
@@ -119,7 +119,12 @@ mod tests {
         let db_path_unwrapped = path.into_os_string().into_string().unwrap();
         let db_output_path = &db_path_unwrapped;
 
-        igd_saveT(&igd, db_output_path)
+        // First test igd_saveT
+        igd_saveT(&igd, db_output_path);
+
+        // then test saveing main databse
+
+        igd_save_db(igd, db_output_path, &String::from("randomname"));
 
 
     }
