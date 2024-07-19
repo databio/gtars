@@ -399,13 +399,85 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
 
     }
 
+    file.write_all(&buffer).unwrap();
     //2. SOrt and save tiles data
 
+    let k: i32;
+
+    for i in 0..igd.nctg{
+        let idx = i.clone() as usize;
+
+        let current_ctg = &igd.ctg[idx];
+        let n = current_ctg.mTiles;
+
+        for j in 0..n{
+            let jdx = j.clone() as usize;
+
+            let mut q = &current_ctg.gTile[jdx];
+            let nrec = q.nCnts;
+
+            if nrec>0{
+                println!("nrec greater than 0");
+                let save_path = format!("{}{}{}_{}{}",output_path,"data0/",current_ctg.name, j,".igd");
+                let parent_path = save_path.clone();
+                let path = std::path::Path::new(&parent_path).parent().unwrap();
+
+                let mut file = OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path);
+
+                match file {
+                    Ok(file) => {
+                        println!("File created or opened successfully!");
+                    }
+                    Err(_) => {println!("Cannot open path!!!");
+                    return;
+                    }
+                }
+
+                // Read from Temp File
+                //the next 4 lines are pulled from googling and are not quite right
+                let gdsize = nrec * std::mem::size_of::<gdata_t>() as i32;
+
+                let mut gdata = vec![gdata_t::default(); gdsize as usize];
+
+                let ni = file.read_exact(gdata.as_mut_slice().to_le_bytes());
+
+                // Sort Data
+                gdata.sort_by_key(|d| d.start); // Sort by start value
+
+                // Write to database after sorting
+                let _ = file.write_all(&gdata);
+
+                // og code!!!!!!!!!!!!
+                // gdsize = nrec*sizeof(gdata_t);
+                // gdata_t *gdata = malloc(gdsize);
+                // if(gdata==NULL){
+                //     printf("Can't alloc mem %lld\n", (long long)gdsize);
+                //     return;
+                // }
+                // ni = fread(gdata, gdsize, 1, fp0);
+                // fclose(fp0);
+                // //qsort(gdata, nrec, sizeof(gdata_t), compare_rstart);
+                // radix_sort_intv(gdata, gdata+nrec);
+                // fwrite(gdata, gdsize, 1, fp);
+                // free(gdata);
+                // remove(iname);
 
 
+            }
+
+            // todo set to zero but it claims that this is immutable
+            //q.nCnts = 0;
 
 
-    file.write_all(&buffer).unwrap();
+        }
+
+    }
+
+
+    //file.write_all(&buffer).unwrap();
 
 
 }
