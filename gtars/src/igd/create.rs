@@ -353,10 +353,10 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
                 // and convert it to byte representation before writing to a file...
                 let mut buffer = Vec::new();
                 for data in &current_tile.gList[..current_tile.ncnts as usize] {
-                    buffer.write_all(&data.idx.to_ne_bytes()).unwrap();
-                    buffer.write_all(&data.start.to_ne_bytes()).unwrap();
-                    buffer.write_all(&data.end.to_ne_bytes()).unwrap();
-                    buffer.write_all(&data.value.to_ne_bytes()).unwrap();
+                    buffer.write_all(&data.idx.to_le_bytes()).unwrap();
+                    buffer.write_all(&data.start.to_le_bytes()).unwrap();
+                    buffer.write_all(&data.end.to_le_bytes()).unwrap();
+                    buffer.write_all(&data.value.to_le_bytes()).unwrap();
                 }
                 file.write_all(&buffer).unwrap();
 
