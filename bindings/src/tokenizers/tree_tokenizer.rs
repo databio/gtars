@@ -137,7 +137,7 @@ impl PyTreeTokenizer {
 
         Ok(regions.into_iter().map(|r| r.into()).collect())
     }
-    
+
     pub fn export(&self, path: String) -> Result<()> {
         let path = Path::new(&path);
         self.tokenizer.export(path)
