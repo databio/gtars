@@ -21,8 +21,8 @@ raw="*.bed"
 unsorted="combined_unsort.bed"
 # chrsorted combined data filename
 chrsorted="combined_chrsort.bed"
-cat $RAWDATA_DIR$raw > $COMBDATA_DIR$unsorted
-sort -k1,1V $COMBDATA_DIR$unsorted > $COMBDATA_DIR$chrsorted
+awk 'NF {print} END {print ""}' $RAWDATA_DIR$raw > $COMBDATA_DIR$unsorted
+sort -k1,1V $COMBDATA_DIR$unsorted | grep '.' > $COMBDATA_DIR$chrsorted
 ```
 ### Running uniwig
 
