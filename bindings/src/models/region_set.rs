@@ -10,7 +10,7 @@ use gtars::common::utils::extract_regions_from_bed_file;
 
 use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 
-#[pyclass(name = "RegionSet")]
+#[pyclass(name = "RegionSet", module="gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
     pub regions: Vec<PyRegion>,
@@ -85,7 +85,7 @@ impl PyRegionSet {
     }
 }
 
-#[pyclass(name = "TokenizedRegionSet")]
+#[pyclass(name = "TokenizedRegionSet", module="gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
     pub ids: Vec<u32>,
@@ -123,7 +123,7 @@ impl PyTokenizedRegionSet {
             Ok(self
                 .ids
                 .iter()
-                .map(|id| self.universe.borrow(py).id_to_region[&id].clone())
+                .map(|id| self.universe.borrow(py).id_to_region[id].clone())
                 .collect())
         })
     }
