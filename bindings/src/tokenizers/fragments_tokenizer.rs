@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use super::PyTokenizedRegionSet;
 use super::PyUniverse;
 
-#[pyclass(name = "FragmentTokenizer")]
+#[pyclass(name = "FragmentTokenizer", module="gtars.tokenizers")]
 pub struct PyFragmentTokenizer {
     pub tokenizer: gtars::tokenizers::FragmentTokenizer<TreeTokenizer>,
     pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons
