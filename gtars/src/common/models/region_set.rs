@@ -1,4 +1,5 @@
 use crate::common::utils::extract_regions_from_bed_file;
+use pyo3::prelude::*;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
@@ -7,6 +8,7 @@ use anyhow::Result;
 
 use crate::common::models::Region;
 
+#[pyclass(module = "gtars.models")]
 pub struct RegionSet {
     pub regions: Vec<Region>,
 }
@@ -77,6 +79,7 @@ impl<'a> IntoIterator for &'a RegionSet {
     }
 }
 
+#[pymethods]
 impl RegionSet {
     pub fn to_bed(&self, path: &Path) -> Result<()> {
         let mut file = File::create(path)?;
