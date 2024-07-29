@@ -3,7 +3,7 @@ use pyo3::{prelude::*, pyclass};
 
 use crate::models::PyInterval;
 
-#[pyclass(name = "AIList")]
+#[pyclass(name = "AIList", module="gtars.ailist")]
 struct PyAIList {
     ailist: AIList,
 }
