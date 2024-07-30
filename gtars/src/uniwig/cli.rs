@@ -2,6 +2,7 @@ use clap::{Arg, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
+/// Creates the uniwig CLI Command object
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")

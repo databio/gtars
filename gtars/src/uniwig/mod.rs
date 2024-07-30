@@ -29,6 +29,8 @@ impl Clone for Chromosome {
     }
 }
 
+/// Reads combined bed file from a given path.
+/// Returns Vec of Chromosome struct
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     let path = Path::new(combinedbedpath);
 
@@ -103,9 +105,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     return chromosome_vec;
 }
 
+/// Parses each line of given bed file into a contig (chromosome), starts and ends
 pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
-    // TODO Eventually refactor all bed file parsing to a single shared function
-
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?;
@@ -125,6 +126,7 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
     Some((ctg.parse().unwrap(), st, en))
 }
 
+/// Matches items from CLAP args before running uniwig_main
 pub fn run_uniwig(matches: &ArgMatches) {
     //println!("I am running. Here are the arguments: {:?}", matches);
 
@@ -157,11 +159,12 @@ pub fn run_uniwig(matches: &ArgMatches) {
     )
 }
 
+/// Ensures that the start position for every wiggle file is at a minimum equal to `1`
 fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
-    // This is for ensuring that the start position for every wiggle file is at a minimum equal to `1`
     std::cmp::max(1, start - smoothsize)
 }
 
+/// Main function
 pub fn uniwig_main(
     smoothsize: i32,
     combinedbedpath: &str,
@@ -169,8 +172,6 @@ pub fn uniwig_main(
     bwfileheader: &str,
     output_type: &str,
 ) {
-    // Main Function
-
     let stepsize = 1;
 
     // Set up output file names
@@ -502,6 +503,7 @@ fn write_to_wig_file(
     }
 }
 
+/// Reads chromosome size file from path and returns chromosome sizes hash map
 fn read_chromosome_sizes(
     chrom_size_path: &str,
 ) -> Result<std::collections::HashMap<String, u32>, Box<dyn Error>> {
@@ -523,6 +525,12 @@ fn read_chromosome_sizes(
     Ok(chrom_sizes)
 }
 
+/// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
+/// It allows the user to accumulate reads of either starts or ends.
+/// Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
+/// the level of smoothing.
+/// counts are reported over a stepsize (with a default of stepsize = 1).
+/// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
 pub fn smooth_fixed_start_end_wiggle(
     starts_vector: &Vec<i32>,
@@ -530,13 +538,6 @@ pub fn smooth_fixed_start_end_wiggle(
     smoothsize: i32,
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {
-    // This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP
-    // It allows the user to accumulate reads of either starts or ends
-    // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
-    // the level of smoothing.
-    // counts are reported over a stepsize (with a default of stepsize = 1)
-    // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
-
     //println!("BEGIN smooth_Fixed_Start_End_Wiggle");
 
     let vin_iter = starts_vector.iter();
@@ -660,6 +661,13 @@ pub fn smooth_fixed_start_end_wiggle(
     //println!("DEBUG: FINAL LENGTHS... Counts: {:?}  Positions: {:?}", v_coord_counts, v_coordinate_positions);
     return (v_coord_counts, v_coordinate_positions);
 }
+
+/// This function is a more direct port of fixedCoreBW from uniwig written in CPP
+/// It allows the user to accumulate reads across paired starts and ends.
+/// Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
+/// the paired ends.
+/// Counts are reported over a stepsize (with a default of stepsize = 1)
+/// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
 pub fn fixed_core_wiggle(
     starts_vector: &Vec<i32>,
@@ -667,13 +675,6 @@ pub fn fixed_core_wiggle(
     chrom_size: i32,
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {
-    // This function is a more direct port of fixedCoreBW from uniwig written in CPP
-    // It allows the user to accumulate reads of across paired starts and ends.
-    // Counts occur between a start coordinate (cutSite) and an end site (endSite) where the endsite is determined based on
-    // the paired ends.
-    // Counts are reported over a stepsize (with a default of stepsize = 1)
-    // Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
-
     //println!("BEGIN Fixed_Core_Wiggle");
 
     //println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
