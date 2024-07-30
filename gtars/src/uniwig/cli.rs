@@ -3,6 +3,9 @@ use clap::{Arg, Command};
 use crate::uniwig::consts::UNIWIG_CMD;
 
 /// Creates the uniwig CLI Command object
+///
+/// Example to run uiwig
+/// `cargo run uniwig -b /sourcefiles/test.bed -c /sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /numpy_arrays_created_with_rust/ -y npy`
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")
