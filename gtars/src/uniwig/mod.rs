@@ -212,7 +212,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
     let num_chromosomes = chromosomes.len();
 
-    println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
+    //println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
 
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
@@ -253,7 +253,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
             if smoothsize != 0 {
                 match j {
                     0 => {
-                        println!("Write Starts Here");
+                        //println!("Write Starts Here");
                         //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
                         //let count_result = count_coordinate_reads(&chromosome.starts);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
@@ -263,7 +263,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                         match output_type {
                             "wig" => {
 
-                                println!("Writing to wig file!");
+                                //println!("Writing to wig file!");
                                 write_to_wig_file(&count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize);
 
 
@@ -282,7 +282,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                         }
                     },
                     1 => {
-                        println!("Write Ends Here");
+                        //println!("Write Ends Here");
                         //let count_result = count_coordinate_reads(&chromosome.ends);
                         let count_result = smooth_fixed_start_end_wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
@@ -308,7 +308,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                     },
                     2 => {
 
-                            println!("Write Core Here");
+                            //println!("Write Core Here");
 
                             let core_results = fixed_core_wiggle(&chromosome.starts,&chromosome.ends,current_chrom_size, stepsize);
 
@@ -353,8 +353,8 @@ fn write_to_npy_file(counts: &Vec<u32>, filename: String, chromname: String, sta
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
 
-    println!("{}", filename);
-    println!("{}", metafilename);
+    //println!("{}", filename);
+    //println!("{}", metafilename);
 
     // Write the NumPy Files
     let arr = Array::from_vec(counts.to_vec());
@@ -440,7 +440,7 @@ pub fn smooth_fixed_start_end_wiggle(starts_vector: &Vec<i32>, chrom_size: i32, 
 
 
 
-    println!("BEGIN smooth_Fixed_Start_End_Wiggle");
+    //println!("BEGIN smooth_Fixed_Start_End_Wiggle");
 
     let vin_iter = starts_vector.iter();
 
