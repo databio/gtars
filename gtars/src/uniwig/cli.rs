@@ -1,4 +1,4 @@
-use clap::{Arg,Command};
+use clap::{Arg, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
@@ -50,5 +50,4 @@ pub fn create_uniwig_cli() -> Command {
                 .help("Output as wiggle or npy")
                 .required(true),
         )
-
 }

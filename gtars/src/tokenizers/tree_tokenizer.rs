@@ -139,8 +139,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let config = TokenizerConfig::new(
                     Some("tree".to_string()),
                     vec![value.to_str().unwrap().to_string()],
-                    None
-
+                    None,
                 );
                 (config, universe, tree, None, None)
             }

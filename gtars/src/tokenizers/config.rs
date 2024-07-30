@@ -24,7 +24,11 @@ impl TokenizerConfig {
         Ok(config)
     }
 
-    pub fn new(tokenizer_type: Option<String>, universes: Vec<String>, exclude_ranges: Option<String>) -> TokenizerConfig {
+    pub fn new(
+        tokenizer_type: Option<String>,
+        universes: Vec<String>,
+        exclude_ranges: Option<String>,
+    ) -> TokenizerConfig {
         TokenizerConfig {
             tokenizer_type,
             universes,
