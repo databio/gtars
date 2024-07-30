@@ -4,7 +4,7 @@ use flate2::read::GzDecoder;
 use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::error::Error;
-use std::fs::{File, OpenOptions};
+use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
 
@@ -372,7 +372,7 @@ pub fn uniwig_main(
 
                         match output_type {
                             "wig" => {
-                                println!("Writing to CORE RESULTS wig file!");
+                                //println!("Writing to CORE RESULTS wig file!");
                                 write_to_wig_file(
                                     &core_results.0,
                                     file_names[2].clone(),
@@ -444,6 +444,9 @@ fn write_to_npy_file(
     // Write to the metadata file.
     // Note: there should be a single metadata file for starts, ends and core
 
+    let path = std::path::Path::new(&metafilename).parent().unwrap();
+    let _ = create_dir_all(path);
+
     let mut file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
         .append(true) // Append data to the existing file if it does exist
@@ -469,6 +472,9 @@ fn write_to_wig_file(
     start_position: i32,
     stepsize: i32,
 ) {
+    let path = std::path::Path::new(&filename).parent().unwrap();
+    let _ = create_dir_all(path);
+
     let mut file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
         .append(true) // Append data to the existing file if it does exist
