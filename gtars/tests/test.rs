@@ -51,7 +51,7 @@ mod tests {
             println!("en: {}", en);
             assert_eq!(st, 7915738);
         } else {
-            println!("Failed to parse BED record");
+            panic!("Failed to parse BED record");
         }
 
     }
@@ -59,8 +59,11 @@ mod tests {
     #[rstest]
     fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
 
-        read_bed_vec(path_to_bed_file);
-        read_bed_vec(path_to_bed_file_gzipped);
+        let result1 = read_bed_vec(path_to_bed_file);
+        assert_eq!(result1.len(),20);
+
+        let result2 = read_bed_vec(path_to_bed_file_gzipped);
+        assert_eq!(result2.len(),20);
 
     }
 
