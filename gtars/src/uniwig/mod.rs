@@ -32,11 +32,6 @@ impl Clone for Chromosome {
 }
 
 
-// pub fn read_bed_map(combinedbedpath: &str){
-//
-//
-// }
-
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     let path = Path::new(combinedbedpath);
@@ -172,8 +167,6 @@ fn clamped_start_position(start:i32, smoothsize: i32) -> i32{
 pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &String, bwfileheader: &str, output_type: &str){
     // Main Function
 
-    //println!("Hello from Uniwig main");
-
     let stepsize = 1;
 
     // Set up output file names
@@ -181,7 +174,6 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
     let mut file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
     let mut meta_data_file_names: [String; 3] = ["placeholder1".to_owned(), "placeholder2".to_owned(), "placeholder3".to_owned()];
 
-    // TODO determine potential file types
     file_names[0] = format!("{}_{}.{}", bwfileheader, "start", output_type);
     file_names[1] = format!("{}_{}.{}", bwfileheader, "end", output_type);
     file_names[2] = format!("{}_{}.{}", bwfileheader, "core", output_type);
@@ -216,7 +208,6 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
-    //let mut chr_lens: Vec<i32> = Vec::with_capacity(num_chromosomes);
 
     println!("Processing each chromosome...");
     for chromosome in chromosomes.iter() {
@@ -288,7 +279,6 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                     },
                     1 => {
                         //println!("Write Ends Here");
-                        //let count_result = count_coordinate_reads(&chromosome.ends);
                         let count_result = smooth_fixed_start_end_wiggle(&chromosome.ends,current_chrom_size,smoothsize, stepsize);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
@@ -327,7 +317,6 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                                 "wig" => {
 
                                     println!("Writing to CORE RESULTS wig file!");
-                                    //write_to_wig_file(&chromosome.starts, &count_result, file_names[0].clone(), chrom_name.clone());
                                     write_to_wig_file(&core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize);
 
 
@@ -348,7 +337,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                             }
 
                     },
-                    _ => println!("Unexpected value: {}", j), // Handle unexpected values
+                    _ => panic!("Unexpected value: {}", j), // Handle unexpected values
                 }
             }
         }
