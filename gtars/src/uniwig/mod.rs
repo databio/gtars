@@ -263,12 +263,12 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                         match output_type {
                             "wig" => {
 
-                                //println!("Writing to wig file!");
+                                println!("Writing to wig file!");
                                 write_to_wig_file(&count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize);
 
 
                             },
-                            "csv" => {println!("Write to CSV. Not Implemented");},
+                            "csv" => {panic!("Write to CSV. Not Implemented");},
                             "npy" => {
 
                                 println!("Writing npy files!");
@@ -278,7 +278,12 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
                             },
-                            _ => {println!("Default to wig file.")},
+                            _ => {println!("Defaulting to npy file...");
+                                file_names[0] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "start", output_type);
+                                write_to_npy_file(&count_result.0, file_names[0].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize,meta_data_file_names[0].clone());
+
+
+                            },
                         }
                     },
                     1 => {
@@ -294,7 +299,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
                                 write_to_wig_file(&count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_end, smoothsize), stepsize);
 
                             },
-                            "csv" => {println!("Write to CSV. Not Implemented");},
+                            "csv" => {panic!("Write to CSV. Not Implemented");},
                             "npy" => {
 
                                 println!("Writing npy files!");
@@ -303,7 +308,13 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
                             },
-                            _ => {println!("Default to wig file.")},
+                            _ => {println!("Defaulting to npy file...");
+                                file_names[1] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "end", output_type);
+                                write_to_npy_file(&count_result.0, file_names[1].clone(), chrom_name.clone(), clamped_start_position(primary_start, smoothsize), stepsize, meta_data_file_names[1].clone());
+
+
+
+                            },
                         }
                     },
                     2 => {
@@ -321,7 +332,7 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
                                 },
-                                "csv" => {println!("Write to CSV. Not Implemented");},
+                                "csv" => {panic!("Write to CSV. Not Implemented");},
                                 "npy" => {
 
                                     println!("Writing npy files!");
@@ -330,7 +341,10 @@ pub fn uniwig_main(smoothsize:i32, combinedbedpath: &str, _chromsizerefpath: &St
 
 
                                 },
-                                _ => {println!("Default to wig file.")},
+                                _ => {println!("Defaulting to npy file...");
+                                    file_names[2] = format!("{}{}_{}.{}", bwfileheader,chrom_name, "core", output_type);
+                                    write_to_npy_file(&core_results.0, file_names[2].clone(), chrom_name.clone(), primary_start, stepsize,meta_data_file_names[2].clone());
+                                },
                             }
 
                     },
