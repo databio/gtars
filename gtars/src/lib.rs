@@ -35,7 +35,7 @@
 //! ```
 pub mod ailist;
 pub mod common;
+pub mod igd;
 pub mod io;
 pub mod tokenizers;
 pub mod uniwig;
-pub mod igd;

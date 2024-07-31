@@ -28,20 +28,19 @@ fn path_to_bed_file_gzipped() -> &'static str {
 }
 
 mod tests {
-    use std::env::temp_dir;
-    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
-    use gtars::igd::create::{parse_bed, create_igd_f, igd_add, igd_saveT, igd_t, igd_save_db};
-    use std::ptr::read;
     use super::*;
-
+    use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
+    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use std::env::temp_dir;
+    use std::ptr::read;
 
     // IGD TESTS
 
     #[rstest]
     fn test_igd_parse_bed_file() {
-
         // Given some random line from a  bed file...
-        let bed_file_string = String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
 
         //Placeholder start and end values
         let mut start = 0;
@@ -56,12 +55,10 @@ mod tests {
         // Ensure start and end is modified via parse_bed
         assert_eq!(start, 32481);
         assert_eq!(end, 32787);
-
     }
 
     #[rstest]
     fn test_igd_add() {
-
         // First create a new igd struct
 
         let mut igd = igd_t::new();
@@ -71,10 +68,11 @@ mod tests {
         igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
         igd.nctg = 0;
         igd.mctg = 32;
-        igd.total=0;
+        igd.total = 0;
 
         // Given some random line from a bed file...
-        let bed_file_string = String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
         //Placeholder start and end values
         let mut start = 0;
         let mut end = 0;
@@ -84,9 +82,7 @@ mod tests {
         let chromosome = result;
 
         // Add to the database (hash table)
-        igd_add(&mut igd,chromosome, start, end, 0, 0);
-
-
+        igd_add(&mut igd, chromosome, start, end, 0, 0);
     }
 
     #[rstest]
@@ -98,10 +94,11 @@ mod tests {
         igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
         igd.nctg = 0;
         igd.mctg = 32;
-        igd.total=0;
+        igd.total = 0;
 
         // Given some random line from a bed file...
-        let bed_file_string = String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
         //Placeholder start and end values
         let mut start = 0;
         let mut end = 0;
@@ -111,7 +108,7 @@ mod tests {
         let chromosome = result;
 
         // Add to the database (hash table)
-        igd_add(&mut igd,chromosome, start, end, 0, 0);
+        igd_add(&mut igd, chromosome, start, end, 0, 0);
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -126,11 +123,7 @@ mod tests {
         // then test saveing main databse
 
         igd_save_db(&mut igd, db_output_path, &String::from("randomname"));
-
-
     }
-
-
 
     // UNIWIG TESTS
     #[rstest]

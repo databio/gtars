@@ -1,6 +1,5 @@
-
-use clap::{arg, ArgMatches, Command};
 use crate::igd::consts::IGD_CMD;
+use clap::{arg, ArgMatches, Command};
 
 pub fn create_igd_cli() -> Command {
     Command::new(IGD_CMD)

@@ -2,9 +2,9 @@ use anyhow::Result;
 use clap::Command;
 
 // go through the library crate to get the interfaces
+use gtars::igd;
 use gtars::tokenizers;
 use gtars::uniwig;
-use gtars::igd;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
