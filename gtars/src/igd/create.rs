@@ -427,11 +427,12 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 //let path = std::path::Path::new(&parent_path).parent().unwrap();
                 let path = std::path::Path::new(&parent_path);
                 //println!("DEBUG retrieved saveT path:{:?}", path);
-                // let mut file = OpenOptions::new()
+                // let mut tile_file = OpenOptions::new()
                 //     .create(true)
                 //     .append(true)
-                //     .open(path);
-                //
+                //     .read(true)
+                //     .open(path).unwrap();
+
                 // match file {
                 //     Ok(file) => {
                 //         println!("File created or opened successfully!");
@@ -444,6 +445,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 let mut temp_tile_file = match OpenOptions::new()
                     .create(true)
                     .append(true)
+                    .read(true)
                     .open(path) {
                     Ok(temp_tile_file) => temp_tile_file,
                     Err(err) => {
@@ -457,7 +459,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 // Read from Temp File
 
                 let mut gdata: Vec<gdata_t> = Vec::new();
-
+                //
                 loop {
                     let mut buf = [0u8; 16];
 
@@ -478,6 +480,12 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
 
                     gdata.push(gdata_t { idx: idx as usize, start, end, value });
                 }
+
+                //let mut buffer = Vec::new();
+                // read the whole file
+                //temp_tile_file.read_to_end(&mut buffer).unwrap();
+                //tile_file.read_to_end(&mut buffer).unwrap();
+
 
                 //let ni = temp_tile_file.read_exact(gdata.as_mut_slice().to_le_bytes());
 
