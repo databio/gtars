@@ -121,7 +121,7 @@ mod tests {
         let db_output_path = &db_path_unwrapped;
 
         // First test igd_saveT
-        igd_saveT(&igd, db_output_path);
+        igd_saveT(&mut igd, db_output_path);
 
         // then test saveing main databse
 
