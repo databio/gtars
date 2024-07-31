@@ -33,9 +33,7 @@ mod tests {
     use gtars::igd::create::{parse_bed, create_igd_f, igd_add, igd_saveT, igd_t, igd_save_db};
     use std::ptr::read;
     use super::*;
-    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
-    use std::env::temp_dir;
-    use std::ptr::read;
+
 
     // IGD TESTS
 

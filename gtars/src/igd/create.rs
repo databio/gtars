@@ -438,17 +438,17 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
 
                 // Read from Temp File
                 //the next 4 lines are pulled from googling and are not quite right
-                let gdsize = nrec * std::mem::size_of::<gdata_t>() as i32;
+                //let gdsize = nrec * std::mem::size_of::<gdata_t>() as i32;
 
-                let mut gdata = vec![gdata_t::default(); gdsize as usize];
+                //let mut gdata = vec![gdata_t::default(); gdsize as usize];
 
-                let ni = file.read_exact(gdata.as_mut_slice().to_le_bytes());
+                //let ni = file.read_exact(gdata.as_mut_slice().to_le_bytes());
 
                 // Sort Data
-                gdata.sort_by_key(|d| d.start); // Sort by start value
+                //gdata.sort_by_key(|d| d.start); // Sort by start value
 
                 // Write to database after sorting
-                let _ = file.write_all(&gdata);
+                //let _ = file.write_all(&gdata);
 
                 // og code!!!!!!!!!!!!
                 // gdsize = nrec*sizeof(gdata_t);
