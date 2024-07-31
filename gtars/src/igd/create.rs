@@ -601,6 +601,7 @@ pub fn igd_saveT(igd:&mut igd_t, output_file_path: &String) {
         }
 
     }
+    igd.total = 0; // batch total
 
 
 
