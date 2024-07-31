@@ -136,12 +136,12 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let regions = extract_regions_from_bed_file(value)?;
                 let universe = Universe::from(regions);
                 let tree = create_interval_tree_from_universe(&universe);
-                let config = TokenizerConfig::new(
-                    Some("tree".to_string()),
-                    vec![value.to_str().unwrap().to_string()],
-                    None
 
-                );
+                let universe_as_path = Path::new(value).file_name().unwrap();
+                let universe_as_path = universe_as_path.to_string_lossy().to_string();
+
+                let config =
+                    TokenizerConfig::new(Some("tree".to_string()), vec![universe_as_path], None);
                 (config, universe, tree, None, None)
             }
         };

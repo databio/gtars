@@ -1,7 +1,11 @@
-use clap::{Arg,Command};
+use clap::{Arg, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
+/// Creates the uniwig CLI Command object
+///
+/// Example to run uiwig
+/// `cargo run uniwig -b /sourcefiles/test.bed -c /sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /numpy_arrays_created_with_rust/ -y npy`
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")
@@ -18,7 +22,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("chromref")
                 .short('c')
                 .help("Path to chromreference")
-                .required(true),
+                .required(false),
         )
         .arg(
             Arg::new("smoothsize")
@@ -50,5 +54,4 @@ pub fn create_uniwig_cli() -> Command {
                 .help("Output as wiggle or npy")
                 .required(true),
         )
-
 }
