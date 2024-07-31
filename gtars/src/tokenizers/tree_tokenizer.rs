@@ -137,7 +137,6 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let universe = Universe::from(regions);
                 let tree = create_interval_tree_from_universe(&universe);
 
-
                 let universe_as_path = Path::new(value).file_name().unwrap();
                 let universe_as_path = universe_as_path.to_string_lossy().to_string();
 

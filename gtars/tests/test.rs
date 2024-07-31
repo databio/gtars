@@ -28,10 +28,10 @@ fn path_to_bed_file_gzipped() -> &'static str {
 }
 
 mod tests {
-    use gtars::uniwig::{read_bed_vec, uniwig_main, Chromosome};
-    use std::env::temp_dir;
-
     use super::*;
+    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use std::env::temp_dir;
+    use std::ptr::read;
 
     #[rstest]
     fn test_parsed_bed_file(path_to_bed_file: &str) {
@@ -71,13 +71,16 @@ mod tests {
         assert_eq!(num_chromosomes, 5);
     }
     #[rstest]
-    fn test_run_uniwig_main_wig_type(path_to_bed_file: &str) {
+    fn test_run_uniwig_main_wig_type(
+        path_to_bed_file: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
-        let tempbedpath = format!("{} {}", path_to_crate, "/tests/data/test5.bed");
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test5.bed");
         let combinedbedpath = tempbedpath.as_str();
 
-        let chromsizerefpath: String = format!("{} {}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = combinedbedpath;
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -92,20 +95,26 @@ mod tests {
         uniwig_main(
             smoothsize,
             combinedbedpath,
-            &chromsizerefpath,
+            chromsizerefpath,
             bwfileheader,
             output_type,
         )
+        .expect("Uniwig main failed!");
+
+        Ok(())
     }
 
     #[rstest]
-    fn test_run_uniwig_main_npy_type(path_to_bed_file: &str) {
+    fn test_run_uniwig_main_npy_type(
+        path_to_bed_file: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
-        let tempbedpath = format!("{} {}", path_to_crate, "/tests/data/test5.bed");
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test5.bed");
         let combinedbedpath = tempbedpath.as_str();
 
-        let chromsizerefpath: String = format!("{} {}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = combinedbedpath;
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -120,9 +129,31 @@ mod tests {
         uniwig_main(
             smoothsize,
             combinedbedpath,
-            &chromsizerefpath,
+            chromsizerefpath,
             bwfileheader,
             output_type,
         )
+        .expect("Uniwig main failed!");
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_reading_chrom_sizes(path_to_bed_file: &str) {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        // Read from sizes file
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chrom_sizes = read_chromosome_sizes(chromsizerefpath.as_str()).unwrap();
+        let chrom_name = String::from("chr13");
+        let current_chrom_size = chrom_sizes[&chrom_name.clone()] as i32;
+        assert_eq!(current_chrom_size, 114364328);
+
+        // Read from BED file
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test5.bed");
+        let combinedbedpath = tempbedpath.as_str();
+        let chrom_sizes = read_chromosome_sizes(combinedbedpath).unwrap();
+        let chrom_name = String::from("chr1");
+        let current_chrom_size = chrom_sizes[&chrom_name.clone()] as i32;
+        assert_eq!(current_chrom_size, 32);
     }
 }
