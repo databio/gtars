@@ -409,6 +409,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                 let mut gdata: Vec<gdata_t> = Vec::new();
                 //
                 loop {
+                    //TODO check that 16 is the right value when reading back the gdata_t structs
                     let mut buf = [0u8; 16];
 
                     let n = temp_tile_file.read(&mut buf).unwrap();
