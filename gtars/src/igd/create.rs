@@ -326,11 +326,11 @@ pub fn create_igd_f(matches: &ArgMatches){
 //TODO Code to sort tile data and save into single files per ctg (part 4)
 
     // Sort tile data and save into single files per ctg
-    igd_save_db(igd, output_path, db_output_name)
+    igd_save_db(&mut igd, output_path, db_output_name)
 
 }
 
-pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
+pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &String) {
     println!("HELLO from igd_save_db");
     // this is the igd_save func from the original c code
 
@@ -409,13 +409,13 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
     for i in 0..igd.nctg{
         let idx = i.clone() as usize;
 
-        let current_ctg = &igd.ctg[idx];
+        let current_ctg = &mut igd.ctg[idx];
         let n = current_ctg.mTiles;
 
         for j in 0..n{
             let jdx = j.clone() as usize;
 
-            let mut q = &current_ctg.gTile[jdx];
+            let mut q = &mut current_ctg.gTile[jdx];
 
             let nrec = q.nCnts;
 
@@ -424,23 +424,8 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 let save_path = format!("{}{}{}_{}{}",output_path,"data0/",current_ctg.name, j,".igd");
                 println!("DEBUG retrieved saveT path:{}", save_path);
                 let parent_path = save_path.clone();
-                //let path = std::path::Path::new(&parent_path).parent().unwrap();
-                let path = std::path::Path::new(&parent_path);
-                //println!("DEBUG retrieved saveT path:{:?}", path);
-                // let mut tile_file = OpenOptions::new()
-                //     .create(true)
-                //     .append(true)
-                //     .read(true)
-                //     .open(path).unwrap();
 
-                // match file {
-                //     Ok(file) => {
-                //         println!("File created or opened successfully!");
-                //     }
-                //     Err(_) => {println!("Cannot open path!!!");
-                //     return;
-                //     }
-                // }
+                let path = std::path::Path::new(&parent_path);
 
                 let mut temp_tile_file = match OpenOptions::new()
                     .create(true)
@@ -481,14 +466,6 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                     gdata.push(gdata_t { idx: idx as usize, start, end, value });
                 }
 
-                //let mut buffer = Vec::new();
-                // read the whole file
-                //temp_tile_file.read_to_end(&mut buffer).unwrap();
-                //tile_file.read_to_end(&mut buffer).unwrap();
-
-
-                //let ni = temp_tile_file.read_exact(gdata.as_mut_slice().to_le_bytes());
-
                 // Sort Data
                 gdata.sort_by_key(|d| d.start); // Sort by start value
 
@@ -508,7 +485,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
             }
 
             // todo set to zero but it claims that this is immutable
-            //q.nCnts = 0;
+            q.nCnts = 0;
 
 
         }
