@@ -125,7 +125,7 @@ mod tests {
 
         // then test saveing main databse
 
-        igd_save_db(igd, db_output_path, &String::from("randomname"));
+        igd_save_db(&mut igd, db_output_path, &String::from("randomname"));
 
 
     }
