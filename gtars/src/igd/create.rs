@@ -1,4 +1,6 @@
 use crate::common::consts::BED_FILE_EXTENSION;
+use anyhow::{Context, Result};
+use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
@@ -7,11 +9,6 @@ use std::mem;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
-//use clap::error::ContextValue::String;
-//use polars::export::arrow::buffer::Buffer;
-//use crate::vocab::consts;
-use anyhow::{Context, Result};
-use byteorder::{LittleEndian, ReadBytesExt};
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
@@ -60,12 +57,6 @@ pub struct igd_t {
     pub ctg: Vec<ctg_t>, // this is the list of contigs (of size n-ctg)  // this might need to be a reference
 }
 
-// impl Default for igd_t{
-//     pub fn default() -> Self {
-//         todo!()
-//     }
-// }
-
 impl igd_t {
     /// Constructs new instance of IGD
     pub fn new() -> Self {
@@ -80,6 +71,7 @@ impl tile_t {
     }
 }
 
+/// Creates IGD database from a directory of bed files.
 pub fn create_igd_f(matches: &ArgMatches) {
     println!("HELLO FROM IGD SUBMODULE!");
 
@@ -151,9 +143,6 @@ pub fn create_igd_f(matches: &ArgMatches) {
             // if it parses, add it to collected lines, increment ix
             match ctg {
                 Some(ctg) => {
-                    //all_bed_files.push(entry.path());
-                    //all_bed_files.push(line);
-                    //all_bed_buffers.push(lines);
                     all_bed_files.push(entry.path());
                     ix += 1;
                 }
@@ -310,6 +299,7 @@ pub fn create_igd_f(matches: &ArgMatches) {
     igd_save_db(&mut igd, output_path, db_output_name)
 }
 
+/// Saves the primary .igd database file by reading the temp_tiles, sorting them, and then writing the sorted tiles to disk.
 pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &String) {
     println!("HELLO from igd_save_db");
     // this is the igd_save func from the original c code
@@ -334,13 +324,6 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
     let mut buffer = Vec::new();
 
-    // for data in &current_tile.gList[..current_tile.ncnts as usize] {
-    //     buffer.write_all(&data.idx.to_le_bytes()).unwrap();
-    //     buffer.write_all(&data.start.to_le_bytes()).unwrap();
-    //     buffer.write_all(&data.end.to_le_bytes()).unwrap();
-    //     buffer.write_all(&data.value.to_le_bytes()).unwrap();
-    // }
-    //
     buffer.write_all(&igd.nbp.to_le_bytes()).unwrap();
     buffer.write_all(&igd.gType.to_le_bytes()).unwrap();
     buffer.write_all(&igd.nctg.to_le_bytes()).unwrap();
@@ -474,6 +457,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     //file.write_all(&buffer).unwrap();
 }
 
+/// Saves temporary tiles to disc to later be sorted before collating into main .igd file
 pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
     println!("HELLO from igd_saveT");
 
@@ -518,24 +502,6 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                     Err(err) => println!("Error creating file: {}", err),
                 }
 
-                //let _ = create_dir_all(save_path.clone());
-                //if let Ok(ret) = create_dir_all(save_path.clone());
-                //
-                // match result {
-                //     Ok(_) => println!("Directory created successfully!"), // Optional: Print a success message
-                //     Err(ref error) if error.kind() == fs:: => {
-                //         println!("Directory already exists. Ignoring error.");
-                //     },
-                //     Err(error) => println!("Error creating directory: {}", error), // Handle other errors
-                // }
-                // let path = std::path::Path::new(&save_path);
-                //
-                // if let Some(parent) = path.parent() {
-                //     std::fs::create_dir_all(parent).unwrap();
-                // } else {
-                //     anyhow::Error("Failed to create parent directories for gtok file!")
-                // }
-
                 let mut file = OpenOptions::new()
                     .create(true) // Create the file if it doesn't exist
                     .append(true) // Append data to the existing file if it does exist
@@ -555,10 +521,6 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
 
                 current_tile.nCnts = current_tile.ncnts + 1;
 
-                // if(tile->ncnts>8)tile->mcnts=8;
-                // else tile->mcnts = 2;
-                // free(tile->gList);
-                // tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
                 if current_tile.ncnts > 8 {
                     current_tile.mcnts = 8;
                 } else {
@@ -571,6 +533,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
     igd.total = 0; // batch total
 }
 
+/// Creates file and any parent directories if they do not already exist.
 fn create_file_with_parents(path: &Path) -> Result<File, Error> {
     // Create all parent directories if they don't exist (ignore errors)
     let _ = create_dir_all(path); // Discard the result (success or error)
@@ -587,23 +550,7 @@ fn create_file_with_parents(path: &Path) -> Result<File, Error> {
     }
 }
 
-// fn create_file_with_parents(path: &Path) -> Result<File, Error> {
-//     // Create all parent directories if they don't exist
-//     let result = create_dir_all(path).unwrap();
-//
-//     match result {
-//         Ok(file) => println!("File created or opened successfully!"),
-//         Err(err) => println!("Error creating file: {}", err),
-//     }
-//
-//
-//     // Open the file for creation or append, ignoring errors if it exists
-//     Ok(OpenOptions::new()
-//         .create(true)
-//         .append(true) // Optional: Append to existing file
-//         .open(path)?)
-// }
-
+/// Adds genomic interval to the igd struct
 pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
@@ -656,29 +603,18 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
             new_tile.ncnts = 0; //each batch
             new_tile.nCnts = 0; //total
             new_tile.mcnts = 2;
-            //new_tile.gList //tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
-            //new_tile.gList = Vec::with_capacity((new_tile.mcnts as usize));
 
             for j in 0..new_tile.mcnts {
                 new_tile.gList.push(gdata_t::new());
             }
-            // for element in new_tile.gList.iter_mut() {
-            //     //*element = gdata_t::new();  // Add new_value to each element
-            //     //element.push(gdata_t::new());
-            //     let element = &mut gdata_t::new();
-            // }
 
             p.gTile.push(new_tile);
         }
 
         igd.ctg.push(p);
-
-        // set key to name kh_key(h, k) = p->name;
     }
 
     // Retrieve values from Hash Map
-    // println!("Here is hash map{:?}", hash_table);
-    //let k = hash_table.insert()
 
     let keycloned = key.clone();
 
@@ -704,18 +640,6 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
             existing_tile.ncnts = 0;
             existing_tile.nCnts = 0;
             existing_tile.mcnts = 2;
-            // og: tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
-            //existing_tile.gList = gdata_t::new(); // TODO Double check this, do we actually want to create a new struct?
-            //existing_tile.gList = Vec::with_capacity((existing_tile.mcnts as usize));
-            // for element in existing_tile.gList.iter_mut() {
-            //     //*element = gdata_t::new();  // Add new_value to each element
-            //     //element.push(gdata_t::new());
-            //     let element = gdata_t::new();
-            // }
-            // existing_tile.gList = Vec::with_capacity(existing_tile.mcnts as usize)
-            //     .iter_mut()  // Iterate over mutable references (not needed here)
-            //     .map(|gdata_t: &mut gdata_t| gdata_t::new())  // Create new gdata_t for each element
-            //     .collect();
             for j in 0..existing_tile.mcnts {
                 existing_tile.gList.push(gdata_t::new());
             }
@@ -729,8 +653,6 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
         let idx_2 = idx_1 as usize;
         // get the tile for the contig
         let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
-        // og code, not necessary in Rust?		if(tile->ncnts == tile->mcnts)
-        // 			EXPAND(tile->gList, tile->mcnts);
 
         let tile_idx = existing_tile.ncnts.clone() as usize;
         let gdata = &mut existing_tile.gList[tile_idx];
@@ -742,7 +664,7 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
         gdata.idx = idx;
     }
 
-    println!("Finished from igd_add");
+    //println!("Finished from igd_add");
     return;
 }
 
@@ -752,35 +674,33 @@ pub enum ParseBedResult {
     Int(i32),
 }
 
+/// Reads bed file, returning contig and modifying borrowed start and end coordinate
 pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32) -> Option<String> {
-    println!("HERE IS THE LINE TO PARSE: {}", line);
+    //println!("HERE IS THE LINE TO PARSE: {}", line);
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?; // Why is ctg used as variable name in og code?
-    println!("GOT CHR: {}", ctg);
-    // Parse 2nd and 3rd string as integers or return -1 if failure
+                              //println!("GOT CHR: {}", ctg);
+                              // Parse 2nd and 3rd string as integers or return -1 if failure
     let st = fields
         .next()
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(-1);
-    println!("GOT st: {}", st);
+    //println!("GOT st: {}", st);
     let en = fields
         .next()
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(-1);
-    println!("GOT en: {}", en);
+    //println!("GOT en: {}", en);
 
-    // if fields.next().is_some() || !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
-    //     return None;
-    // }
     if !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
-        println!("RETURNING NONE");
+        //println!("RETURNING NONE");
         return None;
     }
 
     *start = st;
     *end = en;
 
-    println!("SUCCESSFULLY FINISHING PARSE");
+    //println!("SUCCESSFULLY FINISHING PARSE");
     Some(ctg.parse().unwrap())
 }
