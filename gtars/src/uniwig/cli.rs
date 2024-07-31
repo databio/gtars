@@ -22,7 +22,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("chromref")
                 .short('c')
                 .help("Path to chromreference")
-                .required(true),
+                .required(false),
         )
         .arg(
             Arg::new("smoothsize")

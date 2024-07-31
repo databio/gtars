@@ -34,6 +34,8 @@ cargo run uniwig -b /home/drc/Downloads/uniwig_testing_19apr2024/sourcefiles/tes
 ```
 
 Note that we provide a chrom.sizes reference file (hg38) in the testing folder -> `genimtools/tests/hg38.chrom.sizes`
+The chrom.sizes reference is an optional argument. Uniwig will default to using the combined bed file's last chromosome end position to determine chrom size by default.
+
 
 ### Usage
 ```
@@ -41,11 +43,11 @@ Usage: genimtools uniwig --bed <bed> --chromref <chromref> --smoothsize <smooths
 
 Options:
   -b, --bed <bed>                Path to the combined bed file we want to tranforms
-  -c, --chromref <chromref>      Path to chromreference
+  -c, --chromref <chromref>      Path to chromreference, optional, defaults to combined bed file
   -m, --smoothsize <smoothsize>  Integer value for smoothing
   -t, --stepsize <stepsize>      Integer value for stepsize
   -l, --fileheader <fileheader>  Name of the file
-  -y, --outputtype <outputtype>  Output as wiggle or CSV
+  -y, --outputtype <outputtype>  Output as wiggle or npy
   -h, --help                     Print help
 
 ```
@@ -60,4 +62,4 @@ Once you have created wiggle files, you can convert them to bigWig files using `
 
 ### Export types
 
-Currently only `.wig` is supported as an output type. 
+Currently only `.wig` and `.npy` are supported as output types. 

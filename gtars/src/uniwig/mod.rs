@@ -136,7 +136,8 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
     let chromsizerefpath = matches
         .get_one::<String>("chromref")
-        .expect("chromref path path is required");
+        .cloned()
+        .unwrap_or_else(|| combinedbedpath.clone());
 
     let bwfileheader = matches
         .get_one::<String>("fileheader")
@@ -153,10 +154,11 @@ pub fn run_uniwig(matches: &ArgMatches) {
     uniwig_main(
         *smoothsize,
         combinedbedpath,
-        chromsizerefpath,
+        chromsizerefpath.as_str(),
         bwfileheader,
         output_type,
     )
+    .expect("Uniwig failed.");
 }
 
 /// Ensures that the start position for every wiggle file is at a minimum equal to `1`
@@ -168,10 +170,10 @@ fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
 pub fn uniwig_main(
     smoothsize: i32,
     combinedbedpath: &str,
-    _chromsizerefpath: &String,
+    chromsizerefpath: &str,
     bwfileheader: &str,
     output_type: &str,
-) {
+) -> Result<(), Box<dyn Error>> {
     let stepsize = 1;
 
     // Set up output file names
@@ -195,14 +197,14 @@ pub fn uniwig_main(
     meta_data_file_names[1] = format!("{}{}.{}", bwfileheader, "end", "meta");
     meta_data_file_names[2] = format!("{}{}.{}", bwfileheader, "core", "meta");
 
-    let chrom_sizes = match read_chromosome_sizes(combinedbedpath) {
+    let chrom_sizes = match read_chromosome_sizes(chromsizerefpath) {
         // original program gets chromosome size from a .sizes file, e.g. chr1 248956422
         // the original program simply pushes 0's until the end of the chromosome length and writes these to file.
         // can we instead just use the last endsite for each chromosome to save space in th wiggle file?
         Ok(chrom_sizes) => chrom_sizes,
         Err(err) => {
             println!("Error reading chromosome sizes: {}", err);
-            return; // Exit the main function on error
+            return Err(Box::from("An error occurred")); // Exit the main function on error
         }
     };
 
@@ -421,6 +423,7 @@ pub fn uniwig_main(
             }
         }
     }
+    Ok(())
 }
 
 fn write_to_npy_file(
@@ -510,22 +513,52 @@ fn write_to_wig_file(
 }
 
 /// Reads chromosome size file from path and returns chromosome sizes hash map
-fn read_chromosome_sizes(
+pub fn read_chromosome_sizes(
     chrom_size_path: &str,
 ) -> Result<std::collections::HashMap<String, u32>, Box<dyn Error>> {
     let chrom_size_file = File::open(Path::new(chrom_size_path))?;
+
+    // Get FIle extension
+    let path = Path::new(chrom_size_path);
+    let extension = path.extension().and_then(|ext| ext.to_str());
+
     let mut chrom_sizes = std::collections::HashMap::new();
     let reader = BufReader::new(chrom_size_file);
 
-    for line in reader.lines() {
-        let line = line?; // Propagate the potential error
-        let mut iter = line.split('\t');
-        let chrom_name = iter.next().unwrap().to_owned();
-        let _ = iter.next().unwrap();
-        let size_str = iter.next().unwrap(); // we really want the 3rd column which is the end column.
-        let size = size_str.parse::<u32>()?;
+    match extension {
+        Some("bed") => {
+            // Read BED file
+            //println!("Processing BED file: {}", chrom_size_path);
+            for line in reader.lines() {
+                let line = line?; // Propagate the potential error
+                let mut iter = line.split('\t');
+                let chrom_name = iter.next().unwrap().to_owned();
+                let _ = iter.next().unwrap();
+                let size_str = iter.next().unwrap();
+                let size = size_str.parse::<u32>()?;
 
-        chrom_sizes.insert(chrom_name, size);
+                chrom_sizes.insert(chrom_name, size);
+            }
+        }
+        Some("sizes") => {
+            // Read sizes file
+            // Note this may lead to slower performance as uniwig will pad the remaining chromosome with zeros
+            // this is a remainder from legacy uniwig for creating wiggle files and bigwigs
+            // It could potentially be removed in future versions if deemed unnecessary.
+            //println!("Processing sizes file: {}", chrom_size_path);
+            for line in reader.lines() {
+                let line = line?; // Propagate the potential error
+                let mut iter = line.split('\t');
+                let chrom_name = iter.next().unwrap().to_owned();
+                let size_str = iter.next().unwrap();
+                let size = size_str.parse::<u32>()?;
+
+                chrom_sizes.insert(chrom_name, size);
+            }
+        }
+        _ => {
+            panic!("Unsupported file type: {}", chrom_size_path);
+        }
     }
 
     Ok(chrom_sizes)
