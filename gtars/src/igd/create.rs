@@ -269,7 +269,7 @@ pub fn create_igd_f(matches: &ArgMatches){
         ///og: 2.3 save/append temp tiles to disc, add cnts to Cnts
         ///
 
-        igd_saveT(&igd, output_path);
+        igd_saveT(&mut igd, output_path);
 
         i0 = ig;
         L0 = L1;
@@ -400,7 +400,8 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
     }
 
     file.write_all(&buffer).unwrap();
-    //2. SOrt and save tiles data
+
+    //2. Sort and save tiles data
 
     let k: i32;
 
@@ -414,27 +415,43 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
             let jdx = j.clone() as usize;
 
             let mut q = &current_ctg.gTile[jdx];
+
             let nrec = q.nCnts;
 
             if nrec>0{
                 println!("nrec greater than 0");
                 let save_path = format!("{}{}{}_{}{}",output_path,"data0/",current_ctg.name, j,".igd");
+                println!("DEBUG retrieved saveT path:{}", save_path);
                 let parent_path = save_path.clone();
-                let path = std::path::Path::new(&parent_path).parent().unwrap();
+                //let path = std::path::Path::new(&parent_path).parent().unwrap();
+                let path = std::path::Path::new(&parent_path);
+                //println!("DEBUG retrieved saveT path:{:?}", path);
+                // let mut file = OpenOptions::new()
+                //     .create(true)
+                //     .append(true)
+                //     .open(path);
+                //
+                // match file {
+                //     Ok(file) => {
+                //         println!("File created or opened successfully!");
+                //     }
+                //     Err(_) => {println!("Cannot open path!!!");
+                //     return;
+                //     }
+                // }
 
-                let mut file = OpenOptions::new()
+                let mut file = match OpenOptions::new()
                     .create(true)
                     .append(true)
-                    .open(path);
+                    .open(path) {
+                    Ok(file) => file,
+                    Err(err) => {
+                        println!("Error opening file: {}", err);
+                        return;
+                    }
+                };
 
-                match file {
-                    Ok(file) => {
-                        println!("File created or opened successfully!");
-                    }
-                    Err(_) => {println!("Cannot open path!!!");
-                    return;
-                    }
-                }
+                //println!("{:?}", file)
 
                 // Read from Temp File
                 //the next 4 lines are pulled from googling and are not quite right
@@ -482,7 +499,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
 
 }
 
-pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
+pub fn igd_saveT(igd:&mut igd_t, output_file_path: &String) {
     println!("HELLO from igd_saveT");
 
     // From OG COde:
@@ -494,7 +511,7 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
 
         let idx = i.clone() as usize;
         let idx_2 = idx;
-        let current_ctg = &igd.ctg[idx_2];
+        let current_ctg = &mut igd.ctg[idx_2];
         nt = nt + current_ctg.mTiles;
 
         for j in 0..current_ctg.mTiles{
@@ -502,7 +519,7 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
             let jdx = j.clone() as usize;
             let jdx_2 = jdx;
 
-            let current_tile = &current_ctg.gTile[jdx_2];
+            let current_tile = &mut current_ctg.gTile[jdx_2];
 
             if current_tile.ncnts>0{
 
@@ -511,6 +528,7 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
                 // OG code
                 // sprintf(idFile, "%s%s%s_%i", oPath, "data0/", ctg->name, j);
                 let save_path = format!("{}{}{}_{}{}",output_file_path,"data0/",current_ctg.name, j,".igd");
+                println!("DEBUG saveT path:{}", save_path);
                 let parent_path = save_path.clone();
 
                 println!("{}",save_path);
@@ -524,6 +542,8 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
                     Ok(file) => println!("File created or opened successfully!"),
                     Err(err) => println!("Error creating file: {}", err),
                 }
+
+
 
                 //let _ = create_dir_all(save_path.clone());
                 //if let Ok(ret) = create_dir_all(save_path.clone());
@@ -558,6 +578,20 @@ pub fn igd_saveT(igd: &igd_t, output_file_path: &String) {
                     buffer.write_all(&data.value.to_le_bytes()).unwrap();
                 }
                 file.write_all(&buffer).unwrap();
+
+
+                current_tile.nCnts = current_tile.ncnts +1;
+
+                // if(tile->ncnts>8)tile->mcnts=8;
+                // else tile->mcnts = 2;
+                // free(tile->gList);
+                // tile->gList = malloc(tile->mcnts*sizeof(gdata_t));
+                if current_tile.ncnts>8{
+                    current_tile.mcnts=8;
+                } else {
+                    current_tile.mcnts = 2;
+                }
+                current_tile.ncnts = 0;
 
 
             }
