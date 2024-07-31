@@ -11,6 +11,7 @@ use crate::common::consts::BED_FILE_EXTENSION;
 //use polars::export::arrow::buffer::Buffer;
 //use crate::vocab::consts;
 use anyhow::{Context, Result};
+use byteorder::{LittleEndian, ReadBytesExt};
 
 pub const maxCount: i64 = 268435456;		//16* = 4GB memory  // original code had this as i32
 
@@ -345,7 +346,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
         Err(err) => println!("Error creating file: {}", err),
     }
 
-    let mut file = OpenOptions::new()
+    let mut main_db_file = OpenOptions::new()
         .create(true)  // Create the file if it doesn't exist
         .append(true)  // Append data to the existing file if it does exist
         .open(save_path).unwrap();
@@ -399,7 +400,7 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
 
     }
 
-    file.write_all(&buffer).unwrap();
+    main_db_file.write_all(&buffer).unwrap();
 
     //2. Sort and save tiles data
 
@@ -440,11 +441,11 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 //     }
                 // }
 
-                let mut file = match OpenOptions::new()
+                let mut temp_tile_file = match OpenOptions::new()
                     .create(true)
                     .append(true)
                     .open(path) {
-                    Ok(file) => file,
+                    Ok(temp_tile_file) => temp_tile_file,
                     Err(err) => {
                         println!("Error opening file: {}", err);
                         return;
@@ -454,12 +455,31 @@ pub fn igd_save_db(igd: igd_t, output_path: &String, db_output_name: &String) {
                 //println!("{:?}", file)
 
                 // Read from Temp File
-                //the next 4 lines are pulled from googling and are not quite right
-                //let gdsize = nrec * std::mem::size_of::<gdata_t>() as i32;
 
-                //let mut gdata = vec![gdata_t::default(); gdsize as usize];
+                let mut gdata: Vec<gdata_t> = Vec::new();
 
-                //let ni = file.read_exact(gdata.as_mut_slice().to_le_bytes());
+                loop {
+                    let mut buf = [0u8; 16];
+
+
+                    let n = temp_tile_file.read(&mut buf).unwrap();
+
+                    if n == 0 {
+                        break;
+                    } else if n != 16 {
+                        return;
+                    }
+
+                    let mut rdr = &buf[..] as &[u8];
+                    let idx = rdr.read_u32::<LittleEndian>().unwrap();
+                    let start = rdr.read_i32::<LittleEndian>().unwrap();
+                    let end = rdr.read_i32::<LittleEndian>().unwrap();
+                    let value = rdr.read_i32::<LittleEndian>().unwrap();
+
+                    gdata.push(gdata_t { idx: idx as usize, start, end, value });
+                }
+
+                //let ni = temp_tile_file.read_exact(gdata.as_mut_slice().to_le_bytes());
 
                 // Sort Data
                 //gdata.sort_by_key(|d| d.start); // Sort by start value
