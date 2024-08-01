@@ -58,6 +58,19 @@ mod tests {
     }
 
     #[rstest]
+    fn test_igd_create() {
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = &db_path_unwrapped;
+
+
+
+    }
+    #[rstest]
     fn test_igd_add() {
         // First create a new igd struct
 
