@@ -53,5 +53,4 @@ pub fn create_igd_cli() -> Command {
                         .required(false).short('m'),
                 )
         )
-
 }
