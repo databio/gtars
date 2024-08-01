@@ -8,6 +8,14 @@ Input: /home/drc/IGD_TEST/bedfiles/
 Output: /home/drc/IGD_TEST/output/
 
 Full command:
+
+Create
 ```
-cargo run igd --output /home/drc/IGD_TEST/output/ --filelist /home/drc/IGD_TEST/bedfiles/
+cargo run igd create --output /home/drc/IGD_TEST/output/ --filelist /home/drc/IGD_TEST/bedfiles/
+```
+
+Search
+```
+cargo run igd search -d /home/drc/IGD_TEST/output/igd_database.igd -q /home/drc/IGD_TEST/bedfiles/test_small_bed_file.bed
+
 ```

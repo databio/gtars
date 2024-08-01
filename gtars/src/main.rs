@@ -43,7 +43,7 @@ fn main() -> Result<()> {
             match  matches.subcommand() {
                 Some((igd::consts::IGD_CREATE, matches)) =>{
 
-                    igd::create::create_igd_f(matches);
+                    igd::create::igd_get_create_matches(matches);
                 }
                 Some((igd::consts::IGD_SEARCH, matches)) =>{
 

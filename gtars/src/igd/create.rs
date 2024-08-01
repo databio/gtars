@@ -71,8 +71,7 @@ impl tile_t {
     }
 }
 
-/// Creates IGD database from a directory of bed files.
-pub fn create_igd_f(matches: &ArgMatches) {
+pub fn igd_get_create_matches(matches: &ArgMatches){
     println!("HELLO FROM IGD CREATE SUBMODULE!");
 
     let output_path = matches
@@ -86,6 +85,14 @@ pub fn create_igd_f(matches: &ArgMatches) {
     let db_output_name = matches
         .get_one::<String>("dbname")
         .expect("File list path is required");
+
+    create_igd_f(output_path, filelist, db_output_name);
+
+}
+
+/// Creates IGD database from a directory of bed files.
+pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) {
+
 
     //println!("{}",db_output_name);
     //Initialize IGD into Memory
@@ -214,7 +221,7 @@ pub fn create_igd_f(matches: &ArgMatches) {
                             igd_add(&mut igd, ctg, start, end, va, ig);
                             nr[ig] += 1;
                             avg[ig] += end - start;
-                            println!("DEBUG: after igd add");
+                            //println!("DEBUG: after igd add");
                         }
                     }
                     None => continue,
@@ -379,12 +386,12 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             let nrec = q.nCnts;
 
             if nrec > 0 {
-                println!("nrec greater than 0");
+                //println!("nrec greater than 0");
                 let save_path = format!(
                     "{}{}{}_{}{}",
                     output_path, "data0/", current_ctg.name, j, ".igd"
                 );
-                println!("DEBUG retrieved saveT path:{}", save_path);
+                //println!("DEBUG retrieved saveT path:{}", save_path);
                 let parent_path = save_path.clone();
 
                 let path = std::path::Path::new(&parent_path);
@@ -488,10 +495,10 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                     "{}{}{}_{}{}",
                     output_file_path, "data0/", current_ctg.name, j, ".igd"
                 );
-                println!("DEBUG saveT path:{}", save_path);
+                //println!("DEBUG saveT path:{}", save_path);
                 let parent_path = save_path.clone();
 
-                println!("{}", save_path);
+                //println!("{}", save_path);
 
                 //todo this needs to create the path if it does not already exist!!!
 
@@ -556,7 +563,7 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
 
-    println!("HELLO from igd_add");
+    //println!("HELLO from igd_add");
 
     if start >= end {
         println!(
@@ -625,7 +632,7 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     let p = &mut igd.ctg[cloned_index as usize];
 
     if (n2 + 1 >= p.mTiles) {
-        println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
+        //println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
         let tt = p.mTiles;
 
         p.mTiles = n2 + 1;
