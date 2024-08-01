@@ -4,14 +4,25 @@ use clap::{arg, ArgMatches, Command};
 pub fn create_igd_cli() -> Command {
     Command::new(IGD_CMD)
         .author("DRC")
-        .about("Create a integrated genome database (IGD)")
-        .arg(arg!(--output <VALUE> "Path to the output.").required(true))
-        .arg(
-            arg!(--filelist <VALUE> "Path to the list of files. This should be a folder of bed files.")
-                .required(true),
+        .about("Create or search an integrated genome database (IGD)")
+        .subcommand_required(true)
+        .arg_required_else_help(true)
+        .subcommand(
+            Command::new("create")
+                .about("Create igd database")
+                .arg(arg!(--output <VALUE> "Path to the output.").required(true))
+                .arg(
+                    arg!(--filelist <VALUE> "Path to the list of files. This should be a folder of bed files.")
+                        .required(true),
+                )
+                .arg(
+                    arg!(--dbname <VALUE> "Database name")
+                        .required(false).default_value("igd_database"),
+                )
         )
-        .arg(
-            arg!(--dbname <VALUE> "Database name")
-                .required(false).default_value("igd_database"),
+        .subcommand(
+            Command::new("search")
+                .about("Search igd database")
         )
+
 }
