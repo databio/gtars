@@ -23,6 +23,35 @@ pub fn create_igd_cli() -> Command {
         .subcommand(
             Command::new("search")
                 .about("Search igd database")
+                .arg(arg!(--database <VALUE> "Path to the igd database.").required(true).short('d'))
+                .arg(
+                    arg!(--query <VALUE> "Path to the query file (.bed or .bed.gz)")
+                        .required(true).short('q'),
+                )
+                .arg(
+                    arg!(--singlequery <VALUE> "chrN start end (a single query)")
+                        .required(false).short('r'),
+                )
+                .arg(
+                    arg!(--signalvalue <VALUE> "signal value 0-1000 (signal value > v)")
+                        .required(false).short('v'),
+                )
+                .arg(
+                    arg!(--output <VALUE> "output file path and name")
+                        .required(false).short('o'),
+                )
+                .arg(
+                    arg!(--outseqpare <VALUE> "output seqpare similarity")
+                        .required(false).short('s'),
+                )
+                .arg(
+                    arg!(--full <VALUE> "output full overlaps, for -q and -r only")
+                        .required(false).short('f'),
+                )
+                .arg(
+                    arg!(--hitsmap <VALUE> "hitsmap of igd datasets")
+                        .required(false).short('m'),
+                )
         )
 
 }
