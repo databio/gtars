@@ -71,7 +71,7 @@ impl tile_t {
     }
 }
 
-pub fn igd_get_create_matches(matches: &ArgMatches){
+pub fn igd_get_create_matches(matches: &ArgMatches) {
     println!("HELLO FROM IGD CREATE SUBMODULE!");
 
     let output_path = matches
@@ -87,13 +87,10 @@ pub fn igd_get_create_matches(matches: &ArgMatches){
         .expect("File list path is required");
 
     create_igd_f(output_path, filelist, db_output_name);
-
 }
 
 /// Creates IGD database from a directory of bed files.
 pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) {
-
-
     //println!("{}",db_output_name);
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
@@ -562,9 +559,7 @@ fn create_file_with_parents(path: &Path) -> Result<File, Error> {
 pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
-
     //println!("HELLO from igd_add");
-
     if start >= end {
         println!(
             "Start: {0} greater than End: {1}, returning from igd_add",
