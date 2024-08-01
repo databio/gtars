@@ -73,7 +73,7 @@ impl tile_t {
 
 /// Creates IGD database from a directory of bed files.
 pub fn create_igd_f(matches: &ArgMatches) {
-    println!("HELLO FROM IGD SUBMODULE!");
+    println!("HELLO FROM IGD CREATE SUBMODULE!");
 
     let output_path = matches
         .get_one::<String>("output")
