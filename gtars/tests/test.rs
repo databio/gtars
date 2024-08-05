@@ -264,4 +264,35 @@ mod tests {
         let current_chrom_size = chrom_sizes[&chrom_name.clone()] as i32;
         assert_eq!(current_chrom_size, 32);
     }
+
+    #[rstest]
+    fn test_uniwig_mismatched_chrom_sizes(path_to_bed_file: &str) {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        // Read from sizes file
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+
+        // Read from BED file that contains chromosomes not in size file
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test_unknown_chrom.bed");
+        let combinedbedpath = tempbedpath.as_str();
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 5;
+        let output_type = "npy";
+
+        let result = uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            &chromsizerefpath,
+            bwfileheader,
+            output_type,
+        );
+
+        assert!(result.is_err());
+    }
 }

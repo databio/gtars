@@ -232,9 +232,16 @@ pub fn uniwig_main(
         //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
         chroms.push(chrom_name.clone());
 
-        //chr_lens.push(chrom_sizes[&chromosome.chrom] as i32); // retrieve size from hashmap
-        let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
-        //println!("DEBUG: CHROM SIZE -> {}",current_chrom_size.clone());
+        //let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
+        let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+            Some(size) => *size as i32, // Dereference to get the i32 value
+            None => {
+                return Err(Box::from(format!(
+                    "Error: Chromosome size not found for {} in chrom.sizes",
+                    chromosome.chrom
+                ))); // Or handle the error differently
+            }
+        };
 
         // Iterate 3 times to output the three different files.
         for j in 0..3 {
