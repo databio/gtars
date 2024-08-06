@@ -41,7 +41,7 @@ fn main() -> Result<()> {
                 igd::create::igd_get_create_matches(matches);
             }
             Some((igd::consts::IGD_SEARCH, matches)) => {
-                igd::search::search_igd(matches);
+                igd::search::igd_get_search_matches(matches);
             }
             _ => unreachable!("IGD Subcommand not found"),
         },
