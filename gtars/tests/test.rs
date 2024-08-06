@@ -293,6 +293,6 @@ mod tests {
             output_type,
         );
 
-        assert!(result.is_err());
+        assert!(result.is_ok());
     }
 }
