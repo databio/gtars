@@ -33,7 +33,7 @@ mod tests {
     use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
     use std::env::temp_dir;
     use std::ptr::read;
-
+    use gtars::igd::search::igd_search;
     // IGD TESTS
 
     #[rstest]
@@ -72,6 +72,38 @@ mod tests {
 
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
     }
+    #[rstest]
+
+    fn test_igd_search() {
+
+        // First must create temp igd
+
+        // Temp dir to hold igd
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = db_path_unwrapped;
+
+        // bed files used to create IGD
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+
+        let demo_name = String::from("demo");
+
+        // Create IGD from directory of bed files
+        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+
+        // Get a query file path from test files
+        let query_file = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed");
+
+        // the final db path will be constructed within igd_save_db like so
+        let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
+
+        igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
+
+
+    }
+
     #[rstest]
     fn test_igd_add() {
         // First create a new igd struct
