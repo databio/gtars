@@ -48,7 +48,7 @@ impl ctg_t {
 
 #[derive(Default)]
 pub struct igd_t {
-    // TODO create attributes for the IGD
+    // this struct is used for SAVING to disk
     pub nbp: i32,        //data type: 0, 1, 2 etc; size differs
     pub gType: i32,      //data type: 0, 1, 2 etc; size differs
     pub nctg: i32,       //data type: 0, 1, 2 etc; size differs
