@@ -228,20 +228,21 @@ pub fn uniwig_main(
         let primary_start = chromosome.starts[0].clone();
         let primary_end = chromosome.ends[0].clone();
 
-        let chrom_name = chromosome.chrom.clone();
-        //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-        chroms.push(chrom_name.clone());
-
         //let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
         let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
             Some(size) => *size as i32, // Dereference to get the i32 value
             None => {
-                return Err(Box::from(format!(
-                    "Error: Chromosome size not found for {} in chrom.sizes",
+                println!(
+                    "Warning: Chromosome size not found for {} in chrom.sizes. Skipping...",
                     chromosome.chrom
-                ))); // Or handle the error differently
+                );
+                break; // Or handle the error differently
             }
         };
+
+        let chrom_name = chromosome.chrom.clone();
+        //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
+        chroms.push(chrom_name.clone());
 
         // Iterate 3 times to output the three different files.
         for j in 0..3 {
