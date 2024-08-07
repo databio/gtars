@@ -20,6 +20,7 @@ toml = "0.8.14"
 ndarray-npy = "0.8.1"
 ndarray = "0.15.6"
 tempfile = "3.10.1"
+indicatif = "0.17.8"
 
 [dev-dependencies]
 rstest = "0.18.2"

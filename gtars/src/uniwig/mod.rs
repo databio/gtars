@@ -1,6 +1,7 @@
 use clap::builder::OsStr;
 use clap::ArgMatches;
 use flate2::read::GzDecoder;
+use indicatif::ProgressIterator;
 use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::error::Error;
@@ -219,7 +220,7 @@ pub fn uniwig_main(
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
 
     println!("Processing each chromosome...");
-    for chromosome in chromosomes.iter() {
+    for chromosome in chromosomes.iter().progress() {
         if chromosome.starts.len() != chromosome.ends.len() {
             println!("Chromosome starts and ends are not equal!");
             break;
@@ -270,7 +271,7 @@ pub fn uniwig_main(
 
                         match output_type {
                             "wig" => {
-                                println!("Writing to wig file!");
+                                // println!("Writing to wig file!");
                                 write_to_wig_file(
                                     &count_result.0,
                                     file_names[0].clone(),
