@@ -316,7 +316,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     let result = create_file_with_parents(path);
 
     match result {
-        Ok(file) => println!("File created or opened successfully!"),
+        Ok(file) => (),
         Err(err) => println!("Error creating file: {}", err),
     }
 
@@ -454,7 +454,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                 let _ = main_db_file.write_all(&temp_buffer);
             }
 
-            // todo set to zero but it claims that this is immutable
+
             q.nCnts = 0;
         }
     }
@@ -503,7 +503,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 let result = create_file_with_parents(path);
 
                 match result {
-                    Ok(file) => println!("File created or opened successfully!"),
+                    Ok(file) => (),
                     Err(err) => println!("Error creating file: {}", err),
                 }
 
@@ -560,6 +560,7 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
     //println!("HELLO from igd_add");
+    println!("Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}", chrm,start,end,v,idx);
     if start >= end {
         println!(
             "Start: {0} greater than End: {1}, returning from igd_add",
