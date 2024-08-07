@@ -74,7 +74,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             continue;
         }
 
-        if String::from(parsed_chr.trim()) != chrom {
+        if *parsed_chr.trim() != chrom {
             // If the parsed chrom is not the same as the current, sort, and then push to vector
             // then reset chromosome struct using the newest parsed_chr
             chromosome.starts.sort_unstable();
@@ -102,7 +102,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     //chromosome_vec.sort_by_key(|c| c.chrom.clone());
 
-    return chromosome_vec;
+    chromosome_vec
+
 }
 
 /// Parses each line of given bed file into a contig (chromosome), starts and ends
@@ -225,8 +226,8 @@ pub fn uniwig_main(
         }
 
         // Need these for setting wiggle header
-        let primary_start = chromosome.starts[0].clone();
-        let primary_end = chromosome.ends[0].clone();
+        let primary_start = chromosome.starts[0];
+        let primary_end = chromosome.ends[0];
 
         //let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
         let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
@@ -833,5 +834,5 @@ pub fn fixed_core_wiggle(
     }
 
     //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
-    return (v_coord_counts, v_coordinate_positions);
+    (v_coord_counts, v_coordinate_positions)
 }
