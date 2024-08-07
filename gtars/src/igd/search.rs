@@ -25,13 +25,16 @@ pub struct igd_t_from_disk {
     // Original code uses pointer to pointers
     pub cName: String,
     pub nTile: i32,
-    pub nCnt: i32,
-    pub tIdx: i32,
+
+    //pub nCnt: i32,
+    pub nCnt: Vec<i32>,
+    //pub tIdx: i32,
+    pub tIdx: Vec<Vec<i32>>,
 
 }
 
 impl igd_t_from_disk {
-    /// Constructs new instance of IGD
+    /// Constructs new instance of igd_t_from_disk
     pub fn new() -> Self {
         Self::default()
     }
@@ -68,6 +71,7 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
     igd_search(database_path, query).expect("Error:");
 }
 
+#[allow(unused_variables)]
 pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<(), String> {
 
     // First check that BOTH the igd database and the query are the proper file types
@@ -124,12 +128,12 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     Ok(())
 
 }
-
+#[allow(unused_variables)]
 pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
 
     println!("hello from get_igd_info");
 
-    let igd = igd_t_from_disk::new();
+    let mut igd = igd_t_from_disk::new();
 
     // Open file
 
@@ -152,6 +156,7 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
 
     let mut reader = BufReader::new(temp_tile_file);
 
+    // TODO is this the correct buffer size given the way it was written to disk?
     let mut buffer = [0u8; std::mem::size_of::<i32>()];
 
     reader.read_exact(&mut buffer)?;
@@ -160,9 +165,64 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
     let gType = i32::from_le_bytes(buffer);
 
     reader.read_exact(&mut buffer)?;
-    let nctg = i32::from_le_bytes(buffer);
+    let nCtg = i32::from_le_bytes(buffer);
 
-    println!("Found:\n nbp:{} gtype: {} nctg: {}", nbp,gType,nctg);
+    //println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+
+    igd.nbp = nbp;
+    igd.gType = gType;
+    igd.nCtg = nCtg;
+
+    let tileS = igd.nCtg;
+    let m = igd.nCtg;
+
+    reader.read_exact(&mut buffer)?;
+    let nTile = i32::from_le_bytes(buffer);
+    igd.nTile = nTile;
+
+
+    // This calculation is from og code.
+    // TODO The above buffer size might throw it off and should be double checked
+    let mut chr_loc = 12 +44*m;
+
+    for n in 0..m {
+        chr_loc += n * 4;
+    }
+
+    for i in 0..m {
+        //k = iGD->nTile[i]
+        let k = igd.nTile;
+
+
+        // og code, nCnt originally
+        // k = iGD->nTile[i];
+        // iGD->nCnt[i] = calloc(k, sizeof(int32_t));
+        // ni = fread(iGD->nCnt[i], sizeof(int32_t)*k, 1, fp);
+        reader.read_exact(&mut buffer)?;
+        let current_nCnt = i32::from_le_bytes(buffer);
+
+        igd.nCnt.push(current_nCnt);
+
+        // og code
+        // iGD->tIdx[i] = calloc(k, sizeof(int64_t));
+        // iGD->tIdx[i][0] = chr_loc;
+
+
+        //igd.tIdx.push(Vec::from(chr_loc.clone())); // vec of vecs
+
+        for j in 1..k{
+
+            let idx = i as usize;
+            let jdx = j as usize;
+
+            //igd.tIdx[idx][jdx];
+
+
+        }
+
+
+
+    }
 
 
 
