@@ -295,6 +295,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         let filename = file_path.rsplitn(1, '/').next().unwrap_or(file_path);
 
         total_regions += nr[i];
+
+        //TODO divergence in avg sizes between this and og code. Check fp precision vs int.
         total_avg_size += avg[i] as f32;
 
         // Write file summary
@@ -641,6 +643,12 @@ pub fn igd_add(
 
         igd.ctg.push(p);
     }
+    // else {
+    //     println!(
+    //         "Key exists in hash map, skipping creation, key: {}",
+    //         key.clone()
+    //     )
+    // }
 
     // Retrieve values from Hash Map
 
@@ -704,7 +712,11 @@ pub fn igd_add(
         gdata.end = end;
         gdata.value = v;
         gdata.idx = idx;
+
+        igd.total += 1;
     }
+
+    println!("DEBUG: Here is igd.total:  {}", igd.total);
 
     //println!("Finished from igd_add");
     return;
