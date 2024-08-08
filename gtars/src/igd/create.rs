@@ -308,7 +308,13 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     //TODO Code to sort tile data and save into single files per ctg (part 4)
 
     // Sort tile data and save into single files per ctg
-    igd_save_db(&mut igd, output_path, db_output_name)
+    igd_save_db(&mut igd, output_path, db_output_name);
+
+    let save_path = format!("{}{}{}", output_path, db_output_name, ".igd");
+    println!("IGD saved to: {}",save_path);
+    println!("Total Intervals: {}, l_avg: {}", total_regions, total_avg_size/total_regions as f32);
+
+
 }
 
 /// Saves the primary .igd database file by reading the temp_tiles, sorting them, and then writing the sorted tiles to disk.
