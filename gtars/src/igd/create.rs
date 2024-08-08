@@ -12,6 +12,9 @@ use std::{fs, io};
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
+// Assuming a maximum length of 40 characters, original program constraint
+pub const MAX_CHROM_NAME_LEN: usize = 40;
+
 #[derive(Default, Clone)]
 pub struct gdata_t {
     pub idx: usize, //genomic object--data set index
@@ -388,7 +391,11 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         let idx = i.clone() as usize;
         let current_ctg = &igd.ctg[idx];
 
-        buffer.write_all((&current_ctg.name).as_ref()).unwrap();
+        let name_bytes = current_ctg.name.as_bytes();
+        let len = std::cmp::min(name_bytes.len(), MAX_CHROM_NAME_LEN);
+        buffer.write_all(&name_bytes[..len]).unwrap();
+
+        //buffer.write_all((&current_ctg.name).as_ref()).unwrap();
     }
 
     main_db_file.write_all(&buffer).unwrap();

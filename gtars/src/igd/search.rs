@@ -1,5 +1,5 @@
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
-use crate::igd::create::{gdata0_t, gdata_t, igd_t};
+use crate::igd::create::{gdata0_t, gdata_t, igd_t, MAX_CHROM_NAME_LEN};
 use clap::ArgMatches;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
