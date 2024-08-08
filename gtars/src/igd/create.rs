@@ -107,6 +107,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
     let mut ix = 0;
     let (mut start, mut end) = (0, 0);
+    let mut va: i32 = 0;
 
     ///--------------------
     /// Check each file and only keep the validated BED files
@@ -143,7 +144,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
             // TODO Better name for og function?
             // TODO parse_bed -> parse_bed_file_line
-            let ctg = parse_bed(&first_line, &mut start, &mut end);
+            let ctg = parse_bed(&first_line, &mut start, &mut end, &mut va);
             // if it parses, add it to collected lines, increment ix
             match ctg {
                 Some(ctg) => {
@@ -209,7 +210,11 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             let mut buffer = String::new();
 
             while m == 0 && reader.read_line(&mut buffer).unwrap() != 0 {
-                let ctg = parse_bed(&buffer, &mut start, &mut end);
+                // TODO original code: if(nCols>4) va = atol(splits[4]);
+                // assumes that 5th value it numeric from original .gz file. Is this valid?
+                // va = score  ----> https://genome.ucsc.edu/FAQ/FAQformat.html#format1
+
+                let ctg = parse_bed(&buffer, &mut start, &mut end, &mut va);
 
                 match ctg {
                     Some(ctg) => {
@@ -454,7 +459,6 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                 let _ = main_db_file.write_all(&temp_buffer);
             }
 
-
             q.nCnts = 0;
         }
     }
@@ -560,7 +564,10 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
     //println!("HELLO from igd_add");
-    println!("Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}", chrm,start,end,v,idx);
+    println!(
+        "Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}",
+        chrm, start, end, v, idx
+    );
     if start >= end {
         println!(
             "Start: {0} greater than End: {1}, returning from igd_add",
@@ -679,7 +686,7 @@ pub enum ParseBedResult {
 }
 
 /// Reads bed file, returning contig and modifying borrowed start and end coordinate
-pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32) -> Option<String> {
+pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32, score: &mut i32) -> Option<String> {
     //println!("HERE IS THE LINE TO PARSE: {}", line);
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
@@ -697,6 +704,14 @@ pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32) -> Option<String
         .unwrap_or(-1);
     //println!("GOT en: {}", en);
 
+    let _ = fields.next(); // throwaway the 4th bed column
+
+    // 5th column is score, if it exists, else -1
+    let va = fields
+        .next()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(-1);
+
     if !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
         //println!("RETURNING NONE");
         return None;
@@ -704,6 +719,7 @@ pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32) -> Option<String
 
     *start = st;
     *end = en;
+    *score = va;
 
     //println!("SUCCESSFULLY FINISHING PARSE");
     Some(ctg.parse().unwrap())
