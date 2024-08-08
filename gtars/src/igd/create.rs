@@ -25,6 +25,18 @@ impl gdata_t {
         Self::default()
     }
 }
+#[derive(Default, Clone, Copy)]
+pub struct gdata0_t {
+    pub idx: usize, //genomic object--data set index
+    pub start: i32, //region start
+    pub end: i32,   //region end
+}
+impl gdata0_t {
+    /// Constructs new instance of a gdata0_t
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
 
 #[derive(Default)]
 pub struct tile_t {
@@ -550,6 +562,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
             }
         }
     }
+    println!("nCtgs (igd.nctg): {}, nRegions (igd.total): {}, nTiles (nt): {}", igd.nctg, igd.total, nt);
     igd.total = 0; // batch total
 }
 

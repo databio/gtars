@@ -21,6 +21,5 @@ cargo run igd create --output /home/drc/IGD_TEST_2/igd_rust_output/ --filelist /
 
 Search
 ```
-cargo run igd search -d /home/drc/IGD_TEST/output/igd_database.igd -q /home/drc/IGD_TEST/bedfiles/test_small_bed_file.bed
-
+cargo run igd search --database /home/drc/IGD_TEST_2/igd_rust_output/igd_database.igd --query /home/drc/IGD_TEST_2/query_bed_file/igd_query_test.bed
 ```

@@ -1,9 +1,10 @@
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
-use crate::igd::create::igd_t;
+use crate::igd::create::{gdata0_t, gdata_t, igd_t};
 use clap::ArgMatches;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::path::Path;
+use byteorder::{LittleEndian,ReadBytesExt};
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
@@ -22,13 +23,13 @@ pub struct igd_t_from_disk {
     pub gType: i32, //data type: 0, 1, 2 etc; size differs
     pub nCtg: i32,  //data type: 0, 1, 2 etc; size differs
     // Original code uses pointer to pointers
-    pub cName: String,
-    pub nTile: i32,
+    pub cName: Vec<String>,
+    pub nTile: Vec<i32>,
 
     //pub nCnt: i32,
-    pub nCnt: Vec<i32>,
+    pub nCnt: Vec<Vec<i32>>,
     //pub tIdx: i32,
-    pub tIdx: Vec<Vec<i32>>,
+    pub tIdx: Vec<Vec<i64>>,
 }
 
 impl igd_t_from_disk {
@@ -148,47 +149,121 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     igd.gType = gType;
     igd.nCtg = nCtg;
 
-    let tileS = igd.nCtg;
-    let m = igd.nCtg;
+    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+    let gdsize = if gType == 0 {
+        std::mem::size_of::<gdata0_t>()
+    } else {
+        std::mem::size_of::<gdata_t>()
+    };
 
-    reader.read_exact(&mut buffer)?;
-    let nTile = i32::from_le_bytes(buffer);
-    igd.nTile = nTile;
+    let tileS = igd.nCtg;
+    let m = igd.nCtg; //the idx of a tile in the chrom
+
+    let mut n_Tile: Vec<i32> = Vec::with_capacity(m as usize);
+    for _ in 0..m {
+        n_Tile.push(reader.read_i32::<LittleEndian>()?);
+    }
+
+    igd.nTile = n_Tile.clone();
+    // reader.read_exact(&mut buffer)?;
+    // let nTile = i32::from_le_bytes(buffer);
+    // igd.nTile = nTile;
 
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
-    let mut chr_loc = 12 + 44 * m;
-
+    let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
     for n in 0..m {
-        chr_loc += n * 4;
+        chr_loc = chr_loc + n as i64 * 4;
     }
 
-    for i in 0..m {
-        //k = iGD->nTile[i]
-        let k = igd.nTile;
+    let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
+    let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
-        // og code, nCnt originally
-        // k = iGD->nTile[i];
-        // iGD->nCnt[i] = calloc(k, sizeof(int32_t));
-        // ni = fread(iGD->nCnt[i], sizeof(int32_t)*k, 1, fp);
-        reader.read_exact(&mut buffer)?;
-        let current_nCnt = i32::from_le_bytes(buffer);
+    for (i, k) in n_Tile.iter().enumerate() {
 
-        igd.nCnt.push(current_nCnt);
+        println!("\nFrom Enumeration, here is i: {},  k {}", i,k);
+        println!("From Enumeration, here is chr_loc: {}", chr_loc);
+        let mut cnt = vec![0; *k as usize];
+        reader.read_exact(&mut cnt)?;
 
-        // og code
-        // iGD->tIdx[i] = calloc(k, sizeof(int64_t));
-        // iGD->tIdx[i][0] = chr_loc;
+        // we read as u8 and then must convert back to i32. This seems like an unecessary step if we could just do everything as either u8 or i32...
+        let i32_converted_cnt =  cnt.into_iter().map(|byte| byte as i32).collect();
 
-        //igd.tIdx.push(Vec::from(chr_loc.clone())); // vec of vecs
+        nCnt.push(i32_converted_cnt);
 
-        for j in 1..k {
-            let idx = i as usize;
-            let jdx = j as usize;
 
-            //igd.tIdx[idx][jdx];
+        let mut idx = vec![0; *k as usize];
+
+        for j in 0..*k {
+            if j > 0 {
+                idx[j as usize] = idx[j as usize - 1] + (nCnt[i][j as usize - 1] as i64) * (gdsize as i64);
+            }
+
+            chr_loc = chr_loc + (nCnt[i][j as usize] as i64) * (gdsize as i64);
         }
+
+        tIdx.push(idx);
+
+
     }
+
+    igd.nCnt = nCnt;
+    igd.tIdx = tIdx;
+
+    // More of a direct port of the C code...
+    // getting tile information
+
+    // for i in 0..m {
+    //     //k = iGD->nTile[i]
+    //     let i_idx = i.clone() as usize;
+    //     let k = igd.nTile[i_idx].clone();
+    //     println!("\n k: {:?}, chrm_loc: {}", k, chr_loc);
+    //     // og code, nCnt originally
+    //     // k = iGD->nTile[i];
+    //     // iGD->nCnt[i] = calloc(k, sizeof(int32_t));
+    //     // ni = fread(iGD->nCnt[i], sizeof(int32_t)*k, 1, fp);
+    //     reader.read_exact(&mut buffer)?;
+    //     let current_nCnt = i32::from_le_bytes(buffer);
+    //
+    //     igd.nCnt.push(current_nCnt);
+    //     //println!("\n k: {:?}, chrm_loc: {}", k, chr_loc);
+    //
+    //     // og code
+    //     // iGD->tIdx[i] = calloc(k, sizeof(int64_t));
+    //     // iGD->tIdx[i][0] = chr_loc;
+    //
+    //     //igd.tIdx.push(Vec::from(chr_loc.clone())); // vec of vecs
+    //
+    //     for j in 1..k {
+    //         let idx = i as usize;
+    //         let jdx = j as usize;
+    //
+    //         //igd.tIdx[idx][jdx];
+    //     }
+    // }
+
+    // Read cName
+
+    // Read cName data
+    let mut c_name = Vec::with_capacity(m as usize);
+    for _ in 0..m{
+
+        let mut buf = [0u8; 40];
+        reader.read_exact(&mut buf)?;
+
+        let name = String::from_utf8(buf.to_vec()).unwrap(); // TODO assumes utf 8, add handling for error later
+        c_name.push(name); // Maybe just have this be a String and not a vec<String>?
+    }
+
+    igd.cName = c_name.clone();
+
+    println!("Retrieved chrom name (cName):  {:?}", c_name);
+
+
+
+    // Place values in hash map
+
+
 
     return Ok(igd);
 }
