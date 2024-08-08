@@ -30,10 +30,10 @@ fn path_to_bed_file_gzipped() -> &'static str {
 mod tests {
     use super::*;
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
+    use gtars::igd::search::igd_search;
     use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
     use std::env::temp_dir;
     use std::ptr::read;
-    use gtars::igd::search::igd_search;
     // IGD TESTS
 
     #[rstest]
@@ -45,8 +45,9 @@ mod tests {
         //Placeholder start and end values
         let mut start = 0;
         let mut end = 0;
+        let mut va = 0;
 
-        let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap(); // this will return
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap(); // this will return
 
         let unwrapped_result = result.as_str();
 
@@ -75,7 +76,6 @@ mod tests {
     #[rstest]
 
     fn test_igd_search() {
-
         // First must create temp igd
 
         // Temp dir to hold igd
@@ -94,14 +94,15 @@ mod tests {
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
 
         // Get a query file path from test files
-        let query_file = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed");
+        let query_file = format!(
+            "{}{}",
+            path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
+        );
 
         // the final db path will be constructed within igd_save_db like so
         let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
 
         igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
-
-
     }
 
     #[rstest]
@@ -123,9 +124,10 @@ mod tests {
         //Placeholder start and end values
         let mut start = 0;
         let mut end = 0;
+        let mut va = 0;
 
         // We've now parsed to get the chromosome and the new start and end of the current contig.
-        let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap();
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap();
         let chromosome = result;
 
         // Add to the database (hash table)
@@ -149,9 +151,10 @@ mod tests {
         //Placeholder start and end values
         let mut start = 0;
         let mut end = 0;
+        let mut va = 0;
 
         // We've now parsed to get the chromosome and the new start and end of the current contig.
-        let result = parse_bed(&bed_file_string, &mut start, &mut end).unwrap();
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap();
         let chromosome = result;
 
         // Add to the database (hash table)

@@ -1,13 +1,12 @@
-use clap::ArgMatches;
-use std::path::Path;
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
 use crate::igd::create::igd_t;
+use clap::ArgMatches;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
+use std::path::Path;
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
-
     // int32_t nFiles;
     // info_t *finfo;
     // char fname[64];
@@ -19,9 +18,9 @@ pub struct igd_t_from_disk {
     pub nFiles: i32,
     pub file_info: info_t,
     pub filename: String,
-    pub nbp: i32, //data type: 0, 1, 2 etc; size differs
+    pub nbp: i32,   //data type: 0, 1, 2 etc; size differs
     pub gType: i32, //data type: 0, 1, 2 etc; size differs
-    pub nCtg: i32, //data type: 0, 1, 2 etc; size differs
+    pub nCtg: i32,  //data type: 0, 1, 2 etc; size differs
     // Original code uses pointer to pointers
     pub cName: String,
     pub nTile: i32,
@@ -30,7 +29,6 @@ pub struct igd_t_from_disk {
     pub nCnt: Vec<i32>,
     //pub tIdx: i32,
     pub tIdx: Vec<Vec<i32>>,
-
 }
 
 impl igd_t_from_disk {
@@ -43,9 +41,8 @@ impl igd_t_from_disk {
 #[derive(Default)]
 pub struct info_t {
     pub fileName: String, //dataset file
-    pub nr: i32, // number of regions in dataset
-    pub md: f64, // average width of the regions
-
+    pub nr: i32,          // number of regions in dataset
+    pub md: f64,          // average width of the regions
 }
 
 // typedef struct{
@@ -54,11 +51,8 @@ pub struct info_t {
 //     double md;    				//average width of the regions
 // } info_t;
 
-
-
 /// Searches IGD database
 pub fn igd_get_search_matches(matches: &ArgMatches) {
-
     let database_path = matches
         .get_one::<String>("database")
         .expect("Database path is required");
@@ -67,13 +61,11 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
         .get_one::<String>("query")
         .expect("Query bed file path is required");
 
-
     igd_search(database_path, query).expect("Error:");
 }
 
 #[allow(unused_variables)]
 pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<(), String> {
-
     // First check that BOTH the igd database and the query are the proper file types
     // else raise error
 
@@ -86,51 +78,34 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
 
     match check_file_extension(query_file_path, BED_FILE_EXTENSION) {
         Ok(_) => (),
-        Err(e) => {;
+        Err(e) => {
             return Err(e);
-        
         }
-        ,
     }
 
-    println!("\n {} \n {}", database_path,query_file_path);
-
+    println!("\n {} \n {}", database_path, query_file_path);
 
     //Get file info from the associated TSV
-
-
 
     // Create IGD Struct from database
     let IGD: igd_t_from_disk = get_igd_info(database_path).expect("Could not open IGD");
 
-
-
     // If query "-q" used set to mode 1
 
     match mode {
-
-        1 => {
-
-
-
-        },
+        1 => {}
         _ => {
             println!("Invalid mode selected, exiting");
             return Ok(());
-        },
-
-
+        }
     }
 
-
     println!("FINISHED");
-    
-    Ok(())
 
+    Ok(())
 }
 #[allow(unused_variables)]
-pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
-
+pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     println!("hello from get_igd_info");
 
     let mut igd = igd_t_from_disk::new();
@@ -180,10 +155,9 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
     let nTile = i32::from_le_bytes(buffer);
     igd.nTile = nTile;
 
-
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
-    let mut chr_loc = 12 +44*m;
+    let mut chr_loc = 12 + 44 * m;
 
     for n in 0..m {
         chr_loc += n * 4;
@@ -192,7 +166,6 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
     for i in 0..m {
         //k = iGD->nTile[i]
         let k = igd.nTile;
-
 
         // og code, nCnt originally
         // k = iGD->nTile[i];
@@ -207,28 +180,17 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error>{
         // iGD->tIdx[i] = calloc(k, sizeof(int64_t));
         // iGD->tIdx[i][0] = chr_loc;
 
-
         //igd.tIdx.push(Vec::from(chr_loc.clone())); // vec of vecs
 
-        for j in 1..k{
-
+        for j in 1..k {
             let idx = i as usize;
             let jdx = j as usize;
 
             //igd.tIdx[idx][jdx];
-
-
         }
-
-
-
     }
 
-
-
-    return Ok(igd)
-
-
+    return Ok(igd);
 }
 
 fn check_file_extension(path: &str, expected_extension: &str) -> Result<(), String> {
@@ -239,7 +201,10 @@ fn check_file_extension(path: &str, expected_extension: &str) -> Result<(), Stri
         .ok_or_else(|| format!("Invalid file path: {}", path.display()))?;
 
     if actual_extension != expected_extension {
-        return Err(format!("Incorrect file extension. Expected: {}, got: {}", expected_extension, actual_extension));
+        return Err(format!(
+            "Incorrect file extension. Expected: {}, got: {}",
+            expected_extension, actual_extension
+        ));
     }
 
     Ok(())
