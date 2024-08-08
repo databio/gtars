@@ -32,6 +32,7 @@ mod tests {
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
     use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use std::collections::HashMap;
     use std::env::temp_dir;
     use std::ptr::read;
     // IGD TESTS
@@ -110,6 +111,8 @@ mod tests {
         // First create a new igd struct
 
         let mut igd = igd_t::new();
+        // create hash table
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
 
         // Set values of struct
         igd.gType = 1;
@@ -131,12 +134,14 @@ mod tests {
         let chromosome = result;
 
         // Add to the database (hash table)
-        igd_add(&mut igd, chromosome, start, end, 0, 0);
+        igd_add(&mut igd, &mut hash_table, chromosome, start, end, 0, 0);
     }
 
     #[rstest]
     fn test_igd_saving() {
         let mut igd = igd_t::new();
+        // create hash table
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
 
         // Set values of struct
         igd.gType = 1;
@@ -158,7 +163,7 @@ mod tests {
         let chromosome = result;
 
         // Add to the database (hash table)
-        igd_add(&mut igd, chromosome, start, end, 0, 0);
+        igd_add(&mut igd, &mut hash_table, chromosome, start, end, 0, 0);
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());

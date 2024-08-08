@@ -12,7 +12,7 @@ use std::{fs, io};
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct gdata_t {
     pub idx: usize, //genomic object--data set index
     pub start: i32, //region start
@@ -94,6 +94,9 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     //println!("{}",db_output_name);
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
+
+    // create hash table
+    let mut hash_table: HashMap<String, i32> = HashMap::new();
 
     igd.gType = 1;
     igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
@@ -220,7 +223,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
                     Some(ctg) => {
                         // check that st>=0 and end <321000000   NOTE: these values taken from og code.
                         if start >= 0 && end < 321000000 {
-                            igd_add(&mut igd, ctg, start, end, va, ig);
+                            igd_add(&mut igd, &mut hash_table, ctg, start, end, va, ig);
                             nr[ig] += 1;
                             avg[ig] += end - start;
                             //println!("DEBUG: after igd add");
@@ -560,7 +563,15 @@ fn create_file_with_parents(path: &Path) -> Result<File, Error> {
 }
 
 /// Adds genomic interval to the igd struct
-pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx: usize) {
+pub fn igd_add(
+    igd: &mut igd_t,
+    hash_table: &mut HashMap<String, i32>,
+    chrm: String,
+    start: i32,
+    end: i32,
+    v: i32,
+    idx: usize,
+) {
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
     //println!("HELLO from igd_add");
@@ -584,8 +595,8 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     let n1 = start / igd.nbp;
     let n2 = (end - 1) / igd.nbp;
 
-    // create hash table
-    let mut hash_table: HashMap<String, i32> = HashMap::new();
+    // // create hash table
+    // let mut hash_table: HashMap<String, i32> = HashMap::new();
 
     let key_check = hash_table.contains_key(&key);
 
@@ -658,12 +669,26 @@ pub fn igd_add(igd: &mut igd_t, chrm: String, start: i32, end: i32, v: i32, idx:
     }
 
     for i in n1..=n2 {
+        //println!("Adding data elements, iteration: {}", i);
         //this is inclusive of n1 and n2
         // Get index as usize
         let idx_1 = i.clone() as usize;
         let idx_2 = idx_1 as usize;
         // get the tile for the contig
         let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
+
+        if existing_tile.ncnts == existing_tile.mcnts {
+            // println!(
+            //     "DEBUG Existing tile: ncnts == mcnts {} vs {}",
+            //     existing_tile.ncnts, existing_tile.mcnts
+            // );
+
+            // Expand number of elements by doubling, og used a realloc macro to achieve this...
+            existing_tile
+                .gList
+                .resize((existing_tile.mcnts * 2) as usize, Default::default());
+            existing_tile.mcnts *= 2;
+        }
 
         let tile_idx = existing_tile.ncnts.clone() as usize;
         let gdata = &mut existing_tile.gList[tile_idx];
