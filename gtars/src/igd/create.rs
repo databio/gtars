@@ -299,7 +299,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
         // Write file summary
         //writeln!(fpi, "{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]).expect("Couldn't write to file");
-        let current_line = format!("{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]);
+        let current_line = format!("{} \t {} \t {} \t {} \n", i, filename, nr[i], avg[i] / nr[i]);
         buffer.write_all((&current_line).as_ref()).unwrap();
     }
 
