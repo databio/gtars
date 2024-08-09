@@ -339,6 +339,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let save_path = format!("{}{}{}", output_path, db_output_name, ".igd");
     println!("IGD saved to: {}",save_path);
     println!("Total Intervals: {}, l_avg: {}", total_regions, total_avg_size/total_regions as f32);
+    println!("IGD, nctg:{}  total:{}  nbp:{}", igd.nctg, igd.total, igd.nbp);
 
 
 }
@@ -377,6 +378,9 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         let current_ctg = &igd.ctg[idx];
 
         buffer.write_all(&current_ctg.mTiles.to_le_bytes()).unwrap();
+
+
+        println!("writing current_ctg.mTile to databse: {} ", current_ctg.mTiles);
     }
 
     for i in 0..igd.nctg {
@@ -387,13 +391,22 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         let n = current_ctg.mTiles;
 
+        println!("iterating current_ctg.mTile to databse: {} ", current_ctg.mTiles);
+
         for j in 0..n {
             let jdx = j.clone() as usize;
 
-            buffer
-                .write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes())
-                .unwrap();
+            //if current_ctg.gTile[jdx].nCnts != 0 {
+
+                //println!("writing to buffer because nCnts >0");
+                buffer
+                    .write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes())
+                    .unwrap();
+            //}
+
         }
+
+
     }
 
     for i in 0..igd.nctg {
@@ -404,6 +417,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         let len = std::cmp::min(name_bytes.len(), MAX_CHROM_NAME_LEN);
         buffer.write_all(&name_bytes[..len]).unwrap();
 
+        println!("writing chromosome name, {}", current_ctg.name);
         //buffer.write_all((&current_ctg.name).as_ref()).unwrap();
     }
 
@@ -418,7 +432,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         let current_ctg = &mut igd.ctg[idx];
         let n = current_ctg.mTiles;
-
+        println!("\ndebug mTiles for current contig: {}", current_ctg.mTiles);
         for j in 0..n {
             let jdx = j.clone() as usize;
 
@@ -428,7 +442,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             let nrec = q.nCnts;
 
             if nrec > 0 {
-                //println!("nrec greater than 0");
+                println!("nrec greater than 0: {}   Here is j index: {}", nrec, j);
                 let save_path = format!(
                     "{}{}{}_{}{}",
                     output_path, "data0/", current_ctg.name, j, ".igd"
@@ -457,17 +471,19 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
                 let mut gdata: Vec<gdata_t> = Vec::new();
                 //
-                //loop {
+                loop {
                     //TODO check that 16 is the right value when reading back the gdata_t structs
                     let mut buf = [0u8; 16];
 
                     let n = temp_tile_file.read(&mut buf).unwrap();
 
-                    // if n == 0 {
-                    //     break;
-                    // } else if n != 16 {
-                    //     return;
-                    // }
+                    if n == 0 {
+                        println!("Breaking loop while reading tempfile");
+                        break;
+                    } else if n != 16 {
+                        //panic!("Cannot read temp file.");
+                        return;
+                    }
 
                     let mut rdr = &buf[..] as &[u8];
                     let idx = rdr.read_i32::<LittleEndian>().unwrap();
@@ -485,7 +501,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                         end,
                         value,
                     });
-                //}
+                }
 
                 // Sort Data
                 gdata.sort_by_key(|d| d.start); // Sort by start value
@@ -518,13 +534,14 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
     // TEMPORARILY save/append tiles to disc, add cnts to Cnts; reset tile.gList
 
     let mut nt = 0;
-
+    println!("Number of contigs to be saved {}", igd.nctg);
     for i in 0..igd.nctg {
         let idx = i.clone() as usize;
         let idx_2 = idx;
         let current_ctg = &mut igd.ctg[idx_2];
         nt = nt + current_ctg.mTiles;
 
+        println!("Number of mTiles to be saved {}", current_ctg.mTiles);
         for j in 0..current_ctg.mTiles {
             let jdx = j.clone() as usize;
             let jdx_2 = jdx;
@@ -540,8 +557,9 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                     "{}{}{}_{}{}",
                     output_file_path, "data0/", current_ctg.name, j, ".igd"
                 );
-                //println!("DEBUG saveT path:{}", save_path);
+
                 let parent_path = save_path.clone();
+                println!("Saving saveT path, because current_tile.ncnts > 0:{} {}", current_tile.ncnts,save_path);
 
                 //println!("{}", save_path);
 
@@ -662,7 +680,7 @@ pub fn igd_add(
         p.gTile = Vec::with_capacity((p.mTiles as usize));
 
         for i in 0..p.mTiles {
-            println!("iterating of p.Mtiles");
+            //println!("iterating of p.Mtiles");
             let mut new_tile: tile_t = tile_t::new();
 
             new_tile.ncnts = 0; //each batch
@@ -695,7 +713,7 @@ pub fn igd_add(
     let p = &mut igd.ctg[cloned_index as usize];
 
     if (n2 + 1 >= p.mTiles) {
-        println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
+        //println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
         let tt = p.mTiles;
 
         p.mTiles = n2 + 1;

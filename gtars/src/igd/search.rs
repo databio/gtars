@@ -250,7 +250,7 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
 
         let mut buf = [0u8; 40];
         reader.read_exact(&mut buf)?;
-
+        println!("Raw bytes: {:x?}", buf);
         let name = String::from_utf8(buf.to_vec()).unwrap(); // TODO assumes utf 8, add handling for error later
         c_name.push(name); // Maybe just have this be a String and not a vec<String>?
     }
