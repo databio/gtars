@@ -41,7 +41,7 @@ impl gdata0_t {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct tile_t {
     pub ncnts: i32,          // batch counts
     pub nCnts: i32,          // total (batch) counts
@@ -166,6 +166,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             // if it parses, add it to collected lines, increment ix
             match ctg {
                 Some(ctg) => {
+                    println!("ctg successfully parsed {}", ctg);
                     all_bed_files.push(entry.path());
                     ix += 1;
                 }
@@ -227,33 +228,41 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
             let mut buffer = String::new();
 
-            while m == 0 && reader.read_line(&mut buffer).unwrap() != 0 {
-                // TODO original code: if(nCols>4) va = atol(splits[4]);
-                // assumes that 5th value it numeric from original .gz file. Is this valid?
-                // va = score  ----> https://genome.ucsc.edu/FAQ/FAQformat.html#format1
+            for line in reader.lines(){
+                let line = line.expect("Error reading line"); // Handle errors
+                if m != 0 {
+                    break;
+                }
+                    // TODO original code: if(nCols>4) va = atol(splits[4]);
+                    // assumes that 5th value it numeric from original .gz file. Is this valid?
+                    // va = score  ----> https://genome.ucsc.edu/FAQ/FAQformat.html#format1
 
-                let ctg = parse_bed(&buffer, &mut start, &mut end, &mut va);
+                    // for line in reader.lines() {
+                    //     let line = line.expect("Error reading line"); // Handle errors
 
-                match ctg {
-                    Some(ctg) => {
-                        // check that st>=0 and end <321000000   NOTE: these values taken from og code.
-                        if start >= 0 && end < 321000000 {
-                            igd_add(&mut igd, &mut hash_table, ctg, start, end, va, ig);
-                            nr[ig] += 1;
-                            avg[ig] += end - start;
-                            //println!("DEBUG: after igd add");
+                    let ctg = parse_bed(&line, &mut start, &mut end, &mut va);
+
+                    match ctg {
+                        Some(ctg) => {
+                            // check that st>=0 and end <321000000   NOTE: these values taken from og code.
+                            if start >= 0 && end < 321000000 {
+                                igd_add(&mut igd, &mut hash_table, ctg, start, end, va, ig);
+                                nr[ig] += 1;
+                                avg[ig] += end - start;
+                                //println!("DEBUG: after igd add");
+                            }
                         }
+                        None => continue,
                     }
-                    None => continue,
-                }
 
-                nL += 1;
+                    nL += 1;
 
-                if igd.total > maxCount {
-                    m = 1;
-                    i1 = ig;
-                    L1 = nL;
-                }
+                    if igd.total > maxCount {
+                        m = 1;
+                        i1 = ig;
+                        L1 = nL;
+                    }
+                 //endpoint
             }
 
             if m == 0 {
@@ -413,6 +422,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         for j in 0..n {
             let jdx = j.clone() as usize;
 
+            //current tile
             let mut q = &mut current_ctg.gTile[jdx];
 
             let nrec = q.nCnts;
@@ -441,23 +451,23 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     }
                 };
 
-                //println!("{:?}", file)
+                println!(" Reading from tempfile {:?}", temp_tile_file);
 
                 // Read from Temp File
 
                 let mut gdata: Vec<gdata_t> = Vec::new();
                 //
-                loop {
+                //loop {
                     //TODO check that 16 is the right value when reading back the gdata_t structs
                     let mut buf = [0u8; 16];
 
                     let n = temp_tile_file.read(&mut buf).unwrap();
 
-                    if n == 0 {
-                        break;
-                    } else if n != 16 {
-                        return;
-                    }
+                    // if n == 0 {
+                    //     break;
+                    // } else if n != 16 {
+                    //     return;
+                    // }
 
                     let mut rdr = &buf[..] as &[u8];
                     let idx = rdr.read_i32::<LittleEndian>().unwrap();
@@ -465,13 +475,17 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     let end = rdr.read_i32::<LittleEndian>().unwrap();
                     let value = rdr.read_i32::<LittleEndian>().unwrap();
 
+                    println!("Looping through g_datat in temp files\n");
+                    println!("idx: {}  start: {} end: {}\n", idx,start,end);
+
+
                     gdata.push(gdata_t {
                         idx: idx,
                         start,
                         end,
                         value,
                     });
-                }
+                //}
 
                 // Sort Data
                 gdata.sort_by_key(|d| d.start); // Sort by start value
@@ -648,6 +662,7 @@ pub fn igd_add(
         p.gTile = Vec::with_capacity((p.mTiles as usize));
 
         for i in 0..p.mTiles {
+            println!("iterating of p.Mtiles");
             let mut new_tile: tile_t = tile_t::new();
 
             new_tile.ncnts = 0; //each batch
@@ -680,10 +695,11 @@ pub fn igd_add(
     let p = &mut igd.ctg[cloned_index as usize];
 
     if (n2 + 1 >= p.mTiles) {
-        //println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
+        println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
         let tt = p.mTiles;
 
         p.mTiles = n2 + 1;
+        p.gTile.resize(p.mTiles as usize, crate::igd::create::tile_t::default());
         // original code: p->gTile = realloc(p->gTile, p->mTiles*sizeof(tile_t));
         // Supposedly we may not need to do this ...  p.gTile = Vec::resize()   ???
 
@@ -703,6 +719,7 @@ pub fn igd_add(
     }
 
     for i in n1..=n2 {
+        println!("iterating n1..n2");
         //println!("Adding data elements, iteration: {}", i);
         //this is inclusive of n1 and n2
         // Get index as usize
@@ -776,7 +793,7 @@ pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32, score: &mut i32)
         .unwrap_or(-1);
 
     if !ctg.starts_with("chr") || ctg.len() >= 40 || en <= 0 {
-        //println!("RETURNING NONE");
+        println!("RETURNING NONE, {}", ctg);
         return None;
     }
 
