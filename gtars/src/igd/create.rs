@@ -17,7 +17,7 @@ pub const MAX_CHROM_NAME_LEN: usize = 40;
 
 #[derive(Default, Clone)]
 pub struct gdata_t {
-    pub idx: usize, //genomic object--data set index
+    pub idx: i32, //genomic object--data set index
     pub start: i32, //region start
     pub end: i32,   //region end
     pub value: i32,
@@ -30,7 +30,7 @@ impl gdata_t {
 }
 #[derive(Default, Clone, Copy)]
 pub struct gdata0_t {
-    pub idx: usize, //genomic object--data set index
+    pub idx: i32, //genomic object--data set index
     pub start: i32, //region start
     pub end: i32,   //region end
 }
@@ -460,13 +460,13 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     }
 
                     let mut rdr = &buf[..] as &[u8];
-                    let idx = rdr.read_u32::<LittleEndian>().unwrap();
+                    let idx = rdr.read_i32::<LittleEndian>().unwrap();
                     let start = rdr.read_i32::<LittleEndian>().unwrap();
                     let end = rdr.read_i32::<LittleEndian>().unwrap();
                     let value = rdr.read_i32::<LittleEndian>().unwrap();
 
                     gdata.push(gdata_t {
-                        idx: idx as usize,
+                        idx: idx,
                         start,
                         end,
                         value,
@@ -731,7 +731,7 @@ pub fn igd_add(
         gdata.start = start;
         gdata.end = end;
         gdata.value = v;
-        gdata.idx = idx;
+        gdata.idx = idx as i32;
 
         igd.total += 1;
     }
