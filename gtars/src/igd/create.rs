@@ -396,9 +396,9 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         for j in 0..n {
             let jdx = j.clone() as usize;
 
-            //if current_ctg.gTile[jdx].nCnts != 0 {
-
-                //println!("writing to buffer because nCnts >0");
+            if current_ctg.gTile[jdx].nCnts != 0 {
+            println!(" nCnts >0:  {} > 0, contig number: {}, mTile number: {}", current_ctg.gTile[jdx].nCnts, i ,j);
+        }
                 buffer
                     .write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes())
                     .unwrap();
@@ -438,7 +438,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         let current_ctg = &mut igd.ctg[idx];
         let n = current_ctg.mTiles;
-        println!("\ndebug mTiles for current contig: {}", current_ctg.mTiles);
+        //println!("\ndebug mTiles for current contig: {}", current_ctg.mTiles);
         for j in 0..n {
             let jdx = j.clone() as usize;
 
@@ -448,7 +448,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             let nrec = q.nCnts;
 
             if nrec > 0 {
-                println!("nrec greater than 0: {}   Here is j index: {}", nrec, j);
+               // println!("nrec greater than 0: {}   Here is j index: {}", nrec, j);
                 let save_path = format!(
                     "{}{}{}_{}{}",
                     output_path, "data0/", current_ctg.name, j, ".igd"
@@ -471,7 +471,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     }
                 };
 
-                println!(" Reading from tempfile {:?}", temp_tile_file);
+                //println!(" Reading from tempfile {:?}", temp_tile_file);
 
                 // Read from Temp File
 
@@ -484,7 +484,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     let n = temp_tile_file.read(&mut buf).unwrap();
 
                     if n == 0 {
-                        println!("Breaking loop while reading tempfile");
+                        //println!("Breaking loop while reading tempfile");
                         break;
                     } else if n != 16 {
                         //panic!("Cannot read temp file.");
@@ -497,8 +497,8 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     let end = rdr.read_i32::<LittleEndian>().unwrap();
                     let value = rdr.read_i32::<LittleEndian>().unwrap();
 
-                    println!("Looping through g_datat in temp files\n");
-                    println!("idx: {}  start: {} end: {}\n", idx,start,end);
+                    //println!("Looping through g_datat in temp files\n");
+                    //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
 
                     gdata.push(gdata_t {
@@ -534,20 +534,20 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
 /// Saves temporary tiles to disc to later be sorted before collating into main .igd file
 pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
-    println!("HELLO from igd_saveT");
+    //println!("HELLO from igd_saveT");
 
     // From OG COde:
     // TEMPORARILY save/append tiles to disc, add cnts to Cnts; reset tile.gList
 
     let mut nt = 0;
-    println!("Number of contigs to be saved {}", igd.nctg);
+    //println!("Number of contigs to be saved {}", igd.nctg);
     for i in 0..igd.nctg {
         let idx = i.clone() as usize;
         let idx_2 = idx;
         let current_ctg = &mut igd.ctg[idx_2];
         nt = nt + current_ctg.mTiles;
 
-        println!("Number of mTiles to be saved {}", current_ctg.mTiles);
+        //println!("Number of mTiles to be saved {}", current_ctg.mTiles);
         for j in 0..current_ctg.mTiles {
             let jdx = j.clone() as usize;
             let jdx_2 = jdx;
@@ -565,7 +565,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 );
 
                 let parent_path = save_path.clone();
-                println!("Saving saveT path, because current_tile.ncnts > 0:{} {}", current_tile.ncnts,save_path);
+                //println!("Saving saveT path, because current_tile.ncnts > 0:{} {}", current_tile.ncnts,save_path);
 
                 //println!("{}", save_path);
 
@@ -641,10 +641,10 @@ pub fn igd_add(
     ///Add an interval
     /// og code: layers: igd->ctg->gTile->gdata(list)
     //println!("HELLO from igd_add");
-    println!(
-        "Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}",
-        chrm, start, end, v, idx
-    );
+    // println!(
+    //     "Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}",
+    //     chrm, start, end, v, idx
+    // );
     if start >= end {
         println!(
             "Start: {0} greater than End: {1}, returning from igd_add",
@@ -667,10 +667,10 @@ pub fn igd_add(
     let key_check = hash_table.contains_key(&key);
 
     if key_check == false {
-        println!(
-            "Key does not exist in hash map, creating for {}",
-            key.clone()
-        );
+        // println!(
+        //     "Key does not exist in hash map, creating for {}",
+        //     key.clone()
+        // );
 
         // Insert key and value (igd.nctg)
         hash_table.insert(key.clone(), igd.nctg);
@@ -743,7 +743,7 @@ pub fn igd_add(
     }
 
     for i in n1..=n2 {
-        println!("iterating n1..n2");
+        //println!("iterating n1..n2");
         //println!("Adding data elements, iteration: {}", i);
         //this is inclusive of n1 and n2
         // Get index as usize
@@ -777,7 +777,7 @@ pub fn igd_add(
         igd.total += 1;
     }
 
-    println!("DEBUG: Here is igd.total:  {}", igd.total);
+    //println!("DEBUG: Here is igd.total:  {}", igd.total);
 
     //println!("Finished from igd_add");
     return;
