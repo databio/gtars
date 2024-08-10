@@ -169,6 +169,22 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     // let nTile = i32::from_le_bytes(buffer);
     // igd.nTile = nTile;
 
+    //Attempt new divergence from og code
+
+    // for i in 0..igd.nCtg{
+    //
+    //     for j in 0..igd.nTile{
+    //
+    //
+    //     }
+    //
+    //
+    //
+    // }
+
+
+
+
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
     let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
@@ -187,7 +203,10 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
         reader.read_exact(&mut cnt)?;
 
         // we read as u8 and then must convert back to i32. This seems like an unecessary step if we could just do everything as either u8 or i32...
+        let length = cnt.len();
         let i32_converted_cnt =  cnt.into_iter().map(|byte| byte as i32).collect();
+
+        println!("Converted count: {:?} length vs k: {} vs {}", i32_converted_cnt, length, k);
 
         nCnt.push(i32_converted_cnt);
 
