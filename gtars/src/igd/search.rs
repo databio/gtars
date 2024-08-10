@@ -88,6 +88,9 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
 
     //Get file info from the associated TSV
 
+    //DEBUG
+    read_and_print_numbers(database_path.as_str());
+
     // Create IGD Struct from database
     let IGD: igd_t_from_disk = get_igd_info(database_path).expect("Could not open IGD");
 
@@ -102,6 +105,27 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     }
 
     println!("FINISHED");
+
+    Ok(())
+}
+fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
+
+    // Just a debug function to determine what was actually written to a file.
+    let file = File::open(filename)?;
+    let mut reader = BufReader::new(file);
+
+    let mut buffer = [0u8; 4];
+
+    loop {
+        match reader.read_exact(&mut buffer) {
+            Ok(_) => {
+                let number = u32::from_le_bytes(buffer);
+                println!("{}", number);
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+            Err(e) => return Err(e),
+        }
+    }
 
     Ok(())
 }
@@ -133,13 +157,13 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     let mut reader = BufReader::new(temp_tile_file);
 
     // TODO is this the correct buffer size given the way it was written to disk?
-    let mut buffer = [0u8; std::mem::size_of::<i32>()];
+    //let mut buffer = [0u8; std::mem::size_of::<i32>()];
+    let mut buffer = [0u8; 4];
 
     reader.read_exact(&mut buffer)?;
     let nbp = i32::from_le_bytes(buffer);
     reader.read_exact(&mut buffer)?;
     let gType = i32::from_le_bytes(buffer);
-
     reader.read_exact(&mut buffer)?;
     let nCtg = i32::from_le_bytes(buffer);
 
@@ -161,7 +185,10 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
 
     let mut n_Tile: Vec<i32> = Vec::with_capacity(m as usize);
     for _ in 0..m {
-        n_Tile.push(reader.read_i32::<LittleEndian>()?);
+        reader.read_exact(&mut buffer)?;
+        let tile_value = i32::from_le_bytes(buffer);
+        //n_Tile.push(reader.read_i32::<LittleEndian>()?);
+        n_Tile.push(tile_value);
     }
 
     igd.nTile = n_Tile.clone();
@@ -195,31 +222,49 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
     let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
-    for (i, k) in n_Tile.iter().enumerate() {
+    //for (i, k) in n_Tile.iter().enumerate() {
+    for i in 0..m {
 
-        println!("\nFrom Enumeration, here is i: {},  k {}", i,k);
-        println!("From Enumeration, here is chr_loc: {}", chr_loc);
-        let mut cnt = vec![0; *k as usize];
-        reader.read_exact(&mut cnt)?;
+        let k = n_Tile[i as usize];
+
+        // println!("\nFrom Enumeration, here is i: {},  k {}", i,k);
+        // println!("From Enumeration, here is chr_loc: {}", chr_loc);
+
+        let mut temp_cnt: Vec<i32> = Vec::with_capacity(k as usize);
+
+        for k_cnt in 0..k{
+
+            reader.read_exact(&mut buffer)?;
+            let mtile_count_value = i32::from_le_bytes(buffer);
+
+            temp_cnt.push(mtile_count_value);
+        }
+
+
+
+
 
         // we read as u8 and then must convert back to i32. This seems like an unecessary step if we could just do everything as either u8 or i32...
-        let length = cnt.len();
-        let i32_converted_cnt =  cnt.into_iter().map(|byte| byte as i32).collect();
+        // let length = cnt.len();
+        // let i32_converted_cnt =  cnt.into_iter().map(|byte| byte as i32).collect();
+        //
+        // println!("Converted count: {:?} length vs k: {} vs {}", i32_converted_cnt, length, k);
 
-        println!("Converted count: {:?} length vs k: {} vs {}", i32_converted_cnt, length, k);
+        // TODO this converted count is truncating value or not vonverting them corectly
+        //nCnt.push(i32_converted_cnt);
 
-        nCnt.push(i32_converted_cnt);
+        nCnt.push(temp_cnt);
 
 
-        let mut idx = vec![0; *k as usize];
+        let mut idx = vec![0; k as usize];
 
-        for j in 0..*k {
-            if j > 0 {
-                idx[j as usize] = idx[j as usize - 1] + (nCnt[i][j as usize - 1] as i64) * (gdsize as i64);
-            }
-
-            chr_loc = chr_loc + (nCnt[i][j as usize] as i64) * (gdsize as i64);
-        }
+        // for j in 0..*k {
+        //     if j > 0 {
+        //         idx[j as usize] = idx[j as usize - 1] + (nCnt[i][j as usize - 1] as i64) * (gdsize as i64);
+        //     }
+        //
+        //     chr_loc = chr_loc + (nCnt[i][j as usize] as i64) * (gdsize as i64);
+        // }
 
         tIdx.push(idx);
 
