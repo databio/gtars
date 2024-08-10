@@ -413,9 +413,15 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         let idx = i.clone() as usize;
         let current_ctg = &igd.ctg[idx];
 
-        let name_bytes = current_ctg.name.as_bytes();
-        let len = std::cmp::min(name_bytes.len(), MAX_CHROM_NAME_LEN);
-        buffer.write_all(&name_bytes[..len]).unwrap();
+        let mut name_bytes = current_ctg.name.as_bytes().to_vec();
+
+        //40 bytes might actually be overkill?
+        name_bytes.resize(MAX_CHROM_NAME_LEN, 0);
+        
+        //let len = std::cmp::min(name_bytes.len(), MAX_CHROM_NAME_LEN);
+        //buffer.write_all(&name_bytes[..len]).unwrap();
+
+        buffer.write_all(&name_bytes).unwrap();
 
         println!("writing chromosome name, {}", current_ctg.name);
         //buffer.write_all((&current_ctg.name).as_ref()).unwrap();
