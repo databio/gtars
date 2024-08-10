@@ -215,6 +215,7 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
     let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
+
     for n in 0..m {
         chr_loc = chr_loc + n as i64 * 4;
     }
@@ -316,12 +317,17 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
         reader.read_exact(&mut buf)?;
         println!("Raw bytes: {:x?}", buf);
         let name = String::from_utf8(buf.to_vec()).unwrap(); // TODO assumes utf 8, add handling for error later
-        c_name.push(name); // Maybe just have this be a String and not a vec<String>?
+        let name = name.trim_matches('\0');
+        c_name.push(String::from(name)); // Maybe just have this be a String and not a vec<String>?
     }
 
     igd.cName = c_name.clone();
 
-    println!("Retrieved chrom name (cName):  {:?}", c_name);
+    for name in c_name{
+        println!("Retrieved chrom name (cName):  {}", name);
+
+    }
+
 
 
 
