@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
 use crate::igd::create::{gdata0_t, gdata_t, igd_t, MAX_CHROM_NAME_LEN};
 use clap::ArgMatches;
@@ -71,6 +72,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     // else raise error
 
     let mode = 1;
+    let mut hash_table: HashMap<String, i32> = HashMap::new();
 
     match check_file_extension(database_path, IGD_FILE_EXTENSION) {
         Ok(_) => (),
@@ -89,10 +91,10 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     //Get file info from the associated TSV
 
     //DEBUG
-    read_and_print_numbers(database_path.as_str());
+    //read_and_print_numbers(database_path.as_str());
 
     // Create IGD Struct from database
-    let IGD: igd_t_from_disk = get_igd_info(database_path).expect("Could not open IGD");
+    let IGD: igd_t_from_disk = get_igd_info(database_path,&mut hash_table).expect("Could not open IGD");
 
     // If query "-q" used set to mode 1
 
@@ -130,7 +132,7 @@ fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
     Ok(())
 }
 #[allow(unused_variables)]
-pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
+pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32>,) -> Result<igd_t_from_disk, Error> {
     println!("hello from get_igd_info");
 
     let mut igd = igd_t_from_disk::new();
@@ -192,24 +194,6 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     }
 
     igd.nTile = n_Tile.clone();
-    // reader.read_exact(&mut buffer)?;
-    // let nTile = i32::from_le_bytes(buffer);
-    // igd.nTile = nTile;
-
-    //Attempt new divergence from og code
-
-    // for i in 0..igd.nCtg{
-    //
-    //     for j in 0..igd.nTile{
-    //
-    //
-    //     }
-    //
-    //
-    //
-    // }
-
-
 
 
     // This calculation is from og code.
@@ -223,99 +207,34 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
     let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
     let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
-    //for (i, k) in n_Tile.iter().enumerate() {
-    for i in 0..m {
 
-        let k = n_Tile[i as usize];
-
-        // println!("\nFrom Enumeration, here is i: {},  k {}", i,k);
-        // println!("From Enumeration, here is chr_loc: {}", chr_loc);
-
-        let mut temp_cnt: Vec<i32> = Vec::with_capacity(k as usize);
-
-        for k_cnt in 0..k{
-
-            reader.read_exact(&mut buffer)?;
-            let mtile_count_value = i32::from_le_bytes(buffer);
-
-            temp_cnt.push(mtile_count_value);
+    for (i, k) in n_Tile.iter().enumerate() {
+        let mut cnt = Vec::with_capacity(*k as usize);
+        for _ in 0..*k {
+            cnt.push(reader.read_i32::<LittleEndian>()?);
         }
+        nCnt.push(cnt);
 
-
-
-
-
-        // we read as u8 and then must convert back to i32. This seems like an unecessary step if we could just do everything as either u8 or i32...
-        // let length = cnt.len();
-        // let i32_converted_cnt =  cnt.into_iter().map(|byte| byte as i32).collect();
-        //
-        // println!("Converted count: {:?} length vs k: {} vs {}", i32_converted_cnt, length, k);
-
-        // TODO this converted count is truncating value or not vonverting them corectly
-        //nCnt.push(i32_converted_cnt);
-
-        nCnt.push(temp_cnt);
-
-
-        let mut idx = vec![0; k as usize];
-
-        // for j in 0..*k {
-        //     if j > 0 {
-        //         idx[j as usize] = idx[j as usize - 1] + (nCnt[i][j as usize - 1] as i64) * (gdsize as i64);
-        //     }
-        //
-        //     chr_loc = chr_loc + (nCnt[i][j as usize] as i64) * (gdsize as i64);
-        // }
-
+        let mut idx = Vec::with_capacity(*k as usize);
+        idx.push(chr_loc); // Assuming chr_loc is calculated outside this function
+        for j in 1..*k {
+            idx.push(idx[j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64);
+        }
         tIdx.push(idx);
-
-
     }
 
     igd.nCnt = nCnt;
     igd.tIdx = tIdx;
 
-    // More of a direct port of the C code...
-    // getting tile information
-
-    // for i in 0..m {
-    //     //k = iGD->nTile[i]
-    //     let i_idx = i.clone() as usize;
-    //     let k = igd.nTile[i_idx].clone();
-    //     println!("\n k: {:?}, chrm_loc: {}", k, chr_loc);
-    //     // og code, nCnt originally
-    //     // k = iGD->nTile[i];
-    //     // iGD->nCnt[i] = calloc(k, sizeof(int32_t));
-    //     // ni = fread(iGD->nCnt[i], sizeof(int32_t)*k, 1, fp);
-    //     reader.read_exact(&mut buffer)?;
-    //     let current_nCnt = i32::from_le_bytes(buffer);
-    //
-    //     igd.nCnt.push(current_nCnt);
-    //     //println!("\n k: {:?}, chrm_loc: {}", k, chr_loc);
-    //
-    //     // og code
-    //     // iGD->tIdx[i] = calloc(k, sizeof(int64_t));
-    //     // iGD->tIdx[i][0] = chr_loc;
-    //
-    //     //igd.tIdx.push(Vec::from(chr_loc.clone())); // vec of vecs
-    //
-    //     for j in 1..k {
-    //         let idx = i as usize;
-    //         let jdx = j as usize;
-    //
-    //         //igd.tIdx[idx][jdx];
-    //     }
-    // }
 
     // Read cName
 
-    // Read cName data
     let mut c_name = Vec::with_capacity(m as usize);
     for _ in 0..m{
 
         let mut buf = [0u8; 40];
         reader.read_exact(&mut buf)?;
-        println!("Raw bytes: {:x?}", buf);
+        //println!("Raw bytes: {:x?}", buf);
         let name = String::from_utf8(buf.to_vec()).unwrap(); // TODO assumes utf 8, add handling for error later
         let name = name.trim_matches('\0');
         c_name.push(String::from(name)); // Maybe just have this be a String and not a vec<String>?
@@ -328,11 +247,12 @@ pub fn get_igd_info(database_path: &String) -> Result<igd_t_from_disk, Error> {
 
     }
 
-
-
-
     // Place values in hash map
+    for (i, name) in igd.cName.iter().enumerate() {
 
+        hash_table.insert(name.to_string(), i as i32);
+
+    }
 
 
     return Ok(igd);
