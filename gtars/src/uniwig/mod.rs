@@ -236,7 +236,7 @@ pub fn uniwig_main(
                     "Warning: Chromosome size not found for {} in chrom.sizes. Skipping...",
                     chromosome.chrom
                 );
-                break; // Or handle the error differently
+                continue; // Or handle the error differently
             }
         };
 
