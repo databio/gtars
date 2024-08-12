@@ -281,7 +281,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         L1 = 0;
     }
 
-    let tsv_save_path = format!("{}{}{}", output_path, db_output_name, "_index.tsv");
+    let tsv_save_path = format!("{}{}{}", output_path, db_output_name, ".tsv");
     let tsv_parent_path = tsv_save_path.clone();
     let path = std::path::Path::new(&tsv_parent_path).parent().unwrap();
     let result = create_file_with_parents(path);
@@ -463,6 +463,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     }
                 };
 
+                // TODO we should delete the temp files after processing...
                 //println!(" Reading from tempfile {:?}", temp_tile_file);
 
                 // Read from Temp File
