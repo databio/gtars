@@ -17,7 +17,7 @@ pub const MAX_CHROM_NAME_LEN: usize = 40;
 
 #[derive(Default, Clone)]
 pub struct gdata_t {
-    pub idx: i32, //genomic object--data set index
+    pub idx: i32,   //genomic object--data set index
     pub start: i32, //region start
     pub end: i32,   //region end
     pub value: i32,
@@ -30,7 +30,7 @@ impl gdata_t {
 }
 #[derive(Default, Clone, Copy)]
 pub struct gdata0_t {
-    pub idx: i32, //genomic object--data set index
+    pub idx: i32,   //genomic object--data set index
     pub start: i32, //region start
     pub end: i32,   //region end
 }
@@ -87,7 +87,7 @@ impl tile_t {
 }
 
 pub fn igd_get_create_matches(matches: &ArgMatches) {
-    println!("HELLO FROM IGD CREATE SUBMODULE!");
+    //println!("HELLO FROM IGD CREATE SUBMODULE!");
 
     let output_path = matches
         .get_one::<String>("output")
@@ -121,7 +121,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
     //Check that file path exists and get number of files
     let mut all_bed_files: Vec<PathBuf> = Vec::new();
-    //let mut all_bed_buffers = Vec::new();
 
     let mut ix = 0;
     let (mut start, mut end) = (0, 0);
@@ -166,7 +165,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             // if it parses, add it to collected lines, increment ix
             match ctg {
                 Some(ctg) => {
-                    println!("ctg successfully parsed {}", ctg);
+                    //println!("ctg successfully parsed {}", ctg);
                     all_bed_files.push(entry.path());
                     ix += 1;
                 }
@@ -187,7 +186,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     //Prep memory allocation in a Rust-like manner
     // TODO original code checks that the bed file can be parsed BEFORE memory allocation
     // TODO but then re-parses the bed file again later.
-    // TODO use something like avg.shrink_to_fit(); after we've collected all the files?
     // og C code:
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
@@ -216,8 +214,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         while m == 0 && ig < n_files {
             //og comment: m>0 defines breaks when reading maxCount
 
-            // Have to take ref and then clone the PathBuf
-            // TODO Is this the proper way to do it??
             let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to the PathBuf
             let fp = file_path_buf.clone();
 
@@ -228,41 +224,41 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
             let mut buffer = String::new();
 
-            for line in reader.lines(){
+            for line in reader.lines() {
                 let line = line.expect("Error reading line"); // Handle errors
                 if m != 0 {
                     break;
                 }
-                    // TODO original code: if(nCols>4) va = atol(splits[4]);
-                    // assumes that 5th value it numeric from original .gz file. Is this valid?
-                    // va = score  ----> https://genome.ucsc.edu/FAQ/FAQformat.html#format1
+                // TODO original code: if(nCols>4) va = atol(splits[4]);
+                // assumes that 5th value it numeric from original .gz file. Is this valid?
+                // va = score  ----> https://genome.ucsc.edu/FAQ/FAQformat.html#format1
 
-                    // for line in reader.lines() {
-                    //     let line = line.expect("Error reading line"); // Handle errors
+                // for line in reader.lines() {
+                //     let line = line.expect("Error reading line"); // Handle errors
 
-                    let ctg = parse_bed(&line, &mut start, &mut end, &mut va);
+                let ctg = parse_bed(&line, &mut start, &mut end, &mut va);
 
-                    match ctg {
-                        Some(ctg) => {
-                            // check that st>=0 and end <321000000   NOTE: these values taken from og code.
-                            if start >= 0 && end < 321000000 {
-                                igd_add(&mut igd, &mut hash_table, ctg, start, end, va, ig);
-                                nr[ig] += 1;
-                                avg[ig] += end - start;
-                                //println!("DEBUG: after igd add");
-                            }
+                match ctg {
+                    Some(ctg) => {
+                        // check that st>=0 and end <321000000   NOTE: these values taken from og code.
+                        if start >= 0 && end < 321000000 {
+                            igd_add(&mut igd, &mut hash_table, ctg, start, end, va, ig);
+                            nr[ig] += 1;
+                            avg[ig] += end - start;
+                            //println!("DEBUG: after igd add");
                         }
-                        None => continue,
                     }
+                    None => continue,
+                }
 
-                    nL += 1;
+                nL += 1;
 
-                    if igd.total > maxCount {
-                        m = 1;
-                        i1 = ig;
-                        L1 = nL;
-                    }
-                 //endpoint
+                if igd.total > maxCount {
+                    m = 1;
+                    i1 = ig;
+                    L1 = nL;
+                }
+                //endpoint
             }
 
             if m == 0 {
@@ -285,16 +281,13 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         L1 = 0;
     }
 
-    //TODO CODE TO save _index.tsv (part 3)
-
-    //sprintf(idFile, "%s%s%s", oPath, igdName, "_index.tsv");
     let tsv_save_path = format!("{}{}{}", output_path, db_output_name, "_index.tsv");
     let tsv_parent_path = tsv_save_path.clone();
     let path = std::path::Path::new(&tsv_parent_path).parent().unwrap();
     let result = create_file_with_parents(path);
 
     match result {
-        Ok(file) => println!("TSV File created or opened successfully!"),
+        Ok(file) => (),
         Err(err) => println!("Error creating file: {}", err),
     }
     let mut file = OpenOptions::new()
@@ -302,8 +295,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         .append(true) // Append data to the existing file if it does exist
         .open(tsv_save_path)
         .unwrap();
-
-    //fprintf(fpi, "Index\tFile\tNumber of regions\tAvg size\n");
 
     let initial_line = format!("Index\tFile\tNumber of Regions\t Avg size\n");
     let mut buffer = Vec::new();
@@ -320,33 +311,38 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
         total_regions += nr[i];
 
-        //TODO divergence in avg sizes between this and og code. Check fp precision vs int.
         total_avg_size += avg[i] as f32;
 
         // Write file summary
         //writeln!(fpi, "{} \t {} \t {} \t {}", i, filename, nr[i], avg[i] / nr[i]).expect("Couldn't write to file");
-        let current_line = format!("{} \t {} \t {} \t {} \n", i, filename, nr[i], avg[i] / nr[i]);
+        let current_line = format!(
+            "{} \t {} \t {} \t {} \n",
+            i,
+            filename,
+            nr[i],
+            avg[i] / nr[i]
+        );
         buffer.write_all((&current_line).as_ref()).unwrap();
     }
 
     file.write_all(&buffer).unwrap();
 
-    //TODO Code to sort tile data and save into single files per ctg (part 4)
-
     // Sort tile data and save into single files per ctg
     igd_save_db(&mut igd, output_path, db_output_name);
 
     let save_path = format!("{}{}{}", output_path, db_output_name, ".igd");
-    println!("IGD saved to: {}",save_path);
-    println!("Total Intervals: {}, l_avg: {}", total_regions, total_avg_size/total_regions as f32);
-    println!("IGD, nctg:{}  total:{}  nbp:{}", igd.nctg, igd.total, igd.nbp);
-
-
+    println!("IGD saved to: {}", save_path);
+    println!(
+        "Total Intervals: {}, l_avg: {}",
+        total_regions,
+        total_avg_size / total_regions as f32
+    );
+    println!("nctg:{}  nbp:{}", igd.nctg, igd.nbp);
 }
 
 /// Saves the primary .igd database file by reading the temp_tiles, sorting them, and then writing the sorted tiles to disk.
 pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &String) {
-    println!("HELLO from igd_save_db");
+    //println!("HELLO from igd_save_db");
     // this is the igd_save func from the original c code
 
     // sprintf(idFile, "%s%s%s_%i", oPath, "data0/", ctg->name, j);
@@ -379,8 +375,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         buffer.write_all(&current_ctg.mTiles.to_le_bytes()).unwrap();
 
-
-        println!("writing current_ctg.mTile to databse: {} ", current_ctg.mTiles);
+        //println!("writing current_ctg.mTile to databse: {} ", current_ctg.mTiles);
     }
 
     for i in 0..igd.nctg {
@@ -391,22 +386,19 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         let n = current_ctg.mTiles;
 
-        println!("iterating current_ctg.mTile to databse: {} ", current_ctg.mTiles);
+        //println!("iterating current_ctg.mTile to database: {} ", current_ctg.mTiles);
 
         for j in 0..n {
             let jdx = j.clone() as usize;
 
             if current_ctg.gTile[jdx].nCnts != 0 {
-            println!(" nCnts >0:  {} > 0, contig number: {}, mTile number: {}", current_ctg.gTile[jdx].nCnts, i ,j);
-        }
-                buffer
-                    .write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes())
-                    .unwrap();
+                //println!(" nCnts >0:  {} > 0, contig number: {}, mTile number: {}", current_ctg.gTile[jdx].nCnts, i ,j);
+            }
+            buffer
+                .write_all(&current_ctg.gTile[jdx].nCnts.to_le_bytes())
+                .unwrap();
             //}
-
         }
-
-
     }
 
     for i in 0..igd.nctg {
@@ -417,13 +409,13 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
         //40 bytes might actually be overkill?
         name_bytes.resize(MAX_CHROM_NAME_LEN, 0);
-        
+
         //let len = std::cmp::min(name_bytes.len(), MAX_CHROM_NAME_LEN);
         //buffer.write_all(&name_bytes[..len]).unwrap();
 
         buffer.write_all(&name_bytes).unwrap();
 
-        println!("writing chromosome name, {}", current_ctg.name);
+        //println!("writing chromosome name, {}", current_ctg.name);
         //buffer.write_all((&current_ctg.name).as_ref()).unwrap();
     }
 
@@ -448,7 +440,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             let nrec = q.nCnts;
 
             if nrec > 0 {
-               // println!("nrec greater than 0: {}   Here is j index: {}", nrec, j);
+                // println!("nrec greater than 0: {}   Here is j index: {}", nrec, j);
                 let save_path = format!(
                     "{}{}{}_{}{}",
                     output_path, "data0/", current_ctg.name, j, ".igd"
@@ -499,7 +491,6 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
                     //println!("Looping through g_datat in temp files\n");
                     //println!("idx: {}  start: {} end: {}\n", idx,start,end);
-
 
                     gdata.push(gdata_t {
                         idx: idx,
@@ -607,7 +598,10 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
             }
         }
     }
-    println!("nCtgs (igd.nctg): {}, nRegions (igd.total): {}, nTiles (nt): {}", igd.nctg, igd.total, nt);
+    println!(
+        "Temporary Tiles:\n nCtgs (igd.nctg): {}, nRegions (igd.total): {}, nTiles (nt): {}",
+        igd.nctg, igd.total, nt
+    );
     igd.total = 0; // batch total
 }
 
@@ -723,7 +717,8 @@ pub fn igd_add(
         let tt = p.mTiles;
 
         p.mTiles = n2 + 1;
-        p.gTile.resize(p.mTiles as usize, crate::igd::create::tile_t::default());
+        p.gTile
+            .resize(p.mTiles as usize, crate::igd::create::tile_t::default());
         // original code: p->gTile = realloc(p->gTile, p->mTiles*sizeof(tile_t));
         // Supposedly we may not need to do this ...  p.gTile = Vec::resize()   ???
 

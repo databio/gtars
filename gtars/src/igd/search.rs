@@ -1,11 +1,11 @@
-use std::collections::HashMap;
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
 use crate::igd::create::{gdata0_t, gdata_t, igd_t, MAX_CHROM_NAME_LEN};
+use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
+use std::collections::HashMap;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::path::Path;
-use byteorder::{LittleEndian,ReadBytesExt};
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
@@ -94,7 +94,8 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     //read_and_print_numbers(database_path.as_str());
 
     // Create IGD Struct from database
-    let IGD: igd_t_from_disk = get_igd_info(database_path,&mut hash_table).expect("Could not open IGD");
+    let IGD: igd_t_from_disk =
+        get_igd_info(database_path, &mut hash_table).expect("Could not open IGD");
 
     // If query "-q" used set to mode 1
 
@@ -111,7 +112,6 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     Ok(())
 }
 fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
-
     // Just a debug function to determine what was actually written to a file.
     let file = File::open(filename)?;
     let mut reader = BufReader::new(file);
@@ -132,7 +132,10 @@ fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
     Ok(())
 }
 #[allow(unused_variables)]
-pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32>,) -> Result<igd_t_from_disk, Error> {
+pub fn get_igd_info(
+    database_path: &String,
+    hash_table: &mut HashMap<String, i32>,
+) -> Result<igd_t_from_disk, Error> {
     println!("hello from get_igd_info");
 
     let mut igd = igd_t_from_disk::new();
@@ -175,7 +178,7 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
     igd.gType = gType;
     igd.nCtg = nCtg;
 
-    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp, gType, nCtg);
     let gdsize = if gType == 0 {
         std::mem::size_of::<gdata0_t>()
     } else {
@@ -195,7 +198,6 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
 
     igd.nTile = n_Tile.clone();
 
-
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
     let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
@@ -207,7 +209,6 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
     let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
     let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
-
     for (i, k) in n_Tile.iter().enumerate() {
         let mut cnt = Vec::with_capacity(*k as usize);
         for _ in 0..*k {
@@ -218,7 +219,9 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
         let mut idx = Vec::with_capacity(*k as usize);
         idx.push(chr_loc); // Assuming chr_loc is calculated outside this function
         for j in 1..*k {
-            idx.push(idx[j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64);
+            idx.push(
+                idx[j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
+            );
         }
         tIdx.push(idx);
     }
@@ -226,12 +229,10 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
     igd.nCnt = nCnt;
     igd.tIdx = tIdx;
 
-
     // Read cName
 
     let mut c_name = Vec::with_capacity(m as usize);
-    for _ in 0..m{
-
+    for _ in 0..m {
         let mut buf = [0u8; 40];
         reader.read_exact(&mut buf)?;
         //println!("Raw bytes: {:x?}", buf);
@@ -242,18 +243,14 @@ pub fn get_igd_info(database_path: &String, hash_table: &mut HashMap<String, i32
 
     igd.cName = c_name.clone();
 
-    for name in c_name{
+    for name in c_name {
         println!("Retrieved chrom name (cName):  {}", name);
-
     }
 
     // Place values in hash map
     for (i, name) in igd.cName.iter().enumerate() {
-
         hash_table.insert(name.to_string(), i as i32);
-
     }
-
 
     return Ok(igd);
 }
