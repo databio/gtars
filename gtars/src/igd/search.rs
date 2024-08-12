@@ -5,7 +5,7 @@ use clap::ArgMatches;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
@@ -18,7 +18,7 @@ pub struct igd_t_from_disk {
     // int32_t **nCnt;						//num of counts in each tile
     // int64_t **tIdx;
     pub nFiles: i32,
-    pub file_info: info_t,
+    pub file_info: Vec<info_t>,
     pub filename: String,
     pub nbp: i32,   //data type: 0, 1, 2 etc; size differs
     pub gType: i32, //data type: 0, 1, 2 etc; size differs
@@ -94,10 +94,14 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     //read_and_print_numbers(database_path.as_str());
 
     // Create IGD Struct from database
-    let IGD: igd_t_from_disk =
+    let mut IGD: igd_t_from_disk =
         get_igd_info(database_path, &mut hash_table).expect("Could not open IGD");
 
     // If query "-q" used set to mode 1
+
+    let tsv_path = get_tsv_path(database_path).unwrap();
+
+    get_file_info_tsv(tsv_path, &mut IGD).unwrap();
 
     match mode {
         1 => {}
@@ -110,6 +114,15 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     println!("FINISHED");
 
     Ok(())
+}
+
+/// Given an igd path, simple give the .tsv path that is parallel to the  .igd path
+fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
+    let igd_path = Path::new(igd_path);
+    let stem = igd_path.file_stem()?;
+    let mut tsv_path = igd_path.with_file_name(stem);
+    tsv_path.set_extension("tsv");
+    Some(tsv_path)
 }
 fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
     // Just a debug function to determine what was actually written to a file.
@@ -253,6 +266,53 @@ pub fn get_igd_info(
     }
 
     return Ok(igd);
+}
+
+pub fn get_file_info_tsv(tsv_path: PathBuf, igd: &mut igd_t_from_disk) -> Result<(), Error> {
+    let path = Path::new(&tsv_path);
+
+    let mut tsv_file = match OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(path)
+    {
+        Ok(temp_tile_file) => temp_tile_file,
+        Err(err) => {
+            println!("Error opening file: {}", err);
+            return Err(err);
+        }
+    };
+
+    let reader = BufReader::new(tsv_file);
+
+    let mut lines = reader.lines();
+    // Skip header
+    lines.next();
+
+    let mut infos: Vec<info_t> = Vec::new();
+
+    let mut count = 0;
+
+    for line in lines {
+        println!("Reading tsv lines...");
+        count = count + 1;
+        let line = line?;
+        let fields: Vec<&str> = line.split('\t').collect();
+
+        let info = info_t {
+            fileName: fields[1].to_string(),
+            nr: fields[2].to_string().as_str().trim().parse().unwrap(),
+            md: fields[3].to_string().as_str().trim().parse().unwrap(),
+        };
+        infos.push(info);
+    }
+
+    igd.nFiles = count;
+
+    igd.file_info = infos;
+
+    Ok(())
 }
 
 fn check_file_extension(path: &str, expected_extension: &str) -> Result<(), String> {
