@@ -1,4 +1,4 @@
-use crate::common::consts::BED_FILE_EXTENSION;
+use crate::common::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
@@ -9,6 +9,7 @@ use std::mem;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
+use crate::common::utils::get_dynamic_reader;
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
@@ -133,7 +134,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     for entry in fs::read_dir(filelist).unwrap() {
         // For now only take .bed files
         if let Some(extension) = entry.as_ref().unwrap().path().extension() {
-            if extension != BED_FILE_EXTENSION.trim_start_matches('.') {
+            if extension != BED_FILE_EXTENSION.trim_start_matches('.') && extension != GZ_FILE_EXTENSION.trim_start_matches('.') {
                 continue;
             }
         } else {
@@ -146,9 +147,10 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         if file_type.is_file() {
             // open bed file
             // TODO original code uses gzopen (I assume for .gz files?)
-            let file = File::open(entry.path()).unwrap();
+            // let file = File::open(entry.path()).unwrap();
+            // let mut reader = BufReader::new(file);
 
-            let mut reader = BufReader::new(file);
+            let mut reader = get_dynamic_reader(&entry.path()).unwrap();
 
             /// Read the very first line and see if it meets our criteria
             /// MUST USE by_ref() otherwise borrow checker won't let code compile
@@ -215,10 +217,12 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             //og comment: m>0 defines breaks when reading maxCount
 
             let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to the PathBuf
+            println!("{:?}", file_path_buf);
             let fp = file_path_buf.clone();
+            // let file = File::open(fp).unwrap();
+            // let mut reader = BufReader::new(file);
 
-            let file = File::open(fp).unwrap();
-            let mut reader = BufReader::new(file);
+            let mut reader = get_dynamic_reader(&fp).unwrap();
 
             nL = 0;
 
