@@ -217,7 +217,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             //og comment: m>0 defines breaks when reading maxCount
 
             let file_path_buf = &all_bed_files[ig]; // could not move all_bed_files, so using reference to the PathBuf
-            println!("{:?}", file_path_buf);
             let fp = file_path_buf.clone();
             // let file = File::open(fp).unwrap();
             // let mut reader = BufReader::new(file);
@@ -310,8 +309,13 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     for i in 0..n_files {
         let file_path = &all_bed_files[i].to_str().unwrap();
 
-        // TODO this line isn't not grabbing the end name as desired
-        let filename = file_path.rsplitn(1, '/').next().unwrap_or(file_path);
+
+        let file_path = Path::new(file_path);
+        //let filename = file_path.rsplitn(1, '/').next().unwrap_or(file_path);
+
+        let filename = file_path.file_name().unwrap();
+        let filename = filename.to_str().unwrap();
+
 
         total_regions += nr[i];
 
