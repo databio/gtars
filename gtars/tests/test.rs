@@ -106,6 +106,18 @@ mod tests {
         igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
     }
 
+    //
+    // #[rstest]
+    // fn test_specific_db(){
+    //
+    //     //temp test for debugging
+    //     let db_path = format!("{}","/home/drc/IGD_TEST_2/igd_rust_output/igd_database.igd");
+    //     let query_path = format!("{}","/home/drc/IGD_TEST_2/source_single_bedfile/igd_test_single_source.bed");
+    //
+    //     igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
+    //
+    // }
+
     #[rstest]
     fn test_igd_add() {
         // First create a new igd struct
