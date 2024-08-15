@@ -1,11 +1,12 @@
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
-use crate::igd::create::{gdata0_t, gdata_t, igd_t, MAX_CHROM_NAME_LEN};
+use crate::igd::create::{gdata0_t, gdata_t, igd_t, parse_bed, MAX_CHROM_NAME_LEN};
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
 use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::path::{Path, PathBuf};
+use crate::common::utils::get_dynamic_reader;
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
@@ -101,10 +102,31 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
 
     let tsv_path = get_tsv_path(database_path).unwrap();
 
-    get_file_info_tsv(tsv_path, &mut IGD).unwrap();
+    get_file_info_tsv(tsv_path, &mut IGD).unwrap(); //sets igd.finfo
+
+    let nfiles = IGD.nFiles;
+    let hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
+
+
 
     match mode {
-        1 => {}
+        1 => {
+            // Querying a bedfile
+
+            if IGD.gType==0 {
+                getOverlaps0(query_file_path, hits);
+            } else {
+
+                getOverlaps(query_file_path, hits, &mut hash_table);
+
+
+            }
+
+
+
+
+
+        }
         _ => {
             println!("Invalid mode selected, exiting");
             return Ok(());
@@ -114,6 +136,70 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     println!("FINISHED");
 
     Ok(())
+}
+
+fn getOverlaps(query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+    println!("getoverlaps");
+
+    let mut start = 0;
+    let mut end = 0;
+    let mut va = 0;
+    let mut ols = 0;
+
+    // Get Reader dynamically
+    let path = Path::new(query_file);
+    let mut reader = get_dynamic_reader(path).unwrap();
+
+
+    for line in reader.lines(){
+
+        let line = line.unwrap();
+        let ctg = parse_bed(&line, &mut start, &mut end, &mut va);
+        // if it parses, add it to collected lines, increment ix
+        match ctg {
+            Some(ctg) => {
+                println!("ctg successfully parsed {}", ctg);
+
+                let nl = get_overlaps(ctg,start,end, &mut hits, hash_table);
+
+                ols += nl;
+
+            }
+            None => continue,
+        }
+
+
+    }
+
+    return ols
+
+}
+
+fn get_overlaps(ctg: String, start: i32, end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+    println!("get overlaps main func");
+
+    let ichr = get_id(ctg, hash_table);
+    println!("{}", ichr);
+    42
+
+}
+
+fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
+
+    let key_check = hash_table.contains_key(&ctg);
+
+    if key_check == false{
+        -1
+    }else{
+
+        let value = hash_table.get(&ctg).unwrap();
+        value.clone()
+    }
+
+}
+
+fn getOverlaps0(p0: &String, p1: Vec<i64>) {
+    println!("getoverlaps0");
 }
 
 /// Given an igd path, simple give the .tsv path that is parallel to the  .igd path
