@@ -117,7 +117,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
                 getOverlaps0(query_file_path, hits);
             } else {
 
-                getOverlaps(query_file_path, hits, &mut hash_table);
+                getOverlaps(IGD, query_file_path, hits, &mut hash_table);
 
 
             }
@@ -138,13 +138,16 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     Ok(())
 }
 
-fn getOverlaps(query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+fn getOverlaps(mut IGD: igd_t_from_disk, query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
     println!("getoverlaps");
 
     let mut start = 0;
     let mut end = 0;
     let mut va = 0;
     let mut ols = 0;
+
+    let mut preChr = -6;
+    let mut preIdx=-8;
 
     // Get Reader dynamically
     let path = Path::new(query_file);
@@ -160,7 +163,7 @@ fn getOverlaps(query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap
             Some(ctg) => {
                 println!("ctg successfully parsed {}", ctg);
 
-                let nl = get_overlaps(ctg,start,end, &mut hits, hash_table);
+                let nl = get_overlaps(&mut IGD,ctg,start,end, &mut hits, hash_table, &mut preChr, &mut preIdx);
 
                 ols += nl;
 
@@ -175,12 +178,73 @@ fn getOverlaps(query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap
 
 }
 
-fn get_overlaps(ctg: String, start: i32, end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>, preChr: &mut i32, preIdx: &mut i32) -> i32 {
     println!("get overlaps main func");
 
     let ichr = get_id(ctg, hash_table);
-    println!("{}", ichr);
-    42
+    println!("ichr from get_overlaps {}", ichr);
+
+    if ichr < 0 {
+
+        return 0
+    }
+
+    // Define Boundary
+    let n1 = query_start/IGD.nbp;
+    let mut n2 = (query_end-1)/IGD.nbp;
+    let i: i32;
+    let j: i32;
+    let ni: i32;
+
+    //int32_t tE, tS, tL, tR, tM, tmpi, tmpi1, mlen, mTile = IGD->nTile[ichr]-1;
+    //int32_t nols = 0;
+
+    let tE: i32;
+    let tS: i32;
+    let tL: i32;
+    let tR: i32;
+    let tM: i32;
+    let tmpi: i32;
+    let tmpi1: i32;
+    let mlen: i32;
+
+    let nols = 0; //number of overlaps
+
+    let mTile = IGD.nTile[ichr as usize] -1 ;
+
+    if n1>mTile{
+        return 0
+    }
+
+    // Min between n2 and mTile
+    if n2<mTile{
+        n2 = n2;
+    } else{
+        n2 = mTile;
+    }
+
+    tmpi = IGD.nCnt[ichr as usize][n1 as usize];
+    tmpi1 = tmpi-1;
+
+    println!("prechr and preidx at the  begining of get_overlaps {}  {} \n", preChr, preIdx);
+
+    if tmpi > 0 {
+
+        if n1 != *preIdx || ichr!= *preChr {
+
+
+
+
+        }
+
+
+
+
+
+
+    }
+
+    return nols;
 
 }
 
