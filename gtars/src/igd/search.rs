@@ -225,9 +225,9 @@ fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_
 
     let tE: i32;
     let tS: i32;
-    let tL: i32;
-    let tR: i32;
-    let tM: i32;
+    let mut tL: i32;
+    let mut tR: i32;
+    let mut tM: i32;
     let tmpi: i32;
     let tmpi1: i32;
     let mlen: i32;
@@ -291,14 +291,47 @@ fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_
                         end,
                         value,
                     });
+            }
+
+            // check this code block. original code has outside this first check but that would potentially cause access to wrong
+            // object in memory if it was not de-allocated?
+
+            if query_end > gData[0].start{                                  // sorted by start
+
+                // find the 1st rs<qe
+                tL = 0;
+                tR=tmpi1;
+
+                while tL<tR-1 {
+                    tM = (tL+tR)/2;                                         //result: tR=tL+1, tL.s<qe
+                    if gData[tM as usize].start < query_end{
+                        tL= tM;                                             //right side
+                    }else{
+                        tR = tM;                                            //left side
+                    }
+
+                }
+                if gData[tR as usize].start < query_end{
+                    tL = tR;
+
+                }
+
+                for i in (0..=tL).rev() { // count down from tL (inclusive to tL)
+
+                    if gData[i as usize].end > query_start{
+                        hits[gData[i as usize].idx as usize] = hits[gData[i as usize].idx as usize] + 1;
+
+                    }
+
+                }
 
 
 
             }
 
-
-
         }
+
+
 
 
 
