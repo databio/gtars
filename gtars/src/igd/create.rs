@@ -1,4 +1,5 @@
 use crate::common::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
+use crate::common::utils::get_dynamic_reader;
 use anyhow::{Context, Result};
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
@@ -9,7 +10,6 @@ use std::mem;
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
-use crate::common::utils::get_dynamic_reader;
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
@@ -134,7 +134,9 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     for entry in fs::read_dir(filelist).unwrap() {
         // For now only take .bed files
         if let Some(extension) = entry.as_ref().unwrap().path().extension() {
-            if extension != BED_FILE_EXTENSION.trim_start_matches('.') && extension != GZ_FILE_EXTENSION.trim_start_matches('.') {
+            if extension != BED_FILE_EXTENSION.trim_start_matches('.')
+                && extension != GZ_FILE_EXTENSION.trim_start_matches('.')
+            {
                 continue;
             }
         } else {
@@ -309,13 +311,11 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     for i in 0..n_files {
         let file_path = &all_bed_files[i].to_str().unwrap();
 
-
         let file_path = Path::new(file_path);
         //let filename = file_path.rsplitn(1, '/').next().unwrap_or(file_path);
 
         let filename = file_path.file_name().unwrap();
         let filename = filename.to_str().unwrap();
-
 
         total_regions += nr[i];
 

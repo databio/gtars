@@ -1,16 +1,16 @@
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
+use crate::common::utils::get_dynamic_reader;
 use crate::igd::create::{gdata0_t, gdata_t, igd_t, parse_bed, MAX_CHROM_NAME_LEN};
+use anyhow::Context;
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
+use flate2::read::GzDecoder;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
-use std::io::{BufRead, BufReader, Error, Read, Seek, Write, SeekFrom};
+use std::io::{BufRead, BufReader, Error, Read, Seek, SeekFrom, Write};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
-use anyhow::Context;
-use flate2::read::GzDecoder;
-use crate::common::utils::get_dynamic_reader;
 
 #[derive(Default)]
 pub struct igd_t_from_disk {
@@ -109,8 +109,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     get_file_info_tsv(tsv_path, &mut IGD).unwrap(); //sets igd.finfo
 
     let nfiles = IGD.nFiles;
-    let hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
-
+    let mut hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
 
     //Open IGD database
 
@@ -118,20 +117,26 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
         1 => {
             // Querying a bedfile
 
-            if IGD.gType==0 {
-                getOverlaps0(query_file_path, hits);
+            if IGD.gType == 0 {
+                //getOverlaps0(query_file_path, hits);
+                println!("gType = 0");
             } else {
-
-                getOverlaps(IGD, database_path, query_file_path, hits, &mut hash_table);
-
-
+                getOverlaps(&mut IGD, database_path, query_file_path, &mut hits, &mut hash_table);
             }
 
+            println!("index\t number of regions\t number of hits\t File_name");
 
+            let mut total: i64 = 0;
+            for (i, hit) in hits.iter().enumerate() {
+                if *hit > 0 {
+                    println!("{}\t{}\t{}\t{}", i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName);
+                }
+                total += hit;
+            }
 
-
-
+            println!("Total: {}", total);
         }
+
         _ => {
             println!("Invalid mode selected, exiting");
             return Ok(());
@@ -143,7 +148,13 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     Ok(())
 }
 #[allow(unused_variables)]
-fn getOverlaps(mut IGD: igd_t_from_disk, database_path: &String,query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+fn getOverlaps(
+    IGD: &igd_t_from_disk,
+    database_path: &String,
+    query_file: &String,
+    hits: &mut Vec<i64>,
+    hash_table: &mut HashMap<String, i32>,
+) -> i32 {
     println!("getoverlaps");
 
     let mut start = 0;
@@ -152,12 +163,11 @@ fn getOverlaps(mut IGD: igd_t_from_disk, database_path: &String,query_file: &Str
     let mut ols = 0;
 
     let mut preChr = -6;
-    let mut preIdx=-8;
+    let mut preIdx = -8;
 
     // Get Reader for QUERY FILE dynamically
     let path = Path::new(query_file);
     let mut reader = get_dynamic_reader(path).unwrap();
-
 
     // Also get Reader for database file (.igd)
     let parent_path = database_path.clone();
@@ -168,12 +178,12 @@ fn getOverlaps(mut IGD: igd_t_from_disk, database_path: &String,query_file: &Str
         .create(true)
         .append(true)
         .read(true)
-        .open(dbpath).unwrap();
+        .open(dbpath)
+        .unwrap();
 
     let mut db_reader = BufReader::new(db_file);
 
-    for line in reader.lines(){
-
+    for line in reader.lines() {
         let line = line.unwrap();
         let ctg = parse_bed(&line, &mut start, &mut end, &mut va);
         // if it parses, add it to collected lines, increment ix
@@ -181,41 +191,57 @@ fn getOverlaps(mut IGD: igd_t_from_disk, database_path: &String,query_file: &Str
             Some(ctg) => {
                 println!("ctg successfully parsed {}", ctg);
 
-                let nl = get_overlaps(&mut IGD,ctg,start,end, &mut hits, hash_table, &mut preChr, &mut preIdx, path, &mut db_reader);
+                let nl = get_overlaps(
+                    &IGD,
+                    ctg,
+                    start,
+                    end,
+                    hits,
+                    hash_table,
+                    &mut preChr,
+                    &mut preIdx,
+                    path,
+                    &mut db_reader,
+                );
 
                 ols += nl;
-
             }
             None => continue,
         }
-
-
     }
 
-    return ols
-
+    return ols;
 }
-
 
 // trait ReaderSeeker: Read + Seek {
 //
 // }
 
 #[allow(unused_variables)]
-fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>, preChr: &mut i32, preIdx: &mut i32, query_path: &Path, db_reader: &mut BufReader<File>) -> i32 {
+fn get_overlaps(
+    IGD: &igd_t_from_disk,
+    ctg: String,
+    query_start: i32,
+    query_end: i32,
+    hits: &mut Vec<i64>,
+    hash_table: &mut HashMap<String, i32>,
+    preChr: &mut i32,
+    preIdx: &mut i32,
+    query_path: &Path,
+    db_reader: &mut BufReader<File>,
+) -> i32 {
     println!("get overlaps main func");
 
     let ichr = get_id(ctg, hash_table);
     println!("ichr from get_overlaps {}", ichr);
 
     if ichr < 0 {
-
-        return 0
+        return 0;
     }
 
     // Define Boundary
-    let n1 = query_start/IGD.nbp;
-    let mut n2 = (query_end-1)/IGD.nbp;
+    let n1 = query_start / IGD.nbp;
+    let mut n2 = (query_end - 1) / IGD.nbp;
     let i: i32;
     let j: i32;
     let ni: i32;
@@ -224,139 +250,222 @@ fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_
     //int32_t nols = 0;
 
     let tE: i32;
-    let tS: i32;
+    let mut tS: i32;
     let mut tL: i32;
     let mut tR: i32;
     let mut tM: i32;
-    let tmpi: i32;
-    let tmpi1: i32;
+    let mut tmpi: i32;
+    let mut tmpi1: i32;
     let mlen: i32;
 
     let nols = 0; //number of overlaps
 
-    let mTile = IGD.nTile[ichr as usize] -1 ;
+    let mTile = IGD.nTile[ichr as usize] - 1;
 
-    if n1>mTile{
-        return 0
+    if n1 > mTile {
+        return 0;
     }
 
     // Min between n2 and mTile
-    if n2<mTile{
+    if n2 < mTile {
         n2 = n2;
-    } else{
+    } else {
         n2 = mTile;
     }
 
     tmpi = IGD.nCnt[ichr as usize][n1 as usize];
-    tmpi1 = tmpi-1;
+    tmpi1 = tmpi - 1;
 
-    println!("prechr and preidx at the  begining of get_overlaps {}  {} \n", preChr, preIdx);
-
-
+    println!(
+        "prechr and preidx at the  begining of get_overlaps {}  {} \n",
+        preChr, preIdx
+    );
 
     if tmpi > 0 {
+        if n1 != *preIdx || ichr != *preChr {
+            println!(
+                "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
+                n1, preIdx, ichr, preChr
+            );
 
-        if n1 != *preIdx || ichr!= *preChr {
+            db_reader
+                .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
+                .unwrap();
 
-            db_reader.seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64)).unwrap();
+            let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
 
-            let mut gData:Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
+            for i in 0..tmpi {
+                let mut buf = [0u8; 16];
 
-            for i in 0..tmpi{
+                let n = db_reader.read(&mut buf).unwrap();
 
-                    let mut buf = [0u8; 16];
+                if n == 0 {
+                    //println!("Breaking loop while reading tempfile");
+                    break;
+                } else if n != 16 {
+                    //panic!("Cannot read temp file.");
+                    break;
+                }
 
-                    let n = db_reader.read(&mut buf).unwrap();
+                let mut rdr = &buf[..] as &[u8];
+                let idx = rdr.read_i32::<LittleEndian>().unwrap();
+                let start = rdr.read_i32::<LittleEndian>().unwrap();
+                let end = rdr.read_i32::<LittleEndian>().unwrap();
+                let value = rdr.read_i32::<LittleEndian>().unwrap();
 
-                    if n == 0 {
-                        //println!("Breaking loop while reading tempfile");
-                        break;
-                    } else if n != 16 {
-                        //panic!("Cannot read temp file.");
-                       break;
-                    }
+                //println!("Looping through g_datat in temp files\n");
+                //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
-                    let mut rdr = &buf[..] as &[u8];
-                    let idx = rdr.read_i32::<LittleEndian>().unwrap();
-                    let start = rdr.read_i32::<LittleEndian>().unwrap();
-                    let end = rdr.read_i32::<LittleEndian>().unwrap();
-                    let value = rdr.read_i32::<LittleEndian>().unwrap();
+                gData.push(gdata_t {
+                    idx: idx,
+                    start,
+                    end,
+                    value,
+                });
 
-                    //println!("Looping through g_datat in temp files\n");
-                    //println!("idx: {}  start: {} end: {}\n", idx,start,end);
-
-                    gData.push(gdata_t {
-                        idx: idx,
-                        start,
-                        end,
-                        value,
-                    });
+                *preIdx = n1;
+                *preChr = ichr;
             }
 
             // check this code block. original code has outside this first check but that would potentially cause access to wrong
             // object in memory if it was not de-allocated?
 
-            if query_end > gData[0].start{                                  // sorted by start
+            if query_end > gData[0].start {
+                // sorted by start
 
                 // find the 1st rs<qe
                 tL = 0;
-                tR=tmpi1;
+                tR = tmpi1;
 
-                while tL<tR-1 {
-                    tM = (tL+tR)/2;                                         //result: tR=tL+1, tL.s<qe
-                    if gData[tM as usize].start < query_end{
-                        tL= tM;                                             //right side
-                    }else{
-                        tR = tM;                                            //left side
+                while tL < tR - 1 {
+                    tM = (tL + tR) / 2; //result: tR=tL+1, tL.s<qe
+                    if gData[tM as usize].start < query_end {
+                        tL = tM; //right side
+                    } else {
+                        tR = tM; //left side
                     }
-
                 }
-                if gData[tR as usize].start < query_end{
+                if gData[tR as usize].start < query_end {
                     tL = tR;
-
                 }
+                //--------------------------
+                for i in (0..=tL).rev() {
+                    // count down from tL (inclusive to tL)
 
-                for i in (0..=tL).rev() { // count down from tL (inclusive to tL)
-
-                    if gData[i as usize].end > query_start{
-                        hits[gData[i as usize].idx as usize] = hits[gData[i as usize].idx as usize] + 1;
-
+                    if gData[i as usize].end > query_start {
+                        hits[gData[i as usize].idx as usize] =
+                            hits[gData[i as usize].idx as usize] + 1;
                     }
-
                 }
-
-
-
             }
-
         }
 
+        if n2 > n1 {
+            println!("n2>n1  {} vs {} ", n2, n1);
 
+            let mut bd = IGD.nbp * (n1 + 1); // only keep the first
+            for j in (n1 + 1)..=n2 {
+                //n2 inclusive
+                tmpi = IGD.nCnt[ichr as usize][j as usize];
+                tmpi1 = tmpi - 1;
+                if tmpi > 0 {
+                    let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
 
+                    if j != *preIdx || ichr != *preChr {
+                        println!(
+                            "j != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
+                            j, preIdx, ichr, preChr
+                        );
 
+                        db_reader
+                            .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][j as usize] as u64))
+                            .unwrap();
 
+                        for i in 0..tmpi {
+                            let mut buf = [0u8; 16];
 
+                            let n = db_reader.read(&mut buf).unwrap();
 
+                            if n == 0 {
+                                //println!("Breaking loop while reading tempfile");
+                                break;
+                            } else if n != 16 {
+                                //panic!("Cannot read temp file.");
+                                break;
+                            }
 
+                            let mut rdr = &buf[..] as &[u8];
+                            let idx = rdr.read_i32::<LittleEndian>().unwrap();
+                            let start = rdr.read_i32::<LittleEndian>().unwrap();
+                            let end = rdr.read_i32::<LittleEndian>().unwrap();
+                            let value = rdr.read_i32::<LittleEndian>().unwrap();
+
+                            //println!("Looping through g_datat in temp files\n");
+                            //println!("idx: {}  start: {} end: {}\n", idx,start,end);
+
+                            gData.push(gdata_t {
+                                idx: idx,
+                                start,
+                                end,
+                                value,
+                            });
+
+                            *preIdx = j;
+                            *preChr = ichr;
+                        }
+                    }
+
+                    if query_end > gData[0].start {
+                        tS = 0;
+
+                        while tS < tmpi && gData[tS as usize].start < bd {
+                            //query start < bd
+                            tS = tS + 1;
+                        }
+
+                        tL = 0;
+                        tR = tmpi1;
+
+                        while tL < tR - 1 {
+                            //result: tR=tL+1, tL.s<qe
+                            tM = (tL + tR) / 2;
+
+                            if gData[tM as usize].start < query_end {
+                                // right side
+                                tL = tM;
+                            } else {
+                                tR = tM;
+                            }
+                        }
+                        if gData[tR as usize].start < query_end {
+                            tL = tR;
+                        }
+                        //--------------------------
+                        for i in (tS..=tL).rev() {
+                            if gData[i as usize].end > query_start {
+                                hits[gData[i as usize].idx as usize] =
+                                    hits[gData[i as usize].idx as usize] + 1;
+                            }
+                        }
+                    }
+                }
+                bd = bd + IGD.nbp;
+            }
+        }
     }
-
-    return nols;
-
+    return nols; //TODO this is from the original code but its not actually being used for anything. hits vec IS the main thing.
 }
 
 #[allow(unused_variables)]
 fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
-
     let key_check = hash_table.contains_key(&ctg);
 
-    if key_check == false{
+    if key_check == false {
         -1
-    }else{
-
+    } else {
         let value = hash_table.get(&ctg).unwrap();
         value.clone()
     }
-
 }
 
 #[allow(unused_variables)]
