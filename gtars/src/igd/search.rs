@@ -3,9 +3,13 @@ use crate::igd::create::{gdata0_t, gdata_t, igd_t, parse_bed, MAX_CHROM_NAME_LEN
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
-use std::io::{BufRead, BufReader, Error, Read, Write};
+use std::io::{BufRead, BufReader, Error, Read, Seek, Write, SeekFrom};
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
+use anyhow::Context;
+use flate2::read::GzDecoder;
 use crate::common::utils::get_dynamic_reader;
 
 #[derive(Default)]
@@ -108,6 +112,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     let hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
 
 
+    //Open IGD database
 
     match mode {
         1 => {
@@ -117,7 +122,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
                 getOverlaps0(query_file_path, hits);
             } else {
 
-                getOverlaps(IGD, query_file_path, hits, &mut hash_table);
+                getOverlaps(IGD, database_path, query_file_path, hits, &mut hash_table);
 
 
             }
@@ -137,8 +142,8 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
 
     Ok(())
 }
-
-fn getOverlaps(mut IGD: igd_t_from_disk, query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
+#[allow(unused_variables)]
+fn getOverlaps(mut IGD: igd_t_from_disk, database_path: &String,query_file: &String, mut hits: Vec<i64>, hash_table: &mut HashMap<String, i32>) -> i32 {
     println!("getoverlaps");
 
     let mut start = 0;
@@ -149,10 +154,23 @@ fn getOverlaps(mut IGD: igd_t_from_disk, query_file: &String, mut hits: Vec<i64>
     let mut preChr = -6;
     let mut preIdx=-8;
 
-    // Get Reader dynamically
+    // Get Reader for QUERY FILE dynamically
     let path = Path::new(query_file);
     let mut reader = get_dynamic_reader(path).unwrap();
 
+
+    // Also get Reader for database file (.igd)
+    let parent_path = database_path.clone();
+
+    let dbpath = std::path::Path::new(&parent_path);
+
+    let mut db_file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .read(true)
+        .open(dbpath).unwrap();
+
+    let mut db_reader = BufReader::new(db_file);
 
     for line in reader.lines(){
 
@@ -163,7 +181,7 @@ fn getOverlaps(mut IGD: igd_t_from_disk, query_file: &String, mut hits: Vec<i64>
             Some(ctg) => {
                 println!("ctg successfully parsed {}", ctg);
 
-                let nl = get_overlaps(&mut IGD,ctg,start,end, &mut hits, hash_table, &mut preChr, &mut preIdx);
+                let nl = get_overlaps(&mut IGD,ctg,start,end, &mut hits, hash_table, &mut preChr, &mut preIdx, path, &mut db_reader);
 
                 ols += nl;
 
@@ -178,7 +196,13 @@ fn getOverlaps(mut IGD: igd_t_from_disk, query_file: &String, mut hits: Vec<i64>
 
 }
 
-fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>, preChr: &mut i32, preIdx: &mut i32) -> i32 {
+
+// trait ReaderSeeker: Read + Seek {
+//
+// }
+
+#[allow(unused_variables)]
+fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_end: i32, hits:&mut Vec<i64>, hash_table: &mut HashMap<String, i32>, preChr: &mut i32, preIdx: &mut i32, query_path: &Path, db_reader: &mut BufReader<File>) -> i32 {
     println!("get overlaps main func");
 
     let ichr = get_id(ctg, hash_table);
@@ -228,10 +252,49 @@ fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_
 
     println!("prechr and preidx at the  begining of get_overlaps {}  {} \n", preChr, preIdx);
 
+
+
     if tmpi > 0 {
 
         if n1 != *preIdx || ichr!= *preChr {
 
+            db_reader.seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64)).unwrap();
+
+            let mut gData:Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
+
+            for i in 0..tmpi{
+
+                    let mut buf = [0u8; 16];
+
+                    let n = db_reader.read(&mut buf).unwrap();
+
+                    if n == 0 {
+                        //println!("Breaking loop while reading tempfile");
+                        break;
+                    } else if n != 16 {
+                        //panic!("Cannot read temp file.");
+                       break;
+                    }
+
+                    let mut rdr = &buf[..] as &[u8];
+                    let idx = rdr.read_i32::<LittleEndian>().unwrap();
+                    let start = rdr.read_i32::<LittleEndian>().unwrap();
+                    let end = rdr.read_i32::<LittleEndian>().unwrap();
+                    let value = rdr.read_i32::<LittleEndian>().unwrap();
+
+                    //println!("Looping through g_datat in temp files\n");
+                    //println!("idx: {}  start: {} end: {}\n", idx,start,end);
+
+                    gData.push(gdata_t {
+                        idx: idx,
+                        start,
+                        end,
+                        value,
+                    });
+
+
+
+            }
 
 
 
@@ -248,6 +311,7 @@ fn get_overlaps(IGD: &mut igd_t_from_disk, ctg: String, query_start: i32, query_
 
 }
 
+#[allow(unused_variables)]
 fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
 
     let key_check = hash_table.contains_key(&ctg);
@@ -262,6 +326,7 @@ fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
 
 }
 
+#[allow(unused_variables)]
 fn getOverlaps0(p0: &String, p1: Vec<i64>) {
     println!("getoverlaps0");
 }
