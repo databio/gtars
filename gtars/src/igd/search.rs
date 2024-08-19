@@ -579,6 +579,7 @@ pub fn get_igd_info(
     let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
     let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
+    // TODO this block may be causing errors downstream when calculating overlaps
     for (i, k) in n_Tile.iter().enumerate() {
         let mut cnt = Vec::with_capacity(*k as usize);
         for _ in 0..*k {
@@ -587,12 +588,14 @@ pub fn get_igd_info(
         nCnt.push(cnt);
 
         let mut idx = Vec::with_capacity(*k as usize);
-        idx.push(chr_loc); // Assuming chr_loc is calculated outside this function
+        idx.push(chr_loc);
         for j in 1..*k {
             idx.push(
                 idx[j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
             );
         }
+
+        //println!("here is idx for i and k: {:?} {} {} ", idx, i, k);
         tIdx.push(idx);
     }
 
