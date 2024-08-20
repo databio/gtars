@@ -568,35 +568,61 @@ pub fn get_igd_info(
 
     igd.nTile = n_Tile.clone();
 
+    println!("here is m: {}",m);
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
     let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
 
+
+    println!("Initial chr loc: {}", chr_loc);
+
     for n in 0..m {
-        chr_loc = chr_loc + n as i64 * 4;
+        chr_loc = chr_loc + (n_Tile[n as usize] as i64)* 4;
     }
+
+    println!("Skip to new chr loc: {}", chr_loc);
 
     let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
     let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
 
     // TODO this block may be causing errors downstream when calculating overlaps
     for (i, k) in n_Tile.iter().enumerate() {
+        println!("here is idx for i and k: {} {} ", i, k);
         let mut cnt = Vec::with_capacity(*k as usize);
         for _ in 0..*k {
             cnt.push(reader.read_i32::<LittleEndian>()?);
         }
         nCnt.push(cnt);
 
-        let mut idx = Vec::with_capacity(*k as usize);
-        idx.push(chr_loc);
+        //let mut idx = Vec::with_capacity(*k as usize);
+        tIdx.push(Vec::with_capacity(*k as usize));
+
+        //let mut idx: Vec<Vec<i64>> = Vec::new();
+
+        tIdx[i as usize].push(chr_loc);
+
+
         for j in 1..*k {
-            idx.push(
-                idx[j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
-            );
+            // tIdx[i as usize].push(
+            //     tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
+            // );
+
+            tIdx[i as usize][j as usize] = tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64;
+
+            // tIdx[i as usize].push(
+            //     tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
+            // );
+            println!("here is tIdx chr loc: {:?}", tIdx[i as usize][j as usize]);
         }
 
+        //chr_loc = iGD->tIdx[i][k-1]+iGD->nCnt[i][k-1]*gdsize;
+
+
         //println!("here is idx for i and k: {:?} {} {} ", idx, i, k);
-        tIdx.push(idx);
+        //tIdx.push(idx);
+
+        chr_loc = tIdx[i as usize][*k as usize - 1] + nCnt[i as usize][*k as usize-1] as i64 * gdsize as i64;
+        println!("Skip to new chr loc after m_tile iteration: {}", chr_loc);
     }
 
     igd.nCnt = nCnt;
@@ -655,7 +681,7 @@ pub fn get_file_info_tsv(tsv_path: PathBuf, igd: &mut igd_t_from_disk) -> Result
     let mut count = 0;
 
     for line in lines {
-        println!("Reading tsv lines...");
+        //println!("Reading tsv lines...");
         count = count + 1;
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
