@@ -91,7 +91,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
         }
     }
 
-    println!("\n {} \n {}", database_path, query_file_path);
+    //println!("\n {} \n {}", database_path, query_file_path);
 
     //Get file info from the associated TSV
 
@@ -156,7 +156,6 @@ fn getOverlaps(
     hits: &mut Vec<i64>,
     hash_table: &mut HashMap<String, i32>,
 ) -> i32 {
-    println!("getoverlaps");
 
     let mut start = 0;
     let mut end = 0;
@@ -277,17 +276,19 @@ fn get_overlaps(
     tmpi = IGD.nCnt[ichr as usize][n1 as usize];
     tmpi1 = tmpi - 1;
 
-    println!(
-        "prechr and preidx at the  begining of get_overlaps {}  {} \n",
-        preChr, preIdx
-    );
+    // println!(
+    //     "prechr and preidx at the  begining of get_overlaps {}  {} \n",
+    //     preChr, preIdx
+    // );
 
     if tmpi > 0 {
         if n1 != *preIdx || ichr != *preChr {
-            println!(
-                "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
-                n1, preIdx, ichr, preChr
-            );
+            // println!(
+            //     "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
+            //     n1, preIdx, ichr, preChr
+            // );
+
+            //println!("Seek start here: {}",IGD.tIdx[ichr as usize][n1 as usize]);
 
             db_reader
                 .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
@@ -320,7 +321,7 @@ fn get_overlaps(
                 let value = rdr.read_i32::<LittleEndian>().unwrap();
 
                 //println!("Looping through g_datat in temp files\n");
-                //println!("idx: {}  start: {} end: {}\n", idx,start,end);
+               // println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                 gData[i as usize] = gdata_t {
                     idx: idx,
@@ -339,13 +340,14 @@ fn get_overlaps(
 
             if query_end > gData[0].start {
                 // sorted by start
-
+                //println!("query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
                 // find the 1st rs<qe
                 tL = 0;
                 tR = tmpi1;
 
                 while tL < tR - 1 {
                     tM = (tL + tR) / 2; //result: tR=tL+1, tL.s<qe
+                    //println!("What is tM? {}", tM);
                     if gData[tM as usize].start < query_end {
                         tL = tM; //right side
                     } else {
@@ -359,8 +361,9 @@ fn get_overlaps(
                 for i in (0..=tL).rev() {
                     // count down from tL (inclusive to tL)
                     //println!("iterate over i: {} ", i);
-                    //println!("gdata {} vs query start {}",gData[i as usize].end,query_start);
+                    //println!("gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
                     if gData[i as usize].end > query_start {
+                        //println!(" > gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
                         hits[gData[i as usize].idx as usize] =
                             hits[gData[i as usize].idx as usize] + 1;
                     }
@@ -369,7 +372,7 @@ fn get_overlaps(
         }
 
         if n2 > n1 {
-            println!("n2>n1  {} vs {} ", n2, n1);
+            //println!("n2>n1  {} vs {} ", n2, n1);
 
             let mut bd = IGD.nbp * (n1 + 1); // only keep the first
             for j in (n1 + 1)..=n2 {
@@ -380,10 +383,10 @@ fn get_overlaps(
                     let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
 
                     if j != *preIdx || ichr != *preChr {
-                        println!(
-                            "j != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
-                            j, preIdx, ichr, preChr
-                        );
+                        // println!(
+                        //     "j != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
+                        //     j, preIdx, ichr, preChr
+                        // );
 
                         db_reader
                             .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][j as usize] as u64))
@@ -450,7 +453,9 @@ fn get_overlaps(
                         }
                         //--------------------------
                         for i in (tS..=tL).rev() {
+                            //println!("* gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
                             if gData[i as usize].end > query_start {
+                                //println!("* gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
                                 hits[gData[i as usize].idx as usize] =
                                     hits[gData[i as usize].idx as usize] + 1;
                             }
