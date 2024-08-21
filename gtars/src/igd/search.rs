@@ -109,7 +109,8 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     get_file_info_tsv(tsv_path, &mut IGD).unwrap(); //sets igd.finfo
 
     let nfiles = IGD.nFiles;
-    let mut hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
+    //let mut hits: Vec<i64> = Vec::with_capacity(nfiles as usize);
+    let mut hits: Vec<i64> = vec![0; nfiles as usize];
 
     //Open IGD database
 
@@ -189,7 +190,7 @@ fn getOverlaps(
         // if it parses, add it to collected lines, increment ix
         match ctg {
             Some(ctg) => {
-                println!("ctg successfully parsed {}", ctg);
+                //println!("ctg successfully parsed {}", ctg);
 
                 let nl = get_overlaps(
                     &IGD,
@@ -230,10 +231,10 @@ fn get_overlaps(
     query_path: &Path,
     db_reader: &mut BufReader<File>,
 ) -> i32 {
-    println!("get overlaps main func");
+    //println!("get overlaps main func");
 
     let ichr = get_id(ctg, hash_table);
-    println!("ichr from get_overlaps {}", ichr);
+    //println!("ichr from get_overlaps {}", ichr);
 
     if ichr < 0 {
         return 0;
@@ -292,7 +293,12 @@ fn get_overlaps(
                 .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
                 .unwrap();
 
-            let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
+            let mut gData: Vec<gdata_t> = Vec::new();
+            for j in 0..tmpi{
+                gData.push(gdata_t::default())
+
+            }
+            //let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
 
             for i in 0..tmpi {
                 let mut buf = [0u8; 16];
@@ -316,12 +322,13 @@ fn get_overlaps(
                 //println!("Looping through g_datat in temp files\n");
                 //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
-                gData.push(gdata_t {
+                gData[i as usize] = gdata_t {
                     idx: idx,
                     start,
                     end,
                     value,
-                });
+                };
+
 
                 *preIdx = n1;
                 *preChr = ichr;
@@ -351,7 +358,8 @@ fn get_overlaps(
                 //--------------------------
                 for i in (0..=tL).rev() {
                     // count down from tL (inclusive to tL)
-
+                    //println!("iterate over i: {} ", i);
+                    //println!("gdata {} vs query start {}",gData[i as usize].end,query_start);
                     if gData[i as usize].end > query_start {
                         hits[gData[i as usize].idx as usize] =
                             hits[gData[i as usize].idx as usize] + 1;
@@ -506,7 +514,7 @@ pub fn get_igd_info(
     database_path: &String,
     hash_table: &mut HashMap<String, i32>,
 ) -> Result<igd_t_from_disk, Error> {
-    println!("hello from get_igd_info");
+    //println!("hello from get_igd_info");
 
     let mut igd = igd_t_from_disk::new();
 
@@ -548,7 +556,7 @@ pub fn get_igd_info(
     igd.gType = gType;
     igd.nCtg = nCtg;
 
-    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp, gType, nCtg);
+    //println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp, gType, nCtg);
     let gdsize = if gType == 0 {
         std::mem::size_of::<gdata0_t>()
     } else {
@@ -568,61 +576,59 @@ pub fn get_igd_info(
 
     igd.nTile = n_Tile.clone();
 
-    println!("here is m: {}",m);
+    //println!("here is m: {}",m);
     // This calculation is from og code.
     // TODO The above buffer size might throw it off and should be double checked
     let mut chr_loc = (12 + 44 * m) as i64; // originally this is the header size in bytes
 
 
-    println!("Initial chr loc: {}", chr_loc);
+    //println!("Initial chr loc: {}", chr_loc);
 
     for n in 0..m {
         chr_loc = chr_loc + (n_Tile[n as usize] as i64)* 4;
     }
 
-    println!("Skip to new chr loc: {}", chr_loc);
+    //println!("Skip to new chr loc: {}", chr_loc);
 
-    let mut nCnt: Vec<Vec<i32>> = Vec::with_capacity(n_Tile.len());
-    let mut tIdx: Vec<Vec<i64>> = Vec::with_capacity(n_Tile.len());
+    let mut nCnt: Vec<Vec<i32>> = Vec::new();
+    for _ in 0..n_Tile.len() {
+        nCnt.push(Vec::new());
+    }
+
+    let mut tIdx: Vec<Vec<i64>> = Vec::new();
+    for _ in 0..n_Tile.len(){
+        tIdx.push(Vec::new());
+    }
+
 
     // TODO this block may be causing errors downstream when calculating overlaps
-    for (i, k) in n_Tile.iter().enumerate() {
-        println!("here is idx for i and k: {} {} ", i, k);
-        let mut cnt = Vec::with_capacity(*k as usize);
-        for _ in 0..*k {
-            cnt.push(reader.read_i32::<LittleEndian>()?);
+
+    for i in 0..m{
+
+        let k =  igd.nTile[i as usize];
+
+        //println!("here is idx for i and k: {} {} ", i, k);
+        let mut cnt = vec![0; k as usize]; //original code used calloc which does initialize arrays with 0's
+        for kdx in 0..k {
+            cnt[kdx as usize] = reader.read_i32::<LittleEndian>()?;
         }
-        nCnt.push(cnt);
 
-        //let mut idx = Vec::with_capacity(*k as usize);
-        tIdx.push(Vec::with_capacity(*k as usize));
+        nCnt[i as usize] = cnt;
 
-        //let mut idx: Vec<Vec<i64>> = Vec::new();
+        let mut idx = vec![0; k as usize];
 
-        tIdx[i as usize].push(chr_loc);
+        tIdx[i as usize] = idx;
+        tIdx[i as usize][0] = chr_loc;
 
 
-        for j in 1..*k {
-            // tIdx[i as usize].push(
-            //     tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
-            // );
+        for j in 1..k {
 
             tIdx[i as usize][j as usize] = tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64;
 
-            // tIdx[i as usize].push(
-            //     tIdx[i as usize][j as usize - 1] + (nCnt[i as usize][j as usize - 1] as i64) * gdsize as i64,
-            // );
-            println!("here is tIdx chr loc: {:?}", tIdx[i as usize][j as usize]);
         }
 
-        //chr_loc = iGD->tIdx[i][k-1]+iGD->nCnt[i][k-1]*gdsize;
-
-
-        //println!("here is idx for i and k: {:?} {} {} ", idx, i, k);
-        //tIdx.push(idx);
-
-        chr_loc = tIdx[i as usize][*k as usize - 1] + nCnt[i as usize][*k as usize-1] as i64 * gdsize as i64;
-        println!("Skip to new chr loc after m_tile iteration: {}", chr_loc);
+        chr_loc = tIdx[i as usize][k as usize - 1] + nCnt[i as usize][k as usize-1] as i64 * gdsize as i64;
+        //println!("Skip to new chr loc after m_tile iteration: {}", chr_loc);
     }
 
     igd.nCnt = nCnt;
@@ -642,9 +648,9 @@ pub fn get_igd_info(
 
     igd.cName = c_name.clone();
 
-    for name in c_name {
-        println!("Retrieved chrom name (cName):  {}", name);
-    }
+    // for name in c_name {
+    //     println!("Retrieved chrom name (cName):  {}", name);
+    // }
 
     // Place values in hash map
     for (i, name) in igd.cName.iter().enumerate() {
