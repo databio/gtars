@@ -2,7 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/gtars?&logo=rust)](https://crates.io/crates/gtars)
 
 <h1 align="center">
-<img src="gtars/docs/logo.svg" alt="gtars logo" height="100px">
+<img src="gtars/docs/gtars_logo_new_with_words.png" alt="gtars logo" height="100px">
 </h1>
 
 `gtars` is a rust crate that provides a set of tools for working with genomic interval data. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well.
