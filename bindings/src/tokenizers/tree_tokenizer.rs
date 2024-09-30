@@ -1,12 +1,13 @@
 use gtars::tokenizers::traits::SpecialTokens;
 use pyo3::prelude::*;
-use pyo3::types::PyAny;
+use pyo3::types::{PyAny, PyList};
 
 use anyhow::Result;
+use rayon::prelude::*;
 
 use std::path::Path;
 
-use gtars::common::models::RegionSet;
+use gtars::common::models::{region, RegionSet};
 use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
@@ -125,6 +126,10 @@ impl PyTreeTokenizer {
         let regions = tokenized.into_region_vec();
 
         Ok(regions.into_iter().map(|r| r.into()).collect())
+    }
+
+    pub fn tokenize_batch(&self, regions: &Bound<'_, PyAny>) {
+           
     }
 
     pub fn tokenize_bed_file(&self, path: String) -> Result<Vec<PyRegion>> {
