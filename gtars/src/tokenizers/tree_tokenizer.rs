@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use rayon::prelude::*;
@@ -424,6 +424,13 @@ impl TreeTokenizer {
         let rs = RegionSet::from(regions);
 
         Ok(self.tokenize_region_set(&rs))
+    }
+
+    pub fn tokenize_bed_file_batch(&self, bed_files: &[PathBuf]) -> Vec<Result<TokenizedRegionSet>> {
+        bed_files
+            .par_iter()
+            .map(|bed_file| self.tokenize_bed_file(bed_file))
+            .collect()
     }
 
     pub fn tokenize_region_set_batch(&self, region_sets: &[RegionSet]) -> Vec<TokenizedRegionSet> {
