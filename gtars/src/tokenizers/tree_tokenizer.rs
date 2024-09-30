@@ -6,7 +6,7 @@ use rayon::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
-use crate::common::models::{region, Region, RegionSet, TokenizedRegionSet, Universe};
+use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::{create_interval_tree_from_universe, extract_regions_from_bed_file};
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};

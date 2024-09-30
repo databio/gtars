@@ -1,13 +1,14 @@
 use std::collections::HashMap;
 use std::io::BufRead;
-use std::path::Path;
+use std::path::{PathBuf, Path};
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
-use crate::common::utils::get_dynamic_reader;
+use crate::common::utils::{get_dynamic_reader, extract_regions_from_bed_file};
 use crate::tokenizers::{Tokenizer, TokenizerConfig};
 
 use super::traits::SpecialTokens;
@@ -498,6 +499,29 @@ impl Tokenizer for MetaTokenizer {
             ids: tokenized_regions,
             universe: &self.universe,
         }
+    }
+}
+
+impl MetaTokenizer {
+    pub fn tokenize_bed_file(&self, bed_file: &Path) -> Result<TokenizedRegionSet> {
+        let regions = extract_regions_from_bed_file(bed_file)?;
+        let rs = RegionSet::from(regions);
+
+        Ok(self.tokenize_region_set(&rs))
+    }
+
+    pub fn tokenize_bed_file_batch(&self, bed_files: &[PathBuf]) -> Vec<Result<TokenizedRegionSet>> {
+        bed_files
+            .par_iter()
+            .map(|bed_file| self.tokenize_bed_file(bed_file))
+            .collect()
+    }
+
+    pub fn tokenize_region_set_batch(&self, region_sets: &[RegionSet]) -> Vec<TokenizedRegionSet> {
+        region_sets
+            .par_iter()
+            .map(|rs| self.tokenize_region_set(rs))
+            .collect()
     }
 }
 
