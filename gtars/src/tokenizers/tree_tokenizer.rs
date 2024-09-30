@@ -2,10 +2,11 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use rayon::prelude::*;
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
-use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
+use crate::common::models::{region, Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::{create_interval_tree_from_universe, extract_regions_from_bed_file};
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
@@ -423,6 +424,13 @@ impl TreeTokenizer {
         let rs = RegionSet::from(regions);
 
         Ok(self.tokenize_region_set(&rs))
+    }
+
+    pub fn tokenize_region_set_batch(&self, region_sets: &[RegionSet]) -> Vec<TokenizedRegionSet> {
+        region_sets
+            .par_iter()
+            .map(|rs| self.tokenize_region_set(rs))
+            .collect()
     }
 }
 
