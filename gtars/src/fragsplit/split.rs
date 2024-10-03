@@ -43,6 +43,7 @@ pub fn pseudobulk_fragment_files(
         )
     })?;
 
+    // create actual output directory
     fs::create_dir_all(output).with_context(|| {
         format!(
             "There was an error creating the output directory: {:?}",
@@ -68,7 +69,7 @@ pub fn pseudobulk_fragment_files(
         for (index, line) in reader.lines().enumerate() {
             let line = line?;
 
-            let mut parts = line.split('\t');
+            let mut parts = line.split_whitespace();
 
             let chr = parts.next();
             let start = parts.next();
@@ -97,4 +98,50 @@ pub fn pseudobulk_fragment_files(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    fn barcode_cluster_map_file() -> &'static str {
+        "tests/data/barcode_cluster_map.tsv"
+    }
+
+    #[fixture]
+    fn path_to_fragment_files() -> &'static str {
+        "tests/data/fragments"
+    }
+
+    #[fixture]
+    fn path_to_output() -> &'static str {
+        "tests/data/out"
+    }
+
+    #[fixture]
+    fn filtered_out_barcode() -> &'static str {
+        "AAACGCAAGCAAAGGATCGGCT"
+    }
+
+    #[rstest]
+    fn test_fragment_file_splitter(
+        barcode_cluster_map_file: &str,
+        path_to_fragment_files: &str,
+        path_to_output: &str,
+        filtered_out_barcode: &str,
+    ) {
+        let barcode_cluster_map_file = Path::new(barcode_cluster_map_file);
+        let mapping = BarcodeToClusterMap::from_file(barcode_cluster_map_file).unwrap();
+
+        let path_to_fragment_files = Path::new(path_to_fragment_files);
+        let path_to_output = Path::new(path_to_output);
+
+        let res = pseudobulk_fragment_files(path_to_fragment_files, &mapping, path_to_output);
+
+        assert_eq!(res.is_ok(), true);
+
+    }
 }
