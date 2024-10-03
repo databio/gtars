@@ -1,12 +1,13 @@
-use std::io::{BufReader, BufRead};
-use std::collections::HashMap;
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
+use std::io::{BufRead, BufReader};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 
 pub struct BarcodeToClusterMap {
-    map: HashMap<String, char>
+    map: HashMap<String, char>,
+    cluster_labels: HashSet<char>,
 }
 
 pub trait ClusterLookup {
@@ -21,38 +22,44 @@ impl ClusterLookup for BarcodeToClusterMap {
 
 impl BarcodeToClusterMap {
     pub fn from_file(file: &Path) -> Result<Self> {
-
-        let file = File::open(file)
-            .with_context(|| {
-                format!("Couldn't open file: {:?}", file)
-            })?;
+        let file = File::open(file).with_context(|| format!("Couldn't open file: {:?}", file))?;
 
         let mut map: HashMap<String, char> = HashMap::new();
+        let mut cluster_labels: HashSet<char> = HashSet::new();
 
         let reader = BufReader::new(file);
+
         for (index, line) in reader.lines().enumerate() {
-            let line = line.with_context(|| {
-                format!("There was an error reading line {}", index + 1)
-            })?;
-            
+            let line =
+                line.with_context(|| format!("There was an error reading line {}", index + 1))?;
+
             let mut parts = line.split('\t');
             let barcode = parts.next();
             let cluster_id = parts.next();
-            
+
             if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
                 if cluster_id.len() > 1 {
-                    anyhow::bail!("Invalid cluster id: Must be coercible to a char type. Found: {:?}", cluster_id);
+                    anyhow::bail!(
+                        "Invalid cluster id: Must be coercible to a char type. Found: {:?}",
+                        cluster_id
+                    );
                 }
-                map.insert(barcode.to_string(), cluster_id.chars().next().unwrap());
+                let cluster_id = cluster_id.chars().next().unwrap();
+                map.insert(barcode.to_string(), cluster_id);
+                if !cluster_labels.contains(&cluster_id) {
+                    cluster_labels.insert(cluster_id);
+                }
             } else {
-                anyhow::bail!("There was an error parsing the cluster map file for the following line: {:?}", line)
+                anyhow::bail!(
+                    "There was an error parsing the cluster map file for the following line: {:?}",
+                    line
+                )
             }
-                
         }
 
         Ok(BarcodeToClusterMap {
-            map
+            map,
+            cluster_labels,
         })
-        
     }
 }
