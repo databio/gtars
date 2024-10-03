@@ -1,0 +1,58 @@
+use std::io::{BufReader, BufRead};
+use std::collections::HashMap;
+use std::path::Path;
+use std::fs::File;
+
+use anyhow::{Context, Result};
+
+pub struct BarcodeToClusterMap {
+    map: HashMap<String, char>
+}
+
+pub trait ClusterLookup {
+    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<char>;
+}
+
+impl ClusterLookup for BarcodeToClusterMap {
+    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<char> {
+        self.map.get(barcode).copied()
+    }
+}
+
+impl BarcodeToClusterMap {
+    pub fn from_file(file: &Path) -> Result<Self> {
+
+        let file = File::open(file)
+            .with_context(|| {
+                format!("Couldn't open file: {:?}", file)
+            })?;
+
+        let mut map: HashMap<String, char> = HashMap::new();
+
+        let reader = BufReader::new(file);
+        for (index, line) in reader.lines().enumerate() {
+            let line = line.with_context(|| {
+                format!("There was an error reading line {}", index + 1)
+            })?;
+            
+            let mut parts = line.split('\t');
+            let barcode = parts.next();
+            let cluster_id = parts.next();
+            
+            if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
+                if cluster_id.len() > 1 {
+                    anyhow::bail!("Invalid cluster id: Must be coercible to a char type. Found: {:?}", cluster_id);
+                }
+                map.insert(barcode.to_string(), cluster_id.chars().next().unwrap());
+            } else {
+                anyhow::bail!("There was an error parsing the cluster map file for the following line: {:?}", line)
+            }
+                
+        }
+
+        Ok(BarcodeToClusterMap {
+            map
+        })
+        
+    }
+}
