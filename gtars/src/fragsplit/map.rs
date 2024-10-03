@@ -72,4 +72,8 @@ impl BarcodeToClusterMap {
             cluster_labels,
         })
     }
+
+    pub fn get_cluster_labels(&self) -> HashSet<char> {
+        self.cluster_labels.clone()
+    }
 }
