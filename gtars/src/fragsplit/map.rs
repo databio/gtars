@@ -14,9 +14,19 @@ pub trait ClusterLookup {
     fn get_cluster_from_barcode(&self, barcode: &str) -> Option<char>;
 }
 
+pub trait ClusterCount {
+    fn n_clusters(&self) -> u16;
+}
+
 impl ClusterLookup for BarcodeToClusterMap {
     fn get_cluster_from_barcode(&self, barcode: &str) -> Option<char> {
         self.map.get(barcode).copied()
+    }
+}
+
+impl ClusterCount for BarcodeToClusterMap {
+    fn n_clusters(&self) -> u16 {
+        self.cluster_labels.len() as u16
     }
 }
 
