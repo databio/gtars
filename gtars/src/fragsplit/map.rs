@@ -44,8 +44,16 @@ impl BarcodeToClusterMap {
                 line.with_context(|| format!("There was an error reading line {}", index + 1))?;
 
             let mut parts = line.split('\t');
+
             let barcode = parts.next();
             let cluster_id = parts.next();
+
+            if barcode.is_none() || cluster_id.is_none() {
+                anyhow::bail!(
+                    "Invalid line format: Expected two tab-separated values, found: {:?}",
+                    line
+                );
+            }
 
             if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
                 if cluster_id.len() > 1 {
@@ -75,5 +83,30 @@ impl BarcodeToClusterMap {
 
     pub fn get_cluster_labels(&self) -> HashSet<char> {
         self.cluster_labels.clone()
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    fn barcode_cluster_map_file() -> &'static str {
+        "tests/data/barcode_cluster_map.tsv"
+    }
+
+    #[fixture]
+    fn filtered_out_barcode() -> &'static str {
+        "AAACGCAAGCAAAGGATCGGCT"
+    }
+
+    #[rstest]
+    fn make_map_from_file(barcode_cluster_map_file: &str) {
+        let path = Path::new(barcode_cluster_map_file);
+        let mapping = BarcodeToClusterMap::from_file(path);
+
+        assert_eq!(mapping.is_ok(), true);
+        assert_eq!(mapping.unwrap().get_cluster_labels().len(), 3)
     }
 }

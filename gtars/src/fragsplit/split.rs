@@ -28,7 +28,7 @@ use super::map::ClusterLookup;
 ///
 /// # Arguments:
 /// - files: path to fragment files
-/// - mapping: path to mapping (a csv file)
+/// - mapping: path to mapping (a tsv file)
 /// - output: path to the output folder where new files should go
 ///
 pub fn pseudobulk_fragment_files(
