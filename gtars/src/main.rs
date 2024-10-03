@@ -3,6 +3,7 @@ use clap::Command;
 
 // go through the library crate to get the interfaces
 use gtars::tokenizers;
+use gtars::fragsplit;
 // use gtars::uniwig;
 
 pub mod consts {
@@ -19,6 +20,7 @@ fn build_parser() -> Command {
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
         .subcommand(tokenizers::cli::make_tokenization_cli())
+        .subcommand(fragsplit::cli::make_fragsplit_cli())
 }
 
 fn main() -> Result<()> {
@@ -28,6 +30,9 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches)?;
+        }
+        Some((fragsplit::consts::FRAGSPLIT_CMD, matches)) => {
+            fragsplit::cli::handlers::split_fragment_files(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

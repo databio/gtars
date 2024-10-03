@@ -66,9 +66,14 @@ pub fn pseudobulk_fragment_files(
     for file in files {
         let file = file?;
         let reader = get_dynamic_reader(&file.path())?;
+
+        // strip out any *.*.gz
+        let file_path = file.path();
+        let file_stem = file_path.file_stem().unwrap();
+        let file_stem = file_stem.to_string_lossy();
+
         for (index, line) in reader.lines().enumerate() {
             let line = line?;
-
             let mut parts = line.split_whitespace();
 
             let chr = parts.next();
@@ -80,7 +85,9 @@ pub fn pseudobulk_fragment_files(
             if let (Some(chr), Some(start), Some(end), Some(barcode), Some(read_support)) =
                 (chr, start, end, barcode, read_support)
             {
-                let cluster_id = mapping.get_cluster_from_barcode(barcode);
+                // merge file stem + barcode to get lookup values
+                let lookup_value = format!("{}+{}", file_stem, barcode);
+                let cluster_id = mapping.get_cluster_from_barcode(&lookup_value);
                 if let Some(cluster_id) = cluster_id {
                     let cluster_file = handle_map.get_mut(&cluster_id).unwrap();
                     cluster_file.write_all(
@@ -131,7 +138,6 @@ mod tests {
         barcode_cluster_map_file: &str,
         path_to_fragment_files: &str,
         path_to_output: &str,
-        filtered_out_barcode: &str,
     ) {
         let barcode_cluster_map_file = Path::new(barcode_cluster_map_file);
         let mapping = BarcodeToClusterMap::from_file(barcode_cluster_map_file).unwrap();
