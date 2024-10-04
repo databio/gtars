@@ -1,4 +1,5 @@
 use std::fs::File;
+use std::time::Instant;
 use std::io::{BufRead, BufWriter, Write};
 use std::path::Path;
 use std::{collections::HashMap, fs};
@@ -6,9 +7,11 @@ use std::{collections::HashMap, fs};
 use anyhow::{Context, Result};
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use indicatif::{ProgressBar, ProgressStyle};
 
 use crate::common::utils::get_dynamic_reader;
 use crate::fragsplit::map::BarcodeToClusterMap;
+use crate::fragsplit::utils::remove_all_extensions;
 
 use super::map::ClusterLookup;
 
@@ -51,7 +54,7 @@ pub fn pseudobulk_fragment_files(
         )
     })?;
 
-    let mut handle_map: HashMap<char, BufWriter<GzEncoder<File>>> = HashMap::new();
+    let mut handle_map: HashMap<u16, BufWriter<GzEncoder<File>>> = HashMap::new();
     for cluster_id in mapping.get_cluster_labels() {
         let file_name = format!("cluster_{cluster_id}.bed.gz");
         let file_path = output.join(file_name);
@@ -63,14 +66,24 @@ pub fn pseudobulk_fragment_files(
         handle_map.insert(cluster_id, buf_writer);
     }
 
+    let pb = ProgressBar::new_spinner();
+    pb.set_style(ProgressStyle::default_spinner()
+        .template("{spinner:.green} [{elapsed}] {msg} ({per_sec})")
+        .unwrap()
+        .tick_strings(&["-", "\\", "|", "/"]));
+
+    pb.set_message("Processing fragment files...");
+
+    let _start_time = Instant::now();
+    let mut processed_reads: u64 = 0;
+
     for file in files {
         let file = file?;
         let reader = get_dynamic_reader(&file.path())?;
 
         // strip out any *.*.gz
-        let file_path = file.path();
-        let file_stem = file_path.file_stem().unwrap();
-        let file_stem = file_stem.to_string_lossy();
+        let file_path = file.path();        
+        let file_stem = remove_all_extensions(&file_path);
 
         for (index, line) in reader.lines().enumerate() {
             let line = line?;
@@ -87,9 +100,9 @@ pub fn pseudobulk_fragment_files(
             {
                 // merge file stem + barcode to get lookup values
                 let lookup_value = format!("{}+{}", file_stem, barcode);
-                let cluster_id = mapping.get_cluster_from_barcode(&lookup_value);
-                if let Some(cluster_id) = cluster_id {
-                    let cluster_file = handle_map.get_mut(&cluster_id).unwrap();
+                let cluster = mapping.get_cluster_from_barcode(&lookup_value);
+                if let Some(cluster) = cluster {
+                    let cluster_file = handle_map.get_mut(&cluster).unwrap();
                     cluster_file.write_all(
                         format!("{chr}\t{start}\t{end}\t{barcode}\t{read_support}\n").as_bytes(),
                     )?;
@@ -101,8 +114,19 @@ pub fn pseudobulk_fragment_files(
                     line
                 ))
             }
+
+            // let elapsed = start_time.elapsed().as_secs();
+            processed_reads += 1;
+            if processed_reads % 10_000 == 0 {
+                pb.set_message(format!("Processed {} reads", processed_reads));
+            }
+
+            pb.inc(1);
         }
+
     }
+
+    pb.finish_with_message("Done!");
 
     Ok(())
 }
@@ -115,17 +139,17 @@ mod tests {
 
     #[fixture]
     fn barcode_cluster_map_file() -> &'static str {
-        "tests/data/barcode_cluster_map.tsv"
+        "tests/data/scatlas_leiden.csv"
     }
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments"
+        "tests/data/fragments-test"
     }
 
     #[fixture]
     fn path_to_output() -> &'static str {
-        "tests/data/out"
+        "tests/data/out-test"
     }
 
     #[fixture]
