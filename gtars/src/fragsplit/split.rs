@@ -1,7 +1,7 @@
 use std::fs::File;
 use std::time::Instant;
 use std::io::{BufRead, BufWriter, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Result};
@@ -46,6 +46,13 @@ pub fn pseudobulk_fragment_files(
         )
     })?;
 
+    // convert files to Path -- consume iterator
+    let files: Vec<Result<PathBuf>> = files.map(|f| {
+        let f = f?;
+        Ok(f.path())
+    })
+    .collect();
+
     // create actual output directory
     fs::create_dir_all(output).with_context(|| {
         format!(
@@ -66,24 +73,31 @@ pub fn pseudobulk_fragment_files(
         handle_map.insert(cluster_id, buf_writer);
     }
 
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(ProgressStyle::default_spinner()
+    let total_files = files.len();
+    
+    let pb = ProgressBar::new(total_files as u64);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} files ({eta})")?
+        .progress_chars("##-"));
+
+    let spinner = ProgressBar::new_spinner();
+    spinner.set_style(ProgressStyle::default_spinner()
         .template("{spinner:.green} [{elapsed}] {msg} ({per_sec})")
         .unwrap()
         .tick_strings(&["-", "\\", "|", "/"]));
 
-    pb.set_message("Processing fragment files...");
+    spinner.set_message("Processing fragment files...");
 
     let _start_time = Instant::now();
     let mut processed_reads: u64 = 0;
 
     for file in files {
         let file = file?;
-        let reader = get_dynamic_reader(&file.path())?;
+        let reader = get_dynamic_reader(file.as_path())?;
 
         // strip out any *.*.gz
-        let file_path = file.path();        
-        let file_stem = remove_all_extensions(&file_path);
+        let file_path = file.as_path();
+        let file_stem = remove_all_extensions(file_path);
 
         for (index, line) in reader.lines().enumerate() {
             let line = line?;
@@ -118,15 +132,17 @@ pub fn pseudobulk_fragment_files(
             // let elapsed = start_time.elapsed().as_secs();
             processed_reads += 1;
             if processed_reads % 10_000 == 0 {
-                pb.set_message(format!("Processed {} reads", processed_reads));
+                spinner.set_message(format!("Processed {} reads", processed_reads));
             }
 
-            pb.inc(1);
+            spinner.inc(1);
         }
+
+        pb.inc(1);
 
     }
 
-    pb.finish_with_message("Done!");
+    spinner.finish_with_message("Done!");
 
     Ok(())
 }
