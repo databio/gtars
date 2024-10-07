@@ -6,7 +6,12 @@ use ndarray_npy::write_npy;
 use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
+use std::ops::Deref;
 use std::path::Path;
+
+use noodles::bam;
+// use noodles::sam as sam;
+use bstr::BString;
 
 pub mod cli;
 
@@ -228,7 +233,7 @@ pub fn uniwig_main(
         }
     };
 
-    let  chromosomes: Vec<Chromosome> = match ft {
+    let chromosomes: Vec<Chromosome> = match ft {
         Ok(FileType::BED) => read_bed_vec(filepath),
         Ok(FileType::BAM) => read_bam_header(filepath),
         _ => read_bed_vec(filepath),
@@ -460,9 +465,42 @@ pub fn uniwig_main(
     Ok(())
 }
 
-fn read_bam_header(p0: &str) -> Vec<Chromosome> {
+pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
+    // BAM and SAM format specification https://samtools.github.io/hts-specs/SAMv1.pdf
     println!("READ BAM HEADER PLACE HOLDER");
+
+    let mut reader = bam::io::reader::Builder.build_from_path(filepath).unwrap();
+    let header = reader.read_header();
+
+    let references = header.unwrap();
+    let references = references.reference_sequences();
+
+    //println!("Here are the reference sequences: \n{:?}", references);
+
+    let mut chromosome = Chromosome {
+        chrom: "".to_string(),
+        starts: vec![],
+        ends: vec![],
+    };
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
+
+    for ref_key in references {
+        //println!("Chromosome {:?}", ref_key.0);
+        //println!("Map Value {:?}", ref_key.1);
+
+        let chrom_name_vec = ref_key.0.deref().clone();
+        let chrom_name = String::from_utf8((*chrom_name_vec).to_owned()).unwrap();
+        //println!("{:?}",chrom_name);
+
+        //For later
+        // use bstr::BString;
+        //
+        // let s = BString::from("Hello, world!");
+        chromosome.chrom = chrom_name;
+        chromosome.starts.push(0); //default values for now, less important for bam
+        chromosome.ends.push(0); //default values for now, less important for bam
+        chromosome_vec.push(chromosome.clone());
+    }
 
     chromosome_vec
 }
