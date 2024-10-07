@@ -4,6 +4,10 @@ pub const START_COL_NAME: &str = "start";
 pub const END_COL_NAME: &str = "end";
 pub const DELIMITER: char = '\t';
 
+pub const BED_FILE_EXTENSION: &str = "bed";
+pub const GZ_FILE_EXTENSION: &str = "gz";
+pub const IGD_FILE_EXTENSION: &str = "igd";
+
 // Special tokens
 pub mod special_tokens {
     pub const PAD_CHR: &str = "chrPAD";
