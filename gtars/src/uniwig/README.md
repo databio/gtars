@@ -29,7 +29,7 @@ sort -k1,1V $COMBDATA_DIR$unsorted | grep '.' > $COMBDATA_DIR$chrsorted
 Once you have your single, sorted bedfile, you can run uniwig with the following command:
 
 ```
-cargo run uniwig -b /home/drc/Downloads/uniwig_testing_19apr2024/sourcefiles/test_30_lines_sorted.bed -c /home/drc/Downloads/uniwig_testing_19apr2024/sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /home/drc/Downloads/uniwig_testing_19apr2024/wiggles_created_with_rust/final_wiggles/ -y wig
+cargo run uniwig -f /home/drc/Downloads/uniwig_testing_19apr2024/sourcefiles/test_30_lines_sorted.bed -c /home/drc/Downloads/uniwig_testing_19apr2024/sourcefiles/hg38.chrom.sizes -m 5 -s 1 -l /home/drc/Downloads/uniwig_testing_19apr2024/wiggles_created_with_rust/final_wiggles/ -y wig
 
 ```
 
@@ -39,16 +39,19 @@ The chrom.sizes reference is an optional argument. Uniwig will default to using 
 
 ### Usage
 ```
-Usage: genimtools uniwig --bed <bed> --chromref <chromref> --smoothsize <smoothsize> --stepsize <stepsize> --fileheader <fileheader> --outputtype <outputtype>
+Create wiggle files from a BED or BAM file
+
+Usage: gtars uniwig [OPTIONS] --file <file> --smoothsize <smoothsize> --stepsize <stepsize> --fileheader <fileheader> --outputtype <outputtype>
 
 Options:
-  -b, --bed <bed>                Path to the combined bed file we want to tranforms
-  -c, --chromref <chromref>      Path to chromreference, optional, defaults to combined bed file
+  -f, --file <file>              Path to the combined bed file we want to transform or a sorted bam file
+  -t, --filetype <filetype>      'bed' or 'bam' [default: bed]
+  -c, --chromref <chromref>      Path to chromreference
   -m, --smoothsize <smoothsize>  Integer value for smoothing
-  -t, --stepsize <stepsize>      Integer value for stepsize
+  -s, --stepsize <stepsize>      Integer value for stepsize
   -l, --fileheader <fileheader>  Name of the file
   -y, --outputtype <outputtype>  Output as wiggle or npy
-  -h, --help                     Print help
+  -h, --help 
 
 ```
 

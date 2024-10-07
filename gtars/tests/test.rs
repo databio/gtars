@@ -246,6 +246,7 @@ mod tests {
 
         let smoothsize: i32 = 5;
         let output_type = "wig";
+        let filetype = "bed";
 
         uniwig_main(
             smoothsize,
@@ -253,6 +254,7 @@ mod tests {
             chromsizerefpath,
             bwfileheader,
             output_type,
+            filetype,
         )
         .expect("Uniwig main failed!");
 
@@ -278,6 +280,7 @@ mod tests {
 
         let smoothsize: i32 = 5;
         let output_type = "npy";
+        let filetype = "bed";
 
         uniwig_main(
             smoothsize,
@@ -285,6 +288,7 @@ mod tests {
             chromsizerefpath,
             bwfileheader,
             output_type,
+            filetype,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -329,6 +333,7 @@ mod tests {
 
         let smoothsize: i32 = 5;
         let output_type = "npy";
+        let filetype = "bed";
 
         let result = uniwig_main(
             smoothsize,
@@ -336,6 +341,7 @@ mod tests {
             &chromsizerefpath,
             bwfileheader,
             output_type,
+            filetype,
         );
 
         assert!(result.is_ok());
