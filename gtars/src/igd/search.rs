@@ -1,15 +1,14 @@
 use crate::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
 use crate::common::utils::get_dynamic_reader;
-use crate::igd::create::{gdata0_t, gdata_t, igd_t, parse_bed, MAX_CHROM_NAME_LEN};
-use anyhow::Context;
+use crate::igd::create::{gdata0_t, gdata_t, parse_bed};
+
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
-use flate2::read::GzDecoder;
+
 use std::collections::HashMap;
-use std::ffi::OsStr;
-use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
-use std::io::{BufRead, BufReader, Error, Read, Seek, SeekFrom, Write};
-use std::mem::size_of;
+
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Error, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 #[derive(Default)]
