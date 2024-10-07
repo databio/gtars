@@ -596,11 +596,11 @@ pub fn smooth_fixed_start_end_wiggle(
 
     let mut count: u32 = 0;
 
-    let mut coordinate_value = 0;
+    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut adjusted_start_site = 0;
-    let mut current_end_site = 0;
+    let mut adjusted_start_site: i32;
+    let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
@@ -733,11 +733,11 @@ pub fn fixed_core_wiggle(
 
     let mut count = 0;
 
-    let mut coordinate_value = 0;
+    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut current_start_site = 0;
-    let mut current_end_site = 0;
+    let mut current_start_site: i32;
+    let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 

@@ -159,14 +159,14 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
 
             //TODO Need to do error handling to ensure we gracefully continue if there is no data in the file.
-            let mut lines = reader.lines();
+            //let mut lines = reader.lines();
 
             // TODO Better name for og function?
             // TODO parse_bed -> parse_bed_file_line
             let ctg = parse_bed(&first_line, &mut start, &mut end, &mut va);
             // if it parses, add it to collected lines, increment ix
             match ctg {
-                Some(ctg) => {
+                Some(_ctg) => {
                     //println!("ctg successfully parsed {}", ctg);
                     all_bed_files.push(entry.path());
                     ix += 1;
@@ -179,7 +179,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     //println!("ALL PARSED Lines from BED FILES:\n{:?}", all_bed_files);
 
     let n_files = ix; //all_bed_files.len();
-    let nf10 = n_files / 10;
+    let _nf10 = n_files / 10;
 
     println!("Number of Bed Files found:\n{}", n_files);
 
@@ -204,7 +204,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     // -------------------
     // Initialize required variables
     let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
-    let (mut va, mut i, mut j, mut k, mut ig, mut m, mut nL, mut nf10) =
+    let (mut va, mut i, mut j, mut k, mut ig, mut m, mut nL, nf10) =
         (0, 0, 0, 0, 0, 0, 0, n_files / 10);
 
     while i0 < n_files {
@@ -221,11 +221,11 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             // let file = File::open(fp).unwrap();
             // let mut reader = BufReader::new(file);
 
-            let mut reader = get_dynamic_reader(&fp).unwrap();
+            let reader = get_dynamic_reader(&fp).unwrap();
 
             nL = 0;
 
-            let mut buffer = String::new();
+            // let mut buffer = String::new();
 
             for line in reader.lines() {
                 let line = line.expect("Error reading line"); // Handle errors
@@ -290,7 +290,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let result = create_file_with_parents(path);
 
     match result {
-        Ok(file) => (),
+        Ok(_file) => (),
         Err(err) => println!("Error creating file: {}", err),
     }
     let mut file = OpenOptions::new()
@@ -359,7 +359,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     let result = create_file_with_parents(path);
 
     match result {
-        Ok(file) => (),
+        Ok(_file) => (),
         Err(err) => println!("Error creating file: {}", err),
     }
 
@@ -429,7 +429,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
 
     //2. Sort and save tiles data
 
-    let k: i32;
+    let _k: i32;
 
     for i in 0..igd.nctg {
         let idx = i.clone() as usize;
@@ -441,7 +441,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             let jdx = j.clone() as usize;
 
             //current tile
-            let mut q = &mut current_ctg.gTile[jdx];
+            let q = &mut current_ctg.gTile[jdx];
 
             let nrec = q.nCnts;
 
@@ -573,7 +573,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 let result = create_file_with_parents(path);
 
                 match result {
-                    Ok(file) => (),
+                    Ok(_file) => (),
                     Err(err) => println!("Error creating file: {}", err),
                 }
 
@@ -653,11 +653,11 @@ pub fn igd_add(
         // );
         return;
     }
-    let absent: i32;
-    let i: i32;
+    let _absent: i32;
+    let _i: i32;
 
     // Cloning chrm String because the hash table will own the key after insertion
-    let mut key = chrm.clone();
+    let key = chrm.clone();
 
     let n1 = start / igd.nbp;
     let n2 = (end - 1) / igd.nbp;
@@ -686,7 +686,7 @@ pub fn igd_add(
         //p.gTile = Vec::with_capacity((p.mTiles as usize)*size_of(tile_t()));
         p.gTile = Vec::with_capacity(p.mTiles as usize);
 
-        for i in 0..p.mTiles {
+        for _i in 0..p.mTiles {
             //println!("iterating of p.Mtiles");
             let mut new_tile: tile_t = tile_t::new();
 
@@ -694,7 +694,7 @@ pub fn igd_add(
             new_tile.nCnts = 0; //total
             new_tile.mcnts = 2;
 
-            for j in 0..new_tile.mcnts {
+            for _j in 0..new_tile.mcnts {
                 new_tile.gList.push(gdata_t::new());
             }
 
@@ -738,7 +738,7 @@ pub fn igd_add(
             existing_tile.ncnts = 0;
             existing_tile.nCnts = 0;
             existing_tile.mcnts = 2;
-            for j in 0..existing_tile.mcnts {
+            for _j in 0..existing_tile.mcnts {
                 existing_tile.gList.push(gdata_t::new());
             }
         }
