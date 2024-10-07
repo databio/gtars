@@ -14,6 +14,12 @@ pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
+#[derive(Debug)]
+enum FileType {
+    BED,
+    BAM,
+}
+
 pub struct Chromosome {
     chrom: String,
     starts: Vec<i32>,
@@ -130,14 +136,18 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
 pub fn run_uniwig(matches: &ArgMatches) {
     //println!("I am running. Here are the arguments: {:?}", matches);
 
-    let combinedbedpath = matches
-        .get_one::<String>("bed")
-        .expect("combined bed path is required");
+    let filepath = matches
+        .get_one::<String>("file")
+        .expect("file path is required");
+
+    let filetype = matches
+        .get_one::<String>("filetype")
+        .expect("file type is required");
 
     let chromsizerefpath = matches
         .get_one::<String>("chromref")
         .cloned()
-        .unwrap_or_else(|| combinedbedpath.clone());
+        .unwrap_or_else(|| filepath.clone());
 
     let bwfileheader = matches
         .get_one::<String>("fileheader")
@@ -153,10 +163,11 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
     uniwig_main(
         *smoothsize,
-        combinedbedpath,
+        filepath,
         chromsizerefpath.as_str(),
         bwfileheader,
         output_type,
+        filetype,
     )
     .expect("Uniwig failed.");
 }
@@ -169,13 +180,22 @@ fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
 /// Main function
 pub fn uniwig_main(
     smoothsize: i32,
-    combinedbedpath: &str,
+    filepath: &str,
     chromsizerefpath: &str,
     bwfileheader: &str,
     output_type: &str,
+    filetype: &str,
 ) -> Result<(), Box<dyn Error>> {
-    let stepsize = 1;
+    // Determine File Type
+    let ft = match filetype.to_lowercase().as_str() {
+        "bed" => Ok(FileType::BED),
+        "bam" => Ok(FileType::BAM),
+        _ => Err(format!("Invalid file type: {}", filetype)),
+    };
 
+    println!("Supplied file type: {:?}", ft.unwrap());
+
+    let stepsize = 1;
     // Set up output file names
 
     let mut file_names: [String; 3] = [
@@ -208,7 +228,7 @@ pub fn uniwig_main(
         }
     };
 
-    let chromosomes: Vec<Chromosome> = read_bed_vec(combinedbedpath);
+    let chromosomes: Vec<Chromosome> = read_bed_vec(filepath);
 
     let num_chromosomes = chromosomes.len();
 

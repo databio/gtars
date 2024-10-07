@@ -5,17 +5,24 @@ use crate::uniwig::consts::UNIWIG_CMD;
 /// Creates the uniwig CLI Command object
 ///
 /// Example to run uiwig
-/// `cargo run uniwig -b /sourcefiles/test.bed -c /sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /numpy_arrays_created_with_rust/ -y npy`
+/// `cargo run uniwig -f /sourcefiles/test.bed -t "bed" -c /sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /numpy_arrays_created_with_rust/ -y npy`
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")
-        .about("Given a set of bed files, we want to produce 2")
+        .about("Create wiggle files from a BED or BAM file")
         .arg(
-            Arg::new("bed")
-                .long("bed")
-                .short('b')
-                .help("Path to the combined bed file we want to transform")
+            Arg::new("file")
+                .long("file")
+                .short('f')
+                .help("Path to the combined bed file we want to transform or a sorted bam file")
                 .required(true),
+        )
+        .arg(
+            Arg::new("filetype")
+                .long("filetype")
+                .short('t')
+                .help("'bed' or 'bam'")
+                .default_value("bed"),
         )
         .arg(
             Arg::new("chromref")
@@ -35,7 +42,7 @@ pub fn create_uniwig_cli() -> Command {
         .arg(
             Arg::new("stepsize")
                 .long("stepsize")
-                .short('t')
+                .short('s')
                 .value_parser(clap::value_parser!(i32))
                 .help("Integer value for stepsize")
                 .required(true),
