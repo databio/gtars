@@ -193,7 +193,7 @@ pub fn uniwig_main(
         _ => Err(format!("Invalid file type: {}", filetype)),
     };
 
-    println!("Supplied file type: {:?}", ft.unwrap());
+    //println!("Supplied file type: {:?}", ft.unwrap());
 
     let stepsize = 1;
     // Set up output file names
@@ -228,7 +228,13 @@ pub fn uniwig_main(
         }
     };
 
-    let chromosomes: Vec<Chromosome> = read_bed_vec(filepath);
+    let  chromosomes: Vec<Chromosome> = match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::BAM) => read_bam_header(filepath),
+        _ => read_bed_vec(filepath),
+    };
+
+    //let chromosomes: Vec<Chromosome> = read_bed_vec(filepath);
 
     let num_chromosomes = chromosomes.len();
 
@@ -452,6 +458,13 @@ pub fn uniwig_main(
         }
     }
     Ok(())
+}
+
+fn read_bam_header(p0: &str) -> Vec<Chromosome> {
+    println!("READ BAM HEADER PLACE HOLDER");
+    let mut chromosome_vec: Vec<Chromosome> = Vec::new();
+
+    chromosome_vec
 }
 
 fn write_to_npy_file(
