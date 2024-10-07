@@ -22,6 +22,11 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_small_bam_file() -> &'static str {
+    "tests/data/test1_sort_dedup.bam"
+}
+
+#[fixture]
 fn path_to_bed_file_gzipped() -> &'static str {
     "tests/data/peaks.bed.gz"
 }
@@ -30,7 +35,9 @@ mod tests {
     use super::*;
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
-    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use gtars::uniwig::{
+        read_bam_header, read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome,
+    };
     use std::collections::HashMap;
     // IGD TESTS
 
@@ -227,6 +234,15 @@ mod tests {
 
         assert_eq!(num_chromosomes, 5);
     }
+
+    #[rstest]
+    fn test_read_bam_header(path_to_small_bam_file: &str) {
+        let chromosomes: Vec<Chromosome> = read_bam_header(path_to_small_bam_file);
+        let num_chromosomes = chromosomes.len();
+        println!("Number of chroms: {}", num_chromosomes);
+        assert_eq!(num_chromosomes, 195);
+    }
+
     #[rstest]
     fn test_run_uniwig_main_wig_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         // This test uses the bed file to determine chromsizes for speed
