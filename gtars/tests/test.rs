@@ -29,12 +29,172 @@ fn path_to_bed_file_gzipped() -> &'static str {
 
 mod tests {
     use super::*;
+    use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
+    use gtars::igd::search::igd_search;
     use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use std::collections::HashMap;
     use std::env::temp_dir;
     use std::ptr::read;
+    // IGD TESTS
 
     #[rstest]
-    fn test_parsed_bed_file(path_to_bed_file: &str) {
+    fn test_igd_parse_bed_file() {
+        // Given some random line from a  bed file...
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+        let mut va = 0;
+
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap(); // this will return
+
+        let unwrapped_result = result.as_str();
+
+        assert_eq!(unwrapped_result, "chr1");
+
+        // Ensure start and end is modified via parse_bed
+        assert_eq!(start, 32481);
+        assert_eq!(end, 32787);
+    }
+
+    #[rstest]
+    fn test_igd_create() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = db_path_unwrapped;
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+
+        let demo_name = String::from("demo");
+
+        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+    }
+    #[rstest]
+
+    fn test_igd_search() {
+        // First must create temp igd
+
+        // Temp dir to hold igd
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = db_path_unwrapped;
+
+        // bed files used to create IGD
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+
+        let demo_name = String::from("demo");
+
+        // Create IGD from directory of bed files
+        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+
+        // Get a query file path from test files
+        let query_file = format!(
+            "{}{}",
+            path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
+        );
+
+        // the final db path will be constructed within igd_save_db like so
+        let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
+
+        igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
+    }
+
+    //
+    // #[rstest]
+    // fn test_specific_db(){
+    //
+    //     //temp test for debugging
+    //     let db_path = format!("{}","/home/drc/IGD_TEST_2/igd_rust_output/igd_database.igd");
+    //     let query_path = format!("{}","/home/drc/IGD_TEST_2/source_single_bedfile/igd_test_single_source.bed");
+    //
+    //     igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
+    //
+    // }
+
+    #[rstest]
+    fn test_igd_add() {
+        // First create a new igd struct
+
+        let mut igd = igd_t::new();
+        // create hash table
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
+
+        // Set values of struct
+        igd.gType = 1;
+        igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
+        igd.nctg = 0;
+        igd.mctg = 32;
+        igd.total = 0;
+
+        // Given some random line from a bed file...
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+        let mut va = 0;
+
+        // We've now parsed to get the chromosome and the new start and end of the current contig.
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap();
+        let chromosome = result;
+
+        // Add to the database (hash table)
+        igd_add(&mut igd, &mut hash_table, chromosome, start, end, 0, 0);
+    }
+
+    #[rstest]
+    fn test_igd_saving() {
+        let mut igd = igd_t::new();
+        // create hash table
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
+
+        // Set values of struct
+        igd.gType = 1;
+        igd.nbp = 16384; // from og code tile_size = 16384;  -> this is the bin size (2^14) from the original paper
+        igd.nctg = 0;
+        igd.mctg = 32;
+        igd.total = 0;
+
+        // Given some random line from a bed file...
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+        let mut va = 0;
+
+        // We've now parsed to get the chromosome and the new start and end of the current contig.
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap();
+        let chromosome = result;
+
+        // Add to the database (hash table)
+        igd_add(&mut igd, &mut hash_table, chromosome, start, end, 0, 0);
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = &db_path_unwrapped;
+
+        // First test igd_saveT
+        igd_saveT(&mut igd, db_output_path);
+
+        // then test saveing main databse
+
+        igd_save_db(&mut igd, db_output_path, &String::from("randomname"));
+    }
+
+    // UNIWIG TESTS
+    #[rstest]
+    fn test_uniwig_parsed_bed_file(path_to_bed_file: &str) {
         let path = Path::new(path_to_bed_file);
         let file = File::open(path).unwrap();
 
