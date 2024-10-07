@@ -1,15 +1,13 @@
 use crate::common::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
 use crate::common::utils::get_dynamic_reader;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
 use clap::ArgMatches;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, DirEntry, File, OpenOptions};
-use std::io::{BufRead, BufReader, Error, Read, Write};
-use std::mem;
-use std::mem::size_of;
+use std::fs;
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{BufRead, Error, Read, Write};
 use std::path::{Path, PathBuf};
-use std::{fs, io};
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
 
@@ -127,10 +125,10 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let (mut start, mut end) = (0, 0);
     let mut va: i32 = 0;
 
-    ///--------------------
-    /// Check each file and only keep the validated BED files
-    ///
-    /// -------------------
+    //--------------------
+    // Check each file and only keep the validated BED files
+    //
+    // -------------------
     for entry in fs::read_dir(filelist).unwrap() {
         // For now only take .bed files
         if let Some(extension) = entry.as_ref().unwrap().path().extension() {
@@ -154,10 +152,10 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
 
             let mut reader = get_dynamic_reader(&entry.path()).unwrap();
 
-            /// Read the very first line and see if it meets our criteria
-            /// MUST USE by_ref() otherwise borrow checker won't let code compile
-            /// ALSO bec careful to call by_ref() BEFORE .lines()
-            ///
+            // Read the very first line and see if it meets our criteria
+            // MUST USE by_ref() otherwise borrow checker won't let code compile
+            // ALSO bec careful to call by_ref() BEFORE .lines()
+            //
             let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
 
             //TODO Need to do error handling to ensure we gracefully continue if there is no data in the file.
@@ -199,11 +197,11 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let mut nr: Vec<i32> = Vec::with_capacity(n_files);
     nr.resize(n_files, 0);
 
-    ///--------------------
-    /// READ VALIDATED FILES
-    /// Note: this seems wasteful to load the file *again* using BufReader
-    /// Is there a better way than below?
-    /// -------------------
+    //--------------------
+    // READ VALIDATED FILES
+    // Note: this seems wasteful to load the file *again* using BufReader
+    // Is there a better way than below?
+    // -------------------
     // Initialize required variables
     let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
     let (mut va, mut i, mut j, mut k, mut ig, mut m, mut nL, mut nf10) =
@@ -277,8 +275,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             }
         }
 
-        ///og: 2.3 save/append temp tiles to disc, add cnts to Cnts
-        ///
+        //og: 2.3 save/append temp tiles to disc, add cnts to Cnts
+        //
         igd_saveT(&mut igd, output_path);
 
         i0 = ig;
@@ -641,8 +639,8 @@ pub fn igd_add(
     v: i32,
     idx: usize,
 ) {
-    ///Add an interval
-    /// og code: layers: igd->ctg->gTile->gdata(list)
+    //Add an interval
+    // og code: layers: igd->ctg->gTile->gdata(list)
     //println!("HELLO from igd_add");
     // println!(
     //     "Entering IGD ADD Chrm {}, start {}, end {}, v {}, idx {}",
@@ -686,7 +684,7 @@ pub fn igd_add(
         //p.gTile original code mallocs mTiles*sizeof title_t
         // however in Rust, structs have 0 size: https://doc.rust-lang.org/nomicon/exotic-sizes.html#zero-sized-types-zsts
         //p.gTile = Vec::with_capacity((p.mTiles as usize)*size_of(tile_t()));
-        p.gTile = Vec::with_capacity((p.mTiles as usize));
+        p.gTile = Vec::with_capacity(p.mTiles as usize);
 
         for i in 0..p.mTiles {
             //println!("iterating of p.Mtiles");
@@ -721,7 +719,7 @@ pub fn igd_add(
 
     let p = &mut igd.ctg[cloned_index as usize];
 
-    if (n2 + 1 >= p.mTiles) {
+    if n2 + 1 >= p.mTiles {
         //println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
         let tt = p.mTiles;
 
