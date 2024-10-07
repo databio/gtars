@@ -174,14 +174,14 @@ fn getOverlaps(
 
     // Get Reader for QUERY FILE dynamically
     let path = Path::new(query_file);
-    let mut reader = get_dynamic_reader(path).unwrap();
+    let reader = get_dynamic_reader(path).unwrap();
 
     // Also get Reader for database file (.igd)
     let parent_path = database_path.clone();
 
     let dbpath = std::path::Path::new(&parent_path);
 
-    let mut db_file = OpenOptions::new()
+    let db_file = OpenOptions::new()
         .create(true)
         .append(true)
         .read(true)
@@ -486,10 +486,10 @@ fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
     }
 }
 
-#[allow(unused_variables)]
-fn getOverlaps0(p0: &String, p1: Vec<i64>) {
-    println!("getoverlaps0");
-}
+// #[allow(unused_variables)]
+// fn getOverlaps0(p0: &String, p1: Vec<i64>) {
+//     println!("getoverlaps0");
+// }
 
 /// Given an igd path, simple give the .tsv path that is parallel to the  .igd path
 fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
@@ -499,26 +499,26 @@ fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
     tsv_path.set_extension("tsv");
     Some(tsv_path)
 }
-fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
-    // Just a debug function to determine what was actually written to a file.
-    let file = File::open(filename)?;
-    let mut reader = BufReader::new(file);
-
-    let mut buffer = [0u8; 4];
-
-    loop {
-        match reader.read_exact(&mut buffer) {
-            Ok(_) => {
-                let number = u32::from_le_bytes(buffer);
-                println!("{}", number);
-            }
-            Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(e) => return Err(e),
-        }
-    }
-
-    Ok(())
-}
+// fn read_and_print_numbers(filename: &str) -> std::io::Result<()> {
+//     // Just a debug function to determine what was actually written to a file.
+//     let file = File::open(filename)?;
+//     let mut reader = BufReader::new(file);
+//
+//     let mut buffer = [0u8; 4];
+//
+//     loop {
+//         match reader.read_exact(&mut buffer) {
+//             Ok(_) => {
+//                 let number = u32::from_le_bytes(buffer);
+//                 println!("{}", number);
+//             }
+//             Err(ref e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
+//             Err(e) => return Err(e),
+//         }
+//     }
+//
+//     Ok(())
+// }
 #[allow(unused_variables)]
 pub fn get_igd_info(
     database_path: &String,
@@ -534,7 +534,7 @@ pub fn get_igd_info(
 
     let dbpath = std::path::Path::new(&parent_path);
 
-    let mut temp_tile_file = match OpenOptions::new()
+    let temp_tile_file = match OpenOptions::new()
         .create(true)
         .append(true)
         .read(true)
@@ -622,7 +622,7 @@ pub fn get_igd_info(
 
         nCnt[i as usize] = cnt;
 
-        let mut idx = vec![0; k as usize];
+        let idx = vec![0; k as usize];
 
         tIdx[i as usize] = idx;
         tIdx[i as usize][0] = chr_loc;
@@ -669,7 +669,7 @@ pub fn get_igd_info(
 pub fn get_file_info_tsv(tsv_path: PathBuf, igd: &mut igd_t_from_disk) -> Result<(), Error> {
     let path = Path::new(&tsv_path);
 
-    let mut tsv_file = match OpenOptions::new()
+    let tsv_file = match OpenOptions::new()
         .create(true)
         .append(true)
         .read(true)

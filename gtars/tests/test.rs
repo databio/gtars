@@ -3,7 +3,6 @@ use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use rstest::*;
-use tempfile::tempdir;
 
 use gtars::uniwig::parse_bed_file;
 
@@ -33,8 +32,6 @@ mod tests {
     use gtars::igd::search::igd_search;
     use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
     use std::collections::HashMap;
-    use std::env::temp_dir;
-    use std::ptr::read;
     // IGD TESTS
 
     #[rstest]
@@ -231,9 +228,7 @@ mod tests {
         assert_eq!(num_chromosomes, 5);
     }
     #[rstest]
-    fn test_run_uniwig_main_wig_type(
-        path_to_bed_file: &str,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_wig_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -265,9 +260,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_run_uniwig_main_npy_type(
-        path_to_bed_file: &str,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_npy_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -298,7 +291,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_reading_chrom_sizes(path_to_bed_file: &str) {
+    fn test_reading_chrom_sizes() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
         // Read from sizes file
@@ -318,7 +311,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_uniwig_mismatched_chrom_sizes(path_to_bed_file: &str) {
+    fn test_uniwig_mismatched_chrom_sizes(_path_to_bed_file: &str) {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
         // Read from sizes file
