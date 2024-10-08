@@ -8,6 +8,7 @@ use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
+use rayon::prelude::*;
 
 use noodles::bam;
 // use noodles::sam as sam;
@@ -249,7 +250,7 @@ pub fn uniwig_main(
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
 
     println!("Processing each chromosome...");
-    for chromosome in chromosomes.iter() {
+    for chromosome in chromosomes.iter(){
         if chromosome.starts.len() != chromosome.ends.len() {
             println!("Chromosome starts and ends are not equal!");
             break;
@@ -462,6 +463,9 @@ pub fn uniwig_main(
             }
         }
     }
+
+
+
     Ok(())
 }
 
