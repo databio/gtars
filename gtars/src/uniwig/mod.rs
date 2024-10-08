@@ -249,18 +249,14 @@ pub fn uniwig_main(
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
 
-    println!("Processing each chromosome...");
+    println!("PreProcessing each chromosome...");
+    let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
     for chromosome in chromosomes.iter(){
         if chromosome.starts.len() != chromosome.ends.len() {
-            println!("Chromosome starts and ends are not equal!");
             break;
         }
 
-        // Need these for setting wiggle header
-        let primary_start = chromosome.starts[0].clone();
-        let primary_end = chromosome.ends[0].clone();
-
-        //let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
+        // Check if there is an available chrom size, if not exlcude it from our final list
         let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
             Some(size) => *size as i32, // Dereference to get the i32 value
             None => {
@@ -272,9 +268,23 @@ pub fn uniwig_main(
             }
         };
 
+        final_chromosomes.push(chromosome.clone())
+    }
+
+    println!("Initial chroms: {}  vs Final chroms: {}", chromosomes.len(), final_chromosomes.len());
+
+    final_chromosomes.par_iter().with_min_len(6).for_each(|chromosome: &Chromosome|
+        {
+
+        // Need these for setting wiggle header
+        let primary_start = chromosome.starts[0].clone();
+        let primary_end = chromosome.ends[0].clone();
+
+        let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+
         let chrom_name = chromosome.chrom.clone();
         //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-        chroms.push(chrom_name.clone());
+        //chroms.push(chrom_name.clone());
 
         // Iterate 3 times to output the three different files.
         for j in 0..3 {
@@ -316,13 +326,13 @@ pub fn uniwig_main(
                             "npy" => {
                                 println!("Writing npy files!");
 
-                                file_names[0] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "start", output_type
                                 );
                                 write_to_npy_file(
                                     &count_result.0,
-                                    file_names[0].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_start, smoothsize),
                                     stepsize,
@@ -331,13 +341,13 @@ pub fn uniwig_main(
                             }
                             _ => {
                                 println!("Defaulting to npy file...");
-                                file_names[0] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "start", output_type
                                 );
                                 write_to_npy_file(
                                     &count_result.0,
-                                    file_names[0].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_start, smoothsize),
                                     stepsize,
@@ -372,13 +382,13 @@ pub fn uniwig_main(
                             }
                             "npy" => {
                                 println!("Writing npy files!");
-                                file_names[1] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "end", output_type
                                 );
                                 write_to_npy_file(
                                     &count_result.0,
-                                    file_names[1].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_start, smoothsize),
                                     stepsize,
@@ -387,13 +397,13 @@ pub fn uniwig_main(
                             }
                             _ => {
                                 println!("Defaulting to npy file...");
-                                file_names[1] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "end", output_type
                                 );
                                 write_to_npy_file(
                                     &count_result.0,
-                                    file_names[1].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_start, smoothsize),
                                     stepsize,
@@ -428,13 +438,13 @@ pub fn uniwig_main(
                             }
                             "npy" => {
                                 println!("Writing npy files!");
-                                file_names[2] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "core", output_type
                                 );
                                 write_to_npy_file(
                                     &core_results.0,
-                                    file_names[2].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     primary_start,
                                     stepsize,
@@ -443,13 +453,13 @@ pub fn uniwig_main(
                             }
                             _ => {
                                 println!("Defaulting to npy file...");
-                                file_names[2] = format!(
+                                let file_name = format!(
                                     "{}{}_{}.{}",
                                     bwfileheader, chrom_name, "core", output_type
                                 );
                                 write_to_npy_file(
                                     &core_results.0,
-                                    file_names[2].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     primary_start,
                                     stepsize,
@@ -462,9 +472,11 @@ pub fn uniwig_main(
                 }
             }
         }
-    }
+        }
+    );
 
 
+    println!("FINISHED");
 
     Ok(())
 }
