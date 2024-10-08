@@ -556,7 +556,7 @@ pub fn read_chromosome_sizes(
             //println!("Processing sizes file: {}", chrom_size_path);
             for line in reader.lines() {
                 let line = line?; // Propagate the potential error
-                let mut iter = line.split('\t');
+                let mut iter = line.split_whitespace();
                 let chrom_name = iter.next().unwrap().to_owned();
                 let size_str = iter.next().unwrap();
                 let size = size_str.parse::<u32>()?;
