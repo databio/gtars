@@ -27,6 +27,9 @@ fn path_to_small_bam_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_chrom_sizes_file() -> &'static str {"tests/hg38.chrom.sizes"}
+
+#[fixture]
 fn path_to_bed_file_gzipped() -> &'static str {
     "tests/data/peaks.bed.gz"
 }
@@ -241,6 +244,41 @@ mod tests {
         let num_chromosomes = chromosomes.len();
         println!("Number of chroms: {}", num_chromosomes);
         assert_eq!(num_chromosomes, 195);
+    }
+
+    #[rstest]
+    fn test_run_uniwig_main_bam_input_wig_output(path_to_small_bam_file: &str, path_to_chrom_sizes_file: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses a chrom sizes file and a bam file and will take a long time to run.
+        // only run this during dev/troubleshooting, comment out for normal test suite checks
+        //let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        //let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test5.bed");
+        let combinedbedpath = path_to_small_bam_file;
+
+        let chromsizerefpath = path_to_chrom_sizes_file;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 5;
+        let output_type = "wig";
+        let filetype = "bam";
+
+        uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+        )
+            .expect("Uniwig main failed!");
+
+        Ok(())
     }
 
     #[rstest]
