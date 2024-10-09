@@ -276,7 +276,6 @@ pub fn uniwig_main(
 
                         match output_type {
                             "wig" => {
-                                println!("Writing to wig file!");
                                 write_to_wig_file(
                                     &count_result.0,
                                     file_names[0].clone(),
@@ -333,7 +332,6 @@ pub fn uniwig_main(
 
                         match output_type {
                             "wig" => {
-                                println!("Writing to wig file!");
                                 write_to_wig_file(
                                     &count_result.0,
                                     file_names[1].clone(),
