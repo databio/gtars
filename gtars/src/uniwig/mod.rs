@@ -269,7 +269,7 @@ pub fn uniwig_main(
 
     println!("Initial chroms: {}  vs Final chroms: {}", chromosomes.len(), final_chromosomes.len());
 
-    final_chromosomes.par_iter().with_min_len(6).for_each(|chromosome: &Chromosome|
+    final_chromosomes.par_iter().with_min_len(1).for_each(|chromosome: &Chromosome|
         {
 
         // Need these for setting wiggle header
@@ -297,13 +297,24 @@ pub fn uniwig_main(
                         //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
                         //let count_result = count_coordinate_reads(&chromosome.starts);
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
-
-                        let count_result = smooth_fixed_start_end_wiggle(
-                            &chromosome.starts,
-                            current_chrom_size,
-                            smoothsize,
-                            stepsize,
-                        );
+                        let count_result = match ft {
+                            Ok(FileType::BED) => {smooth_fixed_start_end_wiggle(
+                                &chromosome.starts,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize,
+                            ) },
+                            Ok(FileType::BAM) => { smooth_fixed_start_end_wiggle_bam(
+                                &chromosome.starts,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize,
+                            )},
+                            _ => {smooth_fixed_start_end_wiggle(
+                                &chromosome.starts,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize, )}};
 
                         match output_type {
                             "wig" => {
@@ -358,12 +369,25 @@ pub fn uniwig_main(
                     }
                     1 => {
                         //println!("Write Ends Here");
-                        let count_result = smooth_fixed_start_end_wiggle(
-                            &chromosome.ends,
-                            current_chrom_size,
-                            smoothsize,
-                            stepsize,
-                        );
+                        let count_result = match ft {
+                            Ok(FileType::BED) => {smooth_fixed_start_end_wiggle(
+                                &chromosome.ends,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize,
+                            ) },
+                            Ok(FileType::BAM) => { smooth_fixed_start_end_wiggle_bam(
+                                &chromosome.ends,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize,
+                            )},
+                            _ => {smooth_fixed_start_end_wiggle(
+                                &chromosome.ends,
+                                current_chrom_size,
+                                smoothsize,
+                                stepsize, )}};
+
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
                         match output_type {
@@ -418,13 +442,26 @@ pub fn uniwig_main(
                     }
                     2 => {
                         //println!("Write Core Here");
+                        let core_results = match ft {
+                            Ok(FileType::BED) => {fixed_core_wiggle(
+                                &chromosome.starts,
+                                &chromosome.ends,
+                                current_chrom_size,
+                                stepsize,
+                            ) },
+                            Ok(FileType::BAM) => { fixed_core_wiggle_bam(
+                                &chromosome.starts,
+                                &chromosome.ends,
+                                current_chrom_size,
+                                stepsize,
+                            )},
+                            _ => {fixed_core_wiggle(
+                                &chromosome.starts,
+                                &chromosome.ends,
+                                current_chrom_size,
+                                stepsize,
+                            )}};
 
-                        let core_results = fixed_core_wiggle(
-                            &chromosome.starts,
-                            &chromosome.ends,
-                            current_chrom_size,
-                            stepsize,
-                        );
 
                         match output_type {
                             "wig" => {
@@ -508,6 +545,28 @@ pub fn uniwig_main(
     println!("FINISHED");
 
     Ok(())
+}
+
+fn fixed_core_wiggle_bam(p0: &Vec<i32>, p1: &Vec<i32>, p2: i32, p3: i32) -> (Vec<u32>, Vec<i32>) {
+    println!("smooth_fixed_start_end_wiggle_bam");
+
+
+    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    return (v_coord_counts, v_coordinate_positions);
+}
+
+fn smooth_fixed_start_end_wiggle_bam(p0: &Vec<i32>, p1: i32, p2: i32, p3: i32) -> (Vec<u32>, Vec<i32>) {
+    println!("smooth_fixed_start_end_wiggle_bam");
+
+
+    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    return (v_coord_counts, v_coordinate_positions);
+
+
 }
 
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
@@ -612,7 +671,7 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
 
         let file_name = format!(
             "{}{}_{}.{}",
-            bwfileheader, chrom.chrom, "end", output_type
+            bwfileheader, chrom.chrom, location, output_type
         );
 
         println!("Here is the file name: {}", file_name);
