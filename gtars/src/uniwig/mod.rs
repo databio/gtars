@@ -317,6 +317,15 @@ pub fn uniwig_main(
                                 stepsize, )}};
 
                         match output_type {
+                            "file" => {
+                                println!("Writing to CLI");
+                                for count in &count_result.0{
+                                    println!("{}", count);
+
+                                };
+
+
+                            }
                             "wig" => {
                                 println!("Writing to wig file!");
                                 let file_name = format!(
@@ -391,6 +400,15 @@ pub fn uniwig_main(
                         //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
 
                         match output_type {
+                            "file" => {
+                                println!("Writing to CLI");
+                                for count in &count_result.0{
+                                    println!("{}", count);
+
+                                };
+
+
+                            }
                             "wig" => {
                                 println!("Writing to wig file!");
                                 let file_name = format!(
@@ -464,6 +482,15 @@ pub fn uniwig_main(
 
 
                         match output_type {
+                            "file" => {
+                                println!("Writing to CLI");
+                                for count in &core_results.0{
+                                    println!("{}", count);
+
+                                };
+
+
+                            }
                             "wig" => {
                                 //println!("Writing to CORE RESULTS wig file!");
                                 let file_name = format!(
