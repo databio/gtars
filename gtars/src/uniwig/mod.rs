@@ -483,6 +483,27 @@ pub fn uniwig_main(
         }
     );
 
+    let vec_strings = vec!["start", "core", "end"];
+
+    match output_type {
+        "wig" => {
+            println!("Combining Wig Files");
+
+            for location in vec_strings.iter(){
+
+                write_combined_wig_files(*location, output_type, bwfileheader, &chromosomes);
+
+            }
+
+
+
+        }
+        _ => {
+
+        }
+
+    }
+
 
     println!("FINISHED");
 
@@ -569,6 +590,46 @@ fn write_to_npy_file(
     // TODO using rayon, theis header is written out of order and it may cause issues
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
+}
+
+fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &str, chromosomes: &Vec<Chromosome>){
+    println!("TODO: write combined wig  {}", location);
+
+    let combined_wig_file_name = format!(
+        "{}_{}.{}",
+        bwfileheader,location, output_type
+    );
+    let path = std::path::Path::new(&combined_wig_file_name).parent().unwrap();
+    let _ = create_dir_all(path);
+
+    let mut combined_file = OpenOptions::new()
+        .create(true) // Create the file if it doesn't exist
+        .append(true) // Append data to the existing file if it does exist
+        .open(combined_wig_file_name)
+        .unwrap();
+
+    for chrom in chromosomes.iter(){
+
+        let file_name = format!(
+            "{}{}_{}.{}",
+            bwfileheader, chrom.chrom, "end", output_type
+        );
+
+        println!("Here is the file name: {}", file_name);
+        let mut single_file = File::open(&file_name).unwrap();
+        let mut reader = BufReader::new(&mut single_file);
+
+        let mut line = String::new();
+        while reader.read_line(&mut line).unwrap() > 0 {
+            combined_file.write_all(line.as_bytes()).expect("Cannot write line");
+            line.clear();
+        }
+
+
+
+    }
+
+
 }
 
 #[allow(unused_variables)]
