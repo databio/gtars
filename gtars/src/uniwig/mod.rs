@@ -7,6 +7,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::Path;
+use indicatif::{ProgressBar, ProgressStyle};
 
 pub mod cli;
 
@@ -217,7 +218,13 @@ pub fn uniwig_main(
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
 
-    println!("Processing each chromosome...");
+    // start a progress bar
+    let total_chroms = chromosomes.len();
+    let pb = ProgressBar::new(total_chroms as u64);
+    pb.set_style(ProgressStyle::default_bar()
+        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} chroms ({eta})")?
+        .progress_chars("##-"));
+    
     for chromosome in chromosomes.iter() {
         if chromosome.starts.len() != chromosome.ends.len() {
             println!("Chromosome starts and ends are not equal!");
@@ -225,8 +232,8 @@ pub fn uniwig_main(
         }
 
         // Need these for setting wiggle header
-        let primary_start = chromosome.starts[0].clone();
-        let primary_end = chromosome.ends[0].clone();
+        let primary_start = chromosome.starts[0];
+        let primary_end = chromosome.ends[0];
 
         //let current_chrom_size = chrom_sizes[&chromosome.chrom] as i32;
         let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
@@ -430,6 +437,8 @@ pub fn uniwig_main(
                 }
             }
         }
+
+        pb.inc(1);
     }
     Ok(())
 }
