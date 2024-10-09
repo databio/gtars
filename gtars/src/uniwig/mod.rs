@@ -215,10 +215,6 @@ pub fn uniwig_main(
         "placeholder3".to_owned(),
     ];
 
-    file_names[0] = format!("{}_{}.{}", bwfileheader, "start", output_type);
-    file_names[1] = format!("{}_{}.{}", bwfileheader, "end", output_type);
-    file_names[2] = format!("{}_{}.{}", bwfileheader, "core", output_type);
-
     meta_data_file_names[0] = format!("{}{}.{}", bwfileheader, "start", "meta");
     meta_data_file_names[1] = format!("{}{}.{}", bwfileheader, "end", "meta");
     meta_data_file_names[2] = format!("{}{}.{}", bwfileheader, "core", "meta");
@@ -312,9 +308,13 @@ pub fn uniwig_main(
                         match output_type {
                             "wig" => {
                                 println!("Writing to wig file!");
+                                let file_name = format!(
+                                    "{}{}_{}.{}",
+                                    bwfileheader, chrom_name, "start", output_type
+                                );
                                 write_to_wig_file(
                                     &count_result.0,
-                                    file_names[0].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_start, smoothsize),
                                     stepsize,
@@ -369,9 +369,13 @@ pub fn uniwig_main(
                         match output_type {
                             "wig" => {
                                 println!("Writing to wig file!");
+                                let file_name = format!(
+                                    "{}{}_{}.{}",
+                                    bwfileheader, chrom_name, "end", output_type
+                                );
                                 write_to_wig_file(
                                     &count_result.0,
-                                    file_names[1].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     clamped_start_position(primary_end, smoothsize),
                                     stepsize,
@@ -425,9 +429,13 @@ pub fn uniwig_main(
                         match output_type {
                             "wig" => {
                                 //println!("Writing to CORE RESULTS wig file!");
+                                let file_name = format!(
+                                    "{}{}_{}.{}",
+                                    bwfileheader, chrom_name, "core", output_type
+                                );
                                 write_to_wig_file(
                                     &core_results.0,
-                                    file_names[2].clone(),
+                                    file_name.clone(),
                                     chrom_name.clone(),
                                     primary_start,
                                     stepsize,
@@ -558,6 +566,7 @@ fn write_to_npy_file(
         + start_position.to_string().as_str()
         + " step="
         + stepsize.to_string().as_str();
+    // TODO using rayon, theis header is written out of order and it may cause issues
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
 }
