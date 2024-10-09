@@ -222,10 +222,13 @@ pub fn uniwig_main(
     let total_chroms = chromosomes.len();
     let pb = ProgressBar::new(total_chroms as u64);
     pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} chroms ({eta})")?
+        .template("[{elapsed_precise}] {msg} {bar:40.cyan/blue} {pos}/{len} chroms ({eta})")?
         .progress_chars("##-"));
     
     for chromosome in chromosomes.iter() {
+
+        pb.set_message(format!("Current chrom: {}", chromosome.chrom));
+
         if chromosome.starts.len() != chromosome.ends.len() {
             println!("Chromosome starts and ends are not equal!");
             break;
