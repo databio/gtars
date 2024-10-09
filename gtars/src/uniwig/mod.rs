@@ -556,7 +556,7 @@ pub fn read_chromosome_sizes(
             //println!("Processing sizes file: {}", chrom_size_path);
             for line in reader.lines() {
                 let line = line?; // Propagate the potential error
-                let mut iter = line.split('\t');
+                let mut iter = line.split_whitespace();
                 let chrom_name = iter.next().unwrap().to_owned();
                 let size_str = iter.next().unwrap();
                 let size = size_str.parse::<u32>()?;
@@ -596,11 +596,11 @@ pub fn smooth_fixed_start_end_wiggle(
 
     let mut count: u32 = 0;
 
-    let mut coordinate_value = 0;
+    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut adjusted_start_site = 0;
-    let mut current_end_site = 0;
+    let mut adjusted_start_site: i32;
+    let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
@@ -733,11 +733,11 @@ pub fn fixed_core_wiggle(
 
     let mut count = 0;
 
-    let mut coordinate_value = 0;
+    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut current_start_site = 0;
-    let mut current_end_site = 0;
+    let mut current_start_site: i32;
+    let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
