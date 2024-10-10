@@ -687,7 +687,7 @@ fn write_to_npy_file(
 }
 
 fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &str, chromosomes: &Vec<Chromosome>){
-    println!("TODO: write combined wig  {}", location);
+    //println!("TODO: write combined wig  {}", location);
 
     let combined_wig_file_name = format!(
         "{}_{}.{}",
@@ -702,6 +702,7 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
         .open(combined_wig_file_name)
         .unwrap();
 
+    let mut buf = BufWriter::new(combined_file);
     for chrom in chromosomes.iter(){
 
         let file_name = format!(
@@ -709,21 +710,19 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
             bwfileheader, chrom.chrom, location, output_type
         );
 
-        println!("Here is the file name: {}", file_name);
+        //println!("Here is the file name: {}", file_name);
         let mut single_file = File::open(&file_name).unwrap();
         let mut reader = BufReader::new(&mut single_file);
 
         let mut line = String::new();
         while reader.read_line(&mut line).unwrap() > 0 {
-            combined_file.write_all(line.as_bytes()).expect("Cannot write line");
+            write!(&mut buf, "{}", line).unwrap();
+            //combined_file.write_all(line.as_bytes()).expect("Cannot write line");
             line.clear();
         }
 
-
-
     }
-
-
+    buf.flush().unwrap();
 }
 
 #[allow(unused_variables)]
@@ -755,6 +754,8 @@ fn write_to_wig_file(
 
     let mut position = 0;
 
+    let mut buf = BufWriter::new(file);
+
     for count in counts.iter() {
         //TODO THis is inefficient to iterate over ALL counts when the above coordinate vecs could act as an index
         if *count == 0 {
@@ -763,12 +764,14 @@ fn write_to_wig_file(
         } else {
             //println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
             //let wig_line = position.to_string() + " " + count.to_string().as_str();
-            let wig_line = count.to_string();
-            file.write_all(wig_line.as_ref()).unwrap();
-            file.write_all(b"\n").unwrap();
+            //let wig_line = count.to_string();
+            //file.write_all(wig_line.as_ref()).unwrap();
+            writeln!(&mut buf, "{}", count).unwrap();
+            //file.write_all(b"\n").unwrap();
             position += 1;
         }
     }
+    buf.flush().unwrap();
 }
 
 /// Reads chromosome size file from path and returns chromosome sizes hash map
