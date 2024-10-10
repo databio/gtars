@@ -3,13 +3,13 @@ use clap::ArgMatches;
 use flate2::read::GzDecoder;
 use ndarray::Array;
 use ndarray_npy::write_npy;
+use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
-use rayon::prelude::*;
 
 use noodles::bam;
 // use noodles::sam as sam;
@@ -248,7 +248,7 @@ pub fn uniwig_main(
 
     println!("PreProcessing each chromosome...");
     let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
-    for chromosome in chromosomes.iter(){
+    for chromosome in chromosomes.iter() {
         if chromosome.starts.len() != chromosome.ends.len() {
             break;
         }
@@ -268,293 +268,293 @@ pub fn uniwig_main(
         final_chromosomes.push(chromosome.clone())
     }
 
-    println!("Initial chroms: {}  vs Final chroms: {}", chromosomes.len(), final_chromosomes.len());
+    println!(
+        "Initial chroms: {}  vs Final chroms: {}",
+        chromosomes.len(),
+        final_chromosomes.len()
+    );
 
-    final_chromosomes.par_iter().with_min_len(8).for_each(|chromosome: &Chromosome|
-        {
+    final_chromosomes
+        .par_iter()
+        .with_min_len(8)
+        .for_each(|chromosome: &Chromosome| {
+            // Need these for setting wiggle header
+            let primary_start = chromosome.starts[0].clone();
+            let primary_end = chromosome.ends[0].clone();
 
-        // Need these for setting wiggle header
-        let primary_start = chromosome.starts[0].clone();
-        let primary_end = chromosome.ends[0].clone();
+            let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
 
-        let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+            let chrom_name = chromosome.chrom.clone();
+            //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
+            //chroms.push(chrom_name.clone());
 
-        let chrom_name = chromosome.chrom.clone();
-        //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-        //chroms.push(chrom_name.clone());
+            // Iterate 3 times to output the three different files.
+            for j in 0..3 {
+                // Original code uses:
+                // bwOpen, then bwCreateChromList, then bwWriteHdr
 
-        // Iterate 3 times to output the three different files.
-        for j in 0..3 {
-            // Original code uses:
-            // bwOpen, then bwCreateChromList, then bwWriteHdr
+                let mut _success_count = 0;
+                let mut _failure_count = 0;
 
-            let mut _success_count = 0;
-            let mut _failure_count = 0;
-
-            if smoothsize != 0 {
-                match j {
-                    0 => {
-                        //println!("Write Starts Here");
-                        //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
-                        //let count_result = count_coordinate_reads(&chromosome.starts);
-                        //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
-                        let count_result = match ft {
-                            Ok(FileType::BED) => {smooth_fixed_start_end_wiggle(
-                                &chromosome.starts,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize,
-                            ) },
-                            Ok(FileType::BAM) => { smooth_fixed_start_end_wiggle_bam(
-                                &chromosome.starts,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize,
-                            )},
-                            _ => {smooth_fixed_start_end_wiggle(
-                                &chromosome.starts,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize, )}};
-
-                        match output_type {
-                            "file" => {
-                                //print!("Writing to CLI");
-                                let handle = &std::io::stdout();
-                                let mut buf = BufWriter::new(handle);
-                                for count in &count_result.0{
-                                    writeln!(buf, "{}", count).expect("failed to write line");
-
-                                };
-                                buf.flush().unwrap();
-
-                            }
-                            "wig" => {
-                                println!("Writing to wig file!");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "start", output_type
-                                );
-                                write_to_wig_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_start, smoothsize),
+                if smoothsize != 0 {
+                    match j {
+                        0 => {
+                            //println!("Write Starts Here");
+                            //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
+                            //let count_result = count_coordinate_reads(&chromosome.starts);
+                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+                            let count_result = match ft {
+                                Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
+                                    &chromosome.starts,
+                                    current_chrom_size,
+                                    smoothsize,
                                     stepsize,
-                                );
-                            }
-                            "csv" => {
-                                panic!("Write to CSV. Not Implemented");
-                            }
-                            "npy" => {
-                                println!("Writing npy files!");
+                                ),
+                                Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
+                                    &chromosome.starts,
+                                    current_chrom_size,
+                                    smoothsize,
+                                    stepsize,
+                                ),
+                                _ => smooth_fixed_start_end_wiggle(
+                                    &chromosome.starts,
+                                    current_chrom_size,
+                                    smoothsize,
+                                    stepsize,
+                                ),
+                            };
 
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "start", output_type
-                                );
-                                write_to_npy_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_start, smoothsize),
-                                    stepsize,
-                                    meta_data_file_names[0].clone(),
-                                );
-                            }
-                            _ => {
-                                println!("Defaulting to npy file...");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "start", output_type
-                                );
-                                write_to_npy_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_start, smoothsize),
-                                    stepsize,
-                                    meta_data_file_names[0].clone(),
-                                );
+                            match output_type {
+                                "file" => {
+                                    //print!("Writing to CLI");
+                                    let handle = &std::io::stdout();
+                                    let mut buf = BufWriter::new(handle);
+                                    for count in &count_result.0 {
+                                        writeln!(buf, "{}", count).expect("failed to write line");
+                                    }
+                                    buf.flush().unwrap();
+                                }
+                                "wig" => {
+                                    println!("Writing to wig file!");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "start", output_type
+                                    );
+                                    write_to_wig_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_start, smoothsize),
+                                        stepsize,
+                                    );
+                                }
+                                "csv" => {
+                                    panic!("Write to CSV. Not Implemented");
+                                }
+                                "npy" => {
+                                    println!("Writing npy files!");
+
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "start", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_start, smoothsize),
+                                        stepsize,
+                                        meta_data_file_names[0].clone(),
+                                    );
+                                }
+                                _ => {
+                                    println!("Defaulting to npy file...");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "start", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_start, smoothsize),
+                                        stepsize,
+                                        meta_data_file_names[0].clone(),
+                                    );
+                                }
                             }
                         }
-                    }
-                    1 => {
-                        //println!("Write Ends Here");
-                        let count_result = match ft {
-                            Ok(FileType::BED) => {smooth_fixed_start_end_wiggle(
-                                &chromosome.ends,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize,
-                            ) },
-                            Ok(FileType::BAM) => { smooth_fixed_start_end_wiggle_bam(
-                                &chromosome.ends,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize,
-                            )},
-                            _ => {smooth_fixed_start_end_wiggle(
-                                &chromosome.ends,
-                                current_chrom_size,
-                                smoothsize,
-                                stepsize, )}};
-
-                        //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
-
-                        match output_type {
-                            "file" => {
-                                //print!("Writing to CLI");
-                                let handle = &std::io::stdout();
-                                let mut buf = BufWriter::new(handle);
-                                for count in &count_result.0{
-                                    writeln!(buf, "{}", count).expect("failed to write line");
-
-                                };
-                                buf.flush().unwrap();
-
-
-                            }
-                            "wig" => {
-                                println!("Writing to wig file!");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "end", output_type
-                                );
-                                write_to_wig_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_end, smoothsize),
+                        1 => {
+                            //println!("Write Ends Here");
+                            let count_result = match ft {
+                                Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
+                                    &chromosome.ends,
+                                    current_chrom_size,
+                                    smoothsize,
                                     stepsize,
-                                );
-                            }
-                            "csv" => {
-                                panic!("Write to CSV. Not Implemented");
-                            }
-                            "npy" => {
-                                println!("Writing npy files!");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "end", output_type
-                                );
-                                write_to_npy_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_start, smoothsize),
+                                ),
+                                Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
+                                    &chromosome.ends,
+                                    current_chrom_size,
+                                    smoothsize,
                                     stepsize,
-                                    meta_data_file_names[1].clone(),
-                                );
-                            }
-                            _ => {
-                                println!("Defaulting to npy file...");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "end", output_type
-                                );
-                                write_to_npy_file(
-                                    &count_result.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    clamped_start_position(primary_start, smoothsize),
+                                ),
+                                _ => smooth_fixed_start_end_wiggle(
+                                    &chromosome.ends,
+                                    current_chrom_size,
+                                    smoothsize,
                                     stepsize,
-                                    meta_data_file_names[1].clone(),
-                                );
+                                ),
+                            };
+
+                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
+
+                            match output_type {
+                                "file" => {
+                                    //print!("Writing to CLI");
+                                    let handle = &std::io::stdout();
+                                    let mut buf = BufWriter::new(handle);
+                                    for count in &count_result.0 {
+                                        writeln!(buf, "{}", count).expect("failed to write line");
+                                    }
+                                    buf.flush().unwrap();
+                                }
+                                "wig" => {
+                                    println!("Writing to wig file!");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "end", output_type
+                                    );
+                                    write_to_wig_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_end, smoothsize),
+                                        stepsize,
+                                    );
+                                }
+                                "csv" => {
+                                    panic!("Write to CSV. Not Implemented");
+                                }
+                                "npy" => {
+                                    println!("Writing npy files!");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "end", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_start, smoothsize),
+                                        stepsize,
+                                        meta_data_file_names[1].clone(),
+                                    );
+                                }
+                                _ => {
+                                    println!("Defaulting to npy file...");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "end", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &count_result.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        clamped_start_position(primary_start, smoothsize),
+                                        stepsize,
+                                        meta_data_file_names[1].clone(),
+                                    );
+                                }
                             }
                         }
-                    }
-                    2 => {
-                        //println!("Write Core Here");
-                        let core_results = match ft {
-                            Ok(FileType::BED) => {fixed_core_wiggle(
-                                &chromosome.starts,
-                                &chromosome.ends,
-                                current_chrom_size,
-                                stepsize,
-                            ) },
-                            Ok(FileType::BAM) => { fixed_core_wiggle_bam(
-                                &chromosome.starts,
-                                &chromosome.ends,
-                                current_chrom_size,
-                                stepsize,
-                            )},
-                            _ => {fixed_core_wiggle(
-                                &chromosome.starts,
-                                &chromosome.ends,
-                                current_chrom_size,
-                                stepsize,
-                            )}};
-
-
-                        match output_type {
-                            "file" => {
-                                //print!("Writing to CLI");
-                                let handle = &std::io::stdout();
-                                let mut buf = BufWriter::new(handle);
-                                for count in &core_results.0{
-                                    writeln!(buf, "{}", count).expect("failed to write line");
-
-                                };
-                                buf.flush().unwrap();
-
-
-                            }
-                            "wig" => {
-                                //println!("Writing to CORE RESULTS wig file!");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "core", output_type
-                                );
-                                write_to_wig_file(
-                                    &core_results.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    primary_start,
+                        2 => {
+                            //println!("Write Core Here");
+                            let core_results = match ft {
+                                Ok(FileType::BED) => fixed_core_wiggle(
+                                    &chromosome.starts,
+                                    &chromosome.ends,
+                                    current_chrom_size,
                                     stepsize,
-                                );
-                            }
-                            "csv" => {
-                                panic!("Write to CSV. Not Implemented");
-                            }
-                            "npy" => {
-                                println!("Writing npy files!");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "core", output_type
-                                );
-                                write_to_npy_file(
-                                    &core_results.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    primary_start,
+                                ),
+                                Ok(FileType::BAM) => fixed_core_wiggle_bam(
+                                    &chromosome.starts,
+                                    &chromosome.ends,
+                                    current_chrom_size,
                                     stepsize,
-                                    meta_data_file_names[2].clone(),
-                                );
-                            }
-                            _ => {
-                                println!("Defaulting to npy file...");
-                                let file_name = format!(
-                                    "{}{}_{}.{}",
-                                    bwfileheader, chrom_name, "core", output_type
-                                );
-                                write_to_npy_file(
-                                    &core_results.0,
-                                    file_name.clone(),
-                                    chrom_name.clone(),
-                                    primary_start,
+                                ),
+                                _ => fixed_core_wiggle(
+                                    &chromosome.starts,
+                                    &chromosome.ends,
+                                    current_chrom_size,
                                     stepsize,
-                                    meta_data_file_names[2].clone(),
-                                );
+                                ),
+                            };
+
+                            match output_type {
+                                "file" => {
+                                    //print!("Writing to CLI");
+                                    let handle = &std::io::stdout();
+                                    let mut buf = BufWriter::new(handle);
+                                    for count in &core_results.0 {
+                                        writeln!(buf, "{}", count).expect("failed to write line");
+                                    }
+                                    buf.flush().unwrap();
+                                }
+                                "wig" => {
+                                    //println!("Writing to CORE RESULTS wig file!");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "core", output_type
+                                    );
+                                    write_to_wig_file(
+                                        &core_results.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        primary_start,
+                                        stepsize,
+                                    );
+                                }
+                                "csv" => {
+                                    panic!("Write to CSV. Not Implemented");
+                                }
+                                "npy" => {
+                                    println!("Writing npy files!");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "core", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &core_results.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        primary_start,
+                                        stepsize,
+                                        meta_data_file_names[2].clone(),
+                                    );
+                                }
+                                _ => {
+                                    println!("Defaulting to npy file...");
+                                    let file_name = format!(
+                                        "{}{}_{}.{}",
+                                        bwfileheader, chrom_name, "core", output_type
+                                    );
+                                    write_to_npy_file(
+                                        &core_results.0,
+                                        file_name.clone(),
+                                        chrom_name.clone(),
+                                        primary_start,
+                                        stepsize,
+                                        meta_data_file_names[2].clone(),
+                                    );
+                                }
                             }
                         }
+                        _ => panic!("Unexpected value: {}", j), // Handle unexpected values
                     }
-                    _ => panic!("Unexpected value: {}", j), // Handle unexpected values
                 }
             }
-        }
-        }
-    );
+        });
 
     let vec_strings = vec!["start", "core", "end"];
 
@@ -562,21 +562,12 @@ pub fn uniwig_main(
         "wig" => {
             println!("Combining Wig Files");
 
-            for location in vec_strings.iter(){
-
+            for location in vec_strings.iter() {
                 write_combined_wig_files(*location, output_type, bwfileheader, &chromosomes);
-
             }
-
-
-
         }
-        _ => {
-
-        }
-
+        _ => {}
     }
-
 
     println!("FINISHED");
 
@@ -586,23 +577,24 @@ pub fn uniwig_main(
 fn fixed_core_wiggle_bam(p0: &Vec<i32>, p1: &Vec<i32>, p2: i32, p3: i32) -> (Vec<u32>, Vec<i32>) {
     println!("smooth_fixed_start_end_wiggle_bam");
 
-
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     return (v_coord_counts, v_coordinate_positions);
 }
 
-fn smooth_fixed_start_end_wiggle_bam(p0: &Vec<i32>, p1: i32, p2: i32, p3: i32) -> (Vec<u32>, Vec<i32>) {
+fn smooth_fixed_start_end_wiggle_bam(
+    p0: &Vec<i32>,
+    p1: i32,
+    p2: i32,
+    p3: i32,
+) -> (Vec<u32>, Vec<i32>) {
     println!("smooth_fixed_start_end_wiggle_bam");
-
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     return (v_coord_counts, v_coordinate_positions);
-
-
 }
 
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
@@ -687,13 +679,16 @@ fn write_to_npy_file(
     file.write_all(b"\n").unwrap();
 }
 
-fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &str, chromosomes: &Vec<Chromosome>){
-
-    let combined_wig_file_name = format!(
-        "{}_{}.{}",
-        bwfileheader,location, output_type
-    );
-    let path = std::path::Path::new(&combined_wig_file_name).parent().unwrap();
+fn write_combined_wig_files(
+    location: &str,
+    output_type: &str,
+    bwfileheader: &str,
+    chromosomes: &Vec<Chromosome>,
+) {
+    let combined_wig_file_name = format!("{}_{}.{}", bwfileheader, location, output_type);
+    let path = std::path::Path::new(&combined_wig_file_name)
+        .parent()
+        .unwrap();
     let _ = create_dir_all(path);
 
     let mut combined_file = OpenOptions::new()
@@ -702,7 +697,7 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
         .open(combined_wig_file_name)
         .unwrap();
 
-    let mut inputs: Vec<String>= Vec::new();
+    let mut inputs: Vec<String> = Vec::new();
 
     for chrom in chromosomes.iter() {
         let file_name = format!(
@@ -712,14 +707,10 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
         inputs.push(file_name);
     }
 
-    for input_file in inputs{
-
+    for input_file in inputs {
         let mut input = File::open(input_file).unwrap();
         io::copy(&mut input, &mut combined_file).expect("cannot copy file!!");
-
-
     }
-
 }
 
 #[allow(unused_variables)]
