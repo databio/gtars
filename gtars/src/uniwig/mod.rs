@@ -366,7 +366,7 @@ pub fn uniwig_main(
                                         clamped_start_position(primary_start, smoothsize),
                                         stepsize,
                                         meta_data_file_names[0].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                                 _ => {
@@ -382,7 +382,7 @@ pub fn uniwig_main(
                                         clamped_start_position(primary_start, smoothsize),
                                         stepsize,
                                         meta_data_file_names[0].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                             }
@@ -434,7 +434,7 @@ pub fn uniwig_main(
                                         chrom_name.clone(),
                                         clamped_start_position(primary_end, smoothsize),
                                         stepsize,
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                                 "csv" => {
@@ -453,7 +453,7 @@ pub fn uniwig_main(
                                         clamped_start_position(primary_start, smoothsize),
                                         stepsize,
                                         meta_data_file_names[1].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                                 _ => {
@@ -469,7 +469,7 @@ pub fn uniwig_main(
                                         clamped_start_position(primary_start, smoothsize),
                                         stepsize,
                                         meta_data_file_names[1].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                             }
@@ -519,7 +519,7 @@ pub fn uniwig_main(
                                         chrom_name.clone(),
                                         primary_start,
                                         stepsize,
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                                 "csv" => {
@@ -538,7 +538,7 @@ pub fn uniwig_main(
                                         primary_start,
                                         stepsize,
                                         meta_data_file_names[2].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                                 _ => {
@@ -554,7 +554,7 @@ pub fn uniwig_main(
                                         primary_start,
                                         stepsize,
                                         meta_data_file_names[2].clone(),
-                                        smoothsize
+                                        smoothsize,
                                     );
                                 }
                             }
@@ -589,7 +589,7 @@ fn fixed_core_wiggle_bam(p0: &Vec<i32>, p1: &Vec<i32>, p2: i32, p3: i32) -> (Vec
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
-    return (v_coord_counts, v_coordinate_positions);
+    (v_coord_counts, v_coordinate_positions)
 }
 
 fn smooth_fixed_start_end_wiggle_bam(
@@ -603,7 +603,7 @@ fn smooth_fixed_start_end_wiggle_bam(
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
-    return (v_coord_counts, v_coordinate_positions);
+    (v_coord_counts, v_coordinate_positions)
 }
 
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
@@ -864,7 +864,7 @@ pub fn smooth_fixed_start_end_wiggle(
     adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
     adjusted_start_site = adjusted_start_site - smoothsize; // adjust based on smoothing
                                                             //println!("DEBUG: START SITE AFTER ADJUSTMENT -> {}",adjusted_start_site.clone());
-    //Check endsite generation
+                                                            //Check endsite generation
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
 
     //println!("DEBUG: INITIAL ENDSITE -> {}", current_end_site.clone());
@@ -960,7 +960,7 @@ pub fn smooth_fixed_start_end_wiggle(
     }
 
     //println!("DEBUG: FINAL LENGTHS... Counts: {:?}  Positions: {:?}", v_coord_counts, v_coordinate_positions);
-    return (v_coord_counts, v_coordinate_positions);
+    (v_coord_counts, v_coordinate_positions)
 }
 
 /// This function is a more direct port of fixedCoreBW from uniwig written in CPP
@@ -1087,5 +1087,5 @@ pub fn fixed_core_wiggle(
     }
 
     //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
-    return (v_coord_counts, v_coordinate_positions);
+    (v_coord_counts, v_coordinate_positions)
 }
