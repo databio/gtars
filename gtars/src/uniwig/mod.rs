@@ -10,6 +10,7 @@ use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
+use indicatif::ProgressBar;
 
 use noodles::bam;
 // use noodles::sam as sam;
@@ -257,10 +258,6 @@ pub fn uniwig_main(
         let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
             Some(size) => *size as i32, // Dereference to get the i32 value
             None => {
-                println!(
-                    "Warning: Chromosome size not found for {} in chrom.sizes. Skipping...",
-                    chromosome.chrom
-                );
                 continue; // Or handle the error differently
             }
         };
@@ -272,13 +269,18 @@ pub fn uniwig_main(
         "Initial chroms: {}  vs Final chroms: {}",
         chromosomes.len(),
         final_chromosomes.len()
-    );
 
+    );
+    if chromosomes.len() != final_chromosomes.len(){
+        println!("Some chromosomes were not found in chrom.sizes file and will be skipped...")
+    }
+    let bar = ProgressBar::new(final_chromosomes.len() as u64);
     final_chromosomes
         .par_iter()
         .with_min_len(8)
         .for_each(|chromosome: &Chromosome| {
             // Need these for setting wiggle header
+            bar.inc(1);
             let primary_start = chromosome.starts[0].clone();
             let primary_end = chromosome.ends[0].clone();
 
@@ -335,7 +337,7 @@ pub fn uniwig_main(
                                     buf.flush().unwrap();
                                 }
                                 "wig" => {
-                                    println!("Writing to wig file!");
+                                    //println!("Writing to wig file!");
                                     let file_name = format!(
                                         "{}{}_{}.{}",
                                         bwfileheader, chrom_name, "start", output_type
@@ -423,7 +425,7 @@ pub fn uniwig_main(
                                     buf.flush().unwrap();
                                 }
                                 "wig" => {
-                                    println!("Writing to wig file!");
+                                    //println!("Writing to wig file!");
                                     let file_name = format!(
                                         "{}{}_{}.{}",
                                         bwfileheader, chrom_name, "end", output_type
@@ -564,20 +566,23 @@ pub fn uniwig_main(
                 }
             }
         });
-
+    bar.finish();
     let vec_strings = vec!["start", "core", "end"];
 
+
+    let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
         "wig" => {
             println!("Combining Wig Files");
 
             for location in vec_strings.iter() {
+                bar.inc(1);
                 write_combined_wig_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
         }
         _ => {}
     }
-
+    bar.finish();
     println!("FINISHED");
 
     Ok(())
