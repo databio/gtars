@@ -572,7 +572,7 @@ pub fn uniwig_main(
             println!("Combining Wig Files");
 
             for location in vec_strings.iter() {
-                write_combined_wig_files(*location, output_type, bwfileheader, &chromosomes);
+                write_combined_wig_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
         }
         _ => {}
