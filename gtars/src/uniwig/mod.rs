@@ -5,6 +5,7 @@ use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
+use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
@@ -687,7 +688,6 @@ fn write_to_npy_file(
 }
 
 fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &str, chromosomes: &Vec<Chromosome>){
-    //println!("TODO: write combined wig  {}", location);
 
     let combined_wig_file_name = format!(
         "{}_{}.{}",
@@ -702,27 +702,24 @@ fn write_combined_wig_files(location: &str, output_type: &str, bwfileheader: &st
         .open(combined_wig_file_name)
         .unwrap();
 
-    let mut buf = BufWriter::new(combined_file);
-    for chrom in chromosomes.iter(){
+    let mut inputs: Vec<String>= Vec::new();
 
+    for chrom in chromosomes.iter() {
         let file_name = format!(
             "{}{}_{}.{}",
             bwfileheader, chrom.chrom, location, output_type
         );
+        inputs.push(file_name);
+    }
 
-        //println!("Here is the file name: {}", file_name);
-        let mut single_file = File::open(&file_name).unwrap();
-        let mut reader = BufReader::new(&mut single_file);
+    for input_file in inputs{
 
-        let mut line = String::new();
-        while reader.read_line(&mut line).unwrap() > 0 {
-            write!(&mut buf, "{}", line).unwrap();
-            //combined_file.write_all(line.as_bytes()).expect("Cannot write line");
-            line.clear();
-        }
+        let mut input = File::open(input_file).unwrap();
+        io::copy(&mut input, &mut combined_file).expect("cannot copy file!!");
+
 
     }
-    buf.flush().unwrap();
+
 }
 
 #[allow(unused_variables)]
