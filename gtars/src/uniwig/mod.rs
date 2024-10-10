@@ -5,7 +5,7 @@ use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
 use rayon::prelude::*;
@@ -269,7 +269,7 @@ pub fn uniwig_main(
 
     println!("Initial chroms: {}  vs Final chroms: {}", chromosomes.len(), final_chromosomes.len());
 
-    final_chromosomes.par_iter().with_min_len(1).for_each(|chromosome: &Chromosome|
+    final_chromosomes.par_iter().with_min_len(8).for_each(|chromosome: &Chromosome|
         {
 
         // Need these for setting wiggle header
@@ -318,12 +318,14 @@ pub fn uniwig_main(
 
                         match output_type {
                             "file" => {
-                                println!("Writing to CLI");
+                                //print!("Writing to CLI");
+                                let handle = &std::io::stdout();
+                                let mut buf = BufWriter::new(handle);
                                 for count in &count_result.0{
-                                    println!("{}", count);
+                                    writeln!(buf, "{}", count).expect("failed to write line");
 
                                 };
-
+                                buf.flush().unwrap();
 
                             }
                             "wig" => {
@@ -401,11 +403,14 @@ pub fn uniwig_main(
 
                         match output_type {
                             "file" => {
-                                println!("Writing to CLI");
+                                //print!("Writing to CLI");
+                                let handle = &std::io::stdout();
+                                let mut buf = BufWriter::new(handle);
                                 for count in &count_result.0{
-                                    println!("{}", count);
+                                    writeln!(buf, "{}", count).expect("failed to write line");
 
                                 };
+                                buf.flush().unwrap();
 
 
                             }
@@ -483,11 +488,14 @@ pub fn uniwig_main(
 
                         match output_type {
                             "file" => {
-                                println!("Writing to CLI");
+                                //print!("Writing to CLI");
+                                let handle = &std::io::stdout();
+                                let mut buf = BufWriter::new(handle);
                                 for count in &core_results.0{
-                                    println!("{}", count);
+                                    writeln!(buf, "{}", count).expect("failed to write line");
 
                                 };
+                                buf.flush().unwrap();
 
 
                             }
