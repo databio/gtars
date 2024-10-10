@@ -1,6 +1,7 @@
 use clap::builder::OsStr;
 use clap::ArgMatches;
 use flate2::read::GzDecoder;
+use indicatif::ProgressBar;
 use ndarray::Array;
 use ndarray_npy::write_npy;
 use rayon::prelude::*;
@@ -10,7 +11,6 @@ use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
-use indicatif::ProgressBar;
 
 use noodles::bam;
 // use noodles::sam as sam;
@@ -114,9 +114,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     println!("Reading Bed file complete.");
 
-    //chromosome_vec.sort_by_key(|c| c.chrom.clone());
-
-    return chromosome_vec;
+    chromosome_vec
 }
 
 /// Parses each line of given bed file into a contig (chromosome), starts and ends
@@ -201,8 +199,6 @@ pub fn uniwig_main(
         _ => Err(format!("Invalid file type: {}", filetype)),
     };
 
-    //println!("Supplied file type: {:?}", ft.unwrap());
-
     let stepsize = 1;
     // Set up output file names
 
@@ -238,11 +234,7 @@ pub fn uniwig_main(
         _ => read_bed_vec(filepath),
     };
 
-    //let chromosomes: Vec<Chromosome> = read_bed_vec(filepath);
-
     let num_chromosomes = chromosomes.len();
-
-    //println!(" DEBUG Number of Chromosomes{:?}", num_chromosomes);
 
     // Preallocate memory based on number of chromsomes from previous step
     let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
@@ -269,9 +261,8 @@ pub fn uniwig_main(
         "Initial chroms: {}  vs Final chroms: {}",
         chromosomes.len(),
         final_chromosomes.len()
-
     );
-    if chromosomes.len() != final_chromosomes.len(){
+    if chromosomes.len() != final_chromosomes.len() {
         println!("Some chromosomes were not found in chrom.sizes file and will be skipped...")
     }
     let bar = ProgressBar::new(final_chromosomes.len() as u64);
@@ -287,8 +278,6 @@ pub fn uniwig_main(
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
 
             let chrom_name = chromosome.chrom.clone();
-            //println!("DEBUG: CHROM NAME -> {}",chromosome.chrom.clone());
-            //chroms.push(chrom_name.clone());
 
             // Iterate 3 times to output the three different files.
             for j in 0..3 {
@@ -301,10 +290,6 @@ pub fn uniwig_main(
                 if smoothsize != 0 {
                     match j {
                         0 => {
-                            //println!("Write Starts Here");
-                            //println!("DEBUG: HERE is Initial VEC FOR STARTS:{:?}", chromosome.starts.clone());
-                            //let count_result = count_coordinate_reads(&chromosome.starts);
-                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
                             let count_result = match ft {
                                 Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
                                     &chromosome.starts,
@@ -390,7 +375,6 @@ pub fn uniwig_main(
                             }
                         }
                         1 => {
-                            //println!("Write Ends Here");
                             let count_result = match ft {
                                 Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
                                     &chromosome.ends,
@@ -412,11 +396,8 @@ pub fn uniwig_main(
                                 ),
                             };
 
-                            //println!("DEBUG: HERE is COUNT VEC FOR STARTS:{:?}", result);
-
                             match output_type {
                                 "file" => {
-                                    //print!("Writing to CLI");
                                     let handle = &std::io::stdout();
                                     let mut buf = BufWriter::new(handle);
                                     for count in &count_result.0 {
@@ -425,7 +406,6 @@ pub fn uniwig_main(
                                     buf.flush().unwrap();
                                 }
                                 "wig" => {
-                                    //println!("Writing to wig file!");
                                     let file_name = format!(
                                         "{}{}_{}.{}",
                                         bwfileheader, chrom_name, "end", output_type
@@ -477,7 +457,6 @@ pub fn uniwig_main(
                             }
                         }
                         2 => {
-                            //println!("Write Core Here");
                             let core_results = match ft {
                                 Ok(FileType::BED) => fixed_core_wiggle(
                                     &chromosome.starts,
@@ -501,7 +480,6 @@ pub fn uniwig_main(
 
                             match output_type {
                                 "file" => {
-                                    //print!("Writing to CLI");
                                     let handle = &std::io::stdout();
                                     let mut buf = BufWriter::new(handle);
                                     for count in &core_results.0 {
@@ -510,7 +488,6 @@ pub fn uniwig_main(
                                     buf.flush().unwrap();
                                 }
                                 "wig" => {
-                                    //println!("Writing to CORE RESULTS wig file!");
                                     let file_name = format!(
                                         "{}{}_{}.{}",
                                         bwfileheader, chrom_name, "core", output_type
@@ -569,7 +546,6 @@ pub fn uniwig_main(
     bar.finish();
     let vec_strings = vec!["start", "core", "end"];
 
-
     let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
         "wig" => {
@@ -588,25 +564,30 @@ pub fn uniwig_main(
     Ok(())
 }
 
-fn fixed_core_wiggle_bam(p0: &Vec<i32>, p1: &Vec<i32>, p2: i32, p3: i32) -> (Vec<u32>, Vec<i32>) {
+fn fixed_core_wiggle_bam(
+    _p0: &Vec<i32>,
+    _p1: &Vec<i32>,
+    _p2: i32,
+    _p3: i32,
+) -> (Vec<u32>, Vec<i32>) {
     println!("smooth_fixed_start_end_wiggle_bam");
 
-    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+    let v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     (v_coord_counts, v_coordinate_positions)
 }
 
 fn smooth_fixed_start_end_wiggle_bam(
-    p0: &Vec<i32>,
-    p1: i32,
-    p2: i32,
-    p3: i32,
+    _p0: &Vec<i32>,
+    _p1: i32,
+    _p2: i32,
+    _p3: i32,
 ) -> (Vec<u32>, Vec<i32>) {
     println!("smooth_fixed_start_end_wiggle_bam");
 
-    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+    let v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     (v_coord_counts, v_coordinate_positions)
 }
@@ -621,8 +602,6 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     let references = header.unwrap();
     let references = references.reference_sequences();
 
-    //println!("Here are the reference sequences: \n{:?}", references);
-
     let mut chromosome = Chromosome {
         chrom: "".to_string(),
         starts: vec![],
@@ -631,12 +610,8 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
 
     for ref_key in references {
-        //println!("Chromosome {:?}", ref_key.0);
-        //println!("Map Value {:?}", ref_key.1);
-
         let chrom_name_vec = ref_key.0.deref().clone();
         let chrom_name = String::from_utf8((*chrom_name_vec).to_owned()).unwrap();
-        //println!("{:?}",chrom_name);
 
         //For later
         // use bstr::BString;
@@ -662,9 +637,6 @@ fn write_to_npy_file(
 ) {
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
-
-    //println!("{}", filename);
-    //println!("{}", metafilename);
 
     // Write the NumPy Files
     let arr = Array::from_vec(counts.to_vec());
@@ -768,12 +740,7 @@ fn write_to_wig_file(
             position += 1;
             continue;
         } else {
-            //println!("DEBUG COORDINATE = {} COUNTS= {}",position, count);
-            //let wig_line = position.to_string() + " " + count.to_string().as_str();
-            //let wig_line = count.to_string();
-            //file.write_all(wig_line.as_ref()).unwrap();
             writeln!(&mut buf, "{}", count).unwrap();
-            //file.write_all(b"\n").unwrap();
             position += 1;
         }
     }
@@ -813,7 +780,6 @@ pub fn read_chromosome_sizes(
             // Note this may lead to slower performance as uniwig will pad the remaining chromosome with zeros
             // this is a remainder from legacy uniwig for creating wiggle files and bigwigs
             // It could potentially be removed in future versions if deemed unnecessary.
-            //println!("Processing sizes file: {}", chrom_size_path);
             for line in reader.lines() {
                 let line = line?; // Propagate the potential error
                 let mut iter = line.split('\t');
