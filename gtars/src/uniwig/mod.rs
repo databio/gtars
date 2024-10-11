@@ -873,7 +873,7 @@ pub fn smooth_fixed_start_end_wiggle(
         //println!("DEBUG: Coordinate Value: {}, Adjusted Start Site: {}, New Endsite: {} ", coordinate_value.clone(), adjusted_start_site.clone(), adjusted_start_site + 1 + smoothsize*2);
 
         if adjusted_start_site == prev_coordinate_value {
-            //count += 1;
+            count += 1;
             continue;
         }
 
@@ -1002,7 +1002,7 @@ pub fn fixed_core_wiggle(
         collected_end_sites.push(ends_vector[current_index]);
 
         if current_start_site == prev_coordinate_value {
-            //count += 1;
+            count += 1;
             continue;
         }
 
