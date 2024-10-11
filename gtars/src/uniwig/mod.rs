@@ -276,7 +276,6 @@ pub fn uniwig_main(
             let primary_end = chromosome.ends[0].clone();
 
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-
             let chrom_name = chromosome.chrom.clone();
 
             // Iterate 3 times to output the three different files.
@@ -735,14 +734,7 @@ fn write_to_wig_file(
     let mut buf = BufWriter::new(file);
 
     for count in counts.iter() {
-        //TODO THis is inefficient to iterate over ALL counts when the above coordinate vecs could act as an index
-        if *count == 0 {
-            position += 1;
-            continue;
-        } else {
-            writeln!(&mut buf, "{}", count).unwrap();
-            position += 1;
-        }
+        writeln!(&mut buf, "{}", count).unwrap();
     }
     buf.flush().unwrap();
 }
@@ -855,7 +847,7 @@ pub fn smooth_fixed_start_end_wiggle(
 
     //prev_coordinate_value = adjusted_start_site;
 
-    for coord in vin_iter.skip(1) {
+    for coord in vin_iter.skip(0) {
         //println!("DEBUG: BEGIN COORDINATE ITERATION");
         coordinate_value = *coord;
         //println!("DEBUG: COORDINATE VALUE {}", coordinate_value.clone());
@@ -873,7 +865,6 @@ pub fn smooth_fixed_start_end_wiggle(
         //println!("DEBUG: Coordinate Value: {}, Adjusted Start Site: {}, New Endsite: {} ", coordinate_value.clone(), adjusted_start_site.clone(), adjusted_start_site + 1 + smoothsize*2);
 
         if adjusted_start_site == prev_coordinate_value {
-            count += 1;
             continue;
         }
 
@@ -984,7 +975,7 @@ pub fn fixed_core_wiggle(
 
     //prev_coordinate_value = current_start_site;
 
-    for (index, coord) in starts_vector.iter().enumerate().skip(1) {
+    for (index, coord) in starts_vector.iter().enumerate().skip(0) {
         coordinate_value = *coord;
 
         current_start_site = coordinate_value;
@@ -1002,7 +993,6 @@ pub fn fixed_core_wiggle(
         collected_end_sites.push(ends_vector[current_index]);
 
         if current_start_site == prev_coordinate_value {
-            count += 1;
             continue;
         }
 
