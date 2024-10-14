@@ -272,6 +272,7 @@ mod tests {
     //     let smoothsize: i32 = 5;
     //     let output_type = "wig";
     //     let filetype = "bam";
+    //     let num_threads =6;
     //
     //     uniwig_main(
     //         smoothsize,
@@ -280,6 +281,7 @@ mod tests {
     //         bwfileheader,
     //         output_type,
     //         filetype,
+    //         num_threads,
     //     )
     //     .expect("Uniwig main failed!");
     //
@@ -306,6 +308,7 @@ mod tests {
         let smoothsize: i32 = 5;
         let output_type = "wig";
         let filetype = "bed";
+        let num_threads = 6;
 
         uniwig_main(
             smoothsize,
@@ -314,6 +317,7 @@ mod tests {
             bwfileheader,
             output_type,
             filetype,
+            num_threads,
         )
         .expect("Uniwig main failed!");
 
@@ -340,6 +344,7 @@ mod tests {
         let smoothsize: i32 = 5;
         let output_type = "npy";
         let filetype = "bed";
+        let num_threads = 6;
 
         uniwig_main(
             smoothsize,
@@ -348,6 +353,7 @@ mod tests {
             bwfileheader,
             output_type,
             filetype,
+            num_threads,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -393,6 +399,7 @@ mod tests {
         let smoothsize: i32 = 5;
         let output_type = "npy";
         let filetype = "bed";
+        let num_threads: i32 = 6;
 
         let result = uniwig_main(
             smoothsize,
@@ -401,6 +408,7 @@ mod tests {
             bwfileheader,
             output_type,
             filetype,
+            num_threads,
         );
 
         assert!(result.is_ok());

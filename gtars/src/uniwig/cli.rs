@@ -61,4 +61,13 @@ pub fn create_uniwig_cli() -> Command {
                 .help("Output as wiggle or npy")
                 .required(true),
         )
+        .arg(
+            Arg::new("threads")
+                .long("threads")
+                .short('p')
+                .default_value("6")
+                .value_parser(clap::value_parser!(i32))
+                .help("Number of rayon threads to use for parallel processing")
+                .required(false),
+        )
 }
