@@ -354,8 +354,6 @@ pub fn uniwig_main(
                                         panic!("Write to CSV. Not Implemented");
                                     }
                                     "npy" => {
-                                        println!("Writing npy files!");
-
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "start", output_type
@@ -438,7 +436,6 @@ pub fn uniwig_main(
                                         panic!("Write to CSV. Not Implemented");
                                     }
                                     "npy" => {
-                                        println!("Writing npy files!");
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "end", output_type
@@ -521,7 +518,6 @@ pub fn uniwig_main(
                                         panic!("Write to CSV. Not Implemented");
                                     }
                                     "npy" => {
-                                        println!("Writing npy files!");
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "core", output_type
@@ -674,15 +670,14 @@ fn write_to_npy_file(
 
     // The original wiggle file header. This can be anything we wish it to be. Currently space delimited.
     let actual_start_position = start_position + smoothsize;
-    let wig_header = "fixedStep chrom=".to_string()
+    let mut wig_header = "fixedStep chrom=".to_string()
         + chromname.as_str()
         + " start="
         + actual_start_position.to_string().as_str()
         + " step="
         + stepsize.to_string().as_str();
-    // TODO using rayon, theis header is written out of order and it may cause issues
+    wig_header.push_str("\n");
     file.write_all(wig_header.as_ref()).unwrap();
-    file.write_all(b"\n").unwrap();
 }
 
 fn write_combined_wig_files(
