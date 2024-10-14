@@ -21,7 +21,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("filetype")
                 .long("filetype")
                 .short('t')
-                .help("'bed' or 'bam'")
+                .help("input file type, 'bed' or 'bam'")
                 .default_value("bed"),
         )
         .arg(
