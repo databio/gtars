@@ -40,6 +40,7 @@ mod tests {
     use super::*;
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
+
     use gtars::uniwig::{
         read_bam_header, read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome,
     };
@@ -83,8 +84,46 @@ mod tests {
 
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
     }
+  
     #[rstest]
+    fn test_igd_parse_bed_file() {
+        // Given some random line from a  bed file...
+        let bed_file_string =
+            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
 
+        //Placeholder start and end values
+        let mut start = 0;
+        let mut end = 0;
+        let mut va = 0;
+
+        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap(); // this will return
+
+        let unwrapped_result = result.as_str();
+
+        assert_eq!(unwrapped_result, "chr1");
+
+        // Ensure start and end is modified via parse_bed
+        assert_eq!(start, 32481);
+        assert_eq!(end, 32787);
+    }
+
+    #[rstest]
+    fn test_igd_create() {
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = db_path_unwrapped;
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+
+        let demo_name = String::from("demo");
+
+        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+    }
+  
+    #[rstest]
     fn test_igd_search() {
         // First must create temp igd
 

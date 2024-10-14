@@ -801,7 +801,7 @@ pub fn read_chromosome_sizes(
             // It could potentially be removed in future versions if deemed unnecessary.
             for line in reader.lines() {
                 let line = line?; // Propagate the potential error
-                let mut iter = line.split('\t');
+                let mut iter = line.split_whitespace();
                 let chrom_name = iter.next().unwrap().to_owned();
                 let size_str = iter.next().unwrap();
                 let size = size_str.parse::<u32>()?;
