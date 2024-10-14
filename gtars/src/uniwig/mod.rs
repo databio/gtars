@@ -4,6 +4,7 @@ use flate2::read::GzDecoder;
 use indicatif::ProgressBar;
 use ndarray::Array;
 use ndarray_npy::write_npy;
+use noodles::bam;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
@@ -11,10 +12,9 @@ use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
 use std::path::Path;
-
-use noodles::bam;
+use std::str::FromStr;
 // use noodles::sam as sam;
-use bstr::BString;
+//use bstr::BString;
 
 pub mod cli;
 
@@ -26,6 +26,18 @@ pub mod consts {
 enum FileType {
     BED,
     BAM,
+}
+
+impl FromStr for FileType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "bed" => Ok(FileType::BED),
+            "bam" => Ok(FileType::BAM),
+            _ => Err(format!("Invalid file type: {}", s)),
+        }
+    }
 }
 
 pub struct Chromosome {
@@ -205,11 +217,7 @@ pub fn uniwig_main(
         .unwrap();
 
     // Determine File Type
-    let ft = match filetype.to_lowercase().as_str() {
-        "bed" => Ok(FileType::BED),
-        "bam" => Ok(FileType::BAM),
-        _ => Err(format!("Invalid file type: {}", filetype)),
-    };
+    let ft = FileType::from_str(filetype.to_lowercase().as_str());
 
     let stepsize = 1;
     // Set up output file names
