@@ -6,7 +6,7 @@ use ndarray::Array;
 use ndarray_npy::write_npy;
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io;
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::ops::Deref;
@@ -709,8 +709,13 @@ fn write_combined_wig_files(
     }
 
     for input_file in inputs {
-        let mut input = File::open(input_file).unwrap();
+        // copy single file to the combined file
+        let mut input = File::open(&input_file).unwrap();
         io::copy(&mut input, &mut combined_file).expect("cannot copy file!!");
+
+        // Remove the file after it is combined.
+        let path = std::path::Path::new(&input_file);
+        let _ = remove_file(path).unwrap();
     }
 }
 
