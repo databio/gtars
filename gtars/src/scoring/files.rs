@@ -5,7 +5,14 @@ use anyhow::Result;
 use glob::glob;
 use rust_lapper::{Interval, Lapper};
 
+use crate::common::models::Region;
 use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
+
+struct OverlapResult(Region, u32);
+
+trait FindOverlaps {
+    fn find_overlaps(&self, region: &Region) -> Option<Vec<OverlapResult>>;
+}
 
 pub struct FragmentFileGlob {
     curr: usize,
@@ -53,7 +60,7 @@ impl ConsensusSet {
             let interval = Interval {
                 start: region.start,
                 stop: region.end,
-                val: *region_to_id_map.get(region).unwrap()
+                val: *region_to_id_map.get(region).unwrap(),
             };
 
             // use chr to get the vector of intervals
@@ -72,6 +79,31 @@ impl ConsensusSet {
         Ok(ConsensusSet {
             overlap_trees: trees,
         })
-        
+    }
+}
+
+impl FindOverlaps for ConsensusSet {
+    fn find_overlaps(&self, region: &Region) -> Option<Vec<OverlapResult>> {
+        let tree = self.overlap_trees.get(&region.chr);
+        if tree.is_none() {
+            None
+        } else {
+            let olaps = tree.unwrap().find(region.start, region.end);
+            let olaps = olaps
+                .into_iter()
+                .map(|olap| {
+                    OverlapResult(
+                        Region {
+                            chr: region.chr.clone(),
+                            start: region.start,
+                            end: region.end,
+                        },
+                        olap.val,
+                    )
+                })
+                .collect();
+
+            Some(olaps)
+        }
     }
 }
