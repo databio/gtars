@@ -4,6 +4,7 @@ use clap::Command;
 // go through the library crate to get the interfaces
 use gtars::igd;
 use gtars::tokenizers;
+use gtars::fragsplit;
 use gtars::uniwig;
 
 pub mod consts {
@@ -21,6 +22,7 @@ fn build_parser() -> Command {
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
         .subcommand(tokenizers::cli::make_tokenization_cli())
+        .subcommand(fragsplit::cli::make_fragsplit_cli())
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
 }
@@ -32,6 +34,9 @@ fn main() -> Result<()> {
     match matches.subcommand() {
         Some((tokenizers::consts::TOKENIZE_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_bed_file(matches)?;
+        }
+        Some((fragsplit::consts::FRAGSPLIT_CMD, matches)) => {
+            fragsplit::cli::handlers::split_fragment_files(matches)?;
         }
         Some((uniwig::consts::UNIWIG_CMD, matches)) => {
             uniwig::run_uniwig(matches);
@@ -45,7 +50,6 @@ fn main() -> Result<()> {
             }
             _ => unreachable!("IGD Subcommand not found"),
         },
-
         _ => unreachable!("Subcommand not found"),
     };
 
