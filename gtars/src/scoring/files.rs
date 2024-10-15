@@ -20,6 +20,7 @@ pub struct FragmentFileGlob {
 }
 
 pub struct ConsensusSet {
+    len: usize,
     overlap_trees: HashMap<String, Lapper<u32, u32>>,
 }
 
@@ -35,6 +36,14 @@ impl FragmentFileGlob {
         let curr = 0_usize;
         Ok(FragmentFileGlob { files, curr })
     }
+
+    pub fn len(&self) -> usize {
+        self.files.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.files.is_empty()
+    }
 }
 
 impl Iterator for FragmentFileGlob {
@@ -49,6 +58,7 @@ impl Iterator for FragmentFileGlob {
 impl ConsensusSet {
     pub fn new(path: PathBuf) -> Result<Self> {
         let regions = extract_regions_from_bed_file(&path)?;
+        let len = regions.len();
 
         let mut trees: HashMap<String, Lapper<u32, u32>> = HashMap::new();
         let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
@@ -78,8 +88,18 @@ impl ConsensusSet {
 
         Ok(ConsensusSet {
             overlap_trees: trees,
+            len
         })
     }
+
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+    
 }
 
 impl FindOverlaps for ConsensusSet {
