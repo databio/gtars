@@ -2,9 +2,9 @@ use anyhow::Result;
 use clap::Command;
 
 // go through the library crate to get the interfaces
+use gtars::fragsplit;
 use gtars::igd;
 use gtars::tokenizers;
-use gtars::fragsplit;
 use gtars::uniwig;
 
 pub mod consts {

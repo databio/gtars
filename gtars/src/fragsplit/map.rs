@@ -49,7 +49,6 @@ impl BarcodeToClusterMap {
             let barcode = parts.next();
             let cluster_id = parts.next();
 
-
             if barcode.is_none() || cluster_id.is_none() {
                 anyhow::bail!(
                     "Invalid line format: Expected two tab-separated values, found: {:?}",
@@ -58,9 +57,12 @@ impl BarcodeToClusterMap {
             }
 
             if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
-                let cluster_id: u16 = cluster_id
-                    .parse()
-                    .with_context(|| format!("Error parsing cluster id: {:?}. It must be coercible to a u16 datatype.", cluster_id))?;
+                let cluster_id: u16 = cluster_id.parse().with_context(|| {
+                    format!(
+                        "Error parsing cluster id: {:?}. It must be coercible to a u16 datatype.",
+                        cluster_id
+                    )
+                })?;
 
                 map.insert(barcode.to_string(), cluster_id);
                 if !cluster_labels.contains(&cluster_id) {

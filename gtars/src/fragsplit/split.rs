@@ -1,7 +1,7 @@
 use std::fs::File;
-use std::time::Instant;
 use std::io::{BufRead, BufWriter, Write};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Result};
@@ -47,11 +47,12 @@ pub fn pseudobulk_fragment_files(
     })?;
 
     // convert files to Path -- consume iterator
-    let files: Vec<Result<PathBuf>> = files.map(|f| {
-        let f = f?;
-        Ok(f.path())
-    })
-    .collect();
+    let files: Vec<Result<PathBuf>> = files
+        .map(|f| {
+            let f = f?;
+            Ok(f.path())
+        })
+        .collect();
 
     // create actual output directory
     fs::create_dir_all(output).with_context(|| {
@@ -74,17 +75,21 @@ pub fn pseudobulk_fragment_files(
     }
 
     let total_files = files.len();
-    
+
     let pb = ProgressBar::new(total_files as u64);
-    pb.set_style(ProgressStyle::default_bar()
-        .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} files ({eta})")?
-        .progress_chars("##-"));
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} files ({eta})")?
+            .progress_chars("##-"),
+    );
 
     let spinner = ProgressBar::new_spinner();
-    spinner.set_style(ProgressStyle::default_spinner()
-        .template("{spinner:.green} [{elapsed}] {msg} ({per_sec})")
-        .unwrap()
-        .tick_strings(&["-", "\\", "|", "/"]));
+    spinner.set_style(
+        ProgressStyle::default_spinner()
+            .template("{spinner:.green} [{elapsed}] {msg} ({per_sec})")
+            .unwrap()
+            .tick_strings(&["-", "\\", "|", "/"]),
+    );
 
     spinner.set_message("Processing fragment files...");
 
@@ -139,7 +144,6 @@ pub fn pseudobulk_fragment_files(
         }
 
         pb.inc(1);
-
     }
 
     spinner.finish_with_message("Done!");
@@ -188,6 +192,5 @@ mod tests {
         let res = pseudobulk_fragment_files(path_to_fragment_files, &mapping, path_to_output);
 
         assert_eq!(res.is_ok(), true);
-
     }
 }

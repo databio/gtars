@@ -84,7 +84,7 @@ mod tests {
 
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
     }
-  
+
     #[rstest]
     fn test_igd_parse_bed_file() {
         // Given some random line from a  bed file...
@@ -122,7 +122,7 @@ mod tests {
 
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
     }
-  
+
     #[rstest]
     fn test_igd_search() {
         // First must create temp igd
