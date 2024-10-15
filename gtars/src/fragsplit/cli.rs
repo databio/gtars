@@ -29,14 +29,10 @@ pub mod handlers {
             .expect("A path to a mapping file is required.");
 
         let default_out = consts::DEFAULT_OUT.to_string();
-        let output = matches
-            .get_one::<String>("output")
-            .unwrap_or(&default_out);
+        let output = matches.get_one::<String>("output").unwrap_or(&default_out);
 
         let fragments = Path::new(fragments);
-        let mapping = &BarcodeToClusterMap::from_file(
-            Path::new(mapping)
-        )?;
+        let mapping = &BarcodeToClusterMap::from_file(Path::new(mapping))?;
         let output = Path::new(output);
 
         pseudobulk_fragment_files(fragments, mapping, output)?;
