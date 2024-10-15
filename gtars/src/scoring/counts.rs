@@ -22,9 +22,12 @@ where
         self.data.get(row * self.cols + col)
     }
 
-    pub fn set(&mut self, row: usize, col: usize, value: T) {
+    pub fn set(&mut self, row: usize, col: usize, value: T) -> Result<(), String> {
         if row < self.rows && col < self.cols {
             self.data[row * self.cols + col] = value;
+            Ok(())
+        } else {
+            Err(format!("Index out of bounds: row {}, col {}", row, col))
         }
     }
 
