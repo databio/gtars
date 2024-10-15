@@ -63,7 +63,7 @@ impl ConsensusSet {
             chr_intervals.push(interval);
         }
 
-        // build the tree
+        // build the trees
         for (chr, chr_intervals) in intervals.into_iter() {
             let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals);
             trees.insert(chr.to_string(), lapper);
