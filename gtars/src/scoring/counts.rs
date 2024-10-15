@@ -6,6 +6,12 @@ pub struct CountMatrix<T> {
     cols: usize,
 }
 
+pub struct RowIterator<'a, T> {
+    matrix: &'a CountMatrix<T>,
+    current_row: usize,
+}
+
+
 impl<T> CountMatrix<T>
 where
     T: Copy + Default + Add<Output = T>,
@@ -37,6 +43,37 @@ where
             if let Some(value) = self.data.get_mut(index) {
                 *value = *value + T::default();
             }
+        }
+    }
+}
+
+
+impl<'a, T> Iterator for RowIterator<'a, T>
+where
+    T: Copy + Default,
+{
+    type Item = &'a [T];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_row < self.matrix.rows {
+            let start = self.current_row * self.matrix.cols;
+            let end = start + self.matrix.cols;
+            self.current_row += 1;
+            Some(&self.matrix.data[start..end])
+        } else {
+            None
+        }
+    }
+}
+
+impl<T> CountMatrix<T>
+where
+    T: Copy + Default,
+{
+    pub fn iter_rows(&self) -> RowIterator<T> {
+        RowIterator {
+            matrix: self,
+            current_row: 0,
         }
     }
 }
