@@ -1,10 +1,15 @@
+use std::ops::Add;
+
 pub struct CountMatrix<T> {
     data: Vec<T>,
     rows: usize,
     cols: usize,
 }
 
-impl<T: Copy + Default> CountMatrix<T> {
+impl<T> CountMatrix<T>
+where
+    T: Copy + Default + Add<Output = T>,
+{
     pub fn new(rows: usize, cols: usize) -> Self {
         Self {
             data: vec![T::default(); rows * cols],
@@ -20,6 +25,15 @@ impl<T: Copy + Default> CountMatrix<T> {
     pub fn set(&mut self, row: usize, col: usize, value: T) {
         if row < self.rows && col < self.cols {
             self.data[row * self.cols + col] = value;
+        }
+    }
+
+    pub fn increment(&mut self, row: usize, col: usize) {
+        if row < self.rows && col < self.cols {
+            let index = row * self.cols + col;
+            if let Some(value) = self.data.get_mut(index) {
+                *value = *value + T::default();
+            }
         }
     }
 }

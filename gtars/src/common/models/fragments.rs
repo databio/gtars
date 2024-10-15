@@ -2,6 +2,9 @@ use std::str::FromStr;
 
 use anyhow::Result;
 
+use crate::common::models::Region;
+
+#[allow(unused)]
 pub struct Fragment {
     chr: String,
     start: u32,
@@ -16,7 +19,10 @@ impl FromStr for Fragment {
     fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split_whitespace().collect();
         if parts.len() != 5 {
-            anyhow::bail!("Error parsing fragment file line: {}. Is your fragment file malformed?", s)
+            anyhow::bail!(
+                "Error parsing fragment file line: {}. Is your fragment file malformed?",
+                s
+            )
         }
 
         let start = parts[1].parse::<u32>()?;
@@ -30,5 +36,15 @@ impl FromStr for Fragment {
             barcode: parts[3].to_string(),
             read_support,
         })
+    }
+}
+
+impl From<Fragment> for Region {
+    fn from(val: Fragment) -> Self {
+        Region {
+            chr: val.chr,
+            start: val.start,
+            end: val.end,
+        }
     }
 }

@@ -8,9 +8,10 @@ use rust_lapper::{Interval, Lapper};
 use crate::common::models::Region;
 use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
 
-struct OverlapResult(Region, u32);
+#[allow(unused)]
+pub struct OverlapResult(Region, pub(crate) u32);
 
-trait FindOverlaps {
+pub trait FindOverlaps {
     fn find_overlaps(&self, region: &Region) -> Option<Vec<OverlapResult>>;
 }
 
@@ -88,7 +89,7 @@ impl ConsensusSet {
 
         Ok(ConsensusSet {
             overlap_trees: trees,
-            len
+            len,
         })
     }
 
@@ -99,7 +100,6 @@ impl ConsensusSet {
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
-    
 }
 
 impl FindOverlaps for ConsensusSet {
