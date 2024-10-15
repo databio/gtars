@@ -21,6 +21,7 @@ use super::traits::SpecialTokens;
 pub struct MetaTokenizer {
     pub universe: Universe,
     config: TokenizerConfig,
+    #[allow(dead_code)]
     region_to_metatoken: HashMap<Region, Region>,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,

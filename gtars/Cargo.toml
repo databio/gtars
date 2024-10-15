@@ -13,6 +13,8 @@ anyhow = "1.0.82"
 bytes = "1.6.0"
 clap = { version = "4.4.7", features = ["derive"] }
 flate2 = "1.0.28"
+indicatif = "0.17.8"
+rayon = "1.10.0"
 rust-lapper = "1.1.0"
 serde = {version = "1.0.203", features=["derive"]}
 toml = "0.8.14"
@@ -25,6 +27,7 @@ noodles = { version = "0.83.0", features = ["bam"] }
 bstr = "1.10.0"
 rayon = "1.10.0"
 indicatif = "0.17.8"
+
 
 [dev-dependencies]
 rstest = "0.18.2"
