@@ -1,5 +1,7 @@
 use std::io::BufRead;
+use std::str::FromStr;
 
+use crate::common::models::Fragment;
 use crate::common::utils::get_dynamic_reader;
 use crate::scoring::files::FragmentFileGlob;
 use crate::scoring::files::ConsensusSet;
@@ -18,10 +20,8 @@ pub fn region_scoring_from_fragments(fragments: &mut FragmentFileGlob, consensus
         let reader = get_dynamic_reader(&file)?;
         for line in reader.lines() {
             let line = line?;
-            let parts = line.split_whitespace();
-            
+            let fragment = Fragment::from_str(&line)?;
         }
     }
-
     Ok(())
 }
