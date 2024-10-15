@@ -18,6 +18,16 @@ rayon = "1.10.0"
 rust-lapper = "1.1.0"
 serde = {version = "1.0.203", features=["derive"]}
 toml = "0.8.14"
+# polars = { version = "0.35.4", features = ["decompress", "decompress-fast", "ndarray"] }
+ndarray-npy = "0.8.1"
+ndarray = "0.15.6"
+tempfile = "3.10.1"
+byteorder = "1.5.0"
+noodles = { version = "0.83.0", features = ["bam"] }
+bstr = "1.10.0"
+rayon = "1.10.0"
+indicatif = "0.17.8"
+
 
 [dev-dependencies]
 rstest = "0.18.2"
