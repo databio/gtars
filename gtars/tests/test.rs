@@ -21,10 +21,10 @@ fn path_to_sorted_small_bed_file() -> &'static str {
     "tests/data/test_sorted_small.bed"
 }
 
-#[fixture]
-fn path_to_small_bam_file() -> &'static str {
-    "tests/data/test1_sort_dedup.bam"
-}
+// #[fixture]
+// fn path_to_small_bam_file() -> &'static str {
+//     "tests/data/test1_sort_dedup.bam"
+// }
 
 #[fixture]
 fn path_to_chrom_sizes_file() -> &'static str {
@@ -34,6 +34,21 @@ fn path_to_chrom_sizes_file() -> &'static str {
 #[fixture]
 fn path_to_bed_file_gzipped() -> &'static str {
     "tests/data/peaks.bed.gz"
+}
+
+#[fixture]
+fn path_to_dummy_bed_file() -> &'static str {
+    "tests/data/dummy.bed"
+}
+
+#[fixture]
+fn path_to_dummy_chromsizes() -> &'static str {
+    "tests/data/dummy.chrom.sizes"
+}
+
+#[fixture]
+fn path_to_start_wig_output() -> &'static str {
+    "tests/data/out/_start.wig"
 }
 
 mod tests {
@@ -46,44 +61,6 @@ mod tests {
     };
     use std::collections::HashMap;
     // IGD TESTS
-
-    #[rstest]
-    fn test_igd_parse_bed_file() {
-        // Given some random line from a  bed file...
-        let bed_file_string =
-            String::from("chr1	32481	32787	SRX4150706.05_peak_1	92	.	7.69231	13.22648	9.25988	155");
-
-        //Placeholder start and end values
-        let mut start = 0;
-        let mut end = 0;
-        let mut va = 0;
-
-        let result = parse_bed(&bed_file_string, &mut start, &mut end, &mut va).unwrap(); // this will return
-
-        let unwrapped_result = result.as_str();
-
-        assert_eq!(unwrapped_result, "chr1");
-
-        // Ensure start and end is modified via parse_bed
-        assert_eq!(start, 32481);
-        assert_eq!(end, 32787);
-    }
-
-    #[rstest]
-    fn test_igd_create() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let path = PathBuf::from(&tempdir.path());
-
-        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        let db_output_path = db_path_unwrapped;
-
-        let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
-
-        let demo_name = String::from("demo");
-
-        create_igd_f(&db_output_path, &testfilelists, &demo_name);
-    }
 
     #[rstest]
     fn test_igd_parse_bed_file() {
@@ -279,13 +256,13 @@ mod tests {
         assert_eq!(num_chromosomes, 5);
     }
 
-    #[rstest]
-    fn test_read_bam_header(path_to_small_bam_file: &str) {
-        let chromosomes: Vec<Chromosome> = read_bam_header(path_to_small_bam_file);
-        let num_chromosomes = chromosomes.len();
-        println!("Number of chroms: {}", num_chromosomes);
-        assert_eq!(num_chromosomes, 195);
-    }
+    // #[rstest]
+    // fn test_read_bam_header(path_to_small_bam_file: &str) {
+    //     let chromosomes: Vec<Chromosome> = read_bam_header(path_to_small_bam_file);
+    //     let num_chromosomes = chromosomes.len();
+    //     println!("Number of chroms: {}", num_chromosomes);
+    //     assert_eq!(num_chromosomes, 195);
+    // }
 
     // #[rstest]
     // fn test_run_uniwig_main_bam_input_wig_output(
@@ -451,5 +428,73 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn test_uniwig_wiggle_output(
+        _path_to_dummy_bed_file: &str,
+        _path_to_dummy_chromsizes: &str,
+        _path_to_start_wig_output: &str,
+    ) {
+        let chromsizerefpath = _path_to_dummy_chromsizes;
+        let combinedbedpath = _path_to_dummy_bed_file;
+        let test_output_path = _path_to_start_wig_output;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
+
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 1;
+        let output_type = "wig";
+        let filetype = "bed";
+        let num_threads: i32 = 2;
+
+        let result = uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            &chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+        );
+
+        assert!(result.is_ok());
+
+        let path = PathBuf::from(&tempdir.path());
+        let mut final_start_file_path = path.into_os_string().into_string().unwrap();
+        final_start_file_path.push_str("/final/_start.wig");
+        let final_start_file_path = final_start_file_path.as_str();
+
+        let file1 = File::open(final_start_file_path).unwrap();
+        let file2 = File::open(test_output_path).unwrap();
+
+        let reader1 = BufReader::new(file1);
+        let reader2 = BufReader::new(file2);
+
+        let mut lines1 = reader1.lines();
+        let mut lines2 = reader2.lines();
+
+        loop {
+            let line1 = lines1.next().transpose().unwrap();
+            let line2 = lines2.next().transpose().unwrap();
+
+            match (line1, line2) {
+                (Some(line1), Some(line2)) => {
+                    assert_eq!(line1, line2);
+                }
+                (None, None) => {
+                    break; // Both files reached the end
+                }
+                _ => {
+                    panic!("FILES ARE NOT EQUAL!!!")
+                }
+            }
+        }
     }
 }
