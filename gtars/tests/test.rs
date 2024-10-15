@@ -61,9 +61,7 @@ mod tests {
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
 
-    use gtars::uniwig::{
-        read_bam_header, read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome,
-    };
+    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
     use std::collections::HashMap;
     // IGD TESTS
 

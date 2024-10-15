@@ -222,11 +222,6 @@ pub fn uniwig_main(
     let stepsize = 1;
     // Set up output file names
 
-    let mut file_names: [String; 3] = [
-        "placeholder1".to_owned(),
-        "placeholder2".to_owned(),
-        "placeholder3".to_owned(),
-    ];
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
         "placeholder2".to_owned(),
@@ -256,9 +251,6 @@ pub fn uniwig_main(
 
     let num_chromosomes = chromosomes.len();
 
-    // Preallocate memory based on number of chromsomes from previous step
-    let mut chroms: Vec<String> = Vec::with_capacity(num_chromosomes);
-
     println!("PreProcessing each chromosome...");
     let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
     for chromosome in chromosomes.iter() {
@@ -266,8 +258,8 @@ pub fn uniwig_main(
             break;
         }
 
-        // Check if there is an available chrom size, if not exlcude it from our final list
-        let current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+        // Check if there is an available chrom size, if not exclude it from our final list
+        let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
             Some(size) => *size as i32, // Dereference to get the i32 value
             None => {
                 continue; // Or handle the error differently
@@ -741,8 +733,6 @@ fn write_to_wig_file(
         + stepsize.to_string().as_str();
     file.write_all(wig_header.as_ref()).unwrap();
     file.write_all(b"\n").unwrap();
-
-    let mut position = 0;
 
     let mut buf = BufWriter::new(file);
 
