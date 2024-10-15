@@ -355,7 +355,6 @@ pub fn uniwig_main(
                                             chrom_name.clone(),
                                             clamped_start_position(primary_start, smoothsize),
                                             stepsize,
-                                            smoothsize,
                                         );
                                     }
                                     "csv" => {
@@ -373,7 +372,6 @@ pub fn uniwig_main(
                                             clamped_start_position(primary_start, smoothsize),
                                             stepsize,
                                             meta_data_file_names[0].clone(),
-                                            smoothsize,
                                         );
                                     }
                                     _ => {
@@ -389,7 +387,6 @@ pub fn uniwig_main(
                                             clamped_start_position(primary_start, smoothsize),
                                             stepsize,
                                             meta_data_file_names[0].clone(),
-                                            smoothsize,
                                         );
                                     }
                                 }
@@ -437,7 +434,6 @@ pub fn uniwig_main(
                                             chrom_name.clone(),
                                             clamped_start_position(primary_end, smoothsize),
                                             stepsize,
-                                            smoothsize,
                                         );
                                     }
                                     "csv" => {
@@ -455,7 +451,6 @@ pub fn uniwig_main(
                                             clamped_start_position(primary_start, smoothsize),
                                             stepsize,
                                             meta_data_file_names[1].clone(),
-                                            smoothsize,
                                         );
                                     }
                                     _ => {
@@ -471,7 +466,6 @@ pub fn uniwig_main(
                                             clamped_start_position(primary_start, smoothsize),
                                             stepsize,
                                             meta_data_file_names[1].clone(),
-                                            smoothsize,
                                         );
                                     }
                                 }
@@ -519,7 +513,6 @@ pub fn uniwig_main(
                                             chrom_name.clone(),
                                             primary_start,
                                             stepsize,
-                                            smoothsize,
                                         );
                                     }
                                     "csv" => {
@@ -537,7 +530,6 @@ pub fn uniwig_main(
                                             primary_start,
                                             stepsize,
                                             meta_data_file_names[2].clone(),
-                                            smoothsize,
                                         );
                                     }
                                     _ => {
@@ -553,7 +545,6 @@ pub fn uniwig_main(
                                             primary_start,
                                             stepsize,
                                             meta_data_file_names[2].clone(),
-                                            smoothsize,
                                         );
                                     }
                                 }
@@ -655,7 +646,6 @@ fn write_to_npy_file(
     start_position: i32,
     stepsize: i32,
     metafilename: String,
-    smoothsize: i32,
 ) {
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
@@ -677,11 +667,10 @@ fn write_to_npy_file(
         .unwrap();
 
     // The original wiggle file header. This can be anything we wish it to be. Currently space delimited.
-    let actual_start_position = start_position + smoothsize;
     let mut wig_header = "fixedStep chrom=".to_string()
         + chromname.as_str()
         + " start="
-        + actual_start_position.to_string().as_str()
+        + start_position.to_string().as_str()
         + " step="
         + stepsize.to_string().as_str();
     wig_header.push_str("\n");
@@ -734,7 +723,6 @@ fn write_to_wig_file(
     chromname: String,
     start_position: i32,
     stepsize: i32,
-    smoothsize: i32,
 ) {
     let path = std::path::Path::new(&filename).parent().unwrap();
     let _ = create_dir_all(path);
@@ -745,12 +733,10 @@ fn write_to_wig_file(
         .open(filename)
         .unwrap();
 
-    //println!("DEBUG: fixedStep chrom={}",chromname.clone());
-    let actual_start_position = start_position + smoothsize; // me must add one back if it is smoothed away
     let wig_header = "fixedStep chrom=".to_string()
         + chromname.as_str()
         + " start="
-        + actual_start_position.to_string().as_str()
+        + start_position.to_string().as_str()
         + " step="
         + stepsize.to_string().as_str();
     file.write_all(wig_header.as_ref()).unwrap();
@@ -924,7 +910,7 @@ pub fn smooth_fixed_start_end_wiggle(
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
                        //
 
-    while coordinate_position <= chrom_size {
+    while coordinate_position < chrom_size {
         // Apply an bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -941,7 +927,7 @@ pub fn smooth_fixed_start_end_wiggle(
             // Step size defaults to 1, so report every value
             v_coord_counts.push(count);
             v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-                                                              //println!("DEBUG: Reporting count: {} at start position: {} and end position: ",count, coordinate_position);
+                                                              //println!("DEBUG: Reporting count: {} at start position: {} and end position: {}", count, coordinate_position, current_end_site);
         }
 
         //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
@@ -1052,7 +1038,7 @@ pub fn fixed_core_wiggle(
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
                        //
 
-    while coordinate_position <= chrom_size {
+    while coordinate_position < chrom_size {
         while current_end_site == coordinate_position {
             count = count - 1;
 
