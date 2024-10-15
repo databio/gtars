@@ -13,6 +13,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 pub fn region_scoring_from_fragments(
     fragments: &mut FragmentFileGlob,
     consensus: &ConsensusSet,
+    outfile: &str
 ) -> Result<()> {
     let rows = fragments.len();
     let cols = consensus.len();
@@ -52,6 +53,9 @@ pub fn region_scoring_from_fragments(
             spinner.inc(1);
         }
     }
+
+    // write to a file
+    count_mat.write_to_file(outfile)?;
 
     Ok(())
 }

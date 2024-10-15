@@ -1,4 +1,10 @@
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::ops::Add;
+
+use anyhow::Result;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 
 pub struct CountMatrix<T> {
     data: Vec<T>,
@@ -10,7 +16,6 @@ pub struct RowIterator<'a, T> {
     matrix: &'a CountMatrix<T>,
     current_row: usize,
 }
-
 
 impl<T> CountMatrix<T>
 where
@@ -47,7 +52,6 @@ where
     }
 }
 
-
 impl<'a, T> Iterator for RowIterator<'a, T>
 where
     T: Copy + Default,
@@ -75,5 +79,27 @@ where
             matrix: self,
             current_row: 0,
         }
+    }
+}
+
+impl<T> CountMatrix<T>
+where
+    T: Copy + Default + ToString,
+{
+    pub fn write_to_file(&self, filename: &str) -> std::io::Result<()> {
+        let file = File::create(filename)?;
+        let mut buf_writer = BufWriter::new(GzEncoder::new(file, Compression::default()));
+
+        for row in self.iter_rows() {
+            let row_str: String = row
+                .iter()
+                .map(|v| v.to_string())
+                .collect::<Vec<String>>()
+                .join(",");
+            buf_writer.write_all(row_str.as_bytes())?;
+            buf_writer.write_all(b"\n")?; // Add a newline after each row
+        }
+
+        Ok(())
     }
 }
