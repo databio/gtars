@@ -20,8 +20,9 @@ impl FromStr for Fragment {
         let parts: Vec<&str> = s.split_whitespace().collect();
         if parts.len() != 5 {
             anyhow::bail!(
-                "Error parsing fragment file line: {}. Is your fragment file malformed?",
-                s
+                "Error parsing fragment file line: {}. Is your fragment file malformed? Found {} parts.",
+                s,
+                parts.len()
             )
         }
 
