@@ -61,7 +61,9 @@ mod tests {
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
 
-    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use gtars::uniwig::{
+        read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec, uniwig_main, Chromosome,
+    };
     use std::collections::HashMap;
     // IGD TESTS
 
@@ -249,6 +251,19 @@ mod tests {
 
         let result2 = read_bed_vec(path_to_bed_file_gzipped);
         assert_eq!(result2.len(), 20);
+    }
+
+    #[rstest]
+    fn test_read_narrow_peak_vec() {
+        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
+        let result1 = read_narrow_peak_vec(path_to_narrow_peak);
+        assert_eq!(result1.len(), 1);
+
+        let path_to_narrow_peak_gzipped =
+            "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak.gz";
+
+        let result2 = read_narrow_peak_vec(path_to_narrow_peak_gzipped);
+        assert_eq!(result2.len(), 1);
     }
 
     #[rstest]
