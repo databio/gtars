@@ -39,7 +39,7 @@ pub mod handlers {
         let whitelist = matches.get_one::<String>("whitelist");
 
         // coerce arguments to types
-        let mut fragments = FragmentFileGlob::new(&fragments)?;
+        let mut fragments = FragmentFileGlob::new(fragments)?;
         let consensus = PathBuf::from(consensus);
         let consensus = ConsensusSet::new(consensus)?;
 

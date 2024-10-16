@@ -4,9 +4,9 @@ use clap::Command;
 // go through the library crate to get the interfaces
 use gtars::fragsplit;
 use gtars::igd;
+use gtars::scoring;
 use gtars::tokenizers;
 use gtars::uniwig;
-use gtars::scoring;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");

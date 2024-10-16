@@ -42,7 +42,6 @@ pub fn region_scoring_from_fragments(
     let total_fragments = fragments.len();
 
     for (file_num, file) in fragments.into_iter().enumerate() {
-
         let reader = get_dynamic_reader(&file)?;
         let file_path = file.as_path();
         let file_stem = remove_all_extensions(file_path);
@@ -52,8 +51,12 @@ pub fn region_scoring_from_fragments(
             let fragment = Fragment::from_str(&line)?;
 
             let whitelist_check_value = format!("{file_stem}+{}", fragment.barcode);
+
             // skip anything not in the whitelist
-            if !barcode_whitelist.contains(&whitelist_check_value) {
+            // short-circuiting is important here
+            // if the whitelist is empty, we don't want to check the whitelist
+            if !barcode_whitelist.is_empty() && !barcode_whitelist.contains(&whitelist_check_value)
+            {
                 continue;
             }
             let olaps = consensus.find_overlaps(&fragment.into());
@@ -67,7 +70,10 @@ pub fn region_scoring_from_fragments(
             // update the spinner
             processed_reads += 1;
             if processed_reads % 10_000 == 0 {
-                spinner.set_message(format!("{file_stem} ({file_num}/{total_fragments}) | Processed {} reads", processed_reads));
+                spinner.set_message(format!(
+                    "{file_stem} ({file_num}/{total_fragments}) | Processed {} reads",
+                    processed_reads
+                ));
             }
             spinner.inc(1);
         }
