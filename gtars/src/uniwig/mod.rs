@@ -503,7 +503,7 @@ pub fn uniwig_main(
                                             &core_results.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start,
+                                            clamped_start_position(primary_start, 1), // need this in case a start is = 0 even though cores are not smoothed.
                                             stepsize,
                                         );
                                     }
