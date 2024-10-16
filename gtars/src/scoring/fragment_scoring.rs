@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::io::BufRead;
 use std::str::FromStr;
 
@@ -10,11 +11,17 @@ use crate::scoring::files::{ConsensusSet, FindOverlaps};
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 
+type BarcodeWhiteList = HashSet<String>;
+
 pub fn region_scoring_from_fragments(
     fragments: &mut FragmentFileGlob,
     consensus: &ConsensusSet,
-    outfile: &str
+    outfile: &str,
+    barcode_whitelist: Option<&BarcodeWhiteList>,
 ) -> Result<()> {
+    let binding = HashSet::new();
+    let barcode_whitelist = barcode_whitelist.unwrap_or(&binding);
+
     let rows = fragments.len();
     let cols = consensus.len();
 
@@ -37,6 +44,11 @@ pub fn region_scoring_from_fragments(
         for line in reader.lines() {
             let line = line?;
             let fragment = Fragment::from_str(&line)?;
+
+            // skip anything not in the whitelist
+            if !barcode_whitelist.contains(&fragment.barcode) {
+                continue;
+            }
             let olaps = consensus.find_overlaps(&fragment.into());
             if olaps.is_some() {
                 let olaps = olaps.unwrap();

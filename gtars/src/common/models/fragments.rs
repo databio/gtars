@@ -6,11 +6,11 @@ use crate::common::models::Region;
 
 #[allow(unused)]
 pub struct Fragment {
-    chr: String,
-    start: u32,
-    end: u32,
-    barcode: String,
-    read_support: u32,
+    pub chr: String,
+    pub start: u32,
+    pub end: u32,
+    pub barcode: String,
+    pub read_support: u32,
 }
 
 impl FromStr for Fragment {
