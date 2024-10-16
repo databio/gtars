@@ -264,6 +264,12 @@ mod tests {
 
         let result2 = read_narrow_peak_vec(path_to_narrow_peak_gzipped);
         assert_eq!(result2.len(), 1);
+        //
+        // for item in result1[0].into().iter(){
+        //
+        //
+        // }
+
     }
 
     #[rstest]
