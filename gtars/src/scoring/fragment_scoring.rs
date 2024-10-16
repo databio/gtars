@@ -2,12 +2,14 @@ use std::collections::HashSet;
 use std::io::BufRead;
 use std::str::FromStr;
 
-use crate::common::models::Fragment;
+use crate::common::models::{Fragment, Region};
 use crate::common::utils::get_dynamic_reader;
 use crate::fragsplit::utils::remove_all_extensions;
+use crate::scoring::consts::{END_SHIFT, START_SHIFT};
 use crate::scoring::counts::CountMatrix;
 use crate::scoring::files::FragmentFileGlob;
 use crate::scoring::files::{ConsensusSet, FindOverlaps};
+use crate::scoring::scoring_modes::ScoringMode;
 
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -19,6 +21,7 @@ pub fn region_scoring_from_fragments(
     consensus: &ConsensusSet,
     outfile: &str,
     barcode_whitelist: Option<&BarcodeWhiteList>,
+    scoring_mode: ScoringMode,
 ) -> Result<()> {
     let binding = HashSet::new();
     let barcode_whitelist = barcode_whitelist.unwrap_or(&binding);
@@ -49,6 +52,8 @@ pub fn region_scoring_from_fragments(
 
         for line in reader.lines() {
             let line = line?;
+
+            // convert to fragment and then get new positions of start and end
             let fragment = Fragment::from_str(&line)?;
 
             let whitelist_check_value = format!("{file_stem}+{}", fragment.barcode);
@@ -60,11 +65,49 @@ pub fn region_scoring_from_fragments(
             {
                 continue;
             }
-            let olaps = consensus.find_overlaps(&fragment.into());
-            if let Some(olaps) = olaps {
-                total_overlaps += olaps.len() as u64;
-                for olap in olaps {
-                    count_mat.increment(file_num, olap.1 as usize);
+
+            match scoring_mode {
+                ScoringMode::Atac => {
+                    let new_start = fragment.start + START_SHIFT as u32;
+                    let new_end = fragment.end - END_SHIFT as u32;
+
+                    let start_region = Region {
+                        chr: fragment.chr,
+                        start: new_start,
+                        end: new_start + 1,
+                    };
+
+                    let olaps = consensus.find_overlaps(&start_region);
+                    if let Some(olaps) = olaps {
+                        total_overlaps += olaps.len() as u64;
+                        for olap in olaps {
+                            count_mat.increment(file_num, olap.1 as usize);
+                        }
+                    }
+
+                    let end_region = Region {
+                        // take from start_region to avoid a clone
+                        chr: start_region.chr,
+                        start: new_end,
+                        end: new_end - 1,
+                    };
+
+                    let olaps = consensus.find_overlaps(&end_region);
+                    if let Some(olaps) = olaps {
+                        total_overlaps += olaps.len() as u64;
+                        for olap in olaps {
+                            count_mat.increment(file_num, olap.1 as usize);
+                        }
+                    }
+                }
+                ScoringMode::Chip => {
+                    let olaps = consensus.find_overlaps(&fragment.into());
+                    if let Some(olaps) = olaps {
+                        total_overlaps += olaps.len() as u64;
+                        for olap in olaps {
+                            count_mat.increment(file_num, olap.1 as usize);
+                        }
+                    }
                 }
             }
 

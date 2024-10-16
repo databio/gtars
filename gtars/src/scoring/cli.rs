@@ -14,11 +14,16 @@ pub fn make_fscoring_cli() -> Command {
         .about("Create a scoring matrix for a set of fragment files over a consensus peak set.")
         .arg(Arg::new("fragments"))
         .arg(Arg::new("consensus"))
+        .arg(arg!(--mode <mode>))
         .arg(arg!(--output <output>))
         .arg(arg!(--whitelist <whitelist>))
 }
 
 pub mod handlers {
+
+    use std::str::FromStr;
+
+    use consts::DEFAULT_SCORING_MODE;
 
     use crate::common::utils::get_dynamic_reader;
 
@@ -36,6 +41,12 @@ pub mod handlers {
 
         let default_out = consts::DEFAULT_OUT.to_string();
         let output = matches.get_one::<String>("output").unwrap_or(&default_out);
+        let mode = match matches.get_one::<String>("mode") {
+            Some(mode) => ScoringMode::from_str(mode),
+            None => Ok(DEFAULT_SCORING_MODE),
+        };
+        let mode = mode.unwrap_or(DEFAULT_SCORING_MODE);
+
         let whitelist = matches.get_one::<String>("whitelist");
 
         // coerce arguments to types
@@ -60,7 +71,13 @@ pub mod handlers {
             None => None,
         };
 
-        region_scoring_from_fragments(&mut fragments, &consensus, output, whitelist.as_ref())?;
+        region_scoring_from_fragments(
+            &mut fragments,
+            &consensus,
+            output,
+            whitelist.as_ref(),
+            mode,
+        )?;
 
         Ok(())
     }
