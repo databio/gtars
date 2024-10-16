@@ -18,13 +18,14 @@ impl FromStr for Fragment {
 
     fn from_str(s: &str) -> Result<Self> {
         let parts: Vec<&str> = s.split_whitespace().collect();
-        if parts.len() != 6 {
-            anyhow::bail!(
-                "Error parsing fragment file line: {}. Is your fragment file malformed? Found {} parts.",
-                s,
-                parts.len()
-            )
-        }
+        // dont check file integrity right now
+        // if parts.len() != 6 {
+        //     anyhow::bail!(
+        //         "Error parsing fragment file line: {}. Is your fragment file malformed? Found {} parts.",
+        //         s,
+        //         parts.len()
+        //     )
+        // }
 
         let start = parts[1].parse::<u32>()?;
         let end = parts[2].parse::<u32>()?;
