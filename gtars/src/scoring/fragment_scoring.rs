@@ -72,9 +72,9 @@ pub fn region_scoring_from_fragments(
             processed_reads += 1;
             if processed_reads % 10_000 == 0 {
                 spinner.set_message(format!(
-                    "{file_stem} ({}/{total_fragments}) | {} average overlaps per read | Processed {} reads",
+                    "{file_stem} ({}/{total_fragments}) | {} overlaps | Processed {} reads",
                     file_num + 1,
-                    total_overlaps / processed_reads,
+                    total_overlaps,
                     processed_reads
                 ));
             }
