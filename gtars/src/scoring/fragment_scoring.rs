@@ -67,7 +67,7 @@ pub fn region_scoring_from_fragments(
             // update the spinner
             processed_reads += 1;
             if processed_reads % 10_000 == 0 {
-                spinner.set_message(format!("Processed {} reads", processed_reads));
+                spinner.set_message(format!("{file_stem} ({file_num}/{total_fragments}) | Processed {} reads", processed_reads));
             }
             spinner.inc(1);
         }
