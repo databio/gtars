@@ -4,6 +4,7 @@ use std::str::FromStr;
 
 use crate::common::models::Fragment;
 use crate::common::utils::get_dynamic_reader;
+use crate::fragsplit::utils::remove_all_extensions;
 use crate::scoring::counts::CountMatrix;
 use crate::scoring::files::FragmentFileGlob;
 use crate::scoring::files::{ConsensusSet, FindOverlaps};
@@ -40,13 +41,18 @@ pub fn region_scoring_from_fragments(
     let mut processed_reads: u64 = 0;
 
     for (file_num, file) in fragments.into_iter().enumerate() {
+
         let reader = get_dynamic_reader(&file)?;
+        let file_path = file.as_path();
+        let file_stem = remove_all_extensions(file_path);
+
         for line in reader.lines() {
             let line = line?;
             let fragment = Fragment::from_str(&line)?;
 
+            let whitelist_check_value = format!("{file_stem}+{}", fragment.barcode);
             // skip anything not in the whitelist
-            if !barcode_whitelist.contains(&fragment.barcode) {
+            if !barcode_whitelist.contains(&whitelist_check_value) {
                 continue;
             }
             let olaps = consensus.find_overlaps(&fragment.into());
