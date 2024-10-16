@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use std::ops::Add;
+use std::ops::{Add, AddAssign};
 
 use anyhow::Result;
 use flate2::write::GzEncoder;
@@ -19,7 +19,7 @@ pub struct RowIterator<'a, T> {
 
 impl<T> CountMatrix<T>
 where
-    T: Copy + Default + Add<Output = T>,
+    T: Copy + Default + Add<Output = T> + AddAssign + From<u8>,
 {
     pub fn new(rows: usize, cols: usize) -> Self {
         Self {
@@ -46,7 +46,7 @@ where
         if row < self.rows && col < self.cols {
             let index = row * self.cols + col;
             if let Some(value) = self.data.get_mut(index) {
-                *value = *value + T::default();
+                *value += 1.into();
             }
         }
     }
