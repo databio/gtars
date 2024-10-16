@@ -60,8 +60,7 @@ pub fn region_scoring_from_fragments(
                 continue;
             }
             let olaps = consensus.find_overlaps(&fragment.into());
-            if olaps.is_some() {
-                let olaps = olaps.unwrap();
+            if let Some(olaps) = olaps {
                 for olap in olaps {
                     count_mat.increment(file_num, olap.1 as usize);
                 }
