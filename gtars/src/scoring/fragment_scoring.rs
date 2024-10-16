@@ -39,6 +39,7 @@ pub fn region_scoring_from_fragments(
     spinner.set_message("Processing file...");
 
     let mut processed_reads: u64 = 0;
+    let mut total_overlaps: u64 = 0;
     let total_fragments = fragments.len();
 
     for (file_num, file) in fragments.into_iter().enumerate() {
@@ -61,6 +62,7 @@ pub fn region_scoring_from_fragments(
             }
             let olaps = consensus.find_overlaps(&fragment.into());
             if let Some(olaps) = olaps {
+                total_overlaps += olaps.len() as u64;
                 for olap in olaps {
                     count_mat.increment(file_num, olap.1 as usize);
                 }
@@ -70,7 +72,9 @@ pub fn region_scoring_from_fragments(
             processed_reads += 1;
             if processed_reads % 10_000 == 0 {
                 spinner.set_message(format!(
-                    "{file_stem} ({file_num}/{total_fragments}) | Processed {} reads",
+                    "{file_stem} ({}/{total_fragments}) | {} average overlaps per read | Processed {} reads",
+                    file_num + 1,
+                    total_overlaps / total_fragments as u64,
                     processed_reads
                 ));
             }
