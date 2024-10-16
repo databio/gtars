@@ -36,9 +36,10 @@ pub fn region_scoring_from_fragments(
             .tick_strings(&["-", "\\", "|", "/"]),
     );
 
-    spinner.set_message("Processing fragment files...");
+    spinner.set_message("Processing file...");
 
     let mut processed_reads: u64 = 0;
+    let total_fragments = fragments.len();
 
     for (file_num, file) in fragments.into_iter().enumerate() {
 
