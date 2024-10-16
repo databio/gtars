@@ -6,6 +6,7 @@ use gtars::fragsplit;
 use gtars::igd;
 use gtars::tokenizers;
 use gtars::uniwig;
+use gtars::scoring;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -25,6 +26,7 @@ fn build_parser() -> Command {
         .subcommand(fragsplit::cli::make_fragsplit_cli())
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
+        .subcommand(scoring::cli::make_fscoring_cli())
 }
 
 fn main() -> Result<()> {
@@ -50,6 +52,9 @@ fn main() -> Result<()> {
             }
             _ => unreachable!("IGD Subcommand not found"),
         },
+        Some((scoring::consts::FSCORING_CMD, matches)) => {
+            scoring::cli::handlers::region_fragment_scoring(matches)?;
+        }
         _ => unreachable!("Subcommand not found"),
     };
 

@@ -8,8 +8,8 @@ use clap::{arg, Arg, ArgMatches, Command};
 use super::*;
 use crate::scoring::{region_scoring_from_fragments, ConsensusSet, FragmentFileGlob};
 
-pub fn make_fragsplit_cli() -> Command {
-    Command::new(consts::FRAGSPLIT_CMD)
+pub fn make_fscoring_cli() -> Command {
+    Command::new(consts::FSCORING_CMD)
         .author("Nathan LeRoy")
         .about("Create a scoring matrix for a set of fragment files over a consensus peak set.")
         .arg(Arg::new("fragments"))
@@ -24,7 +24,7 @@ pub mod handlers {
 
     use super::*;
 
-    pub fn split_fragment_files(matches: &ArgMatches) -> Result<()> {
+    pub fn region_fragment_scoring(matches: &ArgMatches) -> Result<()> {
         // get arguments from CLI
         let fragments = matches
             .get_one::<String>("fragments")
