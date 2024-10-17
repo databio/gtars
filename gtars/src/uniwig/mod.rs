@@ -304,6 +304,14 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("threads")
         .expect("requires integer value");
 
+    let score = matches
+        .get_one::<bool>("score")
+        .unwrap_or_else(|| &false);
+
+    let stepsize = matches
+        .get_one::<i32>("stepsize")
+        .expect("requires integer value");
+
     uniwig_main(
         *smoothsize,
         filepath,
@@ -312,6 +320,8 @@ pub fn run_uniwig(matches: &ArgMatches) {
         output_type,
         filetype,
         *num_threads,
+        *score,
+        *stepsize,
     )
     .expect("Uniwig failed.");
 }
@@ -330,6 +340,8 @@ pub fn uniwig_main(
     output_type: &str,
     filetype: &str,
     num_threads: i32,
+    score: bool,
+    stepsize: i32,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -340,7 +352,9 @@ pub fn uniwig_main(
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
 
-    let stepsize = 1;
+    let score = score;
+
+    let stepsize = stepsize;
     // Set up output file names
 
     let mut meta_data_file_names: [String; 3] = [

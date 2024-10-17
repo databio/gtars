@@ -396,6 +396,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         )
         .expect("Uniwig main failed!");
 
@@ -432,6 +434,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -487,6 +491,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         );
 
         assert!(result.is_ok());
@@ -526,6 +532,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1
         );
 
         assert!(result.is_ok());
