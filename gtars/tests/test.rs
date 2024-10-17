@@ -62,7 +62,7 @@ mod tests {
     use gtars::igd::search::igd_search;
 
     use gtars::uniwig::{
-        read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec, uniwig_main, fixed_core_narrow_peak,Chromosome,NarrowPeakChromosome
+        read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec, uniwig_main, fixed_core_narrow_peak, smooth_fixed_start_end_narrow_peak, Chromosome,NarrowPeakChromosome
     };
     use std::collections::HashMap;
     // IGD TESTS
@@ -287,6 +287,24 @@ mod tests {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
             let chrom_name = chromosome.chrom.clone();
             let result =  fixed_core_narrow_peak(&chromosome.starts,&chromosome.ends, current_chrom_size, stepsize);
+        }
+
+    }
+
+    #[rstest]
+    fn test_read_narrow_peak_starts_counts() {
+        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy2.narrowPeak";
+        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak).unwrap();
+        let narrow_peak_vec: Vec<NarrowPeakChromosome> = read_narrow_peak_vec(path_to_narrow_peak);
+        let stepsize = 1;
+        let smooth_size = 1;
+
+        for chromosome in narrow_peak_vec.iter(){
+            let primary_start = chromosome.starts[0].clone();
+            let primary_end = chromosome.ends[0].clone();
+            let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+            let chrom_name = chromosome.chrom.clone();
+            let result =  smooth_fixed_start_end_narrow_peak(&chromosome.starts, current_chrom_size, smooth_size, stepsize);
         }
 
     }
