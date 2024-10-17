@@ -270,7 +270,7 @@ mod tests {
     #[rstest]
     fn test_read_narrow_peak_chrom_sizes() {
         let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
-        let result1 = read_chromosome_sizes(path_to_narrow_peak);
+        let _result1 = read_chromosome_sizes(path_to_narrow_peak);
     }
 
     #[rstest]
@@ -281,11 +281,8 @@ mod tests {
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
-            let primary_start = chromosome.starts[0].clone();
-            let primary_end = chromosome.ends[0].clone();
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-            let chrom_name = chromosome.chrom.clone();
-            let result = fixed_core_narrow_peak(
+            let _result = fixed_core_narrow_peak(
                 &chromosome.starts,
                 &chromosome.ends,
                 current_chrom_size,
@@ -303,11 +300,8 @@ mod tests {
         let smooth_size = 1;
 
         for chromosome in narrow_peak_vec.iter() {
-            let primary_start = chromosome.starts[0].clone();
-            let primary_end = chromosome.ends[0].clone();
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-            let chrom_name = chromosome.chrom.clone();
-            let result = smooth_fixed_start_end_narrow_peak(
+            let _result = smooth_fixed_start_end_narrow_peak(
                 &chromosome.starts,
                 current_chrom_size,
                 smooth_size,
