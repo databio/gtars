@@ -1199,10 +1199,6 @@ pub fn smooth_fixed_start_end_narrow_peak(
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {
 
-    println!("smooth_fixed_start_end_narrow_peak");
-
-    //println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
-
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
@@ -1219,20 +1215,11 @@ pub fn smooth_fixed_start_end_narrow_peak(
     let mut collected_end_sites: Vec<(i32,i32)> = Vec::new();
 
     adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
-    println!("DEBUG: START SITE BEFORE ADJUSTMENT -> {}",adjusted_start_site.0);
+
     adjusted_start_site.0 = adjusted_start_site.0 - smoothsize; // adjust based on smoothing
-    println!("DEBUG: START SITE AFTER ADJUSTMENT -> {}",adjusted_start_site.0);
-    //Check endsite generation
+
     current_end_site = adjusted_start_site;
     current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
-
-    //current_start_site = starts_vector[0].clone(); // get first coordinate position
-    //current_end_site = ends_vector[0].clone();
-
-    println!("Here is the initial current endsite: {}", current_end_site.0);
-
-    //Check endsite generation
-    //current_end_site = adjusted_start_site + 1 + smoothsize*2;
 
     if adjusted_start_site.0 < 1 {
         adjusted_start_site.0 = 1;
@@ -1243,22 +1230,17 @@ pub fn smooth_fixed_start_end_narrow_peak(
         // Note that this function will not return 0s at locations before the initial start site
         coordinate_position = coordinate_position + stepsize;
     }
-    println!("Initial coordinate_position {}", coordinate_position);
-    //prev_coordinate_value = current_start_site;
+    // prev_coordinate_value = adjusted_start_site.0;
 
     for (index, coord) in starts_vector.iter().enumerate().skip(0) {
-        println!("Begin main loop for starts_vector");
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
         adjusted_start_site.0 = coordinate_value.0 - smoothsize;
-        println!("DEBUG: START SITE AFTER ADJUSTMENT -> {}",adjusted_start_site.0);
 
         let current_score = adjusted_start_site.1;
-        println!("Here is current score: {}", current_score);
 
         count += current_score;
-        println!("Here is count after addition: {}", count);
 
         if adjusted_start_site.0 < 1 {
             adjusted_start_site.0 = 1;
@@ -1266,36 +1248,25 @@ pub fn smooth_fixed_start_end_narrow_peak(
 
         let current_index = index;
 
-        //current_end_site = ends_vector[current_index];
-
-
         if current_index != 0{ // this is already added at the beginning of the functions
             current_end_site = adjusted_start_site;
             current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize*2;
-            println!("Here is the current endsite, pushed to vec: {}",current_end_site.0);
             collected_end_sites.push(current_end_site);
         }
 
         if adjusted_start_site.0 == prev_coordinate_value {
-            println!("adjusted_start_site.0 == prev_coordinate_value");
             continue;
         }
 
         while coordinate_position < adjusted_start_site.0 {
-            println!("Coordinate position: {} < adjusted_start_site: {}",coordinate_position, adjusted_start_site.0);
+
             while current_end_site.0 == coordinate_position {
-                println!("current_end_site.0 == coordinate_position");
-                println!("current endsite: {}, Coordinate position: {}",current_end_site.0, coordinate_position);
-                println!("Here is current score as endsite equals corodinate position: {}", current_score);
                 count = count - current_score;
-                println!("Here is count after subtraction: {}", count);
 
                 if collected_end_sites.last() == None {
-                    println!("Collected endsites is now NONE");
                     current_end_site.0 = 0; // From original code. Double check this is the proper way.
                 } else {
                     current_end_site = collected_end_sites.remove(0);
-                    println!("New endsite: {}", current_end_site.0);
                 }
             }
 
@@ -1303,27 +1274,19 @@ pub fn smooth_fixed_start_end_narrow_peak(
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count as u32);
                 v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-                println!("DEBUG: First Reporting count: {} at start position: {} and end position: {}",count, coordinate_position, current_end_site.0);
+
             }
 
-            println!("DEBUG: First Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
             coordinate_position = coordinate_position + 1;
         }
-        println!(" prev_coordinate_value = adjusted_start_site.0");
+
         prev_coordinate_value = adjusted_start_site.0;
     }
 
-    //count = count +
-
-    println!("$$$$$Here is count between loops {}", count);
-    //count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
-    //
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
             let current_score = adjusted_start_site.1;
-            println!("Here is current score: {}", current_score);
 
             count = count - current_score;
 
@@ -1338,14 +1301,11 @@ pub fn smooth_fixed_start_end_narrow_peak(
             // Step size defaults to 1, so report every value
             v_coord_counts.push(count as u32);
             v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-            println!("DEBUG: Reporting count: {} at start position: {} and end position: {}",count, coordinate_position, current_end_site.0);
         }
 
-        println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
         coordinate_position = coordinate_position + 1;
     }
 
-    //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     (v_coord_counts, v_coordinate_positions)
 
 }
@@ -1357,15 +1317,6 @@ pub fn fixed_core_narrow_peak(
     chrom_size: i32,
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {
-    // println!("Begin fixed core narrowpeak");
-    // let v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    // let v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-    //
-    // (v_coord_counts, v_coordinate_positions)
-
-    //println!("BEGIN Fixed_Core_Wiggle");
-
-    //println!("STARTS VECTOR LENGTH: {}  END VECTORS LENGTH: {}", starts_vector.len().clone(), ends_vector.len().clone());
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -1385,10 +1336,6 @@ pub fn fixed_core_narrow_peak(
     current_start_site = starts_vector[0].clone(); // get first coordinate position
     current_end_site = ends_vector[0].clone();
 
-    //println!("Here is current endsite: {}", current_end_site.0);
-
-    //Check endsite generation
-    //current_end_site = adjusted_start_site + 1 + smoothsize*2;
 
     if current_start_site.0 < 1 {
         current_start_site.0 = 1;
@@ -1399,21 +1346,17 @@ pub fn fixed_core_narrow_peak(
         // Note that this function will not return 0s at locations before the initial start site
         coordinate_position = coordinate_position + stepsize;
     }
-    println!("Initial coordinate_position {}", coordinate_position);
 
-    //prev_coordinate_value = current_start_site;
 
     for (index, coord) in starts_vector.iter().enumerate().skip(0) {
-        println!("New coord loop");
+
         coordinate_value = *coord;
 
         current_start_site = coordinate_value;
 
         let current_score = current_start_site.1;
-        //println!("Here is current score: {}", current_score);
 
         count += current_score;
-        //println!("Here is count after addition: {}", count);
 
         if current_start_site.0 < 1 {
             current_start_site.0 = 1;
@@ -1421,7 +1364,6 @@ pub fn fixed_core_narrow_peak(
 
         let current_index = index;
 
-        //current_end_site = ends_vector[current_index];
         if current_index != 0{ // this is already added at the beginning of the functions
             collected_end_sites.push(ends_vector[current_index]);
         }
@@ -1432,19 +1374,13 @@ pub fn fixed_core_narrow_peak(
         }
 
         while coordinate_position < current_start_site.0 {
-            println!("Coordinate position: {} < current_start_site: {}",coordinate_position, current_start_site.0);
             while current_end_site.0 == coordinate_position {
-                //println!("current endsite: {}, Coordinate position: {}",current_end_site.0, coordinate_position);
-                //println!("Here is current score as endsite equals corodinate position: {}", current_score);
                 count = count - current_score;
-                //println!("Here is count after subtraction: {}", count);
 
                 if collected_end_sites.last() == None {
-                    //println!("Collected endsites is now NONE");
                     current_end_site.0 = 0; // From original code. Double check this is the proper way.
                 } else {
                     current_end_site = collected_end_sites.remove(0);
-                    //println!("New endsite: {}", current_end_site.0);
                 }
             }
 
@@ -1452,27 +1388,18 @@ pub fn fixed_core_narrow_peak(
                 // Step size defaults to 1, so report every value
                 v_coord_counts.push(count as u32);
                 v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-                println!("DEBUG: First Reporting count: {} at start position: {} and end position: {}",count, coordinate_position, current_end_site.0);
             }
 
-            //println!("DEBUG: First Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
             coordinate_position = coordinate_position + 1;
         }
 
         prev_coordinate_value = current_start_site.0;
     }
 
-    //count = count +
-
-    //println!("$$$$$Here is count between loops {}", count);
-    //count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
-    //
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
             let current_score = current_start_site.1;
-            //println!("Here is current score: {}", current_score);
 
             count = count - current_score;
 
@@ -1487,13 +1414,9 @@ pub fn fixed_core_narrow_peak(
             // Step size defaults to 1, so report every value
             v_coord_counts.push(count as u32);
             v_coordinate_positions.push(coordinate_position); // This is ONLY the starts
-            println!("DEBUG: Reporting count: {} at start position: {} and end position: {}",count, coordinate_position, current_end_site.0);
         }
-
-        //println!("DEBUG: Incrementing coordinate_position: {}  -> {}", coordinate_position,  coordinate_position +1);
         coordinate_position = coordinate_position + 1;
     }
 
-    //println!("DEBUG: FINAL LENGTHS... Counts: {}  Positions: {}", v_coord_counts.len(), v_coordinate_positions.len());
     (v_coord_counts, v_coordinate_positions)
 }
