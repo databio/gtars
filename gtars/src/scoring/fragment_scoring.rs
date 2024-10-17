@@ -19,10 +19,9 @@ type BarcodeWhiteList = HashSet<String>;
 pub fn region_scoring_from_fragments(
     fragments: &mut FragmentFileGlob,
     consensus: &ConsensusSet,
-    outfile: &str,
     barcode_whitelist: Option<&BarcodeWhiteList>,
     scoring_mode: ScoringMode,
-) -> Result<()> {
+) -> Result<CountMatrix<u32>> {
     let binding = HashSet::new();
     let barcode_whitelist = barcode_whitelist.unwrap_or(&binding);
 
@@ -125,8 +124,64 @@ pub fn region_scoring_from_fragments(
         }
     }
 
-    // write to a file
-    count_mat.write_to_file(outfile)?;
+    Ok(count_mat)
+}
 
-    Ok(())
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+    
+
+    #[fixture]
+    fn path_to_fragment_files() -> &'static str {
+        "tests/data/fragments/region_scoring/*.bed.gz"
+    }
+
+    #[fixture]
+    fn consensus_set() -> &'static str {
+        "tests/data/consensus/consensus1.bed"
+    }
+
+    #[fixture]
+    fn output_file() -> &'static str {
+        "tests/data/out/region_scoring_count.csv.gz"
+    }
+
+    
+    #[rstest]
+    fn test_region_scoring_from_fragments_atac(
+        path_to_fragment_files: &str,
+        consensus_set: &str,
+        output_file: &str
+    ) {
+        let mut fragments = FragmentFileGlob::new(path_to_fragment_files).unwrap();
+        let consensus = ConsensusSet::new(consensus_set.into()).unwrap();
+
+        let res = region_scoring_from_fragments(&mut fragments, &consensus, None, ScoringMode::Atac);
+        assert_eq!(res.is_ok(), true);
+
+        let count_mat = res.unwrap();
+        assert_eq!(count_mat.cols == 4, true);
+        assert_eq!(count_mat.rows == 2, true);
+
+        // Matrix should look like:
+        // 2   2   1   3
+        // 4   1   3   1
+        // assert this is true
+        assert_eq!(*count_mat.get(0, 0).unwrap(), 2);
+        assert_eq!(*count_mat.get(0, 1).unwrap(), 2);
+        assert_eq!(*count_mat.get(0, 2).unwrap(), 1);
+        assert_eq!(*count_mat.get(0, 3).unwrap(), 3);
+
+        assert_eq!(*count_mat.get(1, 0).unwrap(), 4);
+        assert_eq!(*count_mat.get(1, 1).unwrap(), 1);
+        assert_eq!(*count_mat.get(1, 2).unwrap(), 3);
+        assert_eq!(*count_mat.get(1, 3).unwrap(), 1);
+
+        let res = count_mat.write_to_file(output_file);
+        assert_eq!(res.is_ok(), true);
+        
+    }
 }

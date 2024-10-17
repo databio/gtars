@@ -8,8 +8,8 @@ use flate2::Compression;
 
 pub struct CountMatrix<T> {
     data: Vec<T>,
-    rows: usize,
-    cols: usize,
+    pub rows: usize,
+    pub cols: usize,
 }
 
 pub struct RowIterator<'a, T> {

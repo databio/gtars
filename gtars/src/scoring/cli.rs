@@ -71,13 +71,14 @@ pub mod handlers {
             None => None,
         };
 
-        region_scoring_from_fragments(
+        let count_mat = region_scoring_from_fragments(
             &mut fragments,
             &consensus,
-            output,
             whitelist.as_ref(),
             mode,
         )?;
+
+        count_mat.write_to_file(output)?;
 
         Ok(())
     }
