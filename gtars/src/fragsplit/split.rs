@@ -164,7 +164,7 @@ mod tests {
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments"
+        "tests/data/fragments/fragsplit"
     }
 
     #[fixture]
