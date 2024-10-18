@@ -270,15 +270,17 @@ mod tests {
 
     #[rstest]
     fn test_read_narrow_peak_chrom_sizes() {
-        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
-        let _result1 = read_chromosome_sizes(path_to_narrow_peak);
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let _result1 = read_chromosome_sizes(path_to_narrow_peak.as_str());
     }
 
     #[rstest]
     fn test_read_narrow_peak_core_counts() {
-        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
-        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak);
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
@@ -294,9 +296,10 @@ mod tests {
 
     #[rstest]
     fn test_read_narrow_peak_starts_counts() {
-        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy2.narrowPeak";
-        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak);
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
         let stepsize = 1;
         let smooth_size = 1;
 
