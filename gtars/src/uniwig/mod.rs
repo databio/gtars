@@ -28,6 +28,18 @@ enum FileType {
     BAM,
     NARROWPEAK,
 }
+
+enum ChromTypeVariant {
+    Chromosome,
+    NarrowPeakChromosome,
+}
+
+trait ChromType {
+    //type Variant;
+    // fn repr() -> Variant
+    fn value(&self) -> ChromTypeVariant;
+}
+
 impl FromStr for FileType {
     type Err = String;
 
@@ -41,52 +53,6 @@ impl FromStr for FileType {
     }
 }
 
-
-enum ChromTypeVariant {
-    Chromosome(Vec<Chromosome>),
-    NarrowPeakChromosome(Vec<NarrowPeakChromosome>),
-}
-trait ChromosomeTrait {
-    fn len(&self) -> usize;
-    fn iter(&self) -> impl Iterator<Item = &Self>;
-    // Other common methods
-}
-
-impl ChromosomeTrait for Chromosome {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &Self> {
-        self.iter()
-    }
-}
-
-impl ChromosomeTrait for NarrowPeakChromosome {
-    fn len(&self) -> usize {
-        self.len()
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &Self> {
-        self.iter()
-    }
-}
-impl ChromTypeVariant {
-    fn len(&self) -> usize {
-        match self {
-            ChromTypeVariant::Chromosome(chromosomes) => chromosomes.len(),
-            ChromTypeVariant::NarrowPeakChromosome(narrow_peak_chromosomes) => narrow_peak_chromosomes.len(),
-        }
-    }
-
-    fn iter(&self) -> impl Iterator<Item = &dyn ChromosomeTrait> {
-        match self {
-            ChromTypeVariant::Chromosome(chromosomes) => chromosomes.iter().map(|c| c as &dyn ChromosomeTrait),
-            ChromTypeVariant::NarrowPeakChromosome(narrow_peak_chromosomes) => narrow_peak_chromosomes.iter().map(|c| c as &dyn ChromosomeTrait),
-        }
-    }
-}
-
 // Chromosome representation for Bed File Inputs
 pub struct Chromosome {
     chrom: String,
@@ -94,6 +60,9 @@ pub struct Chromosome {
     ends: Vec<i32>,
 }
 
+impl ChromType for Chromosome{
+    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::Chromosome }
+}
 impl Clone for Chromosome {
     fn clone(&self) -> Self {
         Self {
@@ -111,6 +80,10 @@ pub struct NarrowPeakChromosome {
     pub ends: Vec<(i32, i32)>,   // first value of tuple is coordinate, 2nd is the narrowpeak score
 }
 
+impl ChromType for NarrowPeakChromosome{
+    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::NarrowPeakChromosome }
+}
+
 impl Clone for NarrowPeakChromosome {
     fn clone(&self) -> Self {
         Self {
@@ -123,7 +96,7 @@ impl Clone for NarrowPeakChromosome {
 
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
-pub fn read_bed_vec(combinedbedpath: &str) -> ChromTypeVariant {
+pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -192,10 +165,10 @@ pub fn read_bed_vec(combinedbedpath: &str) -> ChromTypeVariant {
 
     println!("Reading Bed file complete.");
 
-    ChromTypeVariant::Chromosome(chromosome_vec)
+    chromosome_vec
 }
 
-pub fn read_narrow_peak_vec(combinedbedpath: &str) -> ChromTypeVariant {
+pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> {
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -269,7 +242,7 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> ChromTypeVariant {
 
     println!("Reading narrowPeak file complete.");
 
-    ChromTypeVariant::NarrowPeakChromosome(chromosome_vec)
+    chromosome_vec
 }
 pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
     let mut fields = line.split('\t');
@@ -425,62 +398,39 @@ pub fn uniwig_main(
         }
     };
 
-    let filetype = ft.unwrap();
-    let result = read_generic_vec(filetype, filepath);
-
-    let chromosomes:ChromTypeVariant = match result{
-        ChromTypeVariant::Chromosome(vec_of_chromosomes)=>{
-            println!("Found chromosomes!");
-            ChromTypeVariant::Chromosome(vec_of_chromosomes)
-            //vec_of_chromosomes
-        }
-        ChromTypeVariant::NarrowPeakChromosome(vec_of_narrowchromosomes)=>{
-            println!("Found narrowpeakchromosomes!");
-            ChromTypeVariant::NarrowPeakChromosome(vec_of_narrowchromosomes)
-        }
+    // I JUST WANT A VECTOR OF CHROMOSOMES OR NARROWPEAKCHROMOSOMES
+    let chromosomes: Vec<Box<dyn ChromType>> = match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath).iter().map(|arg0: &Chromosome| Box::new(arg0.clone())).collect(),//read_bed_vec(filepath).iter().map(|arg0: Chromosome| ChromType::Chromosome(*arg0)).collect(),
+        Ok(FileType::BAM) => read_bam_header(filepath),//read_bam_header(filepath).iter().map(ChromType::Chromosome).collect(),
+        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),//read_narrow_peak_vec(filepath).iter().map(ChromType::NarrowPeakChromosome).collect(),
+        _ => read_bed_vec(filepath),
     };
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     let num_chromosomes = chromosomes.len();
 
     println!("PreProcessing each chromosome...");
-
-    //let mut final_chromosomes = Vec::with_capacity(num_chromosomes);
-    let mut final_chromosomes: Vec<Box<dyn ChromosomeTrait>> = Vec::with_capacity(num_chromosomes);
-
+    let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
     for chromosome in chromosomes.iter() {
+
         match chromosome {
-            ChromTypeVariant::Chromosome(chromosome) => {
-
-                for item in chromosome {
-                    if item.starts.len() != item.ends.len() {
-                        break;
-                    }
-                    // Check if there is an available chrom size, if not exclude it from our final list
-                    let _current_chrom_size = match chrom_sizes.get(&item.chrom) {
-                        Some(size) => final_chromosomes.push(Box::new(item.clone())), // Dereference to get the i32 value
-                        None => {
-                            continue; // Or handle the error differently
-                        }
-                    };
+            ChromType::Chromosome(chromosome) | ChromType::NarrowPeakChromosome(chromosome)=> {
+                if chromosome.starts.len() != chromosome.ends.len() {
+                    break;
                 }
-            }
-
-            ChromTypeVariant::NarrowPeakChromosome(narrow_peak_chromosome) => {
-                for item in narrow_peak_chromosome {
-                    if item.starts.len() != item.ends.len() {
-                        break;
+                // Check if there is an available chrom size, if not exclude it from our final list
+                let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+                    Some(size) => final_chromosomes.push(chromosome.clone()), // Dereference to get the i32 value
+                    None => {
+                        continue; // Or handle the error differently
                     }
-                    // Check if there is an available chrom size, if not exclude it from our final list
-                    let _current_chrom_size = match chrom_sizes.get(&item.chrom) {
-                        Some(size) => final_chromosomes.push(Box::new(item.clone())), // Dereference to get the i32 value
-                        None => {
-                            continue; // Or handle the error differently
-                        }
-                    };
-                }
+                };
             }
             _ => panic!("Chromosome Type not recognized!!!!"),
+
+
         }
+
     }
 
     println!(
@@ -811,7 +761,7 @@ fn smooth_fixed_start_end_wiggle_bam(
     (v_coord_counts, v_coordinate_positions)
 }
 
-pub fn read_bam_header(filepath: &str) -> ChromTypeVariant {
+pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     // BAM and SAM format specification https://samtools.github.io/hts-specs/SAMv1.pdf
     println!("READ BAM HEADER PLACE HOLDER");
 
@@ -842,7 +792,7 @@ pub fn read_bam_header(filepath: &str) -> ChromTypeVariant {
         chromosome_vec.push(chromosome.clone());
     }
 
-    ChromTypeVariant::Chromosome(chromosome_vec)
+    chromosome_vec
 }
 
 fn write_to_npy_file(
@@ -1460,13 +1410,4 @@ pub fn fixed_core_narrow_peak(
     }
 
     (v_coord_counts, v_coordinate_positions)
-}
-
-fn read_generic_vec(ft: FileType, filepath: &str) -> ChromTypeVariant {
-    match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath),
-        Ok(FileType::BAM) => read_bam_header(filepath),
-        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),
-        _ => read_bed_vec(filepath),
-    }
 }
