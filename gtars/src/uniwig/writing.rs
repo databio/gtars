@@ -1,9 +1,9 @@
+use crate::uniwig::Chromosome;
+use ndarray::Array;
+use ndarray_npy::write_npy;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io;
 use std::io::{BufWriter, Write};
-use ndarray::Array;
-use ndarray_npy::write_npy;
-use crate::uniwig::Chromosome;
 
 pub fn write_to_npy_file(
     counts: &Vec<u32>,

@@ -1,16 +1,17 @@
+use crate::uniwig::Chromosome;
+use clap::builder::OsStr;
+use flate2::read::GzDecoder;
+use noodles::bam;
 use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::ops::Deref;
 use std::path::Path;
-use clap::builder::OsStr;
-use flate2::read::GzDecoder;
-use noodles::bam;
-use crate::uniwig::Chromosome;
 
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+    let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -29,8 +30,6 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
-        starts_with_scores: vec![],
-        ends_with_scores: vec![],
     };
 
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
@@ -50,8 +49,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             // Initial chromosome
             chromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
-            chromosome.starts.push(parsed_start);
-            chromosome.ends.push(parsed_end);
+            chromosome.starts.push((parsed_start, default_score));
+            chromosome.ends.push((parsed_end, default_score));
             continue;
         }
 
@@ -70,8 +69,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             chromosome.ends = vec![]
         }
 
-        chromosome.starts.push(parsed_start);
-        chromosome.ends.push(parsed_end);
+        chromosome.starts.push((parsed_start, default_score));
+        chromosome.ends.push((parsed_end, default_score));
     }
 
     // Is this final sort and push actually necessary?
@@ -85,6 +84,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 }
 
 pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+    // For narrowpeak there is no default score, we attempt to parse it from the file
+    //
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -103,8 +104,6 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
-        starts_with_scores: vec![],
-        ends_with_scores: vec![],
     };
 
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
@@ -125,12 +124,8 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             // Initial chromosome
             npchromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
-            npchromosome
-                .starts_with_scores
-                .push((parsed_start, parsed_score));
-            npchromosome
-                .ends_with_scores
-                .push((parsed_end, parsed_score));
+            npchromosome.starts.push((parsed_start, parsed_score));
+            npchromosome.ends.push((parsed_end, parsed_score));
             continue;
         }
 
@@ -139,39 +134,27 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             // then reset chromosome struct using the newest parsed_chr
             //npchromosome.starts.sort_unstable();
             //npchromosome.ends.sort_unstable();
-            npchromosome
-                .starts_with_scores
-                .sort_unstable_by(|a, b| a.0.cmp(&b.0));
-            npchromosome
-                .ends_with_scores
-                .sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            npchromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            npchromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
             chromosome_vec.push(npchromosome.clone());
 
             npchromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
 
-            npchromosome.starts_with_scores = vec![];
-            npchromosome.ends_with_scores = vec![]
+            npchromosome.starts = vec![];
+            npchromosome.ends = vec![]
         }
 
-        npchromosome
-            .starts_with_scores
-            .push((parsed_start, parsed_score));
-        npchromosome
-            .ends_with_scores
-            .push((parsed_end, parsed_score));
+        npchromosome.starts.push((parsed_start, parsed_score));
+        npchromosome.ends.push((parsed_end, parsed_score));
     }
 
     // Is this final sort and push actually necessary?
     // npchromosome.starts.sort_unstable();
     // npchromosome.ends.sort_unstable();
-    npchromosome
-        .starts_with_scores
-        .sort_unstable_by(|a, b| a.0.cmp(&b.0));
-    npchromosome
-        .ends_with_scores
-        .sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    npchromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    npchromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     chromosome_vec.push(npchromosome.clone());
 
     println!("Reading narrowPeak file complete.");
@@ -224,7 +207,6 @@ pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
 
     Some((ctg.parse().unwrap(), st, en))
 }
-
 
 /// Reads chromosome size file from path and returns chromosome sizes hash map
 pub fn read_chromosome_sizes(
@@ -291,7 +273,6 @@ pub fn read_chromosome_sizes(
     Ok(chrom_sizes)
 }
 
-
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     // BAM and SAM format specification https://samtools.github.io/hts-specs/SAMv1.pdf
     println!("READ BAM HEADER PLACE HOLDER");
@@ -306,8 +287,6 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
-        starts_with_scores: vec![],
-        ends_with_scores: vec![],
     };
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
 
@@ -320,8 +299,8 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
         //
         // let s = BString::from("Hello, world!");
         chromosome.chrom = chrom_name;
-        chromosome.starts.push(0); //default values for now, less important for bam
-        chromosome.ends.push(0); //default values for now, less important for bam
+        chromosome.starts.push((0, 0)); //default values for now, less important for bam
+        chromosome.ends.push((0, 0)); //default values for now, less important for bam
         chromosome_vec.push(chromosome.clone());
     }
 

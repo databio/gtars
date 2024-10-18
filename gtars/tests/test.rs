@@ -59,12 +59,13 @@ mod tests {
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
 
-    use gtars::uniwig::{
-       uniwig_main, Chromosome,
-    };
+    use gtars::uniwig::{uniwig_main, Chromosome};
 
-    use gtars::uniwig::reading::{read_narrow_peak_vec,read_bed_vec, parse_bed_file, parse_narrow_peak_file,read_chromosome_sizes};
     use gtars::uniwig::counting::{fixed_core_narrow_peak, smooth_fixed_start_end_narrow_peak};
+    use gtars::uniwig::reading::{
+        parse_bed_file, parse_narrow_peak_file, read_bed_vec, read_chromosome_sizes,
+        read_narrow_peak_vec,
+    };
     use std::collections::HashMap;
     // IGD TESTS
 
@@ -283,8 +284,8 @@ mod tests {
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
             let _result = fixed_core_narrow_peak(
-                &chromosome.starts_with_scores,
-                &chromosome.ends_with_scores,
+                &chromosome.starts,
+                &chromosome.ends,
                 current_chrom_size,
                 stepsize,
             );
@@ -302,7 +303,7 @@ mod tests {
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
             let _result = smooth_fixed_start_end_narrow_peak(
-                &chromosome.starts_with_scores,
+                &chromosome.starts,
                 current_chrom_size,
                 smooth_size,
                 stepsize,

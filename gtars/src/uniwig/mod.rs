@@ -1,4 +1,3 @@
-
 use clap::ArgMatches;
 
 use indicatif::ProgressBar;
@@ -9,10 +8,10 @@ use std::error::Error;
 use std::io::{BufRead, BufWriter, Read, Write};
 use std::ops::Deref;
 
-use std::str::FromStr;
 use crate::uniwig::counting::{fixed_core_wiggle, smooth_fixed_start_end_wiggle};
 use crate::uniwig::reading::{read_bam_header, read_bed_vec, read_chromosome_sizes};
-use crate::uniwig::writing::{write_to_npy_file,write_to_wig_file,write_combined_wig_files};
+use crate::uniwig::writing::{write_combined_wig_files, write_to_npy_file, write_to_wig_file};
+use std::str::FromStr;
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -48,10 +47,8 @@ impl FromStr for FileType {
 // Chromosome representation for Bed File Inputs
 pub struct Chromosome {
     pub chrom: String,
-    pub starts: Vec<i32>,
-    pub ends: Vec<i32>,
-    pub starts_with_scores: Vec<(i32, i32)>, // only to be used with narrowPeak input types
-    pub ends_with_scores: Vec<(i32, i32)>,   // only to be used with narrowPeak input types
+    pub starts: Vec<(i32, i32)>,
+    pub ends: Vec<(i32, i32)>,
 }
 impl Clone for Chromosome {
     fn clone(&self) -> Self {
@@ -59,13 +56,9 @@ impl Clone for Chromosome {
             chrom: self.chrom.clone(),
             starts: self.starts.clone(),
             ends: self.ends.clone(),
-            starts_with_scores: self.starts_with_scores.clone(),
-            ends_with_scores: self.ends_with_scores.clone(),
         }
     }
 }
-
-
 
 /// Matches items from CLAP args before running uniwig_main
 pub fn run_uniwig(matches: &ArgMatches) {
@@ -274,7 +267,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start, smoothsize),
+                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                         );
                                     }
@@ -290,7 +283,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start, smoothsize),
+                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                             meta_data_file_names[0].clone(),
                                         );
@@ -305,7 +298,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start, smoothsize),
+                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                             meta_data_file_names[0].clone(),
                                         );
@@ -353,7 +346,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_end, smoothsize),
+                                            clamped_start_position(primary_end.0, smoothsize),
                                             stepsize,
                                         );
                                     }
@@ -369,7 +362,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start, smoothsize),
+                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                             meta_data_file_names[1].clone(),
                                         );
@@ -384,7 +377,7 @@ pub fn uniwig_main(
                                             &count_result.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start, smoothsize),
+                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                             meta_data_file_names[1].clone(),
                                         );
@@ -432,7 +425,7 @@ pub fn uniwig_main(
                                             &core_results.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start,
+                                            primary_start.0,
                                             stepsize,
                                         );
                                     }
@@ -448,7 +441,7 @@ pub fn uniwig_main(
                                             &core_results.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start,
+                                            primary_start.0,
                                             stepsize,
                                             meta_data_file_names[2].clone(),
                                         );
@@ -463,7 +456,7 @@ pub fn uniwig_main(
                                             &core_results.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start,
+                                            primary_start.0,
                                             stepsize,
                                             meta_data_file_names[2].clone(),
                                         );
@@ -499,8 +492,8 @@ pub fn uniwig_main(
 }
 
 fn fixed_core_wiggle_bam(
-    _p0: &Vec<i32>,
-    _p1: &Vec<i32>,
+    _p0: &Vec<(i32, i32)>,
+    _p1: &Vec<(i32, i32)>,
     _p2: i32,
     _p3: i32,
 ) -> (Vec<u32>, Vec<i32>) {
@@ -513,7 +506,7 @@ fn fixed_core_wiggle_bam(
 }
 
 fn smooth_fixed_start_end_wiggle_bam(
-    _p0: &Vec<i32>,
+    _p0: &Vec<(i32, i32)>,
     _p1: i32,
     _p2: i32,
     _p3: i32,
@@ -525,7 +518,3 @@ fn smooth_fixed_start_end_wiggle_bam(
 
     (v_coord_counts, v_coordinate_positions)
 }
-
-
-
-
