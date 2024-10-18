@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 
 use rstest::*;
 
-use gtars::uniwig::parse_bed_file;
-
 #[fixture]
 fn path_to_data() -> &'static str {
     "tests/data"
@@ -61,7 +59,13 @@ mod tests {
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
     use gtars::igd::search::igd_search;
 
-    use gtars::uniwig::{read_bed_vec, read_chromosome_sizes, uniwig_main, Chromosome};
+    use gtars::uniwig::{uniwig_main, Chromosome};
+
+    use gtars::uniwig::counting::{core_counts, start_end_counts};
+    use gtars::uniwig::reading::{
+        parse_bed_file, parse_narrow_peak_file, read_bed_vec, read_chromosome_sizes,
+        read_narrow_peak_vec,
+    };
     use std::collections::HashMap;
     // IGD TESTS
 
@@ -252,6 +256,65 @@ mod tests {
     }
 
     #[rstest]
+    fn test_read_narrow_peak_vec() {
+        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
+        let result1 = read_narrow_peak_vec(path_to_narrow_peak);
+        assert_eq!(result1.len(), 1);
+
+        let path_to_narrow_peak_gzipped =
+            "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak.gz";
+
+        let result2 = read_narrow_peak_vec(path_to_narrow_peak_gzipped);
+        assert_eq!(result2.len(), 1);
+    }
+
+    #[rstest]
+    fn test_read_narrow_peak_chrom_sizes() {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let _result1 = read_chromosome_sizes(path_to_narrow_peak.as_str());
+    }
+
+    #[rstest]
+    fn test_read_narrow_peak_core_counts() {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let stepsize = 1;
+
+        for chromosome in narrow_peak_vec.iter() {
+            let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+            let _result = core_counts(
+                &chromosome.starts,
+                &chromosome.ends,
+                current_chrom_size,
+                stepsize,
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_read_narrow_peak_starts_counts() {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let stepsize = 1;
+        let smooth_size = 1;
+
+        for chromosome in narrow_peak_vec.iter() {
+            let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+            let _result = start_end_counts(
+                &chromosome.starts,
+                current_chrom_size,
+                smooth_size,
+                stepsize,
+            );
+        }
+    }
+
+    #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
         let chromosomes: Vec<Chromosome> = read_bed_vec(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
@@ -337,6 +400,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         )
         .expect("Uniwig main failed!");
 
@@ -373,6 +438,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -428,6 +495,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         );
 
         assert!(result.is_ok());
@@ -467,6 +536,8 @@ mod tests {
             output_type,
             filetype,
             num_threads,
+            false,
+            1,
         );
 
         assert!(result.is_ok());

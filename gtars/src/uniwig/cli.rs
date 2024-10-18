@@ -21,7 +21,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("filetype")
                 .long("filetype")
                 .short('t')
-                .help("input file type, 'bed' or 'bam'")
+                .help("Input file type, 'bed' 'bam' or 'narrowpeak'")
                 .default_value("bed"),
         )
         .arg(
@@ -68,6 +68,14 @@ pub fn create_uniwig_cli() -> Command {
                 .default_value("6")
                 .value_parser(clap::value_parser!(i32))
                 .help("Number of rayon threads to use for parallel processing")
+                .required(false),
+        )
+        .arg(
+            Arg::new("score")
+                .long("score")
+                .short('o')
+                .value_parser(clap::value_parser!(bool))
+                .help("Count via score (narrowPeak only!)")
                 .required(false),
         )
 }
