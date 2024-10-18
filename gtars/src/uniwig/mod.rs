@@ -435,7 +435,7 @@ pub fn uniwig_main(
                                             &core_results.0,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start.0,
+                                            clamped_start_position(primary_start.0, 1),
                                             stepsize,
                                         );
                                     }
