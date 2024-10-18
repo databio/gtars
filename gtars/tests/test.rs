@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 
 use rstest::*;
 
-use gtars::uniwig::parse_bed_file;
-
 #[fixture]
 fn path_to_data() -> &'static str {
     "tests/data"
@@ -62,9 +60,11 @@ mod tests {
     use gtars::igd::search::igd_search;
 
     use gtars::uniwig::{
-        fixed_core_narrow_peak, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
-        smooth_fixed_start_end_narrow_peak, uniwig_main, Chromosome,
+       uniwig_main, Chromosome,
     };
+
+    use gtars::uniwig::reading::{read_narrow_peak_vec,read_bed_vec, parse_bed_file, parse_narrow_peak_file,read_chromosome_sizes};
+    use gtars::uniwig::counting::{fixed_core_narrow_peak, smooth_fixed_start_end_narrow_peak};
     use std::collections::HashMap;
     // IGD TESTS
 
