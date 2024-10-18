@@ -9,7 +9,9 @@ use std::io::{BufRead, BufWriter, Read, Write};
 use std::ops::Deref;
 
 use crate::uniwig::counting::{core_counts, start_end_counts};
-use crate::uniwig::reading::{read_bam_header, read_bed_vec, read_chromosome_sizes};
+use crate::uniwig::reading::{
+    read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
+};
 use crate::uniwig::writing::{write_combined_wig_files, write_to_npy_file, write_to_wig_file};
 use std::str::FromStr;
 // use noodles::sam as sam;
@@ -167,6 +169,14 @@ pub fn uniwig_main(
 
     let chromosomes: Vec<Chromosome> = match ft {
         Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::NARROWPEAK) => {
+            if score {
+                println!("FileType is NarrowPeak and Score = True...Counting based on Score");
+                read_narrow_peak_vec(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+            } else {
+                read_bed_vec(filepath)
+            }
+        }
         Ok(FileType::BAM) => read_bam_header(filepath),
         _ => read_bed_vec(filepath),
     };

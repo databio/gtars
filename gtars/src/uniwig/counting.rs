@@ -73,6 +73,10 @@ pub fn start_end_counts(
             while current_end_site.0 == coordinate_position {
                 count = count - current_score;
 
+                if count < 0 {
+                    count = 0;
+                }
+
                 if collected_end_sites.last() == None {
                     current_end_site.0 = 0;
                 } else {
@@ -101,6 +105,9 @@ pub fn start_end_counts(
         while current_end_site.0 == coordinate_position {
             let current_score = adjusted_start_site.1;
             count = count - current_score;
+            if count < 0 {
+                count = 0;
+            }
 
             if collected_end_sites.last() == None {
                 current_end_site.0 = 0;
@@ -185,6 +192,9 @@ pub fn core_counts(
         while coordinate_position < current_start_site.0 {
             while current_end_site.0 == coordinate_position {
                 count = count - current_score;
+                if count < 0 {
+                    count = 0;
+                }
 
                 if collected_end_sites.last() == None {
                     current_end_site.0 = 0;
@@ -211,7 +221,9 @@ pub fn core_counts(
         while current_end_site.0 == coordinate_position {
             let current_score = current_start_site.1;
             count = count - current_score;
-
+            if count < 0 {
+                count = 0;
+            }
             if collected_end_sites.last() == None {
                 current_end_site.0 = 0;
             } else {
