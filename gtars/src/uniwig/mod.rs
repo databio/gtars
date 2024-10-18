@@ -44,35 +44,39 @@ impl FromStr for FileType {
 
 // Chromosome representation for Bed File Inputs
 pub struct Chromosome {
-    chrom: String,
-    starts: Vec<i32>,
-    ends: Vec<i32>,
+    pub chrom: String,
+    pub starts: Vec<i32>,
+    pub ends: Vec<i32>,
+    pub starts_with_scores: Vec<(i32, i32)>, // only to be used with narrowPeak input types
+    pub ends_with_scores: Vec<(i32, i32)>,   // only to be used with narrowPeak input types
 }
 impl Clone for Chromosome {
     fn clone(&self) -> Self {
         Self {
-            chrom: self.chrom.clone(),   // Clone the string
-            starts: self.starts.clone(), // Clone the vector
-            ends: self.ends.clone(),     // Clone the vector
+            chrom: self.chrom.clone(),
+            starts: self.starts.clone(),
+            ends: self.ends.clone(),
+            starts_with_scores: self.starts_with_scores.clone(),
+            ends_with_scores: self.ends_with_scores.clone(),
         }
     }
 }
 
-// Chromosome representation for NarrowPeak Inputs
-pub struct NarrowPeakChromosome {
-    pub chrom: String,
-    pub starts: Vec<(i32, i32)>, // first value of tuple is coordinate, 2nd is the narrowpeak score
-    pub ends: Vec<(i32, i32)>,   // first value of tuple is coordinate, 2nd is the narrowpeak score
-}
-impl Clone for NarrowPeakChromosome {
-    fn clone(&self) -> Self {
-        Self {
-            chrom: self.chrom.clone(),   // Clone the string
-            starts: self.starts.clone(), // Clone the vector
-            ends: self.ends.clone(),     // Clone the vector
-        }
-    }
-}
+// // Chromosome representation for NarrowPeak Inputs
+// pub struct NarrowPeakChromosome {
+//     pub chrom: String,
+//     pub starts: Vec<(i32, i32)>, // first value of tuple is coordinate, 2nd is the narrowpeak score
+//     pub ends: Vec<(i32, i32)>,   // first value of tuple is coordinate, 2nd is the narrowpeak score
+// }
+// impl Clone for NarrowPeakChromosome {
+//     fn clone(&self) -> Self {
+//         Self {
+//             chrom: self.chrom.clone(),   // Clone the string
+//             starts: self.starts.clone(), // Clone the vector
+//             ends: self.ends.clone(),     // Clone the vector
+//         }
+//     }
+// }
 
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
@@ -95,6 +99,8 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
+        starts_with_scores: vec![],
+        ends_with_scores: vec![],
     };
 
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
@@ -148,7 +154,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec
 }
 
-pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> {
+pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -163,13 +169,15 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> 
 
     let reader = BufReader::new(reader);
 
-    let mut npchromosome = NarrowPeakChromosome {
+    let mut npchromosome = Chromosome {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
+        starts_with_scores: vec![],
+        ends_with_scores: vec![],
     };
 
-    let mut chromosome_vec: Vec<NarrowPeakChromosome> = Vec::new();
+    let mut chromosome_vec: Vec<Chromosome> = Vec::new();
 
     let mut chrom = String::new();
 
@@ -187,8 +195,12 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> 
             // Initial chromosome
             npchromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
-            npchromosome.starts.push((parsed_start, parsed_score));
-            npchromosome.ends.push((parsed_end, parsed_score));
+            npchromosome
+                .starts_with_scores
+                .push((parsed_start, parsed_score));
+            npchromosome
+                .ends_with_scores
+                .push((parsed_end, parsed_score));
             continue;
         }
 
@@ -197,27 +209,39 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> 
             // then reset chromosome struct using the newest parsed_chr
             //npchromosome.starts.sort_unstable();
             //npchromosome.ends.sort_unstable();
-            npchromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-            npchromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            npchromosome
+                .starts_with_scores
+                .sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            npchromosome
+                .ends_with_scores
+                .sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
             chromosome_vec.push(npchromosome.clone());
 
             npchromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
 
-            npchromosome.starts = vec![];
-            npchromosome.ends = vec![]
+            npchromosome.starts_with_scores = vec![];
+            npchromosome.ends_with_scores = vec![]
         }
 
-        npchromosome.starts.push((parsed_start, parsed_score));
-        npchromosome.ends.push((parsed_end, parsed_score));
+        npchromosome
+            .starts_with_scores
+            .push((parsed_start, parsed_score));
+        npchromosome
+            .ends_with_scores
+            .push((parsed_end, parsed_score));
     }
 
     // Is this final sort and push actually necessary?
     // npchromosome.starts.sort_unstable();
     // npchromosome.ends.sort_unstable();
-    npchromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-    npchromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    npchromosome
+        .starts_with_scores
+        .sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    npchromosome
+        .ends_with_scores
+        .sort_unstable_by(|a, b| a.0.cmp(&b.0));
     chromosome_vec.push(npchromosome.clone());
 
     println!("Reading narrowPeak file complete.");
@@ -304,9 +328,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("threads")
         .expect("requires integer value");
 
-    let score = matches
-        .get_one::<bool>("score")
-        .unwrap_or_else(|| &false);
+    let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
 
     let stepsize = matches
         .get_one::<i32>("stepsize")
@@ -746,6 +768,8 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
         chrom: "".to_string(),
         starts: vec![],
         ends: vec![],
+        starts_with_scores: vec![],
+        ends_with_scores: vec![],
     };
     let mut chromosome_vec: Vec<Chromosome> = Vec::new();
 

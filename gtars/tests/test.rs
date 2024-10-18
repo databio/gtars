@@ -63,7 +63,7 @@ mod tests {
 
     use gtars::uniwig::{
         fixed_core_narrow_peak, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
-        smooth_fixed_start_end_narrow_peak, uniwig_main, Chromosome, NarrowPeakChromosome,
+        smooth_fixed_start_end_narrow_peak, uniwig_main, Chromosome,
     };
     use std::collections::HashMap;
     // IGD TESTS
@@ -277,14 +277,14 @@ mod tests {
     fn test_read_narrow_peak_core_counts() {
         let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak).unwrap();
-        let narrow_peak_vec: Vec<NarrowPeakChromosome> = read_narrow_peak_vec(path_to_narrow_peak);
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak);
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
             let _result = fixed_core_narrow_peak(
-                &chromosome.starts,
-                &chromosome.ends,
+                &chromosome.starts_with_scores,
+                &chromosome.ends_with_scores,
                 current_chrom_size,
                 stepsize,
             );
@@ -295,14 +295,14 @@ mod tests {
     fn test_read_narrow_peak_starts_counts() {
         let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy2.narrowPeak";
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak).unwrap();
-        let narrow_peak_vec: Vec<NarrowPeakChromosome> = read_narrow_peak_vec(path_to_narrow_peak);
+        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak);
         let stepsize = 1;
         let smooth_size = 1;
 
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
             let _result = smooth_fixed_start_end_narrow_peak(
-                &chromosome.starts,
+                &chromosome.starts_with_scores,
                 current_chrom_size,
                 smooth_size,
                 stepsize,
@@ -533,7 +533,7 @@ mod tests {
             filetype,
             num_threads,
             false,
-            1
+            1,
         );
 
         assert!(result.is_ok());

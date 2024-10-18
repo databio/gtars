@@ -76,6 +76,6 @@ pub fn create_uniwig_cli() -> Command {
                 .short('o')
                 .value_parser(clap::value_parser!(bool))
                 .help("Count via score (narrowPeak only!)")
-                .required(false)
+                .required(false),
         )
 }
