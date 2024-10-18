@@ -44,10 +44,6 @@ trait CountableChromosome {
 
 }
 
-impl CountableChromosome for Vec<Chromosome>{
-
-}
-
 
 impl FromStr for FileType {
     type Err = String;
@@ -69,14 +65,9 @@ pub struct Chromosome {
     ends: Vec<i32>,
 }
 
-// impl ChromType for Chromosome{
-//     fn value(&self) -> ChromTypeVariant { ChromTypeVariant::Chromosome }
-// }
-// impl ExactSizeIterator for Chromosome {
-//     fn len(&self) -> usize {
-//         // ... return the length of the chromosome (e.g., self.starts.len())
-//     }
-// }
+impl ChromType for Chromosome{
+    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::Chromosome }
+}
 
 impl CountableChromosome for Chromosome{}
 
@@ -97,9 +88,9 @@ pub struct NarrowPeakChromosome {
     pub ends: Vec<(i32, i32)>,   // first value of tuple is coordinate, 2nd is the narrowpeak score
 }
 
-// impl ChromType for NarrowPeakChromosome{
-//     fn value(&self) -> ChromTypeVariant { ChromTypeVariant::NarrowPeakChromosome }
-// }
+impl ChromType for NarrowPeakChromosome{
+    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::NarrowPeakChromosome }
+}
 
 impl CountableChromosome for NarrowPeakChromosome{}
 
@@ -115,7 +106,7 @@ impl Clone for NarrowPeakChromosome {
 
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
-pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Box<dyn CountableChromosome>> {
+pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     let path = Path::new(combinedbedpath);
 
     let file = File::open(path).unwrap();
@@ -184,7 +175,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Box<dyn CountableChromosome>> 
 
     println!("Reading Bed file complete.");
 
-    Box::new(chromosome_vec)
+    chromosome_vec
 }
 
 pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<NarrowPeakChromosome> {
@@ -389,7 +380,7 @@ pub fn uniwig_main(
         .unwrap();
 
     // Determine File Type
-    let ft = FileType::from_str(filetype.to_lowercase().as_str());
+    let ft = FileType::from_str(filetype.to_lowercase().as_str()).unwrap();
 
     let score = score;
 
@@ -417,50 +408,33 @@ pub fn uniwig_main(
         }
     };
 
+    let chromosomes: Vec<Box<dyn CountableChromosome>> = read_generic_vec(filepath, ft).iter().map(|chrom| Box::new(chrom)).collect();
 
-
-    let chromosomes =
-        match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath),//read_bed_vec(filepath).iter().map(|chrom| Box::new(chrom.clone())).collect(),
-        // Ok(FileType::BAM) => read_bam_header(filepath),
-        // Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),
-        _ => read_bed_vec(filepath),
-    };
-
-    let mut num_chromosomes =0;
-
-    for c in chromosomes.iter(){
-        num_chromosomes = num_chromosomes+1;
-
-
-    }
-    // let num_chromosomes = chromosomes.len();
+    let num_chromosomes = chromosomes.len();
 
     println!("PreProcessing each chromosome...");
-    //let mut final_chromosomes: Vec<Box<dyn CountableChromosome>> = Vec::with_capacity(num_chromosomes);
-    let mut final_chromosomes = chromosomes;
+    let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
+    for chromosome in chromosomes.iter() {
 
-    // for chromosome in chromosomes.iter() {
-    //
-    //     match chromosome {
-    //         ChromType::Chromosome(chromosome) | ChromType::NarrowPeakChromosome(chromosome)=> {
-    //             if chromosome.starts.len() != chromosome.ends.len() {
-    //                 break;
-    //             }
-    //             // Check if there is an available chrom size, if not exclude it from our final list
-    //             let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
-    //                 Some(size) => final_chromosomes.push(chromosome.clone()), // Dereference to get the i32 value
-    //                 None => {
-    //                     continue; // Or handle the error differently
-    //                 }
-    //             };
-    //         }
-    //         _ => panic!("Chromosome Type not recognized!!!!"),
-    //
-    //
-    //     }
-    //
-    // }
+        match chromosome {
+            ChromType::Chromosome(chromosome) | ChromType::NarrowPeakChromosome(chromosome)=> {
+                if chromosome.starts.len() != chromosome.ends.len() {
+                    break;
+                }
+                // Check if there is an available chrom size, if not exclude it from our final list
+                let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+                    Some(size) => final_chromosomes.push(chromosome.clone()), // Dereference to get the i32 value
+                    None => {
+                        continue; // Or handle the error differently
+                    }
+                };
+            }
+            _ => panic!("Chromosome Type not recognized!!!!"),
+
+
+        }
+
+    }
 
     println!(
         "Initial chroms: {}  vs Final chroms: {}",
@@ -762,14 +736,14 @@ pub fn uniwig_main(
     Ok(())
 }
 
-// fn read_generic_vec(filepath: &str, ft: FileType) -> Vec<impl CountableChromosome> {
-//     match ft {
-//         Ok(FileType::BED) => read_bed_vec(filepath),
-//         Ok(FileType::BAM) => read_bam_header(filepath),
-//         Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),
-//         _ => read_bed_vec(filepath),
-//     }
-// }
+fn read_generic_vec<T: CountableChromosome>(filepath: &str, ft: FileType) -> Vec<T> {
+    match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::BAM) => read_bam_header(filepath),
+        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),
+        _ => read_bed_vec(filepath),
+    }
+}
 
 fn fixed_core_wiggle_bam(
     _p0: &Vec<i32>,
