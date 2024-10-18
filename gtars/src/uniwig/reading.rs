@@ -223,7 +223,7 @@ pub fn read_chromosome_sizes(
 
     match extension {
         //TODO what if the user provides a zipped bed file or a zipped narrowPeak and not a .sizes file? This will probably fail.
-        Some("bed") => {
+        Some("bed") | Some("narrowPeak") => {
             // Read BED file
             for line in reader.lines() {
                 let line = line?; // Propagate the potential error
@@ -236,20 +236,7 @@ pub fn read_chromosome_sizes(
                 chrom_sizes.insert(chrom_name, size);
             }
         }
-        Some("narrowPeak") => {
-            // TODO refactor the above case and this case to simply call a function
-            // Read narrowPeak
-            for line in reader.lines() {
-                let line = line?; // Propagate the potential error
-                let mut iter = line.split('\t');
-                let chrom_name = iter.next().unwrap().to_owned();
-                let _ = iter.next().unwrap();
-                let size_str = iter.next().unwrap();
-                let size = size_str.parse::<u32>()?;
 
-                chrom_sizes.insert(chrom_name, size);
-            }
-        }
         Some("sizes") => {
             // Read sizes file
             // Note this may lead to slower performance as uniwig will pad the remaining chromosome with zeros
