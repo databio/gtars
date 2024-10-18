@@ -29,17 +29,6 @@ enum FileType {
     NARROWPEAK,
 }
 
-enum ChromTypeVariant {
-    Chromosome,
-    NarrowPeakChromosome,
-}
-
-trait ChromType {
-    //type Variant;
-    // fn repr() -> Variant
-    fn value(&self) -> ChromTypeVariant;
-}
-
 impl FromStr for FileType {
     type Err = String;
 
@@ -59,10 +48,6 @@ pub struct Chromosome {
     starts: Vec<i32>,
     ends: Vec<i32>,
 }
-
-impl ChromType for Chromosome{
-    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::Chromosome }
-}
 impl Clone for Chromosome {
     fn clone(&self) -> Self {
         Self {
@@ -79,11 +64,6 @@ pub struct NarrowPeakChromosome {
     pub starts: Vec<(i32, i32)>, // first value of tuple is coordinate, 2nd is the narrowpeak score
     pub ends: Vec<(i32, i32)>,   // first value of tuple is coordinate, 2nd is the narrowpeak score
 }
-
-impl ChromType for NarrowPeakChromosome{
-    fn value(&self) -> ChromTypeVariant { ChromTypeVariant::NarrowPeakChromosome }
-}
-
 impl Clone for NarrowPeakChromosome {
     fn clone(&self) -> Self {
         Self {
@@ -398,39 +378,30 @@ pub fn uniwig_main(
         }
     };
 
-    // I JUST WANT A VECTOR OF CHROMOSOMES OR NARROWPEAKCHROMOSOMES
-    let chromosomes: Vec<Box<dyn ChromType>> = match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath).iter().map(|arg0: &Chromosome| Box::new(arg0.clone())).collect(),//read_bed_vec(filepath).iter().map(|arg0: Chromosome| ChromType::Chromosome(*arg0)).collect(),
-        Ok(FileType::BAM) => read_bam_header(filepath),//read_bam_header(filepath).iter().map(ChromType::Chromosome).collect(),
-        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),//read_narrow_peak_vec(filepath).iter().map(ChromType::NarrowPeakChromosome).collect(),
+    let chromosomes: Vec<Chromosome> = match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::BAM) => read_bam_header(filepath),
         _ => read_bed_vec(filepath),
     };
-    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     let num_chromosomes = chromosomes.len();
 
     println!("PreProcessing each chromosome...");
     let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
     for chromosome in chromosomes.iter() {
-
-        match chromosome {
-            ChromType::Chromosome(chromosome) | ChromType::NarrowPeakChromosome(chromosome)=> {
-                if chromosome.starts.len() != chromosome.ends.len() {
-                    break;
-                }
-                // Check if there is an available chrom size, if not exclude it from our final list
-                let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
-                    Some(size) => final_chromosomes.push(chromosome.clone()), // Dereference to get the i32 value
-                    None => {
-                        continue; // Or handle the error differently
-                    }
-                };
-            }
-            _ => panic!("Chromosome Type not recognized!!!!"),
-
-
+        if chromosome.starts.len() != chromosome.ends.len() {
+            break;
         }
 
+        // Check if there is an available chrom size, if not exclude it from our final list
+        let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+            Some(size) => *size as i32, // Dereference to get the i32 value
+            None => {
+                continue; // Or handle the error differently
+            }
+        };
+
+        final_chromosomes.push(chromosome.clone())
     }
 
     println!(
