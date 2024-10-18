@@ -29,11 +29,13 @@ pub fn start_end_counts(
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
 
     adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
+    current_end_site = adjusted_start_site.clone();
 
+    //Update based on smoothing
     adjusted_start_site.0 = adjusted_start_site.0 - smoothsize;
+    current_end_site.0 = current_end_site.0 + 1 + smoothsize * 2;
 
-    current_end_site = adjusted_start_site;
-    current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+    println!("Here is starting site {} and ending site {}", adjusted_start_site.0, current_end_site.0);
 
     if adjusted_start_site.0 < 1 {
         adjusted_start_site.0 = 1;
@@ -49,9 +51,12 @@ pub fn start_end_counts(
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
-        adjusted_start_site.0 = coordinate_value.0 - smoothsize;
+        adjusted_start_site.0 = adjusted_start_site.0 - smoothsize;
 
         let current_score = adjusted_start_site.1;
+
+        println!("Current score: {}", current_score);
+        println!("Here is starting site {} and ending site {}", adjusted_start_site.0, current_end_site.0);
 
         count += current_score;
 
@@ -64,9 +69,10 @@ pub fn start_end_counts(
         if current_index != 0 {
             // this is already added at the beginning of the functions
             current_end_site = adjusted_start_site;
-            current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+            current_end_site.0 = current_end_site.0 + 1 + smoothsize * 2;
             collected_end_sites.push(current_end_site);
         }
+
 
         if adjusted_start_site.0 == prev_coordinate_value {
             continue;
@@ -74,7 +80,10 @@ pub fn start_end_counts(
 
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
+                println!("Current score before sub: {}", current_score);
                 count = count - current_score;
+                println!("Current score after sub: {}", current_score);
+                println!("Here is starting site {} and ending site {}", adjusted_start_site.0, current_end_site.0);
 
                 if collected_end_sites.last() == None {
                     current_end_site.0 = 0;
@@ -85,6 +94,7 @@ pub fn start_end_counts(
 
             if coordinate_position % stepsize == 0 {
                 // Step size defaults to 1, so report every value
+                println!("Reporting count: {}, coordinate position: {}", count, coordinate_position);
                 v_coord_counts.push(count as u32);
                 v_coordinate_positions.push(coordinate_position);
             }
@@ -95,15 +105,18 @@ pub fn start_end_counts(
         prev_coordinate_value = adjusted_start_site.0;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    //count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
-
+    println!("between counts, here is count {}", count);
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
             let current_score = adjusted_start_site.1;
+            println!("Current score before sub: {}", current_score);
             count = count - current_score;
+            println!("Current score after sub: {}", current_score);
+            println!("Here is starting site {} and ending site {}", adjusted_start_site.0, current_end_site.0);
 
             if collected_end_sites.last() == None {
                 current_end_site.0 = 0;
@@ -114,10 +127,11 @@ pub fn start_end_counts(
 
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
+            println!("Reporting count: {}, coordinate position: {}", count, coordinate_position);
             v_coord_counts.push(count as u32);
             v_coordinate_positions.push(coordinate_position);
         }
-
+        println!("Here is starting site {} and ending site {}", adjusted_start_site.0, current_end_site.0);
         coordinate_position = coordinate_position + 1;
     }
 
