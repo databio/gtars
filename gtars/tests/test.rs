@@ -61,7 +61,7 @@ mod tests {
 
     use gtars::uniwig::{uniwig_main, Chromosome};
 
-    use gtars::uniwig::counting::{core_counts,start_end_counts};
+    use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
         parse_bed_file, parse_narrow_peak_file, read_bed_vec, read_chromosome_sizes,
         read_narrow_peak_vec,

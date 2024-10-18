@@ -61,12 +61,9 @@ pub fn start_end_counts(
 
         let current_index = index;
 
-        if current_index != 0 {
-            // this is already added at the beginning of the functions
-            current_end_site = adjusted_start_site;
-            current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
-            collected_end_sites.push(current_end_site);
-        }
+        let mut new_end_site = adjusted_start_site;
+        new_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+        collected_end_sites.push(new_end_site);
 
         if adjusted_start_site.0 == prev_coordinate_value {
             continue;
@@ -179,10 +176,7 @@ pub fn core_counts(
 
         let current_index = index;
 
-        if current_index != 0 {
-            // this is already added at the beginning of the functions
-            collected_end_sites.push(ends_vector[current_index]);
-        }
+        collected_end_sites.push(ends_vector[current_index]);
 
         if current_start_site.0 == prev_coordinate_value {
             continue;
@@ -236,5 +230,3 @@ pub fn core_counts(
 
     (v_coord_counts, v_coordinate_positions)
 }
-
-
