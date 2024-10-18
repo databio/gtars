@@ -5,7 +5,7 @@
 /// counts are reported over a stepsize (with a default of stepsize = 1).
 /// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
-pub fn smooth_fixed_start_end_wiggle(
+pub fn start_end_counts(
     starts_vector: &Vec<(i32, i32)>,
     chrom_size: i32,
     smoothsize: i32,
@@ -131,7 +131,7 @@ pub fn smooth_fixed_start_end_wiggle(
 /// Counts are reported over a stepsize (with a default of stepsize = 1)
 /// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
-pub fn fixed_core_wiggle(
+pub fn core_counts(
     starts_vector: &Vec<(i32, i32)>,
     ends_vector: &Vec<(i32, i32)>,
     chrom_size: i32,

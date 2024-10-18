@@ -8,7 +8,7 @@ use std::error::Error;
 use std::io::{BufRead, BufWriter, Read, Write};
 use std::ops::Deref;
 
-use crate::uniwig::counting::{fixed_core_wiggle, smooth_fixed_start_end_wiggle};
+use crate::uniwig::counting::{core_counts, start_end_counts};
 use crate::uniwig::reading::{read_bam_header, read_bed_vec, read_chromosome_sizes};
 use crate::uniwig::writing::{write_combined_wig_files, write_to_npy_file, write_to_wig_file};
 use std::str::FromStr;
@@ -226,7 +226,7 @@ pub fn uniwig_main(
                         match j {
                             0 => {
                                 let count_result = match ft {
-                                    Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
+                                    Ok(FileType::BED) => start_end_counts(
                                         &chromosome.starts,
                                         current_chrom_size,
                                         smoothsize,
@@ -238,7 +238,7 @@ pub fn uniwig_main(
                                         smoothsize,
                                         stepsize,
                                     ),
-                                    _ => smooth_fixed_start_end_wiggle(
+                                    _ => start_end_counts(
                                         &chromosome.starts,
                                         current_chrom_size,
                                         smoothsize,
@@ -307,7 +307,7 @@ pub fn uniwig_main(
                             }
                             1 => {
                                 let count_result = match ft {
-                                    Ok(FileType::BED) => smooth_fixed_start_end_wiggle(
+                                    Ok(FileType::BED) => start_end_counts(
                                         &chromosome.ends,
                                         current_chrom_size,
                                         smoothsize,
@@ -319,7 +319,7 @@ pub fn uniwig_main(
                                         smoothsize,
                                         stepsize,
                                     ),
-                                    _ => smooth_fixed_start_end_wiggle(
+                                    _ => start_end_counts(
                                         &chromosome.ends,
                                         current_chrom_size,
                                         smoothsize,
@@ -386,7 +386,7 @@ pub fn uniwig_main(
                             }
                             2 => {
                                 let core_results = match ft {
-                                    Ok(FileType::BED) => fixed_core_wiggle(
+                                    Ok(FileType::BED) => core_counts(
                                         &chromosome.starts,
                                         &chromosome.ends,
                                         current_chrom_size,
@@ -398,7 +398,7 @@ pub fn uniwig_main(
                                         current_chrom_size,
                                         stepsize,
                                     ),
-                                    _ => fixed_core_wiggle(
+                                    _ => core_counts(
                                         &chromosome.starts,
                                         &chromosome.ends,
                                         current_chrom_size,

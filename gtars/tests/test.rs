@@ -61,7 +61,7 @@ mod tests {
 
     use gtars::uniwig::{uniwig_main, Chromosome};
 
-    use gtars::uniwig::counting::{fixed_core_wiggle,smooth_fixed_start_end_wiggle};
+    use gtars::uniwig::counting::{core_counts,start_end_counts};
     use gtars::uniwig::reading::{
         parse_bed_file, parse_narrow_peak_file, read_bed_vec, read_chromosome_sizes,
         read_narrow_peak_vec,
@@ -283,7 +283,7 @@ mod tests {
 
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-            let _result = fixed_core_wiggle(
+            let _result = core_counts(
                 &chromosome.starts,
                 &chromosome.ends,
                 current_chrom_size,
@@ -302,7 +302,7 @@ mod tests {
 
         for chromosome in narrow_peak_vec.iter() {
             let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-            let _result = smooth_fixed_start_end_wiggle(
+            let _result = start_end_counts(
                 &chromosome.starts,
                 current_chrom_size,
                 smooth_size,
