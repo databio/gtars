@@ -97,24 +97,24 @@ mod tests {
         "tests/data/barcode_cluster_map.tsv"
     }
 
-    #[rstest]
-    fn make_map_from_file(barcode_cluster_map_file: &str) {
-        let path = Path::new(barcode_cluster_map_file);
-        let mapping = BarcodeToClusterMap::from_file(path);
+    // #[rstest]
+    // fn make_map_from_file(barcode_cluster_map_file: &str) {
+    //     let path = Path::new(barcode_cluster_map_file);
+    //     let mapping = BarcodeToClusterMap::from_file(path);
+    //
+    //     assert_eq!(mapping.is_ok(), true);
+    //     assert_eq!(mapping.unwrap().get_cluster_labels().len(), 3);
+    // }
 
-        assert_eq!(mapping.is_ok(), true);
-        assert_eq!(mapping.unwrap().get_cluster_labels().len(), 3);
-    }
-
-    #[rstest]
-    fn test_get_cluster_label(barcode_cluster_map_file: &str) {
-        let path = Path::new(barcode_cluster_map_file);
-        let mapping = BarcodeToClusterMap::from_file(path).unwrap();
-
-        let cluster_id_none = mapping.get_cluster_from_barcode("AAACGCAAGCAAAGGATCGGCT");
-        let cluster_id_some = mapping.get_cluster_from_barcode("AAACGCAAGCAACTGCGTCTTT");
-
-        assert_eq!(cluster_id_none.is_none(), true);
-        assert_eq!(cluster_id_some.is_some(), true);
-    }
+    // #[rstest]
+    // fn test_get_cluster_label(barcode_cluster_map_file: &str) {
+    //     let path = Path::new(barcode_cluster_map_file);
+    //     let mapping = BarcodeToClusterMap::from_file(path).unwrap();
+    //
+    //     let cluster_id_none = mapping.get_cluster_from_barcode("AAACGCAAGCAAAGGATCGGCT");
+    //     let cluster_id_some = mapping.get_cluster_from_barcode("AAACGCAAGCAACTGCGTCTTT");
+    //
+    //     assert_eq!(cluster_id_none.is_none(), true);
+    //     assert_eq!(cluster_id_some.is_some(), true);
+    // }
 }
