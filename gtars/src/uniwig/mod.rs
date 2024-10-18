@@ -40,11 +40,6 @@ trait ChromType {
     fn value(&self) -> ChromTypeVariant;
 }
 
-trait CountableChromosome {
-
-}
-
-
 impl FromStr for FileType {
     type Err = String;
 
@@ -68,9 +63,6 @@ pub struct Chromosome {
 impl ChromType for Chromosome{
     fn value(&self) -> ChromTypeVariant { ChromTypeVariant::Chromosome }
 }
-
-impl CountableChromosome for Chromosome{}
-
 impl Clone for Chromosome {
     fn clone(&self) -> Self {
         Self {
@@ -91,8 +83,6 @@ pub struct NarrowPeakChromosome {
 impl ChromType for NarrowPeakChromosome{
     fn value(&self) -> ChromTypeVariant { ChromTypeVariant::NarrowPeakChromosome }
 }
-
-impl CountableChromosome for NarrowPeakChromosome{}
 
 impl Clone for NarrowPeakChromosome {
     fn clone(&self) -> Self {
@@ -380,7 +370,7 @@ pub fn uniwig_main(
         .unwrap();
 
     // Determine File Type
-    let ft = FileType::from_str(filetype.to_lowercase().as_str()).unwrap();
+    let ft = FileType::from_str(filetype.to_lowercase().as_str());
 
     let score = score;
 
@@ -408,7 +398,14 @@ pub fn uniwig_main(
         }
     };
 
-    let chromosomes: Vec<Box<dyn CountableChromosome>> = read_generic_vec(filepath, ft).iter().map(|chrom| Box::new(chrom)).collect();
+    // I JUST WANT A VECTOR OF CHROMOSOMES OR NARROWPEAKCHROMOSOMES
+    let chromosomes: Vec<Box<dyn ChromType>> = match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath).iter().map(|arg0: &Chromosome| Box::new(arg0.clone())).collect(),//read_bed_vec(filepath).iter().map(|arg0: Chromosome| ChromType::Chromosome(*arg0)).collect(),
+        Ok(FileType::BAM) => read_bam_header(filepath),//read_bam_header(filepath).iter().map(ChromType::Chromosome).collect(),
+        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),//read_narrow_peak_vec(filepath).iter().map(ChromType::NarrowPeakChromosome).collect(),
+        _ => read_bed_vec(filepath),
+    };
+    // ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     let num_chromosomes = chromosomes.len();
 
@@ -734,15 +731,6 @@ pub fn uniwig_main(
     println!("FINISHED");
 
     Ok(())
-}
-
-fn read_generic_vec<T: CountableChromosome>(filepath: &str, ft: FileType) -> Vec<T> {
-    match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath),
-        Ok(FileType::BAM) => read_bam_header(filepath),
-        Ok(FileType::NARROWPEAK) => read_narrow_peak_vec(filepath),
-        _ => read_bed_vec(filepath),
-    }
 }
 
 fn fixed_core_wiggle_bam(
