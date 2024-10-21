@@ -75,6 +75,6 @@ pub fn create_uniwig_cli() -> Command {
                 .long("score")
                 .short('o')
                 .help("Count via score (narrowPeak only!)")
-                .action(ArgAction::SetTrue)
+                .action(ArgAction::SetTrue),
         )
 }

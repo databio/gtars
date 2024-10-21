@@ -224,7 +224,7 @@ pub fn core_counts(
             if count < 0 {
                 count = 0;
             }
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site.0 = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)

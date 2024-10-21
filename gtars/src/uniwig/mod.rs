@@ -140,10 +140,6 @@ pub fn uniwig_main(
 
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
-
-    let score = score;
-
-    let stepsize = stepsize;
     // Set up output file names
 
     let mut meta_data_file_names: [String; 3] = [

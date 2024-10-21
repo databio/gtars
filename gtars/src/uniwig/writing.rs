@@ -39,7 +39,7 @@ pub fn write_to_npy_file(
         + start_position.to_string().as_str()
         + " step="
         + stepsize.to_string().as_str();
-    wig_header.push_str("\n");
+    wig_header.push('\n');
     file.write_all(wig_header.as_ref()).unwrap();
 }
 
