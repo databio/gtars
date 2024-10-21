@@ -5,15 +5,15 @@ use indicatif::ProgressBar;
 use rayon::prelude::*;
 use std::error::Error;
 
-use std::io::{BufRead, BufWriter, Read, Write};
-use std::ops::Deref;
+use std::io::{BufWriter, Write};
 
 use crate::uniwig::counting::{core_counts, start_end_counts};
 use crate::uniwig::reading::{
     read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
 use crate::uniwig::writing::{
-    write_combined_files, write_to_bed_graph_file, write_to_npy_file, write_to_wig_file,
+    write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
+    write_to_wig_file,
 };
 use std::str::FromStr;
 // use noodles::sam as sam;
@@ -143,6 +143,11 @@ pub fn uniwig_main(
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
+
+    let mut output_type = output_type;
+    if output_type == "bedgraph" {
+        output_type = "bedGraph"
+    }
 
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
@@ -279,7 +284,7 @@ pub fn uniwig_main(
                                             stepsize,
                                         );
                                     }
-                                    "bedgraph" => {
+                                    "bedGraph" => {
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "start", output_type
@@ -358,7 +363,7 @@ pub fn uniwig_main(
                                         }
                                         buf.flush().unwrap();
                                     }
-                                    "bedgraph" => {
+                                    "bedGraph" => {
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "end", output_type
@@ -450,7 +455,7 @@ pub fn uniwig_main(
                                         }
                                         buf.flush().unwrap();
                                     }
-                                    "bedgraph" => {
+                                    "bedGraph" => {
                                         let file_name = format!(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "core", output_type
@@ -522,13 +527,22 @@ pub fn uniwig_main(
 
     let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
-        "wig" | "bedgraph"=> {
+        "wig" | "bedGraph" => {
             println!("Combining {} Files", output_type);
 
             for location in vec_strings.iter() {
                 bar.inc(1);
                 write_combined_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
+        }
+        "bw" => {
+            //Ensure bedGraphs files are made and combined before proceeding with bw writing
+            for location in vec_strings.iter() {
+                bar.inc(1);
+                write_combined_files(*location, "bedGraph", bwfileheader, &final_chromosomes);
+            }
+
+            write_bw_files(bwfileheader, chromsizerefpath, num_threads)
         }
         _ => {}
     }

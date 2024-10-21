@@ -1,9 +1,14 @@
 use crate::uniwig::Chromosome;
+use bigtools::bed::bedparser::{BedFileStream, StreamingBedValues};
+use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
+use bigtools::utils::cli::{bedgraphtobigwig, BBIWriteArgs};
 use ndarray::Array;
 use ndarray_npy::write_npy;
+use std::collections::HashMap;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
-use std::io;
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+use std::{fs, io};
 
 pub fn write_to_npy_file(
     counts: &[u32],
@@ -128,7 +133,7 @@ pub fn write_to_bed_graph_file(
     let _ = create_dir_all(path);
     let mut position = start_position;
 
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
         .append(true) // Append data to the existing file if it does exist
         .open(filename)
@@ -150,4 +155,69 @@ pub fn write_to_bed_graph_file(
         position = position + stepsize;
     }
     buf.flush().unwrap();
+}
+
+/// Converts uniwig generated bedGraphs to bigWig files
+pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
+    // // Create HashMap to store chromosome information
+    // // Then
+    // let mut chrom_map = HashMap::new();
+    // chrom_map.insert("chr17".to_string(), 83257441);
+
+    //Collect all bedGraph files in the given location/directory
+    let mut bed_graph_files = Vec::new();
+
+    for entry in fs::read_dir(location).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+
+        if path.is_file() {
+            let extension = path.extension().unwrap();
+            let extension = extension.to_str().unwrap().to_lowercase();
+            let extension = extension.as_str();
+
+            match extension {
+                "bedgraph" => {
+                    bed_graph_files.push(path.to_str().unwrap().to_string());
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+    }
+
+    println!("bedgraph files {:?}", bed_graph_files);
+
+    for file in bed_graph_files.iter() {
+        // let mut path = PathBuf::from(file);
+        // let infile = File::open(file.clone()).unwrap();
+        // let mut vals_iter = BedFileStream::from_bedgraph_file(infile);
+        // //vals_iter.
+        // let test1= vals_iter.next().unwrap().unwrap().1; //this gives a bbi value
+        // println!("done with: {}", file);
+
+        // Just use the built in arg struct and functionbedgraphtobigwig
+
+        let output_name = location.clone(); // TODO
+
+        let current_arg_struct = BedGraphToBigWigArgs {
+            bedgraph: file.to_string(),
+            chromsizes: chrom_sizes.to_string(),
+            output: output_name.to_string(),
+            parallel: "".to_string(),
+            single_pass: false,
+            write_args: BBIWriteArgs {
+                nthreads: num_threads as usize,
+                nzooms: 0,
+                uncompressed: false,
+                sorted: "".to_string(),
+                block_size: 0,
+                items_per_slot: 0,
+                inmemory: false,
+            },
+        };
+
+        bedgraphtobigwig(current_arg_struct);
+    }
 }

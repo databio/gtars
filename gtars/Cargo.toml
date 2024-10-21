@@ -24,6 +24,7 @@ noodles = { version = "0.83.0", features = ["bam"] }
 bstr = "1.10.0"
 rayon = "1.10.0"
 indicatif = "0.17.8"
+bigtools = "0.5.2"
 
 
 [dev-dependencies]

@@ -63,9 +63,11 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bed_file, parse_narrow_peak_file, read_bed_vec, read_chromosome_sizes,
-        read_narrow_peak_vec,
+        parse_bed_file, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
     };
+
+    use gtars::uniwig::writing::write_bw_files;
+
     use std::collections::HashMap;
     // IGD TESTS
 
@@ -500,6 +502,22 @@ mod tests {
         );
 
         assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn test_uniwig_bed_graphs(_path_to_bed_file: &str) {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        // Read from sizes file
+        let directory_bed_graphs: String = format!("{}{}", path_to_crate, "/tests/data");
+        let chrom_sizes: String = format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
+        let num_threads = 2;
+
+        write_bw_files(
+            directory_bed_graphs.as_str(),
+            chrom_sizes.as_str(),
+            num_threads,
+        );
     }
 
     #[rstest]
