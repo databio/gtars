@@ -28,7 +28,7 @@ pub fn start_end_counts(
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
 
-    adjusted_start_site = starts_vector[0].clone(); // get first coordinate position
+    adjusted_start_site = starts_vector[0]; // get first coordinate position
 
     adjusted_start_site.0 = adjusted_start_site.0 - smoothsize;
 
@@ -156,7 +156,7 @@ pub fn core_counts(
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
 
-    current_start_site = starts_vector[0].clone(); // get first coordinate position
+    current_start_site = starts_vector[0]; // get first coordinate position
     current_end_site = ends_vector[0];
 
     if current_start_site.0 < 1 {
