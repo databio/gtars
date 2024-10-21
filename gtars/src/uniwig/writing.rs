@@ -43,7 +43,8 @@ pub fn write_to_npy_file(
     file.write_all(wig_header.as_ref()).unwrap();
 }
 
-pub fn write_combined_wig_files(
+/// Write either combined bedGraph or wiggle files
+pub fn write_combined_files(
     location: &str,
     output_type: &str,
     bwfileheader: &str,
@@ -112,6 +113,41 @@ pub fn write_to_wig_file(
 
     for count in counts.iter() {
         writeln!(&mut buf, "{}", count).unwrap();
+    }
+    buf.flush().unwrap();
+}
+
+pub fn write_to_bed_graph_file(
+    counts: &[u32],
+    filename: String,
+    chromname: String,
+    start_position: i32,
+    stepsize: i32,
+) {
+    let path = std::path::Path::new(&filename).parent().unwrap();
+    let _ = create_dir_all(path);
+    let mut position = start_position;
+
+    let mut file = OpenOptions::new()
+        .create(true) // Create the file if it doesn't exist
+        .append(true) // Append data to the existing file if it does exist
+        .open(filename)
+        .unwrap();
+
+    let mut buf = BufWriter::new(file);
+
+    for count in counts.iter() {
+        //writeln!(&mut buf, "{}", count).unwrap();
+        writeln!(
+            &mut buf,
+            "{} {} {} {}",
+            chromname,
+            position,
+            position + stepsize,
+            count
+        )
+        .unwrap();
+        position = position + stepsize;
     }
     buf.flush().unwrap();
 }

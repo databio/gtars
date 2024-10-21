@@ -12,7 +12,9 @@ use crate::uniwig::counting::{core_counts, start_end_counts};
 use crate::uniwig::reading::{
     read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
-use crate::uniwig::writing::{write_combined_wig_files, write_to_npy_file, write_to_wig_file};
+use crate::uniwig::writing::{
+    write_combined_files, write_to_bed_graph_file, write_to_npy_file, write_to_wig_file,
+};
 use std::str::FromStr;
 // use noodles::sam as sam;
 //use bstr::BString;
@@ -277,6 +279,19 @@ pub fn uniwig_main(
                                             stepsize,
                                         );
                                     }
+                                    "bedgraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "start", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &count_result.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            clamped_start_position(primary_start.0, smoothsize),
+                                            stepsize,
+                                        );
+                                    }
                                     "csv" => {
                                         panic!("Write to CSV. Not Implemented");
                                     }
@@ -342,6 +357,19 @@ pub fn uniwig_main(
                                                 .expect("failed to write line");
                                         }
                                         buf.flush().unwrap();
+                                    }
+                                    "bedgraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "end", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &count_result.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            clamped_start_position(primary_end.0, smoothsize),
+                                            stepsize,
+                                        );
                                     }
                                     "wig" => {
                                         let file_name = format!(
@@ -422,6 +450,19 @@ pub fn uniwig_main(
                                         }
                                         buf.flush().unwrap();
                                     }
+                                    "bedgraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "core", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &core_results.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            primary_start.0,
+                                            stepsize,
+                                        );
+                                    }
                                     "wig" => {
                                         let file_name = format!(
                                             "{}{}_{}.{}",
@@ -481,12 +522,12 @@ pub fn uniwig_main(
 
     let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
-        "wig" => {
-            println!("Combining Wig Files");
+        "wig" | "bedgraph"=> {
+            println!("Combining {} Files", output_type);
 
             for location in vec_strings.iter() {
                 bar.inc(1);
-                write_combined_wig_files(*location, output_type, bwfileheader, &final_chromosomes);
+                write_combined_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
         }
         _ => {}
