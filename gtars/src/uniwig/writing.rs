@@ -6,7 +6,7 @@ use std::io;
 use std::io::{BufWriter, Write};
 
 pub fn write_to_npy_file(
-    counts: &Vec<u32>,
+    counts: &[u32],
     filename: String,
     chromname: String,
     start_position: i32,
