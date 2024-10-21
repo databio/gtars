@@ -177,20 +177,20 @@ mod tests {
         "AAACGCAAGCAAAGGATCGGCT"
     }
 
-    // #[rstest]
-    // fn test_fragment_file_splitter(
-    //     barcode_cluster_map_file: &str,
-    //     path_to_fragment_files: &str,
-    //     path_to_output: &str,
-    // ) {
-    //     let barcode_cluster_map_file = Path::new(barcode_cluster_map_file);
-    //     let mapping = BarcodeToClusterMap::from_file(barcode_cluster_map_file).unwrap();
-    //
-    //     let path_to_fragment_files = Path::new(path_to_fragment_files);
-    //     let path_to_output = Path::new(path_to_output);
-    //
-    //     let res = pseudobulk_fragment_files(path_to_fragment_files, &mapping, path_to_output);
-    //
-    //     assert_eq!(res.is_ok(), true);
-    // }
+    #[rstest]
+    fn test_fragment_file_splitter(
+        barcode_cluster_map_file: &str,
+        path_to_fragment_files: &str,
+        path_to_output: &str,
+    ) {
+        let barcode_cluster_map_file = Path::new(barcode_cluster_map_file);
+        let mapping = BarcodeToClusterMap::from_file(barcode_cluster_map_file).unwrap();
+
+        let path_to_fragment_files = Path::new(path_to_fragment_files);
+        let path_to_output = Path::new(path_to_output);
+
+        let res = pseudobulk_fragment_files(path_to_fragment_files, &mapping, path_to_output);
+
+        assert_eq!(res.is_ok(), true);
+    }
 }
