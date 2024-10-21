@@ -6,7 +6,7 @@
 /// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
 pub fn start_end_counts(
-    starts_vector: &Vec<(i32, i32)>,
+    starts_vector: &[(i32, i32)],
     chrom_size: i32,
     smoothsize: i32,
     stepsize: i32,
@@ -136,8 +136,8 @@ pub fn start_end_counts(
 /// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
 #[allow(unused_variables)]
 pub fn core_counts(
-    starts_vector: &Vec<(i32, i32)>,
-    ends_vector: &Vec<(i32, i32)>,
+    starts_vector: &[(i32, i32)],
+    ends_vector: &[(i32, i32)],
     chrom_size: i32,
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {

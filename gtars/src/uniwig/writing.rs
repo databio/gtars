@@ -47,7 +47,7 @@ pub fn write_combined_wig_files(
     location: &str,
     output_type: &str,
     bwfileheader: &str,
-    chromosomes: &Vec<Chromosome>,
+    chromosomes: &[Chromosome],
 ) {
     let combined_wig_file_name = format!("{}_{}.{}", bwfileheader, location, output_type);
     let path = std::path::Path::new(&combined_wig_file_name)
@@ -84,7 +84,7 @@ pub fn write_combined_wig_files(
 
 #[allow(unused_variables)]
 pub fn write_to_wig_file(
-    counts: &Vec<u32>,
+    counts: &[u32],
     filename: String,
     chromname: String,
     start_position: i32,
