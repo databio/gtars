@@ -1,4 +1,4 @@
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
@@ -74,8 +74,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("score")
                 .long("score")
                 .short('o')
-                .value_parser(clap::value_parser!(bool))
                 .help("Count via score (narrowPeak only!)")
-                .required(false),
+                .action(ArgAction::SetTrue)
         )
 }
