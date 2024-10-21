@@ -505,7 +505,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_uniwig_bed_graphs(_path_to_bed_file: &str) {
+    fn test_uniwig_write_bw(_path_to_bed_file: &str) {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
         // Read from sizes file

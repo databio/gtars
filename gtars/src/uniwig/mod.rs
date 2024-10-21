@@ -144,9 +144,10 @@ pub fn uniwig_main(
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
 
+    let og_output_type = output_type; // need this later for conversion
     let mut output_type = output_type;
-    if output_type == "bedgraph" {
-        output_type = "bedGraph"
+    if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
+        output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
     }
 
     let mut meta_data_file_names: [String; 3] = [
@@ -535,18 +536,19 @@ pub fn uniwig_main(
                 write_combined_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
         }
-        "bw" => {
-            //Ensure bedGraphs files are made and combined before proceeding with bw writing
-            for location in vec_strings.iter() {
-                bar.inc(1);
-                write_combined_files(*location, "bedGraph", bwfileheader, &final_chromosomes);
-            }
-
-            write_bw_files(bwfileheader, chromsizerefpath, num_threads)
-        }
         _ => {}
     }
     bar.finish();
+
+    match og_output_type {
+        "bw" | "bigWig" => {
+            println!("Writing bigWig files");
+            write_bw_files(bwfileheader, chromsizerefpath, num_threads);
+        }
+
+        _ => {}
+    }
+
     println!("FINISHED");
 
     Ok(())

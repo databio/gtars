@@ -159,11 +159,6 @@ pub fn write_to_bed_graph_file(
 
 /// Converts uniwig generated bedGraphs to bigWig files
 pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
-    // // Create HashMap to store chromosome information
-    // // Then
-    // let mut chrom_map = HashMap::new();
-    // chrom_map.insert("chr17".to_string(), 83257441);
-
     //Collect all bedGraph files in the given location/directory
     let mut bed_graph_files = Vec::new();
 
@@ -190,28 +185,21 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
     println!("bedgraph files {:?}", bed_graph_files);
 
     for file in bed_graph_files.iter() {
-        // let mut path = PathBuf::from(file);
-        // let infile = File::open(file.clone()).unwrap();
-        // let mut vals_iter = BedFileStream::from_bedgraph_file(infile);
-        // //vals_iter.
-        // let test1= vals_iter.next().unwrap().unwrap().1; //this gives a bbi value
-        // println!("done with: {}", file);
-
-        // Just use the built in arg struct and functionbedgraphtobigwig
-
-        let output_name = location.clone(); // TODO
+        let file_path = PathBuf::from(file);
+        let new_file_path = file_path.with_extension("bw");
+        let new_file_path = new_file_path.to_str().unwrap();
 
         let current_arg_struct = BedGraphToBigWigArgs {
             bedgraph: file.to_string(),
             chromsizes: chrom_sizes.to_string(),
-            output: output_name.to_string(),
+            output: new_file_path.to_string(),
             parallel: "".to_string(),
             single_pass: false,
             write_args: BBIWriteArgs {
                 nthreads: num_threads as usize,
                 nzooms: 0,
                 uncompressed: false,
-                sorted: "".to_string(),
+                sorted: "start".to_string(), //TODO CHECK THIS!!!!!!!!!!
                 block_size: 0,
                 items_per_slot: 0,
                 inmemory: false,
