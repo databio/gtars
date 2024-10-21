@@ -45,7 +45,7 @@ pub fn start_end_counts(
         coordinate_position = coordinate_position + stepsize;
     }
 
-    for (index, coord) in starts_vector.iter().enumerate().skip(0) {
+    for (index, coord) in starts_vector.iter().enumerate() {
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
@@ -169,7 +169,7 @@ pub fn core_counts(
         coordinate_position = coordinate_position + stepsize;
     }
 
-    for (index, coord) in starts_vector.iter().enumerate().skip(0) {
+    for (index, coord) in starts_vector.iter().enumerate() {
         coordinate_value = *coord;
 
         current_start_site = coordinate_value;
