@@ -203,9 +203,11 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     // Is there a better way than below?
     // -------------------
     // Initialize required variables
-    let (mut i0, mut i1, mut L0, mut L1) = (0, 0, 0, 1);
-    let (mut va, mut i, mut j, mut k, mut ig, mut m, mut nL, nf10) =
-        (0, 0, 0, 0, 0, 0, 0, n_files / 10);
+    let mut i0 = 0;
+
+    let mut ig: usize;
+    let mut m: i32;
+    let (mut va, nf10) = (0, n_files / 10);
 
     while i0 < n_files {
         //from og code: 2.1 Start from (i0, L0): read till (i1, L1)
@@ -222,8 +224,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             // let mut reader = BufReader::new(file);
 
             let reader = get_dynamic_reader(&fp).unwrap();
-
-            nL = 0;
 
             // let mut buffer = String::new();
 
@@ -254,12 +254,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
                     None => continue,
                 }
 
-                nL += 1;
-
                 if igd.total > maxCount {
                     m = 1;
-                    i1 = ig;
-                    L1 = nL;
                 }
                 //endpoint
             }
@@ -280,8 +276,6 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         igd_saveT(&mut igd, output_path);
 
         i0 = ig;
-        L0 = L1;
-        L1 = 0;
     }
 
     let tsv_save_path = format!("{}{}{}", output_path, db_output_name, ".tsv");

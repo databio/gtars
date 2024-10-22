@@ -1,4 +1,4 @@
-use clap::{Arg, Command};
+use clap::{Arg, ArgAction, Command};
 
 use crate::uniwig::consts::UNIWIG_CMD;
 
@@ -21,7 +21,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("filetype")
                 .long("filetype")
                 .short('t')
-                .help("input file type, 'bed' or 'bam'")
+                .help("Input file type, 'bed' 'bam' or 'narrowpeak'")
                 .default_value("bed"),
         )
         .arg(
@@ -69,5 +69,12 @@ pub fn create_uniwig_cli() -> Command {
                 .value_parser(clap::value_parser!(i32))
                 .help("Number of rayon threads to use for parallel processing")
                 .required(false),
+        )
+        .arg(
+            Arg::new("score")
+                .long("score")
+                .short('o')
+                .help("Count via score (narrowPeak only!)")
+                .action(ArgAction::SetTrue),
         )
 }
