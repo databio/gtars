@@ -103,6 +103,10 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("stepsize")
         .expect("requires integer value");
 
+    let zoom = matches
+        .get_one::<i32>("zoom")
+        .expect("requires integer value");
+
     uniwig_main(
         *smoothsize,
         filepath,
@@ -113,6 +117,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *num_threads,
         *score,
         *stepsize,
+        *zoom,
     )
     .expect("Uniwig failed.");
 }
@@ -133,6 +138,7 @@ pub fn uniwig_main(
     num_threads: i32,
     score: bool,
     stepsize: i32,
+    zoom: i32,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -546,7 +552,7 @@ pub fn uniwig_main(
             println!("Writing bigWig files");
             for location in vec_strings.iter() {
                 bar.inc(1);
-                write_bw_files(bwfileheader, chromsizerefpath, num_threads);
+                write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
             }
         }
 

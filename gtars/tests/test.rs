@@ -393,6 +393,9 @@ mod tests {
         let output_type = "wig";
         let filetype = "bed";
         let num_threads = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
 
         uniwig_main(
             smoothsize,
@@ -402,8 +405,9 @@ mod tests {
             output_type,
             filetype,
             num_threads,
-            false,
-            1,
+            score,
+            stepsize,
+            zoom,
         )
         .expect("Uniwig main failed!");
 
@@ -431,6 +435,9 @@ mod tests {
         let output_type = "npy";
         let filetype = "bed";
         let num_threads = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
 
         uniwig_main(
             smoothsize,
@@ -440,8 +447,9 @@ mod tests {
             output_type,
             filetype,
             num_threads,
-            false,
-            1,
+            score,
+            stepsize,
+            zoom,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -488,6 +496,9 @@ mod tests {
         let output_type = "npy";
         let filetype = "bed";
         let num_threads: i32 = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
 
         let result = uniwig_main(
             smoothsize,
@@ -497,8 +508,9 @@ mod tests {
             output_type,
             filetype,
             num_threads,
-            false,
-            1,
+            score,
+            stepsize,
+            zoom,
         );
 
         assert!(result.is_ok());
@@ -512,11 +524,13 @@ mod tests {
         let directory_bed_graphs: String = format!("{}{}", path_to_crate, "/tests/data");
         let chrom_sizes: String = format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
         let num_threads = 2;
+        let zoom = 0;
 
         write_bw_files(
             directory_bed_graphs.as_str(),
             chrom_sizes.as_str(),
             num_threads,
+            zoom,
         );
     }
 
@@ -545,6 +559,9 @@ mod tests {
         let output_type = "wig";
         let filetype = "bed";
         let num_threads: i32 = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
 
         let result = uniwig_main(
             smoothsize,
@@ -554,8 +571,9 @@ mod tests {
             output_type,
             filetype,
             num_threads,
-            false,
-            1,
+            score,
+            stepsize,
+            zoom,
         );
 
         assert!(result.is_ok());

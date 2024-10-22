@@ -158,7 +158,7 @@ pub fn write_to_bed_graph_file(
 }
 
 /// Converts uniwig generated bedGraphs to bigWig files
-pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
+pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_level: i32) {
     //Collect all bedGraph files in the given location/directory
     let mut bed_graph_files = Vec::new();
 
@@ -182,7 +182,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
         }
     }
 
-    println!("bedgraph files {:?}", bed_graph_files);
+    //println!("bedgraph files {:?}", bed_graph_files);
 
     for file in bed_graph_files.iter() {
         let file_path = PathBuf::from(file);
@@ -197,7 +197,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
             single_pass: false,
             write_args: BBIWriteArgs {
                 nthreads: num_threads as usize,
-                nzooms: 10, //default
+                nzooms: zoom_level as u32, //default
                 uncompressed: false,
                 sorted: "all".to_string(), //TODO CHECK THIS!!!!!!!!!!
                 block_size: 256,           //default
