@@ -10,17 +10,15 @@
 #' @useDynLib gtars, .registration = TRUE
 NULL
 
-#' Return string `"Hello world!"` to R.
-#' @export
-hello_world <- function() .Call(wrap__hello_world)
-
 #' Write tokens to a gtok file
 #' @export
-write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
-
-#' Write tokens to a gtok file
-#' @export
+#' @param filename A string representing the path to the gtok file.
 read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok, filename)
+
+#' Write tokens to a gtok file
+#' @export
+#' @param filename A string representing the path to the gtok file.
+write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
 
 
 # nolint end
