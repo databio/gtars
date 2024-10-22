@@ -10,7 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.82"
-gtars = { path = "../gtars" }
+gtars = { path = "../../gtars" }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
 numpy = "0.21"
 # pyo3-tch = { git = "https://github.com/LaurentMazare/tch-rs" }
