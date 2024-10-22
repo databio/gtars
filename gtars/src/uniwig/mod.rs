@@ -550,10 +550,8 @@ pub fn uniwig_main(
     match og_output_type {
         "bw" | "bigWig" => {
             println!("Writing bigWig files");
-            for location in vec_strings.iter() {
-                bar.inc(1);
-                write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
-            }
+            bar.inc(1);
+            write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
         }
 
         _ => {}
