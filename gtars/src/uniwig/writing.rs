@@ -141,7 +141,6 @@ pub fn write_to_bed_graph_file(
     let mut buf = BufWriter::new(file);
 
     for count in counts.iter() {
-        //writeln!(&mut buf, "{}", count).unwrap();
         writeln!(
             &mut buf,
             "{}\t{}\t{}\t{}",
@@ -181,7 +180,6 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
         }
     }
 
-    //println!("bedgraph files {:?}", bed_graph_files);
     let bar = ProgressBar::new(bed_graph_files.len() as u64);
     for file in bed_graph_files.iter() {
         bar.inc(1);
@@ -197,11 +195,11 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
             single_pass: false,
             write_args: BBIWriteArgs {
                 nthreads: num_threads as usize,
-                nzooms: zoom_level as u32, //default
+                nzooms: zoom_level as u32,
                 uncompressed: false,
-                sorted: "all".to_string(), //TODO CHECK THIS!!!!!!!!!!
-                block_size: 256,           //default
-                items_per_slot: 1024,      //default
+                sorted: "all".to_string(),
+                block_size: 256,      //default
+                items_per_slot: 1024, //default
                 inmemory: false,
             },
         };
