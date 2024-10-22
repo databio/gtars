@@ -1,6 +1,7 @@
 {
     "rust-analyzer.linkedProjects": [
         "./gtars/Cargo.toml",
-        "./bindings/Cargo.toml",
+        "./bindings/python/Cargo.toml",
+        "./bindings/r/src/rust/Cargo.toml",
     ]
 }
