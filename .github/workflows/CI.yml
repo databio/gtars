@@ -27,7 +27,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          working-directory: ./bindings
+          working-directory: ./bindings/python
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
@@ -36,7 +36,7 @@ jobs:
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: ./bindings/dist
+          path: ./bindings/python/dist
 
   windows:
     runs-on: windows-latest
@@ -55,12 +55,12 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
-          working-directory: ./bindings
+          working-directory: ./bindings/python
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: ./bindings/dist
+          path: ./bindings/python/dist
 
   macos:
     runs-on: macos-latest
@@ -78,12 +78,12 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
-          working-directory: ./bindings
+          working-directory: ./bindings/python
       - name: Upload wheels
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: ./bindings/dist
+          path: ./bindings/python/dist
 
   sdist:
     runs-on: ubuntu-latest
@@ -94,12 +94,12 @@ jobs:
         with:
           command: sdist
           args: --out dist
-          working-directory: ./bindings
+          working-directory: ./bindings/python
       - name: Upload sdist
         uses: actions/upload-artifact@v3
         with:
           name: wheels
-          path: ./bindings/dist
+          path: ./bindings/python/dist
 
   release:
     name: Release
@@ -113,13 +113,13 @@ jobs:
       - uses: actions/download-artifact@v3
         with:
           name: wheels
-          path: ./bindings/dist
+          path: ./bindings/python/dist
       - name: List contents
         run: |
           echo "Contents of dist/"
-          ls -l ./bindings/dist/
+          ls -l ./bindings/python/dist/
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         with:
           command: upload
-          args: --non-interactive --skip-existing ./bindings/dist/*
+          args: --non-interactive --skip-existing ./bindings/python/dist/*
