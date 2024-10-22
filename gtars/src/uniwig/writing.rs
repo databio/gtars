@@ -1,10 +1,9 @@
 use crate::uniwig::Chromosome;
-use bigtools::bed::bedparser::{BedFileStream, StreamingBedValues};
 use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
-use bigtools::utils::cli::{bedgraphtobigwig, BBIWriteArgs};
+use bigtools::utils::cli::BBIWriteArgs;
+use indicatif::ProgressBar;
 use ndarray::Array;
 use ndarray_npy::write_npy;
-use std::collections::HashMap;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
@@ -183,8 +182,9 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
     }
 
     //println!("bedgraph files {:?}", bed_graph_files);
-
+    let bar = ProgressBar::new(bed_graph_files.len() as u64);
     for file in bed_graph_files.iter() {
+        bar.inc(1);
         let file_path = PathBuf::from(file);
         let new_file_path = file_path.with_extension("bw");
         let new_file_path = new_file_path.to_str().unwrap();
@@ -206,6 +206,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
             },
         };
 
-        bedgraphtobigwig(current_arg_struct);
+        let _ = bedgraphtobigwig(current_arg_struct);
     }
+    bar.finish();
 }
