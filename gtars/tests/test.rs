@@ -54,6 +54,16 @@ fn path_to_core_wig_output() -> &'static str {
     "tests/data/out/_core.wig"
 }
 
+#[fixture]
+fn path_to_start_bedgraph_output() -> &'static str {
+    "tests/data/out/_start.bedGraph"
+}
+
+#[fixture]
+fn path_to_core_bedgraph_output() -> &'static str {
+    "tests/data/out/_core.bedGraph"
+}
+
 mod tests {
     use super::*;
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
@@ -614,6 +624,115 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
         let mut final_core_file_path = path.into_os_string().into_string().unwrap();
         final_core_file_path.push_str("/final/_core.wig");
+        let final_core_file_path = final_core_file_path.as_str();
+
+        let file1 = File::open(final_core_file_path).unwrap();
+        let file2 = File::open(core_test_output_path).unwrap();
+
+        let reader1 = BufReader::new(file1);
+        let reader2 = BufReader::new(file2);
+
+        let mut lines1 = reader1.lines();
+        let mut lines2 = reader2.lines();
+
+        loop {
+            let line1 = lines1.next().transpose().unwrap();
+            let line2 = lines2.next().transpose().unwrap();
+
+            match (line1, line2) {
+                (Some(line1), Some(line2)) => {
+                    assert_eq!(line1, line2);
+                }
+                (None, None) => {
+                    break; // Both files reached the end
+                }
+                _ => {
+                    panic!("FILES ARE NOT EQUAL!!!")
+                }
+            }
+        }
+    }
+
+    #[rstest]
+    fn test_uniwig_bedgraph_output(
+        _path_to_dummy_bed_file: &str,
+        _path_to_dummy_chromsizes: &str,
+        _path_to_start_bedgraph_output: &str,
+        _path_to_core_bedgraph_output: &str,
+    ) {
+        let chromsizerefpath = _path_to_dummy_chromsizes;
+        let combinedbedpath = _path_to_dummy_bed_file;
+        let test_output_path = _path_to_start_bedgraph_output;
+        let core_test_output_path = _path_to_core_bedgraph_output;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
+
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 1;
+        let output_type = "bedgraph";
+        let filetype = "bed";
+        let num_threads: i32 = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+
+        let result = uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            &chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+        );
+
+        assert!(result.is_ok());
+
+        // Test _start.wig output
+        let path = PathBuf::from(&tempdir.path());
+        let mut final_start_file_path = path.into_os_string().into_string().unwrap();
+        final_start_file_path.push_str("/final/_start.bedGraph");
+        let final_start_file_path = final_start_file_path.as_str();
+
+        let file1 = File::open(final_start_file_path).unwrap();
+        let file2 = File::open(test_output_path).unwrap();
+
+        let reader1 = BufReader::new(file1);
+        let reader2 = BufReader::new(file2);
+
+        let mut lines1 = reader1.lines();
+        let mut lines2 = reader2.lines();
+
+        loop {
+            let line1 = lines1.next().transpose().unwrap();
+            let line2 = lines2.next().transpose().unwrap();
+
+            match (line1, line2) {
+                (Some(line1), Some(line2)) => {
+                    assert_eq!(line1, line2);
+                }
+                (None, None) => {
+                    break; // Both files reached the end
+                }
+                _ => {
+                    panic!("FILES ARE NOT EQUAL!!!")
+                }
+            }
+        }
+
+        // Test _core.wig output
+        let path = PathBuf::from(&tempdir.path());
+        let mut final_core_file_path = path.into_os_string().into_string().unwrap();
+        final_core_file_path.push_str("/final/_core.bedGraph");
         let final_core_file_path = final_core_file_path.as_str();
 
         let file1 = File::open(final_core_file_path).unwrap();
