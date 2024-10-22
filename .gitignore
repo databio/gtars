@@ -21,3 +21,4 @@ Cargo.lock
 # this is for "act"
 bin/
 /.idea/gtars.iml
+/gtars/tests/data/test1.bw

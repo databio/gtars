@@ -5,14 +5,16 @@ use indicatif::ProgressBar;
 use rayon::prelude::*;
 use std::error::Error;
 
-use std::io::{BufRead, BufWriter, Read, Write};
-use std::ops::Deref;
+use std::io::{BufWriter, Write};
 
 use crate::uniwig::counting::{core_counts, start_end_counts};
 use crate::uniwig::reading::{
     read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
-use crate::uniwig::writing::{write_combined_wig_files, write_to_npy_file, write_to_wig_file};
+use crate::uniwig::writing::{
+    write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
+    write_to_wig_file,
+};
 use std::str::FromStr;
 // use noodles::sam as sam;
 //use bstr::BString;
@@ -101,6 +103,10 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("stepsize")
         .expect("requires integer value");
 
+    let zoom = matches
+        .get_one::<i32>("zoom")
+        .expect("requires integer value");
+
     uniwig_main(
         *smoothsize,
         filepath,
@@ -111,6 +117,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *num_threads,
         *score,
         *stepsize,
+        *zoom,
     )
     .expect("Uniwig failed.");
 }
@@ -131,6 +138,7 @@ pub fn uniwig_main(
     num_threads: i32,
     score: bool,
     stepsize: i32,
+    zoom: i32,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -141,6 +149,12 @@ pub fn uniwig_main(
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
+
+    let og_output_type = output_type; // need this later for conversion
+    let mut output_type = output_type;
+    if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
+        output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
+    }
 
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
@@ -277,6 +291,19 @@ pub fn uniwig_main(
                                             stepsize,
                                         );
                                     }
+                                    "bedGraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "start", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &count_result.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            clamped_start_position(primary_start.0, smoothsize),
+                                            stepsize,
+                                        );
+                                    }
                                     "csv" => {
                                         panic!("Write to CSV. Not Implemented");
                                     }
@@ -342,6 +369,19 @@ pub fn uniwig_main(
                                                 .expect("failed to write line");
                                         }
                                         buf.flush().unwrap();
+                                    }
+                                    "bedGraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "end", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &count_result.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            clamped_start_position(primary_end.0, smoothsize),
+                                            stepsize,
+                                        );
                                     }
                                     "wig" => {
                                         let file_name = format!(
@@ -422,6 +462,19 @@ pub fn uniwig_main(
                                         }
                                         buf.flush().unwrap();
                                     }
+                                    "bedGraph" => {
+                                        let file_name = format!(
+                                            "{}{}_{}.{}",
+                                            bwfileheader, chrom_name, "core", output_type
+                                        );
+                                        write_to_bed_graph_file(
+                                            &core_results.0,
+                                            file_name.clone(),
+                                            chrom_name.clone(),
+                                            primary_start.0,
+                                            stepsize,
+                                        );
+                                    }
                                     "wig" => {
                                         let file_name = format!(
                                             "{}{}_{}.{}",
@@ -481,17 +534,27 @@ pub fn uniwig_main(
 
     let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
-        "wig" => {
-            println!("Combining Wig Files");
+        "wig" | "bedGraph" => {
+            println!("Combining {} Files", output_type);
 
             for location in vec_strings.iter() {
                 bar.inc(1);
-                write_combined_wig_files(*location, output_type, bwfileheader, &final_chromosomes);
+                write_combined_files(*location, output_type, bwfileheader, &final_chromosomes);
             }
         }
         _ => {}
     }
     bar.finish();
+
+    match og_output_type {
+        "bw" | "bigWig" => {
+            println!("Writing bigWig files");
+            write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
+        }
+
+        _ => {}
+    }
+
     println!("FINISHED");
 
     Ok(())

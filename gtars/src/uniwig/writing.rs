@@ -1,9 +1,13 @@
 use crate::uniwig::Chromosome;
+use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
+use bigtools::utils::cli::BBIWriteArgs;
+use indicatif::ProgressBar;
 use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
-use std::io;
 use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+use std::{fs, io};
 
 pub fn write_to_npy_file(
     counts: &[u32],
@@ -43,7 +47,8 @@ pub fn write_to_npy_file(
     file.write_all(wig_header.as_ref()).unwrap();
 }
 
-pub fn write_combined_wig_files(
+/// Write either combined bedGraph or wiggle files
+pub fn write_combined_files(
     location: &str,
     output_type: &str,
     bwfileheader: &str,
@@ -114,4 +119,92 @@ pub fn write_to_wig_file(
         writeln!(&mut buf, "{}", count).unwrap();
     }
     buf.flush().unwrap();
+}
+
+pub fn write_to_bed_graph_file(
+    counts: &[u32],
+    filename: String,
+    chromname: String,
+    start_position: i32,
+    stepsize: i32,
+) {
+    let path = std::path::Path::new(&filename).parent().unwrap();
+    let _ = create_dir_all(path);
+    let mut position = start_position;
+
+    let file = OpenOptions::new()
+        .create(true) // Create the file if it doesn't exist
+        .append(true) // Append data to the existing file if it does exist
+        .open(filename)
+        .unwrap();
+
+    let mut buf = BufWriter::new(file);
+
+    for count in counts.iter() {
+        writeln!(
+            &mut buf,
+            "{}\t{}\t{}\t{}",
+            chromname,
+            position,
+            position + stepsize,
+            count
+        )
+        .unwrap();
+        position = position + stepsize;
+    }
+    buf.flush().unwrap();
+}
+
+/// Converts uniwig generated bedGraphs to bigWig files
+pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_level: i32) {
+    //Collect all bedGraph files in the given location/directory
+    let mut bed_graph_files = Vec::new();
+
+    for entry in fs::read_dir(location).unwrap() {
+        let entry = entry.unwrap();
+        let path = entry.path();
+
+        if path.is_file() {
+            let extension = path.extension().unwrap();
+            let extension = extension.to_str().unwrap().to_lowercase();
+            let extension = extension.as_str();
+
+            match extension {
+                "bedgraph" => {
+                    bed_graph_files.push(path.to_str().unwrap().to_string());
+                }
+                _ => {
+                    continue;
+                }
+            }
+        }
+    }
+
+    let bar = ProgressBar::new(bed_graph_files.len() as u64);
+    for file in bed_graph_files.iter() {
+        bar.inc(1);
+        let file_path = PathBuf::from(file);
+        let new_file_path = file_path.with_extension("bw");
+        let new_file_path = new_file_path.to_str().unwrap();
+
+        let current_arg_struct = BedGraphToBigWigArgs {
+            bedgraph: file.to_string(),
+            chromsizes: chrom_sizes.to_string(),
+            output: new_file_path.to_string(),
+            parallel: "auto".to_string(),
+            single_pass: false,
+            write_args: BBIWriteArgs {
+                nthreads: num_threads as usize,
+                nzooms: zoom_level as u32,
+                uncompressed: false,
+                sorted: "all".to_string(),
+                block_size: 256,      //default
+                items_per_slot: 1024, //default
+                inmemory: false,
+            },
+        };
+
+        let _ = bedgraphtobigwig(current_arg_struct);
+    }
+    bar.finish();
 }
