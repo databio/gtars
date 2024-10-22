@@ -540,14 +540,19 @@ pub fn uniwig_main(
     }
     bar.finish();
 
+    let bar = ProgressBar::new(vec_strings.len() as u64);
     match og_output_type {
         "bw" | "bigWig" => {
             println!("Writing bigWig files");
-            write_bw_files(bwfileheader, chromsizerefpath, num_threads);
+            for location in vec_strings.iter() {
+                bar.inc(1);
+                write_bw_files(bwfileheader, chromsizerefpath, num_threads);
+            }
         }
 
         _ => {}
     }
+    bar.finish();
 
     println!("FINISHED");
 

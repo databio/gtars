@@ -145,7 +145,7 @@ pub fn write_to_bed_graph_file(
         //writeln!(&mut buf, "{}", count).unwrap();
         writeln!(
             &mut buf,
-            "{} {} {} {}",
+            "{}\t{}\t{}\t{}",
             chromname,
             position,
             position + stepsize,
@@ -193,15 +193,15 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32) {
             bedgraph: file.to_string(),
             chromsizes: chrom_sizes.to_string(),
             output: new_file_path.to_string(),
-            parallel: "".to_string(),
+            parallel: "auto".to_string(),
             single_pass: false,
             write_args: BBIWriteArgs {
                 nthreads: num_threads as usize,
-                nzooms: 0,
+                nzooms: 10, //default
                 uncompressed: false,
-                sorted: "start".to_string(), //TODO CHECK THIS!!!!!!!!!!
-                block_size: 0,
-                items_per_slot: 0,
+                sorted: "all".to_string(), //TODO CHECK THIS!!!!!!!!!!
+                block_size: 256,           //default
+                items_per_slot: 1024,      //default
                 inmemory: false,
             },
         };
