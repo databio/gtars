@@ -38,5 +38,6 @@ pub mod common;
 pub mod fragsplit;
 pub mod igd;
 pub mod io;
+pub mod scoring;
 pub mod tokenizers;
 pub mod uniwig;
