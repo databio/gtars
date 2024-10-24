@@ -10,7 +10,7 @@ use gtars::common::models::region::Region;
 
 use crate::models::PyUniverse;
 
-#[pyclass(name = "Region", module="gtars.models")]
+#[pyclass(name = "Region", module = "gtars.models")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct PyRegion {
     pub chr: String,
@@ -76,13 +76,13 @@ impl PyRegion {
     }
 }
 
-#[pyclass(name = "TokenizedRegionPointer", module="gtars.models")]
+#[pyclass(name = "TokenizedRegionPointer", module = "gtars.models")]
 #[derive(Clone, Debug, Copy)]
 pub struct PyTokenizedRegionPointer {
     pub id: u32,
     pub chrom_id: u16,
     pub source_start: u32,
-    pub source_end: u32
+    pub source_end: u32,
 }
 
 impl From<TokenizedRegionPointer> for PyTokenizedRegionPointer {
@@ -91,12 +91,12 @@ impl From<TokenizedRegionPointer> for PyTokenizedRegionPointer {
             id: pointer.id,
             chrom_id: pointer.chrom_id,
             source_start: pointer.source_start,
-            source_end: pointer.source_end
+            source_end: pointer.source_end,
         }
     }
 }
 
-#[pyclass(name = "TokenizedRegion", module="gtars.models")]
+#[pyclass(name = "TokenizedRegion", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
     pub pointer: PyTokenizedRegionPointer,
@@ -165,6 +165,21 @@ impl PyTokenizedRegion {
     #[getter]
     pub fn id(&self) -> Result<u32> {
         Ok(self.pointer.id)
+    }
+
+    #[getter]
+    pub fn source_start(&self) -> Result<u32> {
+        Ok(self.pointer.source_start)
+    }
+
+    #[getter]
+    pub fn source_end(&self) -> Result<u32> {
+        Ok(self.pointer.source_end)
+    }
+
+    #[getter]
+    pub fn chrom_id(&self) -> Result<u16> {
+        Ok(self.pointer.chrom_id)
     }
 
     pub fn __repr__(&self) -> String {

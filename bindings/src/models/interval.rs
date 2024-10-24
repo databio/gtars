@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-#[pyclass(name = "Interval", module="gtars.models")]
+#[pyclass(name = "Interval", module = "gtars.models")]
 pub struct PyInterval {
     #[pyo3(get, set)]
     pub start: u32,

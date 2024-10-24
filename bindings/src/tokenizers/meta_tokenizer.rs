@@ -12,7 +12,7 @@ use gtars::tokenizers::{MetaTokenizer, Tokenizer};
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;
 
-#[pyclass(name = "MetaTokenizer", module="gtars.tokenizers")]
+#[pyclass(name = "MetaTokenizer", module = "gtars.tokenizers")]
 pub struct PyMetaTokenizer {
     pub tokenizer: MetaTokenizer,
     pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons
@@ -150,7 +150,7 @@ impl PyMetaTokenizer {
 
         // tokenize the RegionSet
         let tokenized = self.tokenizer.tokenize_region_set(&rs);
-        let py_pointers= tokenized.pointers.into_iter().map(|p| p.into()).collect();
+        let py_pointers = tokenized.pointers.into_iter().map(|p| p.into()).collect();
 
         Python::with_gil(|py| {
             let py_tokenized_region_set = PyTokenizedRegionSet {

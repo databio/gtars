@@ -9,7 +9,7 @@ use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 
 use super::region::PyTokenizedRegionPointer;
 
-#[pyclass(name = "RegionSet", module="gtars.models")]
+#[pyclass(name = "RegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
     pub regions: Vec<PyRegion>,
@@ -84,7 +84,7 @@ impl PyRegionSet {
     }
 }
 
-#[pyclass(name = "TokenizedRegionSet", module="gtars.models")]
+#[pyclass(name = "TokenizedRegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
     pub pointers: Vec<PyTokenizedRegionPointer>,
@@ -127,7 +127,10 @@ impl PyTokenizedRegionSet {
     }
 
     pub fn __repr__(&self) -> String {
-        format!("TokenizedRegionSet({:?})", self.pointers.iter().map(|p| p.id).collect::<Vec<u32>>())
+        format!(
+            "TokenizedRegionSet({:?})",
+            self.pointers.iter().map(|p| p.id).collect::<Vec<u32>>()
+        )
     }
 
     pub fn __len__(&self) -> usize {
@@ -146,7 +149,7 @@ impl PyTokenizedRegionSet {
 
                 Some(PyTokenizedRegion {
                     universe: self.universe.clone_ref(py),
-                    pointer
+                    pointer,
                 })
             } else {
                 None

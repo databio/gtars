@@ -5,7 +5,6 @@ mod ailist;
 mod models;
 mod tokenizers;
 mod utils;
-mod igd;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

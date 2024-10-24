@@ -7,6 +7,6 @@ pub mod universe;
 // re-export for cleaner imports
 pub use self::region::Region;
 pub use self::region_set::RegionSet;
-pub use self::tokenized_region::TokenizedRegion;
+pub use self::tokenized_region::{TokenizedRegion, TokenizedRegionPointer};
 pub use self::tokenized_regionset::TokenizedRegionSet;
 pub use self::universe::Universe;

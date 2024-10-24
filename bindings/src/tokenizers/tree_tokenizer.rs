@@ -12,7 +12,7 @@ use gtars::tokenizers::{Tokenizer, TreeTokenizer};
 use crate::models::{PyRegion, PyTokenizedRegionSet, PyUniverse};
 use crate::utils::extract_regions_from_py_any;
 
-#[pyclass(name = "TreeTokenizer", module="gtars.tokenizers")]
+#[pyclass(name = "TreeTokenizer", module = "gtars.tokenizers")]
 pub struct PyTreeTokenizer {
     pub tokenizer: TreeTokenizer,
     pub universe: Py<PyUniverse>, // this is a Py-wrapped version self.tokenizer.universe for performance reasons

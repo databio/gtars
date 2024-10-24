@@ -6,7 +6,7 @@ mod region_set;
 mod universe;
 
 pub use self::interval::PyInterval;
-pub use self::region::{PyRegion, PyTokenizedRegion};
+pub use self::region::{PyRegion, PyTokenizedRegion, PyTokenizedRegionPointer};
 pub use self::region_set::{PyRegionSet, PyTokenizedRegionSet};
 pub use self::universe::PyUniverse;
 
