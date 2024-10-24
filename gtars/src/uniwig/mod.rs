@@ -8,9 +8,7 @@ use std::error::Error;
 use std::io::{BufWriter, Write};
 
 use crate::uniwig::counting::{core_counts, start_end_counts};
-use crate::uniwig::reading::{
-    read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
-};
+use crate::uniwig::reading::{get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec};
 use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
@@ -49,6 +47,7 @@ impl FromStr for FileType {
 }
 
 // Chromosome representation for Bed File Inputs
+#[derive(Debug)]
 pub struct Chromosome {
     pub chrom: String,
     pub starts: Vec<(i32, i32)>,
@@ -187,7 +186,7 @@ pub fn uniwig_main(
                 read_bed_vec(filepath)
             }
         }
-        Ok(FileType::BAM) => read_bam_header(filepath),
+        Ok(FileType::BAM) => read_bam_header(filepath), //TODO  Also check for associated .bai file and if it does not exist create one.
         _ => read_bed_vec(filepath),
     };
 
@@ -226,8 +225,16 @@ pub fn uniwig_main(
         final_chromosomes
             .par_iter()
             .for_each(|chromosome: &Chromosome| {
-                // Need these for setting wiggle header
+
                 bar.inc(1);
+                match ft {
+                    Ok(FileType::BAM) => {
+                        let mut chromosome = chromosome.clone(); // empty vectors, so cloning is not a big deal.
+                        get_seq_reads_bam(&mut chromosome, filepath)
+                    },
+                    _ => {},
+                };
+
                 let primary_start = chromosome.starts[0].clone();
                 let primary_end = chromosome.ends[0].clone();
 
@@ -252,12 +259,12 @@ pub fn uniwig_main(
                                         smoothsize,
                                         stepsize,
                                     ),
-                                    Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
-                                        &chromosome.starts,
-                                        current_chrom_size,
-                                        smoothsize,
-                                        stepsize,
-                                    ),
+                                    // Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
+                                    //     &chromosome.starts,
+                                    //     current_chrom_size,
+                                    //     smoothsize,
+                                    //     stepsize,
+                                    // ),
                                     _ => start_end_counts(
                                         &chromosome.starts,
                                         current_chrom_size,
@@ -346,12 +353,12 @@ pub fn uniwig_main(
                                         smoothsize,
                                         stepsize,
                                     ),
-                                    Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
-                                        &chromosome.ends,
-                                        current_chrom_size,
-                                        smoothsize,
-                                        stepsize,
-                                    ),
+                                    // Ok(FileType::BAM) => smooth_fixed_start_end_wiggle_bam(
+                                    //     &chromosome.ends,
+                                    //     current_chrom_size,
+                                    //     smoothsize,
+                                    //     stepsize,
+                                    // ),
                                     _ => start_end_counts(
                                         &chromosome.ends,
                                         current_chrom_size,
@@ -438,12 +445,12 @@ pub fn uniwig_main(
                                         current_chrom_size,
                                         stepsize,
                                     ),
-                                    Ok(FileType::BAM) => fixed_core_wiggle_bam(
-                                        &chromosome.starts,
-                                        &chromosome.ends,
-                                        current_chrom_size,
-                                        stepsize,
-                                    ),
+                                    // Ok(FileType::BAM) => fixed_core_wiggle_bam(
+                                    //     &chromosome.starts,
+                                    //     &chromosome.ends,
+                                    //     current_chrom_size,
+                                    //     stepsize,
+                                    // ),
                                     _ => core_counts(
                                         &chromosome.starts,
                                         &chromosome.ends,
@@ -530,6 +537,13 @@ pub fn uniwig_main(
     });
 
     bar.finish();
+
+
+
+
+
+
+
     let vec_strings = vec!["start", "core", "end"];
 
     let bar = ProgressBar::new(vec_strings.len() as u64);
@@ -559,6 +573,8 @@ pub fn uniwig_main(
 
     Ok(())
 }
+
+
 
 fn fixed_core_wiggle_bam(
     _p0: &Vec<(i32, i32)>,
