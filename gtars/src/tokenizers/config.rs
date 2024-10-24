@@ -9,6 +9,7 @@ pub struct TokenizerConfig {
     pub tokenizer_type: Option<String>,
     pub universes: Vec<String>,
     pub exclude_ranges: Option<String>,
+    pub chrom_sizes: Option<String>,
 }
 
 impl TokenizerConfig {
