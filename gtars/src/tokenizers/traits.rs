@@ -114,9 +114,3 @@ pub trait Pad: SpecialTokens {
         }
     }
 }
-
-pub trait FromPretrained: Tokenizer {
-    fn from_pretrained(models: &str) -> Result<Self>
-    where
-        Self: Sized;
-}

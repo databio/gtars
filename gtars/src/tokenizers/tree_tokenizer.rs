@@ -37,7 +37,7 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (config, mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
+        let (config, mut universe, tree, secondary_trees) = match file_extension {
             // parse config file
             "toml" => {
                 let config = TokenizerConfig::try_from(value).with_context(|| {
@@ -111,25 +111,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                     None => None,
                 };
 
-                // create exclude ranges if they exist
-                let exclude_ranges = match &config.exclude_ranges {
-                    Some(exclude_ranges) => {
-                        let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
-
-                        // universe gets discarded since its not conasidered a part of the tokenizers universe
-                        let exclude_ranges_universe =
-                            Universe::try_from(exclude_ranges_path.as_path())?;
-
-                        let exclude_ranges_map =
-                            create_interval_tree_from_universe(&exclude_ranges_universe);
-
-                        Some(exclude_ranges_map)
-                    }
-
-                    None => None,
-                };
-
-                (config, universe, tree, secondary_trees, exclude_ranges)
+                (config, universe, tree, secondary_trees)
             }
             // else assume its a bed file
             _ => {
@@ -144,9 +126,8 @@ impl TryFrom<&Path> for TreeTokenizer {
                     Some("tree".to_string()),
                     vec![universe_as_path],
                     None,
-                    None,
                 );
-                (config, universe, tree, None, None)
+                (config, universe, tree, None)
             }
         };
 

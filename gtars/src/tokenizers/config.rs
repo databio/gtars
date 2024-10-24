@@ -8,7 +8,6 @@ use serde::{Deserialize, Serialize};
 pub struct TokenizerConfig {
     pub tokenizer_type: Option<String>,
     pub universes: Vec<String>,
-    pub exclude_ranges: Option<String>,
     pub chrom_sizes: Option<String>,
 }
 
@@ -28,13 +27,12 @@ impl TokenizerConfig {
     pub fn new(
         tokenizer_type: Option<String>,
         universes: Vec<String>,
-        exclude_ranges: Option<String>,
         chrom_sizes: Option<String>,
     ) -> TokenizerConfig {
+
         TokenizerConfig {
             tokenizer_type,
             universes,
-            exclude_ranges,
             chrom_sizes,
         }
     }
