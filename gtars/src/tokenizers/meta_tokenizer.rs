@@ -630,7 +630,23 @@ mod tests {
             end: 203871688,
         };
 
-        assert_eq!(tokenizer.tokenize_region(&r1).pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![2]);
-        assert_eq!(tokenizer.tokenize_region(&r2).pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![2]);
+        assert_eq!(
+            tokenizer
+                .tokenize_region(&r1)
+                .pointers
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<u32>>(),
+            vec![2]
+        );
+        assert_eq!(
+            tokenizer
+                .tokenize_region(&r2)
+                .pointers
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<u32>>(),
+            vec![2]
+        );
     }
 }
