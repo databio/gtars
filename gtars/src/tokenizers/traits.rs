@@ -55,18 +55,6 @@ pub trait Tokenizer {
     fn export(&self, path: &Path) -> Result<()>;
 }
 
-pub trait SingleCellTokenizer {
-    ///
-    /// Tokenize an AnnData object, this is single-cell data
-    ///
-    /// # Arguments
-    /// - `anndata` - the path to the AnnData object
-    ///
-    /// # Returns
-    /// A vector of TokenizedRegionSets
-    fn tokenize_anndata(&self, anndata: &Path) -> Result<Vec<TokenizedRegionSet>>;
-}
-
 pub trait SpecialTokens {
     fn unknown_token(&self) -> Region;
     fn padding_token(&self) -> Region;

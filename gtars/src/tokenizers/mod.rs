@@ -25,7 +25,6 @@ pub mod builder;
 pub mod cli;
 pub mod config;
 pub mod meta_tokenizer;
-pub mod soft_tokenizer;
 pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
@@ -41,5 +40,5 @@ pub mod consts {
 pub use builder::TokenizerBuilder;
 pub use config::TokenizerConfig;
 pub use meta_tokenizer::MetaTokenizer;
-pub use traits::{SingleCellTokenizer, Tokenizer};
+pub use traits::Tokenizer;
 pub use tree_tokenizer::TreeTokenizer;
