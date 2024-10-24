@@ -1,5 +1,6 @@
 use std::hash::Hash;
 
+use gtars::common::models::tokenized_region::TokenizedRegionPointer;
 use pyo3::class::basic::CompareOp;
 use pyo3::exceptions::PyTypeError;
 use pyo3::prelude::*;
@@ -75,10 +76,30 @@ impl PyRegion {
     }
 }
 
+#[pyclass(name = "TokenizedRegionPointer", module="gtars.models")]
+#[derive(Clone, Debug, Copy)]
+pub struct PyTokenizedRegionPointer {
+    pub id: u32,
+    pub chrom_id: u16,
+    pub source_start: u32,
+    pub source_end: u32
+}
+
+impl From<TokenizedRegionPointer> for PyTokenizedRegionPointer {
+    fn from(pointer: TokenizedRegionPointer) -> Self {
+        PyTokenizedRegionPointer {
+            id: pointer.id,
+            chrom_id: pointer.chrom_id,
+            source_start: pointer.source_start,
+            source_end: pointer.source_end
+        }
+    }
+}
+
 #[pyclass(name = "TokenizedRegion", module="gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
-    pub id: u32,
+    pub pointer: PyTokenizedRegionPointer,
     pub universe: Py<PyUniverse>,
 }
 
@@ -88,7 +109,7 @@ impl From<PyTokenizedRegion> for PyRegion {
             value
                 .universe
                 .borrow(py)
-                .convert_id_to_region(value.id)
+                .convert_id_to_region(value.pointer.id)
                 .unwrap()
         })
     }
@@ -102,7 +123,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_region(self.pointer.id)
                 .unwrap()
                 .chr)
         })
@@ -114,7 +135,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_region(self.pointer.id)
                 .unwrap()
                 .start)
         })
@@ -126,7 +147,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_region(self.pointer.id)
                 .unwrap()
                 .end)
         })
@@ -137,13 +158,13 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_region(self.pointer.id)
                 .unwrap())
         })
     }
     #[getter]
     pub fn id(&self) -> Result<u32> {
-        Ok(self.id)
+        Ok(self.pointer.id)
     }
 
     pub fn __repr__(&self) -> String {

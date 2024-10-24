@@ -229,9 +229,10 @@ impl Tokenizer for TreeTokenizer {
 
                 TokenizedRegionSet {
                     pointers: ids
+                        .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.chrom_to_id(region.chr),
+                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })
@@ -274,9 +275,10 @@ impl Tokenizer for TreeTokenizer {
 
                 TokenizedRegionSet {
                     pointers: ids
+                        .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.chrom_to_id(region.chr),
+                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })
@@ -292,7 +294,7 @@ impl Tokenizer for TreeTokenizer {
 
         for region in region_set {
             let tokenized_region = self.tokenize_region(region);
-            pointers.extend(tokenized_region.ids);
+            pointers.extend(tokenized_region.pointers);
         }
 
         TokenizedRegionSet {
@@ -523,7 +525,7 @@ mod tests {
         assert_eq!(res.len(), 1);
 
         // check the id, it should be len(primary_universe) + 1 (since its chr1)
-        assert_eq!(res.ids, vec![25]);
+        assert_eq!(res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![25]);
 
         let res = res.into_region_vec();
         let region = &res[0];
@@ -544,7 +546,7 @@ mod tests {
         assert_eq!(res.len(), 1);
 
         // check the id, it should be the id of the UNK token
-        assert_eq!(res.ids, vec![49]);
+        assert_eq!(res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![49]);
 
         let res = res.into_region_vec();
         let region = &res[0];

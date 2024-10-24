@@ -150,10 +150,11 @@ impl PyMetaTokenizer {
 
         // tokenize the RegionSet
         let tokenized = self.tokenizer.tokenize_region_set(&rs);
+        let py_pointers= tokenized.pointers.into_iter().map(|p| p.into()).collect();
 
         Python::with_gil(|py| {
             let py_tokenized_region_set = PyTokenizedRegionSet {
-                ids: tokenized.ids,
+                pointers: py_pointers,
                 curr: 0,
                 universe: self.universe.clone_ref(py),
             };
@@ -170,7 +171,7 @@ impl PyMetaTokenizer {
         // tokenize the RegionSet
         let tokenized = self.tokenizer.tokenize_region_set(&rs);
 
-        Ok(tokenized.ids)
+        Ok(tokenized.ids())
     }
 
     pub fn decode(&self, ids: Vec<u32>) -> Result<Vec<PyRegion>> {
