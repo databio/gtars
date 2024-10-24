@@ -101,16 +101,3 @@ pub trait AtttentionMask: SpecialTokens {
         mask
     }
 }
-
-pub trait Pad: SpecialTokens {
-    fn pad(&self, tokens_list: &mut Vec<TokenizedRegionSet>) {
-        let pad_token = self.padding_token_id();
-        let longest = tokens_list.iter().map(|t| t.len()).max().unwrap();
-
-        for token in tokens_list.iter_mut() {
-            while token.len() < longest {
-                token.ids.push(pad_token);
-            }
-        }
-    }
-}

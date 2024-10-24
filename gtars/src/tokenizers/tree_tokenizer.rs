@@ -5,10 +5,11 @@ use anyhow::{Context, Result};
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
+use crate::common::models::tokenized_region::TokenizedRegionPointer;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::{create_interval_tree_from_universe, extract_regions_from_bed_file};
 use crate::tokenizers::config::TokenizerConfig;
-use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
+use crate::tokenizers::traits::{SpecialTokens, Tokenizer};
 
 ///
 /// The TreeTokenizer is a basic tokenizer that can "tokenize" genomic regions
@@ -194,16 +195,14 @@ impl Tokenizer for TreeTokenizer {
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let mut ids: Vec<u32> = intervals
-                    .map(|interval| interval.val)
-                    .collect();
+                let mut ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                 // tokenized to nothing... check secondary trees
                 if ids.is_empty() {
                     // oh, we have no secondary trees, just return the unknown token
                     if self.secondary_trees.is_none() {
                         ids = vec![self.unknown_token_id()];
-                        
+
                     // iterate over secondary trees and check if the region is in any of them
                     } else {
                         for s_tree in self.secondary_trees.as_ref().unwrap() {
@@ -216,11 +215,8 @@ impl Tokenizer for TreeTokenizer {
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let regions: Vec<u32> = intervals
-                                .map(|interval| {
-                                    interval.val
-                                })
-                                .collect();
+                            let regions: Vec<u32> =
+                                intervals.map(|interval| interval.val).collect();
 
                             // a hit
                             if !ids.is_empty() {
@@ -232,7 +228,14 @@ impl Tokenizer for TreeTokenizer {
                 }
 
                 TokenizedRegionSet {
-                    ids,
+                    pointers: ids
+                        .map(|id| TokenizedRegionPointer {
+                            id,
+                            chrom_id: self.universe.chrom_to_id(region.chr),
+                            source_start: region.start,
+                            source_end: region.end,
+                        })
+                        .collect(),
                     universe: &self.universe,
                 }
             }
@@ -240,7 +243,7 @@ impl Tokenizer for TreeTokenizer {
             // so, check secondary trees
             None => {
                 let mut ids = Vec::new();
-                
+
                 // oh, we have no secondary trees, just return the unknown token
                 if self.secondary_trees.is_none() {
                     ids = vec![self.unknown_token_id()];
@@ -249,7 +252,7 @@ impl Tokenizer for TreeTokenizer {
                     for s_tree in self.secondary_trees.as_ref().unwrap() {
                         // default to unknown token
                         ids = vec![self.unknown_token_id()];
-                       
+
                         let s_lapper = s_tree.get(&region.chr);
                         if s_lapper.is_none() {
                             continue;
@@ -257,13 +260,11 @@ impl Tokenizer for TreeTokenizer {
 
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let regions: Vec<u32> = intervals
-                            .map(|interval| interval.val )
-                            .collect();
+                        let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                         // a hit
                         if !regions.is_empty() {
-                            ids = regions;                            
+                            ids = regions;
                             break;
                         } else {
                             ids = vec![self.unknown_token_id()];
@@ -272,7 +273,14 @@ impl Tokenizer for TreeTokenizer {
                 }
 
                 TokenizedRegionSet {
-                    ids,
+                    pointers: ids
+                        .map(|id| TokenizedRegionPointer {
+                            id,
+                            chrom_id: self.universe.chrom_to_id(region.chr),
+                            source_start: region.start,
+                            source_end: region.end,
+                        })
+                        .collect(),
                     universe: &self.universe,
                 }
             }
@@ -280,15 +288,15 @@ impl Tokenizer for TreeTokenizer {
     }
 
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet {
-        let mut tokenized_regions = Vec::new();
+        let mut pointers = Vec::new();
 
         for region in region_set {
             let tokenized_region = self.tokenize_region(region);
-            tokenized_regions.extend(tokenized_region.ids);
+            pointers.extend(tokenized_region.ids);
         }
 
         TokenizedRegionSet {
-            ids: tokenized_regions,
+            pointers,
             universe: &self.universe,
         }
     }
@@ -416,9 +424,6 @@ impl TreeTokenizer {
         Ok(self.tokenize_region_set(&rs))
     }
 }
-
-// use default implementation
-impl Pad for TreeTokenizer {}
 
 #[cfg(test)]
 mod tests {

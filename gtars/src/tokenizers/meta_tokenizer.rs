@@ -6,6 +6,7 @@ use anyhow::{Context, Result};
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
+use crate::common::models::tokenized_region::TokenizedRegionPointer;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
 use crate::common::utils::get_dynamic_reader;
 use crate::tokenizers::{Tokenizer, TokenizerConfig};
@@ -412,9 +413,7 @@ impl Tokenizer for MetaTokenizer {
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let mut ids: Vec<u32> = intervals
-                    .map(|interval| interval.val)
-                    .collect();
+                let mut ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                 // tokenized to nothing... check secondary trees
                 // for overlap
@@ -427,18 +426,15 @@ impl Tokenizer for MetaTokenizer {
                         for s_tree in self.secondary_trees.as_ref().unwrap() {
                             // default to unknown token
                             ids = vec![self.unknown_token_id()];
-                            
+
                             let s_lapper = s_tree.get(&region.chr);
                             if s_lapper.is_none() {
                                 continue;
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let regions: Vec<u32> = intervals
-                                .map(|interval| {
-                                    interval.val
-                                })
-                                .collect();
+                            let regions: Vec<u32> =
+                                intervals.map(|interval| interval.val).collect();
 
                             // a hit
                             if !ids.is_empty() {
@@ -450,7 +446,15 @@ impl Tokenizer for MetaTokenizer {
                 }
 
                 TokenizedRegionSet {
-                    ids,
+                    pointers: ids
+                        .into_iter()
+                        .map(|id| TokenizedRegionPointer {
+                            id,
+                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
+                            source_start: region.start,
+                            source_end: region.end,
+                        })
+                        .collect(),
                     universe: &self.universe,
                 }
             }
@@ -467,7 +471,7 @@ impl Tokenizer for MetaTokenizer {
                     for s_tree in self.secondary_trees.as_ref().unwrap() {
                         // default to unknown token
                         ids = vec![self.unknown_token_id()];
-                        
+
                         let s_lapper = s_tree.get(&region.chr);
                         if s_lapper.is_none() {
                             continue;
@@ -475,9 +479,7 @@ impl Tokenizer for MetaTokenizer {
 
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let regions: Vec<u32> = intervals
-                            .map(|interval| interval.val)
-                            .collect();
+                        let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                         // a hit
                         if !regions.is_empty() {
@@ -490,7 +492,15 @@ impl Tokenizer for MetaTokenizer {
                 }
 
                 TokenizedRegionSet {
-                    ids,
+                    pointers: ids
+                        .into_iter()
+                        .map(|id| TokenizedRegionPointer {
+                            id,
+                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
+                            source_start: region.start,
+                            source_end: region.end,
+                        })
+                        .collect(),
                     universe: &self.universe,
                 }
             }
@@ -498,15 +508,15 @@ impl Tokenizer for MetaTokenizer {
     }
 
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet {
-        let mut tokenized_regions = Vec::new();
+        let mut pointers = Vec::new();
 
         for region in region_set {
             let tokenized_region = self.tokenize_region(region);
-            tokenized_regions.extend(tokenized_region.ids);
+            pointers.extend(tokenized_region.pointers);
         }
 
         TokenizedRegionSet {
-            ids: tokenized_regions,
+            pointers,
             universe: &self.universe,
         }
     }
@@ -573,9 +583,33 @@ mod tests {
             end: 1000000,
         };
 
-        assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![1]);
-        assert_eq!(tokenizer.tokenize_region(&r2).ids, vec![13]);
-        assert_eq!(tokenizer.tokenize_region(&r3).ids, vec![20]);
+        assert_eq!(
+            tokenizer
+                .tokenize_region(&r1)
+                .pointers
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<u32>>(),
+            vec![1]
+        );
+        assert_eq!(
+            tokenizer
+                .tokenize_region(&r2)
+                .pointers
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<u32>>(),
+            vec![13]
+        );
+        assert_eq!(
+            tokenizer
+                .tokenize_region(&r3)
+                .pointers
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<u32>>(),
+            vec![20]
+        );
     }
 
     #[rstest]
@@ -596,8 +630,7 @@ mod tests {
             end: 203871688,
         };
 
-        assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![2]);
-        assert_eq!(tokenizer.tokenize_region(&r2).ids, vec![2]);
-        
+        assert_eq!(tokenizer.tokenize_region(&r1).pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![2]);
+        assert_eq!(tokenizer.tokenize_region(&r2).pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![2]);
     }
 }

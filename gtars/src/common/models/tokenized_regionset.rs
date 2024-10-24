@@ -4,7 +4,6 @@ use std::ops::Index;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use itertools::izip;
 
 use crate::common::models::region::Region;
 use crate::common::models::tokenized_region::TokenizedRegion;
@@ -26,9 +25,10 @@ pub struct TokenizedRegionSet<'a> {
 impl From<TokenizedRegionSet<'_>> for RegionSet {
     fn from(val: TokenizedRegionSet<'_>) -> Self {
         let regions: Vec<Region> = val
-            .ids
+            .pointers
             .iter()
-            .map(|id| val.universe.regions[*id as usize].clone())
+            .map(|p| p.id)
+            .map(|id| val.universe.regions[id as usize].clone())
             .collect();
 
         RegionSet::from(regions)
@@ -39,7 +39,7 @@ impl From<TokenizedRegionSet<'_>> for Vec<u8> {
     fn from(val: TokenizedRegionSet<'_>) -> Self {
         let mut bit_vector: Vec<u8> = Vec::with_capacity(val.universe.len());
 
-        for id in val.ids {
+        for id in val.pointers.into_iter().map(|p| p.id) {
             bit_vector[id as usize] = 1;
         }
 
@@ -50,9 +50,10 @@ impl From<TokenizedRegionSet<'_>> for Vec<u8> {
 impl From<TokenizedRegionSet<'_>> for Vec<Region> {
     fn from(value: TokenizedRegionSet<'_>) -> Self {
         value
-            .ids
+            .pointers
             .iter()
-            .map(|id| value.universe.id_to_region[id].to_owned())
+            .map(|p| p.id)
+            .map(|id| value.universe.id_to_region[&id].to_owned())
             .collect()
     }
 }
@@ -61,7 +62,7 @@ impl<'a> Index<usize> for TokenizedRegionSet<'a> {
     type Output = u32;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.ids[index]
+        &self.pointers[index].id
     }
 }
 
@@ -70,11 +71,11 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
     type IntoIter = std::vec::IntoIter<TokenizedRegion<'a>>;
 
     fn into_iter(self) -> Self::IntoIter {
-        let mut tokenized_regions = Vec::with_capacity(self.ids.len());
-        for id in self.ids.iter() {
+        let mut tokenized_regions = Vec::with_capacity(self.pointers.len());
+        for pointer in self.pointers.iter() {
             let tokenized_region: TokenizedRegion = TokenizedRegion {
                 universe: self.universe,
-                id: *id,
+                pointer: *pointer,
             };
 
             tokenized_regions.push(tokenized_region);
@@ -92,11 +93,8 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `regions` - A vector of regions
     /// * `universe` - A reference to a Universe
     ///
-    pub fn new(ids: Vec<u32>, universe: &'a Universe) -> Self {
-        TokenizedRegionSet {
-            ids,
-            universe,
-        }
+    pub fn new(pointers: Vec<TokenizedRegionPointer>, universe: &'a Universe) -> Self {
+        TokenizedRegionSet { pointers, universe }
     }
 
     ///
@@ -107,8 +105,8 @@ impl<'a> TokenizedRegionSet<'a> {
     ///
     pub fn to_bed_file(&self, path: &PathBuf) -> Result<()> {
         let mut file = File::create(path)?;
-        for id in self.ids.iter() {
-            let r = self.universe.id_to_region.get(id).unwrap();
+        for pointer in self.pointers.iter() {
+            let r = self.universe.id_to_region.get(&pointer.id).unwrap();
             let line = format!("{}\t{}\t{}\n", r.chr, r.start, r.end);
             file.write_all(line.as_bytes())?;
         }
@@ -121,8 +119,10 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `path` - A PathBuf to write the .gtok file to
     ///
     pub fn to_gtok_file(&self, path: &str) -> Result<()> {
-        let tokens = &self.ids;
-        write_tokens_to_gtok(path, tokens)?;
+        let pointers = &self.pointers;
+        let ids: Vec<u32> = pointers.iter().map(|p| p.id).collect();
+
+        write_tokens_to_gtok(path, &ids)?;
         Ok(())
     }
 
@@ -130,7 +130,11 @@ impl<'a> TokenizedRegionSet<'a> {
     /// Get the tokenized regions as a vector of ids
     /// * Returns a vector of u32
     pub fn ids(&self) -> Vec<u32> {
-        self.ids.clone()
+        self.pointers
+            .iter()
+            .map(|p| p.id)
+            .collect::<Vec<u32>>()
+            .clone()
     }
 
     ///
@@ -157,10 +161,10 @@ impl<'a> TokenizedRegionSet<'a> {
 
 impl<'a> TokenizedRegionSet<'a> {
     pub fn len(&self) -> usize {
-        self.ids.len()
+        self.pointers.len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.ids.is_empty()
+        self.pointers.is_empty()
     }
 }
