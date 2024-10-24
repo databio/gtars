@@ -18,10 +18,10 @@ use super::traits::SpecialTokens;
 /// machine learning models.
 ///
 /// In brief, meta-tokens are tokens that represent *clusters* of genomic intervals.
+#[allow(dead_code)]
 pub struct MetaTokenizer {
     pub universe: Universe,
     config: TokenizerConfig,
-    #[allow(dead_code)]
     region_to_metatoken: HashMap<Region, Region>,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,

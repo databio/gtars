@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -13,6 +13,7 @@ pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
     pub id_to_region: HashMap<u32, Region>,
+    pub chrom_to_id: HashMap<String, u16>,
 }
 
 impl Universe {
@@ -63,10 +64,27 @@ impl From<Vec<Region>> for Universe {
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);
 
+        let mut chroms: HashSet<String> = HashSet::new();
+        for region in regions.iter() {
+            chroms.insert(region.chr.clone());
+        }
+
+        let mut current_chrom_id = 0_u16;
+        let mut chrom_to_id: HashMap<String, u16> = HashMap::new();
+        for chrom in chroms {
+            chrom_to_id.entry(chrom).or_insert_with(|| {
+                let old_id = current_chrom_id;
+                current_chrom_id +=1;
+                old_id
+            });
+        }
+        
+
         Universe {
             regions,
             region_to_id,
             id_to_region,
+            chrom_to_id
         }
     }
 }
@@ -81,10 +99,26 @@ impl TryFrom<&Path> for Universe {
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);
 
+        let mut chroms: HashSet<String> = HashSet::new();
+        for region in regions.iter() {
+            chroms.insert(region.chr.clone());
+        }
+
+        let mut current_chrom_id = 0_u16;
+        let mut chrom_to_id: HashMap<String, u16> = HashMap::new();
+        for chrom in chroms {
+            chrom_to_id.entry(chrom).or_insert_with(|| {
+                let old_id = current_chrom_id;
+                current_chrom_id +=1;
+                old_id
+            });
+        }
+
         Ok(Universe {
             regions,
             region_to_id,
             id_to_region,
+            chrom_to_id
         })
     }
 }

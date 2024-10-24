@@ -70,6 +70,7 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     id_to_region
 }
 
+
 ///
 /// Read in a bed file into a vector of [Region] structs. It handles detecting
 /// the file-type, verifying each line, and error handling.

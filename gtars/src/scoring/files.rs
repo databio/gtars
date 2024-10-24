@@ -12,6 +12,7 @@ pub struct FragmentFileGlob {
     files: Vec<PathBuf>,
 }
 
+#[allow(dead_code)]
 pub struct ConsensusSet {
     overlap_trees: HashMap<String, Lapper<u32, u32>>,
 }
