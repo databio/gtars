@@ -29,7 +29,6 @@ impl TokenizerConfig {
         universes: Vec<String>,
         chrom_sizes: Option<String>,
     ) -> TokenizerConfig {
-
         TokenizerConfig {
             tokenizer_type,
             universes,

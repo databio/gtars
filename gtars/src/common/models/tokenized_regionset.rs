@@ -74,7 +74,7 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
             let tokenized_region: TokenizedRegion = TokenizedRegion {
                 universe: self.universe,
                 id: *id,
-                genomic_pos: *pos
+                genomic_pos: *pos,
             };
 
             tokenized_regions.push(tokenized_region);
@@ -93,7 +93,11 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `universe` - A reference to a Universe
     ///
     pub fn new(ids: Vec<u32>, genomic_positions: Vec<u32>, universe: &'a Universe) -> Self {
-        TokenizedRegionSet { ids, genomic_positions, universe }
+        TokenizedRegionSet {
+            ids,
+            genomic_positions,
+            universe,
+        }
     }
 
     ///

@@ -78,17 +78,16 @@ impl From<Vec<Region>> for Universe {
         for chrom in chroms {
             chrom_to_id.entry(chrom).or_insert_with(|| {
                 let old_id = current_chrom_id;
-                current_chrom_id +=1;
+                current_chrom_id += 1;
                 old_id
             });
         }
-        
 
         Universe {
             regions,
             region_to_id,
             id_to_region,
-            chrom_to_id
+            chrom_to_id,
         }
     }
 }
@@ -113,7 +112,7 @@ impl TryFrom<&Path> for Universe {
         for chrom in chroms {
             chrom_to_id.entry(chrom).or_insert_with(|| {
                 let old_id = current_chrom_id;
-                current_chrom_id +=1;
+                current_chrom_id += 1;
                 old_id
             });
         }
@@ -122,7 +121,7 @@ impl TryFrom<&Path> for Universe {
             regions,
             region_to_id,
             id_to_region,
-            chrom_to_id
+            chrom_to_id,
         })
     }
 }

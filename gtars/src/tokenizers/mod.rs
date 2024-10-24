@@ -24,9 +24,9 @@
 pub mod builder;
 pub mod cli;
 pub mod config;
-pub mod traits;
 pub mod meta_tokenizer;
 pub mod special_tokens;
+pub mod traits;
 pub mod tree_tokenizer;
 
 /// constants for the tokenizer module.

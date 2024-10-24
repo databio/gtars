@@ -406,7 +406,6 @@ impl Tokenizer for MetaTokenizer {
     }
 
     fn tokenize_region(&self, region: &Region) -> TokenizedRegionSet {
-        
         // try to get tree for primary universe (self.tree)
         let lapper = self.tree.get(&region.chr);
 
@@ -437,9 +436,10 @@ impl Tokenizer for MetaTokenizer {
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let (regions, pos): (Vec<u32>, Vec<u32>) =
-                                intervals
-                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                            let (regions, pos): (Vec<u32>, Vec<u32>) = intervals
+                                .map(|interval| {
+                                    (interval.val, (interval.start + interval.stop) / 2)
+                                })
                                 .unzip();
 
                             // a hit
@@ -482,10 +482,9 @@ impl Tokenizer for MetaTokenizer {
 
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let (regions, pos): (Vec<u32>, Vec<u32>) =
-                                intervals
-                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
-                                .unzip();
+                        let (regions, pos): (Vec<u32>, Vec<u32>) = intervals
+                            .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                            .unzip();
 
                         // a hit
                         if !regions.is_empty() {

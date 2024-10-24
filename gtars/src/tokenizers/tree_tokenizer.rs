@@ -122,11 +122,8 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let universe_as_path = Path::new(value).file_name().unwrap();
                 let universe_as_path = universe_as_path.to_string_lossy().to_string();
 
-                let config = TokenizerConfig::new(
-                    Some("tree".to_string()),
-                    vec![universe_as_path],
-                    None,
-                );
+                let config =
+                    TokenizerConfig::new(Some("tree".to_string()), vec![universe_as_path], None);
                 (config, universe, tree, None)
             }
         };
@@ -219,9 +216,10 @@ impl Tokenizer for TreeTokenizer {
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let (regions, pos): (Vec<u32>, Vec<u32>) =
-                                intervals
-                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                            let (regions, pos): (Vec<u32>, Vec<u32>) = intervals
+                                .map(|interval| {
+                                    (interval.val, (interval.start + interval.stop) / 2)
+                                })
                                 .unzip();
 
                             // a hit
@@ -264,12 +262,9 @@ impl Tokenizer for TreeTokenizer {
 
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let (regions, pos): (Vec<u32>, Vec<u32>) =
-                                intervals
-                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
-                                .unzip();
-
-                             
+                        let (regions, pos): (Vec<u32>, Vec<u32>) = intervals
+                            .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                            .unzip();
 
                         // a hit
                         if !regions.is_empty() {
