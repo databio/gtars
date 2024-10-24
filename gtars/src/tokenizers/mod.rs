@@ -24,7 +24,6 @@
 pub mod builder;
 pub mod cli;
 pub mod config;
-pub mod fragment_tokenizer;
 pub mod meta_tokenizer;
 pub mod soft_tokenizer;
 pub mod special_tokens;
@@ -41,7 +40,6 @@ pub mod consts {
 // expose the TreeTokenizer struct to users of this crate
 pub use builder::TokenizerBuilder;
 pub use config::TokenizerConfig;
-pub use fragment_tokenizer::FragmentTokenizer;
 pub use meta_tokenizer::MetaTokenizer;
 pub use traits::{SingleCellTokenizer, Tokenizer};
 pub use tree_tokenizer::TreeTokenizer;
