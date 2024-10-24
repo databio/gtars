@@ -525,7 +525,10 @@ mod tests {
         assert_eq!(res.len(), 1);
 
         // check the id, it should be len(primary_universe) + 1 (since its chr1)
-        assert_eq!(res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![25]);
+        assert_eq!(
+            res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(),
+            vec![25]
+        );
 
         let res = res.into_region_vec();
         let region = &res[0];
@@ -546,7 +549,10 @@ mod tests {
         assert_eq!(res.len(), 1);
 
         // check the id, it should be the id of the UNK token
-        assert_eq!(res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(), vec![49]);
+        assert_eq!(
+            res.pointers.iter().map(|p| p.id).collect::<Vec<u32>>(),
+            vec![49]
+        );
 
         let res = res.into_region_vec();
         let region = &res[0];
