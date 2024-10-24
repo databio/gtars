@@ -596,7 +596,7 @@ mod tests {
         let tokenizer = MetaTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
 
         let r1 = Region {
-            // tokenize to 2
+            // tokenize to id 2
             chr: "chr10".to_string(),
             start: 70576220,
             end: 70576251,
@@ -611,5 +611,6 @@ mod tests {
 
         assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![2]);
         assert_eq!(tokenizer.tokenize_region(&r2).ids, vec![2]);
+        
     }
 }
