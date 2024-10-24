@@ -123,7 +123,7 @@ impl PyTokenizedRegionSet {
     }
 
     pub fn to_ids(&self) -> Result<Vec<u32>> {
-        Ok(self.ids()?)
+        self.ids()
     }
 
     pub fn __repr__(&self) -> String {
