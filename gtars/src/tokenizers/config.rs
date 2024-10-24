@@ -29,11 +29,13 @@ impl TokenizerConfig {
         tokenizer_type: Option<String>,
         universes: Vec<String>,
         exclude_ranges: Option<String>,
+        chrom_sizes: Option<String>
     ) -> TokenizerConfig {
         TokenizerConfig {
             tokenizer_type,
             universes,
             exclude_ranges,
+            chrom_sizes
         }
     }
 }
