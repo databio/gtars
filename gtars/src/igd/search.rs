@@ -274,11 +274,7 @@ fn get_overlaps(
     }
 
     // Min between n2 and mTile
-    n2 = if n2 < mTile {
-        n2
-    } else {
-        mTile
-    };
+    n2 = if n2 < mTile { n2 } else { mTile };
 
     tmpi = IGD.nCnt[ichr as usize][n1 as usize];
     tmpi1 = tmpi - 1;

@@ -53,7 +53,7 @@ impl ConsensusSet {
             let interval = Interval {
                 start: region.start,
                 stop: region.end,
-                val: *region_to_id_map.get(region).unwrap()
+                val: *region_to_id_map.get(region).unwrap(),
             };
 
             // use chr to get the vector of intervals
@@ -72,6 +72,5 @@ impl ConsensusSet {
         Ok(ConsensusSet {
             overlap_trees: trees,
         })
-        
     }
 }
