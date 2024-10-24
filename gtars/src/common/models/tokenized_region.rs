@@ -5,8 +5,7 @@ use crate::common::models::{Region, Universe};
 #[derive(Eq, PartialEq, Clone)]
 pub struct TokenizedRegion<'a> {
     pub universe: &'a Universe,
-    pub id: u32,
-    pub genomic_pos: u32,
+    pub id: u32
 }
 
 impl From<TokenizedRegion<'_>> for Region {

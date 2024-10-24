@@ -17,7 +17,6 @@ use super::RegionSet;
 /// two things: 1) a list of ids, and 2) a pointer to a Universe. The ids correspond
 /// to the regions in that universe this [TokenizedRegionSet] represents.
 pub struct TokenizedRegionSet<'a> {
-    pub genomic_positions: Vec<u32>,
     pub ids: Vec<u32>,
     pub universe: &'a Universe,
 }
@@ -70,11 +69,10 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
 
     fn into_iter(self) -> Self::IntoIter {
         let mut tokenized_regions = Vec::with_capacity(self.ids.len());
-        for (id, pos) in self.ids.iter().zip(self.genomic_positions.iter()) {
+        for id in self.ids.iter() {
             let tokenized_region: TokenizedRegion = TokenizedRegion {
                 universe: self.universe,
                 id: *id,
-                genomic_pos: *pos,
             };
 
             tokenized_regions.push(tokenized_region);
@@ -92,10 +90,9 @@ impl<'a> TokenizedRegionSet<'a> {
     /// * `regions` - A vector of regions
     /// * `universe` - A reference to a Universe
     ///
-    pub fn new(ids: Vec<u32>, genomic_positions: Vec<u32>, universe: &'a Universe) -> Self {
+    pub fn new(ids: Vec<u32>, universe: &'a Universe) -> Self {
         TokenizedRegionSet {
             ids,
-            genomic_positions,
             universe,
         }
     }
