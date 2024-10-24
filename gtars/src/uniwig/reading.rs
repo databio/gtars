@@ -283,6 +283,17 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     for ref_key in references {
         let chrom_name_vec = ref_key.0.deref().clone();
         let chrom_name = String::from_utf8((*chrom_name_vec).to_owned()).unwrap();
+        //let length: NonZeroUsize = ref_key.1.clone().length();
+        // let length = ref_key.1.other_fields().clone().into_values();
+        // let length = length.len();
+        // for (key, value) in ref_key.1.other_fields().iter(){
+        //     println!("new iteration");
+        //     println!("here is key = {:?}", key);
+        //     println!("here is value = {:?}", value);
+        //     println!("Done");
+        //
+        // }
+        // println!("here is length = {:?}", length);
         chromosome.chrom = chrom_name;
         chromosome.starts.push((0, 0)); //default values for now, less important for bam
         chromosome.ends.push((0, 0)); //default values for now, less important for bam
@@ -301,7 +312,6 @@ pub fn get_seq_reads_bam(chromosome: &mut Chromosome, filepath: &str) {
 
     // TODO this function requires there to be an associated .bai file in the same directory as the .bam file
     // And the error message if it does not exist is not very helpful.
-
     let src = String::from(filepath);
     let raw_region = String::from(chromosome.chrom.clone());
     //let raw_region = String::from("chr1");

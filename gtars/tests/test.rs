@@ -21,7 +21,7 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 
 #[fixture]
 fn path_to_small_bam_file() -> &'static str {
-    "/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam" //todo change back to relative to test folder
+    "/home/drc/Downloads/bam files for rust test/test1_chr22.bam" //todo change back to relative to test folder
 }
 
 #[fixture]
@@ -361,7 +361,7 @@ mod tests {
         let smoothsize: i32 = 1;
         let output_type = "wig";
         let filetype = "bam";
-        let num_threads = 6;
+        let num_threads = 2;
         let score = false;
         let stepsize = 1;
         let zoom = 0;
