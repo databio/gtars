@@ -26,6 +26,7 @@ rayon = "1.10.0"
 indicatif = "0.17.8"
 glob = "0.3.1"
 bigtools = "0.5.2"
+itertools = "0.13.0"
 
 
 [dev-dependencies]

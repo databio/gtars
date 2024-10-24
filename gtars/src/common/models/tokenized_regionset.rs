@@ -4,12 +4,14 @@ use std::ops::Index;
 use std::path::PathBuf;
 
 use anyhow::Result;
+use itertools::izip;
 
 use crate::common::models::region::Region;
 use crate::common::models::tokenized_region::TokenizedRegion;
 use crate::common::models::universe::Universe;
 use crate::io::write_tokens_to_gtok;
 
+use super::tokenized_region::TokenizedRegionPointer;
 use super::RegionSet;
 
 ///
@@ -17,7 +19,7 @@ use super::RegionSet;
 /// two things: 1) a list of ids, and 2) a pointer to a Universe. The ids correspond
 /// to the regions in that universe this [TokenizedRegionSet] represents.
 pub struct TokenizedRegionSet<'a> {
-    pub ids: Vec<u32>,
+    pub pointers: Vec<TokenizedRegionPointer>,
     pub universe: &'a Universe,
 }
 

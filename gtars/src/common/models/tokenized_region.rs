@@ -2,10 +2,32 @@ use std::fmt::Display;
 
 use crate::common::models::{Region, Universe};
 
+///
+/// The `TokenizedRegionPointer` is a wrapper/convenience struct that
+/// lets us store pointers to the original universe and stores some other metadata
+/// that will be useful for modeling -- the genomic positional encodings.
+pub struct TokenizedRegionPointer {
+    /// The id of the token in the universe
+    pub id: u32,
+
+    /// The id of the chromosome in the universe
+    pub chrom_id: u16,
+
+    /// The original start position of the region in the query
+    pub source_start: u32,
+
+    /// The original end position of the region in the query
+    pub source_end: u32
+}
+
 #[derive(Eq, PartialEq, Clone)]
 pub struct TokenizedRegion<'a> {
     pub universe: &'a Universe,
-    pub id: u32
+    pub id: u32,
+    // these attributes are for positional encodings
+    pub source_chr_id: u16,
+    pub source_start: u32,
+    pub source_end: u32
 }
 
 impl From<TokenizedRegion<'_>> for Region {
