@@ -197,13 +197,16 @@ impl Tokenizer for TreeTokenizer {
         match lapper {
             Some(lapper) => {
                 let intervals = lapper.find(region.start, region.end);
-                let mut ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
+                let (mut ids, mut genomic_positions): (Vec<u32>, Vec<u32>) = intervals
+                    .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                    .unzip();
 
                 // tokenized to nothing... check secondary trees
                 if ids.is_empty() {
                     // oh, we have no secondary trees, just return the unknown token
                     if self.secondary_trees.is_none() {
                         ids = vec![self.unknown_token_id()];
+                        genomic_positions = vec![(region.start + region.end) / 2];
                     // iterate over secondary trees and check if the region is in any of them
                     } else {
                         for s_tree in self.secondary_trees.as_ref().unwrap() {
@@ -216,12 +219,15 @@ impl Tokenizer for TreeTokenizer {
                             }
                             // get overlapped intervals -- map to regions
                             let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let regions: Vec<u32> =
-                                intervals.map(|interval| interval.val).collect();
+                            let (regions, pos): (Vec<u32>, Vec<u32>) =
+                                intervals
+                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                                .unzip();
 
                             // a hit
-                            if !regions.is_empty() {
+                            if !ids.is_empty() {
                                 ids = regions;
+                                genomic_positions = pos;
                                 break;
                             }
                         }
@@ -230,6 +236,7 @@ impl Tokenizer for TreeTokenizer {
 
                 TokenizedRegionSet {
                     ids,
+                    genomic_positions,
                     universe: &self.universe,
                 }
             }
@@ -237,14 +244,18 @@ impl Tokenizer for TreeTokenizer {
             // so, check secondary trees
             None => {
                 let mut ids = Vec::new();
+                let mut genomic_positions = Vec::new();
+
                 // oh, we have no secondary trees, just return the unknown token
                 if self.secondary_trees.is_none() {
                     ids = vec![self.unknown_token_id()];
+                    genomic_positions = vec![(region.start + region.end) / 2];
                 // iterate over secondary trees and check if the region is in any of them
                 } else {
                     for s_tree in self.secondary_trees.as_ref().unwrap() {
                         // default to unknown token
                         ids = vec![self.unknown_token_id()];
+                        genomic_positions = vec![(region.start + region.end) / 2];
 
                         let s_lapper = s_tree.get(&region.chr);
                         if s_lapper.is_none() {
@@ -253,20 +264,28 @@ impl Tokenizer for TreeTokenizer {
 
                         // get overlapped intervals -- map to regions
                         let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
+                        let (regions, pos): (Vec<u32>, Vec<u32>) =
+                                intervals
+                                .map(|interval| (interval.val, (interval.start + interval.stop) / 2))
+                                .unzip();
+
+                             
 
                         // a hit
                         if !regions.is_empty() {
                             ids = regions;
+                            genomic_positions = pos;
                             break;
                         } else {
                             ids = vec![self.unknown_token_id()];
+                            genomic_positions = vec![(region.start + region.end) / 2];
                         }
                     }
                 }
 
                 TokenizedRegionSet {
                     ids,
+                    genomic_positions,
                     universe: &self.universe,
                 }
             }
@@ -274,15 +293,18 @@ impl Tokenizer for TreeTokenizer {
     }
 
     fn tokenize_region_set(&self, region_set: &RegionSet) -> TokenizedRegionSet {
-        let mut tokenized_regions: Vec<u32> = Vec::new();
+        let mut tokenized_regions = Vec::new();
+        let mut genomic_positions = Vec::new();
 
         for region in region_set {
             let tokenized_region = self.tokenize_region(region);
             tokenized_regions.extend(tokenized_region.ids);
+            genomic_positions.extend(tokenized_region.genomic_positions);
         }
 
         TokenizedRegionSet {
             ids: tokenized_regions,
+            genomic_positions,
             universe: &self.universe,
         }
     }

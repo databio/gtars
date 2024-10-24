@@ -6,6 +6,7 @@ use crate::common::models::{Region, Universe};
 pub struct TokenizedRegion<'a> {
     pub universe: &'a Universe,
     pub id: u32,
+    pub genomic_pos: u32
 }
 
 impl From<TokenizedRegion<'_>> for Region {
@@ -17,6 +18,11 @@ impl From<TokenizedRegion<'_>> for Region {
 impl TokenizedRegion<'_> {
     pub fn into_region(self) -> Region {
         self.into()
+    }
+
+    pub fn chrom_id(&self) -> u16 {
+        let r = self.universe.convert_id_to_region(self.id).unwrap();
+        self.universe.convert_chrom_to_id(&r.chr).unwrap()
     }
 }
 
