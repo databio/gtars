@@ -62,12 +62,6 @@ pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
 }
 
 #[pyfunction]
-pub fn read_tokens_from_gtokp(filename: &str) -> PyResult<Vec<PyTokenizedRegionPointer>> {
-    let tokens = gtars::io::read_tokens_from_gtokp(filename)?;
-    Ok(tokens.into_iter().map(|p| p.into()).collect())
-}
-
-#[pyfunction]
 pub fn write_tokens_to_gtokp(
     filename: &str,
     pointers: Vec<PyTokenizedRegionPointer>,
@@ -89,6 +83,12 @@ pub fn write_tokens_to_gtokp(
 pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
     let tokens = gtars::io::read_tokens_from_gtok(filename)?;
     Ok(tokens)
+}
+
+#[pyfunction]
+pub fn read_tokens_from_gtokp(filename: &str) -> PyResult<Vec<PyTokenizedRegionPointer>> {
+    let tokens = gtars::io::read_tokens_from_gtokp(filename)?;
+    Ok(tokens.into_iter().map(|p| p.into()).collect())
 }
 
 #[pyfunction]

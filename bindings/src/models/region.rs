@@ -59,6 +59,7 @@ impl PyRegion {
     pub fn end(&self) -> Result<u32> {
         Ok(self.end)
     }
+
     pub fn __repr__(&self) -> String {
         format!("Region({}, {}, {})", self.chr, self.start, self.end)
     }
@@ -93,6 +94,40 @@ impl From<TokenizedRegionPointer> for PyTokenizedRegionPointer {
             source_start: pointer.source_start,
             source_end: pointer.source_end,
         }
+    }
+}
+
+#[pymethods]
+impl PyTokenizedRegionPointer {
+
+    #[getter]
+    pub fn id(&self) -> usize {
+        self.id as usize
+    }
+
+    #[getter]
+    pub fn chrom_id(&self) -> usize {
+        self.chrom_id as usize
+    }
+
+    #[getter]
+    pub fn source_start(&self) -> usize {
+        self.source_start as usize
+    }
+
+    #[getter]
+    pub fn source_end(&self) -> usize {
+        self.source_end as usize
+    }
+
+    pub fn __repr__(&self) -> String {
+        format!(
+            "TokenizedRegionPointer(id={}, chrom_id={}, source_start={}, source_end={})",
+            self.id,
+            self.chrom_id,
+            self.source_start,
+            self.source_end
+        )
     }
 }
 
@@ -180,6 +215,11 @@ impl PyTokenizedRegion {
     #[getter]
     pub fn chrom_id(&self) -> Result<u16> {
         Ok(self.pointer.chrom_id)
+    }
+
+    #[getter]
+    pub fn pointer(&self) -> Result<PyTokenizedRegionPointer> {
+        Ok(self.pointer)
     }
 
     pub fn __repr__(&self) -> String {

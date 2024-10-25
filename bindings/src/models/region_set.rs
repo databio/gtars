@@ -99,6 +99,11 @@ impl PyTokenizedRegionSet {
         Ok(self.pointers.iter().map(|p| p.id).collect::<Vec<u32>>())
     }
 
+    #[getter]
+    pub fn pointers(&self) -> Result<Vec<PyTokenizedRegionPointer>> {
+        Ok(self.pointers.clone())
+    }
+
     pub fn to_bit_vector(&self) -> Result<Vec<u8>> {
         Python::with_gil(|py| {
             let mut bit_vector = vec![0; self.universe.borrow(py).id_to_region.len()];
