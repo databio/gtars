@@ -122,15 +122,19 @@ pub fn write_to_wig_file(
 }
 
 pub fn write_to_bed_graph_file(
-    counts: &[u32],
+    count_info: &(Vec<u32>, Vec<u32>, Vec<u32>),
     filename: String,
     chromname: String,
-    start_position: i32,
     stepsize: i32,
 ) {
     let path = std::path::Path::new(&filename).parent().unwrap();
     let _ = create_dir_all(path);
-    let mut position = start_position;
+
+    if count_info.0.len() != count_info.1.len() || count_info.0.len() != count_info.2.len() {
+        panic!("count info vectors are not equal!")
+    }
+
+    let n_index = count_info.0.len();
 
     let file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
@@ -140,19 +144,19 @@ pub fn write_to_bed_graph_file(
 
     let mut buf = BufWriter::new(file);
 
-    for count in counts.iter() {
-        writeln!(
-            &mut buf,
-            "{}\t{}\t{}\t{}",
-            chromname,
-            position,
-            position + stepsize,
-            count
-        )
-        .unwrap();
-        position = position + stepsize;
+    for i in 0..n_index{
+            writeln!(
+                &mut buf,
+                "{}\t{}\t{}\t{}",
+                chromname,
+                count_info.0[i],
+                count_info.1[i],
+                count_info.2[i]
+            )
+            .unwrap();
     }
     buf.flush().unwrap();
+
 }
 
 /// Converts uniwig generated bedGraphs to bigWig files
@@ -197,7 +201,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
                 nthreads: num_threads as usize,
                 nzooms: zoom_level as u32,
                 uncompressed: false,
-                sorted: "all".to_string(),
+                sorted: "start".to_string(),
                 block_size: 256,      //default
                 items_per_slot: 1024, //default
                 inmemory: false,

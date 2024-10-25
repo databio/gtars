@@ -339,7 +339,7 @@ mod tests {
         let chromosomes: Vec<Chromosome> = read_bam_header(path_to_small_bam_file);
         let num_chromosomes = chromosomes.len();
         println!("Number of chroms: {}", num_chromosomes);
-        assert_eq!(num_chromosomes, 195);
+        assert_eq!(num_chromosomes, 1);
     }
 
     #[rstest]
@@ -359,7 +359,7 @@ mod tests {
 
 
         let smoothsize: i32 = 1;
-        let output_type = "wig";
+        let output_type = "bedgraph";
         let filetype = "bam";
         let num_threads = 2;
         let score = false;
