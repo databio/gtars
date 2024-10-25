@@ -225,14 +225,12 @@ pub fn uniwig_main(
     // Pool installs iterator
     pool.install(|| {
         final_chromosomes
-            .par_iter()
-            .for_each(|chromosome: &Chromosome| {
-
+            .par_iter_mut()
+            .for_each(|chromosome: &mut Chromosome| {
                 bar.inc(1);
                 match ft {
                     Ok(FileType::BAM) => {
-                        let mut chromosome = chromosome.clone(); // empty vectors, so cloning is not a big deal.
-                        get_seq_reads_bam(&mut chromosome, filepath)
+                        get_seq_reads_bam(chromosome, filepath);
                     },
                     _ => {},
                 };

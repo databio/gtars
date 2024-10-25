@@ -342,46 +342,46 @@ mod tests {
         assert_eq!(num_chromosomes, 1);
     }
 
-    // #[rstest]
-    // fn test_process_bam(path_to_small_bam_file: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    //     let path_to_crate = env!("CARGO_MANIFEST_DIR");
-    //     let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
-    //     let chromsizerefpath = chromsizerefpath.as_str();
-    //     let combinedbedpath = path_to_small_bam_file;
-    //
-    //     let tempdir = tempfile::tempdir().unwrap();
-    //     let path = PathBuf::from(&tempdir.path());
-    //
-    //     // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-    //     //let bwfileheader_path = path.into_os_string().into_string().unwrap();
-    //     //let bwfileheader = bwfileheader_path.as_str();
-    //     let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
-    //
-    //
-    //     let smoothsize: i32 = 1;
-    //     let output_type = "wig";
-    //     let filetype = "bam";
-    //     let num_threads = 2;
-    //     let score = false;
-    //     let stepsize = 1;
-    //     let zoom = 0;
-    //
-    //     uniwig_main(
-    //         smoothsize,
-    //         combinedbedpath,
-    //         chromsizerefpath,
-    //         bwfileheader,
-    //         output_type,
-    //         filetype,
-    //         num_threads,
-    //         score,
-    //         stepsize,
-    //         zoom,
-    //     )
-    //         .expect("Uniwig main failed!");
-    //
-    //     Ok(())
-    // }
+    #[rstest]
+    fn test_process_bam(path_to_small_bam_file: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let combinedbedpath = path_to_small_bam_file;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        //let bwfileheader = bwfileheader_path.as_str();
+        let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
+
+
+        let smoothsize: i32 = 1;
+        let output_type = "bedgraph";
+        let filetype = "bam";
+        let num_threads = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+
+        uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+        )
+            .expect("Uniwig main failed!");
+
+        Ok(())
+    }
 
 
     #[rstest]
