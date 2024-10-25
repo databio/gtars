@@ -20,17 +20,18 @@ def read_tokens_from_gtok(filename: str) -> List[int]:
 
 def write_tokens_to_gtokp(filename: str, tokens: List[TokenizedRegionPointer]):
     """
-    Write tokens to a GTOK file.
+    Write tokens with positional information to a GTOKP file.
 
     :param filename: The filename of the GTOK file.
     :param tokens: The tokens to write.
     """
     pass
 
-def read_tokens_from_gtokp(filename: str) -> List[TokenizedRegionPointer]:
+def read_tokens_from_gtokp(filename: str, unzip: bool) -> List[TokenizedRegionPointer]:
     """
-    Read tokens from a GTOK file.
+    Read tokens from a GTOKP file with included positional information.
 
     :param filename: The filename of the GTOK file.
+    :param unzip: Whether to return the positional information separately.
     """
     pass

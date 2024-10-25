@@ -86,6 +86,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                                 HashMap::new();
                             for region in hierarchical_universe_regions {
                                 universe.insert_token(&region);
+                                universe.insert_chrom(&region);
                                 let interval = Interval {
                                     start: region.start,
                                     stop: region.end,
@@ -131,53 +132,68 @@ impl TryFrom<&Path> for TreeTokenizer {
 
         // add special tokens to the universe
         // unk
-        universe.insert_token(&Region {
+        let unk_token = Region {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
-        });
+        };
+        universe.insert_token(&unk_token);
+        universe.insert_chrom(&unk_token);
 
         // pad
-        universe.insert_token(&Region {
+        let pad_token = Region {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
-        });
+        };
+        universe.insert_token(&pad_token);
+        universe.insert_chrom(&pad_token);
+
 
         // mask
-        universe.insert_token(&Region {
+        let mask_token = Region {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
-        });
+        };
+        universe.insert_token(&mask_token);
+        universe.insert_chrom(&mask_token);
 
         // eos
-        universe.insert_token(&Region {
+        let eos_token = Region {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
-        });
+        };
+        universe.insert_token(&eos_token);
+        universe.insert_chrom(&eos_token);
 
         // bos
-        universe.insert_token(&Region {
+        let bos_token = Region {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
-        });
+        };
+        universe.insert_token(&bos_token);
+        universe.insert_chrom(&bos_token);
 
         // cls
-        universe.insert_token(&Region {
+        let cls_token = Region {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
-        });
+        };
+        universe.insert_token(&cls_token);
+        universe.insert_chrom(&cls_token);
 
         // sep
-        universe.insert_token(&Region {
+        let sep_token = Region {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
-        });
+        };
+        universe.insert_token(&sep_token);
+        universe.insert_chrom(&sep_token);
 
         Ok(TreeTokenizer {
             config,
@@ -560,5 +576,20 @@ mod tests {
         assert_eq!(region.chr, "chrUNK");
         assert_eq!(region.start, 0);
         assert_eq!(region.end, 0);
+    }
+
+    #[rstest]
+    fn test_pointers_valid(path_to_config_file: &str) {
+        let tokenizer = TreeTokenizer::try_from(Path::new(path_to_config_file)).unwrap();
+        let res = tokenizer.tokenize_region(&Region {
+            chr: "chr1".to_string(),
+            start: 151399450,
+            end: 151399560
+        });
+
+
+        assert_eq!(res.pointers[0].source_start, 151399450);
+        assert_eq!(res.pointers[0].source_end, 151399560);
+        
     }
 }

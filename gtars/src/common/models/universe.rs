@@ -22,10 +22,12 @@ impl Universe {
         self.region_to_id.insert(region.to_owned(), new_id as u32);
         self.id_to_region.insert(new_id as u32, region.to_owned());
         self.regions.push(region.to_owned());
+    }
 
+    pub fn insert_chrom(&mut self, region: &Region) {
         if !self.chrom_to_id.contains_key(&region.chr) {
-            let new_chrom_id = self.chrom_to_id.len() as u16;
-            self.chrom_to_id.insert(region.chr.clone(), new_chrom_id);
+            let new_id = self.chrom_to_id.len();
+            self.chrom_to_id.insert(region.chr.clone(), new_id as u16);
         }
     }
 
