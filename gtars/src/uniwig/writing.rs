@@ -201,7 +201,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
                 nthreads: num_threads as usize,
                 nzooms: zoom_level as u32,
                 uncompressed: false,
-                sorted: "all".to_string(),
+                sorted: "start".to_string(),
                 block_size: 256,      //default
                 items_per_slot: 1024, //default
                 inmemory: false,
