@@ -13,6 +13,7 @@ pub struct PyUniverse {
     pub regions: Vec<PyRegion>,
     pub region_to_id: HashMap<PyRegion, u32>,
     pub id_to_region: HashMap<u32, PyRegion>,
+    pub chrom_to_id: HashMap<String, u16>
 }
 
 impl From<Universe> for PyUniverse {
@@ -35,6 +36,7 @@ impl From<Universe> for PyUniverse {
             regions,
             region_to_id,
             id_to_region,
+            chrom_to_id: value.chrom_to_id
         }
     }
 }
@@ -67,6 +69,10 @@ impl PyUniverse {
 
     pub fn len(&self) -> usize {
         self.region_to_id.len()
+    }
+
+    pub fn num_chroms(&self) -> usize {
+        self.chrom_to_id.len()
     }
 
     pub fn is_empty(&self) -> bool {

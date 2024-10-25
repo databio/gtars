@@ -56,6 +56,10 @@ impl Universe {
         self.region_to_id.len()
     }
 
+    pub fn num_chroms(&self) -> usize {
+        self.chrom_to_id.len()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.region_to_id.len() == 0
     }
