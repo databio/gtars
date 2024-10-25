@@ -305,12 +305,11 @@ pub fn uniwig_main(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "start", output_type
                                         );
-                                        compress_counts(&mut count_result, clamped_start_position(primary_start.0, smoothsize));
+                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut count_result, clamped_start_position(primary_start.0, smoothsize));
                                         write_to_bed_graph_file(
-                                            &count_result.0,
+                                            &count_info,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_start.0, smoothsize),
                                             stepsize,
                                         );
                                     }
@@ -349,7 +348,7 @@ pub fn uniwig_main(
                                 }
                             }
                             1 => {
-                                let count_result = match ft {
+                                let mut count_result = match ft {
                                     Ok(FileType::BED) => start_end_counts(
                                         &chromosome.ends,
                                         current_chrom_size,
@@ -385,13 +384,15 @@ pub fn uniwig_main(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "end", output_type
                                         );
+
+                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut count_result, clamped_start_position(primary_end.0, smoothsize));
                                         write_to_bed_graph_file(
-                                            &count_result.0,
+                                            &count_info,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            clamped_start_position(primary_end.0, smoothsize),
                                             stepsize,
                                         );
+
                                     }
                                     "wig" => {
                                         let file_name = format!(
@@ -441,7 +442,7 @@ pub fn uniwig_main(
                                 }
                             }
                             2 => {
-                                let core_results = match ft {
+                                let mut core_results = match ft {
                                     Ok(FileType::BED) => core_counts(
                                         &chromosome.starts,
                                         &chromosome.ends,
@@ -477,13 +478,15 @@ pub fn uniwig_main(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "core", output_type
                                         );
+
+                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut core_results, primary_start.0);
                                         write_to_bed_graph_file(
-                                            &core_results.0,
+                                            &count_info,
                                             file_name.clone(),
                                             chrom_name.clone(),
-                                            primary_start.0,
                                             stepsize,
                                         );
+
                                     }
                                     "wig" => {
                                         let file_name = format!(
