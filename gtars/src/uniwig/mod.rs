@@ -14,6 +14,7 @@ use crate::uniwig::writing::{
     write_to_wig_file,
 };
 use std::str::FromStr;
+use crate::uniwig::utils::compress_counts;
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -21,6 +22,7 @@ pub mod cli;
 pub mod counting;
 pub mod reading;
 pub mod writing;
+mod utils;
 
 pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
@@ -252,7 +254,7 @@ pub fn uniwig_main(
                     if smoothsize != 0 {
                         match j {
                             0 => {
-                                let count_result = match ft {
+                                let mut count_result = match ft {
                                     Ok(FileType::BED) => start_end_counts(
                                         &chromosome.starts,
                                         current_chrom_size,
@@ -303,6 +305,7 @@ pub fn uniwig_main(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "start", output_type
                                         );
+                                        compress_counts(&mut count_result, clamped_start_position(primary_start.0, smoothsize));
                                         write_to_bed_graph_file(
                                             &count_result.0,
                                             file_name.clone(),
@@ -539,12 +542,8 @@ pub fn uniwig_main(
     bar.finish();
 
 
-
-
-
-
-
     let vec_strings = vec!["start", "core", "end"];
+    //let vec_strings = vec!["start"];
 
     let bar = ProgressBar::new(vec_strings.len() as u64);
     match output_type {
