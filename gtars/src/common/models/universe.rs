@@ -24,7 +24,7 @@ impl Universe {
         self.regions.push(region.to_owned());
     }
 
-    pub fn insert_chrom(&mut self, region: &Region) {
+    pub fn insert_source_chrom(&mut self, region: &Region) {
         if !self.source_chrom_to_id.contains_key(&region.chr) {
             let new_id = self.source_chrom_to_id.len();
             self.source_chrom_to_id.insert(region.chr.clone(), new_id as u16);

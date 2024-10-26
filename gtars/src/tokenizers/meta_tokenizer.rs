@@ -121,7 +121,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             if !universe.contains_region(&meta_region) {
                 universe.insert_token(&meta_region);
             }
-            universe.insert_chrom(&region);
+            universe.insert_source_chrom(&region);
 
             // insert a region into the appropriate list
             let ilist = intervals.entry(region.chr.clone()).or_default();
@@ -205,7 +205,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                         if !universe.contains_region(&meta_region) {
                             universe.insert_token(&meta_region);
                         }
-                        universe.insert_chrom(&region);
+                        universe.insert_source_chrom(&region);
 
                         // insert a region into the appropriate list
                         let ilist = intervals.entry(region.chr.clone()).or_default();
@@ -241,7 +241,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: UNKNOWN_END as u32,
         };
         universe.insert_token(&unk_token);
-        universe.insert_chrom(&unk_token);
+        universe.insert_source_chrom(&unk_token);
 
         // pad
         let pad_token = Region {
@@ -250,7 +250,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: PAD_END as u32,
         };
         universe.insert_token(&pad_token);
-        universe.insert_chrom(&pad_token);
+        universe.insert_source_chrom(&pad_token);
 
 
         // mask
@@ -260,7 +260,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: MASK_END as u32,
         };
         universe.insert_token(&mask_token);
-        universe.insert_chrom(&mask_token);
+        universe.insert_source_chrom(&mask_token);
 
         // eos
         let eos_token = Region {
@@ -269,7 +269,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: EOS_END as u32,
         };
         universe.insert_token(&eos_token);
-        universe.insert_chrom(&eos_token);
+        universe.insert_source_chrom(&eos_token);
 
         // bos
         let bos_token = Region {
@@ -278,7 +278,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: BOS_END as u32,
         };
         universe.insert_token(&bos_token);
-        universe.insert_chrom(&bos_token);
+        universe.insert_source_chrom(&bos_token);
 
         // cls
         let cls_token = Region {
@@ -287,7 +287,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: CLS_END as u32,
         };
         universe.insert_token(&cls_token);
-        universe.insert_chrom(&cls_token);
+        universe.insert_source_chrom(&cls_token);
 
         // sep
         let sep_token = Region {
@@ -296,7 +296,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             end: SEP_END as u32,
         };
         universe.insert_token(&sep_token);
-        universe.insert_chrom(&sep_token);
+        universe.insert_source_chrom(&sep_token);
 
         Ok(MetaTokenizer {
             config,
