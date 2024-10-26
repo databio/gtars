@@ -337,6 +337,11 @@ class TreeTokenizer:
         """
         Get the vocabulary size.
         """
+    
+    def num_cource_chroms(self) -> int:
+        """
+        Get the number of unique source chromosomes.
+        """
 
     def tokenize(self, regions: List[Region]) -> List[Region]:
         """
@@ -494,6 +499,11 @@ class MetaTokenizer:
     def vocab_size(self) -> int:
         """
         Get the vocabulary size.
+        """
+    
+    def num_cource_chroms(self) -> int:
+        """
+        Get the number of unique source chromosomes.
         """
 
     def tokenize(self, regions: List[Region]) -> List[Region]:
