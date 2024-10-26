@@ -67,6 +67,10 @@ impl PyUniverse {
         self.id_to_region.get(&id).cloned()
     }
 
+    pub fn convert_source_chrom_to_id(&self, chr: &str) -> Option<usize> {
+        self.source_chrom_to_id.get(chr).map(|id| *id as usize)
+    }
+
     pub fn len(&self) -> usize {
         self.region_to_id.len()
     }
