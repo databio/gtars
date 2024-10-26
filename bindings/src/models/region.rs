@@ -122,7 +122,7 @@ impl PyTokenizedRegionPointer {
 
     pub fn __repr__(&self) -> String {
         format!(
-            "TokenizedRegionPointer(id={}, chrom_id={}, source_start={}, source_end={})",
+            "TokenizedRegionPointer(id={}, source_chrom_id={}, source_start={}, source_end={})",
             self.id,
             self.source_chrom_id,
             self.source_start,
