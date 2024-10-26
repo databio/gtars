@@ -413,6 +413,10 @@ impl Tokenizer for MetaTokenizer {
         self.universe.len()
     }
 
+    fn num_source_chroms(&self) -> usize {
+        self.universe.num_source_chroms()
+    }
+
     fn get_universe(&self) -> &Universe {
         &self.universe
     }

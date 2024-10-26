@@ -58,7 +58,7 @@ impl Universe {
         self.region_to_id.len()
     }
 
-    pub fn num_chroms(&self) -> usize {
+    pub fn num_source_chroms(&self) -> usize {
         self.source_chrom_to_id.len()
     }
 

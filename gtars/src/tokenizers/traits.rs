@@ -37,6 +37,16 @@ pub trait Tokenizer {
     /// The size of the vocabulary as usize
     fn vocab_size(&self) -> usize;
 
+
+    ///
+    /// Get the number of unique source chroms in the universe
+    /// This is important for Atacformer which has an embedding layer for the chromosome
+    /// the query came from
+    /// 
+    /// # Returns
+    /// The number of unique source chroms
+    fn num_source_chroms(&self) -> usize;
+
     ///
     /// Get the universe of the tokenizer
     ///
