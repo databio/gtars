@@ -70,7 +70,7 @@ pub fn write_tokens_to_gtokp(
         .into_iter()
         .map(|p| TokenizedRegionPointer {
             id: p.id,
-            chrom_id: p.chrom_id,
+            source_chrom_id: p.source_chrom_id,
             source_start: p.source_start,
             source_end: p.source_end,
         })

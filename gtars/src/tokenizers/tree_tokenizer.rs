@@ -248,7 +248,7 @@ impl Tokenizer for TreeTokenizer {
                         .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
+                            source_chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })
@@ -294,7 +294,7 @@ impl Tokenizer for TreeTokenizer {
                         .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
+                            source_chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })

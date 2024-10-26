@@ -12,7 +12,7 @@ pub struct TokenizedRegionPointer {
     pub id: u32,
 
     /// The id of the chromosome in the universe
-    pub chrom_id: u16,
+    pub source_chrom_id: u16,
 
     /// The original start position of the region in the query
     pub source_start: u32,
@@ -39,7 +39,7 @@ impl TokenizedRegion<'_> {
     }
 
     pub fn chrom_id(&self) -> u16 {
-        self.pointer.chrom_id
+        self.pointer.source_chrom_id
     }
 }
 

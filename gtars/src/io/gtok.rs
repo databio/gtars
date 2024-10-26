@@ -105,7 +105,7 @@ pub fn write_tokens_to_gtokp(filename: &str, pointers: &[TokenizedRegionPointer]
         }
 
         writer
-            .write_all(&pointer.chrom_id.to_le_bytes())
+            .write_all(&pointer.source_chrom_id.to_le_bytes())
             .with_context(|| "Failed to write chrom_id bytes to file!")?;
 
         writer
@@ -194,14 +194,14 @@ pub fn read_tokens_from_gtokp(filename: &str) -> Result<Vec<TokenizedRegionPoint
             let mut buffer = [0; 2 + 4 + 4 + 4]; // u16 + u32 + u32 + u32
             while let Ok(()) = reader.read_exact(&mut buffer) {
                 let id = u16::from_le_bytes([buffer[0], buffer[1]]) as u32;
-                let chrom_id =
+                let source_chrom_id =
                     u32::from_le_bytes([buffer[2], buffer[3], buffer[4], buffer[5]]) as u16;
                 let source_start = u32::from_le_bytes([buffer[6], buffer[7], buffer[8], buffer[9]]);
                 let source_end =
                     u32::from_le_bytes([buffer[10], buffer[11], buffer[12], buffer[13]]);
                 pointers.push(TokenizedRegionPointer {
                     id,
-                    chrom_id,
+                    source_chrom_id,
                     source_start,
                     source_end,
                 });
@@ -211,7 +211,7 @@ pub fn read_tokens_from_gtokp(filename: &str) -> Result<Vec<TokenizedRegionPoint
             let mut buffer = [0; 4 + 4 + 4 + 4]; // u32 + u32 + u32 + u32
             while let Ok(()) = reader.read_exact(&mut buffer) {
                 let id = u32::from_le_bytes([buffer[0], buffer[1], buffer[2], buffer[3]]);
-                let chrom_id =
+                let source_chrom_id =
                     u32::from_le_bytes([buffer[4], buffer[5], buffer[6], buffer[7]]) as u16;
                 let source_start =
                     u32::from_le_bytes([buffer[8], buffer[9], buffer[10], buffer[11]]);
@@ -219,7 +219,7 @@ pub fn read_tokens_from_gtokp(filename: &str) -> Result<Vec<TokenizedRegionPoint
                     u32::from_le_bytes([buffer[12], buffer[13], buffer[14], buffer[15]]);
                 pointers.push(TokenizedRegionPointer {
                     id,
-                    chrom_id,
+                    source_chrom_id,
                     source_start,
                     source_end,
                 });
