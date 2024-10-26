@@ -57,6 +57,16 @@ class Universe:
         :return: The region corresponding to the ID, or None if the ID is not found.
         """
         return self.id_to_region.get(id)
+    
+    def convert_source_chrom_to_id(self, chrom: str) -> int:
+        """
+        Convert a source chromosome to its corresponding ID.
+
+        :param chrom: The source chromosome name.
+
+        :return: The ID of the source chromosome, or None if the source chromosome is not found.
+        """
+
 
     def __len__(self) -> int:
         """
@@ -338,7 +348,7 @@ class TreeTokenizer:
         Get the vocabulary size.
         """
     
-    def num_cource_chroms(self) -> int:
+    def num_source_chroms(self) -> int:
         """
         Get the number of unique source chromosomes.
         """
@@ -501,7 +511,7 @@ class MetaTokenizer:
         Get the vocabulary size.
         """
     
-    def num_cource_chroms(self) -> int:
+    def num_source_chroms(self) -> int:
         """
         Get the number of unique source chromosomes.
         """

@@ -111,6 +111,11 @@ impl PyTreeTokenizer {
     }
 
     #[getter]
+    pub fn num_source_chroms(&self) -> usize {
+        self.tokenizer.num_source_chroms()
+    }
+
+    #[getter]
     pub fn universe(&self) -> PyUniverse {
         self.tokenizer.universe.clone().into()
     }
