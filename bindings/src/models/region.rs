@@ -106,7 +106,7 @@ impl PyTokenizedRegionPointer {
     }
 
     #[getter]
-    pub fn chrom_id(&self) -> usize {
+    pub fn source_chrom_id(&self) -> usize {
         self.source_chrom_id as usize
     }
 
@@ -203,6 +203,11 @@ impl PyTokenizedRegion {
     }
 
     #[getter]
+    pub fn source_chrom_id(&self) -> Result<u16> {
+        Ok(self.pointer.source_chrom_id)
+    }
+    
+    #[getter]
     pub fn source_start(&self) -> Result<u32> {
         Ok(self.pointer.source_start)
     }
@@ -210,11 +215,6 @@ impl PyTokenizedRegion {
     #[getter]
     pub fn source_end(&self) -> Result<u32> {
         Ok(self.pointer.source_end)
-    }
-
-    #[getter]
-    pub fn chrom_id(&self) -> Result<u16> {
-        Ok(self.pointer.source_chrom_id)
     }
 
     #[getter]

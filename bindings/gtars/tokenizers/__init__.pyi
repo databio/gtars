@@ -1,5 +1,7 @@
 from typing import List, Tuple, Iterator
 
+from ..models import TokenizedRegionPointer, Region, RegionSet
+
 class Universe:
     """
     A Universe object represents a set of regions.
@@ -149,6 +151,42 @@ class TokenizedRegion:
         """
         Convert the tokenized region back to the original region.
         """
+    
+    @property
+    def source_chrom_id(self) -> int:
+        """
+        Get the source chromosome ID.
+
+        :return: The source chromosome ID.
+        """
+        return self.pointer.source_chrom_id
+
+    @property
+    def source_start(self) -> int:
+        """
+        Get the source start position.
+
+        :return: The source start position.
+        """
+        return self.pointer.source_start
+
+    @property
+    def source_end(self) -> int:
+        """
+        Get the source end position.
+
+        :return: The source end position.
+        """
+        return self.pointer.source_end
+
+    @property
+    def pointer(self) -> 'TokenizedRegionPointer':
+        """
+        Get the pointer to the tokenized region.
+
+        :return: The pointer to the tokenized region.
+        """
+        return self.pointer
     
     def __repr__(self) -> str: ...
 
