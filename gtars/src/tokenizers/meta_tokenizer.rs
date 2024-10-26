@@ -467,7 +467,7 @@ impl Tokenizer for MetaTokenizer {
                         .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
+                            chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })
@@ -513,7 +513,7 @@ impl Tokenizer for MetaTokenizer {
                         .into_iter()
                         .map(|id| TokenizedRegionPointer {
                             id,
-                            chrom_id: self.universe.convert_chrom_to_id(&region.chr).unwrap(),
+                            chrom_id: self.universe.convert_source_chrom_to_id(&region.chr).unwrap(),
                             source_start: region.start,
                             source_end: region.end,
                         })

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -13,7 +13,7 @@ pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
     pub id_to_region: HashMap<u32, Region>,
-    pub chrom_to_id: HashMap<String, u16>,
+    pub source_chrom_to_id: HashMap<String, u16>,
 }
 
 impl Universe {
@@ -25,9 +25,9 @@ impl Universe {
     }
 
     pub fn insert_chrom(&mut self, region: &Region) {
-        if !self.chrom_to_id.contains_key(&region.chr) {
-            let new_id = self.chrom_to_id.len();
-            self.chrom_to_id.insert(region.chr.clone(), new_id as u16);
+        if !self.source_chrom_to_id.contains_key(&region.chr) {
+            let new_id = self.source_chrom_to_id.len();
+            self.source_chrom_to_id.insert(region.chr.clone(), new_id as u16);
         }
     }
 
@@ -50,8 +50,8 @@ impl Universe {
         self.id_to_region.get(&id).cloned()
     }
 
-    pub fn convert_chrom_to_id(&self, chr: &str) -> Option<u16> {
-        self.chrom_to_id.get(chr).copied()
+    pub fn convert_source_chrom_to_id(&self, chr: &str) -> Option<u16> {
+        self.source_chrom_to_id.get(chr).copied()
     }
 
     pub fn len(&self) -> usize {
@@ -59,7 +59,7 @@ impl Universe {
     }
 
     pub fn num_chroms(&self) -> usize {
-        self.chrom_to_id.len()
+        self.source_chrom_to_id.len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -80,15 +80,10 @@ impl From<Vec<Region>> for Universe {
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);
 
-        let mut chroms: HashSet<String> = HashSet::new();
-        for region in regions.iter() {
-            chroms.insert(region.chr.clone());
-        }
-
         let mut current_chrom_id = 0_u16;
-        let mut chrom_to_id: HashMap<String, u16> = HashMap::new();
-        for chrom in chroms {
-            chrom_to_id.entry(chrom).or_insert_with(|| {
+        let mut source_chrom_to_id: HashMap<String, u16> = HashMap::new();
+        for region in regions.iter() {
+            source_chrom_to_id.entry(region.chr.clone()).or_insert_with(|| {
                 let old_id = current_chrom_id;
                 current_chrom_id += 1;
                 old_id
@@ -99,7 +94,7 @@ impl From<Vec<Region>> for Universe {
             regions,
             region_to_id,
             id_to_region,
-            chrom_to_id,
+            source_chrom_to_id,
         }
     }
 }
@@ -114,15 +109,10 @@ impl TryFrom<&Path> for Universe {
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);
 
-        let mut chroms: HashSet<String> = HashSet::new();
-        for region in regions.iter() {
-            chroms.insert(region.chr.clone());
-        }
-
         let mut current_chrom_id = 0_u16;
-        let mut chrom_to_id: HashMap<String, u16> = HashMap::new();
-        for chrom in chroms {
-            chrom_to_id.entry(chrom).or_insert_with(|| {
+        let mut source_chrom_to_id: HashMap<String, u16> = HashMap::new();
+        for region in regions.iter() {
+            source_chrom_to_id.entry(region.chr.clone()).or_insert_with(|| {
                 let old_id = current_chrom_id;
                 current_chrom_id += 1;
                 old_id
@@ -133,7 +123,7 @@ impl TryFrom<&Path> for Universe {
             regions,
             region_to_id,
             id_to_region,
-            chrom_to_id,
+            source_chrom_to_id,
         })
     }
 }
