@@ -532,6 +532,10 @@ pub fn uniwig_main(
 
             println!("Do nothing for bam right now");
 
+            // Read sequences in chunks, do counts, send to bigTools via streamer.
+            // Check that bam is sorted? Can noodles do that ahead of time? Error if not sorted.
+            // Check for associated .bai file, if it does not exist create it
+
 
                 },
 
