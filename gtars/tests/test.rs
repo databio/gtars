@@ -21,7 +21,7 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 
 #[fixture]
 fn path_to_small_bam_file() -> &'static str {
-    "/home/drc/Downloads/bam files for rust test/test1_chr22.bam" //todo change back to relative to test folder
+    "tests/data/test_chr22_small.bam"
 }
 
 #[fixture]
@@ -73,7 +73,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bed_file, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,read_bam_header,
+        parse_bed_file, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
     };
 
     use gtars::uniwig::writing::write_bw_files;
@@ -343,7 +343,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_process_bam(path_to_small_bam_file: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_process_bam(
+        path_to_small_bam_file: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
@@ -356,7 +358,6 @@ mod tests {
         //let bwfileheader_path = path.into_os_string().into_string().unwrap();
         //let bwfileheader = bwfileheader_path.as_str();
         let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
-
 
         let smoothsize: i32 = 1;
         let output_type = "bedgraph";
@@ -378,11 +379,10 @@ mod tests {
             stepsize,
             zoom,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
 
         Ok(())
     }
-
 
     #[rstest]
     fn test_run_uniwig_main_wig_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {

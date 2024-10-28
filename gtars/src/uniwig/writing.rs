@@ -144,19 +144,15 @@ pub fn write_to_bed_graph_file(
 
     let mut buf = BufWriter::new(file);
 
-    for i in 0..n_index{
-            writeln!(
-                &mut buf,
-                "{}\t{}\t{}\t{}",
-                chromname,
-                count_info.0[i],
-                count_info.1[i],
-                count_info.2[i]
-            )
-            .unwrap();
+    for i in 0..n_index {
+        writeln!(
+            &mut buf,
+            "{}\t{}\t{}\t{}",
+            chromname, count_info.0[i], count_info.1[i], count_info.2[i]
+        )
+        .unwrap();
     }
     buf.flush().unwrap();
-
 }
 
 /// Converts uniwig generated bedGraphs to bigWig files

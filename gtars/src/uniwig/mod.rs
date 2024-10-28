@@ -8,21 +8,23 @@ use std::error::Error;
 use std::io::{BufWriter, Write};
 
 use crate::uniwig::counting::{core_counts, start_end_counts};
-use crate::uniwig::reading::{get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec};
+use crate::uniwig::reading::{
+    get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
+};
+use crate::uniwig::utils::compress_counts;
 use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
 use std::str::FromStr;
-use crate::uniwig::utils::compress_counts;
 // use noodles::sam as sam;
 //use bstr::BString;
 
 pub mod cli;
 pub mod counting;
 pub mod reading;
-pub mod writing;
 mod utils;
+pub mod writing;
 
 pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
@@ -231,8 +233,8 @@ pub fn uniwig_main(
                 match ft {
                     Ok(FileType::BAM) => {
                         get_seq_reads_bam(chromosome, filepath);
-                    },
-                    _ => {},
+                    }
+                    _ => {}
                 };
 
                 let primary_start = chromosome.starts[0].clone();
@@ -303,7 +305,11 @@ pub fn uniwig_main(
                                             "{}{}_{}.{}",
                                             bwfileheader, chrom_name, "start", output_type
                                         );
-                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut count_result, clamped_start_position(primary_start.0, smoothsize));
+                                        let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
+                                            compress_counts(
+                                                &mut count_result,
+                                                clamped_start_position(primary_start.0, smoothsize),
+                                            );
                                         write_to_bed_graph_file(
                                             &count_info,
                                             file_name.clone(),
@@ -383,14 +389,17 @@ pub fn uniwig_main(
                                             bwfileheader, chrom_name, "end", output_type
                                         );
 
-                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut count_result, clamped_start_position(primary_end.0, smoothsize));
+                                        let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
+                                            compress_counts(
+                                                &mut count_result,
+                                                clamped_start_position(primary_end.0, smoothsize),
+                                            );
                                         write_to_bed_graph_file(
                                             &count_info,
                                             file_name.clone(),
                                             chrom_name.clone(),
                                             stepsize,
                                         );
-
                                     }
                                     "wig" => {
                                         let file_name = format!(
@@ -477,14 +486,14 @@ pub fn uniwig_main(
                                             bwfileheader, chrom_name, "core", output_type
                                         );
 
-                                        let count_info:(Vec<u32>, Vec<u32>, Vec<u32>)  = compress_counts(&mut core_results, primary_start.0);
+                                        let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
+                                            compress_counts(&mut core_results, primary_start.0);
                                         write_to_bed_graph_file(
                                             &count_info,
                                             file_name.clone(),
                                             chrom_name.clone(),
                                             stepsize,
                                         );
-
                                     }
                                     "wig" => {
                                         let file_name = format!(
@@ -542,7 +551,6 @@ pub fn uniwig_main(
 
     bar.finish();
 
-
     let vec_strings = vec!["start", "core", "end"];
     //let vec_strings = vec!["start"];
 
@@ -573,8 +581,6 @@ pub fn uniwig_main(
 
     Ok(())
 }
-
-
 
 fn fixed_core_wiggle_bam(
     _p0: &Vec<(i32, i32)>,

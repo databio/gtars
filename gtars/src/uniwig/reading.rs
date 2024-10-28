@@ -266,7 +266,6 @@ pub fn read_chromosome_sizes(
 }
 
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
-
     let mut reader = bam::io::reader::Builder.build_from_path(filepath).unwrap();
     let header = reader.read_header();
 
@@ -316,7 +315,9 @@ pub fn get_seq_reads_bam(chromosome: &mut Chromosome, filepath: &str) {
     let raw_region = String::from(chromosome.chrom.clone());
     //let raw_region = String::from("chr1");
 
-    let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(src).unwrap();
+    let mut reader = bam::io::indexed_reader::Builder::default()
+        .build_from_path(src)
+        .unwrap();
     let header = reader.read_header().unwrap();
 
     let records: Box<dyn Iterator<Item = io::Result<bam::Record>>> = if raw_region == UNMAPPED {
@@ -341,12 +342,13 @@ pub fn get_seq_reads_bam(chromosome: &mut Chromosome, filepath: &str) {
         let end = end_position.get();
         chromosome.starts.push((start as i32, default_score));
         chromosome.ends.push((end as i32, default_score));
-
     }
 
     chromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
     chromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
-
-    println!("Finished reading seq for chrom: {}",chromosome.chrom.clone() );
+    println!(
+        "Finished reading seq for chrom: {}",
+        chromosome.chrom.clone()
+    );
 }
