@@ -1,3 +1,6 @@
+use crate::uniwig::{Chromosome, FileType};
+use crate::uniwig::reading::{read_bed_vec, read_narrow_peak_vec};
+
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
     count_results: &mut (Vec<u32>, Vec<i32>),
@@ -41,4 +44,53 @@ pub fn compress_counts(
     // println!("Final Counts:{:?}", final_counts);
 
     (final_starts, final_ends, final_counts)
+}
+
+pub fn get_final_chromosomes(ft: &Result<FileType, String>, filepath: &str, chrom_sizes: &std::collections::HashMap<String, u32>,score:bool) -> Vec<Chromosome>{
+
+    let chromosomes: Vec<Chromosome> = match ft {
+        Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::NARROWPEAK) => {
+            if score {
+                println!("FileType is NarrowPeak and Score = True...Counting based on Score");
+                read_narrow_peak_vec(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+            } else {
+                read_bed_vec(filepath)
+            }
+        }
+        _ => read_bed_vec(filepath),
+    };
+
+    let num_chromosomes = chromosomes.len();
+
+    println!("PreProcessing each chromosome...");
+    let mut final_chromosomes: Vec<Chromosome> = Vec::with_capacity(num_chromosomes);
+    for chromosome in chromosomes.iter() {
+        if chromosome.starts.len() != chromosome.ends.len() {
+            break;
+        }
+
+        // Check if there is an available chrom size, if not exclude it from our final list
+        let _current_chrom_size = match chrom_sizes.get(&chromosome.chrom) {
+            Some(size) => *size as i32, // Dereference to get the i32 value
+            None => {
+                continue; // Or handle the error differently
+            }
+        };
+
+        final_chromosomes.push(chromosome.clone())
+    }
+
+    println!(
+        "Initial chroms: {}  vs Final chroms: {}",
+        chromosomes.len(),
+        final_chromosomes.len()
+    );
+    if chromosomes.len() != final_chromosomes.len() {
+        println!("Some chromosomes were not found in chrom.sizes file and will be skipped...")
+    }
+
+    final_chromosomes
+
+
 }
