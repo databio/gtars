@@ -42,6 +42,13 @@ enum FileType {
     NARROWPEAK,
 }
 
+#[derive(Debug)]
+enum OutSelection {
+    STARTS,
+    ENDS,
+    CORE,
+}
+
 impl FromStr for FileType {
     type Err = String;
 
@@ -548,7 +555,7 @@ pub fn uniwig_main(
                 "bw" | "bigWig" => {
                     println!("Writing bigWig files");
 
-                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool)
+                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize)
                 }
                 &_ => Ok({})
             }
@@ -565,7 +572,7 @@ pub fn uniwig_main(
     Ok(())
 }
 
-fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool) -> Result<(), Box<dyn Error>> {
+fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
 
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
@@ -581,37 +588,79 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
             .par_iter()
             .for_each(|chromosome_string: &String| {
 
+                let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+
                 let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
                 let header = reader.read_header().unwrap();
 
-                let region = chromosome_string.parse().unwrap();
+                let region = chromosome_string.parse().unwrap(); // can this be coordinate?
 
 
                 match reader.query(&header, &region).map(Box::new){
                     Err(_) => println!("Region not found in bam file, skipping region {}", region),
 
                     Ok(records) => {
-                        for result in reader.records() {
+                        for result in records {
+                            println!("Region found in bam file: {}", region);
+                            // let record = result.unwrap();
+                            // let flags = record.flags();
+                            // let start = record.alignment_start().unwrap().unwrap();
+                            // let mate_start = record.mate_alignment_start().unwrap().unwrap();
+                            // let end = record.alignment_end().unwrap().unwrap();
+                            // let name = record.name().unwrap();
+                            // let seq_id = record.reference_sequence_id().unwrap().unwrap();
+                            // let data_iter = record.data();
+                            // //let _ = record.
+                            // println!("flags= {:?}", flags);
+                            // println!("start = {:?}", start);
+                            // println!("mate_start = {:?}", mate_start);
+                            // println!("end = {:?}", end);
+                            // println!("name = {:?}", name);
+                            // println!("seq_id = {:?}", seq_id);
+                            //
+                            // for data in data_iter.iter() {
+                            //     println!("data= {:?}", data.unwrap());
+                            // }
                             let record = result.unwrap();
                             let flags = record.flags();
-                            let start = record.alignment_start().unwrap().unwrap();
-                            let mate_start = record.mate_alignment_start().unwrap().unwrap();
-                            let end = record.alignment_end().unwrap().unwrap();
-                            let name = record.name().unwrap();
-                            let seq_id = record.reference_sequence_id().unwrap().unwrap();
-                            let data_iter = record.data();
-                            //let _ = record.
-                            println!("flags= {:?}", flags);
-                            println!("start = {:?}", start);
-                            println!("mate_start = {:?}", mate_start);
-                            println!("end = {:?}", end);
-                            println!("name = {:?}", name);
-                            println!("seq_id = {:?}", seq_id);
+                            //TODO Determine position shift via what flags are set
+                            let start_position = record.alignment_start().unwrap().unwrap();
+                            let start = start_position.get();
+                            let end_position = record.alignment_end().unwrap().unwrap();
+                            let end = end_position.get();
 
-                            for data in data_iter.iter() {
-                                println!("data= {:?}", data.unwrap());
+                            //MATCH J
+                            // J=0
+                            for selection in out_selection_vec.iter() {
+
+                                match selection {
+
+                                    OutSelection::STARTS =>{
+
+
+                                    }
+
+                                    OutSelection::ENDS =>{
+
+
+                                    }
+
+                                    OutSelection::CORE =>{
+
+
+                                    }
+                                    _ => panic!("Unexpected value: {:?}", selection), // Handle unexpected values
+
+
+                                }
+
+
+
+
                             }
-                            break;
+
+
+
                         }
 
                     },
