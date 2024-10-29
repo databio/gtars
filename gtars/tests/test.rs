@@ -45,6 +45,11 @@ fn path_to_dummy_chromsizes() -> &'static str {
 }
 
 #[fixture]
+fn path_to_dummy_narrowpeak() -> &'static str {
+    "tests/data/dummy.narrowPeak"
+}
+
+#[fixture]
 fn path_to_start_wig_output() -> &'static str {
     "tests/data/out/_start.wig"
 }
@@ -763,4 +768,46 @@ mod tests {
             }
         }
     }
+
+    #[rstest]
+    fn test_process_narrowpeak(path_to_dummy_narrowpeak: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let combinedbedpath = path_to_dummy_narrowpeak;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        //let bwfileheader = bwfileheader_path.as_str();
+        let bwfileheader = "/home/drc/Downloads/uniwig_narrowpeak_testing/results_rstest/"; //todo change back to non local example
+
+
+        let smoothsize: i32 = 1;
+        let output_type = "bw";
+        let filetype = "narrowpeak";
+        let num_threads = 2;
+        let score = true;
+        let stepsize = 1;
+        let zoom = 2;
+
+        uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+        )
+            .expect("Uniwig main failed!");
+
+        Ok(())
+    }
+
 }
