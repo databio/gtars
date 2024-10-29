@@ -360,9 +360,9 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
-        //let bwfileheader = bwfileheader_path.as_str();
-        let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+        //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
 
         let smoothsize: i32 = 1;
         let output_type = "bedgraph";
@@ -780,9 +780,9 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
-        //let bwfileheader = bwfileheader_path.as_str();
-        let bwfileheader = "/home/drc/Downloads/uniwig_narrowpeak_testing/results_rstest/"; //todo change back to non local example
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+        //let bwfileheader = "/home/drc/Downloads/uniwig_narrowpeak_testing/results_rstest/"; //todo change back to non local example
 
 
         let smoothsize: i32 = 1;
