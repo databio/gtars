@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use clap::ArgMatches;
 
 use indicatif::ProgressBar;
@@ -17,6 +18,10 @@ use crate::uniwig::writing::{
     write_to_wig_file,
 };
 use std::str::FromStr;
+use noodles::bam;
+use rayon::ThreadPool;
+use std::ops::Deref;
+use noodles::sam::alignment::Record;
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -196,12 +201,6 @@ pub fn uniwig_main(
                     .par_iter_mut()
                     .for_each(|chromosome: &mut Chromosome| {
                         bar.inc(1);
-                        match ft {
-                            Ok(FileType::BAM) => {
-                                get_seq_reads_bam(chromosome, filepath);
-                            }
-                            _ => {}
-                        };
 
                         let primary_start = chromosome.starts[0].clone();
                         let primary_end = chromosome.ends[0].clone();
@@ -529,15 +528,31 @@ pub fn uniwig_main(
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
-
-            println!("Do nothing for bam right now");
+            if chromsizerefpath == filepath {
+                panic!("Must provide a valid chrom.sizes file for processing bam files. Provided file: {}", chromsizerefpath);
+            }
 
             // Read sequences in chunks, do counts, send to bigTools via streamer.
             // Check that bam is sorted? Can noodles do that ahead of time? Error if not sorted.
             // Check for associated .bai file, if it does not exist create it
+            //print!("Writing to CLI");
+            // let handle = &std::io::stdout();
+            // let mut buf = BufWriter::new(handle);
+            // for count in &count_result.0 {
+            //     writeln!(buf, "{}", count)
+            //         .expect("failed to write line");
+            // }
+            // buf.flush().unwrap();
 
+            match og_output_type {
+                "bw" | "bigWig" => {
+                    println!("Writing bigWig files");
 
-                },
+                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool)
+                }
+                &_ => Ok({})
+            }
+        }?,
 
         _ => {
             panic!("Unknown File Type provided");
@@ -548,4 +563,70 @@ pub fn uniwig_main(
     println!("FINISHED");
 
     Ok(())
+}
+
+fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool) -> Result<(), Box<dyn Error>> {
+    println!("Begin Process bam");
+
+    let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
+    let header = reader.read_header()?;
+
+    let mut list_of_valid_chromosomes:Vec<String>  = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
+
+
+    // RAYON issues
+    // error[E0277]: `(dyn noodles_csi::binning_index::BinningIndex + 'static)` cannot be sent between threads safely if i read from one header in parallel
+    pool.install(|| {
+        list_of_valid_chromosomes
+            .par_iter()
+            .for_each(|chromosome_string: &String| {
+
+                let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
+                let header = reader.read_header().unwrap();
+
+                let region = chromosome_string.parse().unwrap();
+
+
+                match reader.query(&header, &region).map(Box::new){
+                    Err(_) => println!("Region not found in bam file, skipping region {}", region),
+
+                    Ok(records) => {
+                        for result in reader.records() {
+                            let record = result.unwrap();
+                            let flags = record.flags();
+                            let start = record.alignment_start().unwrap().unwrap();
+                            let mate_start = record.mate_alignment_start().unwrap().unwrap();
+                            let end = record.alignment_end().unwrap().unwrap();
+                            let name = record.name().unwrap();
+                            let seq_id = record.reference_sequence_id().unwrap().unwrap();
+                            let data_iter = record.data();
+                            //let _ = record.
+                            println!("flags= {:?}", flags);
+                            println!("start = {:?}", start);
+                            println!("mate_start = {:?}", mate_start);
+                            println!("end = {:?}", end);
+                            println!("name = {:?}", name);
+                            println!("seq_id = {:?}", seq_id);
+
+                            for data in data_iter.iter() {
+                                println!("data= {:?}", data.unwrap());
+                            }
+                            break;
+                        }
+
+                    },
+
+                }
+
+
+            })
+    });
+
+
+
+
+    Ok(())
+
+
+
 }

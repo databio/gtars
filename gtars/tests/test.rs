@@ -365,7 +365,7 @@ mod tests {
         //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
 
         let smoothsize: i32 = 1;
-        let output_type = "bedgraph";
+        let output_type = "bw";
         let filetype = "bam";
         let num_threads = 2;
         let score = false;

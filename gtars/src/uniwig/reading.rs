@@ -85,6 +85,18 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     println!("Reading Bed file complete.");
 
+    // println!("Here are chrom starts");
+    //
+    // for start in chromosome.starts.iter(){
+    //     println!("{}",start.0);
+    // }
+    //
+    // println!("Here are chrom ends");
+    //
+    // for end in chromosome.ends.iter(){
+    //     println!("{}",end.0);
+    // }
+
     chromosome_vec
 }
 
@@ -163,6 +175,19 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec.push(npchromosome.clone());
 
     println!("Reading narrowPeak file complete.");
+
+    // println!("Here are chrom starts");
+    //
+    // for start in npchromosome.starts.iter(){
+    //     println!("{}",start.0);
+    // }
+    //
+    // println!("Here are chrom ends");
+    //
+    // for end in npchromosome.ends.iter(){
+    //     println!("{}",end.0);
+    // }
+
 
     chromosome_vec
 }
