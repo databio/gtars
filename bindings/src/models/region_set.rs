@@ -100,6 +100,21 @@ impl PyTokenizedRegionSet {
     }
 
     #[getter]
+    pub fn source_chrom_ids(&self) -> Result<Vec<u16>> {
+        Ok(self.pointers.iter().map(|p| p.source_chrom_id).collect::<Vec<u16>>())
+    }
+
+    #[getter]
+    pub fn source_starts(&self) -> Result<Vec<u32>> {
+        Ok(self.pointers.iter().map(|p| p.source_start).collect::<Vec<u32>>())
+    }
+
+    #[getter]
+    pub fn source_ends(&self) -> Result<Vec<u32>> {
+        Ok(self.pointers.iter().map(|p| p.source_end).collect::<Vec<u32>>())
+    }
+
+    #[getter]
     pub fn pointers(&self) -> Result<Vec<PyTokenizedRegionPointer>> {
         Ok(self.pointers.clone())
     }
