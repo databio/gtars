@@ -5,7 +5,7 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-
+use std::fs::{create_dir_all, OpenOptions};
 use std::io::{BufWriter, Write};
 
 use crate::uniwig::counting::{core_counts, fixed_start_end_counts_bam, start_end_counts};
@@ -551,16 +551,16 @@ pub fn uniwig_main(
             //         .expect("failed to write line");
             // }
             // buf.flush().unwrap();
-
-            match og_output_type {
-                "bw" | "bigWig" => {
-                    println!("Writing bigWig files");
-
-                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed)
-                }
-                &_ => Ok({})
-            }
-        }?,
+            process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed, output_type);
+            // match og_output_type {
+            //     "bw" | "bigWig" => {
+            //         println!("Writing bigWig files");
+            //
+            //         process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed)
+            //     }
+            //     &_ => Ok({})
+            // }
+        },
 
         _ => {
             panic!("Unknown File Type provided");
@@ -573,7 +573,7 @@ pub fn uniwig_main(
     Ok(())
 }
 
-fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32, fixed: bool) -> Result<(), Box<dyn Error>> {
+fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32, fixed: bool, output_type: &str) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
 
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
@@ -581,9 +581,6 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
 
     let mut list_of_valid_chromosomes:Vec<String>  = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
 
-
-    // RAYON issues
-    // error[E0277]: `(dyn noodles_csi::binning_index::BinningIndex + 'static)` cannot be sent between threads safely if i read from one header in parallel
     pool.install(|| {
         list_of_valid_chromosomes
             .par_iter()
@@ -611,7 +608,26 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                                         match fixed {
 
                                             true => {
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                                                println!("Counting starts");
+                                                //todo matching output type here might be redundandt if we need to do it anyway later for file writing...
+                                                // match output_type {
+                                                //
+                                                //     "wig" => {
+                                                //         //DETERMINE HEADER
+                                                //         // can't do this
+                                                //         //let iter = records.copied().peekable();
+                                                //
+                                                //     }
+                                                //
+                                                //     _ =>{println!("Unknown output type");
+                                                //
+                                                //     }
+                                                //
+                                                //
+                                                // }
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start");
+
+                                                //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
 
                                             }
                                             _ => {println!("Variable step not implemented")}
@@ -630,7 +646,9 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                                         match fixed {
 
                                             true => {
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                                                println!("Counting ends");
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end");
+                                                //println!("Variable step not implemented")
 
                                             }
                                             _ => {println!("Variable step not implemented")}
@@ -645,7 +663,8 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                                         match fixed {
 
                                             true => {
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                                                //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                                                println!("CORE NOT IMPLEMENTED")
 
                                             }
                                             _ => {println!("Variable step not implemented")}

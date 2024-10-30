@@ -1,4 +1,5 @@
-
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{BufWriter, Write};
 use noodles::sam::alignment::Record;
 use noodles::bam;
 use noodles::bam::io::Reader;
@@ -258,6 +259,10 @@ pub fn fixed_start_end_counts_bam(
     chrom_size: i32,
     smoothsize: i32,
     stepsize: i32,
+    output_type: &str,
+    chromosome_name: &String,
+    bwfileheader: &str,
+    out_sel: &str,
 ) -> (Vec<u32>, Vec<i32>) {
     //let vin_iter = starts_vector.iter();
 
@@ -278,9 +283,21 @@ pub fn fixed_start_end_counts_bam(
 
     let first_record = records.next().unwrap().unwrap();
 
-    adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
+    let mut adjusted_start_site: i32 = match out_sel {
+        "start" => { first_record.alignment_start().unwrap().unwrap().get() as i32}
+        "end" => { first_record.alignment_end().unwrap().unwrap().get() as i32}
+        _ => {panic!("unknown output selection must be either 'start', 'end', 'core'")}
+
+
+    };
+
+    //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
 
     adjusted_start_site = adjusted_start_site - smoothsize;
+
+    //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
+    let file = set_up_file_output(output_type, adjusted_start_site,chromosome_name, bwfileheader,stepsize, out_sel);
+    let mut buf = BufWriter::new(file);
 
     current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -296,7 +313,16 @@ pub fn fixed_start_end_counts_bam(
     }
 
     for coord in records {
-        coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
+
+        let mut coordinate_value: i32 = match out_sel {
+            "start" => { coord.unwrap().alignment_start().unwrap().unwrap().get() as i32}
+            "end" => { coord.unwrap().alignment_end().unwrap().unwrap().get() as i32}
+            _ => {panic!("unknown output selection must be either 'start', 'end', 'core'")}
+
+
+        };
+
+       // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
         adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
@@ -336,7 +362,8 @@ pub fn fixed_start_end_counts_bam(
 
             if coordinate_position % stepsize == 0 {
                 // Step size defaults to 1, so report every value
-                v_coord_counts.push(count as u32);
+                //v_coord_counts.push(count as u32);
+                writeln!(&mut buf, "{}", count).unwrap();
                 v_coordinate_positions.push(coordinate_position);
             }
 
@@ -368,13 +395,54 @@ pub fn fixed_start_end_counts_bam(
 
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
-            v_coord_counts.push(count as u32);
+            //v_coord_counts.push(count as u32);
+            writeln!(&mut buf, "{}", count).unwrap();
             v_coordinate_positions.push(coordinate_position);
         }
 
         coordinate_position = coordinate_position + 1;
     }
 
+    buf.flush().unwrap();
     println!("FInished with fixed_start_end_counts_bam");
     (v_coord_counts, v_coordinate_positions)
+}
+
+fn set_up_file_output(output_type: &str, adjusted_start_site: i32,chromosome_name: &String, bwfileheader:&str, stepsize:i32, out_sel:&str) -> File {
+
+
+    // SET UP FILE BASED ON NAME
+    let filename = format!(
+        "{}{}_{}.{}",
+        bwfileheader, chromosome_name, out_sel, output_type
+    );
+    let path = std::path::Path::new(&filename).parent().unwrap();
+    let _ = create_dir_all(path);
+    //
+    let mut file = OpenOptions::new()
+        .create(true) // Create the file if it doesn't exist
+        .append(true) // Append data to the existing file if it does exist
+        .open(filename)
+        .unwrap();
+
+
+    match  output_type {
+
+        "wig" => {
+
+            let wig_header = "fixedStep chrom=".to_string()
+                + chromosome_name.as_str()
+                + " "+out_sel+"="
+                + adjusted_start_site.to_string().as_str()
+                + " step="
+                + stepsize.to_string().as_str();
+            file.write_all(wig_header.as_ref()).unwrap();
+            file.write_all(b"\n").unwrap();
+        }
+        _ => {panic!("output type not recognized during file set up for writing!")}
+
+    }
+
+    file
+
 }
