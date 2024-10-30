@@ -8,7 +8,7 @@ use std::error::Error;
 
 use std::io::{BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, start_end_counts};
+use crate::uniwig::counting::{core_counts, fixed_start_end_counts_bam, start_end_counts};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -164,6 +164,7 @@ pub fn uniwig_main(
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
+    let fixed = true;
 
     let og_output_type = output_type; // need this later for conversion
     let mut output_type = output_type;
@@ -555,7 +556,7 @@ pub fn uniwig_main(
                 "bw" | "bigWig" => {
                     println!("Writing bigWig files");
 
-                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize)
+                    process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed)
                 }
                 &_ => Ok({})
             }
@@ -572,7 +573,7 @@ pub fn uniwig_main(
     Ok(())
 }
 
-fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32) -> Result<(), Box<dyn Error>> {
+fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32, fixed: bool) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
 
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
@@ -594,59 +595,63 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                 let header = reader.read_header().unwrap();
 
                 let region = chromosome_string.parse().unwrap(); // can this be coordinate?
-
+                let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
                 match reader.query(&header, &region).map(Box::new){
                     Err(_) => println!("Region not found in bam file, skipping region {}", region),
 
-                    Ok(records) => {
-                        for result in records {
-                            println!("Region found in bam file: {}", region);
-                            // let record = result.unwrap();
-                            // let flags = record.flags();
-                            // let start = record.alignment_start().unwrap().unwrap();
-                            // let mate_start = record.mate_alignment_start().unwrap().unwrap();
-                            // let end = record.alignment_end().unwrap().unwrap();
-                            // let name = record.name().unwrap();
-                            // let seq_id = record.reference_sequence_id().unwrap().unwrap();
-                            // let data_iter = record.data();
-                            // //let _ = record.
-                            // println!("flags= {:?}", flags);
-                            // println!("start = {:?}", start);
-                            // println!("mate_start = {:?}", mate_start);
-                            // println!("end = {:?}", end);
-                            // println!("name = {:?}", name);
-                            // println!("seq_id = {:?}", seq_id);
-                            //
-                            // for data in data_iter.iter() {
-                            //     println!("data= {:?}", data.unwrap());
-                            // }
-                            let record = result.unwrap();
-                            let flags = record.flags();
-                            //TODO Determine position shift via what flags are set
-                            let start_position = record.alignment_start().unwrap().unwrap();
-                            let start = start_position.get();
-                            let end_position = record.alignment_end().unwrap().unwrap();
-                            let end = end_position.get();
+                    Ok(mut records) => {
 
-                            //MATCH J
-                            // J=0
                             for selection in out_selection_vec.iter() {
 
                                 match selection {
 
                                     OutSelection::STARTS =>{
 
+                                        match fixed {
+
+                                            true => {
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+
+                                            }
+                                            _ => {println!("Variable step not implemented")}
+
+
+                                        }
+
+
+
+
 
                                     }
 
                                     OutSelection::ENDS =>{
+                                        //TODO
+                                        match fixed {
 
+                                            true => {
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+
+                                            }
+                                            _ => {println!("Variable step not implemented")}
+
+
+                                        }
 
                                     }
 
                                     OutSelection::CORE =>{
+                                        //TODO
+                                        match fixed {
 
+                                            true => {
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+
+                                            }
+                                            _ => {println!("Variable step not implemented")}
+
+
+                                        }
 
                                     }
                                     _ => panic!("Unexpected value: {:?}", selection), // Handle unexpected values
@@ -654,14 +659,7 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
 
                                 }
 
-
-
-
                             }
-
-
-
-                        }
 
                     },
 
