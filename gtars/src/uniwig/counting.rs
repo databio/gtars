@@ -372,7 +372,22 @@ pub fn fixed_start_end_counts_bam(
             if coordinate_position % stepsize == 0 {
                 // Step size defaults to 1, so report every value
                 //v_coord_counts.push(count as u32);
-                writeln!(&mut buf, "{}", count).unwrap();
+
+                match output_type {
+                    "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
+                    "bw" | "bedgraph" =>{
+
+                        writeln!(
+                            &mut buf,
+                            "{}\t{}\t{}\t{}",
+                            chromosome_name, adjusted_start_site, current_end_site, count
+                        )
+                            .unwrap();
+
+                    }
+                    _ => {}
+                }
+
                 v_coordinate_positions.push(coordinate_position);
             }
 
@@ -405,7 +420,22 @@ pub fn fixed_start_end_counts_bam(
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
             //v_coord_counts.push(count as u32);
-            writeln!(&mut buf, "{}", count).unwrap();
+            match output_type {
+                "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
+
+                "bw" | "bedgraph" =>{
+
+                    writeln!(
+                        &mut buf,
+                        "{}\t{}\t{}\t{}",
+                        chromosome_name, adjusted_start_site, current_end_site, count
+                    )
+                    .unwrap();
+
+                }
+
+                _ => {}
+            }
             v_coordinate_positions.push(coordinate_position);
         }
 
@@ -413,7 +443,7 @@ pub fn fixed_start_end_counts_bam(
     }
 
     buf.flush().unwrap();
-    println!("FInished with fixed_start_end_counts_bam");
+    //println!("FInished with fixed_start_end_counts_bam");
     (v_coord_counts, v_coordinate_positions)
 }
 
@@ -426,6 +456,7 @@ fn set_up_file_output(
     out_sel: &str,
     std_out_sel: bool,
 ) -> Result<Box<dyn Write>, io::Error> {
+
     if !std_out_sel {
         // SET UP FILE BASED ON NAME
         let filename = format!(

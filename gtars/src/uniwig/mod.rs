@@ -21,7 +21,10 @@ use noodles::bam;
 use noodles::sam::alignment::Record;
 use rayon::ThreadPool;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::str::FromStr;
+use bigtools::utils::cli::BBIWriteArgs;
+use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -166,11 +169,7 @@ pub fn uniwig_main(
     // Set up output file names
     let fixed = true;
 
-    let og_output_type = output_type; // need this later for conversion
-    let mut output_type = output_type;
-    if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
-        output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
-    }
+
 
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
@@ -196,6 +195,13 @@ pub fn uniwig_main(
     match ft {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+            let og_output_type = output_type; // need this later for conversion
+            let mut output_type = output_type;
+
+            if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
+                output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
+            }
+
             let mut final_chromosomes = get_final_chromosomes(&ft, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
@@ -583,6 +589,7 @@ pub fn uniwig_main(
                 filepath,
                 bwfileheader,
                 chrom_sizes,
+                chromsizerefpath,
                 num_threads,
                 zoom,
                 pool,
@@ -615,6 +622,7 @@ fn process_bam(
     filepath: &str,
     bwfileheader: &str,
     chrom_sizes: HashMap<String, u32>,
+    chrom_sizes_ref_path: &str,
     num_threads: i32,
     zoom: i32,
     pool: ThreadPool,
@@ -638,8 +646,10 @@ fn process_bam(
                 let current_chrom_size =
                     *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
+                // let out_selection_vec =
+                //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
                 let out_selection_vec =
-                    vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                    vec![OutSelection::STARTS];
 
                 for selection in out_selection_vec.iter() {
                     match selection {
@@ -657,6 +667,46 @@ fn process_bam(
                                     // let first_start= first.unwrap().alignment_start().unwrap().unwrap().get();
                                     // You could get the first value and shift setting up the file headers BEFORE the counting
 
+                                    match output_type{
+                                        "bw" =>{
+
+                                            let file_name = format!("{}_{}_{}", chromosome_string,bwfileheader, "start");
+                                            let file_path = PathBuf::from(file_name);
+                                            let new_file_path = file_path.with_extension("bw");
+                                            let new_file_path = new_file_path.to_str().unwrap();
+                                            let current_arg_struct = BedGraphToBigWigArgs {
+                                                bedgraph: String::from("stdin"),
+                                                chromsizes: chrom_sizes_ref_path.to_string(),
+                                                output: new_file_path.to_string(),
+                                                parallel: "auto".to_string(),
+                                                single_pass: false,
+                                                write_args: BBIWriteArgs {
+                                                    nthreads: num_threads as usize,
+                                                    nzooms: zoom as u32,
+                                                    uncompressed: false,
+                                                    sorted: "start".to_string(),
+                                                    block_size: 256,      //default
+                                                    items_per_slot: 1024, //default
+                                                    inmemory: false,
+                                                },
+                                            };
+
+                                            let _ = bedgraphtobigwig(current_arg_struct);
+                                            fixed_start_end_counts_bam(
+                                                &mut records,
+                                                current_chrom_size,
+                                                smoothsize,
+                                                stepsize,
+                                                output_type,
+                                                chromosome_string,
+                                                bwfileheader,
+                                                "start",
+                                                true,
+                                            );
+
+                                        }
+                                        _ => {}
+                                    }
                                     fixed_start_end_counts_bam(
                                         &mut records,
                                         current_chrom_size,
