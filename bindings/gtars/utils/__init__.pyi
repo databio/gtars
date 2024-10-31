@@ -16,3 +16,12 @@ def read_tokens_from_gtok(filename: str) -> List[str]:
     :param filename: The filename of the GTOK file.
     """
     pass
+
+def remove_n_consecutive_ids(ids: List[int], n: int) -> List[int]:
+    """
+    Remove consecutive N IDs from a list of tokens.
+
+    :param int: The tokens to process.
+    :param n: The number of consecutive IDs to remove.
+    """
+    pass

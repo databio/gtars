@@ -65,9 +65,15 @@ pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
     Ok(tokens)
 }
 
+#[pyfunction]
+pub fn remove_n_consecutive_ids(ids: Vec<u32>, n: u16) -> Vec<u32> {
+    gtars::common::utils::remove_n_consecutive_ids(ids, n)
+}
+
 #[pymodule]
 pub fn utils(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(write_tokens_to_gtok))?;
     m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok))?;
+    m.add_wrapped(wrap_pyfunction!(remove_n_consecutive_ids))?;
     Ok(())
 }
