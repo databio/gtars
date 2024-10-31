@@ -157,7 +157,7 @@ impl PyTokenizedRegionSet {
         self.pointers.len()
     }
 
-    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+    pub fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
         slf
     }
 
