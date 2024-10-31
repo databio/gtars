@@ -146,3 +146,60 @@ pub fn create_interval_tree_from_universe(
 
     tree
 }
+
+///
+/// Given a list of ids (integers), this will keep track of how many
+/// times each value has been seen and will remove duplicates until
+/// N is reached. Then it will reset.
+/// 
+/// # Example
+/// Given this list and `n=3`
+/// ```no_run
+/// [1, 1, 3, 1, 4, 3, 4, 3, 1, 2, 2, 2, 3, 2, 4]
+/// ```
+/// It should return:
+/// ```no_run
+/// [1, 3, 4, 1, 2, 3, 2]
+/// ```
+/// 
+/// 
+/// # Arguments
+///    - ids: list of id values
+///    - n: total consecutive to remove
+pub fn remove_n_consecutive_ids(ids: Vec<u32>, n: u16) -> Vec<u32> {
+    let mut counts: HashMap<u32, u16> = HashMap::new();
+    let mut new_ids: Vec<u32> = vec![];
+
+    for id in ids {
+        let count = counts.entry(id).or_insert_with(|| {
+            new_ids.push(id);
+            1
+        });
+        if *count <= n {
+            *count += 1;
+        } else {
+            *count = 1;
+            new_ids.push(id);
+        }
+    }
+
+    new_ids
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[rstest]
+    fn test_remove_consecutive_n() {
+        let old = vec![1, 1, 3, 1, 4, 3, 4, 3, 1, 2, 2, 2, 3, 2, 4];
+        let target = vec![1, 3, 4, 1, 2, 3, 2];
+        let result = remove_n_consecutive_ids(old, 3);
+
+        assert_eq!(result, target);
+
+    }
+}
