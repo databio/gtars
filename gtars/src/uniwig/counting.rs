@@ -6,9 +6,11 @@ use noodles::bgzf;
 use noodles::sam::alignment::Record;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{stdout, BufRead, BufReader, BufWriter, Write};
 use bigtools::{BigWigWrite, InputSortType};
+use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
+use tokio::runtime;
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -463,7 +465,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     out_sel: &str,
     std_out_sel: bool,
     bedgraphargstruct: BedGraphToBigWigArgs,
-) -> (Vec<u32>, Vec<i32>) {
+){
     //let vin_iter = starts_vector.iter();
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
@@ -495,19 +497,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     adjusted_start_site = adjusted_start_site - smoothsize;
 
-    //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
-    // let file = set_up_file_output(
-    //     output_type,
-    //     adjusted_start_site,
-    //     chromosome_name,
-    //     bwfileheader,
-    //     stepsize,
-    //     out_sel,
-    //     std_out_sel,
-    // );
-    // let file = file.unwrap();
-
     // SET UP BW FILE WRITER HERE
+    //------------------------------------
     let chrom_map: HashMap<String, u32> = BufReader::new(File::open( bedgraphargstruct.chromsizes).unwrap())
         .lines()
         .filter(|l| match l {
@@ -530,9 +521,19 @@ pub fn fixed_start_end_counts_bam_to_bw(
     outb.options.input_sort_type = InputSortType::START;
     outb.options.block_size = bedgraphargstruct.write_args.block_size;
     outb.options.inmemory = bedgraphargstruct.write_args.inmemory;
-    // outb = Ok(Box::new(outb));
-    // outb
-    let mut buf = BufWriter::new(outb);
+    let runtime = if bedgraphargstruct.write_args.nthreads == 1 {
+        outb.options.channel_size = 0;
+        runtime::Builder::new_current_thread().build().unwrap()
+    } else {
+        runtime::Builder::new_multi_thread()
+            .worker_threads(bedgraphargstruct.write_args.nthreads)
+            .build()
+            .unwrap()
+    };
+    let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+    //------------------------------------
+    //FINISHED SETTING UP BW WRITER
+
 
     current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -598,13 +599,20 @@ pub fn fixed_start_end_counts_bam_to_bw(
                 // Step size defaults to 1, so report every value
                 //v_coord_counts.push(count as u32);
 
-                writeln!(
-                    &mut buf,
-                    "{}\t{}\t{}\t{}",
-                    chromosome_name, adjusted_start_site, current_end_site, count
-                )
-                    .unwrap();
-                v_coordinate_positions.push(coordinate_position);
+                // writeln!(
+                //     &mut buf,
+                //     "{}\t{}\t{}\t{}",
+                //     chromosome_name, adjusted_start_site, current_end_site, count
+                // )
+                //     .unwrap();
+                let stdin = std::io::stdin().lock();
+                let mut stdout = stdout().lock();
+                write!(stdout, "{}\t{}\t{}\t{}",
+                       chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
+                let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
+
+                outb.write(vals, runtime)?;
+                //v_coordinate_positions.push(coordinate_position);
             }
 
             coordinate_position = coordinate_position + 1;
@@ -636,21 +644,25 @@ pub fn fixed_start_end_counts_bam_to_bw(
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
             //v_coord_counts.push(count as u32);
-            writeln!(
-                &mut buf,
-                "{}\t{}\t{}\t{}",
-                chromosome_name, adjusted_start_site, current_end_site, count
-            )
-                .unwrap();
-            v_coordinate_positions.push(coordinate_position);
+            let stdin = std::io::stdin().lock();
+            let mut stdout = stdout().lock();
+
+            write!(stdout, "{}\t{}\t{}\t{}",
+                   chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
+            let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
+
+            outb.write(vals, runtime)?;
+
+
+            //v_coordinate_positions.push(coordinate_position);
         }
 
         coordinate_position = coordinate_position + 1;
     }
 
-    buf.flush().unwrap();
+    let _ = stdout.flush();
     //println!("FInished with fixed_start_end_counts_bam");
-    (v_coord_counts, v_coordinate_positions)
+    //(v_coord_counts, v_coordinate_positions)
 }
 
 fn set_up_file_output(
