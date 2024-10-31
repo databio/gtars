@@ -600,7 +600,12 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                                             Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                             Ok(mut records) => {
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start");
+
+                                                // let first = records.next().unwrap();
+                                                // let first_start= first.unwrap().alignment_start().unwrap().unwrap().get();
+                                                // You could get the first value and shift setting up the file headers BEFORE the counting
+
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start", false);
 
 
                                             }
@@ -615,7 +620,7 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
 
                                             Ok(mut records) => {
 
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end");
+                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end", false);
 
                                             }
                                         }

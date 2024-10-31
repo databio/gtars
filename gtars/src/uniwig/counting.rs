@@ -1,4 +1,5 @@
 use std::fs::{create_dir_all, File, OpenOptions};
+use std::io;
 use std::io::{BufWriter, Write};
 use noodles::sam::alignment::Record;
 use noodles::bam;
@@ -263,6 +264,7 @@ pub fn fixed_start_end_counts_bam(
     chromosome_name: &String,
     bwfileheader: &str,
     out_sel: &str,
+    std_out_sel: bool,
 ) -> (Vec<u32>, Vec<i32>) {
     //let vin_iter = starts_vector.iter();
 
@@ -296,7 +298,8 @@ pub fn fixed_start_end_counts_bam(
     adjusted_start_site = adjusted_start_site - smoothsize;
 
     //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
-    let file = set_up_file_output(output_type, adjusted_start_site,chromosome_name, bwfileheader,stepsize, out_sel);
+    let file = set_up_file_output(output_type, adjusted_start_site,chromosome_name, bwfileheader,stepsize, out_sel, std_out_sel);
+    let file = file.unwrap();
     let mut buf = BufWriter::new(file);
 
     current_end_site = adjusted_start_site;
@@ -408,9 +411,9 @@ pub fn fixed_start_end_counts_bam(
     (v_coord_counts, v_coordinate_positions)
 }
 
-fn set_up_file_output(output_type: &str, adjusted_start_site: i32,chromosome_name: &String, bwfileheader:&str, stepsize:i32, out_sel:&str) -> File {
+fn set_up_file_output(output_type: &str, adjusted_start_site: i32,chromosome_name: &String, bwfileheader:&str, stepsize:i32, out_sel:&str, std_out_sel: bool) -> Result<Box<dyn Write>, io::Error> {
 
-
+if !std_out_sel {
     // SET UP FILE BASED ON NAME
     let filename = format!(
         "{}{}_{}.{}",
@@ -426,23 +429,25 @@ fn set_up_file_output(output_type: &str, adjusted_start_site: i32,chromosome_nam
         .unwrap();
 
 
-    match  output_type {
-
+    match output_type {
         "wig" => {
-
             let wig_header = "fixedStep chrom=".to_string()
                 + chromosome_name.as_str()
-                + " "+out_sel+"="
+                + " " + out_sel + "="
                 + adjusted_start_site.to_string().as_str()
                 + " step="
                 + stepsize.to_string().as_str();
             file.write_all(wig_header.as_ref()).unwrap();
             file.write_all(b"\n").unwrap();
         }
-        _ => {panic!("output type not recognized during file set up for writing!")}
-
+        _ => { panic!("output type not recognized during file set up for writing!") }
     }
 
-    file
+    Ok(Box::new(file))
+
+}else{
+    Ok(Box::new(io::stdout()))
+    // write to std_out, this will be useful for sending input to bigtools to create bw files
+}
 
 }
