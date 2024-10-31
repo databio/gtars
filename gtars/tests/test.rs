@@ -770,7 +770,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_process_narrowpeak(path_to_dummy_narrowpeak: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_process_narrowpeak(
+        path_to_dummy_narrowpeak: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
@@ -783,7 +785,6 @@ mod tests {
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
         //let bwfileheader = "/home/drc/Downloads/uniwig_narrowpeak_testing/results_rstest/"; //todo change back to non local example
-
 
         let smoothsize: i32 = 1;
         let output_type = "bw";
@@ -805,9 +806,8 @@ mod tests {
             stepsize,
             zoom,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
 
         Ok(())
     }
-
 }

@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use clap::ArgMatches;
+use std::collections::HashMap;
 
 use indicatif::ProgressBar;
 
@@ -17,11 +17,11 @@ use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
-use std::str::FromStr;
 use noodles::bam;
+use noodles::sam::alignment::Record;
 use rayon::ThreadPool;
 use std::ops::Deref;
-use noodles::sam::alignment::Record;
+use std::str::FromStr;
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -193,13 +193,10 @@ pub fn uniwig_main(
         }
     };
 
-
-
     match ft {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
-
-            let mut final_chromosomes = get_final_chromosomes(&ft, filepath, &chrom_sizes,score);
+            let mut final_chromosomes = get_final_chromosomes(&ft, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
@@ -213,7 +210,8 @@ pub fn uniwig_main(
                         let primary_start = chromosome.starts[0].clone();
                         let primary_end = chromosome.ends[0].clone();
 
-                        let current_chrom_size = *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+                        let current_chrom_size =
+                            *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
                         let chrom_name = chromosome.chrom.clone();
 
                         // Iterate 3 times to output the three different files.
@@ -263,7 +261,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_start.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                 );
                                             }
@@ -275,7 +276,10 @@ pub fn uniwig_main(
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
                                                     compress_counts(
                                                         &mut count_result,
-                                                        clamped_start_position(primary_start.0, smoothsize),
+                                                        clamped_start_position(
+                                                            primary_start.0,
+                                                            smoothsize,
+                                                        ),
                                                     );
                                                 write_to_bed_graph_file(
                                                     &count_info,
@@ -296,7 +300,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_start.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[0].clone(),
                                                 );
@@ -311,7 +318,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_start.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[0].clone(),
                                                 );
@@ -353,7 +363,10 @@ pub fn uniwig_main(
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
                                                     compress_counts(
                                                         &mut count_result,
-                                                        clamped_start_position(primary_end.0, smoothsize),
+                                                        clamped_start_position(
+                                                            primary_end.0,
+                                                            smoothsize,
+                                                        ),
                                                     );
                                                 write_to_bed_graph_file(
                                                     &count_info,
@@ -371,7 +384,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_end.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_end.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                 );
                                             }
@@ -387,7 +403,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_start.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
                                                 );
@@ -402,7 +421,10 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, smoothsize),
+                                                    clamped_start_position(
+                                                        primary_start.0,
+                                                        smoothsize,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
                                                 );
@@ -442,7 +464,10 @@ pub fn uniwig_main(
                                                 );
 
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
-                                                    compress_counts(&mut core_results, primary_start.0);
+                                                    compress_counts(
+                                                        &mut core_results,
+                                                        primary_start.0,
+                                                    );
                                                 write_to_bed_graph_file(
                                                     &count_info,
                                                     file_name.clone(),
@@ -516,7 +541,12 @@ pub fn uniwig_main(
 
                     for location in vec_strings.iter() {
                         bar.inc(1);
-                        write_combined_files(*location, output_type, bwfileheader, &final_chromosomes);
+                        write_combined_files(
+                            *location,
+                            output_type,
+                            bwfileheader,
+                            &final_chromosomes,
+                        );
                     }
                 }
                 _ => {}
@@ -531,8 +561,6 @@ pub fn uniwig_main(
 
                 _ => {}
             }
-
-
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
@@ -551,7 +579,18 @@ pub fn uniwig_main(
             //         .expect("failed to write line");
             // }
             // buf.flush().unwrap();
-            let _ = process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed, output_type);
+            let _ = process_bam(
+                filepath,
+                bwfileheader,
+                chrom_sizes,
+                num_threads,
+                zoom,
+                pool,
+                smoothsize,
+                stepsize,
+                fixed,
+                output_type,
+            );
             // match og_output_type {
             //     "bw" | "bigWig" => {
             //         println!("Writing bigWig files");
@@ -560,88 +599,114 @@ pub fn uniwig_main(
             //     }
             //     &_ => Ok({})
             // }
-        },
+        }
 
         _ => {
             panic!("Unknown File Type provided");
-        },
+        }
     };
-
 
     println!("FINISHED");
 
     Ok(())
 }
 
-fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, u32>, num_threads: i32, zoom: i32, pool: ThreadPool, smoothsize: i32, stepsize: i32, fixed: bool, output_type: &str) -> Result<(), Box<dyn Error>> {
+fn process_bam(
+    filepath: &str,
+    bwfileheader: &str,
+    chrom_sizes: HashMap<String, u32>,
+    num_threads: i32,
+    zoom: i32,
+    pool: ThreadPool,
+    smoothsize: i32,
+    stepsize: i32,
+    fixed: bool,
+    output_type: &str,
+) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
 
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
     let header = reader.read_header()?;
 
-    let list_of_valid_chromosomes:Vec<String>  = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
+    let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
 
     pool.install(|| {
         list_of_valid_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
                 let region = chromosome_string.parse().unwrap(); // can this be coordinate?
-                let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
+                let current_chrom_size =
+                    *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-                let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                let out_selection_vec =
+                    vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
 
-                            for selection in out_selection_vec.iter() {
-                                match selection {
-                                    OutSelection::STARTS => {
-                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
-                                        let header = reader.read_header().unwrap();
+                for selection in out_selection_vec.iter() {
+                    match selection {
+                        OutSelection::STARTS => {
+                            let mut reader = bam::io::indexed_reader::Builder::default()
+                                .build_from_path(filepath)
+                                .unwrap();
+                            let header = reader.read_header().unwrap();
 
-                                        match reader.query(&header, &region).map(Box::new){
-                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+                            match reader.query(&header, &region).map(Box::new) {
+                                Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
-                                            Ok(mut records) => {
+                                Ok(mut records) => {
+                                    // let first = records.next().unwrap();
+                                    // let first_start= first.unwrap().alignment_start().unwrap().unwrap().get();
+                                    // You could get the first value and shift setting up the file headers BEFORE the counting
 
-                                                // let first = records.next().unwrap();
-                                                // let first_start= first.unwrap().alignment_start().unwrap().unwrap().get();
-                                                // You could get the first value and shift setting up the file headers BEFORE the counting
-
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start", false);
-
-
-                                            }
-                                        }
-
-                                    }
-                                    OutSelection::ENDS => {
-                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
-                                        let header = reader.read_header().unwrap();
-                                        match reader.query(&header, &region).map(Box::new){
-                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
-
-                                            Ok(mut records) => {
-
-                                                fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end", false);
-
-                                            }
-                                        }
-
-
-                                    }
-                                    OutSelection::CORE => {
-                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
-                                        let header = reader.read_header().unwrap();
-                                        match reader.query(&header, &region).map(Box::new){
-                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
-
-                                            Ok(mut records) => {
-
-
-                                            }
-                                        }
-
-                                    }
+                                    fixed_start_end_counts_bam(
+                                        &mut records,
+                                        current_chrom_size,
+                                        smoothsize,
+                                        stepsize,
+                                        output_type,
+                                        chromosome_string,
+                                        bwfileheader,
+                                        "start",
+                                        false,
+                                    );
                                 }
                             }
+                        }
+                        OutSelection::ENDS => {
+                            let mut reader = bam::io::indexed_reader::Builder::default()
+                                .build_from_path(filepath)
+                                .unwrap();
+                            let header = reader.read_header().unwrap();
+                            match reader.query(&header, &region).map(Box::new) {
+                                Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+
+                                Ok(mut records) => {
+                                    fixed_start_end_counts_bam(
+                                        &mut records,
+                                        current_chrom_size,
+                                        smoothsize,
+                                        stepsize,
+                                        output_type,
+                                        chromosome_string,
+                                        bwfileheader,
+                                        "end",
+                                        false,
+                                    );
+                                }
+                            }
+                        }
+                        OutSelection::CORE => {
+                            let mut reader = bam::io::indexed_reader::Builder::default()
+                                .build_from_path(filepath)
+                                .unwrap();
+                            let header = reader.read_header().unwrap();
+                            match reader.query(&header, &region).map(Box::new) {
+                                Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+
+                                Ok(mut records) => {}
+                            }
+                        }
+                    }
+                }
 
                 // let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
                 // let header = reader.read_header().unwrap();
@@ -738,14 +803,8 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
                 //     },
                 //
                 // }
-
-
             })
     });
 
-
     Ok(())
-
-
-
 }

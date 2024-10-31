@@ -1,11 +1,11 @@
+use noodles::bam;
+use noodles::bam::io::reader::Query;
+use noodles::bam::io::Reader;
+use noodles::bgzf;
+use noodles::sam::alignment::Record;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{BufWriter, Write};
-use noodles::sam::alignment::Record;
-use noodles::bam;
-use noodles::bam::io::Reader;
-use noodles::bam::io::reader::Query;
-use noodles::bgzf;
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -252,7 +252,6 @@ pub fn core_counts(
     (v_coord_counts, v_coordinate_positions)
 }
 
-
 ///Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
 /// Primarily for use to count sequence reads in bam files.
 pub fn fixed_start_end_counts_bam(
@@ -286,11 +285,11 @@ pub fn fixed_start_end_counts_bam(
     let first_record = records.next().unwrap().unwrap();
 
     let mut adjusted_start_site: i32 = match out_sel {
-        "start" => { first_record.alignment_start().unwrap().unwrap().get() as i32}
-        "end" => { first_record.alignment_end().unwrap().unwrap().get() as i32}
-        _ => {panic!("unknown output selection must be either 'start', 'end', 'core'")}
-
-
+        "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
+        "end" => first_record.alignment_end().unwrap().unwrap().get() as i32,
+        _ => {
+            panic!("unknown output selection must be either 'start', 'end', 'core'")
+        }
     };
 
     //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
@@ -298,7 +297,15 @@ pub fn fixed_start_end_counts_bam(
     adjusted_start_site = adjusted_start_site - smoothsize;
 
     //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
-    let file = set_up_file_output(output_type, adjusted_start_site,chromosome_name, bwfileheader,stepsize, out_sel, std_out_sel);
+    let file = set_up_file_output(
+        output_type,
+        adjusted_start_site,
+        chromosome_name,
+        bwfileheader,
+        stepsize,
+        out_sel,
+        std_out_sel,
+    );
     let file = file.unwrap();
     let mut buf = BufWriter::new(file);
 
@@ -316,16 +323,15 @@ pub fn fixed_start_end_counts_bam(
     }
 
     for coord in records {
-
         let mut coordinate_value: i32 = match out_sel {
-            "start" => { coord.unwrap().alignment_start().unwrap().unwrap().get() as i32}
-            "end" => { coord.unwrap().alignment_end().unwrap().unwrap().get() as i32}
-            _ => {panic!("unknown output selection must be either 'start', 'end', 'core'")}
-
-
+            "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
+            "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
+            _ => {
+                panic!("unknown output selection must be either 'start', 'end', 'core'")
+            }
         };
 
-       // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
+        // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
         adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
@@ -377,7 +383,7 @@ pub fn fixed_start_end_counts_bam(
     }
 
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -411,43 +417,51 @@ pub fn fixed_start_end_counts_bam(
     (v_coord_counts, v_coordinate_positions)
 }
 
-fn set_up_file_output(output_type: &str, adjusted_start_site: i32,chromosome_name: &String, bwfileheader:&str, stepsize:i32, out_sel:&str, std_out_sel: bool) -> Result<Box<dyn Write>, io::Error> {
+fn set_up_file_output(
+    output_type: &str,
+    adjusted_start_site: i32,
+    chromosome_name: &String,
+    bwfileheader: &str,
+    stepsize: i32,
+    out_sel: &str,
+    std_out_sel: bool,
+) -> Result<Box<dyn Write>, io::Error> {
+    if !std_out_sel {
+        // SET UP FILE BASED ON NAME
+        let filename = format!(
+            "{}{}_{}.{}",
+            bwfileheader, chromosome_name, out_sel, output_type
+        );
+        let path = std::path::Path::new(&filename).parent().unwrap();
+        let _ = create_dir_all(path);
+        //
+        let mut file = OpenOptions::new()
+            .create(true) // Create the file if it doesn't exist
+            .append(true) // Append data to the existing file if it does exist
+            .open(filename)
+            .unwrap();
 
-if !std_out_sel {
-    // SET UP FILE BASED ON NAME
-    let filename = format!(
-        "{}{}_{}.{}",
-        bwfileheader, chromosome_name, out_sel, output_type
-    );
-    let path = std::path::Path::new(&filename).parent().unwrap();
-    let _ = create_dir_all(path);
-    //
-    let mut file = OpenOptions::new()
-        .create(true) // Create the file if it doesn't exist
-        .append(true) // Append data to the existing file if it does exist
-        .open(filename)
-        .unwrap();
-
-
-    match output_type {
-        "wig" => {
-            let wig_header = "fixedStep chrom=".to_string()
-                + chromosome_name.as_str()
-                + " " + out_sel + "="
-                + adjusted_start_site.to_string().as_str()
-                + " step="
-                + stepsize.to_string().as_str();
-            file.write_all(wig_header.as_ref()).unwrap();
-            file.write_all(b"\n").unwrap();
+        match output_type {
+            "wig" => {
+                let wig_header = "fixedStep chrom=".to_string()
+                    + chromosome_name.as_str()
+                    + " "
+                    + out_sel
+                    + "="
+                    + adjusted_start_site.to_string().as_str()
+                    + " step="
+                    + stepsize.to_string().as_str();
+                file.write_all(wig_header.as_ref()).unwrap();
+                file.write_all(b"\n").unwrap();
+            }
+            _ => {
+                panic!("output type not recognized during file set up for writing!")
+            }
         }
-        _ => { panic!("output type not recognized during file set up for writing!") }
+
+        Ok(Box::new(file))
+    } else {
+        Ok(Box::new(io::stdout()))
+        // write to std_out, this will be useful for sending input to bigtools to create bw files
     }
-
-    Ok(Box::new(file))
-
-}else{
-    Ok(Box::new(io::stdout()))
-    // write to std_out, this will be useful for sending input to bigtools to create bw files
-}
-
 }

@@ -188,7 +188,6 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     //     println!("{}",end.0);
     // }
 
-
     chromosome_vec
 }
 pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {

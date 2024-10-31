@@ -1,5 +1,5 @@
-use crate::uniwig::{Chromosome, FileType};
 use crate::uniwig::reading::{read_bed_vec, read_narrow_peak_vec};
+use crate::uniwig::{Chromosome, FileType};
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
@@ -46,8 +46,12 @@ pub fn compress_counts(
     (final_starts, final_ends, final_counts)
 }
 
-pub fn get_final_chromosomes(ft: &Result<FileType, String>, filepath: &str, chrom_sizes: &std::collections::HashMap<String, u32>,score:bool) -> Vec<Chromosome>{
-
+pub fn get_final_chromosomes(
+    ft: &Result<FileType, String>,
+    filepath: &str,
+    chrom_sizes: &std::collections::HashMap<String, u32>,
+    score: bool,
+) -> Vec<Chromosome> {
     let chromosomes: Vec<Chromosome> = match ft {
         Ok(FileType::BED) => read_bed_vec(filepath),
         Ok(FileType::NARROWPEAK) => {
@@ -91,6 +95,4 @@ pub fn get_final_chromosomes(ft: &Result<FileType, String>, filepath: &str, chro
     }
 
     final_chromosomes
-
-
 }
