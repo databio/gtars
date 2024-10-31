@@ -125,11 +125,29 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let (mut start, mut end) = (0, 0);
     let mut va: i32 = 0;
 
+    // create Path obj from filepath
+    let input_filepaths = if filelist.ends_with(".txt") {
+        // if txt input, read paths from file
+        let mut paths = Vec::new();
+        if let Ok(file) = File::open(filelist) {
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(path) = line {
+                    paths.push(PathBuf::from(path.trim()));
+                }
+            }
+        }
+        paths.into_iter()
+    } else {
+        // if dir input, get directory entries directly
+        fs::read_dir(filelist).unwrap().map(|entry| entry.unwrap().path())
+    };
+
     //--------------------
     // Check each file and only keep the validated BED files
     //
     // -------------------
-    for entry in fs::read_dir(filelist).unwrap() {
+    for path in input_filepaths {
         // For now only take .bed files
         if let Some(extension) = entry.as_ref().unwrap().path().extension() {
             if extension != BED_FILE_EXTENSION.trim_start_matches('.')
