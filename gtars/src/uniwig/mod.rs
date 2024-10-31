@@ -691,7 +691,7 @@ fn process_bam(
                                                 },
                                             };
 
-
+                                            let _ = bedgraphtobigwig(current_arg_struct);
                                             fixed_start_end_counts_bam(
                                                 &mut records,
                                                 current_chrom_size,
@@ -702,24 +702,22 @@ fn process_bam(
                                                 bwfileheader,
                                                 "start",
                                                 true,
-                                                current_arg_struct,
                                             );
 
                                         }
                                         _ => {}
                                     }
-                                    // fixed_start_end_counts_bam(
-                                    //     &mut records,
-                                    //     current_chrom_size,
-                                    //     smoothsize,
-                                    //     stepsize,
-                                    //     output_type,
-                                    //     chromosome_string,
-                                    //     bwfileheader,
-                                    //     "start",
-                                    //     false,
-                                    //     BedGraphToBigWigArgs
-                                    // );
+                                    fixed_start_end_counts_bam(
+                                        &mut records,
+                                        current_chrom_size,
+                                        smoothsize,
+                                        stepsize,
+                                        output_type,
+                                        chromosome_string,
+                                        bwfileheader,
+                                        "start",
+                                        false,
+                                    );
                                 }
                             }
                         }
@@ -732,17 +730,17 @@ fn process_bam(
                                 Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                 Ok(mut records) => {
-                                    // fixed_start_end_counts_bam(
-                                    //     &mut records,
-                                    //     current_chrom_size,
-                                    //     smoothsize,
-                                    //     stepsize,
-                                    //     output_type,
-                                    //     chromosome_string,
-                                    //     bwfileheader,
-                                    //     "end",
-                                    //     false,
-                                    // );
+                                    fixed_start_end_counts_bam(
+                                        &mut records,
+                                        current_chrom_size,
+                                        smoothsize,
+                                        stepsize,
+                                        output_type,
+                                        chromosome_string,
+                                        bwfileheader,
+                                        "end",
+                                        false,
+                                    );
                                 }
                             }
                         }

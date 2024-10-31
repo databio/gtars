@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bam::io::Reader;
@@ -6,11 +5,7 @@ use noodles::bgzf;
 use noodles::sam::alignment::Record;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
-use std::io::{BufRead, BufReader, BufWriter, Write};
-use bigtools::{BigWigWrite, InputSortType};
-use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
-use tokio::runtime;
+use std::io::{BufWriter, Write};
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -269,7 +264,6 @@ pub fn fixed_start_end_counts_bam(
     bwfileheader: &str,
     out_sel: &str,
     std_out_sel: bool,
-    bedgraphstruct: BedGraphToBigWigArgs,
 ) -> (Vec<u32>, Vec<i32>) {
     //let vin_iter = starts_vector.iter();
 
@@ -303,61 +297,17 @@ pub fn fixed_start_end_counts_bam(
     adjusted_start_site = adjusted_start_site - smoothsize;
 
     //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
-
-    let file = match output_type{
-
-        "wig" => {
-
-            let mut file = set_up_file_output(
-                output_type,
-                adjusted_start_site,
-                chromosome_name,
-                bwfileheader,
-                stepsize,
-                out_sel,
-                std_out_sel,
-            );
-            file = Ok(file.unwrap());
-            file
-        }
-
-        "bw" =>{
-            let chrom_map: HashMap<String, u32> = BufReader::new(File::open( bedgraphstruct.chromsizes).unwrap())
-                .lines()
-                .filter(|l| match l {
-                    Ok(s) => !s.is_empty(),
-                    _ => true,
-                })
-                .map(|l| {
-                    let words = l.expect("Split error");
-                    let mut split = words.split_whitespace();
-                    (
-                        split.next().expect("Missing chrom").to_owned(),
-                        split.next().expect("Missing size").parse::<u32>().unwrap(),
-                    )
-                })
-                .collect();
-
-            let mut outb = BigWigWrite::create_file(bedgraphstruct.bedgraph, chrom_map).unwrap();
-            outb.options.max_zooms = bedgraphstruct.write_args.nzooms;
-            outb.options.compress = !bedgraphstruct.write_args.uncompressed;
-            outb.options.input_sort_type = InputSortType::START;
-            outb.options.block_size = bedgraphstruct.write_args.block_size;
-            outb.options.inmemory = bedgraphstruct.write_args.inmemory;
-            outb = Ok(Box::new(outb));
-            outb
-
-        }
-
-        _ => {panic!("cannot create file, output file not determinable")}
-
-    };
-
+    let file = set_up_file_output(
+        output_type,
+        adjusted_start_site,
+        chromosome_name,
+        bwfileheader,
+        stepsize,
+        out_sel,
+        std_out_sel,
+    );
     let file = file.unwrap();
-
     let mut buf = BufWriter::new(file);
-
-    //let _ = bedgraphtobigwig(bedgraphstruct);
 
     current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -425,30 +375,14 @@ pub fn fixed_start_end_counts_bam(
 
                 match output_type {
                     "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
-                    "bw" =>{
+                    "bw" | "bedgraph" =>{
 
-                        let outb = file.unwrap();
-                        let runtime = if bedgraphstruct.write_args.nthreads == 1 {
-                            outb.options.channel_size = 0;
-                            runtime::Builder::new_current_thread().build().unwrap()
-                        } else {
-                            runtime::Builder::new_multi_thread()
-                                .worker_threads(bedgraphstruct.write_args.nthreads)
-                                .build()
-                                .unwrap()
-                        };
-                        let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-
-                        let stdin = std::io::stdin().lock();
-                        let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
                         writeln!(
                             &mut buf,
                             "{}\t{}\t{}\t{}",
                             chromosome_name, adjusted_start_site, current_end_site, count
                         )
                             .unwrap();
-                        outb.write(vals, runtime)?;
-
 
                     }
                     _ => {}
@@ -558,7 +492,7 @@ fn set_up_file_output(
 
         Ok(Box::new(file))
     } else {
-        Ok(Box::new(io::stdout().lock()))
+        Ok(Box::new(io::stdout()))
         // write to std_out, this will be useful for sending input to bigtools to create bw files
     }
 }
