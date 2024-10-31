@@ -533,7 +533,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
     let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
     //------------------------------------
     //FINISHED SETTING UP BW WRITER
-
+    let stdin = std::io::stdin().lock();
+    let mut stdout = stdout().lock();
 
     current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -605,13 +606,9 @@ pub fn fixed_start_end_counts_bam_to_bw(
                 //     chromosome_name, adjusted_start_site, current_end_site, count
                 // )
                 //     .unwrap();
-                let stdin = std::io::stdin().lock();
-                let mut stdout = stdout().lock();
                 write!(stdout, "{}\t{}\t{}\t{}",
                        chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
-                let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
 
-                outb.write(vals, runtime)?;
                 //v_coordinate_positions.push(coordinate_position);
             }
 
@@ -644,22 +641,18 @@ pub fn fixed_start_end_counts_bam_to_bw(
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
             //v_coord_counts.push(count as u32);
-            let stdin = std::io::stdin().lock();
-            let mut stdout = stdout().lock();
 
             write!(stdout, "{}\t{}\t{}\t{}",
                    chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
-            let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
-
-            outb.write(vals, runtime)?;
-
 
             //v_coordinate_positions.push(coordinate_position);
         }
 
         coordinate_position = coordinate_position + 1;
     }
+    let vals = BedParserStreamingIterator::from_bedgraph_file(stdin, allow_out_of_order_chroms);
 
+    outb.write(vals, runtime).unwrap();
     let _ = stdout.flush();
     //println!("FInished with fixed_start_end_counts_bam");
     //(v_coord_counts, v_coordinate_positions)
