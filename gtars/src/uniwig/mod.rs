@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, fixed_start_end_counts_bam, start_end_counts};
+use crate::uniwig::counting::{core_counts, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -691,8 +691,7 @@ fn process_bam(
                                                 },
                                             };
 
-                                            let _ = bedgraphtobigwig(current_arg_struct);
-                                            fixed_start_end_counts_bam(
+                                            fixed_start_end_counts_bam_to_bw(
                                                 &mut records,
                                                 current_chrom_size,
                                                 smoothsize,
@@ -702,22 +701,25 @@ fn process_bam(
                                                 bwfileheader,
                                                 "start",
                                                 true,
+                                                current_arg_struct
                                             );
 
                                         }
-                                        _ => {}
+                                        _ => {
+                                            fixed_start_end_counts_bam(
+                                                &mut records,
+                                                current_chrom_size,
+                                                smoothsize,
+                                                stepsize,
+                                                output_type,
+                                                chromosome_string,
+                                                bwfileheader,
+                                                "start",
+                                                false,
+                                            );
+                                        }
                                     }
-                                    fixed_start_end_counts_bam(
-                                        &mut records,
-                                        current_chrom_size,
-                                        smoothsize,
-                                        stepsize,
-                                        output_type,
-                                        chromosome_string,
-                                        bwfileheader,
-                                        "start",
-                                        false,
-                                    );
+
                                 }
                             }
                         }
@@ -730,17 +732,17 @@ fn process_bam(
                                 Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                 Ok(mut records) => {
-                                    fixed_start_end_counts_bam(
-                                        &mut records,
-                                        current_chrom_size,
-                                        smoothsize,
-                                        stepsize,
-                                        output_type,
-                                        chromosome_string,
-                                        bwfileheader,
-                                        "end",
-                                        false,
-                                    );
+                                    // fixed_start_end_counts_bam(
+                                    //     &mut records,
+                                    //     current_chrom_size,
+                                    //     smoothsize,
+                                    //     stepsize,
+                                    //     output_type,
+                                    //     chromosome_string,
+                                    //     bwfileheader,
+                                    //     "end",
+                                    //     false,
+                                    // );
                                 }
                             }
                         }

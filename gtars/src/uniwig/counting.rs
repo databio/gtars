@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bam::io::Reader;
@@ -5,7 +6,9 @@ use noodles::bgzf;
 use noodles::sam::alignment::Record;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
-use std::io::{BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Write};
+use bigtools::{BigWigWrite, InputSortType};
+use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -375,7 +378,7 @@ pub fn fixed_start_end_counts_bam(
 
                 match output_type {
                     "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
-                    "bw" | "bedgraph" =>{
+                    "bedgraph" =>{
 
                         writeln!(
                             &mut buf,
@@ -423,7 +426,7 @@ pub fn fixed_start_end_counts_bam(
             match output_type {
                 "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
 
-                "bw" | "bedgraph" =>{
+                "bedgraph" =>{
 
                     writeln!(
                         &mut buf,
@@ -436,6 +439,209 @@ pub fn fixed_start_end_counts_bam(
 
                 _ => {}
             }
+            v_coordinate_positions.push(coordinate_position);
+        }
+
+        coordinate_position = coordinate_position + 1;
+    }
+
+    buf.flush().unwrap();
+    //println!("FInished with fixed_start_end_counts_bam");
+    (v_coord_counts, v_coordinate_positions)
+}
+
+///Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
+/// Primarily for use to count sequence reads in bam files.
+pub fn fixed_start_end_counts_bam_to_bw(
+    records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
+    chrom_size: i32,
+    smoothsize: i32,
+    stepsize: i32,
+    output_type: &str,
+    chromosome_name: &String,
+    bwfileheader: &str,
+    out_sel: &str,
+    std_out_sel: bool,
+    bedgraphargstruct: BedGraphToBigWigArgs,
+) -> (Vec<u32>, Vec<i32>) {
+    //let vin_iter = starts_vector.iter();
+
+    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
+    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+
+    let mut coordinate_position = 1;
+
+    let mut count: i32 = 0;
+
+    let mut coordinate_value: i32;
+    let mut prev_coordinate_value = 0;
+
+    let mut adjusted_start_site: i32;
+    let mut current_end_site: i32;
+
+    let mut collected_end_sites: Vec<i32> = Vec::new();
+
+    let first_record = records.next().unwrap().unwrap();
+
+    let mut adjusted_start_site: i32 = match out_sel {
+        "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
+        "end" => first_record.alignment_end().unwrap().unwrap().get() as i32,
+        _ => {
+            panic!("unknown output selection must be either 'start', 'end', 'core'")
+        }
+    };
+
+    //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
+
+    adjusted_start_site = adjusted_start_site - smoothsize;
+
+    //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
+    // let file = set_up_file_output(
+    //     output_type,
+    //     adjusted_start_site,
+    //     chromosome_name,
+    //     bwfileheader,
+    //     stepsize,
+    //     out_sel,
+    //     std_out_sel,
+    // );
+    // let file = file.unwrap();
+
+    // SET UP BW FILE WRITER HERE
+    let chrom_map: HashMap<String, u32> = BufReader::new(File::open( bedgraphargstruct.chromsizes).unwrap())
+        .lines()
+        .filter(|l| match l {
+            Ok(s) => !s.is_empty(),
+            _ => true,
+        })
+        .map(|l| {
+            let words = l.expect("Split error");
+            let mut split = words.split_whitespace();
+            (
+                split.next().expect("Missing chrom").to_owned(),
+                split.next().expect("Missing size").parse::<u32>().unwrap(),
+            )
+        })
+        .collect();
+
+    let mut outb = BigWigWrite::create_file(bedgraphargstruct.bedgraph, chrom_map).unwrap();
+    outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
+    outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
+    outb.options.input_sort_type = InputSortType::START;
+    outb.options.block_size = bedgraphargstruct.write_args.block_size;
+    outb.options.inmemory = bedgraphargstruct.write_args.inmemory;
+    // outb = Ok(Box::new(outb));
+    // outb
+    let mut buf = BufWriter::new(outb);
+
+    current_end_site = adjusted_start_site;
+    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
+
+    if adjusted_start_site < 1 {
+        adjusted_start_site = 1;
+    }
+
+    while coordinate_position < adjusted_start_site {
+        // Just skip until we reach the initial adjusted start position
+        // Note that this function will not return 0s at locations before the initial start site
+        coordinate_position = coordinate_position + stepsize;
+    }
+
+    for coord in records {
+        let mut coordinate_value: i32 = match out_sel {
+            "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
+            "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
+            _ => {
+                panic!("unknown output selection must be either 'start', 'end', 'core'")
+            }
+        };
+
+        // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
+
+        adjusted_start_site = coordinate_value;
+        adjusted_start_site = coordinate_value - smoothsize;
+
+        let current_score = adjusted_start_site;
+
+        count += current_score;
+
+        if adjusted_start_site < 1 {
+            adjusted_start_site = 1;
+        }
+
+        //let current_index = index;
+
+        let mut new_end_site = adjusted_start_site;
+        new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        collected_end_sites.push(new_end_site);
+
+        if adjusted_start_site == prev_coordinate_value {
+            continue;
+        }
+
+        while coordinate_position < adjusted_start_site {
+            while current_end_site == coordinate_position {
+                count = count - current_score;
+
+                if count < 0 {
+                    count = 0;
+                }
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0;
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+            }
+
+            if coordinate_position % stepsize == 0 {
+                // Step size defaults to 1, so report every value
+                //v_coord_counts.push(count as u32);
+
+                writeln!(
+                    &mut buf,
+                    "{}\t{}\t{}\t{}",
+                    chromosome_name, adjusted_start_site, current_end_site, count
+                )
+                    .unwrap();
+                v_coordinate_positions.push(coordinate_position);
+            }
+
+            coordinate_position = coordinate_position + 1;
+        }
+
+        prev_coordinate_value = adjusted_start_site;
+    }
+
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    while coordinate_position < chrom_size {
+        // Apply a bound to push the final coordinates otherwise it will become truncated.
+
+        while current_end_site == coordinate_position {
+            let current_score = adjusted_start_site;
+            count = count - current_score;
+            if count < 0 {
+                count = 0;
+            }
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0;
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+        }
+
+        if coordinate_position % stepsize == 0 {
+            // Step size defaults to 1, so report every value
+            //v_coord_counts.push(count as u32);
+            writeln!(
+                &mut buf,
+                "{}\t{}\t{}\t{}",
+                chromosome_name, adjusted_start_site, current_end_site, count
+            )
+                .unwrap();
             v_coordinate_positions.push(coordinate_position);
         }
 
@@ -484,6 +690,8 @@ fn set_up_file_output(
                     + stepsize.to_string().as_str();
                 file.write_all(wig_header.as_ref()).unwrap();
                 file.write_all(b"\n").unwrap();
+            }
+            "bedgraph" => { // do nothing, no header needed
             }
             _ => {
                 panic!("output type not recognized during file set up for writing!")
