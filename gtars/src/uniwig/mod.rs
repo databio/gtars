@@ -551,7 +551,7 @@ pub fn uniwig_main(
             //         .expect("failed to write line");
             // }
             // buf.flush().unwrap();
-            process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed, output_type);
+            let _ = process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed, output_type);
             // match og_output_type {
             //     "bw" | "bigWig" => {
             //         println!("Writing bigWig files");
@@ -579,116 +579,164 @@ fn process_bam(filepath: &str, bwfileheader: &str, chrom_sizes: HashMap<String, 
     let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
     let header = reader.read_header()?;
 
-    let mut list_of_valid_chromosomes:Vec<String>  = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
+    let list_of_valid_chromosomes:Vec<String>  = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
 
     pool.install(|| {
         list_of_valid_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
-
-                let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-
-                let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
-                let header = reader.read_header().unwrap();
-
                 let region = chromosome_string.parse().unwrap(); // can this be coordinate?
                 let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-                match reader.query(&header, &region).map(Box::new){
-                    Err(_) => println!("Region not found in bam file, skipping region {}", region),
-
-                    Ok(mut records) => {
+                let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
 
                             for selection in out_selection_vec.iter() {
-
                                 match selection {
+                                    OutSelection::STARTS => {
+                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
+                                        let header = reader.read_header().unwrap();
 
-                                    OutSelection::STARTS =>{
+                                        match reader.query(&header, &region).map(Box::new){
+                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
-                                        match fixed {
-
-                                            true => {
-                                                println!("Counting starts");
-                                                //todo matching output type here might be redundandt if we need to do it anyway later for file writing...
-                                                // match output_type {
-                                                //
-                                                //     "wig" => {
-                                                //         //DETERMINE HEADER
-                                                //         // can't do this
-                                                //         //let iter = records.copied().peekable();
-                                                //
-                                                //     }
-                                                //
-                                                //     _ =>{println!("Unknown output type");
-                                                //
-                                                //     }
-                                                //
-                                                //
-                                                // }
+                                            Ok(mut records) => {
                                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start");
 
-                                                //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
 
                                             }
-                                            _ => {println!("Variable step not implemented")}
-
-
                                         }
 
-
-
-
-
                                     }
+                                    OutSelection::ENDS => {
+                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
+                                        let header = reader.read_header().unwrap();
+                                        match reader.query(&header, &region).map(Box::new){
+                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
-                                    OutSelection::ENDS =>{
-                                        //TODO
-                                        match fixed {
+                                            Ok(mut records) => {
 
-                                            true => {
-                                                println!("Counting ends");
                                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end");
-                                                //println!("Variable step not implemented")
 
                                             }
-                                            _ => {println!("Variable step not implemented")}
+                                        }
 
 
+                                    }
+                                    OutSelection::CORE => {
+                                        let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
+                                        let header = reader.read_header().unwrap();
+                                        match reader.query(&header, &region).map(Box::new){
+                                            Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+
+                                            Ok(mut records) => {
+
+
+                                            }
                                         }
 
                                     }
-
-                                    OutSelection::CORE =>{
-                                        //TODO
-                                        match fixed {
-
-                                            true => {
-                                                //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
-                                                println!("CORE NOT IMPLEMENTED")
-
-                                            }
-                                            _ => {println!("Variable step not implemented")}
-
-
-                                        }
-
-                                    }
-                                    _ => panic!("Unexpected value: {:?}", selection), // Handle unexpected values
-
-
                                 }
-
                             }
 
-                    },
+                // let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
+                // let header = reader.read_header().unwrap();
+                //
+                // let region = chromosome_string.parse().unwrap(); // can this be coordinate?
+                // let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-                }
+                // match reader.query(&header, &region).map(Box::new){
+                //     Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+                //
+                //     Ok(mut records) => {
+                //
+                //             for selection in out_selection_vec.iter() {
+                //
+                //                 match selection {
+                //
+                //                     OutSelection::STARTS =>{
+                //
+                //                         match fixed {
+                //
+                //                             true => {
+                //                                 println!("Counting starts");
+                //                                 //todo matching output type here might be redundandt if we need to do it anyway later for file writing...
+                //                                 // match output_type {
+                //                                 //
+                //                                 //     "wig" => {
+                //                                 //         //DETERMINE HEADER
+                //                                 //         // can't do this
+                //                                 //         //let iter = records.copied().peekable();
+                //                                 //
+                //                                 //     }
+                //                                 //
+                //                                 //     _ =>{println!("Unknown output type");
+                //                                 //
+                //                                 //     }
+                //                                 //
+                //                                 //
+                //                                 // }
+                //                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start");
+                //
+                //                                 //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                //
+                //                             }
+                //                             _ => {println!("Variable step not implemented")}
+                //
+                //
+                //                         }
+                //
+                //
+                //
+                //
+                //
+                //                     }
+                //
+                //                     OutSelection::ENDS =>{
+                //                         //TODO
+                //                         match fixed {
+                //
+                //                             true => {
+                //                                 println!("Counting ends");
+                //                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end");
+                //                                 //println!("Variable step not implemented")
+                //
+                //                             }
+                //                             _ => {println!("Variable step not implemented")}
+                //
+                //
+                //                         }
+                //
+                //                     }
+                //
+                //                     OutSelection::CORE =>{
+                //                         //TODO
+                //                         match fixed {
+                //
+                //                             true => {
+                //                                 //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
+                //                                 println!("CORE NOT IMPLEMENTED")
+                //
+                //                             }
+                //                             _ => {println!("Variable step not implemented")}
+                //
+                //
+                //                         }
+                //
+                //                     }
+                //                     _ => panic!("Unexpected value: {:?}", selection), // Handle unexpected values
+                //
+                //
+                //                 }
+                //
+                //             }
+                //
+                //     },
+                //
+                // }
 
 
             })
     });
-
-
 
 
     Ok(())
