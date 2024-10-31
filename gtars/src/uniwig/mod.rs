@@ -8,7 +8,9 @@ use std::error::Error;
 use std::fs::{create_dir_all, OpenOptions};
 use std::io::{BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts};
+use crate::uniwig::counting::{
+    core_counts, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts,
+};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -17,14 +19,14 @@ use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
+use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
+use bigtools::utils::cli::BBIWriteArgs;
 use noodles::bam;
 use noodles::sam::alignment::Record;
 use rayon::ThreadPool;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
-use bigtools::utils::cli::BBIWriteArgs;
-use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -168,8 +170,6 @@ pub fn uniwig_main(
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
     let fixed = true;
-
-
 
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
@@ -648,8 +648,7 @@ fn process_bam(
 
                 // let out_selection_vec =
                 //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-                let out_selection_vec =
-                    vec![OutSelection::STARTS];
+                let out_selection_vec = vec![OutSelection::STARTS];
 
                 for selection in out_selection_vec.iter() {
                     match selection {
@@ -667,10 +666,12 @@ fn process_bam(
                                     // let first_start= first.unwrap().alignment_start().unwrap().unwrap().get();
                                     // You could get the first value and shift setting up the file headers BEFORE the counting
 
-                                    match output_type{
-                                        "bw" =>{
-
-                                            let file_name = format!("{}_{}_{}", chromosome_string,bwfileheader, "start");
+                                    match output_type {
+                                        "bw" => {
+                                            let file_name = format!(
+                                                "{}_{}_{}",
+                                                chromosome_string, bwfileheader, "start"
+                                            );
                                             let file_path = PathBuf::from(file_name);
                                             let new_file_path = file_path.with_extension("bw");
                                             let new_file_path = new_file_path.to_str().unwrap();
@@ -701,9 +702,8 @@ fn process_bam(
                                                 bwfileheader,
                                                 "start",
                                                 true,
-                                                current_arg_struct
+                                                current_arg_struct,
                                             );
-
                                         }
                                         _ => {
                                             fixed_start_end_counts_bam(
@@ -719,7 +719,6 @@ fn process_bam(
                                             );
                                         }
                                     }
-
                                 }
                             }
                         }

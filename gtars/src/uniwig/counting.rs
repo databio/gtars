@@ -1,15 +1,15 @@
-use std::collections::HashMap;
+use bigtools::beddata::BedParserStreamingIterator;
+use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
+use bigtools::{BigWigWrite, InputSortType};
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bam::io::Reader;
 use noodles::bgzf;
 use noodles::sam::alignment::Record;
+use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{stdout, BufRead, BufReader, BufWriter, Write};
-use bigtools::{BigWigWrite, InputSortType};
-use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
 use tokio::runtime;
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
@@ -379,16 +379,16 @@ pub fn fixed_start_end_counts_bam(
                 //v_coord_counts.push(count as u32);
 
                 match output_type {
-                    "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
-                    "bedgraph" =>{
-
+                    "wig" => {
+                        writeln!(&mut buf, "{}", count).unwrap();
+                    }
+                    "bedgraph" => {
                         writeln!(
                             &mut buf,
                             "{}\t{}\t{}\t{}",
                             chromosome_name, adjusted_start_site, current_end_site, count
                         )
-                            .unwrap();
-
+                        .unwrap();
                     }
                     _ => {}
                 }
@@ -426,17 +426,17 @@ pub fn fixed_start_end_counts_bam(
             // Step size defaults to 1, so report every value
             //v_coord_counts.push(count as u32);
             match output_type {
-                "wig" => {writeln!(&mut buf, "{}", count).unwrap();}
+                "wig" => {
+                    writeln!(&mut buf, "{}", count).unwrap();
+                }
 
-                "bedgraph" =>{
-
+                "bedgraph" => {
                     writeln!(
                         &mut buf,
                         "{}\t{}\t{}\t{}",
                         chromosome_name, adjusted_start_site, current_end_site, count
                     )
                     .unwrap();
-
                 }
 
                 _ => {}
@@ -465,7 +465,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     out_sel: &str,
     std_out_sel: bool,
     bedgraphargstruct: BedGraphToBigWigArgs,
-){
+) {
     //let vin_iter = starts_vector.iter();
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
@@ -499,21 +499,22 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     // SET UP BW FILE WRITER HERE
     //------------------------------------
-    let chrom_map: HashMap<String, u32> = BufReader::new(File::open( bedgraphargstruct.chromsizes).unwrap())
-        .lines()
-        .filter(|l| match l {
-            Ok(s) => !s.is_empty(),
-            _ => true,
-        })
-        .map(|l| {
-            let words = l.expect("Split error");
-            let mut split = words.split_whitespace();
-            (
-                split.next().expect("Missing chrom").to_owned(),
-                split.next().expect("Missing size").parse::<u32>().unwrap(),
-            )
-        })
-        .collect();
+    let chrom_map: HashMap<String, u32> =
+        BufReader::new(File::open(bedgraphargstruct.chromsizes).unwrap())
+            .lines()
+            .filter(|l| match l {
+                Ok(s) => !s.is_empty(),
+                _ => true,
+            })
+            .map(|l| {
+                let words = l.expect("Split error");
+                let mut split = words.split_whitespace();
+                (
+                    split.next().expect("Missing chrom").to_owned(),
+                    split.next().expect("Missing size").parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
 
     let mut outb = BigWigWrite::create_file(bedgraphargstruct.bedgraph, chrom_map).unwrap();
     outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
@@ -606,8 +607,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
                 //     chromosome_name, adjusted_start_site, current_end_site, count
                 // )
                 //     .unwrap();
-                write!(stdout, "{}\t{}\t{}\t{}",
-                       chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
+                write!(
+                    stdout,
+                    "{}\t{}\t{}\t{}",
+                    chromosome_name, adjusted_start_site, current_end_site, count
+                )
+                .unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
 
                 //v_coordinate_positions.push(coordinate_position);
             }
@@ -619,7 +624,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     }
 
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -642,8 +647,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
             // Step size defaults to 1, so report every value
             //v_coord_counts.push(count as u32);
 
-            write!(stdout, "{}\t{}\t{}\t{}",
-                   chromosome_name, adjusted_start_site, current_end_site, count).unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
+            write!(
+                stdout,
+                "{}\t{}\t{}\t{}",
+                chromosome_name, adjusted_start_site, current_end_site, count
+            )
+            .unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
 
             //v_coordinate_positions.push(coordinate_position);
         }
@@ -667,7 +676,6 @@ fn set_up_file_output(
     out_sel: &str,
     std_out_sel: bool,
 ) -> Result<Box<dyn Write>, io::Error> {
-
     if !std_out_sel {
         // SET UP FILE BASED ON NAME
         let filename = format!(
