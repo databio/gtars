@@ -5,8 +5,8 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::{create_dir_all, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::fs::{create_dir_all, File, OpenOptions};
+use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use crate::uniwig::counting::{
     core_counts, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts,
@@ -27,6 +27,9 @@ use rayon::ThreadPool;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
+use bigtools::beddata::BedParserStreamingIterator;
+use bigtools::{BigWigWrite, InputSortType};
+use tokio::runtime;
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -675,8 +678,11 @@ fn process_bam(
                                             let file_path = PathBuf::from(file_name);
                                             let new_file_path = file_path.with_extension("bw");
                                             let new_file_path = new_file_path.to_str().unwrap();
-                                            let current_arg_struct = BedGraphToBigWigArgs {
-                                                bedgraph: String::from("stdin"),
+
+                                            let new_file_path = "/home/drc/Downloads/refactor_test_gtars/example.bw";
+
+                                            let bedgraphargstruct = BedGraphToBigWigArgs {
+                                                bedgraph: String::from("-"),
                                                 chromsizes: chrom_sizes_ref_path.to_string(),
                                                 output: new_file_path.to_string(),
                                                 parallel: "auto".to_string(),
@@ -691,19 +697,54 @@ fn process_bam(
                                                     inmemory: false,
                                                 },
                                             };
+                                            let chrom_map: HashMap<String, u32> =
+                                                BufReader::new(File::open(bedgraphargstruct.chromsizes).unwrap())
+                                                    .lines()
+                                                    .filter(|l| match l {
+                                                        Ok(s) => !s.is_empty(),
+                                                        _ => true,
+                                                    })
+                                                    .map(|l| {
+                                                        let words = l.expect("Split error");
+                                                        let mut split = words.split_whitespace();
+                                                        (
+                                                            split.next().expect("Missing chrom").to_owned(),
+                                                            split.next().expect("Missing size").parse::<u32>().unwrap(),
+                                                        )
+                                                    })
+                                                    .collect();
 
-                                            fixed_start_end_counts_bam_to_bw(
+                                            let mut outb = BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
+                                            outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
+                                            outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
+                                            outb.options.input_sort_type = InputSortType::START;
+                                            outb.options.block_size = bedgraphargstruct.write_args.block_size;
+                                            outb.options.inmemory = bedgraphargstruct.write_args.inmemory;
+                                            let runtime = if bedgraphargstruct.write_args.nthreads == 1 {
+                                                outb.options.channel_size = 0;
+                                                runtime::Builder::new_current_thread().build().unwrap()
+                                            } else {
+                                                runtime::Builder::new_multi_thread()
+                                                    .worker_threads(bedgraphargstruct.write_args.nthreads)
+                                                    .build()
+                                                    .unwrap()
+                                            };
+                                            let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+
+                                            let bedgraph_line = fixed_start_end_counts_bam_to_bw(
                                                 &mut records,
                                                 current_chrom_size,
                                                 smoothsize,
                                                 stepsize,
-                                                output_type,
                                                 chromosome_string,
                                                 bwfileheader,
                                                 "start",
                                                 true,
-                                                current_arg_struct,
                                             );
+                                            println!("after_fixed_start");
+                                            let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
+                                            outb.write(vals, runtime).unwrap();
+
                                         }
                                         _ => {
                                             fixed_start_end_counts_bam(
