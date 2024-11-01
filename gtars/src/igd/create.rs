@@ -138,6 +138,26 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             }
         }
         paths
+    } else if filelist == "-" || filelist == "stdin" {
+        // if you pass "-" assume you want to read files list from stdin
+        let stdin = std::io::stdin();
+        let locked = stdin.lock();
+        let reader = BufReader::new(locked);
+
+        let mut paths: Vec<PathBuf> = Vec::new();
+
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let path = PathBuf::from(line);
+                    paths.push(path);
+                }
+                Err(e) => {
+                    eprintln!("Error reading line: {}", e);
+                }
+            }
+        }
+        paths
     } else {
         // if dir input, get directory entries directly
         let entries = fs::read_dir(filelist).unwrap();
