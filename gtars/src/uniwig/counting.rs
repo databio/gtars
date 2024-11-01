@@ -544,92 +544,76 @@ pub fn fixed_start_end_counts_bam_to_bw(
             continue;
         }
 
-        //let single_line = format!("{}\t{}\t{}\t{}\n", chromosome_name, adjusted_start_site, current_end_site, count);
-        let single_line = format!("chr1\t{}\t{}\t2\n", adjusted_start_site, adjusted_start_site+2);
-        //let mut single_line = String::from("chr1\t1156063\t1156075\t2\n");
-        //vec_lines.push(single_line);
-        bedgraphlines.push_str(&*single_line);
-        println!("{}",bedgraphlines);
-        println!("iteration");
+        while coordinate_position < adjusted_start_site {
+            while current_end_site == coordinate_position {
+                count = count - current_score;
+
+                if count < 0 {
+                    count = 0;
+                }
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0;
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+            }
+
+            if coordinate_position % stepsize == 0 {
+                let single_line = format!("{}\t{}\t{}\t{}\n",
+                                          chromosome_name, adjusted_start_site, adjusted_start_site+1, count);
+
+                // if adjusted_start_site> current_end_site{
+                //     println!("adjusted start is greater than current end: {} vs {}", adjusted_start_site,current_end_site);
+                // } else {
+                //     bedgraphlines.push_str(&*single_line);
+                // }
+                //TODO currently has overlaps and downstream conversion is fialing.
+                bedgraphlines.push_str(&*single_line);
 
 
-        // while coordinate_position < adjusted_start_site {
-        //     while current_end_site == coordinate_position {
-        //         count = count - current_score;
-        //
-        //         if count < 0 {
-        //             count = 0;
-        //         }
-        //
-        //         if collected_end_sites.last() == None {
-        //             current_end_site = 0;
-        //         } else {
-        //             current_end_site = collected_end_sites.remove(0)
-        //         }
-        //     }
-        //
-        //     if coordinate_position % stepsize == 0 {
-        //         // Step size defaults to 1, so report every value
-        //         //v_coord_counts.push(count as u32);
-        //
-        //         // writeln!(
-        //         //     &mut buf,
-        //         //     "{}\t{}\t{}\t{}",
-        //         //     chromosome_name, adjusted_start_site, current_end_site, count
-        //         // )
-        //         //     .unwrap();
-        //         // write!(
-        //         //     stdout,
-        //         //     "{}\t{}\t{}\t{}",
-        //         //     chromosome_name, adjusted_start_site, current_end_site, count
-        //         // )
-        //         // .unwrap(); // THIS IS A FIXED STEP BEDGRAPH LINE
-        //         let single_line = format!("{}\t{}\t{}\t{}",
-        //                                   chromosome_name, adjusted_start_site, current_end_site, count);
-        //         //v_coordinate_positions.push(coordinate_position);
-        //     }
-        //
-        //     coordinate_position = coordinate_position + 1;
-        // }
-        //
-        // prev_coordinate_value = adjusted_start_site;
+            }
+
+            coordinate_position = coordinate_position + 1;
+        }
+
+        prev_coordinate_value = adjusted_start_site;
     }
+    println!("First loop done");
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    while coordinate_position < chrom_size {
+        // Apply a bound to push the final coordinates otherwise it will become truncated.
+
+        while current_end_site == coordinate_position {
+            let current_score = adjusted_start_site;
+            count = count - current_score;
+            if count < 0 {
+                count = 0;
+            }
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0;
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+        }
+
+        if coordinate_position % stepsize == 0 {
+            // Step size defaults to 1, so report every value
+            let single_line = format!("{}\t{}\t{}\t{}\n",
+                                      chromosome_name, adjusted_start_site, adjusted_start_site+1, count);
+            bedgraphlines.push_str(&*single_line);
+        }
+
+        coordinate_position = coordinate_position + 1;
+    }
+
+    println!("2nd loop done");
     let mut cursor = Cursor::new(bedgraphlines);
+
     cursor
-
-    // count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    //                    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
-    //
-    // while coordinate_position < chrom_size {
-    //     // Apply a bound to push the final coordinates otherwise it will become truncated.
-    //
-    //     while current_end_site == coordinate_position {
-    //         let current_score = adjusted_start_site;
-    //         count = count - current_score;
-    //         if count < 0 {
-    //             count = 0;
-    //         }
-    //
-    //         if collected_end_sites.last() == None {
-    //             current_end_site = 0;
-    //         } else {
-    //             current_end_site = collected_end_sites.remove(0)
-    //         }
-    //     }
-    //
-    //     if coordinate_position % stepsize == 0 {
-    //         // Step size defaults to 1, so report every value
-    //         //v_coord_counts.push(count as u32);
-    //         let single_line = format!("{}\t{}\t{}\t{}",
-    //                                   chromosome_name, adjusted_start_site, current_end_site, count);
-    //         //v_coordinate_positions.push(coordinate_position);
-    //     }
-    //
-    //     coordinate_position = coordinate_position + 1;
-    // }
-
-
-    //(v_coord_counts, v_coordinate_positions)
 }
 
 fn set_up_file_output(
