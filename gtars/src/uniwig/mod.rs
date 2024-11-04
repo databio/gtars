@@ -679,6 +679,7 @@ fn process_bam(
                                             let new_file_path = file_path.with_extension("bw");
                                             let new_file_path = new_file_path.to_str().unwrap();
 
+                                            //TODO remove local path
                                             let new_file_path = "/home/drc/Downloads/refactor_test_gtars/example.bw";
 
                                             let bedgraphargstruct = BedGraphToBigWigArgs {

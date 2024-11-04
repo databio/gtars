@@ -526,9 +526,9 @@ pub fn fixed_start_end_counts_bam_to_bw(
         adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
 
-        let current_score = adjusted_start_site;
+        //let current_score = adjusted_start_site;
 
-        count += current_score;
+        count += 1;
 
         if adjusted_start_site < 1 {
             adjusted_start_site = 1;
@@ -546,7 +546,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         while coordinate_position < adjusted_start_site {
             while current_end_site == coordinate_position {
-                count = count - current_score;
+                count = count - 1;
 
                 if count < 0 {
                     count = 0;
@@ -561,7 +561,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
             if coordinate_position % stepsize == 0 {
                 let single_line = format!("{}\t{}\t{}\t{}\n",
-                                          chromosome_name, adjusted_start_site, adjusted_start_site+1, count);
+                                          chromosome_name, coordinate_position, coordinate_position+1, count);
 
                 // if adjusted_start_site> current_end_site{
                 //     println!("adjusted start is greater than current end: {} vs {}", adjusted_start_site,current_end_site);
@@ -588,7 +588,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         while current_end_site == coordinate_position {
             let current_score = adjusted_start_site;
-            count = count - current_score;
+            count = count - 1;
             if count < 0 {
                 count = 0;
             }
@@ -603,7 +603,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
             let single_line = format!("{}\t{}\t{}\t{}\n",
-                                      chromosome_name, adjusted_start_site, adjusted_start_site+1, count);
+                                      chromosome_name, coordinate_position, coordinate_position+1, count);
             bedgraphlines.push_str(&*single_line);
         }
 
