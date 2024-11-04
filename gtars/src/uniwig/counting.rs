@@ -71,7 +71,7 @@ pub fn start_end_counts(
 
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count = count - current_score;
+                count = count - current_end_site.1;
 
                 if count < 0 {
                     count = 0;
@@ -103,8 +103,7 @@ pub fn start_end_counts(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
-            let current_score = adjusted_start_site.1;
-            count = count - current_score;
+            count = count - current_end_site.1;
             if count < 0 {
                 count = 0;
             }
@@ -191,7 +190,7 @@ pub fn core_counts(
 
         while coordinate_position < current_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count = count - current_score;
+                count = count - current_end_site.1;
                 if count < 0 {
                     count = 0;
                 }
@@ -219,8 +218,7 @@ pub fn core_counts(
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
-            let current_score = current_start_site.1;
-            count = count - current_score;
+            count = count - current_end_site.1;
             if count < 0 {
                 count = 0;
             }
