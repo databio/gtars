@@ -746,12 +746,16 @@ fn process_bam(
                                             println!("after_fixed_start");
                                             match bedgraph_line {
                                                 Ok(bedgraph_line) => {
+                                                    println!("writing vals to bw file");
 
                                                     let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
                                                     outb.write(vals, runtime).unwrap();
+                                                    println!("Done writing bw file");
                                                 }
                                                 Err(_) => {
                                                     // Error printed in previous func, do nothing here.
+                                                    println!("returned error skipping chrom: {}", chromosome_string);
+                                                    continue
                                                 }
                                             }
 
