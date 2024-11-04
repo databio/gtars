@@ -476,11 +476,13 @@ pub fn fixed_start_end_counts_bam_to_bw(
     bwfileheader: &str,
     out_sel: &str,
     std_out_sel: bool,
-) -> Result<Cursor<String>, BAMRecordError> {
+) -> Result<Cursor<Vec<u8>>, BAMRecordError> {
     //let vin_iter = starts_vector.iter();
 
     //let mut vec_lines: Vec<String> = Vec::new();
     let mut bedgraphlines = String::new();
+
+    let mut cursor = Cursor::new(Vec::new());
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -605,7 +607,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
                 //     bedgraphlines.push_str(&*single_line);
                 // }
                 //TODO currently has overlaps and downstream conversion is fialing.
-                bedgraphlines.push_str(&*single_line);
+                //bedgraphlines.push_str(&*single_line);
+                cursor.write_all(single_line.as_ref()).unwrap();
 
 
             }
@@ -640,14 +643,15 @@ pub fn fixed_start_end_counts_bam_to_bw(
             // Step size defaults to 1, so report every value
             let single_line = format!("{}\t{}\t{}\t{}\n",
                                       chromosome_name, coordinate_position, coordinate_position+1, count);
-            bedgraphlines.push_str(&*single_line);
+            //bedgraphlines.push_str(&*single_line);
+            cursor.write_all(single_line.as_ref()).unwrap();
         }
 
         coordinate_position = coordinate_position + 1;
     }
 
     println!("2nd loop done");
-    let mut cursor = Cursor::new(bedgraphlines);
+    //let mut cursor = Cursor::new(bedgraphlines);
 
     Ok(cursor)
 }
