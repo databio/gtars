@@ -21,7 +21,8 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 
 #[fixture]
 fn path_to_small_bam_file() -> &'static str {
-    "tests/data/test_chr22_small.bam"
+    //"tests/data/test_chr22_small.bam"
+    "/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam" //todo change back
 }
 
 #[fixture]

@@ -9,8 +9,21 @@ use noodles::sam::alignment::Record;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
-use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Write};
+use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
 use tokio::runtime;
+
+#[derive(Debug)]
+pub enum BAMRecordError {
+    IoError(std::io::Error),
+    NoFirstRecord,
+}
+
+impl From<std::io::Error> for BAMRecordError {
+    fn from(err: std::io::Error) -> Self {
+        BAMRecordError::IoError(err)
+    }
+}
+
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -463,7 +476,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     bwfileheader: &str,
     out_sel: &str,
     std_out_sel: bool,
-) -> Cursor<String> {
+) -> Result<Cursor<String>, BAMRecordError> {
     //let vin_iter = starts_vector.iter();
 
     //let mut vec_lines: Vec<String> = Vec::new();
@@ -484,7 +497,30 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
-    let first_record = records.next().unwrap().unwrap();
+    //let first_record = records.next().unwrap()?;
+    //let first_record = records.next().ok_or(BAMRecordError::NoFirstRecord)?.unwrap()?;
+    // let first_record_option = records.next().unwrap();
+    //
+    // let first_record = match first_record_option{
+    //     None => {BAMRecordError::NoFirstRecord}
+    //     Some(Ok(some_item)) => {some_item}
+    // };
+    let first_record_option = records.next();
+
+    let first_record = match first_record_option {
+        Some(Ok(record)) => record,  // Extract the record
+        Some(Err(err)) => {
+            // Handle the error
+            eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
+            return Err(BAMRecordError::NoFirstRecord);  // Example error handling
+        }
+        None => {
+            // Handle no records
+            eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
+            return Err(BAMRecordError::NoFirstRecord);
+        }
+    };
+
 
     let mut adjusted_start_site: i32 = match out_sel {
         "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
@@ -613,7 +649,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     println!("2nd loop done");
     let mut cursor = Cursor::new(bedgraphlines);
 
-    cursor
+    Ok(cursor)
 }
 
 fn set_up_file_output(

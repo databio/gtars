@@ -744,8 +744,17 @@ fn process_bam(
                                                 true,
                                             );
                                             println!("after_fixed_start");
-                                            let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
-                                            outb.write(vals, runtime).unwrap();
+                                            match bedgraph_line {
+                                                Ok(bedgraph_line) => {
+
+                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
+                                                    outb.write(vals, runtime).unwrap();
+                                                }
+                                                Err(_) => {
+                                                    // Error printed in previous func, do nothing here.
+                                                }
+                                            }
+
 
                                         }
                                         _ => {
