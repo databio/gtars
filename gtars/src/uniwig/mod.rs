@@ -691,7 +691,7 @@ fn process_bam(
                                                 write_args: BBIWriteArgs {
                                                     nthreads: num_threads as usize,
                                                     nzooms: zoom as u32,
-                                                    zooms: None,
+                                                    zooms:None,
                                                     uncompressed: false,
                                                     sorted: "start".to_string(),
                                                     block_size: 256,      //default
@@ -718,6 +718,9 @@ fn process_bam(
 
                                             let mut outb = BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
                                             outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
+                                            let u32_value = bedgraphargstruct.write_args.nzooms;
+                                            let option_vec_u32: Option<Vec<u32>> = Some(vec![u32_value]);
+                                            outb.options.manual_zoom_sizes = option_vec_u32;
                                             outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
                                             outb.options.input_sort_type = InputSortType::START;
                                             outb.options.block_size = bedgraphargstruct.write_args.block_size;
