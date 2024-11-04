@@ -673,14 +673,14 @@ fn process_bam(
                                         "bw" => {
                                             let file_name = format!(
                                                 "{}_{}_{}",
-                                                chromosome_string, bwfileheader, "start"
+                                                bwfileheader,chromosome_string, "start"
                                             );
                                             let file_path = PathBuf::from(file_name);
                                             let new_file_path = file_path.with_extension("bw");
                                             let new_file_path = new_file_path.to_str().unwrap();
 
-                                            //TODO remove local path
-                                            let new_file_path = "/home/drc/Downloads/refactor_test_gtars/example.bw";
+                                            //let new_file_path = "/home/drc/Downloads/refactor_test_gtars/example.bw";
+                                            //println!("new file path: {}", new_file_path);
 
                                             let bedgraphargstruct = BedGraphToBigWigArgs {
                                                 bedgraph: String::from("-"),
