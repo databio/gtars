@@ -690,6 +690,7 @@ fn process_bam(
                                                 write_args: BBIWriteArgs {
                                                     nthreads: num_threads as usize,
                                                     nzooms: zoom as u32,
+                                                    zooms: None,
                                                     uncompressed: false,
                                                     sorted: "start".to_string(),
                                                     block_size: 256,      //default
