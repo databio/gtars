@@ -660,7 +660,6 @@ fn process_bam(
                                 .build_from_path(filepath)
                                 .unwrap();
                             let header = reader.read_header().unwrap();
-
                             match reader.query(&header, &region).map(Box::new) {
                                 Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
@@ -818,101 +817,6 @@ fn process_bam(
                     }
                 }
 
-                // let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath).unwrap();
-                // let header = reader.read_header().unwrap();
-                //
-                // let region = chromosome_string.parse().unwrap(); // can this be coordinate?
-                // let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
-
-                // match reader.query(&header, &region).map(Box::new){
-                //     Err(_) =>{},//Do nothing. //println!("Region not found in bam file, skipping region {}", region),
-                //
-                //     Ok(mut records) => {
-                //
-                //             for selection in out_selection_vec.iter() {
-                //
-                //                 match selection {
-                //
-                //                     OutSelection::STARTS =>{
-                //
-                //                         match fixed {
-                //
-                //                             true => {
-                //                                 println!("Counting starts");
-                //                                 //todo matching output type here might be redundandt if we need to do it anyway later for file writing...
-                //                                 // match output_type {
-                //                                 //
-                //                                 //     "wig" => {
-                //                                 //         //DETERMINE HEADER
-                //                                 //         // can't do this
-                //                                 //         //let iter = records.copied().peekable();
-                //                                 //
-                //                                 //     }
-                //                                 //
-                //                                 //     _ =>{println!("Unknown output type");
-                //                                 //
-                //                                 //     }
-                //                                 //
-                //                                 //
-                //                                 // }
-                //                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "start");
-                //
-                //                                 //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
-                //
-                //                             }
-                //                             _ => {println!("Variable step not implemented")}
-                //
-                //
-                //                         }
-                //
-                //
-                //
-                //
-                //
-                //                     }
-                //
-                //                     OutSelection::ENDS =>{
-                //                         //TODO
-                //                         match fixed {
-                //
-                //                             true => {
-                //                                 println!("Counting ends");
-                //                                 fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize, output_type, chromosome_string, bwfileheader, "end");
-                //                                 //println!("Variable step not implemented")
-                //
-                //                             }
-                //                             _ => {println!("Variable step not implemented")}
-                //
-                //
-                //                         }
-                //
-                //                     }
-                //
-                //                     OutSelection::CORE =>{
-                //                         //TODO
-                //                         match fixed {
-                //
-                //                             true => {
-                //                                 //fixed_start_end_counts_bam(&mut records,current_chrom_size,smoothsize,stepsize);
-                //                                 println!("CORE NOT IMPLEMENTED")
-                //
-                //                             }
-                //                             _ => {println!("Variable step not implemented")}
-                //
-                //
-                //                         }
-                //
-                //                     }
-                //                     _ => panic!("Unexpected value: {:?}", selection), // Handle unexpected values
-                //
-                //
-                //                 }
-                //
-                //             }
-                //
-                //     },
-                //
-                // }
             })
     });
 
