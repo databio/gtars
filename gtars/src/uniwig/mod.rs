@@ -678,58 +678,14 @@ fn process_bam(
                                             let new_file_path = file_path.with_extension("bw");
                                             let new_file_path = new_file_path.to_str().unwrap();
 
-                                            //let new_file_path = "/home/drc/Downloads/refactor_test_gtars/example.bw";
-                                            //println!("new file path: {}", new_file_path);
+                                            let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
 
-                                            let bedgraphargstruct = BedGraphToBigWigArgs {
-                                                bedgraph: String::from("-"),
-                                                chromsizes: chrom_sizes_ref_path.to_string(),
-                                                output: new_file_path.to_string(),
-                                                parallel: "auto".to_string(),
-                                                single_pass: false,
-                                                write_args: BBIWriteArgs {
-                                                    nthreads: num_threads as usize,
-                                                    nzooms: zoom as u32,
-                                                    zooms:None,
-                                                    uncompressed: false,
-                                                    sorted: "start".to_string(),
-                                                    block_size: 256,      //default
-                                                    items_per_slot: 1024, //default
-                                                    inmemory: false,
-                                                },
-                                            };
-                                            let chrom_map: HashMap<String, u32> =
-                                                BufReader::new(File::open(bedgraphargstruct.chromsizes).unwrap())
-                                                    .lines()
-                                                    .filter(|l| match l {
-                                                        Ok(s) => !s.is_empty(),
-                                                        _ => true,
-                                                    })
-                                                    .map(|l| {
-                                                        let words = l.expect("Split error");
-                                                        let mut split = words.split_whitespace();
-                                                        (
-                                                            split.next().expect("Missing chrom").to_owned(),
-                                                            split.next().expect("Missing size").parse::<u32>().unwrap(),
-                                                        )
-                                                    })
-                                                    .collect();
-
-                                            let mut outb = BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
-                                            outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
-                                            let u32_value = bedgraphargstruct.write_args.nzooms;
-                                            let option_vec_u32: Option<Vec<u32>> = Some(vec![u32_value]);
-                                            outb.options.manual_zoom_sizes = option_vec_u32;
-                                            outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
-                                            outb.options.input_sort_type = InputSortType::START;
-                                            outb.options.block_size = bedgraphargstruct.write_args.block_size;
-                                            outb.options.inmemory = bedgraphargstruct.write_args.inmemory;
-                                            let runtime = if bedgraphargstruct.write_args.nthreads == 1 {
+                                            let runtime = if num_threads == 1 {
                                                 outb.options.channel_size = 0;
                                                 runtime::Builder::new_current_thread().build().unwrap()
                                             } else {
                                                 runtime::Builder::new_multi_thread()
-                                                    .worker_threads(bedgraphargstruct.write_args.nthreads)
+                                                    .worker_threads(num_threads as usize)
                                                     .build()
                                                     .unwrap()
                                             };
@@ -748,11 +704,11 @@ fn process_bam(
                                             println!("after_fixed_start");
                                             match bedgraph_line {
                                                 Ok(bedgraph_line) => {
-                                                    println!("writing vals to bw file");
+                                                    //println!("writing vals to bw file for {:?}", selection);
 
                                                     let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
                                                     outb.write(vals, runtime).unwrap();
-                                                    println!("Done writing bw file");
+                                                    //println!("Done writing bw file");
                                                 }
                                                 Err(_) => {
                                                     // Error printed in previous func, do nothing here.
@@ -789,17 +745,71 @@ fn process_bam(
                                 Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                 Ok(mut records) => {
-                                    // fixed_start_end_counts_bam(
-                                    //     &mut records,
-                                    //     current_chrom_size,
-                                    //     smoothsize,
-                                    //     stepsize,
-                                    //     output_type,
-                                    //     chromosome_string,
-                                    //     bwfileheader,
-                                    //     "end",
-                                    //     false,
-                                    // );
+                                    match output_type {
+                                        "bw" => {
+                                            let file_name = format!(
+                                                "{}_{}_{}",
+                                                bwfileheader,chromosome_string, "end"
+                                            );
+                                            let file_path = PathBuf::from(file_name);
+                                            let new_file_path = file_path.with_extension("bw");
+                                            let new_file_path = new_file_path.to_str().unwrap();
+
+                                            let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
+
+                                            let runtime = if num_threads == 1 {
+                                                outb.options.channel_size = 0;
+                                                runtime::Builder::new_current_thread().build().unwrap()
+                                            } else {
+                                                runtime::Builder::new_multi_thread()
+                                                    .worker_threads(num_threads as usize)
+                                                    .build()
+                                                    .unwrap()
+                                            };
+                                            let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+
+                                            let bedgraph_line = fixed_start_end_counts_bam_to_bw(
+                                                &mut records,
+                                                current_chrom_size,
+                                                smoothsize,
+                                                stepsize,
+                                                chromosome_string,
+                                                bwfileheader,
+                                                "end",
+                                                true,
+                                            );
+                                            //println!("after_fixed_start");
+                                            match bedgraph_line {
+                                                Ok(bedgraph_line) => {
+                                                    //println!("writing vals to bw file for {:?}", selection);
+
+                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
+                                                    outb.write(vals, runtime).unwrap();
+                                                    //println!("Done writing bw file");
+                                                }
+                                                Err(_) => {
+                                                    // Error printed in previous func, do nothing here.
+                                                    println!("returned error skipping chrom: {}", chromosome_string);
+                                                    continue
+                                                }
+                                            }
+
+
+                                        }
+                                        _ => {
+                                            fixed_start_end_counts_bam(
+                                                &mut records,
+                                                current_chrom_size,
+                                                smoothsize,
+                                                stepsize,
+                                                output_type,
+                                                chromosome_string,
+                                                bwfileheader,
+                                                "end",
+                                                false,
+                                            );
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -821,4 +831,56 @@ fn process_bam(
     });
 
     Ok(())
+}
+
+pub fn create_bw_writer(chrom_sizes_ref_path: &str, new_file_path: &str, num_threads: i32, zoom: i32) ->  BigWigWrite<File>{
+
+
+
+    let bedgraphargstruct = BedGraphToBigWigArgs {
+
+        bedgraph: String::from("-"),
+        chromsizes: chrom_sizes_ref_path.to_string(),
+        output: new_file_path.to_string(),
+        parallel: "auto".to_string(),
+        single_pass: false,
+        write_args: BBIWriteArgs {
+            nthreads: num_threads as usize,
+            nzooms: zoom as u32,
+            zooms:None,
+            uncompressed: false,
+            sorted: "start".to_string(),
+            block_size: 256,      //default
+            items_per_slot: 1024, //default
+            inmemory: false,
+        },
+    };
+    let chrom_map: HashMap<String, u32> =
+        BufReader::new(File::open(bedgraphargstruct.chromsizes).unwrap())
+            .lines()
+            .filter(|l| match l {
+                Ok(s) => !s.is_empty(),
+                _ => true,
+            })
+            .map(|l| {
+                let words = l.expect("Split error");
+                let mut split = words.split_whitespace();
+                (
+                    split.next().expect("Missing chrom").to_owned(),
+                    split.next().expect("Missing size").parse::<u32>().unwrap(),
+                )
+            })
+            .collect();
+
+    let mut outb:  BigWigWrite<File> = BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
+    outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
+    let u32_value = bedgraphargstruct.write_args.nzooms;
+    let option_vec_u32: Option<Vec<u32>> = Some(vec![u32_value]);
+    outb.options.manual_zoom_sizes = option_vec_u32;
+    outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
+    outb.options.input_sort_type = InputSortType::START;
+    outb.options.block_size = bedgraphargstruct.write_args.block_size;
+    outb.options.inmemory = bedgraphargstruct.write_args.inmemory;
+
+    outb
 }
