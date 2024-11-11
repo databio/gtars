@@ -27,6 +27,7 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BigWigWrite, InputSortType};
+use bigtools::utils::cli::bigwigmerge::BigWigMergeArgs;
 use tokio::runtime;
 // use noodles::sam as sam;
 //use bstr::BString;
@@ -891,6 +892,73 @@ fn process_bam(
 
             })
     });
+
+    match output_type {
+        // Must merge all individual CHRs bw files...
+        "bw" => {
+            let out_selection_vec =
+                vec!["start", "end", "core"];
+            //let out_selection_vec = vec![OutSelection::STARTS];
+
+            for selection in out_selection_vec.iter() {
+
+                let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);
+
+                let mut inputs: Vec<String> = Vec::new();
+
+                for chrom in list_of_valid_chromosomes.iter() {
+                    let file_name = format!(
+                        "{}{}_{}.{}",
+                        bwfileheader, chrom, selection, output_type
+                    );
+                    inputs.push(file_name);
+                }
+
+                let merge_args = BigWigMergeArgs{
+
+                    output: combined_bw_file_name,
+                    bigwig: inputs,
+                    list: inputs, // list vs requiring an initial arg?
+                    threshold: 0.0, //default
+                    adjust: Some(0.0), // unknown default
+                    clip: Some(0.0), // unknown default, TODO probably should NOT be 0.0
+                    max: true,
+                    output_type: Some("bigwig"),
+                    write_args: BBIWriteArgs {
+                        nthreads: num_threads as usize,
+                        nzooms: zoom as u32,
+                        zooms:None,
+                        uncompressed: false,
+                        sorted: "start".to_string(),
+                        block_size: 256,      //default
+                        items_per_slot: 1024, //default
+                        inmemory: false,
+                    },
+
+
+
+
+                };
+
+
+
+
+
+
+
+            }
+
+
+            // gather starts, ends, cores bw and merge
+
+
+        }
+
+        _ =>{
+
+        }
+
+    }
 
     Ok(())
 }
