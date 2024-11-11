@@ -647,9 +647,9 @@ fn process_bam(
                 let current_chrom_size =
                     *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-                // let out_selection_vec =
-                //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-                let out_selection_vec = vec![OutSelection::STARTS];
+                let out_selection_vec =
+                    vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                //let out_selection_vec = vec![OutSelection::STARTS];
 
                 for selection in out_selection_vec.iter() {
                     match selection {
@@ -699,7 +699,7 @@ fn process_bam(
                                                 "start",
                                                 true,
                                             );
-                                            println!("after_fixed_start");
+
                                             match bedgraph_line {
                                                 Ok(bedgraph_line) => {
                                                     //println!("writing vals to bw file for {:?}", selection);

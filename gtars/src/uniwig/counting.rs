@@ -738,7 +738,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         prev_coordinate_value = adjusted_start_site;
     }
-    println!("First loop done");
+    //println!("First loop done");
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
@@ -769,7 +769,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         coordinate_position = coordinate_position + 1;
     }
 
-    println!("2nd loop done");
+    //println!("2nd loop done");
     let mut cursor = Cursor::new(bedgraphlines);
 
     Ok(cursor)
