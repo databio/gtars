@@ -71,6 +71,7 @@ fn __init__() {}
 
 extendr_module! {
     mod gtars;
+    use io;
     fn __init__;
     fn igd_search;
 }

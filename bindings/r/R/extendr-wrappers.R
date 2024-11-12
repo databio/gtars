@@ -15,5 +15,15 @@ NULL
 #' @export
 igd_search <- function(database_path, query_path) .Call(wrap__igd_search, database_path, query_path)
 
+#' Write tokens to a gtok file
+#' @export
+#' @param filename A string representing the path to the gtok file.
+read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok, filename)
+
+#' Write tokens to a gtok file
+#' @export
+#' @param filename A string representing the path to the gtok file.
+write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
+
 
 # nolint end
