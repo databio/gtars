@@ -26,9 +26,13 @@ use std::ops::Deref;
 use std::path::PathBuf;
 use std::str::FromStr;
 use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::{BigWigWrite, InputSortType};
-use bigtools::utils::cli::bigwigmerge::BigWigMergeArgs;
+use bigtools::{BigWigRead, BigWigWrite, InputSortType};
+use bigtools::utils::cli::bigwigmerge::{bigwigmerge, get_merged_vals, MergingValues, MergingValuesError};
+use bigtools::utils::reopen::ReopenableFile;
 use tokio::runtime;
+// struct ChromGroupReadImpl {
+//     iter: Box<dyn Iterator<Item = Result<(String, u32, MergingValues), MergingValuesError>> + Send>,
+// }
 // use noodles::sam as sam;
 //use bstr::BString;
 
@@ -901,7 +905,6 @@ fn process_bam(
             //let out_selection_vec = vec![OutSelection::STARTS];
 
             for selection in out_selection_vec.iter() {
-
                 let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);
 
                 let mut inputs: Vec<String> = Vec::new();
@@ -914,40 +917,67 @@ fn process_bam(
                     inputs.push(file_name);
                 }
 
-                let merge_args = BigWigMergeArgs{
+                // let mut bigwigs: Vec<BigWigRead<ReopenableFile>> = vec![];
+                //
+                // for input in inputs {
+                //     match BigWigRead::open_file(&input) {
+                //         Ok(bw) => bigwigs.push(bw),
+                //         Err(e) => {
+                //             eprintln!("Error when opening bigwig ({}): {:?}", input, e);
+                //             return Ok(());
+                //         }
+                //     }
+                // }
 
-                    output: combined_bw_file_name,
-                    bigwig: inputs,
-                    list: inputs, // list vs requiring an initial arg?
-                    threshold: 0.0, //default
-                    adjust: Some(0.0), // unknown default
-                    clip: Some(0.0), // unknown default, TODO probably should NOT be 0.0
-                    max: true,
-                    output_type: Some("bigwig"),
-                    write_args: BBIWriteArgs {
-                        nthreads: num_threads as usize,
-                        nzooms: zoom as u32,
-                        zooms:None,
-                        uncompressed: false,
-                        sorted: "start".to_string(),
-                        block_size: 256,      //default
-                        items_per_slot: 1024, //default
-                        inmemory: false,
-                    },
-
-
-
-
-                };
-
-
-
-
-
-
-
+                // let first_bw = inputs[0].clone();
+                // inputs.remove(0);
+                // let mut vec_first_bw: Vec<String> = Vec::new();
+                // vec_first_bw.push(first_bw);
             }
 
+                // let merge_args = BigWigMergeArgs{
+                //
+                //     output: combined_bw_file_name,
+                //     bigwig: vec_first_bw,
+                //     list: inputs, // list vs requiring an initial arg?
+                //     threshold: 0.0, //default
+                //     adjust: Some(0.0), // unknown default
+                //     clip: Some(0.0), // unknown default, TODO probably should NOT be 0.0
+                //     max: true,
+                //     output_type: Some("bigwig".parse().unwrap()),
+                //     write_args: BBIWriteArgs {
+                //         nthreads: num_threads as usize,
+                //         nzooms: zoom as u32,
+                //         zooms:None,
+                //         uncompressed: false,
+                //         sorted: "start".to_string(),
+                //         block_size: 256,      //default
+                //         items_per_slot: 1024, //default
+                //         inmemory: false,
+                //     }};
+
+                //let result = bigwigmerge(merge_args);
+                //let nthreads = args.write_args.nthreads;
+                // let threshold = 0.0;
+                // let adjust = Some(0.0);
+                // let clip = Some(0.0); //TODO probably should NOT be 0.0
+                // let (iter, chrom_map) = get_merged_vals(bigwigs, 10,threshold, adjust, clip)?;
+                //
+                // let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
+                // let runtime = if num_threads == 1 {
+                //     runtime::Builder::new_current_thread().build().unwrap()
+                // } else {
+                //     runtime::Builder::new_multi_thread()
+                //         .worker_threads(num_threads as usize)
+                //         .build()
+                //         .unwrap()
+                // };
+                // let all_values = ChromGroupReadImpl {
+                //     iter: Box::new(iter),
+                // };
+                // outb.write(all_values, runtime)?;
+                //
+                // };
 
             // gather starts, ends, cores bw and merge
 
