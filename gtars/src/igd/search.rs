@@ -157,7 +157,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
     Ok(())
 }
 #[allow(unused_variables)]
-fn getOverlaps(
+pub fn getOverlaps(
     IGD: &igd_t_from_disk,
     database_path: &String,
     query_file: &String,
@@ -492,7 +492,7 @@ fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
 // }
 
 /// Given an igd path, simple give the .tsv path that is parallel to the  .igd path
-fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
+pub fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
     let igd_path = Path::new(igd_path);
     let stem = igd_path.file_stem()?;
     let mut tsv_path = igd_path.with_file_name(stem);

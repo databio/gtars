@@ -10,15 +10,10 @@
 #' @useDynLib gtars, .registration = TRUE
 NULL
 
-#' Write tokens to a gtok file
-#' @export
-#' @param filename A string representing the path to the gtok file.
-read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok, filename)
+`__init__` <- function() invisible(.Call(wrap____init__))
 
-#' Write tokens to a gtok file
 #' @export
-#' @param filename A string representing the path to the gtok file.
-write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
+igd_search <- function(database_path, query_path) .Call(wrap__igd_search, database_path, query_path)
 
 
 # nolint end
