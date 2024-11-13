@@ -12,9 +12,6 @@ NULL
 
 `__init__` <- function() invisible(.Call(wrap____init__))
 
-#' @export
-igd_search <- function(database_path, query_path) .Call(wrap__igd_search, database_path, query_path)
-
 #' Write tokens to a gtok file
 #' @export
 #' @param filename A string representing the path to the gtok file.
@@ -24,6 +21,18 @@ read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok,
 #' @export
 #' @param filename A string representing the path to the gtok file.
 write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
+
+#' Search igd with a bed file
+#' @param database_path A string representing the path to the database igd file.
+#' @param query_path A string representing the path to the query bed file.
+#' @export
+igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
+
+#' Create an IGD database from a directory of bed files
+#' @param output_path String path where the IGD database will be saved
+#' @param filelist String path to either a text file containing paths to bed files, or a directory containing bed files
+#' @param db_name String name for the database (will be used in output filenames)
+r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_create, output_path, filelist, db_name)
 
 
 # nolint end
