@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
+use std::sync::Arc;
+use std::os::unix::io::{AsRawFd, FromRawFd};
 use tokio::runtime;
 
 #[derive(Debug)]
@@ -596,14 +598,14 @@ pub fn fixed_start_end_counts_bam_to_bw(
     smoothsize: i32,
     stepsize: i32,
     chromosome_name: &String,
-    bwfileheader: &str,
     out_sel: &str,
-    std_out_sel: bool,
-) -> Result<Cursor<String>, BAMRecordError> {
+    write_fd: Arc<dyn AsRawFd + Send + Sync>,
+) -> Result<(), BAMRecordError> {
+    let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
     //let vin_iter = starts_vector.iter();
 
     //let mut vec_lines: Vec<String> = Vec::new();
-    let mut bedgraphlines = String::new();
+    //let mut bedgraphlines = String::new();
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -620,14 +622,6 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
-    //let first_record = records.next().unwrap()?;
-    //let first_record = records.next().ok_or(BAMRecordError::NoFirstRecord)?.unwrap()?;
-    // let first_record_option = records.next().unwrap();
-    //
-    // let first_record = match first_record_option{
-    //     None => {BAMRecordError::NoFirstRecord}
-    //     Some(Ok(some_item)) => {some_item}
-    // };
     let first_record_option = records.next();
 
     let first_record = match first_record_option {
@@ -653,7 +647,6 @@ pub fn fixed_start_end_counts_bam_to_bw(
         }
     };
 
-    //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
 
     adjusted_start_site = adjusted_start_site - smoothsize;
 
@@ -721,15 +714,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
             if coordinate_position % stepsize == 0 {
                 let single_line = format!("{}\t{}\t{}\t{}\n",
                                           chromosome_name, coordinate_position, coordinate_position+1, count);
-
-                // if adjusted_start_site> current_end_site{
-                //     println!("adjusted start is greater than current end: {} vs {}", adjusted_start_site,current_end_site);
-                // } else {
-                //     bedgraphlines.push_str(&*single_line);
-                // }
-                //TODO currently has overlaps and downstream conversion is fialing.
-                bedgraphlines.push_str(&*single_line);
-
+                writer.write_all(single_line.as_bytes())?;
+                writer.flush()?;
 
             }
 
@@ -738,7 +724,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         prev_coordinate_value = adjusted_start_site;
     }
-    //println!("First loop done");
+
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
@@ -763,16 +749,14 @@ pub fn fixed_start_end_counts_bam_to_bw(
             // Step size defaults to 1, so report every value
             let single_line = format!("{}\t{}\t{}\t{}\n",
                                       chromosome_name, coordinate_position, coordinate_position+1, count);
-            bedgraphlines.push_str(&*single_line);
+            writer.write_all(single_line.as_bytes()).unwrap();
+            writer.flush().unwrap();
         }
 
         coordinate_position = coordinate_position + 1;
     }
 
-    //println!("2nd loop done");
-    let mut cursor = Cursor::new(bedgraphlines);
-
-    Ok(cursor)
+    Ok(())
 }
 
 fn set_up_file_output(

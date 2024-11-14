@@ -27,6 +27,7 @@ indicatif = "0.17.8"
 #bigtools = "0.5.2"
 bigtools = { git = "https://github.com/donaldcampbelljr/bigtools.git", branch = "donald_bigwigmerge" }
 tokio = "1.40.0"
+os_pipe = "1.2.1"
 
 
 [dev-dependencies]
