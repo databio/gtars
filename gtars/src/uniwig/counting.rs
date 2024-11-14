@@ -749,8 +749,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
             // Step size defaults to 1, so report every value
             let single_line = format!("{}\t{}\t{}\t{}\n",
                                       chromosome_name, coordinate_position, coordinate_position+1, count);
-            writer.write_all(single_line.as_bytes()).unwrap();
-            writer.flush().unwrap();
+            writer.write_all(single_line.as_bytes())?;
+            writer.flush()?;
         }
 
         coordinate_position = coordinate_position + 1;

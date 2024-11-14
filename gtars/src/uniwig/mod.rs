@@ -642,6 +642,7 @@ fn process_bam(
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
     let fp_String= filepath.clone().to_string();
+    let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
 
@@ -671,7 +672,14 @@ fn process_bam(
                                             let stepsize_cloned = stepsize.clone();
                                             let chromosome_string_cloned = chromosome_string.clone();
 
-                                            let fpclone = fp_String.clone();
+                                            let file_name = format!(
+                                                "{}_{}_{}",
+                                                bwfileheader,chromosome_string, "start"
+                                            );
+
+
+                                            let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
+                                            let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
 
                                             let producer_handle = thread::spawn(move || {
                                                 let region = chromosome_string_cloned.parse().unwrap();
@@ -679,51 +687,76 @@ fn process_bam(
                                                     .build_from_path(fpclone)
                                                     .unwrap();
                                                 let header = reader.read_header().unwrap();
-                                                let mut records = reader.query(&header, &region).map(Box::new).unwrap();
-                                                fixed_start_end_counts_bam_to_bw(
-                                                    &mut records,
-                                                    current_chrom_size_cloned,
-                                                    smoothsize_cloned,
-                                                    stepsize_cloned,
-                                                    &chromosome_string_cloned,
-                                                    "start",
-                                                    write_fd,
-                                                ).expect("TODO: panic message");
-                                                ;
+                                                //let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+
+                                                match reader.query(&header, &region).map(Box::new) {
+                                                    Err(err) => {println!("Region not found in bam file, skipping region {}", region);
+                                                        let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
+                                                        writer.write_all(b"").unwrap();
+                                                        writer.flush().unwrap();
+                                                    } //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+
+                                                    Ok(mut records) => {
+                                                        fixed_start_end_counts_bam_to_bw(
+                                                            &mut records,
+                                                            current_chrom_size_cloned,
+                                                            smoothsize_cloned,
+                                                            stepsize_cloned,
+                                                            &chromosome_string_cloned,
+                                                            "start",
+                                                            write_fd,
+                                                        ).expect("TODO: panic message");
+                                                    }
+                                                }
+
+
+                                                }
+                                            );
+
+
+                                            let consumer_handle = thread::spawn(move || {
+
+                                                let file = unsafe { std::fs::File::from_raw_fd(read_fd.as_raw_fd()) };
+
+                                                let metadata = file.metadata().unwrap().clone();
+
+                                                if metadata.len() !=0{
+
+                                                    let file_path = PathBuf::from(file_name);
+                                                    let new_file_path = file_path.with_extension("bw");
+
+                                                    let new_file_path = new_file_path.to_str().unwrap();
+                                                    //
+                                                    let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+
+                                                    let runtime = if num_threads == 1 {
+                                                        outb.options.channel_size = 0;
+                                                        runtime::Builder::new_current_thread().build().unwrap()
+                                                    } else {
+                                                        runtime::Builder::new_multi_thread()
+                                                            .worker_threads(num_threads as usize)
+                                                            .build()
+                                                            .unwrap()
+                                                    };
+                                                    let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+                                                    println!("Before file read");
+
+                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
+                                                    outb.write(vals, runtime).unwrap();
+                                                }
+                                                else{
+                                                    println!("No values written for previous region.")
+                                                }
+
+                                                //
                                             });
 
-                                            // let consumer_handle = thread::spawn(move || {
-                                            //     consumer(read_fd);
-                                            // });
-
-                                            //producer_handle.join().unwrap();
+                                            producer_handle.join().unwrap();
+                                            consumer_handle.join().unwrap();
 
 
-                                            // let file_name = format!(
-                                            //     "{}_{}_{}",
-                                            //     bwfileheader,chromosome_string, "start"
-                                            // );
-                                            // let file_path = PathBuf::from(file_name);
-                                            // let new_file_path = file_path.with_extension("bw");
-                                            //
-                                            //
-                                            // let new_file_path = new_file_path.to_str().unwrap();
-                                            //
-                                            // let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
-                                            //
-                                            // let runtime = if num_threads == 1 {
-                                            //     outb.options.channel_size = 0;
-                                            //     runtime::Builder::new_current_thread().build().unwrap()
-                                            // } else {
-                                            //     runtime::Builder::new_multi_thread()
-                                            //         .worker_threads(num_threads as usize)
-                                            //         .build()
-                                            //         .unwrap()
-                                            // };
-                                            // let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                            // let file = unsafe { std::fs::File::from_raw_fd(read_fd.as_raw_fd()) };
-                                            // let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
-                                            // outb.write(vals, runtime).unwrap();
+
+
 
                                         }
                                         _ => {
