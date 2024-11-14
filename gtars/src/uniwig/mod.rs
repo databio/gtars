@@ -651,7 +651,7 @@ fn process_bam(
         list_of_valid_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
-                let region = chromosome_string.parse().unwrap(); // can this be coordinate?
+                //let region = chromosome_string.parse().unwrap(); // can this be coordinate?
                 // let current_chrom_size =
                 //     *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
@@ -677,13 +677,13 @@ fn process_bam(
                                             let smoothsize_cloned = smoothsize.clone();
                                             let stepsize_cloned = stepsize.clone();
                                             let chromosome_string_cloned = chromosome_string.clone();
-                                            let filepath_cloned = filepath.clone();
+                                            //let filepath_cloned = filepath.clone();
 
 
                                             let producer_handle = thread::spawn(move || {
-                                                let region = chromosome_string.parse().unwrap();
+                                                let region = chromosome_string_cloned.parse().unwrap();
                                                 let mut reader = bam::io::indexed_reader::Builder::default()
-                                                    .build_from_path(filepath_cloned)
+                                                    .build_from_path(filepath)
                                                     .unwrap();
                                                 let header = reader.read_header().unwrap();
                                                 let mut records = reader.query(&header, &region).map(Box::new).unwrap();
@@ -750,158 +750,159 @@ fn process_bam(
 
 
                         }
-                        OutSelection::ENDS => {
-                            let mut reader = bam::io::indexed_reader::Builder::default()
-                                .build_from_path(filepath)
-                                .unwrap();
-                            let header = reader.read_header().unwrap();
-                            match reader.query(&header, &region).map(Box::new) {
-                                Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
-
-                                Ok(mut records) => {
-                                    // match output_type {
-                                    //     "bw" => {
-                                    //         let file_name = format!(
-                                    //             "{}_{}_{}",
-                                    //             bwfileheader,chromosome_string, "end"
-                                    //         );
-                                    //         let file_path = PathBuf::from(file_name);
-                                    //         let new_file_path = file_path.with_extension("bw");
-                                    //         let new_file_path = new_file_path.to_str().unwrap();
-                                    //
-                                    //         let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
-                                    //
-                                    //         let runtime = if num_threads == 1 {
-                                    //             outb.options.channel_size = 0;
-                                    //             runtime::Builder::new_current_thread().build().unwrap()
-                                    //         } else {
-                                    //             runtime::Builder::new_multi_thread()
-                                    //                 .worker_threads(num_threads as usize)
-                                    //                 .build()
-                                    //                 .unwrap()
-                                    //         };
-                                    //         let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                    //
-                                    //         let bedgraph_line = fixed_start_end_counts_bam_to_bw(
-                                    //             &mut records,
-                                    //             current_chrom_size,
-                                    //             smoothsize,
-                                    //             stepsize,
-                                    //             chromosome_string,
-                                    //             bwfileheader,
-                                    //             "end",
-                                    //             true,
-                                    //         );
-                                    //         //println!("after_fixed_start");
-                                    //         match bedgraph_line {
-                                    //             Ok(bedgraph_line) => {
-                                    //                 //println!("writing vals to bw file for {:?}", selection);
-                                    //
-                                    //                 let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
-                                    //                 outb.write(vals, runtime).unwrap();
-                                    //                 //println!("Done writing bw file");
-                                    //             }
-                                    //             Err(_) => {
-                                    //                 // Error printed in previous func, do nothing here.
-                                    //                 println!("returned error skipping chrom: {}", chromosome_string);
-                                    //                 continue
-                                    //             }
-                                    //         }
-                                    //
-                                    //
-                                    //     }
-                                    //     _ => {
-                                    //         fixed_start_end_counts_bam(
-                                    //             &mut records,
-                                    //             current_chrom_size,
-                                    //             smoothsize,
-                                    //             stepsize,
-                                    //             output_type,
-                                    //             chromosome_string,
-                                    //             bwfileheader,
-                                    //             "end",
-                                    //             false,
-                                    //         );
-                                    //     }
-                                    // }
-                                }
-                            }
-                        }
-                        OutSelection::CORE => {
-                            let mut reader = bam::io::indexed_reader::Builder::default()
-                                .build_from_path(filepath)
-                                .unwrap();
-                            let header = reader.read_header().unwrap();
-                            // match reader.query(&header, &region).map(Box::new) {
-                                // Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
-                                //
-                                // Ok(mut records) => {
-                                //     match output_type {
-                                //         "bw" => {
-                                //             let file_name = format!(
-                                //                 "{}_{}_{}",
-                                //                 bwfileheader,chromosome_string, "core"
-                                //             );
-                                //             let file_path = PathBuf::from(file_name);
-                                //             let new_file_path = file_path.with_extension("bw");
-                                //             let new_file_path = new_file_path.to_str().unwrap();
-                                //
-                                //             let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
-                                //
-                                //             let runtime = if num_threads == 1 {
-                                //                 outb.options.channel_size = 0;
-                                //                 runtime::Builder::new_current_thread().build().unwrap()
-                                //             } else {
-                                //                 runtime::Builder::new_multi_thread()
-                                //                     .worker_threads(num_threads as usize)
-                                //                     .build()
-                                //                     .unwrap()
-                                //             };
-                                //             let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                //
-                                //             let bedgraph_line = fixed_core_counts_bam_to_bw(
-                                //                 &mut records,
-                                //                 current_chrom_size,
-                                //                 stepsize,
-                                //                 chromosome_string,
-                                //             );
-                                //             //println!("after_fixed_start");
-                                //             match bedgraph_line {
-                                //                 Ok(bedgraph_line) => {
-                                //                     //println!("writing vals to bw file for {:?}", selection);
-                                //
-                                //                     let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
-                                //                     outb.write(vals, runtime).unwrap();
-                                //                     //println!("Done writing bw file");
-                                //                 }
-                                //                 Err(_) => {
-                                //                     // Error printed in previous func, do nothing here.
-                                //                     println!("returned error skipping chrom: {}", chromosome_string);
-                                //                     continue
-                                //                 }
-                                //             }
-                                //
-                                //
-                                //         }
-                                //         _ => {
-                                //             println!("Core counts for bam to non-bw not currently implemented.");
-                                //             // fixed_start_end_counts_bam(
-                                //             //     &mut records,
-                                //             //     current_chrom_size,
-                                //             //     smoothsize,
-                                //             //     stepsize,
-                                //             //     output_type,
-                                //             //     chromosome_string,
-                                //             //     bwfileheader,
-                                //             //     "core",
-                                //             //     false,
-                                //             // );
-                                //         }
-                                //     }
-                                //
-                                // }
-                            // }
-                        }
+                        // OutSelection::ENDS => {
+                        //     let mut reader = bam::io::indexed_reader::Builder::default()
+                        //         .build_from_path(filepath)
+                        //         .unwrap();
+                        //     let header = reader.read_header().unwrap();
+                        //     match reader.query(&header, &region).map(Box::new) {
+                        //         Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+                        //
+                        //         Ok(mut records) => {
+                        //             // match output_type {
+                        //             //     "bw" => {
+                        //             //         let file_name = format!(
+                        //             //             "{}_{}_{}",
+                        //             //             bwfileheader,chromosome_string, "end"
+                        //             //         );
+                        //             //         let file_path = PathBuf::from(file_name);
+                        //             //         let new_file_path = file_path.with_extension("bw");
+                        //             //         let new_file_path = new_file_path.to_str().unwrap();
+                        //             //
+                        //             //         let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
+                        //             //
+                        //             //         let runtime = if num_threads == 1 {
+                        //             //             outb.options.channel_size = 0;
+                        //             //             runtime::Builder::new_current_thread().build().unwrap()
+                        //             //         } else {
+                        //             //             runtime::Builder::new_multi_thread()
+                        //             //                 .worker_threads(num_threads as usize)
+                        //             //                 .build()
+                        //             //                 .unwrap()
+                        //             //         };
+                        //             //         let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+                        //             //
+                        //             //         let bedgraph_line = fixed_start_end_counts_bam_to_bw(
+                        //             //             &mut records,
+                        //             //             current_chrom_size,
+                        //             //             smoothsize,
+                        //             //             stepsize,
+                        //             //             chromosome_string,
+                        //             //             bwfileheader,
+                        //             //             "end",
+                        //             //             true,
+                        //             //         );
+                        //             //         //println!("after_fixed_start");
+                        //             //         match bedgraph_line {
+                        //             //             Ok(bedgraph_line) => {
+                        //             //                 //println!("writing vals to bw file for {:?}", selection);
+                        //             //
+                        //             //                 let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
+                        //             //                 outb.write(vals, runtime).unwrap();
+                        //             //                 //println!("Done writing bw file");
+                        //             //             }
+                        //             //             Err(_) => {
+                        //             //                 // Error printed in previous func, do nothing here.
+                        //             //                 println!("returned error skipping chrom: {}", chromosome_string);
+                        //             //                 continue
+                        //             //             }
+                        //             //         }
+                        //             //
+                        //             //
+                        //             //     }
+                        //             //     _ => {
+                        //             //         fixed_start_end_counts_bam(
+                        //             //             &mut records,
+                        //             //             current_chrom_size,
+                        //             //             smoothsize,
+                        //             //             stepsize,
+                        //             //             output_type,
+                        //             //             chromosome_string,
+                        //             //             bwfileheader,
+                        //             //             "end",
+                        //             //             false,
+                        //             //         );
+                        //             //     }
+                        //             // }
+                        //         }
+                        //     }
+                        // }
+                        // OutSelection::CORE => {
+                        //     let mut reader = bam::io::indexed_reader::Builder::default()
+                        //         .build_from_path(filepath)
+                        //         .unwrap();
+                        //     let header = reader.read_header().unwrap();
+                        //     // match reader.query(&header, &region).map(Box::new) {
+                        //         // Err(_) => {} //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+                        //         //
+                        //         // Ok(mut records) => {
+                        //         //     match output_type {
+                        //         //         "bw" => {
+                        //         //             let file_name = format!(
+                        //         //                 "{}_{}_{}",
+                        //         //                 bwfileheader,chromosome_string, "core"
+                        //         //             );
+                        //         //             let file_path = PathBuf::from(file_name);
+                        //         //             let new_file_path = file_path.with_extension("bw");
+                        //         //             let new_file_path = new_file_path.to_str().unwrap();
+                        //         //
+                        //         //             let mut outb =  create_bw_writer(chrom_sizes_ref_path, new_file_path, num_threads, zoom);
+                        //         //
+                        //         //             let runtime = if num_threads == 1 {
+                        //         //                 outb.options.channel_size = 0;
+                        //         //                 runtime::Builder::new_current_thread().build().unwrap()
+                        //         //             } else {
+                        //         //                 runtime::Builder::new_multi_thread()
+                        //         //                     .worker_threads(num_threads as usize)
+                        //         //                     .build()
+                        //         //                     .unwrap()
+                        //         //             };
+                        //         //             let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+                        //         //
+                        //         //             let bedgraph_line = fixed_core_counts_bam_to_bw(
+                        //         //                 &mut records,
+                        //         //                 current_chrom_size,
+                        //         //                 stepsize,
+                        //         //                 chromosome_string,
+                        //         //             );
+                        //         //             //println!("after_fixed_start");
+                        //         //             match bedgraph_line {
+                        //         //                 Ok(bedgraph_line) => {
+                        //         //                     //println!("writing vals to bw file for {:?}", selection);
+                        //         //
+                        //         //                     let vals = BedParserStreamingIterator::from_bedgraph_file(bedgraph_line, allow_out_of_order_chroms);
+                        //         //                     outb.write(vals, runtime).unwrap();
+                        //         //                     //println!("Done writing bw file");
+                        //         //                 }
+                        //         //                 Err(_) => {
+                        //         //                     // Error printed in previous func, do nothing here.
+                        //         //                     println!("returned error skipping chrom: {}", chromosome_string);
+                        //         //                     continue
+                        //         //                 }
+                        //         //             }
+                        //         //
+                        //         //
+                        //         //         }
+                        //         //         _ => {
+                        //         //             println!("Core counts for bam to non-bw not currently implemented.");
+                        //         //             // fixed_start_end_counts_bam(
+                        //         //             //     &mut records,
+                        //         //             //     current_chrom_size,
+                        //         //             //     smoothsize,
+                        //         //             //     stepsize,
+                        //         //             //     output_type,
+                        //         //             //     chromosome_string,
+                        //         //             //     bwfileheader,
+                        //         //             //     "core",
+                        //         //             //     false,
+                        //         //             // );
+                        //         //         }
+                        //         //     }
+                        //         //
+                        //         // }
+                        //     // }
+                        // }
+                        _ => {}
                     }
                 }
 
