@@ -641,9 +641,7 @@ fn process_bam(
     output_type: &str,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
-
-    //let mut reader = bam::io::indexed_reader::Builder::default().build_from_path(filepath)?;
-    //let header = reader.read_header()?;
+    let fp_String= filepath.clone().to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
 
@@ -651,10 +649,6 @@ fn process_bam(
         list_of_valid_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
-                //let region = chromosome_string.parse().unwrap(); // can this be coordinate?
-                // let current_chrom_size =
-                //     *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
-
                 // let out_selection_vec =
                 //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
                 let out_selection_vec = vec![OutSelection::STARTS];
@@ -669,7 +663,6 @@ fn process_bam(
                                             let write_fd = Arc::new(writer);
                                             let read_fd = Arc::new(reader);
 
-
                                             let current_chrom_size =
                                                 *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
@@ -677,13 +670,13 @@ fn process_bam(
                                             let smoothsize_cloned = smoothsize.clone();
                                             let stepsize_cloned = stepsize.clone();
                                             let chromosome_string_cloned = chromosome_string.clone();
-                                            //let filepath_cloned = filepath.clone();
 
+                                            let fpclone = fp_String.clone();
 
                                             let producer_handle = thread::spawn(move || {
                                                 let region = chromosome_string_cloned.parse().unwrap();
                                                 let mut reader = bam::io::indexed_reader::Builder::default()
-                                                    .build_from_path(filepath)
+                                                    .build_from_path(fpclone)
                                                     .unwrap();
                                                 let header = reader.read_header().unwrap();
                                                 let mut records = reader.query(&header, &region).map(Box::new).unwrap();
