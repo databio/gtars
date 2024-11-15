@@ -27,6 +27,7 @@ use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BigWigRead, BigWigWrite, InputSortType};
@@ -666,6 +667,8 @@ fn process_bam(
                                             let (mut reader, mut writer) = os_pipe::pipe().unwrap();
                                             let write_fd = Arc::new(writer);
                                             let read_fd = Arc::new(reader);
+                                            let error_flag = Arc::new(AtomicBool::new(false));
+                                            let error_flag_clone = error_flag.clone();
 
                                             let current_chrom_size =
                                                 *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
@@ -693,10 +696,13 @@ fn process_bam(
                                                 //let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
                                                 match reader.query(&header, &region).map(Box::new) {
-                                                    Err(err) => {//println!("Region not found in bam file, skipping region {}, error: {}", region, err);
+                                                    Err(err) => {eprintln!("Region not found in bam file, skipping region {}, error: {}", region, err);
+                                                        error_flag_clone.store(true, Ordering::Relaxed);
                                                         let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
-                                                        writer.write_all(b"").unwrap();
+                                                        writer.write_all(b"\0").unwrap();
                                                         writer.flush().unwrap();
+                                                        drop(writer)
+                                                        //drop(write_fd);
                                                     } //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                                     Ok(mut records) => {
@@ -717,7 +723,7 @@ fn process_bam(
                                                                 eprintln!("processing succesful");
                                                             }
                                                             Err(err) => {
-                                                                //eprintln!("Error processing records: {:?}", err);
+                                                                eprintln!("Error processing records: {:?}", err);
                                                                 // Signal an error to the consumer by writing an empty file
 
                                                             }
@@ -727,11 +733,14 @@ fn process_bam(
 
 
                                                     }
-                                                }
 
+
+
+                                                }
 
                                                 }
                                             );
+
 
 
                                             let consumer_handle = thread::spawn(move || {
@@ -741,7 +750,7 @@ fn process_bam(
                                                 let metadata = file.metadata().unwrap().clone();
 
 
-                                                println!("found metadata");
+                                                //println!("found metadata");
 
                                                 let file_path = PathBuf::from(file_name);
                                                 let new_file_path = file_path.with_extension("bw");
@@ -760,10 +769,28 @@ fn process_bam(
                                                         .unwrap()
                                                 };
                                                 let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                                println!("Before file read");
+                                                //eprintln!("Before file read");
 
-                                                let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
-                                                outb.write(vals, runtime).unwrap();
+                                                if !error_flag.load(Ordering::Relaxed) {
+                                                    eprintln!("No error flag found, proceeding....");
+                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
+                                                    //outb.write(vals, runtime).unwrap();
+                                                    match outb.write(vals, runtime) {
+                                                        Ok(_) => {
+                                                            eprintln!("Successfully wrote file: {}", new_file_path);
+                                                        }
+                                                        Err(err) => {
+                                                            eprintln!("Error writing to BigWig file: {}", err);
+                                                            // Delete the partially written file
+                                                            std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
+                                                                eprintln!("Error deleting file: {}", e);
+                                                            });
+                                                        }
+                                                    }
+                                                }else {
+                                                    println!("No data or error occurred during processing");
+                                                }
+
 
 
 
@@ -997,7 +1024,7 @@ fn process_bam(
                         Ok(bw) => bigwigs.push(bw),
                         Err(e) => {
                             eprintln!("Error when opening bigwig ({}): {:?}", input, e);
-                            return Ok(());
+                            //return Ok(());
                         }
                     }
                 }

@@ -602,6 +602,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     out_sel: &str,
     write_fd: Arc<dyn AsRawFd + Send + Sync>,
 ) -> Result<(), BAMRecordError> {
+    //eprintln!("BEGIN FIXEDSTART COUNTS");
     let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
     //let vin_iter = starts_vector.iter();
 
@@ -768,6 +769,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         coordinate_position = coordinate_position + 1;
     }
+
+    drop(writer);
 
     Ok(())
 }
