@@ -649,9 +649,28 @@ fn process_bam(
     let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
+    let mut final_chromosomes: Vec<String> = Vec::with_capacity(list_of_valid_chromosomes.len());
+
+    // pre-process chromosomes that are actually in the bam file BEFORE spawning threads.
+    for chromosome in list_of_valid_chromosomes.iter() {
+        let region = chromosome.parse().unwrap();
+        let mut reader = bam::io::indexed_reader::Builder::default()
+            .build_from_path(filepath)
+            .unwrap();
+        let header = reader.read_header().unwrap();
+        match reader.query(&header, &region).map(Box::new) {
+            Err(err) => {eprintln!("Region not found, skipping region {}", region);
+                continue;
+            }
+
+            Ok(mut records) => {
+                final_chromosomes.push(chromosome.clone())
+            }}
+
+    }
 
     pool.install(|| {
-        list_of_valid_chromosomes
+        final_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
                 // let out_selection_vec =
@@ -693,54 +712,32 @@ fn process_bam(
                                                     .build_from_path(fpclone)
                                                     .unwrap();
                                                 let header = reader.read_header().unwrap();
-                                                //let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
-                                                match reader.query(&header, &region).map(Box::new) {
-                                                    Err(err) => {eprintln!("Region not found, skipping region {}", region);
-                                                        error_flag_clone.store(true, Ordering::Relaxed);
-                                                        let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
-                                                        writer.write_all(b"\0").unwrap();
-                                                        writer.flush().unwrap();
-                                                        drop(writer);
-                                                        //drop(write_fd);
-                                                    } //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
+                                                let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+                                                match fixed_start_end_counts_bam_to_bw(
+                                                    &mut records,
+                                                    current_chrom_size_cloned,
+                                                    smoothsize_cloned,
+                                                    stepsize_cloned,
+                                                    &chromosome_string_cloned,
+                                                    "start",
+                                                    write_fd,
+                                                ){
 
-                                                    Ok(mut records) => {
-
-
-                                                        match fixed_start_end_counts_bam_to_bw(
-                                                            &mut records,
-                                                            current_chrom_size_cloned,
-                                                            smoothsize_cloned,
-                                                            stepsize_cloned,
-                                                            &chromosome_string_cloned,
-                                                            "start",
-                                                            write_fd,
-                                                        ){
-
-                                                            Ok(_) => {
-                                                                // Processing successful, no need to signal an error
-                                                                eprintln!("Processing successful for {}", chromosome_string_cloned);
-                                                            }
-                                                            Err(err) => {
-                                                                eprintln!("Error processing records: {:?}", err);
-                                                                // Signal an error to the consumer by writing an empty file
-
-                                                            }
-
-                                                        }
-
-
+                                                    Ok(_) => {
+                                                        // Processing successful, no need to signal an error
+                                                        eprintln!("Processing successful for {}", chromosome_string_cloned);
+                                                    }
+                                                    Err(err) => {
+                                                        eprintln!("Error processing records: {:?}", err);
+                                                        // Signal an error to the consumer by writing an empty file
 
                                                     }
-
-
 
                                                 }
 
                                                 }
                                             );
-
 
 
                                             let consumer_handle = thread::spawn(move || {
