@@ -727,6 +727,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
                                           chromosome_name, coordinate_position, coordinate_position+1, count);
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
+                //eprintln!("{}",single_line);
 
             }
 
@@ -762,6 +763,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
                                       chromosome_name, coordinate_position, coordinate_position+1, count);
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
+            //eprintln!("{}",single_line);
         }
 
         coordinate_position = coordinate_position + 1;

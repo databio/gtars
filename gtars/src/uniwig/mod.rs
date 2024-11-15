@@ -594,6 +594,9 @@ pub fn uniwig_main(
             //         .expect("failed to write line");
             // }
             // buf.flush().unwrap();
+
+            //TODO Check bam header and remove any keys from chrom_sizes hash map before proceeding?
+
             let _ = process_bam(
                 filepath,
                 bwfileheader,
@@ -737,33 +740,32 @@ fn process_bam(
 
                                                 let metadata = file.metadata().unwrap().clone();
 
-                                                if metadata.len() !=0{
 
-                                                    let file_path = PathBuf::from(file_name);
-                                                    let new_file_path = file_path.with_extension("bw");
+                                                println!("found metadata");
 
-                                                    let new_file_path = new_file_path.to_str().unwrap();
-                                                    //
-                                                    let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+                                                let file_path = PathBuf::from(file_name);
+                                                let new_file_path = file_path.with_extension("bw");
 
-                                                    let runtime = if num_threads == 1 {
-                                                        outb.options.channel_size = 0;
-                                                        runtime::Builder::new_current_thread().build().unwrap()
-                                                    } else {
-                                                        runtime::Builder::new_multi_thread()
-                                                            .worker_threads(num_threads as usize)
-                                                            .build()
-                                                            .unwrap()
-                                                    };
-                                                    let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                                    println!("Before file read");
+                                                let new_file_path = new_file_path.to_str().unwrap();
+                                                //
+                                                let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
 
-                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
-                                                    outb.write(vals, runtime).unwrap();
-                                                }
-                                                else{
-                                                    println!("No values written for previous region.")
-                                                }
+                                                let runtime = if num_threads == 1 {
+                                                    outb.options.channel_size = 0;
+                                                    runtime::Builder::new_current_thread().build().unwrap()
+                                                } else {
+                                                    runtime::Builder::new_multi_thread()
+                                                        .worker_threads(num_threads as usize)
+                                                        .build()
+                                                        .unwrap()
+                                                };
+                                                let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+                                                println!("Before file read");
+
+                                                let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
+                                                outb.write(vals, runtime).unwrap();
+
+
 
                                                 //
                                             });
@@ -955,9 +957,9 @@ fn process_bam(
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
-            let out_selection_vec =
-                vec!["start", "end", "core"];
-            //let out_selection_vec = vec![OutSelection::STARTS];
+            // let out_selection_vec =
+            //     vec!["start", "end", "core"];
+            let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
                 let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);

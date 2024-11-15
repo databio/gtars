@@ -21,8 +21,8 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 
 #[fixture]
 fn path_to_small_bam_file() -> &'static str {
-    //"tests/data/test_chr22_small.bam"
-    "/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam" //todo change back
+    "tests/data/test_chr22_small.bam"
+    //"/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam" //todo change back
 }
 
 #[fixture]
@@ -353,7 +353,8 @@ mod tests {
         path_to_small_bam_file: &str,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        //let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath =String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = path_to_small_bam_file;
 
@@ -363,7 +364,8 @@ mod tests {
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
         //let bwfileheader_path = path.into_os_string().into_string().unwrap();
         //let bwfileheader = bwfileheader_path.as_str();
-        let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
+        //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
+        let bwfileheader = "/home/drc/Downloads/refactor_test_gtars/";
 
         let smoothsize: i32 = 1;
         let output_type = "bw";
