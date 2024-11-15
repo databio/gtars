@@ -696,12 +696,12 @@ fn process_bam(
                                                 //let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
                                                 match reader.query(&header, &region).map(Box::new) {
-                                                    Err(err) => {eprintln!("Region not found in bam file, skipping region {}, error: {}", region, err);
+                                                    Err(err) => {eprintln!("Region not found, skipping region {}", region);
                                                         error_flag_clone.store(true, Ordering::Relaxed);
                                                         let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
                                                         writer.write_all(b"\0").unwrap();
                                                         writer.flush().unwrap();
-                                                        drop(writer)
+                                                        drop(writer);
                                                         //drop(write_fd);
                                                     } //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
@@ -720,7 +720,7 @@ fn process_bam(
 
                                                             Ok(_) => {
                                                                 // Processing successful, no need to signal an error
-                                                                eprintln!("processing succesful");
+                                                                eprintln!("Processing successful for {}", chromosome_string_cloned);
                                                             }
                                                             Err(err) => {
                                                                 eprintln!("Error processing records: {:?}", err);
@@ -772,7 +772,7 @@ fn process_bam(
                                                 //eprintln!("Before file read");
 
                                                 if !error_flag.load(Ordering::Relaxed) {
-                                                    eprintln!("No error flag found, proceeding....");
+                                                    //eprintln!("No error flag found, proceeding....");
                                                     let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
                                                     //outb.write(vals, runtime).unwrap();
                                                     match outb.write(vals, runtime) {
@@ -783,12 +783,12 @@ fn process_bam(
                                                             eprintln!("Error writing to BigWig file: {}", err);
                                                             // Delete the partially written file
                                                             std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
-                                                                eprintln!("Error deleting file: {}", e);
+                                                                //eprintln!("Error deleting file: {}", e);
                                                             });
                                                         }
                                                     }
                                                 }else {
-                                                    println!("No data or error occurred during processing");
+                                                    //println!("No data or error occurred during processing");
                                                 }
 
 
