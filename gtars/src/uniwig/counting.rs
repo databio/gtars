@@ -18,6 +18,7 @@ use tokio::runtime;
 pub enum BAMRecordError {
     IoError(std::io::Error),
     NoFirstRecord,
+    IncorrectSel,
 }
 
 impl From<std::io::Error> for BAMRecordError {
@@ -629,11 +630,15 @@ pub fn fixed_start_end_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
+            writer.write_all(b"").unwrap();
+            writer.flush().unwrap();
             return Err(BAMRecordError::NoFirstRecord);  // Example error handling
         }
         None => {
             // Handle no records
             eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
+            writer.write_all(b"").unwrap();
+            writer.flush().unwrap();
             return Err(BAMRecordError::NoFirstRecord);
         }
     };
@@ -643,7 +648,10 @@ pub fn fixed_start_end_counts_bam_to_bw(
         "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
         "end" => first_record.alignment_end().unwrap().unwrap().get() as i32,
         _ => {
-            panic!("unknown output selection must be either 'start', 'end', 'core'")
+            writer.write_all(b"").unwrap();
+            writer.flush().unwrap();
+            return Err(BAMRecordError::IncorrectSel);  // Example error handling
+            //panic!("unknown output selection must be either 'start', 'end', 'core'")
         }
     };
 
@@ -669,7 +677,10 @@ pub fn fixed_start_end_counts_bam_to_bw(
             "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
             "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
             _ => {
-                panic!("unknown output selection must be either 'start', 'end', 'core'")
+                writer.write_all(b"").unwrap();
+                writer.flush().unwrap();
+                return Err(BAMRecordError::IncorrectSel);
+                //panic!("unknown output selection must be either 'start', 'end', 'core'")
             }
         };
 

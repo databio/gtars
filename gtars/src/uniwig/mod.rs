@@ -690,14 +690,16 @@ fn process_bam(
                                                 //let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
                                                 match reader.query(&header, &region).map(Box::new) {
-                                                    Err(err) => {println!("Region not found in bam file, skipping region {}", region);
+                                                    Err(err) => {//println!("Region not found in bam file, skipping region {}, error: {}", region, err);
                                                         let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
                                                         writer.write_all(b"").unwrap();
                                                         writer.flush().unwrap();
                                                     } //Do nothing. //println!("Region not found in bam file, skipping region {}", region),
 
                                                     Ok(mut records) => {
-                                                        fixed_start_end_counts_bam_to_bw(
+
+
+                                                        match fixed_start_end_counts_bam_to_bw(
                                                             &mut records,
                                                             current_chrom_size_cloned,
                                                             smoothsize_cloned,
@@ -705,7 +707,22 @@ fn process_bam(
                                                             &chromosome_string_cloned,
                                                             "start",
                                                             write_fd,
-                                                        ).expect("TODO: panic message");
+                                                        ){
+
+                                                            Ok(_) => {
+                                                                // Processing successful, no need to signal an error
+                                                                eprintln!("processing succesful");
+                                                            }
+                                                            Err(err) => {
+                                                                //eprintln!("Error processing records: {:?}", err);
+                                                                // Signal an error to the consumer by writing an empty file
+
+                                                            }
+
+                                                        }
+
+
+
                                                     }
                                                 }
 
