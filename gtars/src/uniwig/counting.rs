@@ -633,6 +633,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
             eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
             writer.write_all(b"").unwrap();
             writer.flush().unwrap();
+            drop(writer);
             return Err(BAMRecordError::NoFirstRecord);  // Example error handling
         }
         None => {
@@ -640,6 +641,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
             eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
             writer.write_all(b"").unwrap();
             writer.flush().unwrap();
+            drop(writer);
             return Err(BAMRecordError::NoFirstRecord);
         }
     };
@@ -651,6 +653,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         _ => {
             writer.write_all(b"").unwrap();
             writer.flush().unwrap();
+            drop(writer);
             return Err(BAMRecordError::IncorrectSel);  // Example error handling
             //panic!("unknown output selection must be either 'start', 'end', 'core'")
         }
