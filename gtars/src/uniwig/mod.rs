@@ -584,20 +584,6 @@ pub fn uniwig_main(
                 panic!("Must provide a valid chrom.sizes file for processing bam files. Provided file: {}", chromsizerefpath);
             }
 
-            // Read sequences in chunks, do counts, send to bigTools via streamer.
-            // Check that bam is sorted? Can noodles do that ahead of time? Error if not sorted.
-            // Check for associated .bai file, if it does not exist create it
-            //print!("Writing to CLI");
-            // let handle = &std::io::stdout();
-            // let mut buf = BufWriter::new(handle);
-            // for count in &count_result.0 {
-            //     writeln!(buf, "{}", count)
-            //         .expect("failed to write line");
-            // }
-            // buf.flush().unwrap();
-
-            //TODO Check bam header and remove any keys from chrom_sizes hash map before proceeding?
-
             let _ = process_bam(
                 filepath,
                 bwfileheader,
@@ -611,14 +597,6 @@ pub fn uniwig_main(
                 fixed,
                 output_type,
             );
-            // match og_output_type {
-            //     "bw" | "bigWig" => {
-            //         println!("Writing bigWig files");
-            //
-            //         process_bam(filepath, bwfileheader,chrom_sizes, num_threads, zoom, pool, smoothsize, stepsize, fixed)
-            //     }
-            //     &_ => Ok({})
-            // }
         }
 
         _ => {
@@ -659,7 +637,8 @@ fn process_bam(
             .unwrap();
         let header = reader.read_header().unwrap();
         match reader.query(&header, &region).map(Box::new) {
-            Err(err) => {eprintln!("Region not found, skipping region {}", region);
+            Err(err) => {
+                eprintln!("Region not found, skipping region {}", region); //TODO only print if a debug mode is set?
                 continue;
             }
 
@@ -686,8 +665,6 @@ fn process_bam(
                                             let (mut reader, mut writer) = os_pipe::pipe().unwrap();
                                             let write_fd = Arc::new(Mutex::new(writer));
                                             let read_fd = Arc::new(Mutex::new(reader));
-                                            let error_flag = Arc::new(AtomicBool::new(false));
-                                            let error_flag_clone = error_flag.clone();
 
                                             let current_chrom_size =
                                                 *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
@@ -725,13 +702,10 @@ fn process_bam(
                                                 ){
 
                                                     Ok(_) => {
-                                                        // Processing successful, no need to signal an error
-                                                        eprintln!("Processing successful for {}", chromosome_string_cloned);
+                                                        //eprintln!("Processing successful for {}", chromosome_string_cloned);
                                                     }
                                                     Err(err) => {
                                                         eprintln!("Error processing records: {:?}", err);
-                                                        // Signal an error to the consumer by writing an empty file
-
                                                     }
 
                                                 }
@@ -742,20 +716,14 @@ fn process_bam(
 
                                             let consumer_handle = thread::spawn(move || {
 
-                                                //let file = unsafe { std::fs::File::from_raw_fd(read_fd.as_raw_fd()) };
                                                 let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
                                                 let mut reader = std::io::BufReader::new(&mut *file_lock);
-                                                //let mut writer = BufWriter::new(&mut *write_lock);
-                                                //let metadata = file.metadata().unwrap().clone();
-
-
-                                                //println!("found metadata");
 
                                                 let file_path = PathBuf::from(file_name);
                                                 let new_file_path = file_path.with_extension("bw");
 
                                                 let new_file_path = new_file_path.to_str().unwrap();
-                                                //
+
                                                 let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
 
                                                 let runtime = if num_threads == 1 {
@@ -768,34 +736,21 @@ fn process_bam(
                                                         .unwrap()
                                                 };
                                                 let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-                                                //eprintln!("Before file read");
 
-                                                if !error_flag.load(Ordering::Relaxed) {
-                                                    //eprintln!("No error flag found, proceeding....");
-                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
-                                                    //outb.write(vals, runtime).unwrap();
-                                                    match outb.write(vals, runtime) {
-                                                        Ok(_) => {
-                                                            eprintln!("Successfully wrote file: {}", new_file_path);
-                                                        }
-                                                        Err(err) => {
-                                                            eprintln!("Error writing to BigWig file: {}", err);
-                                                            // Delete the partially written file
-                                                            std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
-                                                                //eprintln!("Error deleting file: {}", e);
-                                                            });
-
-                                                        }
+                                                let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
+                                                match outb.write(vals, runtime) {
+                                                    Ok(_) => {
+                                                        eprintln!("Successfully wrote file: {}", new_file_path);
                                                     }
+                                                    Err(err) => {
+                                                        eprintln!("Error writing to BigWig file: {}", err);
+                                                        // Delete the partially written file
+                                                        std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
+                                                            eprintln!("Error deleting file: {}", e);
+                                                        });
 
-                                                }else {
-                                                    //println!("No data or error occurred during processing");
+                                                    }
                                                 }
-
-
-
-
-                                                //
                                             });
 
                                             producer_handle.join().unwrap();
