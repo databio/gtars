@@ -469,15 +469,19 @@ pub fn fixed_start_end_counts_bam(
     (v_coord_counts, v_coordinate_positions)
 }
 
-
+/// Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
+/// Primarily for use to count sequence reads in bam files.
+/// FIXED STEP
 pub fn fixed_core_counts_bam_to_bw(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
     stepsize: i32,
     chromosome_name: &String,
-) -> Result<Cursor<String>, BAMRecordError> {
+    write_fd: Arc<Mutex<PipeWriter>>,
+) -> Result<(), BAMRecordError> {
+    let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
+    let mut writer = BufWriter::new(&mut *write_lock);
 
-    let mut bedgraphlines = String::new();
     let mut coordinate_position = 1;
     let mut count: i32 = 0;
     let mut prev_coordinate_value = 0;
@@ -491,11 +495,17 @@ pub fn fixed_core_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
             return Err(BAMRecordError::NoFirstRecord);  // Example error handling
         }
         None => {
             // Handle no records
             eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
             return Err(BAMRecordError::NoFirstRecord);
         }
     };
@@ -548,7 +558,8 @@ pub fn fixed_core_counts_bam_to_bw(
             if coordinate_position % stepsize == 0 {
                 let single_line = format!("{}\t{}\t{}\t{}\n",
                                           chromosome_name, coordinate_position, coordinate_position+1, count);
-                bedgraphlines.push_str(&*single_line);
+                writer.write_all(single_line.as_bytes())?;
+                writer.flush()?;
             }
 
             coordinate_position = coordinate_position + 1;
@@ -579,21 +590,19 @@ pub fn fixed_core_counts_bam_to_bw(
             // Step size defaults to 1, so report every value
             let single_line = format!("{}\t{}\t{}\t{}\n",
                                       chromosome_name, coordinate_position, coordinate_position+1, count);
-            bedgraphlines.push_str(&*single_line);
+            writer.write_all(single_line.as_bytes())?;
+            writer.flush()?;
         }
 
         coordinate_position = coordinate_position + 1;
     }
-
-    let cursor = Cursor::new(bedgraphlines);
-
-    Ok(cursor)
-
+    Ok(())
 }
 
 
 ///Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
 /// Primarily for use to count sequence reads in bam files.
+/// FIXED STEP
 pub fn fixed_start_end_counts_bam_to_bw(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
