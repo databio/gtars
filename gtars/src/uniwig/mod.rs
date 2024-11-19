@@ -26,7 +26,7 @@ use std::ops::Deref;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use bigtools::beddata::BedParserStreamingIterator;
@@ -684,8 +684,8 @@ fn process_bam(
                                     match output_type {
                                         "bw" => {
                                             let (mut reader, mut writer) = os_pipe::pipe().unwrap();
-                                            let write_fd = Arc::new(writer);
-                                            let read_fd = Arc::new(reader);
+                                            let write_fd = Arc::new(Mutex::new(writer));
+                                            let read_fd = Arc::new(Mutex::new(reader));
                                             let error_flag = Arc::new(AtomicBool::new(false));
                                             let error_flag_clone = error_flag.clone();
 
@@ -742,9 +742,11 @@ fn process_bam(
 
                                             let consumer_handle = thread::spawn(move || {
 
-                                                let file = unsafe { std::fs::File::from_raw_fd(read_fd.as_raw_fd()) };
-
-                                                let metadata = file.metadata().unwrap().clone();
+                                                //let file = unsafe { std::fs::File::from_raw_fd(read_fd.as_raw_fd()) };
+                                                let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
+                                                let mut reader = std::io::BufReader::new(&mut *file_lock);
+                                                //let mut writer = BufWriter::new(&mut *write_lock);
+                                                //let metadata = file.metadata().unwrap().clone();
 
 
                                                 //println!("found metadata");
@@ -770,7 +772,7 @@ fn process_bam(
 
                                                 if !error_flag.load(Ordering::Relaxed) {
                                                     //eprintln!("No error flag found, proceeding....");
-                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(file, allow_out_of_order_chroms);
+                                                    let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
                                                     //outb.write(vals, runtime).unwrap();
                                                     match outb.write(vals, runtime) {
                                                         Ok(_) => {
@@ -782,8 +784,10 @@ fn process_bam(
                                                             std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
                                                                 //eprintln!("Error deleting file: {}", e);
                                                             });
+
                                                         }
                                                     }
+
                                                 }else {
                                                     //println!("No data or error occurred during processing");
                                                 }

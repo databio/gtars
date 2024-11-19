@@ -10,8 +10,9 @@ use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use os_pipe::PipeWriter;
 use tokio::runtime;
 
 #[derive(Debug)]
@@ -600,10 +601,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
     stepsize: i32,
     chromosome_name: &String,
     out_sel: &str,
-    write_fd: Arc<dyn AsRawFd + Send + Sync>,
+    write_fd: Arc<Mutex<PipeWriter>>,
 ) -> Result<(), BAMRecordError> {
     //eprintln!("BEGIN FIXEDSTART COUNTS");
-    let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
+    let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
+    let mut writer = BufWriter::new(&mut *write_lock);
+    //let mut writer = std::io::BufWriter::new(unsafe { std::fs::File::from_raw_fd(write_fd.as_raw_fd()) });
     //let vin_iter = starts_vector.iter();
 
     //let mut vec_lines: Vec<String> = Vec::new();
@@ -631,7 +634,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
-            writer.write_all(b"").unwrap();
+            writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
             return Err(BAMRecordError::NoFirstRecord);  // Example error handling
@@ -639,7 +642,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         None => {
             // Handle no records
             eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
-            writer.write_all(b"").unwrap();
+            writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
             return Err(BAMRecordError::NoFirstRecord);
@@ -651,7 +654,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
         "end" => first_record.alignment_end().unwrap().unwrap().get() as i32,
         _ => {
-            writer.write_all(b"").unwrap();
+            writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
             return Err(BAMRecordError::IncorrectSel);  // Example error handling
@@ -681,7 +684,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
             "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
             "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
             _ => {
-                writer.write_all(b"").unwrap();
+                writer.write_all(b"\n").unwrap();
                 writer.flush().unwrap();
                 return Err(BAMRecordError::IncorrectSel);
                 //panic!("unknown output selection must be either 'start', 'end', 'core'")
