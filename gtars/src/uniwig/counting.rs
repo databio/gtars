@@ -6,13 +6,13 @@ use noodles::bam::io::reader::Query;
 use noodles::bam::io::Reader;
 use noodles::bgzf;
 use noodles::sam::alignment::Record;
+use os_pipe::PipeWriter;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io;
 use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
-use std::sync::{Arc, Mutex};
 use std::os::unix::io::{AsRawFd, FromRawFd};
-use os_pipe::PipeWriter;
+use std::sync::{Arc, Mutex};
 use tokio::runtime;
 
 #[derive(Debug)]
@@ -27,7 +27,6 @@ impl From<std::io::Error> for BAMRecordError {
         BAMRecordError::IoError(err)
     }
 }
-
 
 /// This function is a more direct port of smoothFixedStartEndBW from uniwig written in CPP.
 /// It allows the user to accumulate reads of either starts or ends.
@@ -491,18 +490,24 @@ pub fn fixed_core_counts_bam_to_bw(
     let first_record_option = records.next();
 
     let first_record = match first_record_option {
-        Some(Ok(record)) => record,  // Extract the record
+        Some(Ok(record)) => record, // Extract the record
         Some(Err(err)) => {
             // Handle the error
-            eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
+            eprintln!(
+                "Error reading the first record for chrom: {} {:?} Skipping...",
+                chromosome_name, err
+            );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
-            return Err(BAMRecordError::NoFirstRecord);  // Example error handling
+            return Err(BAMRecordError::NoFirstRecord); // Example error handling
         }
         None => {
             // Handle no records
-            eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
+            eprintln!(
+                "Error reading the first record for chrom: {} Skipping...",
+                chromosome_name
+            );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
@@ -524,9 +529,9 @@ pub fn fixed_core_counts_bam_to_bw(
     }
 
     for coord in records {
-
         let unwrapped_coord = coord.unwrap().clone();
-        let mut current_start_site = unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
+        let mut current_start_site =
+            unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
         let new_end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
         count += 1;
@@ -556,8 +561,13 @@ pub fn fixed_core_counts_bam_to_bw(
             }
 
             if coordinate_position % stepsize == 0 {
-                let single_line = format!("{}\t{}\t{}\t{}\n",
-                                          chromosome_name, coordinate_position, coordinate_position+1, count);
+                let single_line = format!(
+                    "{}\t{}\t{}\t{}\n",
+                    chromosome_name,
+                    coordinate_position,
+                    coordinate_position + 1,
+                    count
+                );
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
             }
@@ -568,7 +578,7 @@ pub fn fixed_core_counts_bam_to_bw(
         prev_coordinate_value = current_start_site;
     }
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -588,8 +598,13 @@ pub fn fixed_core_counts_bam_to_bw(
 
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
-            let single_line = format!("{}\t{}\t{}\t{}\n",
-                                      chromosome_name, coordinate_position, coordinate_position+1, count);
+            let single_line = format!(
+                "{}\t{}\t{}\t{}\n",
+                chromosome_name,
+                coordinate_position,
+                coordinate_position + 1,
+                count
+            );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
         }
@@ -598,7 +613,6 @@ pub fn fixed_core_counts_bam_to_bw(
     }
     Ok(())
 }
-
 
 ///Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
 /// Primarily for use to count sequence reads in bam files.
@@ -639,25 +653,30 @@ pub fn fixed_start_end_counts_bam_to_bw(
     let first_record_option = records.next();
 
     let first_record = match first_record_option {
-        Some(Ok(record)) => record,  // Extract the record
+        Some(Ok(record)) => record, // Extract the record
         Some(Err(err)) => {
             // Handle the error
-            eprintln!("Error reading the first record for chrom: {} {:?} Skipping...", chromosome_name,err);
+            eprintln!(
+                "Error reading the first record for chrom: {} {:?} Skipping...",
+                chromosome_name, err
+            );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
-            return Err(BAMRecordError::NoFirstRecord);  // Example error handling
+            return Err(BAMRecordError::NoFirstRecord); // Example error handling
         }
         None => {
             // Handle no records
-            eprintln!("Error reading the first record for chrom: {} Skipping...", chromosome_name);
+            eprintln!(
+                "Error reading the first record for chrom: {} Skipping...",
+                chromosome_name
+            );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
             return Err(BAMRecordError::NoFirstRecord);
         }
     };
-
 
     let mut adjusted_start_site: i32 = match out_sel {
         "start" => first_record.alignment_start().unwrap().unwrap().get() as i32,
@@ -666,14 +685,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
-            return Err(BAMRecordError::IncorrectSel);  // Example error handling
-            //panic!("unknown output selection must be either 'start', 'end', 'core'")
+            return Err(BAMRecordError::IncorrectSel); // Example error handling
+                                                      //panic!("unknown output selection must be either 'start', 'end', 'core'")
         }
     };
 
-
     adjusted_start_site = adjusted_start_site - smoothsize;
-
 
     current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -739,12 +756,16 @@ pub fn fixed_start_end_counts_bam_to_bw(
             }
 
             if coordinate_position % stepsize == 0 {
-                let single_line = format!("{}\t{}\t{}\t{}\n",
-                                          chromosome_name, coordinate_position, coordinate_position+1, count);
+                let single_line = format!(
+                    "{}\t{}\t{}\t{}\n",
+                    chromosome_name,
+                    coordinate_position,
+                    coordinate_position + 1,
+                    count
+                );
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
                 //eprintln!("{}",single_line);
-
             }
 
             coordinate_position = coordinate_position + 1;
@@ -775,8 +796,13 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         if coordinate_position % stepsize == 0 {
             // Step size defaults to 1, so report every value
-            let single_line = format!("{}\t{}\t{}\t{}\n",
-                                      chromosome_name, coordinate_position, coordinate_position+1, count);
+            let single_line = format!(
+                "{}\t{}\t{}\t{}\n",
+                chromosome_name,
+                coordinate_position,
+                coordinate_position + 1,
+                count
+            );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
             //eprintln!("{}",single_line);

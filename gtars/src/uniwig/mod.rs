@@ -8,7 +8,10 @@ use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, BAMRecordError};
+use crate::uniwig::counting::{
+    core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam,
+    fixed_start_end_counts_bam_to_bw, start_end_counts, BAMRecordError,
+};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -17,25 +20,28 @@ use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
+use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
+use bigtools::utils::cli::bigwigmerge::{
+    bigwigmerge, get_merged_vals, BigWigMergeArgs, ChromGroupReadImpl, MergingValues,
+    MergingValuesError,
+};
 use bigtools::utils::cli::BBIWriteArgs;
+use bigtools::utils::reopen::ReopenableFile;
+use bigtools::{BigWigRead, BigWigWrite, InputSortType};
 use noodles::bam;
+use noodles::bam::io::reader::Query;
+use noodles::bgzf::Reader;
 use noodles::sam::alignment::Record;
+use os_pipe::PipeWriter;
 use rayon::ThreadPool;
 use std::ops::Deref;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::{BigWigRead, BigWigWrite, InputSortType};
-use bigtools::utils::cli::bigwigmerge::{bigwigmerge, get_merged_vals, BigWigMergeArgs, ChromGroupReadImpl, MergingValues, MergingValuesError};
-use bigtools::utils::reopen::ReopenableFile;
-use noodles::bam::io::reader::Query;
-use noodles::bgzf::Reader;
-use os_pipe::PipeWriter;
 use tokio::runtime;
 // struct ChromGroupReadImpl {
 //     iter: Box<dyn Iterator<Item = Result<(String, u32, MergingValues), MergingValuesError>> + Send>,
@@ -626,7 +632,7 @@ fn process_bam(
     output_type: &str,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
-    let fp_String= filepath.clone().to_string();
+    let fp_String = filepath.clone().to_string();
     let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
@@ -645,10 +651,8 @@ fn process_bam(
                 continue;
             }
 
-            Ok(mut records) => {
-                final_chromosomes.push(chromosome.clone())
-            }}
-
+            Ok(mut records) => final_chromosomes.push(chromosome.clone()),
+        }
     }
 
     pool.install(|| {
@@ -725,20 +729,18 @@ fn process_bam(
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
-            let out_selection_vec =
-                vec!["start", "end", "core"];
+            let out_selection_vec = vec!["start", "end", "core"];
             //let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
-                let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);
+                let combined_bw_file_name =
+                    format!("{}_{}.{}", bwfileheader, selection, output_type);
 
                 let mut inputs: Vec<String> = Vec::new();
 
                 for chrom in final_chromosomes.iter() {
-                    let file_name = format!(
-                        "{}_{}_{}.{}",
-                        bwfileheader, chrom, selection, output_type
-                    );
+                    let file_name =
+                        format!("{}_{}_{}.{}", bwfileheader, chrom, selection, output_type);
                     let result = File::open(&file_name);
                     match result {
                         Ok(_) => {
@@ -759,7 +761,10 @@ fn process_bam(
                     match BigWigRead::open_file(&input) {
                         Ok(bw) => bigwigs.push(bw),
                         Err(e) => {
-                            eprintln!("Error when opening bigwig {}. Skipping due to error: {:?}", input, e);
+                            eprintln!(
+                                "Error when opening bigwig {}. Skipping due to error: {:?}",
+                                input, e
+                            );
                         }
                     }
                 }
@@ -767,7 +772,7 @@ fn process_bam(
                 let threshold = 0.0; // default
                 let adjust = Some(0.0); // default
                 let clip = Some(100000000.0); // arbitrary but large because we don't want to clip
-                let (iter, chrom_map) = get_merged_vals(bigwigs, 10,threshold, adjust, clip)?;
+                let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
 
                 let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
                 let runtime = if num_threads == 1 {
@@ -784,27 +789,32 @@ fn process_bam(
 
                 //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
                 outb.write(all_values, runtime)?;
-
-
             }
         }
 
-        _ =>{
-
-        }
-
+        _ => {}
     }
 
     Ok(())
 }
 
-fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &String, smoothsize: i32, stepsize: i32, num_threads: i32, zoom: i32,bwfileheader: &str, fp_String: &String, chrom_sizes_ref_path_String: &String, sel: &str) {
+fn process_bw_in_threads(
+    chrom_sizes: &HashMap<String, u32>,
+    chromosome_string: &String,
+    smoothsize: i32,
+    stepsize: i32,
+    num_threads: i32,
+    zoom: i32,
+    bwfileheader: &str,
+    fp_String: &String,
+    chrom_sizes_ref_path_String: &String,
+    sel: &str,
+) {
     let (mut reader, mut writer) = os_pipe::pipe().unwrap();
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
-    let current_chrom_size =
-        *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
+    let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
     let current_chrom_size_cloned = current_chrom_size.clone();
     let smoothsize_cloned = smoothsize.clone();
@@ -812,15 +822,10 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
     let chromosome_string_cloned = chromosome_string.clone();
     let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
 
-    let file_name = format!(
-        "{}_{}_{}",
-        bwfileheader,chromosome_string, sel
-    );
-
+    let file_name = format!("{}_{}_{}", bwfileheader, chromosome_string, sel);
 
     let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
     let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
-
 
     let producer_handle = thread::spawn(move || {
         let region = chromosome_string_cloned.parse().unwrap();
@@ -831,14 +836,15 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
 
         let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
-        match determine_counting_func(            records,
-                                            current_chrom_size_cloned,
-                                            smoothsize_cloned,
-                                            stepsize_cloned,
-                                            &chromosome_string_cloned,
-                                            sel_clone.as_str(),
-                                            write_fd,){
-
+        match determine_counting_func(
+            records,
+            current_chrom_size_cloned,
+            smoothsize_cloned,
+            stepsize_cloned,
+            &chromosome_string_cloned,
+            sel_clone.as_str(),
+            write_fd,
+        ) {
             Ok(_) => {
                 //eprintln!("Processing successful for {}", chromosome_string_cloned);
             }
@@ -846,12 +852,9 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
                 eprintln!("Error processing records: {:?}", err);
             }
         }
-    }
-    );
-
+    });
 
     let consumer_handle = thread::spawn(move || {
-
         let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
         let mut reader = std::io::BufReader::new(&mut *file_lock);
 
@@ -860,7 +863,7 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
 
         let new_file_path = new_file_path.to_str().unwrap();
 
-        let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+        let mut outb = create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
 
         let runtime = if num_threads == 1 {
             outb.options.channel_size = 0;
@@ -873,7 +876,8 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
         };
         let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
 
-        let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
+        let vals =
+            BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
         match outb.write(vals, runtime) {
             Ok(_) => {
                 eprintln!("Successfully wrote file: {}", new_file_path);
@@ -884,7 +888,6 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
                 std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
                     eprintln!("Error deleting file: {}", e);
                 });
-
             }
         }
     });
@@ -893,13 +896,17 @@ fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &
     consumer_handle.join().unwrap();
 }
 
-fn determine_counting_func(mut records: Box<Query<Reader<File>>>, current_chrom_size_cloned: i32, smoothsize_cloned: i32, stepsize_cloned: i32, chromosome_string_cloned: &String, sel_clone: &str, write_fd: Arc<Mutex<PipeWriter>>) ->  Result<(), BAMRecordError> {
-
-
-    let count_result:Result<(), BAMRecordError> = match sel_clone {
-
-        "start" | "end" =>{
-
+fn determine_counting_func(
+    mut records: Box<Query<Reader<File>>>,
+    current_chrom_size_cloned: i32,
+    smoothsize_cloned: i32,
+    stepsize_cloned: i32,
+    chromosome_string_cloned: &String,
+    sel_clone: &str,
+    write_fd: Arc<Mutex<PipeWriter>>,
+) -> Result<(), BAMRecordError> {
+    let count_result: Result<(), BAMRecordError> = match sel_clone {
+        "start" | "end" => {
             match fixed_start_end_counts_bam_to_bw(
                 &mut records,
                 current_chrom_size_cloned,
@@ -908,25 +915,23 @@ fn determine_counting_func(mut records: Box<Query<Reader<File>>>, current_chrom_
                 &chromosome_string_cloned,
                 sel_clone,
                 write_fd,
-            ){
-
-                Ok(_) => {
-                    Ok(())
-                }
+            ) {
+                Ok(_) => Ok(()),
                 Err(err) => {
                     eprintln!("Error processing records: {:?}", err);
                     Err(err)
                 }
-
             }
-
-
         }
 
         "core" => {
-            match fixed_core_counts_bam_to_bw(&mut records,current_chrom_size_cloned,stepsize_cloned,&chromosome_string_cloned,write_fd)
-            {
-
+            match fixed_core_counts_bam_to_bw(
+                &mut records,
+                current_chrom_size_cloned,
+                stepsize_cloned,
+                &chromosome_string_cloned,
+                write_fd,
+            ) {
                 Ok(_) => {
                     //eprintln!("Processing successful for {}", chromosome_string_cloned);
                     Ok(())
@@ -935,30 +940,28 @@ fn determine_counting_func(mut records: Box<Query<Reader<File>>>, current_chrom_
                     eprintln!("Error processing records: {:?}", err);
                     Err(err)
                 }
-
             }
-
         }
 
-
         &_ => {
-
-            eprintln!("Error processing records, improper selection: {}", sel_clone);
+            eprintln!(
+                "Error processing records, improper selection: {}",
+                sel_clone
+            );
             Err(BAMRecordError::IncorrectSel)
-
         }
     };
 
     count_result
-
 }
 
-pub fn create_bw_writer(chrom_sizes_ref_path: &str, new_file_path: &str, num_threads: i32, zoom: i32) ->  BigWigWrite<File>{
-
-
-
+pub fn create_bw_writer(
+    chrom_sizes_ref_path: &str,
+    new_file_path: &str,
+    num_threads: i32,
+    zoom: i32,
+) -> BigWigWrite<File> {
     let bedgraphargstruct = BedGraphToBigWigArgs {
-
         bedgraph: String::from("-"),
         chromsizes: chrom_sizes_ref_path.to_string(),
         output: new_file_path.to_string(),
@@ -967,7 +970,7 @@ pub fn create_bw_writer(chrom_sizes_ref_path: &str, new_file_path: &str, num_thr
         write_args: BBIWriteArgs {
             nthreads: num_threads as usize,
             nzooms: zoom as u32,
-            zooms:None,
+            zooms: None,
             uncompressed: false,
             sorted: "start".to_string(),
             block_size: 256,      //default
@@ -992,7 +995,8 @@ pub fn create_bw_writer(chrom_sizes_ref_path: &str, new_file_path: &str, num_thr
             })
             .collect();
 
-    let mut outb:  BigWigWrite<File> = BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
+    let mut outb: BigWigWrite<File> =
+        BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
     outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
     let u32_value = bedgraphargstruct.write_args.nzooms;
     let option_vec_u32: Option<Vec<u32>> = Some(vec![u32_value]);

@@ -354,7 +354,7 @@ mod tests {
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         //let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
-        let chromsizerefpath =String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
+        let chromsizerefpath = String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = path_to_small_bam_file;
 
