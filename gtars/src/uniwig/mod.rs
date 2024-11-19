@@ -994,84 +994,78 @@ fn process_bam(
             })
     });
 
-    // match output_type {
-    //     // Must merge all individual CHRs bw files...
-    //     "bw" => {
-    //         // let out_selection_vec =
-    //         //     vec!["start", "end", "core"];
-    //         let out_selection_vec = vec!["start"];
-    //
-    //         for selection in out_selection_vec.iter() {
-    //             let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);
-    //
-    //             let mut inputs: Vec<String> = Vec::new();
-    //
-    //             for chrom in list_of_valid_chromosomes.iter() {
-    //                 let file_name = format!(
-    //                     "{}_{}_{}.{}",
-    //                     bwfileheader, chrom, selection, output_type
-    //                 );
-    //                 let result = File::open(&file_name);
-    //                 match result {
-    //                     Ok(_) => {
-    //                         // File exists, add it to the input list
-    //                         inputs.push(file_name);
-    //                     }
-    //                     Err(error) => {
-    //                         // Just pass for now, this could happen if there are chroms in the bam header but no .bw files were created for those chroms
-    //                         // if error.kind() == ErrorKind::NotFound {
-    //                         //     eprintln!("File not found: {}", file_name);
-    //                         // } else {
-    //                         //     // Handle other errors, like permission denied, etc.
-    //                         //     eprintln!("Error opening file: {}", error);
-    //                         // }
-    //                     }
-    //                 }
-    //                 //inputs.push(file_name);
-    //             }
-    //
-    //             let mut bigwigs: Vec<BigWigRead<ReopenableFile>> = vec![];
-    //
-    //             for input in inputs {
-    //                 match BigWigRead::open_file(&input) {
-    //                     Ok(bw) => bigwigs.push(bw),
-    //                     Err(e) => {
-    //                         //eprintln!("Error when opening bigwig ({}): {:?}", input, e);
-    //                         //return Ok(());
-    //                     }
-    //                 }
-    //             }
-    //
-    //             let threshold = 0.0;
-    //             let adjust = Some(0.0);
-    //             let clip = Some(10000.0); //TODO probably should NOT be 0.0
-    //             let (iter, chrom_map) = get_merged_vals(bigwigs, 10,threshold, adjust, clip)?;
-    //
-    //             let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
-    //             let runtime = if num_threads == 1 {
-    //                 runtime::Builder::new_current_thread().build().unwrap()
-    //             } else {
-    //                 runtime::Builder::new_multi_thread()
-    //                     .worker_threads(num_threads as usize)
-    //                     .build()
-    //                     .unwrap()
-    //             };
-    //             let all_values = ChromGroupReadImpl {
-    //                 iter: Box::new(iter),
-    //             };
-    //
-    //             //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
-    //             outb.write(all_values, runtime)?;
-    //
-    //
-    //         }
-    //     }
-    //
-    //     _ =>{
-    //
-    //     }
-    //
-    // }
+    match output_type {
+        // Must merge all individual CHRs bw files...
+        "bw" => {
+            let out_selection_vec =
+                vec!["start", "end", "core"];
+            //let out_selection_vec = vec!["start"];
+
+            for selection in out_selection_vec.iter() {
+                let combined_bw_file_name = format!("{}_{}.{}", bwfileheader, selection, output_type);
+
+                let mut inputs: Vec<String> = Vec::new();
+
+                for chrom in final_chromosomes.iter() {
+                    let file_name = format!(
+                        "{}_{}_{}.{}",
+                        bwfileheader, chrom, selection, output_type
+                    );
+                    let result = File::open(&file_name);
+                    match result {
+                        Ok(_) => {
+                            // File exists, add it to the input list
+                            inputs.push(file_name);
+                        }
+                        Err(error) => {
+                            // Just pass for now, this could happen if there are chroms in the bam header but no .bw files were created for those chroms
+                            eprintln!("Error opening file: {}", error);
+                        }
+                    }
+                    //inputs.push(file_name);
+                }
+
+                let mut bigwigs: Vec<BigWigRead<ReopenableFile>> = vec![];
+
+                for input in inputs {
+                    match BigWigRead::open_file(&input) {
+                        Ok(bw) => bigwigs.push(bw),
+                        Err(e) => {
+                            eprintln!("Error when opening bigwig {}. Skipping due to error: {:?}", input, e);
+                        }
+                    }
+                }
+
+                let threshold = 0.0; // default
+                let adjust = Some(0.0); // default
+                let clip = Some(100000000.0); // arbitrary but large because we don't want to clip
+                let (iter, chrom_map) = get_merged_vals(bigwigs, 10,threshold, adjust, clip)?;
+
+                let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
+                let runtime = if num_threads == 1 {
+                    runtime::Builder::new_current_thread().build().unwrap()
+                } else {
+                    runtime::Builder::new_multi_thread()
+                        .worker_threads(num_threads as usize)
+                        .build()
+                        .unwrap()
+                };
+                let all_values = ChromGroupReadImpl {
+                    iter: Box::new(iter),
+                };
+
+                //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
+                outb.write(all_values, runtime)?;
+
+
+            }
+        }
+
+        _ =>{
+
+        }
+
+    }
 
     Ok(())
 }
