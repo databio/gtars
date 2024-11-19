@@ -662,99 +662,8 @@ fn process_bam(
 
                                     match output_type {
                                         "bw" => {
-                                            let (mut reader, mut writer) = os_pipe::pipe().unwrap();
-                                            let write_fd = Arc::new(Mutex::new(writer));
-                                            let read_fd = Arc::new(Mutex::new(reader));
 
-                                            let current_chrom_size =
-                                                *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
-
-                                            let current_chrom_size_cloned = current_chrom_size.clone();
-                                            let smoothsize_cloned = smoothsize.clone();
-                                            let stepsize_cloned = stepsize.clone();
-                                            let chromosome_string_cloned = chromosome_string.clone();
-
-                                            let file_name = format!(
-                                                "{}_{}_{}",
-                                                bwfileheader,chromosome_string, "start"
-                                            );
-
-
-                                            let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
-                                            let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
-
-                                            let producer_handle = thread::spawn(move || {
-                                                let region = chromosome_string_cloned.parse().unwrap();
-                                                let mut reader = bam::io::indexed_reader::Builder::default()
-                                                    .build_from_path(fpclone)
-                                                    .unwrap();
-                                                let header = reader.read_header().unwrap();
-
-                                                let mut records = reader.query(&header, &region).map(Box::new).unwrap();
-                                                match fixed_start_end_counts_bam_to_bw(
-                                                    &mut records,
-                                                    current_chrom_size_cloned,
-                                                    smoothsize_cloned,
-                                                    stepsize_cloned,
-                                                    &chromosome_string_cloned,
-                                                    "start",
-                                                    write_fd,
-                                                ){
-
-                                                    Ok(_) => {
-                                                        //eprintln!("Processing successful for {}", chromosome_string_cloned);
-                                                    }
-                                                    Err(err) => {
-                                                        eprintln!("Error processing records: {:?}", err);
-                                                    }
-
-                                                }
-
-                                                }
-                                            );
-
-
-                                            let consumer_handle = thread::spawn(move || {
-
-                                                let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
-                                                let mut reader = std::io::BufReader::new(&mut *file_lock);
-
-                                                let file_path = PathBuf::from(file_name);
-                                                let new_file_path = file_path.with_extension("bw");
-
-                                                let new_file_path = new_file_path.to_str().unwrap();
-
-                                                let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
-
-                                                let runtime = if num_threads == 1 {
-                                                    outb.options.channel_size = 0;
-                                                    runtime::Builder::new_current_thread().build().unwrap()
-                                                } else {
-                                                    runtime::Builder::new_multi_thread()
-                                                        .worker_threads(num_threads as usize)
-                                                        .build()
-                                                        .unwrap()
-                                                };
-                                                let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-
-                                                let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
-                                                match outb.write(vals, runtime) {
-                                                    Ok(_) => {
-                                                        eprintln!("Successfully wrote file: {}", new_file_path);
-                                                    }
-                                                    Err(err) => {
-                                                        eprintln!("Error writing to BigWig file: {}", err);
-                                                        // Delete the partially written file
-                                                        std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
-                                                            eprintln!("Error deleting file: {}", e);
-                                                        });
-
-                                                    }
-                                                }
-                                            });
-
-                                            producer_handle.join().unwrap();
-                                            consumer_handle.join().unwrap();
+                                            process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
 
                                         }
                                         _ => {
@@ -777,100 +686,8 @@ fn process_bam(
                         OutSelection::ENDS => {
                             match output_type {
                                 "bw" => {
-                                    let (mut reader, mut writer) = os_pipe::pipe().unwrap();
-                                    let write_fd = Arc::new(Mutex::new(writer));
-                                    let read_fd = Arc::new(Mutex::new(reader));
 
-                                    let current_chrom_size =
-                                        *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
-
-                                    let current_chrom_size_cloned = current_chrom_size.clone();
-                                    let smoothsize_cloned = smoothsize.clone();
-                                    let stepsize_cloned = stepsize.clone();
-                                    let chromosome_string_cloned = chromosome_string.clone();
-
-                                    let file_name = format!(
-                                        "{}_{}_{}",
-                                        bwfileheader,chromosome_string, "end"
-                                    );
-
-
-                                    let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
-                                    let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
-
-                                    let producer_handle = thread::spawn(move || {
-                                        let region = chromosome_string_cloned.parse().unwrap();
-                                        let mut reader = bam::io::indexed_reader::Builder::default()
-                                            .build_from_path(fpclone)
-                                            .unwrap();
-                                        let header = reader.read_header().unwrap();
-
-                                        let mut records = reader.query(&header, &region).map(Box::new).unwrap();
-                                        match fixed_start_end_counts_bam_to_bw(
-                                            &mut records,
-                                            current_chrom_size_cloned,
-                                            smoothsize_cloned,
-                                            stepsize_cloned,
-                                            &chromosome_string_cloned,
-                                            "end",
-                                            write_fd,
-                                        ){
-
-                                            Ok(_) => {
-                                                //eprintln!("Processing successful for {}", chromosome_string_cloned);
-                                            }
-                                            Err(err) => {
-                                                eprintln!("Error processing records: {:?}", err);
-                                            }
-
-                                        }
-
-                                    }
-                                    );
-
-
-                                    let consumer_handle = thread::spawn(move || {
-
-                                        let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
-                                        let mut reader = std::io::BufReader::new(&mut *file_lock);
-
-                                        let file_path = PathBuf::from(file_name);
-                                        let new_file_path = file_path.with_extension("bw");
-
-                                        let new_file_path = new_file_path.to_str().unwrap();
-
-                                        let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
-
-                                        let runtime = if num_threads == 1 {
-                                            outb.options.channel_size = 0;
-                                            runtime::Builder::new_current_thread().build().unwrap()
-                                        } else {
-                                            runtime::Builder::new_multi_thread()
-                                                .worker_threads(num_threads as usize)
-                                                .build()
-                                                .unwrap()
-                                        };
-                                        let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
-
-                                        let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
-                                        match outb.write(vals, runtime) {
-                                            Ok(_) => {
-                                                eprintln!("Successfully wrote file: {}", new_file_path);
-                                            }
-                                            Err(err) => {
-                                                eprintln!("Error writing to BigWig file: {}", err);
-                                                // Delete the partially written file
-                                                std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
-                                                    eprintln!("Error deleting file: {}", e);
-                                                });
-
-                                            }
-                                        }
-                                    });
-
-                                    producer_handle.join().unwrap();
-                                    consumer_handle.join().unwrap();
-
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
 
 
                                 }
@@ -1068,6 +885,104 @@ fn process_bam(
     }
 
     Ok(())
+}
+
+fn process_bw_in_threads(chrom_sizes: &HashMap<String, u32>,chromosome_string: &String, smoothsize: i32, stepsize: i32, num_threads: i32, zoom: i32,bwfileheader: &str, fp_String: &String, chrom_sizes_ref_path_String: &String, sel: &str) {
+    let (mut reader, mut writer) = os_pipe::pipe().unwrap();
+    let write_fd = Arc::new(Mutex::new(writer));
+    let read_fd = Arc::new(Mutex::new(reader));
+
+    let current_chrom_size =
+        *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
+
+    let current_chrom_size_cloned = current_chrom_size.clone();
+    let smoothsize_cloned = smoothsize.clone();
+    let stepsize_cloned = stepsize.clone();
+    let chromosome_string_cloned = chromosome_string.clone();
+    let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
+
+    let file_name = format!(
+        "{}_{}_{}",
+        bwfileheader,chromosome_string, sel
+    );
+
+
+    let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
+    let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
+
+
+    let producer_handle = thread::spawn(move || {
+        let region = chromosome_string_cloned.parse().unwrap();
+        let mut reader = bam::io::indexed_reader::Builder::default()
+            .build_from_path(fpclone)
+            .unwrap();
+        let header = reader.read_header().unwrap();
+
+        let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+        match fixed_start_end_counts_bam_to_bw(
+            &mut records,
+            current_chrom_size_cloned,
+            smoothsize_cloned,
+            stepsize_cloned,
+            &chromosome_string_cloned,
+            sel_clone.as_str(),
+            write_fd,
+        ){
+
+            Ok(_) => {
+                //eprintln!("Processing successful for {}", chromosome_string_cloned);
+            }
+            Err(err) => {
+                eprintln!("Error processing records: {:?}", err);
+            }
+
+        }
+
+    }
+    );
+
+
+    let consumer_handle = thread::spawn(move || {
+
+        let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
+        let mut reader = std::io::BufReader::new(&mut *file_lock);
+
+        let file_path = PathBuf::from(file_name);
+        let new_file_path = file_path.with_extension("bw");
+
+        let new_file_path = new_file_path.to_str().unwrap();
+
+        let mut outb =  create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+
+        let runtime = if num_threads == 1 {
+            outb.options.channel_size = 0;
+            runtime::Builder::new_current_thread().build().unwrap()
+        } else {
+            runtime::Builder::new_multi_thread()
+                .worker_threads(num_threads as usize)
+                .build()
+                .unwrap()
+        };
+        let allow_out_of_order_chroms = !matches!(outb.options.input_sort_type, InputSortType::ALL);
+
+        let vals = BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
+        match outb.write(vals, runtime) {
+            Ok(_) => {
+                eprintln!("Successfully wrote file: {}", new_file_path);
+            }
+            Err(err) => {
+                eprintln!("Error writing to BigWig file: {}", err);
+                // Delete the partially written file
+                std::fs::remove_file(new_file_path).unwrap_or_else(|e| {
+                    eprintln!("Error deleting file: {}", e);
+                });
+
+            }
+        }
+    });
+
+    producer_handle.join().unwrap();
+    consumer_handle.join().unwrap();
 }
 
 pub fn create_bw_writer(chrom_sizes_ref_path: &str, new_file_path: &str, num_threads: i32, zoom: i32) ->  BigWigWrite<File>{
