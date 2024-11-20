@@ -22,19 +22,16 @@ read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok,
 #' @param filename A string representing the path to the gtok file.
 write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
 
-#' RUST WRAPPERS SHOULD BE MINIMAL. HANDLE DATA STRUCTURES IN IGD
-#' Search igd with a bed file
-#' @param database_path A string representing the path to the database igd file.
-#' @param query_path A string representing the path to the query bed file.
-#' @export
-r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
-
 #' Create an IGD database from a directory of bed files
 #' @param output_path String path where the IGD database will be saved
 #' @param filelist String path to either a text file containing paths to bed files, or a directory containing bed files
 #' @param db_name String name for the database (will be used in output filenames)
-#' @export
-r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_create, output_path, filelist, db_name)
+rextendr_igd_create <- function(output_path, filelist, db_name) .Call(wrap__rextendr_igd_create, output_path, filelist, db_name)
+
+#' Search igd with a bed file
+#' @param database_path A string representing the path to the database igd file.
+#' @param query_path A string representing the path to the query bed file.
+rextendr_igd_search <- function(database_path, query_path) .Call(wrap__rextendr_igd_search, database_path, query_path)
 
 
 # nolint end

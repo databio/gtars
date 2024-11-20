@@ -20,39 +20,55 @@ NULL
 #' \dontrun{
 #' # Create database with default name
 #' igd_create("path/to/output", "path/to/bed/files")
-#' 
-#' # Create database with custom name
-#' igd_create("path/to/output", "path/to/bed/files", "my_database")
 #' }
 #' 
 #' @export
-# igd_create <- function(output_path, filelist, db_name = "igd_database") {
-#   # Input validation
-#   if (!is.character(output_path) || length(output_path) != 1) {
-#     stop("output_path must be a single character string")
-#   }
-#   if (!is.character(filelist) || length(filelist) != 1) {
-#     stop("filelist must be a single character string")
-#   }
-#   
-#   # Call Rust function
-#   .Call(wrap__r_igd_create, output_path, filelist, db_name)
-#   
-#   invisible(NULL)
-# }
-parse_igd_search_results <- function(chr_vector) {
-  # Create a temporary file
-  temp_file <- tempfile()
-  writeLines(chr_vector, temp_file)
+r_igd_create <- function(output_path, filelist, db_name = "igd_database") {
+  # Input validation
+  if (!is.character(output_path) || length(output_path) != 1) {
+    stop("output_path must be a single character string")
+  }
+  if (!is.character(filelist) || length(filelist) != 1) {
+    stop("filelist must be a single character string")
+  }
+
+  # Call Rust function
+  .Call(wrap__rextendr_igd_create, output_path, filelist, db_name)
+
+  invisible(NULL)
+}
+
+
+#' @title Search IGD Database
+#' 
+#' @description Searches an IGD database for region overlaps with an input BED file
+#' 
+#' @param database_path path to .igd database
+#' @param query_path path to .bed file
+#' 
+#' @return dataframe of overlap hits
+#' 
+#' @examples
+#' \dontrun{
+#' }
+#' 
+#' @export
+r_igd_search <- function(database_path, query_path) {
   
-  # Read the temporary file as a data frame
-  df <- read.table(temp_file, header = FALSE, sep = "\t")
+  # Input validation
+  if (!is.character(database_path) || length(database_path) != 1) {
+    stop("database_path must be a single character string")
+  }
+  if (!is.character(query_path) || length(query_path) != 1) {
+    stop("query_path must be a single character string")
+  }
   
-  # Assign column names
-  colnames(df) <- c("index", "number_of_regions", "number_of_hits", "File_name")
+  # Call Rust function
+  chr_vector <- .Call(wrap__rextendr_igd_search, database_path, query_path)
   
-  # Remove the temporary file
-  unlink(temp_file)
+  split_result <- strsplit(chr_vector, split = '\t')
+  df <- data.frame(matrix(unlist(split_result[-1]), nrow = length(chr_vector)-1, byrow = TRUE))
+  colnames(df) <- split_result[[1]]
   
-  return(df)
+  invisible(df)
 }
