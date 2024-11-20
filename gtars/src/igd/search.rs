@@ -71,12 +71,14 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
 }
 
 #[allow(unused_variables)]
-pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<(), String> {
+pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Vec<String>, String> {
     // First check that BOTH the igd database and the query are the proper file types
     // else raise error
 
     let mode = 1;
     let mut hash_table: HashMap<String, i32> = HashMap::new();
+
+    let mut final_string_vec = Vec::new();
 
     match check_file_extension(database_path, IGD_FILE_EXTENSION) {
         Ok(_) => (),
@@ -131,6 +133,8 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
             }
 
             println!("index\t number of regions\t number of hits\t File_name");
+            let format_string = format!("index\t number of regions\t number of hits\t File_name");
+            final_string_vec.push(format_string);
 
             let mut total: i64 = 0;
             for (i, hit) in hits.iter().enumerate() {
@@ -139,6 +143,9 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
                         "{}\t{}\t{}\t{}",
                         i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName
                     );
+                    let format_string = format!("{}\t{}\t{}\t{}",
+                                               i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName);
+                    final_string_vec.push(format_string);
                 }
                 total += hit;
             }
@@ -148,13 +155,13 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<()
 
         _ => {
             println!("Invalid mode selected, exiting");
-            return Ok(());
+            return Err(String::from("Invalid mode selected, exiting"));
         }
     }
 
     println!("FINISHED");
 
-    Ok(())
+    Ok(final_string_vec)
 }
 #[allow(unused_variables)]
 pub fn getOverlaps(

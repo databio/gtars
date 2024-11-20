@@ -26,17 +26,17 @@ NULL
 #' }
 #' 
 #' @export
-igd_create <- function(output_path, filelist, db_name = "igd_database") {
-  # Input validation
-  if (!is.character(output_path) || length(output_path) != 1) {
-    stop("output_path must be a single character string")
-  }
-  if (!is.character(filelist) || length(filelist) != 1) {
-    stop("filelist must be a single character string")
-  }
-  
-  # Call Rust function
-  .Call(wrap__r_igd_create, output_path, filelist, db_name)
-  
-  invisible(NULL)
-}
+# igd_create <- function(output_path, filelist, db_name = "igd_database") {
+#   # Input validation
+#   if (!is.character(output_path) || length(output_path) != 1) {
+#     stop("output_path must be a single character string")
+#   }
+#   if (!is.character(filelist) || length(filelist) != 1) {
+#     stop("filelist must be a single character string")
+#   }
+#   
+#   # Call Rust function
+#   .Call(wrap__r_igd_create, output_path, filelist, db_name)
+#   
+#   invisible(NULL)
+# }
