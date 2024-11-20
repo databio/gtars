@@ -40,3 +40,19 @@ NULL
 #   
 #   invisible(NULL)
 # }
+parse_igd_search_results <- function(chr_vector) {
+  # Create a temporary file
+  temp_file <- tempfile()
+  writeLines(chr_vector, temp_file)
+  
+  # Read the temporary file as a data frame
+  df <- read.table(temp_file, header = FALSE, sep = "\t")
+  
+  # Assign column names
+  colnames(df) <- c("index", "number_of_regions", "number_of_hits", "File_name")
+  
+  # Remove the temporary file
+  unlink(temp_file)
+  
+  return(df)
+}

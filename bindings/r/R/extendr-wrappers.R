@@ -29,5 +29,12 @@ write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write
 #' @export
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
 
+#' Create an IGD database from a directory of bed files
+#' @param output_path String path where the IGD database will be saved
+#' @param filelist String path to either a text file containing paths to bed files, or a directory containing bed files
+#' @param db_name String name for the database (will be used in output filenames)
+#' @export
+r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_create, output_path, filelist, db_name)
+
 
 # nolint end
