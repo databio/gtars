@@ -836,6 +836,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 
     let mut coordinate_position = 1;
 
+    let mut prev_count: i32 = 0;
     let mut count: i32 = 0;
 
     let mut coordinate_value: i32;
@@ -952,17 +953,33 @@ pub fn variable_start_end_counts_bam_to_bw(
                 }
             }
 
-            if coordinate_position % stepsize == 0 {
-                let single_line = format!(
-                    "{}\t{}\t{}\t{}\n",
-                    chromosome_name,
-                    coordinate_position,
-                    coordinate_position + 1,
-                    count
-                );
-                writer.write_all(single_line.as_bytes())?;
-                writer.flush()?;
-                eprintln!("{}",single_line);
+            // if coordinate_position % stepsize == 0 {
+            //     let single_line = format!(
+            //         "{}\t{}\t{}\t{}\n",
+            //         chromosome_name,
+            //         coordinate_position,
+            //         coordinate_position + 1,
+            //         count
+            //     );
+            //     writer.write_all(single_line.as_bytes())?;
+            //     writer.flush()?;
+            //     eprintln!("{}",single_line);
+
+                if count != prev_count {
+                        let single_line = format!(
+                            "{}\t{}\t{}\t{}\n",
+                            chromosome_name,
+                            coordinate_position,
+                            current_end_site,
+                            count
+                        );
+                        writer.write_all(single_line.as_bytes())?;
+                        writer.flush()?;
+                        eprintln!("{}",single_line);
+
+                        prev_count = count;
+
+
             }
 
             coordinate_position = coordinate_position + 1;
@@ -991,18 +1008,34 @@ pub fn variable_start_end_counts_bam_to_bw(
             }
         }
 
-        if coordinate_position % stepsize == 0 {
-            // Step size defaults to 1, so report every value
+        // if coordinate_position % stepsize == 0 {
+        //     // Step size defaults to 1, so report every value
+        //     let single_line = format!(
+        //         "{}\t{}\t{}\t{}\n",
+        //         chromosome_name,
+        //         coordinate_position,
+        //         coordinate_position + 1,
+        //         count
+        //     );
+        //     writer.write_all(single_line.as_bytes())?;
+        //     writer.flush()?;
+        //     eprintln!("{}",single_line);
+        // }
+
+        if count != prev_count {
             let single_line = format!(
                 "{}\t{}\t{}\t{}\n",
                 chromosome_name,
                 coordinate_position,
-                coordinate_position + 1,
+                current_end_site,
                 count
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
             eprintln!("{}",single_line);
+
+            prev_count = count;
+
         }
 
         coordinate_position = coordinate_position + 1;
