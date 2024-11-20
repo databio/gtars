@@ -163,7 +163,9 @@ mod tests {
         // the final db path will be constructed within igd_save_db like so
         let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
 
-        igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
+        let res = igd_search(&final_db_save_path, &query_file).expect("Error during testing:");
+
+
     }
 
     //
