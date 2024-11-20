@@ -4,6 +4,10 @@ use std::path::PathBuf;
 use gtars::igd::search::{get_igd_info, get_file_info_tsv};
 use gtars::igd::create::create_igd_f;
 
+
+
+/// RUST WRAPPERS SHOULD BE MINIMAL. HANDLE DATA STRUCTURES IN IGD
+
 /// Search igd with a bed file
 /// @param database_path A string representing the path to the database igd file.
 /// @param query_path A string representing the path to the query bed file.
@@ -34,7 +38,7 @@ pub fn r_igd_search(database_path: &str, query_path: &str) -> extendr_api::Resul
     // Initialize hits vector
     let mut hits = vec![0; igd.nFiles as usize];
     
-    // Process the search
+    // Process the search THIS IS MOST IMPORTANT IN WRAPPER
     gtars::igd::search::getOverlaps(
         &igd,
         &database_path.to_string(),
