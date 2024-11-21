@@ -648,7 +648,29 @@ fn process_bam(
                 continue;
             }
 
-            Ok(mut records) => final_chromosomes.push(chromosome.clone()),
+            Ok(mut records) => {
+                // TODO does this pre-processing make downstream error handling redundant? No, because the functions are public.
+                let first_record_option = records.next();
+
+                match first_record_option {
+                    Some(Ok(record)) => final_chromosomes.push(chromosome.clone()), // Extract the record
+                    Some(Err(err)) => {
+                        // Handle the error no first record
+                        eprintln!(
+                            "Error reading the first record for chrom: {} {:?} Skipping...",
+                            chromosome, err
+                        );
+                    }
+                    None => {
+                        // Handle no records
+                        eprintln!(
+                            "No records exist for chrom: {} Skipping...",
+                           chromosome
+                        );
+                    }
+                };
+
+            },
         }
     }
 
@@ -726,12 +748,15 @@ fn process_bam(
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
+            println!("Merging all bigwig files...");
             let out_selection_vec = vec!["start", "end", "core"];
             //let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
                 let combined_bw_file_name =
                     format!("{}_{}.{}", bwfileheader, selection, output_type);
+
+                let final_file_path = combined_bw_file_name.clone();
 
                 let mut inputs: Vec<String> = Vec::new();
 
@@ -785,7 +810,20 @@ fn process_bam(
                 };
 
                 //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
-                outb.write(all_values, runtime)?;
+                // outb.write(all_values, runtime)?;
+
+                match outb.write(all_values, runtime) {
+                    Ok(_) => {
+                        eprintln!("Successfully wrote file: {}", final_file_path);
+                    }
+                    Err(err) => {
+                        eprintln!("Error writing to BigWig file: {}", err);
+                        // Delete the partially written file
+                        std::fs::remove_file(final_file_path).unwrap_or_else(|e| {
+                            eprintln!("Error deleting file: {}", e);
+                        });
+                    }
+                }
             }
         }
 
@@ -877,7 +915,7 @@ fn process_bw_in_threads(
             BedParserStreamingIterator::from_bedgraph_file(&mut reader, allow_out_of_order_chroms);
         match outb.write(vals, runtime) {
             Ok(_) => {
-                eprintln!("Successfully wrote file: {}", new_file_path);
+                //eprintln!("Successfully wrote file: {}", new_file_path);
             }
             Err(err) => {
                 eprintln!("Error writing to BigWig file: {}", err);
