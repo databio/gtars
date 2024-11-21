@@ -86,4 +86,11 @@ pub fn create_uniwig_cli() -> Command {
                 .help("Number of zoom levels (for bw file output only")
                 .required(false),
         )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .short('d')
+                .help("Print more verbose debug messages?")
+                .action(ArgAction::SetTrue),
+        )
 }

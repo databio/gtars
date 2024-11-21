@@ -135,6 +135,8 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
     let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
 
+    let debug = matches.get_one::<bool>("debug").unwrap_or_else(|| &false);
+
     let stepsize = matches
         .get_one::<i32>("stepsize")
         .expect("requires integer value");
@@ -154,6 +156,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *score,
         *stepsize,
         *zoom,
+        *debug,
     )
     .expect("Uniwig failed.");
 }
@@ -175,6 +178,7 @@ pub fn uniwig_main(
     score: bool,
     stepsize: i32,
     zoom: i32,
+    debug: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -602,6 +606,7 @@ pub fn uniwig_main(
                 stepsize,
                 fixed,
                 output_type,
+                debug,
             );
         }
 
@@ -627,6 +632,7 @@ fn process_bam(
     stepsize: i32,
     fixed: bool,
     output_type: &str,
+    debug: bool,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin Process bam");
     let fp_String = filepath.clone().to_string();
@@ -644,7 +650,10 @@ fn process_bam(
         let header = reader.read_header().unwrap();
         match reader.query(&header, &region).map(Box::new) {
             Err(err) => {
-                eprintln!("Region not found, skipping region {}", region); //TODO only print if a debug mode is set?
+                if debug{
+                    eprintln!("Region not found, skipping region {}", region); //TODO only print if a debug mode is set?
+                }
+
                 continue;
             }
 
@@ -656,17 +665,24 @@ fn process_bam(
                     Some(Ok(record)) => final_chromosomes.push(chromosome.clone()), // Extract the record
                     Some(Err(err)) => {
                         // Handle the error no first record
-                        eprintln!(
-                            "Error reading the first record for chrom: {} {:?} Skipping...",
-                            chromosome, err
-                        );
+                        if debug {
+                            eprintln!(
+                                "Error reading the first record for chrom: {} {:?} Skipping...",
+                                chromosome, err
+                            );
+
+                        }
+
                     }
                     None => {
                         // Handle no records
-                        eprintln!(
-                            "No records exist for chrom: {} Skipping...",
-                           chromosome
-                        );
+                        if debug {
+                            eprintln!(
+                                "No records exist for chrom: {} Skipping...",
+                                chromosome
+                            );
+                        }
+
                     }
                 };
 
