@@ -856,7 +856,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!(
-                "Error reading the first record for chrom: {} {:?} Skipping...",
+                "Error reading the first record for {} chrom: {} {:?} Skipping...", out_sel,
                 chromosome_name, err
             );
             writer.write_all(b"\n").unwrap();
@@ -867,7 +867,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         None => {
             // Handle no records
             eprintln!(
-                "Error reading the first record for chrom: {} Skipping...",
+                "No records for {} chrom: {} Skipping...", out_sel,
                 chromosome_name
             );
             writer.write_all(b"\n").unwrap();
@@ -1059,7 +1059,7 @@ pub fn variable_core_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!(
-                "Error reading the first record for chrom: {} {:?} Skipping...",
+                "Error reading the first record for core chrom: {} {:?} Skipping...",
                 chromosome_name, err
             );
             writer.write_all(b"\n").unwrap();
@@ -1070,7 +1070,7 @@ pub fn variable_core_counts_bam_to_bw(
         None => {
             // Handle no records
             eprintln!(
-                "Error reading the first record for chrom: {} Skipping...",
+                "No records for core chrom: {} Skipping...",
                 chromosome_name
             );
             writer.write_all(b"\n").unwrap();

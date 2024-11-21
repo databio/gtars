@@ -915,7 +915,7 @@ fn determine_counting_func(
             ) {
                 Ok(_) => Ok(()),
                 Err(err) => {
-                    eprintln!("Error processing records: {:?}", err);
+                    //eprintln!("Error processing records for {} {:?}", sel_clone,err);
                     Err(err)
                 }
             }
@@ -934,7 +934,7 @@ fn determine_counting_func(
                     Ok(())
                 }
                 Err(err) => {
-                    eprintln!("Error processing records: {:?}", err);
+                    //eprintln!("Error processing records for {}: {:?}", sel_clone,err);
                     Err(err)
                 }
             }
