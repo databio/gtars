@@ -634,7 +634,7 @@ fn process_bam(
     output_type: &str,
     debug: bool,
 ) -> Result<(), Box<dyn Error>> {
-    println!("Begin Process bam");
+    println!("Begin bam processing workflow...");
     let fp_String = filepath.clone().to_string();
     let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
 
@@ -795,6 +795,8 @@ fn process_bam(
 
                 let mut bigwigs: Vec<BigWigRead<ReopenableFile>> = vec![];
 
+                let inputs_clone = inputs.clone();
+
                 for input in inputs {
                     match BigWigRead::open_file(&input) {
                         Ok(bw) => bigwigs.push(bw),
@@ -840,6 +842,16 @@ fn process_bam(
                         });
                     }
                 }
+
+                // CLean up after writing merged bigwig
+                for input in inputs_clone.iter(){
+                    std::fs::remove_file(input).unwrap_or_else(|e| {
+                        eprintln!("Error deleting file: {}", e);
+                    });
+
+                }
+
+
             }
         }
 
