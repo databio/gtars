@@ -844,6 +844,8 @@ pub fn variable_start_end_counts_bam_to_bw(
 
     let mut adjusted_start_site: i32;
     let mut current_end_site: i32;
+    let mut prev_end_site: i32 =0;
+    let mut bg_prev_coord: i32 = 0; // keep track of which coordinate had a switch in count.
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
@@ -920,6 +922,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         adjusted_start_site = coordinate_value - smoothsize;
 
         //let current_score = adjusted_start_site;
+        //eprintln!("coordinate_value {} adjusted start {}", coordinate_value, adjusted_start_site);
 
         count += 1;
 
@@ -942,6 +945,8 @@ pub fn variable_start_end_counts_bam_to_bw(
             while current_end_site == coordinate_position {
                 count = count - 1;
 
+                //prev_end_site = current_end_site;
+
                 if count < 0 {
                     count = 0;
                 }
@@ -953,31 +958,22 @@ pub fn variable_start_end_counts_bam_to_bw(
                 }
             }
 
-            // if coordinate_position % stepsize == 0 {
-            //     let single_line = format!(
-            //         "{}\t{}\t{}\t{}\n",
-            //         chromosome_name,
-            //         coordinate_position,
-            //         coordinate_position + 1,
-            //         count
-            //     );
-            //     writer.write_all(single_line.as_bytes())?;
-            //     writer.flush()?;
-            //     eprintln!("{}",single_line);
 
                 if count != prev_count {
                         let single_line = format!(
                             "{}\t{}\t{}\t{}\n",
                             chromosome_name,
+                            bg_prev_coord,
                             coordinate_position,
-                            current_end_site,
                             count
                         );
                         writer.write_all(single_line.as_bytes())?;
                         writer.flush()?;
-                        eprintln!("{}",single_line);
+                        //eprintln!("{}\n",single_line);
+                        //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
 
                         prev_count = count;
+                        bg_prev_coord = coordinate_position;
 
 
             }
@@ -997,6 +993,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         while current_end_site == coordinate_position {
             let current_score = adjusted_start_site;
             count = count - 1;
+            //prev_end_site = current_end_site;
             if count < 0 {
                 count = 0;
             }
@@ -1008,33 +1005,22 @@ pub fn variable_start_end_counts_bam_to_bw(
             }
         }
 
-        // if coordinate_position % stepsize == 0 {
-        //     // Step size defaults to 1, so report every value
-        //     let single_line = format!(
-        //         "{}\t{}\t{}\t{}\n",
-        //         chromosome_name,
-        //         coordinate_position,
-        //         coordinate_position + 1,
-        //         count
-        //     );
-        //     writer.write_all(single_line.as_bytes())?;
-        //     writer.flush()?;
-        //     eprintln!("{}",single_line);
-        // }
 
         if count != prev_count {
             let single_line = format!(
                 "{}\t{}\t{}\t{}\n",
                 chromosome_name,
+                bg_prev_coord,
                 coordinate_position,
-                current_end_site,
                 count
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
-            eprintln!("{}",single_line);
+            //eprintln!("{}",single_line);
+            //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
 
             prev_count = count;
+            bg_prev_coord = coordinate_position;
 
         }
 
