@@ -1032,6 +1032,170 @@ pub fn variable_start_end_counts_bam_to_bw(
     Ok(())
 }
 
+/// Variable counting for CORE, writes line by line in bedgraph format
+pub fn variable_core_counts_bam_to_bw(
+    records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
+    chrom_size: i32,
+    stepsize: i32,
+    chromosome_name: &String,
+    write_fd: Arc<Mutex<PipeWriter>>,
+) -> Result<(), BAMRecordError> {
+    let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
+    let mut writer = BufWriter::new(&mut *write_lock);
+
+    let mut coordinate_position = 1;
+    let mut prev_count: i32 = 0;
+    let mut count: i32 = 0;
+    let mut prev_coordinate_value = 0;
+    let mut current_end_site: i32;
+    let mut bg_prev_coord: i32 = 0;
+    let mut collected_end_sites: Vec<i32> = Vec::new();
+
+
+    let first_record_option = records.next();
+
+    let first_record = match first_record_option {
+        Some(Ok(record)) => record, // Extract the record
+        Some(Err(err)) => {
+            // Handle the error
+            eprintln!(
+                "Error reading the first record for chrom: {} {:?} Skipping...",
+                chromosome_name, err
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord); // Example error handling
+        }
+        None => {
+            // Handle no records
+            eprintln!(
+                "Error reading the first record for chrom: {} Skipping...",
+                chromosome_name
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord);
+        }
+    };
+
+    let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
+    let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
+
+    if current_start_site < 1 {
+        current_start_site = 1;
+    }
+
+    while coordinate_position < current_start_site {
+        // Just skip until we reach the initial adjusted start position
+        // Note that this function will not return 0s at locations before the initial start site
+        coordinate_position = coordinate_position + stepsize;
+    }
+
+    for coord in records {
+        let unwrapped_coord = coord.unwrap().clone();
+        let mut current_start_site =
+            unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
+        let new_end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
+
+        count += 1;
+
+        if current_start_site < 1 {
+            current_start_site = 1;
+        }
+
+        collected_end_sites.push(new_end_site);
+
+        if current_start_site == prev_coordinate_value {
+            continue;
+        }
+
+        while coordinate_position < current_start_site {
+            while current_end_site == coordinate_position {
+                count = count - 1;
+                if count < 0 {
+                    count = 0;
+                }
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0;
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+            }
+
+            if count != prev_count {
+                let single_line = format!(
+                    "{}\t{}\t{}\t{}\n",
+                    chromosome_name,
+                    bg_prev_coord,
+                    coordinate_position,
+                    count
+                );
+                writer.write_all(single_line.as_bytes())?;
+                writer.flush()?;
+                //eprintln!("{}\n",single_line);
+                //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
+
+                prev_count = count;
+                bg_prev_coord = coordinate_position;
+
+
+            }
+
+
+
+            coordinate_position = coordinate_position + 1;
+        }
+
+        prev_coordinate_value = current_start_site;
+    }
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    while coordinate_position < chrom_size {
+        // Apply a bound to push the final coordinates otherwise it will become truncated.
+
+        while current_end_site == coordinate_position {
+            count = count - 1;
+            if count < 0 {
+                count = 0;
+            }
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0;
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+        }
+
+        if count != prev_count {
+            let single_line = format!(
+                "{}\t{}\t{}\t{}\n",
+                chromosome_name,
+                bg_prev_coord,
+                coordinate_position,
+                count
+            );
+            writer.write_all(single_line.as_bytes())?;
+            writer.flush()?;
+            //eprintln!("{}",single_line);
+            //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
+
+            prev_count = count;
+            bg_prev_coord = coordinate_position;
+
+        }
+
+        coordinate_position = coordinate_position + 1;
+    }
+
+    drop(writer);
+
+    Ok(())
+}
+
 fn set_up_file_output(
     output_type: &str,
     adjusted_start_site: i32,

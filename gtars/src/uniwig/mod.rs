@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, variable_start_end_counts_bam_to_bw, BAMRecordError};
+use crate::uniwig::counting::{core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -656,9 +656,9 @@ fn process_bam(
         final_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
-                // let out_selection_vec =
-                //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-                let out_selection_vec = vec![OutSelection::STARTS];
+                let out_selection_vec =
+                    vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                //let out_selection_vec = vec![OutSelection::STARTS];
 
                 for selection in out_selection_vec.iter() {
                     match selection {
@@ -726,8 +726,8 @@ fn process_bam(
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
-            //let out_selection_vec = vec!["start", "end", "core"];
-            let out_selection_vec = vec!["start"];
+            let out_selection_vec = vec!["start", "end", "core"];
+            //let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
                 let combined_bw_file_name =
@@ -922,7 +922,7 @@ fn determine_counting_func(
         }
 
         "core" => {
-            match fixed_core_counts_bam_to_bw(
+            match variable_core_counts_bam_to_bw(
                 &mut records,
                 current_chrom_size_cloned,
                 stepsize_cloned,
