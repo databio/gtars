@@ -707,17 +707,7 @@ fn process_bam(
                                             process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
                                         }
                                         _ => {
-                                            // fixed_start_end_counts_bam(
-                                            //     &mut records,
-                                            //     current_chrom_size,
-                                            //     smoothsize,
-                                            //     stepsize,
-                                            //     output_type,
-                                            //     chromosome_string,
-                                            //     bwfileheader,
-                                            //     "start",
-                                            //     false,
-                                            // );
+                                            output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
                                         }
                                     }
 
@@ -729,6 +719,7 @@ fn process_bam(
                                     process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
                                 }
                                 _ => {
+                                    output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
                                     // fixed_start_end_counts_bam(
                                     //     &mut records,
                                     //     current_chrom_size,
@@ -749,7 +740,7 @@ fn process_bam(
                                     process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
                                 }
                                 _ =>{
-                                    println!("fixed_core_counts for bam to other file file type (not bw) currently not implemented.");
+                                    output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
                                 }
                             }
 
@@ -855,10 +846,63 @@ fn process_bam(
             }
         }
 
-        _ => {}
+        _ => {
+
+            // todo combine files for non bw outputs
+
+        }
     }
 
     Ok(())
+}
+
+/// This option is for outputting BAM counts to any other file type that is not BW
+/// Currently this will use FIXED step counting while outputting to bw uses variable step counting
+fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
+                                chromosome_string: &String,
+                                smoothsize: i32,
+                                stepsize: i32,
+                                num_threads: i32,
+                                zoom: i32,
+                                bwfileheader: &str,
+                                fp_String: &String,
+                                chrom_sizes_ref_path_String: &String,
+                                sel: &str,) {
+
+    let region = chromosome_string.parse().unwrap();
+    let mut reader = bam::io::indexed_reader::Builder::default()
+        .build_from_path(fp_String)
+        .unwrap();
+    let header = reader.read_header().unwrap();
+
+    let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+
+
+    match sel {
+        "start" | "end" => {
+
+            // fixed_start_end_counts_bam(
+            //     &mut records,
+            //     current_chrom_size,
+            //     smoothsize,
+            //     stepsize,
+            //     output_type,
+            //     chromosome_string,
+            //     bwfileheader,
+            //     "end",
+            //     false,
+            // );
+        }
+
+        "core" => {
+            println!("fixed_core_counts for bam to other file file type (not bw) currently not implemented.");
+        }
+
+        _ => {eprintln!("improper selection: {}", sel)}
+    }
+
+
+
 }
 
 fn process_bw_in_threads(
