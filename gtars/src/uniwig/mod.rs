@@ -694,9 +694,9 @@ fn process_bam(
         final_chromosomes
             .par_iter()
             .for_each(|chromosome_string: &String| {
-                let out_selection_vec =
-                    vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-                //let out_selection_vec = vec![OutSelection::STARTS];
+                // let out_selection_vec =
+                //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                let out_selection_vec = vec![OutSelection::STARTS];
 
                 for selection in out_selection_vec.iter() {
                     match selection {
@@ -756,8 +756,8 @@ fn process_bam(
         // Must merge all individual CHRs bw files...
         "bw" => {
             println!("Merging all bigwig files...");
-            let out_selection_vec = vec!["start", "end", "core"];
-            //let out_selection_vec = vec!["start"];
+            //let out_selection_vec = vec!["start", "end", "core"];
+            let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
                 let combined_bw_file_name =
@@ -1105,9 +1105,7 @@ pub fn create_bw_writer(
     let mut outb: BigWigWrite<File> =
         BigWigWrite::create_file(bedgraphargstruct.output, chrom_map).unwrap();
     outb.options.max_zooms = bedgraphargstruct.write_args.nzooms;
-    let u32_value = bedgraphargstruct.write_args.nzooms;
-    let option_vec_u32: Option<Vec<u32>> = Some(vec![u32_value]);
-    outb.options.manual_zoom_sizes = option_vec_u32;
+    outb.options.manual_zoom_sizes = bedgraphargstruct.write_args.zooms;
     outb.options.compress = !bedgraphargstruct.write_args.uncompressed;
     outb.options.input_sort_type = InputSortType::START;
     outb.options.block_size = bedgraphargstruct.write_args.block_size;
