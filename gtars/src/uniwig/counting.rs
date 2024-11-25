@@ -965,7 +965,7 @@ pub fn variable_start_end_counts_bam_to_bw(
                             chromosome_name,
                             bg_prev_coord,
                             coordinate_position,
-                            count
+                            prev_count
                         );
                         writer.write_all(single_line.as_bytes())?;
                         writer.flush()?;
@@ -1012,7 +1012,7 @@ pub fn variable_start_end_counts_bam_to_bw(
                 chromosome_name,
                 bg_prev_coord,
                 coordinate_position,
-                count
+                prev_count
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
