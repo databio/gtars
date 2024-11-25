@@ -196,6 +196,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
             write_args: BBIWriteArgs {
                 nthreads: num_threads as usize,
                 nzooms: zoom_level as u32,
+                zooms: None,
                 uncompressed: false,
                 sorted: "all".to_string(),
                 block_size: 256,      //default
