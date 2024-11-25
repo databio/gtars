@@ -690,74 +690,41 @@ fn process_bam(
         }
     }
 
-    pool.install(|| {
-        final_chromosomes
-            .par_iter()
-            .for_each(|chromosome_string: &String| {
-                // let out_selection_vec =
-                //     vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
-                let out_selection_vec = vec![OutSelection::STARTS];
-
-                for selection in out_selection_vec.iter() {
-                    match selection {
-                        OutSelection::STARTS => {
-
-                                    match output_type {
-                                        "bw" => {
-                                            process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
-                                        }
-                                        _ => {
-                                            output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
-                                        }
-                                    }
-
-
-                        }
-                        OutSelection::ENDS => {
-                            match output_type {
-                                "bw" => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
-                                }
-                                _ => {
-                                    output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
-                                    // fixed_start_end_counts_bam(
-                                    //     &mut records,
-                                    //     current_chrom_size,
-                                    //     smoothsize,
-                                    //     stepsize,
-                                    //     output_type,
-                                    //     chromosome_string,
-                                    //     bwfileheader,
-                                    //     "end",
-                                    //     false,
-                                    // );
-                                }
-                            }
-                        }
-                        OutSelection::CORE => {
-                            match output_type {
-                                "bw" => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
-                                }
-                                _ =>{
-                                    output_bam_counts_non_bw(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
-                                }
-                            }
-
-                        }
-                        _ => {}
-                    }
-                }
-
-            })
-    });
 
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
+
+            // TODO Add progress bars...
+            pool.install(|| {
+                final_chromosomes
+                    .par_iter()
+                    .for_each(|chromosome_string: &String| {
+                        let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                        //let out_selection_vec = vec![OutSelection::STARTS];
+
+                        for selection in out_selection_vec.iter() {
+                            match selection {
+                                OutSelection::STARTS => {
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
+                                }
+                                OutSelection::ENDS => {
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
+                                }
+                                OutSelection::CORE => {
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
+                                }
+                                _ => {}
+                            }
+                        }
+
+                    })
+            });
+
+
             println!("Merging all bigwig files...");
-            //let out_selection_vec = vec!["start", "end", "core"];
-            let out_selection_vec = vec!["start"];
+            let out_selection_vec = vec!["start", "end", "core"];
+            //let out_selection_vec = vec!["start"];
 
             for selection in out_selection_vec.iter() {
                 let combined_bw_file_name =
@@ -880,7 +847,7 @@ fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
 
     match sel {
         "start" | "end" => {
-
+            println!("fixed_core_counts for bam to other file file type (not bw or BED) currently not implemented.");
             // fixed_start_end_counts_bam(
             //     &mut records,
             //     current_chrom_size,
@@ -1068,6 +1035,8 @@ pub fn create_bw_writer(
     num_threads: i32,
     zoom: i32,
 ) -> BigWigWrite<File> {
+
+    //TODO do we need to force zooms? Related to https://github.com/jackh726/bigtools/issues/63
     let bedgraphargstruct = BedGraphToBigWigArgs {
         bedgraph: String::from("-"),
         chromsizes: chrom_sizes_ref_path.to_string(),
@@ -1076,8 +1045,8 @@ pub fn create_bw_writer(
         single_pass: false,
         write_args: BBIWriteArgs {
             nthreads: num_threads as usize,
-            nzooms: zoom as u32,
-            zooms: None,
+            nzooms: zoom as u32, // this does NOT force zooms
+            zooms: None, // this will force zooms
             uncompressed: false,
             sorted: "start".to_string(),
             block_size: 256,      //default
