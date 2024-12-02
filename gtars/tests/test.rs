@@ -394,6 +394,51 @@ mod tests {
     }
 
     #[rstest]
+    fn test_process_bam_to_bed(
+        path_to_small_bam_file: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        //let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let combinedbedpath = path_to_small_bam_file;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        //let bwfileheader = bwfileheader_path.as_str();
+        //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
+        let bwfileheader = "/home/drc/Downloads/refactor_test_gtars/";
+
+        let smoothsize: i32 = 1;
+        let output_type = "bed";
+        let filetype = "bam";
+        let num_threads = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+
+        uniwig_main(
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+        )
+            .expect("Uniwig main failed!");
+
+        Ok(())
+    }
+
+    #[rstest]
     fn test_run_uniwig_main_wig_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");

@@ -13,8 +13,8 @@ use std::io;
 use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
 use std::os::unix::io::{AsRawFd, FromRawFd};
 use std::sync::{Arc, Mutex};
+use noodles::sam::alignment::record::Flags;
 use tokio::runtime;
-
 #[derive(Debug)]
 pub enum BAMRecordError {
     IoError(std::io::Error),
@@ -1251,24 +1251,52 @@ pub fn bam_to_bed_no_counts(
             false => {"+"}
         };
 
-        let mut current_start_site =
+        //println!("processing records bam to bed");
+
+        let flag = unwrapped_coord.flags();
+
+        let mut shifted_pos:i32;
+
+        let mut start_site =
             unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
-        let new_end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
+
+        let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
         // GET shifted pos and Strand
-        // TODO based on flags
-        let shifted_pos = current_start_site;
-        // if args.mode == "dnase":
-        //     shift_factor = {"+":1, "-":0}  # DNase
-        // elif args.mode == "atac":
-        //     shift_factor = {"+":4, "-":-5}  # ATAC
-        // else:
-        // shift_factor = {"+":0, "-":0}
+        // TODO ONLY ATAC SHIFTING IS SUPPORTED
+        //shift_factor = {"+":4, "-":-5}  # ATAC
+        // TODO this assumes tail_edge is false, which is default on PEPATAC pipeline, should add tail_edge=true workflow
+        if flag.bits() & 1 != 0 { // Paired-end read
+            //println!("found, flag bits {} and flagbits &64 {}", flag.bits(), flag.bits() & 64);
+            if flag.bits() & 64 != 0 { // First in pair
+                if flag.bits() & 16 != 0 { // Reverse complement
+                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                    shifted_pos = end_site + -5;
+                } else {
+                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                    shifted_pos = start_site + 4;
+                }
+            } else { // Second in pair
+                if flag.bits() & 16 != 0 { // Reverse complement
+                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                    shifted_pos = end_site + -5;
+                } else {
+                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                    shifted_pos = start_site + 4;
+                }
+            }
+        } else { // Single-end read
+            //println!("Single end read {}" flag.bits());
+            if flag.bits() & 16 != 0 { // Reverse complement
+                shifted_pos = end_site + -5;
+            } else {
+                shifted_pos = start_site + 4;
+            }
+        }
 
-        // Relevant comment from original bamSitesToWig.py
+        // Relevant comment from original bamSitesToWig.py:
         // The bed file needs 6 columns (even though some are dummy)
         // because MACS says so.
-
         let single_line = format!(
             "{}\t{}\t{}\t{}\t{}\t{}\n",
             chromosome_name,
