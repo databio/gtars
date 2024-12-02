@@ -284,7 +284,7 @@ pub fn fixed_start_end_counts_bam(
     //let vin_iter = starts_vector.iter();
 
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
+    let v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
     let mut coordinate_position = 1;
 
@@ -323,7 +323,7 @@ pub fn fixed_start_end_counts_bam(
     let file = file.unwrap();
     let mut buf = BufWriter::new(file);
 
-    current_end_site = adjusted_start_site;
+    //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
 
     if adjusted_start_site < 1 {
@@ -337,7 +337,7 @@ pub fn fixed_start_end_counts_bam(
     }
 
     for coord in records {
-        let mut coordinate_value: i32 = match out_sel {
+        let coordinate_value: i32 = match out_sel {
             "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
             "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
             _ => {
@@ -347,7 +347,7 @@ pub fn fixed_start_end_counts_bam(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        adjusted_start_site = coordinate_value;
+        //adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
 
         let current_score = adjusted_start_site;
@@ -360,8 +360,8 @@ pub fn fixed_start_end_counts_bam(
 
         //let current_index = index;
 
-        let mut new_end_site = adjusted_start_site;
-        new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        //let mut new_end_site = adjusted_start_site;
+        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -680,7 +680,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     adjusted_start_site = adjusted_start_site - smoothsize;
 
-    current_end_site = adjusted_start_site;
+    //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
 
     if adjusted_start_site < 1 {
@@ -694,7 +694,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     }
 
     for coord in records {
-        let mut coordinate_value: i32 = match out_sel {
+        let coordinate_value: i32 = match out_sel {
             "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
             "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
             _ => {
@@ -707,7 +707,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        adjusted_start_site = coordinate_value;
+        //adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
 
         //let current_score = adjusted_start_site;
@@ -720,8 +720,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         //let current_index = index;
 
-        let mut new_end_site = adjusted_start_site;
-        new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        //let mut new_end_site = adjusted_start_site;
+        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {

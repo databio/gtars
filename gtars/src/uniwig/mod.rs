@@ -30,8 +30,6 @@ use noodles::bam::io::reader::Query;
 use noodles::bgzf::Reader;
 use os_pipe::PipeWriter;
 use rayon::ThreadPool;
-use std::ops::Deref;
-use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
