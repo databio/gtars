@@ -433,7 +433,7 @@ mod tests {
             zoom,
             false,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
 
         Ok(())
     }
@@ -517,7 +517,7 @@ mod tests {
             score,
             stepsize,
             zoom,
-            false
+            false,
         )
         .expect("Uniwig main failed!");
         Ok(())

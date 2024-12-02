@@ -1,4 +1,3 @@
-
 use noodles::bam::io::reader::Query;
 
 use noodles::sam::alignment::Record;
@@ -6,7 +5,7 @@ use os_pipe::PipeWriter;
 
 use std::fs::{create_dir_all, OpenOptions};
 use std::io;
-use std::io::{ BufWriter,  Write};
+use std::io::{BufWriter, Write};
 
 use std::sync::{Arc, Mutex};
 
@@ -769,7 +768,6 @@ pub fn fixed_start_end_counts_bam_to_bw(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-
             count = count - 1;
             if count < 0 {
                 count = 0;
@@ -815,7 +813,6 @@ pub fn variable_start_end_counts_bam_to_bw(
     out_sel: &str,
     write_fd: Arc<Mutex<PipeWriter>>,
 ) -> Result<(), BAMRecordError> {
-
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
 
@@ -838,8 +835,8 @@ pub fn variable_start_end_counts_bam_to_bw(
         Some(Err(err)) => {
             // Handle the error
             eprintln!(
-                "Error reading the first record for {} chrom: {} {:?} Skipping...", out_sel,
-                chromosome_name, err
+                "Error reading the first record for {} chrom: {} {:?} Skipping...",
+                out_sel, chromosome_name, err
             );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
@@ -849,8 +846,8 @@ pub fn variable_start_end_counts_bam_to_bw(
         None => {
             // Handle no records
             eprintln!(
-                "No records for {} chrom: {} Skipping...", out_sel,
-                chromosome_name
+                "No records for {} chrom: {} Skipping...",
+                out_sel, chromosome_name
             );
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
@@ -867,7 +864,7 @@ pub fn variable_start_end_counts_bam_to_bw(
             writer.flush().unwrap();
             drop(writer);
             return Err(BAMRecordError::IncorrectSel); // Example error handling
-            //panic!("unknown output selection must be either 'start', 'end', 'core'")
+                                                      //panic!("unknown output selection must be either 'start', 'end', 'core'")
         }
     };
 
@@ -900,7 +897,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-       // adjusted_start_site = coordinate_value;
+        // adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
 
         //let current_score = adjusted_start_site;
@@ -923,7 +920,6 @@ pub fn variable_start_end_counts_bam_to_bw(
         }
 
         while coordinate_position < adjusted_start_site {
-
             while current_end_site == coordinate_position {
                 count = count - 1;
 
@@ -940,24 +936,18 @@ pub fn variable_start_end_counts_bam_to_bw(
                 }
             }
 
+            if count != prev_count {
+                let single_line = format!(
+                    "{}\t{}\t{}\t{}\n",
+                    chromosome_name, bg_prev_coord, coordinate_position, prev_count
+                );
+                writer.write_all(single_line.as_bytes())?;
+                writer.flush()?;
+                //eprintln!("{}\n",single_line);
+                //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
 
-                if count != prev_count {
-                        let single_line = format!(
-                            "{}\t{}\t{}\t{}\n",
-                            chromosome_name,
-                            bg_prev_coord,
-                            coordinate_position,
-                            prev_count
-                        );
-                        writer.write_all(single_line.as_bytes())?;
-                        writer.flush()?;
-                        //eprintln!("{}\n",single_line);
-                        //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
-
-                        prev_count = count;
-                        bg_prev_coord = coordinate_position;
-
-
+                prev_count = count;
+                bg_prev_coord = coordinate_position;
             }
 
             coordinate_position = coordinate_position + 1;
@@ -967,7 +957,7 @@ pub fn variable_start_end_counts_bam_to_bw(
     }
 
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -986,14 +976,10 @@ pub fn variable_start_end_counts_bam_to_bw(
             }
         }
 
-
         if count != prev_count {
             let single_line = format!(
                 "{}\t{}\t{}\t{}\n",
-                chromosome_name,
-                bg_prev_coord,
-                coordinate_position,
-                prev_count
+                chromosome_name, bg_prev_coord, coordinate_position, prev_count
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
@@ -1002,7 +988,6 @@ pub fn variable_start_end_counts_bam_to_bw(
 
             prev_count = count;
             bg_prev_coord = coordinate_position;
-
         }
 
         coordinate_position = coordinate_position + 1;
@@ -1031,7 +1016,6 @@ pub fn variable_core_counts_bam_to_bw(
     let mut bg_prev_coord: i32 = 0;
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
-
     let first_record_option = records.next();
 
     let first_record = match first_record_option {
@@ -1049,10 +1033,7 @@ pub fn variable_core_counts_bam_to_bw(
         }
         None => {
             // Handle no records
-            eprintln!(
-                "No records for core chrom: {} Skipping...",
-                chromosome_name
-            );
+            eprintln!("No records for core chrom: {} Skipping...", chromosome_name);
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
@@ -1108,10 +1089,7 @@ pub fn variable_core_counts_bam_to_bw(
             if count != prev_count {
                 let single_line = format!(
                     "{}\t{}\t{}\t{}\n",
-                    chromosome_name,
-                    bg_prev_coord,
-                    coordinate_position,
-                    count
+                    chromosome_name, bg_prev_coord, coordinate_position, count
                 );
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
@@ -1120,11 +1098,7 @@ pub fn variable_core_counts_bam_to_bw(
 
                 prev_count = count;
                 bg_prev_coord = coordinate_position;
-
-
             }
-
-
 
             coordinate_position = coordinate_position + 1;
         }
@@ -1132,7 +1106,7 @@ pub fn variable_core_counts_bam_to_bw(
         prev_coordinate_value = current_start_site;
     }
     count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                       // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -1153,10 +1127,7 @@ pub fn variable_core_counts_bam_to_bw(
         if count != prev_count {
             let single_line = format!(
                 "{}\t{}\t{}\t{}\n",
-                chromosome_name,
-                bg_prev_coord,
-                coordinate_position,
-                count
+                chromosome_name, bg_prev_coord, coordinate_position, count
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
@@ -1165,7 +1136,6 @@ pub fn variable_core_counts_bam_to_bw(
 
             prev_count = count;
             bg_prev_coord = coordinate_position;
-
         }
 
         coordinate_position = coordinate_position + 1;
@@ -1205,10 +1175,7 @@ pub fn bam_to_bed_no_counts(
         }
         None => {
             // Handle no records
-            eprintln!(
-                "No records for core chrom: {} Skipping...",
-                chromosome_name
-            );
+            eprintln!("No records for core chrom: {} Skipping...", chromosome_name);
             writer.write_all(b"\n").unwrap();
             writer.flush().unwrap();
             drop(writer);
@@ -1219,23 +1186,21 @@ pub fn bam_to_bed_no_counts(
     // let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
     // let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
 
-
     for coord in records {
         let unwrapped_coord = coord.unwrap().clone();
 
-        let strand = match unwrapped_coord.flags().is_reverse_complemented(){
-            true => {"-"}
-            false => {"+"}
+        let strand = match unwrapped_coord.flags().is_reverse_complemented() {
+            true => "-",
+            false => "+",
         };
 
         //println!("processing records bam to bed");
 
         let flag = unwrapped_coord.flags();
 
-        let shifted_pos:i32;
+        let shifted_pos: i32;
 
-        let start_site =
-            unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
+        let start_site = unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
@@ -1243,18 +1208,23 @@ pub fn bam_to_bed_no_counts(
         // TODO ONLY ATAC SHIFTING IS SUPPORTED
         //shift_factor = {"+":4, "-":-5}  # ATAC
         // TODO this assumes tail_edge is false, which is default on PEPATAC pipeline, should add tail_edge=true workflow
-        if flag.bits() & 1 != 0 { // Paired-end read
+        if flag.bits() & 1 != 0 {
+            // Paired-end read
             //println!("found, flag bits {} and flagbits &64 {}", flag.bits(), flag.bits() & 64);
-            if flag.bits() & 64 != 0 { // First in pair
-                if flag.bits() & 16 != 0 { // Reverse complement
+            if flag.bits() & 64 != 0 {
+                // First in pair
+                if flag.bits() & 16 != 0 {
+                    // Reverse complement
                     //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
                     shifted_pos = end_site + -5;
                 } else {
                     //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
                     shifted_pos = start_site + 4;
                 }
-            } else { // Second in pair
-                if flag.bits() & 16 != 0 { // Reverse complement
+            } else {
+                // Second in pair
+                if flag.bits() & 16 != 0 {
+                    // Reverse complement
                     //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
                     shifted_pos = end_site + -5;
                 } else {
@@ -1262,9 +1232,11 @@ pub fn bam_to_bed_no_counts(
                     shifted_pos = start_site + 4;
                 }
             }
-        } else { // Single-end read
+        } else {
+            // Single-end read
             //println!("Single end read {}" flag.bits());
-            if flag.bits() & 16 != 0 { // Reverse complement
+            if flag.bits() & 16 != 0 {
+                // Reverse complement
                 shifted_pos = end_site + -5;
             } else {
                 shifted_pos = start_site + 4;
@@ -1286,13 +1258,11 @@ pub fn bam_to_bed_no_counts(
 
         writer.write_all(single_line.as_bytes())?;
         writer.flush()?;
-
     }
 
     drop(writer);
 
     Ok(())
-
 }
 
 fn set_up_file_output(

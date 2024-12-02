@@ -5,23 +5,22 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::{File};
+use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
-use crate::uniwig::reading::{
-   read_chromosome_sizes
+use crate::uniwig::counting::{
+    bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,
+    variable_start_end_counts_bam_to_bw, BAMRecordError,
 };
+use crate::uniwig::reading::read_chromosome_sizes;
 use crate::uniwig::utils::{compress_counts, get_final_chromosomes};
 use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
 use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::bedgraphtobigwig::{ BedGraphToBigWigArgs};
-use bigtools::utils::cli::bigwigmerge::{
-    get_merged_vals,  ChromGroupReadImpl,
-};
+use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
+use bigtools::utils::cli::bigwigmerge::{get_merged_vals, ChromGroupReadImpl};
 use bigtools::utils::cli::BBIWriteArgs;
 use bigtools::utils::reopen::ReopenableFile;
 use bigtools::{BigWigRead, BigWigWrite, InputSortType};
@@ -637,7 +636,7 @@ fn process_bam(
         let header = reader.read_header().unwrap();
         match reader.query(&header, &region).map(Box::new) {
             Err(..) => {
-                if debug{
+                if debug {
                     eprintln!("Region not found, skipping region {}", region); //TODO only print if a debug mode is set?
                 }
 
@@ -657,57 +656,79 @@ fn process_bam(
                                 "Error reading the first record for chrom: {} {:?} Skipping...",
                                 chromosome, err
                             );
-
                         }
-
                     }
                     None => {
                         // Handle no records
                         if debug {
-                            eprintln!(
-                                "No records exist for chrom: {} Skipping...",
-                                chromosome
-                            );
+                            eprintln!("No records exist for chrom: {} Skipping...", chromosome);
                         }
-
                     }
                 };
-
-            },
+            }
         }
     }
-
 
     match output_type {
         // Must merge all individual CHRs bw files...
         "bw" => {
-
             // TODO Add progress bars...
             pool.install(|| {
                 final_chromosomes
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
-                        let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                        let out_selection_vec =
+                            vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
                             match selection {
                                 OutSelection::STARTS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "start");
+                                    process_bw_in_threads(
+                                        &chrom_sizes,
+                                        chromosome_string,
+                                        smoothsize,
+                                        stepsize,
+                                        num_threads,
+                                        zoom,
+                                        bwfileheader,
+                                        &fp_string,
+                                        &chrom_sizes_ref_path_string,
+                                        "start",
+                                    );
                                 }
                                 OutSelection::ENDS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "end");
+                                    process_bw_in_threads(
+                                        &chrom_sizes,
+                                        chromosome_string,
+                                        smoothsize,
+                                        stepsize,
+                                        num_threads,
+                                        zoom,
+                                        bwfileheader,
+                                        &fp_string,
+                                        &chrom_sizes_ref_path_string,
+                                        "end",
+                                    );
                                 }
                                 OutSelection::CORE => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "core");
+                                    process_bw_in_threads(
+                                        &chrom_sizes,
+                                        chromosome_string,
+                                        smoothsize,
+                                        stepsize,
+                                        num_threads,
+                                        zoom,
+                                        bwfileheader,
+                                        &fp_string,
+                                        &chrom_sizes_ref_path_string,
+                                        "core",
+                                    );
                                 }
-
                             }
                         }
-
                     })
             });
-
 
             println!("Merging all bigwig files...");
             let out_selection_vec = vec!["start", "end", "core"];
@@ -789,58 +810,57 @@ fn process_bam(
                 }
 
                 // CLean up after writing merged bigwig
-                for input in inputs_clone.iter(){
+                for input in inputs_clone.iter() {
                     std::fs::remove_file(input).unwrap_or_else(|e| {
                         eprintln!("Error deleting file: {}", e);
                     });
-
                 }
-
-
             }
         }
 
         "bed" => {
-
             pool.install(|| {
                 final_chromosomes
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
-
-                        let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                        let out_selection_vec =
+                            vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
                             match selection {
                                 OutSelection::STARTS => {
-                                    println!("Only CORE output is implemented for bam to BED file.");
+                                    println!(
+                                        "Only CORE output is implemented for bam to BED file."
+                                    );
                                 }
                                 OutSelection::ENDS => {
-                                    println!("Only CORE output is implemented for bam to BED file.");
+                                    println!(
+                                        "Only CORE output is implemented for bam to BED file."
+                                    );
                                 }
                                 OutSelection::CORE => {
-                                    process_bed_in_threads(chromosome_string,smoothsize,bwfileheader, &fp_string, "core");
+                                    process_bed_in_threads(
+                                        chromosome_string,
+                                        smoothsize,
+                                        bwfileheader,
+                                        &fp_string,
+                                        "core",
+                                    );
                                 }
-
                             }
                         }
-
-
-
                     })
             });
 
-
             // Combine bed files
             let out_selection_vec = vec!["core"];
-            for location in out_selection_vec.iter()  {
-
+            for location in out_selection_vec.iter() {
                 // this is a work around since we need to make a String to Chrom
                 // so that we can re-use write_combined_files
                 // use vec of Strings to make vec of empty chrom structs
                 let mut chromosome_vec: Vec<Chromosome> = Vec::new();
-                for chrom_string in final_chromosomes.iter(){
-
+                for chrom_string in final_chromosomes.iter() {
                     let chrom_name = chrom_string.clone();
 
                     let chromosome = Chromosome {
@@ -851,24 +871,13 @@ fn process_bam(
                     chromosome_vec.push(chromosome);
                 }
 
-                write_combined_files(
-                    *location,
-                    output_type,
-                    bwfileheader,
-                    &chromosome_vec,
-                );
-
-
+                write_combined_files(*location, output_type, bwfileheader, &chromosome_vec);
             }
-
-
-
         }
 
         _ => {
 
             // todo combine files for non bw outputs
-
         }
     }
 
@@ -930,16 +939,14 @@ fn process_bed_in_threads(
     bwfileheader: &str,
     fp_string: &String,
     sel: &str,
-){
+) {
     let (reader, writer) = os_pipe::pipe().unwrap();
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
-
     let smoothsize_cloned = smoothsize.clone();
 
     let chromosome_string_cloned = chromosome_string.clone();
-
 
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
 
@@ -967,8 +974,6 @@ fn process_bed_in_threads(
                 eprintln!("Error processing records: {:?}", err);
             }
         }
-
-
     });
 
     let consumer_handle = thread::spawn(move || {
@@ -988,15 +993,10 @@ fn process_bed_in_threads(
             let line = line.unwrap();
             writeln!(&mut writer, "{}", line).unwrap();
         }
-
-
-
     });
 
     producer_handle.join().unwrap();
     consumer_handle.join().unwrap();
-
-
 }
 
 fn process_bw_in_threads(
@@ -1162,7 +1162,6 @@ pub fn create_bw_writer(
     num_threads: i32,
     zoom: i32,
 ) -> BigWigWrite<File> {
-
     //TODO do we need to force zooms? Related to https://github.com/jackh726/bigtools/issues/63
     let bedgraphargstruct = BedGraphToBigWigArgs {
         bedgraph: String::from("-"),
@@ -1173,7 +1172,7 @@ pub fn create_bw_writer(
         write_args: BBIWriteArgs {
             nthreads: num_threads as usize,
             nzooms: zoom as u32, // this does NOT force zooms
-            zooms: None, // this will force zooms
+            zooms: None,         // this will force zooms
             uncompressed: false,
             sorted: "start".to_string(),
             block_size: 256,      //default
