@@ -181,7 +181,6 @@ pub fn uniwig_main(
     // Determine File Type
     let ft = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
-    let fixed = true;
 
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
@@ -639,7 +638,7 @@ fn process_bam(
             .unwrap();
         let header = reader.read_header().unwrap();
         match reader.query(&header, &region).map(Box::new) {
-            Err(err) => {
+            Err(..) => {
                 if debug{
                     eprintln!("Region not found, skipping region {}", region); //TODO only print if a debug mode is set?
                 }
@@ -822,7 +821,7 @@ fn process_bam(
                                     println!("Only CORE output is implemented for bam to BED file.");
                                 }
                                 OutSelection::CORE => {
-                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "core");
+                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,bwfileheader, &fp_string, "core");
                                 }
 
                             }
@@ -934,7 +933,6 @@ fn process_bed_in_threads(
     stepsize: i32,
     bwfileheader: &str,
     fp_string: &String,
-    chrom_sizes_ref_path_string: &String,
     sel: &str,
 ){
     let (reader, writer) = os_pipe::pipe().unwrap();
@@ -984,7 +982,7 @@ fn process_bed_in_threads(
 
     let consumer_handle = thread::spawn(move || {
         let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
-        let mut reader = std::io::BufReader::new(&mut *file_lock);
+        let reader = std::io::BufReader::new(&mut *file_lock);
 
         let file_path = PathBuf::from(file_name);
         let new_file_path = file_path.with_extension("bed");

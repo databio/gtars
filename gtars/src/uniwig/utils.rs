@@ -13,13 +13,12 @@ pub fn compress_counts(
     // .0 are the counts, .1 are the positions to track
     let mut previous_count = count_results.0[0];
 
-    let mut previous_start = start_position as u32;
+    let previous_start = start_position as u32;
     let mut current_start = previous_start;
 
     let mut current_end = start_position as u32;
 
-    for (u, i) in count_results.0.iter().zip(count_results.1.iter()) {
-        //println!("u: {}, i: {}", u, i);
+    for (u, _i) in count_results.0.iter().zip(count_results.1.iter()) {
         let current_count = *u;
         current_end = current_end + 1;
 

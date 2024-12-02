@@ -1208,7 +1208,7 @@ pub fn bam_to_bed_no_counts(
     // TODO Use PEEK INSTEAD
     let first_record_option = records.next();
 
-    let first_record = match first_record_option {
+    let _first_record = match first_record_option {
         Some(Ok(record)) => record, // Extract the record
         Some(Err(err)) => {
             // Handle the error
@@ -1234,8 +1234,8 @@ pub fn bam_to_bed_no_counts(
         }
     };
 
-    let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
-    let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
+    // let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
+    // let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
 
 
     for coord in records {
@@ -1252,7 +1252,7 @@ pub fn bam_to_bed_no_counts(
 
         let mut shifted_pos:i32;
 
-        let mut start_site =
+        let start_site =
             unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;

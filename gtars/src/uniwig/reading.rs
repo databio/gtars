@@ -358,7 +358,6 @@ pub fn get_seq_reads_bam(chromosome: &mut Chromosome, filepath: &str) {
 
     for result in records {
         let record = result.unwrap();
-        let flags = record.flags();
         //TODO Determine position shift via what flags are set
         let start_position = record.alignment_start().unwrap().unwrap();
         let start = start_position.get();

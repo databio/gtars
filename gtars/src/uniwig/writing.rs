@@ -125,7 +125,7 @@ pub fn write_to_bed_graph_file(
     count_info: &(Vec<u32>, Vec<u32>, Vec<u32>),
     filename: String,
     chromname: String,
-    stepsize: i32,
+    _stepsize: i32,
 ) {
     let path = std::path::Path::new(&filename).parent().unwrap();
     let _ = create_dir_all(path);
