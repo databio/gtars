@@ -52,12 +52,12 @@ enum FileType {
     NARROWPEAK,
 }
 
-#[derive(Debug)]
-enum OutSelection {
-    STARTS,
-    ENDS,
-    CORE,
-}
+// #[derive(Debug)]
+// enum OutSelection {
+//     STARTS,
+//     ENDS,
+//     CORE,
+// }
 
 impl FromStr for FileType {
     type Err = String;
@@ -118,6 +118,23 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<String>("outputtype")
         .expect("output type is required");
 
+    //let default_vec = &vec!["start", "end", "core"];
+    let count_types = matches
+        .get_one::<String>("counttype")
+        .expect("output type is required");
+
+   // let mut vec_count_type: Vec<&str> = Vec::new();
+    let vec_count_type = match count_types.as_str() {
+        "all" => {vec!["start", "end", "core"]}
+        "start" => {vec!["start"]}
+        "end" => {vec!["end"]}
+        "core" => {vec!["core"]}
+
+        _ => {vec!["start", "end", "core"]}
+    };
+
+    //println!("FOUND count_type {:?}", vec_count_type);
+
     let num_threads = matches
         .get_one::<i32>("threads")
         .expect("requires integer value");
@@ -135,6 +152,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .expect("requires integer value");
 
     uniwig_main(
+        vec_count_type,
         *smoothsize,
         filepath,
         chromsizerefpath.as_str(),
@@ -157,6 +175,7 @@ fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
 
 /// Main function
 pub fn uniwig_main(
+    vec_count_type: Vec<&str>,
     smoothsize: i32,
     filepath: &str,
     chromsizerefpath: &str,
@@ -229,7 +248,7 @@ pub fn uniwig_main(
                         let chrom_name = chromosome.chrom.clone();
 
                         // Iterate 3 times to output the three different files.
-                        for j in 0..3 {
+                        for j in 0..3 { // todo change these to be ooptional based on vec_count_type
                             // Original code uses:
                             // bwOpen, then bwCreateChromList, then bwWriteHdr
 
@@ -545,15 +564,15 @@ pub fn uniwig_main(
 
             bar.finish();
 
-            let vec_strings = vec!["start", "core", "end"];
+            //let vec_strings = vec!["start", "core", "end"];
             //let vec_strings = vec!["start"];
 
-            let bar = ProgressBar::new(vec_strings.len() as u64);
+            let bar = ProgressBar::new(vec_count_type.len() as u64);
             match output_type {
                 "wig" | "bedGraph" => {
                     println!("Combining {} Files", output_type);
 
-                    for location in vec_strings.iter() {
+                    for location in vec_count_type.iter() {
                         bar.inc(1);
                         write_combined_files(
                             *location,
@@ -583,6 +602,7 @@ pub fn uniwig_main(
             }
 
             let _ = process_bam(
+                vec_count_type,
                 filepath,
                 bwfileheader,
                 chrom_sizes,
@@ -594,6 +614,7 @@ pub fn uniwig_main(
                 stepsize,
                 output_type,
                 debug,
+
             );
         }
 
@@ -608,6 +629,7 @@ pub fn uniwig_main(
 }
 
 fn process_bam(
+    vec_count_type: Vec<&str>,
     filepath: &str,
     bwfileheader: &str,
     chrom_sizes: HashMap<String, u32>,
@@ -678,12 +700,12 @@ fn process_bam(
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
                         let out_selection_vec =
-                            vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                            vec_count_type.clone();
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
                             match selection {
-                                OutSelection::STARTS => {
+                                &"start" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -697,7 +719,7 @@ fn process_bam(
                                         "start",
                                     );
                                 }
-                                OutSelection::ENDS => {
+                                &"end" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -711,7 +733,7 @@ fn process_bam(
                                         "end",
                                     );
                                 }
-                                OutSelection::CORE => {
+                                &"core" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -725,16 +747,17 @@ fn process_bam(
                                         "core",
                                     );
                                 }
+                                _ => {println!("Must specify start, end, or core.")}
                             }
                         }
                     })
             });
 
             println!("Merging all bigwig files...");
-            let out_selection_vec = vec!["start", "end", "core"];
+            //let out_selection_vec = vec!["start", "end", "core"];
             //let out_selection_vec = vec!["start"];
 
-            for selection in out_selection_vec.iter() {
+            for selection in vec_count_type.iter() {
                 let combined_bw_file_name =
                     format!("{}_{}.{}", bwfileheader, selection, output_type);
 
@@ -824,22 +847,22 @@ fn process_bam(
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
                         let out_selection_vec =
-                            vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                            vec_count_type.clone();
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
                             match selection {
-                                OutSelection::STARTS => {
+                               &"start" => {
                                     println!(
                                         "Only CORE output is implemented for bam to BED file."
                                     );
                                 }
-                                OutSelection::ENDS => {
+                                &"end" => {
                                     println!(
                                         "Only CORE output is implemented for bam to BED file."
                                     );
                                 }
-                                OutSelection::CORE => {
+                                &"core" => {
                                     process_bed_in_threads(
                                         chromosome_string,
                                         smoothsize,
@@ -848,13 +871,14 @@ fn process_bam(
                                         "core",
                                     );
                                 }
+                                _ => {println!("Must specify start, end, or core")}
                             }
                         }
                     })
             });
 
             // Combine bed files
-            let out_selection_vec = vec!["core"];
+            let out_selection_vec = vec!["core"]; //TODO this should not be hard coded.
             for location in out_selection_vec.iter() {
                 // this is a work around since we need to make a String to Chrom
                 // so that we can re-use write_combined_files

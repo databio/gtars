@@ -62,6 +62,14 @@ pub fn create_uniwig_cli() -> Command {
                 .required(true),
         )
         .arg(
+            Arg::new("counttype")
+                .long("counttype")
+                .short('u')
+                .default_value("all")
+                .help("Select to only output start, end, or core. Defaults to all.")
+                .required(false),
+        )
+        .arg(
             Arg::new("threads")
                 .long("threads")
                 .short('p')

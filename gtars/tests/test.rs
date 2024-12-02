@@ -375,7 +375,10 @@ mod tests {
         let stepsize = 1;
         let zoom = 0;
 
+        let vec_count_type = vec!["start", "end", "core"];
+
         uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             chromsizerefpath,
@@ -419,8 +422,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             chromsizerefpath,
@@ -462,8 +467,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             chromsizerefpath,
@@ -505,8 +512,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             chromsizerefpath,
@@ -567,8 +576,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         let result = uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             &chromsizerefpath,
@@ -631,8 +642,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         let result = uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             &chromsizerefpath,
@@ -741,8 +754,10 @@ mod tests {
         let score = false;
         let stepsize = 1;
         let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
 
         let result = uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             &chromsizerefpath,
@@ -847,8 +862,10 @@ mod tests {
         let score = true;
         let stepsize = 1;
         let zoom = 2;
+        let vec_count_type = vec!["start", "end", "core"];
 
         uniwig_main(
+            vec_count_type,
             smoothsize,
             combinedbedpath,
             chromsizerefpath,
