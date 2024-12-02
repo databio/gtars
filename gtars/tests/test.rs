@@ -268,7 +268,8 @@ mod tests {
         let result1 = read_narrow_peak_vec(&path_to_narrow_peak);
         assert_eq!(result1.len(), 1);
 
-        let path_to_narrow_peak_gzipped = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
+        let path_to_narrow_peak_gzipped =
+            format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
 
         let result2 = read_narrow_peak_vec(&path_to_narrow_peak_gzipped);
         assert_eq!(result2.len(), 1);

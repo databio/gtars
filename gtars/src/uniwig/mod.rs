@@ -123,14 +123,24 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<String>("counttype")
         .expect("output type is required");
 
-   // let mut vec_count_type: Vec<&str> = Vec::new();
+    // let mut vec_count_type: Vec<&str> = Vec::new();
     let vec_count_type = match count_types.as_str() {
-        "all" => {vec!["start", "end", "core"]}
-        "start" => {vec!["start"]}
-        "end" => {vec!["end"]}
-        "core" => {vec!["core"]}
+        "all" => {
+            vec!["start", "end", "core"]
+        }
+        "start" => {
+            vec!["start"]
+        }
+        "end" => {
+            vec!["end"]
+        }
+        "core" => {
+            vec!["core"]
+        }
 
-        _ => {vec!["start", "end", "core"]}
+        _ => {
+            vec!["start", "end", "core"]
+        }
     };
 
     //println!("FOUND count_type {:?}", vec_count_type);
@@ -248,7 +258,8 @@ pub fn uniwig_main(
                         let chrom_name = chromosome.chrom.clone();
 
                         // Iterate 3 times to output the three different files.
-                        for j in 0..3 { // todo change these to be ooptional based on vec_count_type
+                        for j in 0..3 {
+                            // todo change these to be ooptional based on vec_count_type
                             // Original code uses:
                             // bwOpen, then bwCreateChromList, then bwWriteHdr
 
@@ -614,7 +625,6 @@ pub fn uniwig_main(
                 stepsize,
                 output_type,
                 debug,
-
             );
         }
 
@@ -699,8 +709,7 @@ fn process_bam(
                 final_chromosomes
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
-                        let out_selection_vec =
-                            vec_count_type.clone();
+                        let out_selection_vec = vec_count_type.clone();
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
@@ -747,7 +756,9 @@ fn process_bam(
                                         "core",
                                     );
                                 }
-                                _ => {println!("Must specify start, end, or core.")}
+                                _ => {
+                                    println!("Must specify start, end, or core.")
+                                }
                             }
                         }
                     })
@@ -846,13 +857,12 @@ fn process_bam(
                 final_chromosomes
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
-                        let out_selection_vec =
-                            vec_count_type.clone();
+                        let out_selection_vec = vec_count_type.clone();
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
                             match selection {
-                               &"start" => {
+                                &"start" => {
                                     println!(
                                         "Only CORE output is implemented for bam to BED file."
                                     );
@@ -871,7 +881,9 @@ fn process_bam(
                                         "core",
                                     );
                                 }
-                                _ => {println!("Must specify start, end, or core")}
+                                _ => {
+                                    println!("Must specify start, end, or core")
+                                }
                             }
                         }
                     })
