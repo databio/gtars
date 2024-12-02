@@ -821,7 +821,7 @@ fn process_bam(
                                     println!("Only CORE output is implemented for bam to BED file.");
                                 }
                                 OutSelection::CORE => {
-                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,bwfileheader, &fp_string, "core");
+                                    process_bed_in_threads(chromosome_string,smoothsize,bwfileheader, &fp_string, "core");
                                 }
 
                             }
@@ -927,10 +927,8 @@ fn process_bam(
 // }
 
 fn process_bed_in_threads(
-    chrom_sizes: &HashMap<String, u32>,
     chromosome_string: &String,
     smoothsize: i32,
-    stepsize: i32,
     bwfileheader: &str,
     fp_string: &String,
     sel: &str,
@@ -939,13 +937,11 @@ fn process_bed_in_threads(
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
-    let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-    let current_chrom_size_cloned = current_chrom_size.clone();
     let smoothsize_cloned = smoothsize.clone();
-    let stepsize_cloned = stepsize.clone();
+
     let chromosome_string_cloned = chromosome_string.clone();
-    let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
+
 
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
 
@@ -962,11 +958,8 @@ fn process_bed_in_threads(
 
         match bam_to_bed_no_counts(
             &mut records,
-            current_chrom_size_cloned,
             smoothsize_cloned,
-            stepsize_cloned,
             &chromosome_string_cloned,
-            sel_clone.as_str(),
             write_fd,
         ) {
             Ok(_) => {

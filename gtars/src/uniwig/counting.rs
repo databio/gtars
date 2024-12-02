@@ -290,10 +290,8 @@ pub fn fixed_start_end_counts_bam(
 
     let mut count: i32 = 0;
 
-    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut adjusted_start_site: i32;
     let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
@@ -479,7 +477,7 @@ pub fn fixed_core_counts_bam_to_bw(
     let mut coordinate_position = 1;
     let mut count: i32 = 0;
     let mut prev_coordinate_value = 0;
-    let mut current_end_site: i32;
+
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
     let first_record_option = records.next();
@@ -630,17 +628,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
     //let mut vec_lines: Vec<String> = Vec::new();
     //let mut bedgraphlines = String::new();
 
-    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-
     let mut coordinate_position = 1;
 
     let mut count: i32 = 0;
 
-    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut adjusted_start_site: i32;
     let mut current_end_site: i32;
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
@@ -776,7 +769,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            let current_score = adjusted_start_site;
+
             count = count - 1;
             if count < 0 {
                 count = 0;
@@ -826,20 +819,14 @@ pub fn variable_start_end_counts_bam_to_bw(
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
 
-    let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
-    let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
-
     let mut coordinate_position = 1;
 
     let mut prev_count: i32 = 0;
     let mut count: i32 = 0;
 
-    let mut coordinate_value: i32;
     let mut prev_coordinate_value = 0;
 
-    let mut adjusted_start_site: i32;
     let mut current_end_site: i32;
-    let mut prev_end_site: i32 =0;
     let mut bg_prev_coord: i32 = 0; // keep track of which coordinate had a switch in count.
 
     let mut collected_end_sites: Vec<i32> = Vec::new();
@@ -886,7 +873,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 
     adjusted_start_site = adjusted_start_site - smoothsize;
 
-    current_end_site = adjusted_start_site;
+    //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
 
     if adjusted_start_site < 1 {
@@ -900,7 +887,7 @@ pub fn variable_start_end_counts_bam_to_bw(
     }
 
     for coord in records {
-        let mut coordinate_value: i32 = match out_sel {
+        let coordinate_value: i32 = match out_sel {
             "start" => coord.unwrap().alignment_start().unwrap().unwrap().get() as i32,
             "end" => coord.unwrap().alignment_end().unwrap().unwrap().get() as i32,
             _ => {
@@ -913,7 +900,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        adjusted_start_site = coordinate_value;
+       // adjusted_start_site = coordinate_value;
         adjusted_start_site = coordinate_value - smoothsize;
 
         //let current_score = adjusted_start_site;
@@ -927,8 +914,8 @@ pub fn variable_start_end_counts_bam_to_bw(
 
         //let current_index = index;
 
-        let mut new_end_site = adjusted_start_site;
-        new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        //let mut new_end_site = adjusted_start_site;
+        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -986,7 +973,6 @@ pub fn variable_start_end_counts_bam_to_bw(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            let current_score = adjusted_start_site;
             count = count - 1;
             //prev_end_site = current_end_site;
             if count < 0 {
@@ -1042,7 +1028,6 @@ pub fn variable_core_counts_bam_to_bw(
     let mut prev_count: i32 = 0;
     let mut count: i32 = 0;
     let mut prev_coordinate_value = 0;
-    let mut current_end_site: i32;
     let mut bg_prev_coord: i32 = 0;
     let mut collected_end_sites: Vec<i32> = Vec::new();
 
@@ -1195,11 +1180,8 @@ pub fn variable_core_counts_bam_to_bw(
 /// shifted sequence reads to a bed file.
 pub fn bam_to_bed_no_counts(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
-    chrom_size: i32,
     smoothsize: i32,
-    stepsize: i32,
     chromosome_name: &String,
-    out_sel: &str,
     write_fd: Arc<Mutex<PipeWriter>>,
 ) -> Result<(), BAMRecordError> {
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
@@ -1250,7 +1232,7 @@ pub fn bam_to_bed_no_counts(
 
         let flag = unwrapped_coord.flags();
 
-        let mut shifted_pos:i32;
+        let shifted_pos:i32;
 
         let start_site =
             unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
