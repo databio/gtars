@@ -596,7 +596,6 @@ pub fn uniwig_main(
                 pool,
                 smoothsize,
                 stepsize,
-                fixed,
                 output_type,
                 debug,
             );
@@ -622,13 +621,12 @@ fn process_bam(
     pool: ThreadPool,
     smoothsize: i32,
     stepsize: i32,
-    fixed: bool,
     output_type: &str,
     debug: bool,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin bam processing workflow...");
-    let fp_string = filepath.clone().to_string();
-    let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
+    let fp_string = filepath.to_string();
+    let chrom_sizes_ref_path_string = chrom_sizes_ref_path.to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
     let mut final_chromosomes: Vec<String> = Vec::with_capacity(list_of_valid_chromosomes.len());
@@ -654,7 +652,7 @@ fn process_bam(
                 let first_record_option = records.next();
 
                 match first_record_option {
-                    Some(Ok(record)) => final_chromosomes.push(chromosome.clone()), // Extract the record
+                    Some(Ok(..)) => final_chromosomes.push(chromosome.clone()), // Extract the record
                     Some(Err(err)) => {
                         // Handle the error no first record
                         if debug {
@@ -698,15 +696,15 @@ fn process_bam(
                         for selection in out_selection_vec.iter() {
                             match selection {
                                 OutSelection::STARTS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "start");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "start");
                                 }
                                 OutSelection::ENDS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "end");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "end");
                                 }
                                 OutSelection::CORE => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "core");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "core");
                                 }
-                                _ => {}
+
                             }
                         }
 
@@ -824,9 +822,9 @@ fn process_bam(
                                     println!("Only CORE output is implemented for bam to BED file.");
                                 }
                                 OutSelection::CORE => {
-                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "core");
+                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,bwfileheader, &fp_string, &chrom_sizes_ref_path_string, "core");
                                 }
-                                _ => {}
+
                             }
                         }
 
@@ -848,7 +846,7 @@ fn process_bam(
 
                     let chrom_name = chrom_string.clone();
 
-                    let mut chromosome = Chromosome {
+                    let chromosome = Chromosome {
                         chrom: chrom_name,
                         starts: vec![],
                         ends: vec![],
@@ -934,14 +932,12 @@ fn process_bed_in_threads(
     chromosome_string: &String,
     smoothsize: i32,
     stepsize: i32,
-    num_threads: i32,
-    zoom: i32,
     bwfileheader: &str,
     fp_string: &String,
-    chrom_sizes_ref_path_String: &String,
+    chrom_sizes_ref_path_string: &String,
     sel: &str,
 ){
-    let (mut reader, mut writer) = os_pipe::pipe().unwrap();
+    let (reader, writer) = os_pipe::pipe().unwrap();
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
@@ -956,7 +952,6 @@ fn process_bed_in_threads(
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
 
     let fpclone = fp_string.clone(); // we must clone this string here, not before, else we get lifetime issues.
-    let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
 
     let producer_handle = thread::spawn(move || {
         let region = chromosome_string_cloned.parse().unwrap();
@@ -1027,7 +1022,7 @@ fn process_bw_in_threads(
     chrom_sizes_ref_path_string: &String,
     sel: &str,
 ) {
-    let (mut reader, mut writer) = os_pipe::pipe().unwrap();
+    let (reader, writer) = os_pipe::pipe().unwrap();
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
@@ -1051,7 +1046,7 @@ fn process_bw_in_threads(
             .unwrap();
         let header = reader.read_header().unwrap();
 
-        let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+        let records = reader.query(&header, &region).map(Box::new).unwrap();
 
         match determine_counting_func(
             records,
