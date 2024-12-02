@@ -844,6 +844,35 @@ fn process_bam(
             });
 
 
+            // Combine bed files
+            let out_selection_vec = vec!["core"];
+            for location in out_selection_vec.iter()  {
+
+                // this is a work around since we need to make a String to Chrom
+                // so that we can re-use write_combined_files
+                // use vec of Strings to make vec of empty chrom structs
+                let mut chromosome_vec: Vec<Chromosome> = Vec::new();
+                for chrom_string in final_chromosomes.iter(){
+
+                    let chrom_name = chrom_string.clone();
+
+                    let mut chromosome = Chromosome {
+                        chrom: chrom_name,
+                        starts: vec![],
+                        ends: vec![],
+                    };
+                    chromosome_vec.push(chromosome);
+                }
+
+                write_combined_files(
+                    *location,
+                    output_type,
+                    bwfileheader,
+                    &chromosome_vec,
+                );
+
+
+            }
 
 
 
@@ -932,7 +961,7 @@ fn process_bed_in_threads(
     let chromosome_string_cloned = chromosome_string.clone();
     let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
 
-    let file_name = format!("{}_{}_{}", bwfileheader, chromosome_string, sel);
+    let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
 
     let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
     let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
