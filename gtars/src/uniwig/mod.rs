@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
+use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
 use crate::uniwig::reading::{
     get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
 };
@@ -813,6 +813,42 @@ fn process_bam(
             }
         }
 
+        "bed" => {
+
+            pool.install(|| {
+                final_chromosomes
+                    .par_iter()
+                    .for_each(|chromosome_string: &String| {
+
+                        let out_selection_vec = vec![OutSelection::STARTS, OutSelection::ENDS, OutSelection::CORE];
+                        //let out_selection_vec = vec![OutSelection::STARTS];
+
+                        for selection in out_selection_vec.iter() {
+                            match selection {
+                                OutSelection::STARTS => {
+                                    println!("Only CORE output is implemented for bam to BED file.");
+                                }
+                                OutSelection::ENDS => {
+                                    println!("Only CORE output is implemented for bam to BED file.");
+                                }
+                                OutSelection::CORE => {
+                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
+                                }
+                                _ => {}
+                            }
+                        }
+
+
+
+                    })
+            });
+
+
+
+
+
+        }
+
         _ => {
 
             // todo combine files for non bw outputs
@@ -868,6 +904,92 @@ fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
         _ => {eprintln!("improper selection: {}", sel)}
     }
 
+
+
+}
+
+fn process_bed_in_threads(
+    chrom_sizes: &HashMap<String, u32>,
+    chromosome_string: &String,
+    smoothsize: i32,
+    stepsize: i32,
+    num_threads: i32,
+    zoom: i32,
+    bwfileheader: &str,
+    fp_String: &String,
+    chrom_sizes_ref_path_String: &String,
+    sel: &str,
+){
+    let (mut reader, mut writer) = os_pipe::pipe().unwrap();
+    let write_fd = Arc::new(Mutex::new(writer));
+    let read_fd = Arc::new(Mutex::new(reader));
+
+    let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
+
+    let current_chrom_size_cloned = current_chrom_size.clone();
+    let smoothsize_cloned = smoothsize.clone();
+    let stepsize_cloned = stepsize.clone();
+    let chromosome_string_cloned = chromosome_string.clone();
+    let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
+
+    let file_name = format!("{}_{}_{}", bwfileheader, chromosome_string, sel);
+
+    let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
+    let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
+
+    let producer_handle = thread::spawn(move || {
+        let region = chromosome_string_cloned.parse().unwrap();
+        let mut reader = bam::io::indexed_reader::Builder::default()
+            .build_from_path(fpclone)
+            .unwrap();
+        let header = reader.read_header().unwrap();
+
+        let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+
+        match bam_to_bed_no_counts(
+            &mut records,
+            current_chrom_size_cloned,
+            smoothsize_cloned,
+            stepsize_cloned,
+            &chromosome_string_cloned,
+            sel_clone.as_str(),
+            write_fd,
+        ) {
+            Ok(_) => {
+                eprintln!("Processing successful for {}", chromosome_string_cloned);
+            }
+            Err(err) => {
+                eprintln!("Error processing records: {:?}", err);
+            }
+        }
+
+
+    });
+
+    let consumer_handle = thread::spawn(move || {
+        let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
+        let mut reader = std::io::BufReader::new(&mut *file_lock);
+
+        let file_path = PathBuf::from(file_name);
+        let new_file_path = file_path.with_extension("bed");
+
+        let new_file_path = new_file_path.to_str().unwrap();
+
+        // Create a new file
+        let mut writer = std::fs::File::create(new_file_path).unwrap();
+
+        // Read data from the reader and write it to the file
+        for line in reader.lines() {
+            let line = line.unwrap();
+            writeln!(&mut writer, "{}", line).unwrap();
+        }
+
+
+
+    });
+
+    producer_handle.join().unwrap();
+    consumer_handle.join().unwrap();
 
 
 }

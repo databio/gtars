@@ -1196,6 +1196,100 @@ pub fn variable_core_counts_bam_to_bw(
     Ok(())
 }
 
+/// Though this is in the counting.rs file because it shares code with other counting functions, this simply reports the
+/// shifted sequence reads to a bed file.
+pub fn bam_to_bed_no_counts(
+    records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
+    chrom_size: i32,
+    smoothsize: i32,
+    stepsize: i32,
+    chromosome_name: &String,
+    out_sel: &str,
+    write_fd: Arc<Mutex<PipeWriter>>,
+) -> Result<(), BAMRecordError> {
+    let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
+    let mut writer = BufWriter::new(&mut *write_lock);
+
+    // TODO Use PEEK INSTEAD
+    let first_record_option = records.next();
+
+    let first_record = match first_record_option {
+        Some(Ok(record)) => record, // Extract the record
+        Some(Err(err)) => {
+            // Handle the error
+            eprintln!(
+                "Error reading the first record for core chrom: {} {:?} Skipping...",
+                chromosome_name, err
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord); // Example error handling
+        }
+        None => {
+            // Handle no records
+            eprintln!(
+                "No records for core chrom: {} Skipping...",
+                chromosome_name
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord);
+        }
+    };
+
+    let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
+    let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
+
+
+    for coord in records {
+        let unwrapped_coord = coord.unwrap().clone();
+
+        let strand = match unwrapped_coord.flags().is_reverse_complemented(){
+            true => {"-"}
+            false => {"+"}
+        };
+
+        let mut current_start_site =
+            unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
+        let new_end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
+
+        // GET shifted pos and Strand
+        // TODO based on flags
+        let shifted_pos = current_start_site;
+        // if args.mode == "dnase":
+        //     shift_factor = {"+":1, "-":0}  # DNase
+        // elif args.mode == "atac":
+        //     shift_factor = {"+":4, "-":-5}  # ATAC
+        // else:
+        // shift_factor = {"+":0, "-":0}
+
+        // Relevant comment from original bamSitesToWig.py
+        // The bed file needs 6 columns (even though some are dummy)
+        // because MACS says so.
+
+        let single_line = format!(
+            "{}\t{}\t{}\t{}\t{}\t{}\n",
+            chromosome_name,
+            shifted_pos - smoothsize,
+            shifted_pos + smoothsize,
+            "N",
+            "O",
+            strand,
+        );
+
+        writer.write_all(single_line.as_bytes())?;
+        writer.flush()?;
+
+    }
+
+    drop(writer);
+
+    Ok(())
+
+}
+
 fn set_up_file_output(
     output_type: &str,
     adjusted_start_site: i32,
