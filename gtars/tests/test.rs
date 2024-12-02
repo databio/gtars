@@ -22,7 +22,7 @@ fn path_to_sorted_small_bed_file() -> &'static str {
 #[fixture]
 fn path_to_small_bam_file() -> &'static str {
     "tests/data/test_chr22_small.bam"
-    //"/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam" //todo change back
+    //"/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam"
 }
 
 #[fixture]
@@ -156,18 +156,6 @@ mod tests {
         igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
     }
 
-    //
-    // #[rstest]
-    // fn test_specific_db(){
-    //
-    //     //temp test for debugging
-    //     let db_path = format!("{}","/home/drc/IGD_TEST_2/igd_rust_output/igd_database.igd");
-    //     let query_path = format!("{}","/home/drc/IGD_TEST_2/source_single_bedfile/igd_test_single_source.bed");
-    //
-    //     igd_search(&final_db_save_path, &query_file).expect("Error during testing:")
-    //
-    // }
-
     #[rstest]
     fn test_igd_add() {
         // First create a new igd struct
@@ -275,14 +263,14 @@ mod tests {
 
     #[rstest]
     fn test_read_narrow_peak_vec() {
-        let path_to_narrow_peak = "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak";
-        let result1 = read_narrow_peak_vec(path_to_narrow_peak);
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
+        let result1 = read_narrow_peak_vec(&path_to_narrow_peak);
         assert_eq!(result1.len(), 1);
 
-        let path_to_narrow_peak_gzipped =
-            "/home/drc/Downloads/uniwig_narrowpeak_testing/dummy.narrowPeak.gz";
+        let path_to_narrow_peak_gzipped = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
 
-        let result2 = read_narrow_peak_vec(path_to_narrow_peak_gzipped);
+        let result2 = read_narrow_peak_vec(&path_to_narrow_peak_gzipped);
         assert_eq!(result2.len(), 1);
     }
 
@@ -353,8 +341,7 @@ mod tests {
         path_to_small_bam_file: &str,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        //let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
-        let chromsizerefpath = String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = path_to_small_bam_file;
 
@@ -362,10 +349,8 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
-        //let bwfileheader = bwfileheader_path.as_str();
-        //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
-        let bwfileheader = "/home/drc/Downloads/refactor_test_gtars/";
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
 
         let smoothsize: i32 = 1;
         let output_type = "bw";
@@ -401,8 +386,7 @@ mod tests {
         path_to_small_bam_file: &str,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        //let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
-        let chromsizerefpath = String::from("/home/drc/Downloads/test_small.chrom.sizes"); //todo change back
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = path_to_small_bam_file;
 
@@ -410,10 +394,8 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        //let bwfileheader_path = path.into_os_string().into_string().unwrap();
-        //let bwfileheader = bwfileheader_path.as_str();
-        //let bwfileheader = "/home/drc/Downloads/baminput_bwoutput_test_rust/"; //todo change back to non local example
-        let bwfileheader = "/home/drc/Downloads/refactor_test_gtars/";
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
 
         let smoothsize: i32 = 1;
         let output_type = "bed";
@@ -853,7 +835,6 @@ mod tests {
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
-        //let bwfileheader = "/home/drc/Downloads/uniwig_narrowpeak_testing/results_rstest/"; //todo change back to non local example
 
         let smoothsize: i32 = 1;
         let output_type = "bw";
