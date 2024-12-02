@@ -1,20 +1,15 @@
-use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
-use bigtools::{BigWigWrite, InputSortType};
-use noodles::bam;
+
 use noodles::bam::io::reader::Query;
-use noodles::bam::io::Reader;
-use noodles::bgzf;
+
 use noodles::sam::alignment::Record;
 use os_pipe::PipeWriter;
-use std::collections::HashMap;
-use std::fs::{create_dir_all, File, OpenOptions};
+
+use std::fs::{create_dir_all, OpenOptions};
 use std::io;
-use std::io::{stdout, BufRead, BufReader, BufWriter, Cursor, Error, Write};
-use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::io::{ BufWriter,  Write};
+
 use std::sync::{Arc, Mutex};
-use noodles::sam::alignment::record::Flags;
-use tokio::runtime;
+
 #[derive(Debug)]
 pub enum BAMRecordError {
     IoError(std::io::Error),

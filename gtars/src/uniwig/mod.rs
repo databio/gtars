@@ -5,12 +5,12 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, fixed_core_counts_bam_to_bw, fixed_start_end_counts_bam, fixed_start_end_counts_bam_to_bw, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
+use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
 use crate::uniwig::reading::{
-    get_seq_reads_bam, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
+   read_chromosome_sizes
 };
 use crate::uniwig::utils::{compress_counts, get_final_chromosomes};
 use crate::uniwig::writing::{
@@ -18,10 +18,9 @@ use crate::uniwig::writing::{
     write_to_wig_file,
 };
 use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::bedgraphtobigwig::{bedgraphtobigwig, BedGraphToBigWigArgs};
+use bigtools::utils::cli::bedgraphtobigwig::{ BedGraphToBigWigArgs};
 use bigtools::utils::cli::bigwigmerge::{
-    bigwigmerge, get_merged_vals, BigWigMergeArgs, ChromGroupReadImpl, MergingValues,
-    MergingValuesError,
+    get_merged_vals,  ChromGroupReadImpl,
 };
 use bigtools::utils::cli::BBIWriteArgs;
 use bigtools::utils::reopen::ReopenableFile;
@@ -29,22 +28,15 @@ use bigtools::{BigWigRead, BigWigWrite, InputSortType};
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bgzf::Reader;
-use noodles::sam::alignment::Record;
 use os_pipe::PipeWriter;
 use rayon::ThreadPool;
 use std::ops::Deref;
 use std::os::fd::{AsRawFd, FromRawFd};
 use std::path::PathBuf;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::runtime;
-// struct ChromGroupReadImpl {
-//     iter: Box<dyn Iterator<Item = Result<(String, u32, MergingValues), MergingValuesError>> + Send>,
-// }
-// use noodles::sam as sam;
-//use bstr::BString;
 
 pub mod cli;
 pub mod counting;
@@ -635,7 +627,7 @@ fn process_bam(
     debug: bool,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin bam processing workflow...");
-    let fp_String = filepath.clone().to_string();
+    let fp_string = filepath.clone().to_string();
     let chrom_sizes_ref_path_String = chrom_sizes_ref_path.clone().to_string();
 
     let list_of_valid_chromosomes: Vec<String> = chrom_sizes.keys().cloned().collect(); //taken from chrom.sizes as source of truth
@@ -706,13 +698,13 @@ fn process_bam(
                         for selection in out_selection_vec.iter() {
                             match selection {
                                 OutSelection::STARTS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "start");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "start");
                                 }
                                 OutSelection::ENDS => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "end");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "end");
                                 }
                                 OutSelection::CORE => {
-                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
+                                    process_bw_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "core");
                                 }
                                 _ => {}
                             }
@@ -832,7 +824,7 @@ fn process_bam(
                                     println!("Only CORE output is implemented for bam to BED file.");
                                 }
                                 OutSelection::CORE => {
-                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_String, &chrom_sizes_ref_path_String, "core");
+                                    process_bed_in_threads(&chrom_sizes,chromosome_string,smoothsize,stepsize,num_threads,zoom,bwfileheader, &fp_string, &chrom_sizes_ref_path_String, "core");
                                 }
                                 _ => {}
                             }
@@ -890,52 +882,52 @@ fn process_bam(
 
 /// This option is for outputting BAM counts to any other file type that is not BW
 /// Currently this will use FIXED step counting while outputting to bw uses variable step counting
-fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
-                                chromosome_string: &String,
-                                smoothsize: i32,
-                                stepsize: i32,
-                                num_threads: i32,
-                                zoom: i32,
-                                bwfileheader: &str,
-                                fp_String: &String,
-                                chrom_sizes_ref_path_String: &String,
-                                sel: &str,) {
-
-    let region = chromosome_string.parse().unwrap();
-    let mut reader = bam::io::indexed_reader::Builder::default()
-        .build_from_path(fp_String)
-        .unwrap();
-    let header = reader.read_header().unwrap();
-
-    let mut records = reader.query(&header, &region).map(Box::new).unwrap();
-
-
-    match sel {
-        "start" | "end" => {
-            println!("fixed_core_counts for bam to other file file type (not bw or BED) currently not implemented.");
-            // fixed_start_end_counts_bam(
-            //     &mut records,
-            //     current_chrom_size,
-            //     smoothsize,
-            //     stepsize,
-            //     output_type,
-            //     chromosome_string,
-            //     bwfileheader,
-            //     "end",
-            //     false,
-            // );
-        }
-
-        "core" => {
-            println!("fixed_core_counts for bam to other file file type (not bw) currently not implemented.");
-        }
-
-        _ => {eprintln!("improper selection: {}", sel)}
-    }
-
-
-
-}
+// fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
+//                                 chromosome_string: &String,
+//                                 smoothsize: i32,
+//                                 stepsize: i32,
+//                                 num_threads: i32,
+//                                 zoom: i32,
+//                                 bwfileheader: &str,
+//                                 fp_String: &String,
+//                                 chrom_sizes_ref_path_String: &String,
+//                                 sel: &str,) {
+//
+//     let region = chromosome_string.parse().unwrap();
+//     let mut reader = bam::io::indexed_reader::Builder::default()
+//         .build_from_path(fp_String)
+//         .unwrap();
+//     let header = reader.read_header().unwrap();
+//
+//     let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+//
+//
+//     match sel {
+//         "start" | "end" => {
+//             println!("fixed_core_counts for bam to other file file type (not bw or BED) currently not implemented.");
+//             // fixed_start_end_counts_bam(
+//             //     &mut records,
+//             //     current_chrom_size,
+//             //     smoothsize,
+//             //     stepsize,
+//             //     output_type,
+//             //     chromosome_string,
+//             //     bwfileheader,
+//             //     "end",
+//             //     false,
+//             // );
+//         }
+//
+//         "core" => {
+//             println!("fixed_core_counts for bam to other file file type (not bw) currently not implemented.");
+//         }
+//
+//         _ => {eprintln!("improper selection: {}", sel)}
+//     }
+//
+//
+//
+// }
 
 fn process_bed_in_threads(
     chrom_sizes: &HashMap<String, u32>,
@@ -945,7 +937,7 @@ fn process_bed_in_threads(
     num_threads: i32,
     zoom: i32,
     bwfileheader: &str,
-    fp_String: &String,
+    fp_string: &String,
     chrom_sizes_ref_path_String: &String,
     sel: &str,
 ){
@@ -963,7 +955,7 @@ fn process_bed_in_threads(
 
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
 
-    let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
+    let fpclone = fp_string.clone(); // we must clone this string here, not before, else we get lifetime issues.
     let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
 
     let producer_handle = thread::spawn(move || {
@@ -1031,8 +1023,8 @@ fn process_bw_in_threads(
     num_threads: i32,
     zoom: i32,
     bwfileheader: &str,
-    fp_String: &String,
-    chrom_sizes_ref_path_String: &String,
+    fp_string: &String,
+    chrom_sizes_ref_path_string: &String,
     sel: &str,
 ) {
     let (mut reader, mut writer) = os_pipe::pipe().unwrap();
@@ -1049,8 +1041,8 @@ fn process_bw_in_threads(
 
     let file_name = format!("{}_{}_{}", bwfileheader, chromosome_string, sel);
 
-    let fpclone = fp_String.clone(); // we must clone this string here, not before, else we get lifetime issues.
-    let chr_sz_ref_clone = chrom_sizes_ref_path_String.clone();
+    let fpclone = fp_string.clone(); // we must clone this string here, not before, else we get lifetime issues.
+    let chr_sz_ref_clone = chrom_sizes_ref_path_string.clone();
 
     let producer_handle = thread::spawn(move || {
         let region = chromosome_string_cloned.parse().unwrap();
