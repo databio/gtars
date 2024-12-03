@@ -28,7 +28,6 @@ impl From<std::io::Error> for BAMRecordError {
 /// the level of smoothing.
 /// counts are reported over a stepsize (with a default of stepsize = 1).
 /// Unlike the original function, it does not write to disk in chunks. it simply returns a vector of accumulated reads.
-#[allow(unused_variables)]
 pub fn start_end_counts(
     starts_vector: &[(i32, i32)],
     chrom_size: i32,
@@ -69,7 +68,7 @@ pub fn start_end_counts(
         coordinate_position = coordinate_position + stepsize;
     }
 
-    for (index, coord) in starts_vector.iter().enumerate() {
+    for (_index, coord) in starts_vector.iter().enumerate() {
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
@@ -83,7 +82,7 @@ pub fn start_end_counts(
             adjusted_start_site.0 = 1;
         }
 
-        let current_index = index;
+        //let current_index = index;
 
         let mut new_end_site = adjusted_start_site;
         new_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
@@ -267,8 +266,10 @@ pub fn core_counts(
     (v_coord_counts, v_coordinate_positions)
 }
 
-///Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
+/// Instead of counting based on in-memory chromosomes, this method takes a buffered reader and iterates
 /// Primarily for use to count sequence reads in bam files.
+/// This sends directly to a file without using a producer/consumer workflow
+/// FIXED STEP
 pub fn fixed_start_end_counts_bam(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
@@ -803,7 +804,8 @@ pub fn fixed_start_end_counts_bam_to_bw(
 }
 
 /// Variable counting function, used specifically for bam input to bw output
-/// writes a variable step bedgraph line by line
+/// Writes a variable step bedgraph line by line
+/// Used in producer/consumer workflow
 pub fn variable_start_end_counts_bam_to_bw(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
@@ -999,6 +1001,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 }
 
 /// Variable counting for CORE, writes line by line in bedgraph format
+/// Used in producer/consumer workflow
 pub fn variable_core_counts_bam_to_bw(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
@@ -1148,6 +1151,7 @@ pub fn variable_core_counts_bam_to_bw(
 
 /// Though this is in the counting.rs file because it shares code with other counting functions, this simply reports the
 /// shifted sequence reads to a bed file.
+/// Ported from bamSitesToWig.py found in PEPATAC
 pub fn bam_to_bed_no_counts(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     smoothsize: i32,
@@ -1265,6 +1269,8 @@ pub fn bam_to_bed_no_counts(
     Ok(())
 }
 
+/// Set up header for wiggle or no header if bedGraph
+/// This is for bed/narrowPeak to wiggle/bedGraph workflows.
 fn set_up_file_output(
     output_type: &str,
     adjusted_start_site: i32,

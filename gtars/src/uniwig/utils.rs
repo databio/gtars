@@ -45,6 +45,8 @@ pub fn compress_counts(
     (final_starts, final_ends, final_counts)
 }
 
+/// Determine if there is a size associated with a Chromosome
+/// Only return chromosomes that have an associated size.
 pub fn get_final_chromosomes(
     ft: &Result<FileType, String>,
     filepath: &str,

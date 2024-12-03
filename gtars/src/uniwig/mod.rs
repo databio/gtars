@@ -638,6 +638,9 @@ pub fn uniwig_main(
     Ok(())
 }
 
+/// This is for bam workflows where bam is the input file.
+/// Currently, supports bam -> bigwig (start, end, core) and bam -> bed (shifted core values only).
+/// You must provide a .bai file alongside the bam file! Create one: `samtools index your_file.bam`
 fn process_bam(
     vec_count_type: Vec<&str>,
     filepath: &str,
@@ -969,6 +972,7 @@ fn process_bam(
 //
 // }
 
+/// Creates a Producer/Consumer workflow for reading bam sequences and outputting to Bed files across threads.
 fn process_bed_in_threads(
     chromosome_string: &String,
     smoothsize: i32,
@@ -1035,6 +1039,7 @@ fn process_bed_in_threads(
     consumer_handle.join().unwrap();
 }
 
+/// Creates a Producer/Consumer workflow for reading bam sequences and outputting to bigwig files across threads.
 fn process_bw_in_threads(
     chrom_sizes: &HashMap<String, u32>,
     chromosome_string: &String,
@@ -1133,6 +1138,9 @@ fn process_bw_in_threads(
     consumer_handle.join().unwrap();
 }
 
+/// This function determines if the starts/end counting function should be selected or the core counting function
+/// Currently only variable step is supported, however, fixed_step has been written and can be added or replaced below if the user wishes.
+/// Replacing the variable funcs with fixed step funcs will result in performance loss and greater processing times.
 fn determine_counting_func(
     mut records: Box<Query<Reader<File>>>,
     current_chrom_size_cloned: i32,
@@ -1192,6 +1200,7 @@ fn determine_counting_func(
     count_result
 }
 
+/// Creates the bigwig writer struct for use with the BigTools crate
 pub fn create_bw_writer(
     chrom_sizes_ref_path: &str,
     new_file_path: &str,

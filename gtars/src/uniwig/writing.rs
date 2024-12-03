@@ -9,6 +9,7 @@ use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::{fs, io};
 
+/// Write output to npy files
 pub fn write_to_npy_file(
     counts: &[u32],
     filename: String,
@@ -47,12 +48,13 @@ pub fn write_to_npy_file(
     file.write_all(wig_header.as_ref()).unwrap();
 }
 
-/// Write either combined bedGraph or wiggle files
+/// Write either combined bedGraph, wiggle files, and bed files
+/// Requires a list of Chromosomes
 pub fn write_combined_files(
     location: &str,
     output_type: &str,
     bwfileheader: &str,
-    chromosomes: &[Chromosome],
+    chromosomes: &[Chromosome], // TODO make this a vec of Strings instead? Since we only care about the names.
 ) {
     let combined_wig_file_name = format!("{}_{}.{}", bwfileheader, location, output_type);
     let path = std::path::Path::new(&combined_wig_file_name)
@@ -87,7 +89,7 @@ pub fn write_combined_files(
     }
 }
 
-#[allow(unused_variables)]
+/// Write output  to a wiggle file
 pub fn write_to_wig_file(
     counts: &[u32],
     filename: String,
@@ -121,6 +123,7 @@ pub fn write_to_wig_file(
     buf.flush().unwrap();
 }
 
+/// Write output to bedgraph file
 pub fn write_to_bed_graph_file(
     count_info: &(Vec<u32>, Vec<u32>, Vec<u32>),
     filename: String,
