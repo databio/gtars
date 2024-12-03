@@ -24,8 +24,6 @@ pub mod handlers {
 
     use consts::DEFAULT_SCORING_MODE;
 
-    use crate::common::utils::get_dynamic_reader;
-
     use super::*;
 
     pub fn region_fragment_scoring(matches: &ArgMatches) -> Result<()> {
