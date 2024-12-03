@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0]
+- Rust implementation of `uniwig` that expands on the C++ version
+  - Uniwig now accepts a single sorted  `.bed` file, `.narrowPeak` file, or `.bam` file.
+  - Outputs now include  `.wig`, `.npy`, `.bedGraph`, and `.bw`
+  - Accumulations can now be counted via `.narrowPeak` scoring
+- Rust implementation of `igd` ported from the C version (experimental).
+- Region scoring matrix calculation for region clustering
+- Fragment file splitter for pseudobulking
+
 ## [0.0.15]
 -  added meta tokenization tools and a new `MetaTokenizer` struct that can be used to tokenize regions using the meta-token strategy.
 -  added some annotations to the `pyo3` `#[pyclass]` and `#[pymethods]` attributes to make the python bindings more readable.
