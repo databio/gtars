@@ -6,7 +6,7 @@ use clap::ArgMatches;
 use std::collections::HashMap;
 use std::fs;
 use std::fs::{create_dir_all, File, OpenOptions};
-use std::io::{BufRead, Error, Read, Write};
+use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::path::{Path, PathBuf};
 
 pub const maxCount: i64 = 268435456; //16* = 4GB memory  // original code had this as i32
@@ -125,13 +125,58 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     let (mut start, mut end) = (0, 0);
     let mut va: i32 = 0;
 
+    // create Path obj from filepath
+    let input_filepaths = if filelist.ends_with(".txt") {
+        // if txt input, read paths from file
+        let mut paths = Vec::new();
+        if let Ok(file) = File::open(filelist) {
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                if let Ok(path) = line {
+                    paths.push(PathBuf::from(path.trim()));
+                }
+            }
+        }
+        paths
+    } else if filelist == "-" || filelist == "stdin" {
+        // if you pass "-" assume you want to read files list from stdin
+        let stdin = std::io::stdin();
+        let locked = stdin.lock();
+        let reader = BufReader::new(locked);
+
+        let mut paths: Vec<PathBuf> = Vec::new();
+
+        for line in reader.lines() {
+            match line {
+                Ok(line) => {
+                    let path = PathBuf::from(line);
+                    paths.push(path);
+                }
+                Err(e) => {
+                    eprintln!("Error reading line: {}", e);
+                }
+            }
+        }
+        paths
+    } else {
+        // if dir input, get directory entries directly
+        let entries = fs::read_dir(filelist).unwrap();
+        let mut paths = Vec::new();
+
+        for entry in entries {
+            let p = entry.as_ref().unwrap().path();
+            paths.push(p)
+        }
+        paths
+    };
+
     //--------------------
     // Check each file and only keep the validated BED files
     //
     // -------------------
-    for entry in fs::read_dir(filelist).unwrap() {
+    for path in input_filepaths {
         // For now only take .bed files
-        if let Some(extension) = entry.as_ref().unwrap().path().extension() {
+        if let Some(extension) = path.extension() {
             if extension != BED_FILE_EXTENSION.trim_start_matches('.')
                 && extension != GZ_FILE_EXTENSION.trim_start_matches('.')
             {
@@ -141,8 +186,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             continue;
         } // This will skip files that do not have an extension
 
-        let entry = entry.unwrap();
-        let file_type = entry.file_type().unwrap();
+        let metadata = fs::metadata(&path).unwrap();
+        let file_type = metadata.file_type();
 
         if file_type.is_file() {
             // open bed file
@@ -150,7 +195,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             // let file = File::open(entry.path()).unwrap();
             // let mut reader = BufReader::new(file);
 
-            let mut reader = get_dynamic_reader(&entry.path()).unwrap();
+            let mut reader = get_dynamic_reader(&path).unwrap();
 
             // Read the very first line and see if it meets our criteria
             // MUST USE by_ref() otherwise borrow checker won't let code compile
@@ -168,7 +213,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             match ctg {
                 Some(_ctg) => {
                     //println!("ctg successfully parsed {}", ctg);
-                    all_bed_files.push(entry.path());
+                    all_bed_files.push(path);
                     ix += 1;
                 }
                 None => continue,

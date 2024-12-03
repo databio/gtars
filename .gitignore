@@ -22,3 +22,5 @@ Cargo.lock
 bin/
 /.idea/gtars.iml
 /gtars/tests/data/test1.bw
+
+.DS_Store
