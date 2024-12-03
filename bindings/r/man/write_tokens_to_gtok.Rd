@@ -8,6 +8,8 @@ write_tokens_to_gtok(filename, tokens)
 }
 \arguments{
 \item{filename}{A string representing the path to the gtok file.}
+
+\item{tokens}{The tokens to write.}
 }
 \description{
 Write tokens to a gtok file

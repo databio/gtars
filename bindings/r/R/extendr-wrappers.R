@@ -20,6 +20,7 @@ read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok,
 #' Write tokens to a gtok file
 #' @export
 #' @param filename A string representing the path to the gtok file.
+#' @param tokens The tokens to write.
 write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
 
 #' Create an IGD database from a directory of bed files
