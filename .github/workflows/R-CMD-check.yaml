@@ -38,4 +38,5 @@ jobs:
         with:
           extra-packages: rcmdcheck
       - uses: r-lib/actions/check-r-package@v2
-        working-directory: ${{ github.workspace }}/bindings/r
+        with:
+          working-directory: ${{ github.workspace }}/bindings/r
