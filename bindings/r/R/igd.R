@@ -1,5 +1,4 @@
 #' @useDynLib gtars, .registration = TRUE
-#' @importFrom methods new
 NULL
 
 #' @title Create IGD Database

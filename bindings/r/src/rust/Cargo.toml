@@ -9,5 +9,5 @@ name = 'gtars'
 
 [dependencies]
 extendr-api = '*'
-gtars = { git = "https://github.com/databio/gtars", branch = "master" }
+gtars = { git = "https://github.com/databio/gtars", branch = "dev" }
 # gtars = { path = "../../../../gtars" }
