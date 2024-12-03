@@ -1,4 +1,3 @@
-use std::path::Path;
 use pyo3::prelude::*;
 
 use gtars::igd::search::igd_search;
@@ -10,9 +9,9 @@ pub struct IGD;
 impl IGD {
 
     #[classmethod]
-    pub fn search(database_path: &String, query_file_path: &String) ->  Ok() {
+    pub fn search(database_path: String, query_file_path: String) {
 
-        igd_search(database_path, query_file_path).unwrap()
+        igd_search(&database_path, &query_file_path).unwrap();
 
 
     }
