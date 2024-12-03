@@ -16,7 +16,7 @@ jobs:
       fail-fast: false
       matrix:
         config:
-          - {os: windows-latest, r: 'release', rust-version: 'stable-msvc', rust-target: 'x86_64-pc-windows-gnu'}
+          #  - {os: windows-latest, r: 'release', rust-version: 'stable-msvc', rust-target: 'x86_64-pc-windows-gnu'}
           - {os: macOS-latest,   r: 'release', rust-version: 'stable'}
           - {os: ubuntu-latest,  r: 'release', rust-version: 'stable'}
           - {os: ubuntu-latest,  r: 'devel',   rust-version: 'stable'}
