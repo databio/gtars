@@ -125,6 +125,21 @@ mod tests {
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
     }
 
+    // #[rstest]
+    // fn test_igd_create_txt() {
+    //     let tempdir = tempfile::tempdir().unwrap();
+    //     let path = PathBuf::from(&tempdir.path());
+    //
+    //     let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+    //     let db_output_path = db_path_unwrapped;
+    //
+    //     let path_to_crate = env!("CARGO_MANIFEST_DIR");
+    //     let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igdlist.txt");
+    //
+    //     let demo_name = String::from("demo");
+    //
+    //     create_igd_f(&db_output_path, &testfilelists, &demo_name);
+    // }
 
     #[rstest]
     fn test_igd_search() {
