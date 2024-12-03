@@ -19,11 +19,8 @@ type BarcodeWhiteList = HashSet<String>;
 pub fn region_scoring_from_fragments(
     fragments: &mut FragmentFileGlob,
     consensus: &ConsensusSet,
-    barcode_whitelist: Option<&BarcodeWhiteList>,
     scoring_mode: ScoringMode,
 ) -> Result<CountMatrix<u32>> {
-    let binding = HashSet::new();
-    let barcode_whitelist = barcode_whitelist.unwrap_or(&binding);
 
     let rows = fragments.len();
     let cols = consensus.len();
@@ -54,16 +51,6 @@ pub fn region_scoring_from_fragments(
 
             // convert to fragment and then get new positions of start and end
             let fragment = Fragment::from_str(&line)?;
-
-            let whitelist_check_value = format!("{file_stem}+{}", fragment.barcode);
-
-            // skip anything not in the whitelist
-            // short-circuiting is important here
-            // if the whitelist is empty, we don't want to check the whitelist
-            if !barcode_whitelist.is_empty() && !barcode_whitelist.contains(&whitelist_check_value)
-            {
-                continue;
-            }
 
             match scoring_mode {
                 ScoringMode::Atac => {
