@@ -47,25 +47,20 @@ set_B <- GRangesList(
 export(set_A, '/Users/sam/Documents/Work/gtars/bindings/r/tests/set_A.bed', format="BED")
 export(set_AA, '/Users/sam/Documents/Work/gtars/bindings/r/tests/set_AA.bed', format="BED" )
 
-rextendr::document()
+# rextendr::document()
 
-gtars_create <- gtars::r_igd_create('/Users/sam/Documents/Work/episcope/.test/igd/', '/Users/sam/Documents/Work/episcope/.test/bed_db')
+gtars_create <- gtars::r_igd_create('/Users/sam/Documents/Work/episcope/.test/igd/', '/Users/sam/Documents/Work/episcope/.test/test_paths.txt')
 gtars_count <- gtars::r_igd_search(database_path = '/Users/sam/Documents/Work/episcope/.test/igd/igd_database.igd', query_path = '/Users/sam/Documents/Work/episcope/.test/set_A.bed')
-
-userSets_bed <- '/Users/sam/Documents/Work/episcope/.test/set_A.bed'
 
 userSets_beds <- c('/Users/sam/Documents/Work/episcope/.test/set_A.bed', '/Users/sam/Documents/Work/episcope/.test/set_AA.bed')
 db_path <- '/Users/sam/Documents/Work/episcope/.test/igd/igd_database.igd'
 
+
+## test lapply
 r_igd_search_rev <- function(query_path = query_path, database_path = database_path) {
   gtars::r_igd_search(database_path = database_path, query_path = query_path)
 }
 
-geneSetDatabaseOverlap =
-  lapply(userSets_bed, r_igd_search_rev, db_path)
-
-geneSetDatabaseOverlaps =
-  lapply(userSets_beds, r_igd_search_rev, db_path)
-
+lapply(userSets_beds, r_igd_search_rev, db_path)
 lapply(geneSetDatabaseOverlaps, function(x) as.numeric(as.character(x[," number of hits"])))
        
