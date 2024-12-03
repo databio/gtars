@@ -61,6 +61,6 @@ r_igd_search_rev <- function(query_path = query_path, database_path = database_p
   gtars::r_igd_search(database_path = database_path, query_path = query_path)
 }
 
-lapply(userSets_beds, r_igd_search_rev, db_path)
-lapply(geneSetDatabaseOverlaps, function(x) as.numeric(as.character(x[," number of hits"])))
+geneSetDatabaseOverlaps <- lapply(userSets_beds, r_igd_search_rev, db_path)
+geneSetDatabaseOverlapsHits <- lapply(geneSetDatabaseOverlaps, function(x) as.numeric(as.character(x[," number of hits"])))
        
