@@ -14,8 +14,6 @@ use crate::scoring::scoring_modes::ScoringMode;
 use anyhow::Result;
 use indicatif::{ProgressBar, ProgressStyle};
 
-type BarcodeWhiteList = HashSet<String>;
-
 pub fn region_scoring_from_fragments(
     fragments: &mut FragmentFileGlob,
     consensus: &ConsensusSet,
@@ -135,7 +133,6 @@ mod tests {
     fn output_file() -> &'static str {
         "tests/data/out/region_scoring_count.csv.gz"
     }
-
     
     #[rstest]
     fn test_region_scoring_from_fragments_atac(
@@ -146,7 +143,7 @@ mod tests {
         let mut fragments = FragmentFileGlob::new(path_to_fragment_files).unwrap();
         let consensus = ConsensusSet::new(consensus_set.into()).unwrap();
 
-        let res = region_scoring_from_fragments(&mut fragments, &consensus, None, ScoringMode::Atac);
+        let res = region_scoring_from_fragments(&mut fragments, &consensus, ScoringMode::Atac);
         assert_eq!(res.is_ok(), true);
 
         let count_mat = res.unwrap();
