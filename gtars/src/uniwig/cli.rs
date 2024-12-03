@@ -9,7 +9,7 @@ use crate::uniwig::consts::UNIWIG_CMD;
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")
-        .about("Create wiggle files from a BED or BAM file")
+        .about("Create accumulation files from a BED or BAM file")
         .arg(
             Arg::new("file")
                 .long("file")
