@@ -264,10 +264,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
                 ig += 1;
             }
 
-            if nf10 > 1 {
-                if ig % nf10 == 0 {
-                    println!(".") // SHow progress for every 10 files
-                }
+            if nf10 > 1 && ig % nf10 == 0 {
+                println!(".") // Show progress for every 10 files
             }
         }
 
