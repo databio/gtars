@@ -9,7 +9,7 @@ use crate::uniwig::consts::UNIWIG_CMD;
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
         .author("DRC")
-        .about("Create wiggle files from a BED or BAM file")
+        .about("Create accumulation files from a BED or BAM file")
         .arg(
             Arg::new("file")
                 .long("file")
@@ -62,6 +62,14 @@ pub fn create_uniwig_cli() -> Command {
                 .required(true),
         )
         .arg(
+            Arg::new("counttype")
+                .long("counttype")
+                .short('u')
+                .default_value("all")
+                .help("Select to only output start, end, or core. Defaults to all.")
+                .required(false),
+        )
+        .arg(
             Arg::new("threads")
                 .long("threads")
                 .short('p')
@@ -81,9 +89,16 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("zoom")
                 .long("zoom")
                 .short('z')
-                .default_value("0")
+                .default_value("5")
                 .value_parser(clap::value_parser!(i32))
                 .help("Number of zoom levels (for bw file output only")
                 .required(false),
+        )
+        .arg(
+            Arg::new("debug")
+                .long("debug")
+                .short('d')
+                .help("Print more verbose debug messages?")
+                .action(ArgAction::SetTrue),
         )
 }

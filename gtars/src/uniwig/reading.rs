@@ -8,6 +8,8 @@ use std::io::{BufRead, BufReader, Read};
 use std::ops::Deref;
 use std::path::Path;
 
+//const UNMAPPED: &str = "*";
+
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
 pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
@@ -80,9 +82,24 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     println!("Reading Bed file complete.");
 
+    // println!("Here are chrom starts");
+    //
+    // for start in chromosome.starts.iter(){
+    //     println!("{}",start.0);
+    // }
+    //
+    // println!("Here are chrom ends");
+    //
+    // for end in chromosome.ends.iter(){
+    //     println!("{}",end.0);
+    // }
+
     chromosome_vec
 }
 
+/// Reads narrowPeak files and returns a `Vec<Chromosome>`
+/// Pushes narrowPeak scores along with chrom coordinates.
+/// Differs from read_bed_vec in that read_bed_vec pushes a default score (1).
 pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     // For narrowpeak there is no default score, we attempt to parse it from the file
     //
@@ -159,8 +176,22 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
 
     println!("Reading narrowPeak file complete.");
 
+    // println!("Here are chrom starts");
+    //
+    // for start in npchromosome.starts.iter(){
+    //     println!("{}",start.0);
+    // }
+    //
+    // println!("Here are chrom ends");
+    //
+    // for end in npchromosome.ends.iter(){
+    //     println!("{}",end.0);
+    // }
+
     chromosome_vec
 }
+
+/// Parses narrowPeak file grabbing chrom (ctg), start, end, and a numerical score in column 5
 pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
@@ -187,7 +218,9 @@ pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
 
     Some((ctg.parse().unwrap(), st, en, narrow_peak_score))
 }
+
 /// Parses each line of given bed file into a contig (chromosome), starts and ends
+/// This ignores any other columns beyond start and ends.
 pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
@@ -260,10 +293,9 @@ pub fn read_chromosome_sizes(
     Ok(chrom_sizes)
 }
 
+/// A wrapper around Noodles package to retrieve information from the bam header.
+/// Returns a `Vec<Chromosome>`
 pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
-    // BAM and SAM format specification https://samtools.github.io/hts-specs/SAMv1.pdf
-    println!("READ BAM HEADER PLACE HOLDER");
-
     let mut reader = bam::io::reader::Builder.build_from_path(filepath).unwrap();
     let header = reader.read_header();
 
@@ -280,16 +312,73 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
     for ref_key in references {
         let chrom_name_vec = ref_key.0.deref().clone();
         let chrom_name = String::from_utf8((*chrom_name_vec).to_owned()).unwrap();
-
-        //For later
-        // use bstr::BString;
+        //let length: NonZeroUsize = ref_key.1.clone().length();
+        // let length = ref_key.1.other_fields().clone().into_values();
+        // let length = length.len();
+        // for (key, value) in ref_key.1.other_fields().iter(){
+        //     println!("new iteration");
+        //     println!("here is key = {:?}", key);
+        //     println!("here is value = {:?}", value);
+        //     println!("Done");
         //
-        // let s = BString::from("Hello, world!");
+        // }
+        // println!("here is length = {:?}", length);
         chromosome.chrom = chrom_name;
         chromosome.starts.push((0, 0)); //default values for now, less important for bam
         chromosome.ends.push((0, 0)); //default values for now, less important for bam
         chromosome_vec.push(chromosome.clone());
     }
-
+    //
+    // for c in &chromosome_vec{
+    //     println!("chromsome= {:?}", c);
+    // }
+    //TODO this could just as easily be a Vec<String>?
+    // In fact I think we later convert to Vec<String> after assessing the final chromosomes.
     chromosome_vec
 }
+
+// pub fn get_seq_reads_bam(chromosome: &mut Chromosome, filepath: &str) {
+//     // read bam seq info into the current Chromosome
+//
+//     // TODO this function requires there to be an associated .bai file in the same directory as the .bam file
+//     // And the error message if it does not exist is not very helpful.
+//     let src = String::from(filepath);
+//     let raw_region = String::from(chromosome.chrom.clone());
+//     //let raw_region = String::from("chr1");
+//
+//     let mut reader = bam::io::indexed_reader::Builder::default()
+//         .build_from_path(src)
+//         .unwrap();
+//     let header = reader.read_header().unwrap();
+//
+//     let records: Box<dyn Iterator<Item = io::Result<bam::Record>>> = if raw_region == UNMAPPED {
+//         reader.query_unmapped().map(Box::new).unwrap()
+//     } else {
+//         let region = raw_region.parse().unwrap();
+//         reader.query(&header, &region).map(Box::new).unwrap()
+//     };
+//
+//     // remove the placeholder (0,0 ))
+//     chromosome.starts.remove(0);
+//     chromosome.ends.remove(0);
+//     let default_score = 1;
+//
+//     for result in records {
+//         let record = result.unwrap();
+//         //TODO Determine position shift via what flags are set
+//         let start_position = record.alignment_start().unwrap().unwrap();
+//         let start = start_position.get();
+//         let end_position = record.alignment_end().unwrap().unwrap();
+//         let end = end_position.get();
+//         chromosome.starts.push((start as i32, default_score));
+//         chromosome.ends.push((end as i32, default_score));
+//     }
+//
+//     chromosome.starts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+//     chromosome.ends.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+//
+//     println!(
+//         "Finished reading seq for chrom: {}",
+//         chromosome.chrom.clone()
+//     );
+// }

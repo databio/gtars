@@ -62,7 +62,7 @@ pub fn pseudobulk_fragment_files(
         )
     })?;
 
-    let mut handle_map: HashMap<u16, BufWriter<GzEncoder<File>>> = HashMap::new();
+    let mut handle_map: HashMap<String, BufWriter<GzEncoder<File>>> = HashMap::new();
     for cluster_id in mapping.get_cluster_labels() {
         let file_name = format!("cluster_{cluster_id}.bed.gz");
         let file_path = output.join(file_name);
@@ -159,17 +159,17 @@ mod tests {
 
     #[fixture]
     fn barcode_cluster_map_file() -> &'static str {
-        "tests/data/scatlas_leiden.csv"
+        "tests/data/barcode_cluster_map.tsv"
     }
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments-test"
+        "tests/data/fragments/fragsplit"
     }
 
     #[fixture]
     fn path_to_output() -> &'static str {
-        "tests/data/out-test"
+        "tests/data/out"
     }
 
     #[fixture]

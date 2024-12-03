@@ -20,12 +20,15 @@ ndarray-npy = "0.8.1"
 ndarray = "0.15.6"
 tempfile = "3.10.1"
 byteorder = "1.5.0"
-noodles = { version = "0.83.0", features = ["bam"] }
+noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
 bstr = "1.10.0"
 rayon = "1.10.0"
 indicatif = "0.17.8"
+bigtools = "0.5.4"
+tokio = "1.40.0"
+os_pipe = "1.2.1"
 glob = "0.3.1"
-bigtools = "0.5.2"
+
 
 
 [dev-dependencies]

@@ -6,12 +6,12 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 pub struct BarcodeToClusterMap {
-    map: HashMap<String, u16>,
-    cluster_labels: HashSet<u16>,
+    map: HashMap<String, String>,
+    cluster_labels: HashSet<String>,
 }
 
 pub trait ClusterLookup {
-    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<u16>;
+    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<String>;
 }
 
 pub trait ClusterCount {
@@ -19,9 +19,9 @@ pub trait ClusterCount {
 }
 
 impl ClusterLookup for BarcodeToClusterMap {
-    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<u16> {
+    fn get_cluster_from_barcode(&self, barcode: &str) -> Option<String> {
         let cluster_id = self.map.get(barcode);
-        cluster_id.copied()
+        cluster_id.cloned()
     }
 }
 
@@ -35,8 +35,8 @@ impl BarcodeToClusterMap {
     pub fn from_file(file: &Path) -> Result<Self> {
         let file = File::open(file).with_context(|| format!("Couldn't open file: {:?}", file))?;
 
-        let mut map: HashMap<String, u16> = HashMap::new();
-        let mut cluster_labels: HashSet<u16> = HashSet::new();
+        let mut map: HashMap<String, String> = HashMap::new();
+        let mut cluster_labels: HashSet<String> = HashSet::new();
 
         let reader = BufReader::new(file);
 
@@ -57,16 +57,10 @@ impl BarcodeToClusterMap {
             }
 
             if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
-                let cluster_id: u16 = cluster_id.parse().with_context(|| {
-                    format!(
-                        "Error parsing cluster id: {:?}. It must be coercible to a u16 datatype.",
-                        cluster_id
-                    )
-                })?;
 
-                map.insert(barcode.to_string(), cluster_id);
-                if !cluster_labels.contains(&cluster_id) {
-                    cluster_labels.insert(cluster_id);
+                map.insert(barcode.to_string(), cluster_id.to_string());
+                if !cluster_labels.contains(cluster_id) {
+                    cluster_labels.insert(cluster_id.to_string());
                 }
             } else {
                 anyhow::bail!(
@@ -82,14 +76,12 @@ impl BarcodeToClusterMap {
         })
     }
 
-    pub fn get_cluster_labels(&self) -> HashSet<u16> {
+    pub fn get_cluster_labels(&self) -> HashSet<String> {
         self.cluster_labels.clone()
     }
 }
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use pretty_assertions::assert_eq;
     use rstest::*;
 
     #[fixture]
