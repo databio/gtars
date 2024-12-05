@@ -1316,7 +1316,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
         let shifted_pos = get_shifted_pos(flags, start_site, end_site);
 
-        let mut adjusted_start_site = shifted_pos - smoothsize;
+        adjusted_start_site = shifted_pos - smoothsize;
 
 
         count += 1;
