@@ -8,10 +8,7 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{
-    bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,
-    variable_start_end_counts_bam_to_bw, BAMRecordError,
-};
+use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw, variable_shifted_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
 use crate::uniwig::reading::read_chromosome_sizes;
 use crate::uniwig::utils::{compress_counts, get_final_chromosomes};
 use crate::uniwig::writing::{
@@ -1150,55 +1147,88 @@ fn determine_counting_func(
     sel_clone: &str,
     write_fd: Arc<Mutex<PipeWriter>>,
 ) -> Result<(), BAMRecordError> {
-    let count_result: Result<(), BAMRecordError> = match sel_clone {
-        "start" | "end" => {
-            match variable_start_end_counts_bam_to_bw(
-                &mut records,
-                current_chrom_size_cloned,
-                smoothsize_cloned,
-                stepsize_cloned,
-                &chromosome_string_cloned,
-                sel_clone,
-                write_fd,
-            ) {
-                Ok(_) => Ok(()),
-                Err(err) => {
-                    //eprintln!("Error processing records for {} {:?}", sel_clone,err);
-                    Err(err)
+
+    let bam_shift: bool = true; // This is to ensure a shifted position workflow is used when doing bams
+
+    let count_result: Result<(), BAMRecordError> =
+
+        match bam_shift{
+
+            true =>{
+
+                match variable_shifted_bam_to_bw(
+                    &mut records,
+                    current_chrom_size_cloned,
+                    smoothsize_cloned,
+                    stepsize_cloned,
+                    &chromosome_string_cloned,
+                    sel_clone,
+                    write_fd,
+                ) {
+                    Ok(_) => Ok(()),
+                    Err(err) => {
+                        //eprintln!("Error processing records for {} {:?}", sel_clone,err);
+                        Err(err)
+                    }
                 }
+
             }
+            false => {
+
+                match sel_clone {
+                    "start" | "end" => {
+                        match variable_start_end_counts_bam_to_bw(
+                            &mut records,
+                            current_chrom_size_cloned,
+                            smoothsize_cloned,
+                            stepsize_cloned,
+                            &chromosome_string_cloned,
+                            sel_clone,
+                            write_fd,
+                        ) {
+                            Ok(_) => Ok(()),
+                            Err(err) => {
+                                //eprintln!("Error processing records for {} {:?}", sel_clone,err);
+                                Err(err)
+                            }
+                        }
+                    }
+
+                    "core" => {
+                        match variable_core_counts_bam_to_bw(
+                            &mut records,
+                            current_chrom_size_cloned,
+                            stepsize_cloned,
+                            &chromosome_string_cloned,
+                            write_fd,
+                        ) {
+                            Ok(_) => {
+                                //eprintln!("Processing successful for {}", chromosome_string_cloned);
+                                Ok(())
+                            }
+                            Err(err) => {
+                                //eprintln!("Error processing records for {}: {:?}", sel_clone,err);
+                                Err(err)
+                            }
+                        }
+                    }
+
+                    &_ => {
+                        eprintln!(
+                            "Error processing records, improper selection: {}",
+                            sel_clone
+                        );
+                        Err(BAMRecordError::IncorrectSel)
+                    }
+            }
+
         }
 
-        "core" => {
-            match variable_core_counts_bam_to_bw(
-                &mut records,
-                current_chrom_size_cloned,
-                stepsize_cloned,
-                &chromosome_string_cloned,
-                write_fd,
-            ) {
-                Ok(_) => {
-                    //eprintln!("Processing successful for {}", chromosome_string_cloned);
-                    Ok(())
-                }
-                Err(err) => {
-                    //eprintln!("Error processing records for {}: {:?}", sel_clone,err);
-                    Err(err)
-                }
-            }
-        }
-
-        &_ => {
-            eprintln!(
-                "Error processing records, improper selection: {}",
-                sel_clone
-            );
-            Err(BAMRecordError::IncorrectSel)
-        }
     };
 
     count_result
 }
+
 
 /// Creates the bigwig writer struct for use with the BigTools crate
 pub fn create_bw_writer(

@@ -1231,6 +1231,187 @@ pub fn bam_to_bed_no_counts(
     Ok(())
 }
 
+pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
+                               chrom_size: i32,
+                               smoothsize: i32,
+                               stepsize: i32,
+                               chromosome_name: &String,
+                               out_sel: &str,
+                               write_fd: Arc<Mutex<PipeWriter>>,
+) -> Result<(), BAMRecordError> {
+    let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
+    let mut writer = BufWriter::new(&mut *write_lock);
+
+    let mut coordinate_position = 1;
+
+    let mut prev_count: i32 = 0;
+    let mut count: i32 = 0;
+
+    let mut prev_coordinate_value = 0;
+
+    let mut current_end_site: i32;
+    let mut bg_prev_coord: i32 = 0; // keep track of which coordinate had a switch in count.
+
+    let mut collected_end_sites: Vec<i32> = Vec::new();
+
+    let first_record_option = records.next();
+
+    let first_record = match first_record_option {
+        Some(Ok(record)) => record, // Extract the record
+        Some(Err(err)) => {
+            // Handle the error
+            eprintln!(
+                "Error reading the first record for {} chrom: {} {:?} Skipping...",
+                out_sel, chromosome_name, err
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord); // Example error handling
+        }
+        None => {
+            // Handle no records
+            eprintln!(
+                "No records for {} chrom: {} Skipping...",
+                out_sel, chromosome_name
+            );
+            writer.write_all(b"\n").unwrap();
+            writer.flush().unwrap();
+            drop(writer);
+            return Err(BAMRecordError::NoFirstRecord);
+        }
+    };
+
+    let flags =first_record.flags();
+
+    let start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
+
+    let end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
+
+    let shifted_pos = get_shifted_pos(flags, start_site, end_site);
+
+    let mut adjusted_start_site = shifted_pos - smoothsize;
+
+    //current_end_site = adjusted_start_site;
+    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
+
+    if adjusted_start_site < 1 {
+        adjusted_start_site = 1;
+    }
+
+    while coordinate_position < adjusted_start_site {
+        // Just skip until we reach the initial adjusted start position
+        // Note that this function will not return 0s at locations before the initial start site
+        coordinate_position = coordinate_position + stepsize;
+    }
+
+    for coord in records {
+
+        let unwrapped_coord = coord.unwrap().clone();
+        let flags = unwrapped_coord.flags().clone();
+
+        let start_site = unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
+
+        let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
+
+        let shifted_pos = get_shifted_pos(flags, start_site, end_site);
+
+        let mut adjusted_start_site = shifted_pos - smoothsize;
+
+
+        count += 1;
+
+        if adjusted_start_site < 1 {
+            adjusted_start_site = 1;
+        }
+
+        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        collected_end_sites.push(new_end_site);
+
+        if adjusted_start_site == prev_coordinate_value {
+            continue;
+        }
+
+        while coordinate_position < adjusted_start_site {
+            while current_end_site == coordinate_position {
+                count = count - 1;
+
+                //prev_end_site = current_end_site;
+
+                if count < 0 {
+                    count = 0;
+                }
+
+                if collected_end_sites.last() == None {
+                    current_end_site = 0;
+                } else {
+                    current_end_site = collected_end_sites.remove(0)
+                }
+            }
+
+            if count != prev_count {
+                let single_line = format!(
+                    "{}\t{}\t{}\t{}\n",
+                    chromosome_name, bg_prev_coord, coordinate_position, prev_count
+                );
+                writer.write_all(single_line.as_bytes())?;
+                writer.flush()?;
+                //eprintln!("{}\n",single_line);
+                //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
+
+                prev_count = count;
+                bg_prev_coord = coordinate_position;
+            }
+
+            coordinate_position = coordinate_position + 1;
+        }
+
+        prev_coordinate_value = adjusted_start_site;
+    }
+
+    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    while coordinate_position < chrom_size {
+        // Apply a bound to push the final coordinates otherwise it will become truncated.
+
+        while current_end_site == coordinate_position {
+            count = count - 1;
+            //prev_end_site = current_end_site;
+            if count < 0 {
+                count = 0;
+            }
+
+            if collected_end_sites.last() == None {
+                current_end_site = 0;
+            } else {
+                current_end_site = collected_end_sites.remove(0)
+            }
+        }
+
+        if count != prev_count {
+            let single_line = format!(
+                "{}\t{}\t{}\t{}\n",
+                chromosome_name, bg_prev_coord, coordinate_position, prev_count
+            );
+            writer.write_all(single_line.as_bytes())?;
+            writer.flush()?;
+            //eprintln!("{}",single_line);
+            //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
+
+            prev_count = count;
+            bg_prev_coord = coordinate_position;
+        }
+
+        coordinate_position = coordinate_position + 1;
+    }
+
+    drop(writer);
+
+    Ok(())
+}
+
+
 /// Set up header for wiggle or no header if bedGraph
 /// This is for bed/narrowPeak to wiggle/bedGraph workflows.
 fn set_up_file_output(
