@@ -394,6 +394,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -438,6 +439,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -483,6 +485,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -528,6 +531,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -592,6 +596,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -658,6 +663,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -770,6 +776,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -877,6 +884,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 

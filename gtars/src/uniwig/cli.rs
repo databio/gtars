@@ -86,6 +86,13 @@ pub fn create_uniwig_cli() -> Command {
                 .action(ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("bamshift")
+                .long("bamshift")
+                .short('a')
+                .help("Set bam shift to False, i.e. uniwig will count raw reads without considering read direction.")
+                .action(ArgAction::SetFalse),
+        )
+        .arg(
             Arg::new("zoom")
                 .long("zoom")
                 .short('z')

@@ -54,10 +54,10 @@ Options:
   -u, --counttype <counttype>    Select to only output start, end, or core. Defaults to all. [default: all]
   -p, --threads <threads>        Number of rayon threads to use for parallel processing [default: 6]
   -o, --score                    Count via score (narrowPeak only!)
+  -a, --bamshift                 Set bam shift to False, i.e. uniwig will count raw reads without considering read direction.
   -z, --zoom <zoom>              Number of zoom levels (for bw file output only [default: 5]
   -d, --debug                    Print more verbose debug messages?
   -h, --help                     Print help
-
 
 ```
 
