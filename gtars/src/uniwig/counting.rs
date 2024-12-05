@@ -8,6 +8,7 @@ use std::io;
 use std::io::{BufWriter, Write};
 
 use std::sync::{Arc, Mutex};
+use noodles::sam::alignment::record::Flags;
 
 #[derive(Debug)]
 pub enum BAMRecordError {
@@ -1198,52 +1199,15 @@ pub fn bam_to_bed_no_counts(
 
         //println!("processing records bam to bed");
 
-        let flag = unwrapped_coord.flags();
+        let flags = unwrapped_coord.flags();
 
-        let shifted_pos: i32;
+        //let shifted_pos: i32;
 
         let start_site = unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
-        // GET shifted pos and Strand
-        // TODO ONLY ATAC SHIFTING IS SUPPORTED
-        //shift_factor = {"+":4, "-":-5}  # ATAC
-        // TODO this assumes tail_edge is false, which is default on PEPATAC pipeline, should add tail_edge=true workflow
-        if flag.bits() & 1 != 0 {
-            // Paired-end read
-            //println!("found, flag bits {} and flagbits &64 {}", flag.bits(), flag.bits() & 64);
-            if flag.bits() & 64 != 0 {
-                // First in pair
-                if flag.bits() & 16 != 0 {
-                    // Reverse complement
-                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
-                    shifted_pos = end_site + -5;
-                } else {
-                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
-                    shifted_pos = start_site + 4;
-                }
-            } else {
-                // Second in pair
-                if flag.bits() & 16 != 0 {
-                    // Reverse complement
-                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
-                    shifted_pos = end_site + -5;
-                } else {
-                    //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
-                    shifted_pos = start_site + 4;
-                }
-            }
-        } else {
-            // Single-end read
-            //println!("Single end read {}" flag.bits());
-            if flag.bits() & 16 != 0 {
-                // Reverse complement
-                shifted_pos = end_site + -5;
-            } else {
-                shifted_pos = start_site + 4;
-            }
-        }
+        let shifted_pos = get_shifted_pos(flags, start_site, end_site);
 
         // Relevant comment from original bamSitesToWig.py:
         // The bed file needs 6 columns (even though some are dummy)
@@ -1318,4 +1282,49 @@ fn set_up_file_output(
         Ok(Box::new(io::stdout()))
         // write to std_out, this will be useful for sending input to bigtools to create bw files
     }
+}
+
+pub fn get_shifted_pos(flags: Flags, start_site:i32, end_site:i32) -> i32 {
+
+    let shifted_pos: i32;
+    // GET shifted pos and Strand
+    // TODO ONLY ATAC SHIFTING IS SUPPORTED
+    //shift_factor = {"+":4, "-":-5}  # ATAC
+    // TODO this assumes tail_edge is false, which is default on PEPATAC pipeline, should add tail_edge=true workflow
+    if flags.bits() & 1 != 0 {
+        // Paired-end read
+        //println!("found, flag bits {} and flagbits &64 {}", flag.bits(), flag.bits() & 64);
+        if flags.bits() & 64 != 0 {
+            // First in pair
+            if flags.bits() & 16 != 0 {
+                // Reverse complement
+                //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                shifted_pos = end_site + -5;
+            } else {
+                //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                shifted_pos = start_site + 4;
+            }
+        } else {
+            // Second in pair
+            if flags.bits() & 16 != 0 {
+                // Reverse complement
+                //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                shifted_pos = end_site + -5;
+            } else {
+                //println!("found, flag bits {} and flagbits &16 {}", flag.bits(), flag.bits() & 16);
+                shifted_pos = start_site + 4;
+            }
+        }
+    } else {
+        // Single-end read
+        //println!("Single end read {}" flag.bits());
+        if flags.bits() & 16 != 0 {
+            // Reverse complement
+            shifted_pos = end_site + -5;
+        } else {
+            shifted_pos = start_site + 4;
+        }
+    }
+
+    shifted_pos
 }
