@@ -711,14 +711,13 @@ fn process_bam(
 
     //let out_selection_vec: Vec<&str>;
 
-    if bam_shift && vec_count_type.len()>1{
-        println!("bam_shift defaults to true for bam processing, but more than one count_type was selected. Defaulting to shift workflow which will produce a single file count file.");
-    }
-
     if !bam_shift{
         //do nothing, just keep user output selection for starts, ends, core
     }
     else{
+        if vec_count_type.len()>1{
+            println!("bam_shift defaults to true for bam processing, but more than one count_type was selected. Defaulting to shift workflow which will produce a single file count file.");
+        }
         vec_count_type = vec!["shift"];
     }
 
