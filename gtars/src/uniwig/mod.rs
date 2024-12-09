@@ -134,6 +134,9 @@ pub fn run_uniwig(matches: &ArgMatches) {
         "core" => {
             vec!["core"]
         }
+        "shift" => {
+            vec!["shift"]
+        }
 
         _ => {
             vec!["start", "end", "core"]
@@ -709,7 +712,7 @@ fn process_bam(
     //let out_selection_vec: Vec<&str>;
 
     if bam_shift && vec_count_type.len()>1{
-        println!("bam_shift is set to true, but more than one count_type was selected. Defaulting to shift workflow which will produce a single file count file");
+        println!("bam_shift defaults to true for bam processing, but more than one count_type was selected. Defaulting to shift workflow which will produce a single file count file.");
     }
 
     if !bam_shift{

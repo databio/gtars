@@ -66,7 +66,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("counttype")
                 .short('u')
                 .default_value("all")
-                .help("Select to only output start, end, or core. Defaults to all.")
+                .help("Select to only output start, end, or core. Select `shift` for bam workflows. Defaults to all.")
                 .required(false),
         )
         .arg(
