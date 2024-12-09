@@ -147,7 +147,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .expect("requires integer value");
 
     let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
-    let bam_shift = matches.get_one::<bool>("bamshift").unwrap_or_else(|| &true);
+    let bam_shift = matches.get_one::<bool>("no-bamshift").unwrap_or_else(|| &true);
 
     let debug = matches.get_one::<bool>("debug").unwrap_or_else(|| &false);
 

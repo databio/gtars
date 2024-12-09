@@ -1207,7 +1207,7 @@ pub fn bam_to_bed_no_counts(
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
-        let shifted_pos = get_shifted_pos(flags, start_site, end_site);
+        let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
 
         // Relevant comment from original bamSitesToWig.py:
         // The bed file needs 6 columns (even though some are dummy)
@@ -1288,7 +1288,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
     let end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
 
-    let shifted_pos = get_shifted_pos(flags, start_site, end_site);
+    let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
 
     let mut adjusted_start_site = shifted_pos - smoothsize;
 
@@ -1314,7 +1314,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
-        let shifted_pos = get_shifted_pos(flags, start_site, end_site);
+        let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
 
         adjusted_start_site = shifted_pos - smoothsize;
 
@@ -1465,7 +1465,7 @@ fn set_up_file_output(
     }
 }
 
-pub fn get_shifted_pos(flags: Flags, start_site:i32, end_site:i32) -> i32 {
+pub fn get_shifted_pos(flags: &Flags, start_site:i32, end_site:i32) -> i32 {
 
     let shifted_pos: i32;
     // GET shifted pos and Strand
