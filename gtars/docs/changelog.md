@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add position shift workflow for `bam` to `bw`
 
 ## [0.1.1]
-- Temporarily removed Linux ARM builds
+- hot fix for broken python bindings; remove IGD from the python bindings for now
 
 ## [0.1.0]
 - Rust implementation of `uniwig` that expands on the C++ version
