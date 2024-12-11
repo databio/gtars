@@ -1207,7 +1207,8 @@ pub fn bam_to_bed_no_counts(
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
-        let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
+        // we must shift the start position by -1 to convert bam/sam 1 based position to bed 0 based pos
+        let shifted_pos = get_shifted_pos(&flags, start_site-1, end_site);
 
         // Relevant comment from original bamSitesToWig.py:
         // The bed file needs 6 columns (even though some are dummy)
@@ -1221,6 +1222,8 @@ pub fn bam_to_bed_no_counts(
             "O",
             strand,
         );
+
+        //eprintln!("here is shifted with smoothing: {}  {}", shifted_pos - smoothsize, shifted_pos + smoothsize);
 
         writer.write_all(single_line.as_bytes())?;
         writer.flush()?;
@@ -1242,7 +1245,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
 
-    let mut coordinate_position = 1;
+    let mut coordinate_position = 0;
 
     let mut prev_count: i32 = 0;
     let mut count: i32 = 0;
@@ -1288,15 +1291,15 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
     let end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
 
-    let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
+    let shifted_pos = get_shifted_pos(&flags, start_site - 1, end_site); // we must shift the start position by -1 to convert bam/sam 1 based position to bedgraph 0 based pos
 
     let mut adjusted_start_site = shifted_pos - smoothsize;
 
     //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
 
-    if adjusted_start_site < 1 {
-        adjusted_start_site = 1;
+    if adjusted_start_site < 0 {
+        adjusted_start_site = 0; // must ensure we start at 0 for bedGraph 0 position
     }
 
     while coordinate_position < adjusted_start_site {
@@ -1314,15 +1317,15 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
-        let shifted_pos = get_shifted_pos(&flags, start_site, end_site);
+        let shifted_pos = get_shifted_pos(&flags, start_site - 1, end_site);
 
         adjusted_start_site = shifted_pos - smoothsize;
 
 
         count += 1;
 
-        if adjusted_start_site < 1 {
-            adjusted_start_site = 1;
+        if adjusted_start_site < 0 {
+            adjusted_start_site = 0;
         }
 
         let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -1506,6 +1509,9 @@ pub fn get_shifted_pos(flags: &Flags, start_site:i32, end_site:i32) -> i32 {
             shifted_pos = start_site + 4;
         }
     }
+
+    //eprintln!("Here is read.reference_start {} and read.reference_end {}", start_site, end_site);
+    //eprintln!("here is shifted_pos -> {shifted_pos}");
 
     shifted_pos
 }
