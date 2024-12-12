@@ -1329,14 +1329,27 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
         }
 
         let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
-        collected_end_sites.push(new_end_site);
+        println!("adjusted start site for new coord: {}", adjusted_start_site);
+        println!("new endsite for new coord: {}", new_end_site);
+
+        if new_end_site < current_end_site {
+            collected_end_sites.insert(0, current_end_site); // put the current end site back into the queue
+            current_end_site = new_end_site;
+        } else
+        {
+            collected_end_sites.push(new_end_site);
+        }
+
+        println!("here is all endsites: {:?}", collected_end_sites);
 
         if adjusted_start_site == prev_coordinate_value {
             continue;
         }
 
         while coordinate_position < adjusted_start_site {
+            println!("coordinate_position< adjusted_start_site: {} < {} . here is current endsite: {} ", coordinate_position, adjusted_start_site, current_end_site);
             while current_end_site == coordinate_position {
+                println!("current_end_site == coordinate_position {} = {} adjusted start site: {}", current_end_site, coordinate_position, adjusted_start_site);
                 count = count - 1;
 
                 //prev_end_site = current_end_site;
@@ -1348,7 +1361,8 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
                 if collected_end_sites.last() == None {
                     current_end_site = 0;
                 } else {
-                    current_end_site = collected_end_sites.remove(0)
+                    current_end_site = collected_end_sites.remove(0);
+                    println!("new endsite deom deque: {}", current_end_site);
                 }
             }
 
@@ -1510,8 +1524,8 @@ pub fn get_shifted_pos(flags: &Flags, start_site:i32, end_site:i32) -> i32 {
         }
     }
 
-    //eprintln!("Here is read.reference_start {} and read.reference_end {}", start_site, end_site);
-    //eprintln!("here is shifted_pos -> {shifted_pos}");
+    println!("Here is read.reference_start {} and read.reference_end {}", start_site, end_site);
+    println!("here is shifted_pos -> {shifted_pos}");
 
     shifted_pos
 }
