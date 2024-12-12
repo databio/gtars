@@ -34,6 +34,7 @@ pub fn start_end_counts(
     chrom_size: i32,
     smoothsize: i32,
     stepsize: i32,
+    shift: i32,
 ) -> (Vec<u32>, Vec<i32>) {
     //let vin_iter = starts_vector.iter();
 
@@ -54,7 +55,7 @@ pub fn start_end_counts(
 
     adjusted_start_site = starts_vector[0]; // get first coordinate position
 
-    adjusted_start_site.0 = adjusted_start_site.0 - smoothsize;
+    adjusted_start_site.0 = adjusted_start_site.0 - smoothsize + shift;
 
     current_end_site = adjusted_start_site;
     current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
@@ -73,7 +74,7 @@ pub fn start_end_counts(
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
-        adjusted_start_site.0 = coordinate_value.0 - smoothsize;
+        adjusted_start_site.0 = coordinate_value.0 - smoothsize + shift;
 
         let current_score = adjusted_start_site.1;
 
@@ -163,6 +164,7 @@ pub fn core_counts(
     ends_vector: &[(i32, i32)],
     chrom_size: i32,
     stepsize: i32,
+    shift: i32,
 ) -> (Vec<u32>, Vec<i32>) {
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
@@ -182,6 +184,8 @@ pub fn core_counts(
     current_start_site = starts_vector[0]; // get first coordinate position
     current_end_site = ends_vector[0];
 
+    current_start_site.0 = current_start_site.0 + shift;
+
     if current_start_site.0 < 1 {
         current_start_site.0 = 1;
     }
@@ -196,6 +200,8 @@ pub fn core_counts(
         coordinate_value = *coord;
 
         current_start_site = coordinate_value;
+
+        current_start_site.0 = current_start_site.0 + shift;
 
         let current_score = current_start_site.1;
         count += current_score;

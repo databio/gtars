@@ -315,6 +315,7 @@ mod tests {
                 &chromosome.ends,
                 current_chrom_size,
                 stepsize,
+                0
             );
         }
     }
@@ -335,6 +336,7 @@ mod tests {
                 current_chrom_size,
                 smooth_size,
                 stepsize,
+                0
             );
         }
     }
