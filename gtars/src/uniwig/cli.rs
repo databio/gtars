@@ -66,7 +66,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("counttype")
                 .short('u')
                 .default_value("all")
-                .help("Select to only output start, end, or core. Defaults to all.")
+                .help("Select to only output start, end, or core. Select `shift` for bam workflows. Defaults to all.")
                 .required(false),
         )
         .arg(
@@ -84,6 +84,13 @@ pub fn create_uniwig_cli() -> Command {
                 .short('o')
                 .help("Count via score (narrowPeak only!)")
                 .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("no-bamshift")
+                .long("no-bamshift")
+                .short('a')
+                .help("Set bam shift to False, i.e. uniwig will count raw reads without considering read direction.")
+                .action(ArgAction::SetFalse),
         )
         .arg(
             Arg::new("zoom")

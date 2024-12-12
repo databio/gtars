@@ -315,6 +315,7 @@ mod tests {
                 &chromosome.ends,
                 current_chrom_size,
                 stepsize,
+                0
             );
         }
     }
@@ -335,6 +336,7 @@ mod tests {
                 current_chrom_size,
                 smooth_size,
                 stepsize,
+                0
             );
         }
     }
@@ -394,6 +396,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -438,6 +441,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -483,6 +487,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
@@ -528,6 +533,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -592,6 +598,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -658,6 +665,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -770,6 +778,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         );
 
         assert!(result.is_ok());
@@ -877,6 +886,7 @@ mod tests {
             stepsize,
             zoom,
             false,
+            true,
         )
         .expect("Uniwig main failed!");
 
