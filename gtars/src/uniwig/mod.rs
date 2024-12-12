@@ -316,6 +316,7 @@ pub fn uniwig_main(
                                                         smoothsize,
                                                     ),
                                                     stepsize,
+                                                    current_chrom_size,
                                                 );
                                             }
                                             "bedGraph" => {
@@ -507,6 +508,7 @@ pub fn uniwig_main(
                                                         smoothsize,
                                                     ),
                                                     stepsize,
+                                                    current_chrom_size,
                                                 );
                                             }
                                             "csv" => {
@@ -658,6 +660,7 @@ pub fn uniwig_main(
                                                         0,
                                                     ),
                                                     stepsize,
+                                                    current_chrom_size,
                                                 );
                                             }
                                             "csv" => {

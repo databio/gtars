@@ -96,6 +96,7 @@ pub fn write_to_wig_file(
     chromname: String,
     start_position: i32,
     stepsize: i32,
+    chrom_size: i32,
 ) {
     let path = std::path::Path::new(&filename).parent().unwrap();
     let _ = create_dir_all(path);
@@ -117,7 +118,7 @@ pub fn write_to_wig_file(
 
     let mut buf = BufWriter::new(file);
 
-    for count in counts.iter() {
+    for count in counts.iter().take(chrom_size as usize) { // must set upper bound for wiggles based on reported chromsize, this is for downstream tool interoperability
         writeln!(&mut buf, "{}", count).unwrap();
     }
     buf.flush().unwrap();
