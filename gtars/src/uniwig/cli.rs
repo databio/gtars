@@ -48,6 +48,15 @@ pub fn create_uniwig_cli() -> Command {
                 .required(true),
         )
         .arg(
+            Arg::new("bamscale")
+                .long("bamscale")
+                .short('e')
+                .default_value("1")
+                .value_parser(clap::value_parser!(i32))
+                .help("Integer for scaling bam read values, default is 1")
+                .required(false),
+        )
+        .arg(
             Arg::new("fileheader")
                 .long("fileheader")
                 .short('l')

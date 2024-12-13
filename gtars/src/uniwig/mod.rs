@@ -149,6 +149,10 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("threads")
         .expect("requires integer value");
 
+    let bam_scale = matches
+        .get_one::<i32>("bamscale")
+        .expect("requires int value");
+
     let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
     let bam_shift = matches.get_one::<bool>("no-bamshift").unwrap_or_else(|| &true);
 
@@ -176,6 +180,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *zoom,
         *debug,
         *bam_shift,
+        *bam_scale,
     )
     .expect("Uniwig failed.");
 }
@@ -200,6 +205,7 @@ pub fn uniwig_main(
     zoom: i32,
     debug: bool,
     bam_shift: bool,
+    bam_scale: i32,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -789,6 +795,7 @@ pub fn uniwig_main(
                 output_type,
                 debug,
                 bam_shift,
+                bam_scale,
             );
         }
 
@@ -819,6 +826,7 @@ fn process_bam(
     output_type: &str,
     debug: bool,
     bam_shift: bool,
+    bam_scale: i32
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin bam processing workflow...");
     let fp_string = filepath.to_string();
@@ -910,6 +918,7 @@ fn process_bam(
                                         &chrom_sizes_ref_path_string,
                                         "start",
                                         bam_shift,
+                                        bam_scale,
                                     );
                                 }
                                 &"end" => {
@@ -925,6 +934,7 @@ fn process_bam(
                                         &chrom_sizes_ref_path_string,
                                         "end",
                                         bam_shift,
+                                        bam_scale,
                                     );
                                 }
                                 &"core" => {
@@ -939,7 +949,8 @@ fn process_bam(
                                         &fp_string,
                                         &chrom_sizes_ref_path_string,
                                         "core",
-                                        bam_shift
+                                        bam_shift,
+                                        bam_scale,
                                     );
 
                                 }
@@ -955,7 +966,8 @@ fn process_bam(
                                         &fp_string,
                                         &chrom_sizes_ref_path_string,
                                         "shift",
-                                        bam_shift
+                                        bam_shift,
+                                        bam_scale,
                                     );
 
                                 }
@@ -1257,6 +1269,7 @@ fn process_bw_in_threads(
     chrom_sizes_ref_path_string: &String,
     sel: &str,
     bam_shift:bool,
+    bam_scale: i32,
 ) {
     let (reader, writer) = os_pipe::pipe().unwrap();
     let write_fd = Arc::new(Mutex::new(writer));
@@ -1293,6 +1306,7 @@ fn process_bw_in_threads(
             sel_clone.as_str(),
             write_fd,
             bam_shift,
+            bam_scale,
         ) {
             Ok(_) => {
                 //eprintln!("Processing successful for {}", chromosome_string_cloned);
@@ -1357,6 +1371,7 @@ fn determine_counting_func(
     sel_clone: &str,
     write_fd: Arc<Mutex<PipeWriter>>,
     bam_shift: bool,
+    bam_scale: i32,
 ) -> Result<(), BAMRecordError> {
 
     //let bam_shift: bool = true; // This is to ensure a shifted position workflow is used when doing bams
@@ -1375,6 +1390,7 @@ fn determine_counting_func(
                     &chromosome_string_cloned,
                     sel_clone,
                     write_fd,
+                    bam_scale,
                 ) {
                     Ok(_) => Ok(()),
                     Err(err) => {
