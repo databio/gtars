@@ -1167,30 +1167,30 @@ pub fn bam_to_bed_no_counts(
     let mut writer = BufWriter::new(&mut *write_lock);
 
     // TODO Use PEEK INSTEAD
-    let first_record_option = records.next();
+    // let first_record_option = records.next();
 
-    let _first_record = match first_record_option {
-        Some(Ok(record)) => record, // Extract the record
-        Some(Err(err)) => {
-            // Handle the error
-            eprintln!(
-                "Error reading the first record for core chrom: {} {:?} Skipping...",
-                chromosome_name, err
-            );
-            writer.write_all(b"\n").unwrap();
-            writer.flush().unwrap();
-            drop(writer);
-            return Err(BAMRecordError::NoFirstRecord); // Example error handling
-        }
-        None => {
-            // Handle no records
-            eprintln!("No records for core chrom: {} Skipping...", chromosome_name);
-            writer.write_all(b"\n").unwrap();
-            writer.flush().unwrap();
-            drop(writer);
-            return Err(BAMRecordError::NoFirstRecord);
-        }
-    };
+    // let _first_record = match first_record_option {
+    //     Some(Ok(record)) => record, // Extract the record
+    //     Some(Err(err)) => {
+    //         // Handle the error
+    //         eprintln!(
+    //             "Error reading the first record for core chrom: {} {:?} Skipping...",
+    //             chromosome_name, err
+    //         );
+    //         writer.write_all(b"\n").unwrap();
+    //         writer.flush().unwrap();
+    //         drop(writer);
+    //         return Err(BAMRecordError::NoFirstRecord); // Example error handling
+    //     }
+    //     None => {
+    //         // Handle no records
+    //         eprintln!("No records for core chrom: {} Skipping...", chromosome_name);
+    //         writer.write_all(b"\n").unwrap();
+    //         writer.flush().unwrap();
+    //         drop(writer);
+    //         return Err(BAMRecordError::NoFirstRecord);
+    //     }
+    // };
 
     // let mut current_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
     // let mut current_end_site = first_record.alignment_end().unwrap().unwrap().get() as i32;
@@ -1225,7 +1225,7 @@ pub fn bam_to_bed_no_counts(
             shifted_pos - smoothsize,
             shifted_pos + smoothsize,
             "N",
-            "O",
+            "0",
             strand,
         );
 
