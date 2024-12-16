@@ -1247,15 +1247,15 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
                                chromosome_name: &String,
                                out_sel: &str,
                                write_fd: Arc<Mutex<PipeWriter>>,
-                                   bam_scale:i32,
+                                   bam_scale:f32,
 ) -> Result<(), BAMRecordError> {
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
 
     let mut coordinate_position = 0;
 
-    let mut prev_count: i32 = 0;
-    let mut count: i32 = 0;
+    let mut prev_count: f32 = 0.0;
+    let mut count: f32 = 0.0;
 
     let mut prev_coordinate_value = 0;
 
@@ -1343,7 +1343,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
             collected_end_sites.push(new_end_site);
         }
 
-        count += 1;
+        count += 1.0;
         //println!("here is all endsites: {:?}", collected_end_sites);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -1354,12 +1354,12 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
             //println!("coordinate_position< adjusted_start_site: {} < {} . here is current endsite: {} ", coordinate_position, adjusted_start_site, current_end_site);
             while current_end_site == coordinate_position {
                 //println!("current_end_site == coordinate_position {} = {} adjusted start site: {}", current_end_site, coordinate_position, adjusted_start_site);
-                count = count - 1;
+                count = count - 1.0;
 
                 //prev_end_site = current_end_site;
 
-                if count < 0 {
-                    count = 0;
+                if count < 0.0 {
+                    count = 0.0;
                 }
 
                 if collected_end_sites.last() == None {
@@ -1390,17 +1390,17 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
         prev_coordinate_value = adjusted_start_site;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count = count + 1.0; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1;
+            count = count - 1.0;
             //prev_end_site = current_end_site;
-            if count < 0 {
-                count = 0;
+            if count < 0.0 {
+                count = 0.0;
             }
 
             if collected_end_sites.last() == None {

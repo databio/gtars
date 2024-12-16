@@ -51,8 +51,8 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("bamscale")
                 .long("bamscale")
                 .short('e')
-                .default_value("1")
-                .value_parser(clap::value_parser!(i32))
+                .default_value("1.0")
+                .value_parser(clap::value_parser!(f32))
                 .help("Integer for scaling bam read values, default is 1")
                 .required(false),
         )
