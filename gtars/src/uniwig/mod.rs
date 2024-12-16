@@ -213,8 +213,10 @@ pub fn uniwig_main(
         .build()
         .unwrap();
 
-    // Determine File Type
-    let ft = FileType::from_str(filetype.to_lowercase().as_str());
+    let mut wig_shift: i32 = 0; // This will be set to 1 when writing to wiggle files, else always set to 0
+
+    // Determine Input File Type
+    let input_filetype = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
 
     let mut meta_data_file_names: [String; 3] = [
@@ -238,21 +240,26 @@ pub fn uniwig_main(
         }
     };
 
-    match ft {
+    match input_filetype {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+
+            // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
             let mut output_type = output_type;
-
             if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
             }
+            if output_type == "wig"{
+                wig_shift = 1;
+            }
 
-            let mut final_chromosomes = get_final_chromosomes(&ft, filepath, &chrom_sizes, score);
+            // Pare down chromosomes if necessary
+            let mut final_chromosomes = get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
-            // Pool installs iterator
+            // Pool installs iterator via rayon crate
             pool.install(|| {
                 final_chromosomes
                     .par_iter_mut()
@@ -278,36 +285,24 @@ pub fn uniwig_main(
                             if smoothsize != 0 {
                                 match j {
                                     0 => {
+                                        let mut count_result = start_end_counts(
+                                            &chromosome.starts,
+                                            current_chrom_size,
+                                            smoothsize,
+                                            stepsize,
+                                            wig_shift,
+                                        );
 
                                         match output_type {
+
+
                                             "file" => {
                                                 panic!("Writing to file currently not supported");
-                                                //print!("Writing to CLI");
-                                                // let handle = &std::io::stdout();
-                                                // let mut buf = BufWriter::new(handle);
-                                                // for count in &count_result.0 {
-                                                //     writeln!(buf, "{}", count)
-                                                //         .expect("failed to write line");
-                                                // }
-                                                // buf.flush().unwrap();
+                                            }
+                                            "csv" => {
+                                                panic!("Write to CSV. Not Implemented");
                                             }
                                             "wig" => {
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        1,
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        1,
-                                                    ),
-                                                };
                                                 //println!("Writing to wig file!");
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
@@ -326,22 +321,6 @@ pub fn uniwig_main(
                                                 );
                                             }
                                             "bedGraph" => {
-                                                let mut count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
@@ -361,26 +340,7 @@ pub fn uniwig_main(
                                                     stepsize,
                                                 );
                                             }
-                                            "csv" => {
-                                                panic!("Write to CSV. Not Implemented");
-                                            }
                                             "npy" => {
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
@@ -399,22 +359,6 @@ pub fn uniwig_main(
                                             }
                                             _ => {
                                                 println!("Defaulting to npy file...");
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.starts,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0,
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
@@ -434,35 +378,21 @@ pub fn uniwig_main(
                                         }
                                     }
                                     1 => {
-
+                                        let mut count_result = start_end_counts(
+                                            &chromosome.ends,
+                                            current_chrom_size,
+                                            smoothsize,
+                                            stepsize,
+                                            wig_shift,
+                                        );
                                         match output_type {
                                             "file" => {
                                                 panic!("Writing to file not currently supported.")
-                                                // let handle = &std::io::stdout();
-                                                // let mut buf = BufWriter::new(handle);
-                                                // for count in &count_result.0 {
-                                                //     writeln!(buf, "{}", count)
-                                                //         .expect("failed to write line");
-                                                // }
-                                                // buf.flush().unwrap();
+                                            }
+                                            "csv" => {
+                                                panic!("Write to CSV. Not Implemented");
                                             }
                                             "bedGraph" => {
-                                                let mut count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
 
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
@@ -485,22 +415,6 @@ pub fn uniwig_main(
                                                 );
                                             }
                                             "wig" => {
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        1
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        1
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "end", output_type
@@ -517,26 +431,8 @@ pub fn uniwig_main(
                                                     current_chrom_size,
                                                 );
                                             }
-                                            "csv" => {
-                                                panic!("Write to CSV. Not Implemented");
-                                            }
+
                                             "npy" => {
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "end", output_type
@@ -554,22 +450,6 @@ pub fn uniwig_main(
                                                 );
                                             }
                                             _ => {
-                                                let count_result = match ft {
-                                                    Ok(FileType::BED) => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => start_end_counts(
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        smoothsize,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
                                                 println!("Defaulting to npy file...");
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
@@ -590,35 +470,21 @@ pub fn uniwig_main(
                                         }
                                     }
                                     2 => {
-
+                                        let mut core_results = core_counts(
+                                            &chromosome.starts,
+                                            &chromosome.ends,
+                                            current_chrom_size,
+                                            stepsize,
+                                            wig_shift
+                                        );
                                         match output_type {
                                             "file" => {
                                                 panic!("Writing to file not supported.")
-                                                // let handle = &std::io::stdout();
-                                                // let mut buf = BufWriter::new(handle);
-                                                // for count in &core_results.0 {
-                                                //     writeln!(buf, "{}", count)
-                                                //         .expect("failed to write line");
-                                                // }
-                                                // buf.flush().unwrap();
+                                            }
+                                            "csv" => {
+                                                panic!("Write to CSV. Not Implemented");
                                             }
                                             "bedGraph" => {
-                                                let mut core_results = match ft {
-                                                    Ok(FileType::BED) => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "core", output_type
@@ -637,22 +503,6 @@ pub fn uniwig_main(
                                                 );
                                             }
                                             "wig" => {
-                                                let core_results = match ft {
-                                                    Ok(FileType::BED) => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        1
-                                                    ),
-                                                    _ => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        1
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "core", output_type
@@ -669,26 +519,7 @@ pub fn uniwig_main(
                                                     current_chrom_size,
                                                 );
                                             }
-                                            "csv" => {
-                                                panic!("Write to CSV. Not Implemented");
-                                            }
                                             "npy" => {
-                                                let core_results = match ft {
-                                                    Ok(FileType::BED) => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "core", output_type
@@ -703,22 +534,6 @@ pub fn uniwig_main(
                                                 );
                                             }
                                             _ => {
-                                                let core_results = match ft {
-                                                    Ok(FileType::BED) => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                    _ => core_counts(
-                                                        &chromosome.starts,
-                                                        &chromosome.ends,
-                                                        current_chrom_size,
-                                                        stepsize,
-                                                        0
-                                                    ),
-                                                };
                                                 println!("Defaulting to npy file...");
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
