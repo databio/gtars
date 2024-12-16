@@ -584,6 +584,10 @@ pub fn uniwig_main(
             match og_output_type {
                 "bw" | "bigWig" => {
                     println!("Writing bigWig files");
+                    if zoom !=1{
+                        println!("Only zoom level 1 is supported at this time, zoom level supplied {}", zoom);
+                    }
+                    let zoom = 1; //overwrite zoom
                     write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
                 }
 

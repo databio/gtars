@@ -105,7 +105,7 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("zoom")
                 .long("zoom")
                 .short('z')
-                .default_value("5")
+                .default_value("1")
                 .value_parser(clap::value_parser!(i32))
                 .help("Number of zoom levels (for bw file output only")
                 .required(false),
