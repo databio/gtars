@@ -5,6 +5,7 @@ mod ailist;
 mod models;
 mod tokenizers;
 mod utils;
+mod digests;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -14,11 +15,13 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let ailist_module = pyo3::wrap_pymodule!(ailist::ailist);
     let utils_module = pyo3::wrap_pymodule!(utils::utils);
     let models_module = pyo3::wrap_pymodule!(models::models);
+    let digests_module = pyo3::wrap_pymodule!(digests::digests);
 
     m.add_wrapped(tokenize_module)?;
     m.add_wrapped(ailist_module)?;
     m.add_wrapped(utils_module)?;
     m.add_wrapped(models_module)?;
+    m.add_wrapped(digests_module)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let binding = sys.getattr("modules")?;
@@ -32,6 +35,8 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // add constants
     m.add("__version__", VERSION)?;
+
+    // m.add_function(wrap_pyfunction!(digests::sha512t24u_digest, m)?)?;
 
     Ok(())
 }
