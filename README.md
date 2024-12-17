@@ -17,9 +17,11 @@
 
 This repo is organized like so:
 
-1. A rust library crate (`/gtars/lib.rs`) that provides functions, traits, and structs for working with genomic interval data.
-2. A rust binary crate (in `/gtars/main.rs`), a small, wrapper command-line interface for the library crate.
-3. A rust crate (in `/bindings`) that provides Python bindings, and a resulting Python package, so that it can be used within Python.
+1. The main gtars rust package in `/gtars`, which contains two crates:
+    1a. A rust library crate (`/gtars/lib.rs`) that provides functions, traits, and structs for working with genomic interval data.
+    1b. A rust binary crate (in `/gtars/main.rs`), a small, wrapper command-line interface for the library crate.
+2. Python bindings (in `/bindings/python`), which consists of a rust package with a library crate (no binary crate) and Python package.
+3. R bindings (in `/bindinds/r`), which consists of an R package.
 
 This repository is a work in progress, and still in early development.
 
