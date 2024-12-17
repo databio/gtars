@@ -36,7 +36,5 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // add constants
     m.add("__version__", VERSION)?;
 
-    // m.add_function(wrap_pyfunction!(digests::sha512t24u_digest, m)?)?;
-
     Ok(())
 }

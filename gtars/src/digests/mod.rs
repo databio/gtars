@@ -7,6 +7,8 @@
 //! The following functions are available:
 //!
 //! * `sha512t24u` - Processes a given string to compute its GA4GH sha512t24 checksum.
+//! * `md5` - Processes a given string to compute its MD5 checksum.
+//! * `digest_fasta` - Processes a FASTA file to compute the digests of each sequence in the file.
 //!
 //! # Usage
 //!
@@ -14,7 +16,8 @@
 //! 
 //! ```rust
 //! use gtars::digests::sha512t24u;
-//! 
+//!
+//! let digest = sha512t24u("hello world")
 //! ```
 use sha2::{Digest, Sha512};
 use md5::Md5;
@@ -71,7 +74,7 @@ pub fn md5(string: &str) -> String {
 }
 
 /// Returns a `Read` object for a given file path.
-pub fn get_file_reader(file_path: &str) -> Result<Box<dyn Read>, io::Error> {
+fn get_file_reader(file_path: &str) -> Result<Box<dyn Read>, io::Error> {
     if file_path == "-" {
         Ok(Box::new(std::io::stdin()) as Box<dyn Read>)
     } else if file_path.ends_with(".gz") {
@@ -87,7 +90,8 @@ pub fn get_file_reader(file_path: &str) -> Result<Box<dyn Read>, io::Error> {
 /// Processes a FASTA file to compute the digests of each sequence in the file.
 ///
 /// This function reads a FASTA file, computes the SHA-512 and MD5 digests for each sequence,
-/// and returns a vector of `DigestResult` structs containing the results.
+/// and returns a vector of `DigestResult` structs containing the results. It can also handle
+// gzipped FASTA files (ending in `.gz`).
 ///
 /// # Arguments
 ///
