@@ -32,6 +32,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     sys_modules.set_item("gtars.ailist", m.getattr("ailist")?)?;
     sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
     sys_modules.set_item("gtars.models", m.getattr("models")?)?;
+    sys_modules.set_item("gtars.digests", m.getattr("digests")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;
