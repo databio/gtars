@@ -111,18 +111,53 @@ mod tests {
 
     #[rstest]
     fn test_igd_create() {
-        let tempdir = tempfile::tempdir().unwrap();
-        let path = PathBuf::from(&tempdir.path());
+        //let tempdir = tempfile::tempdir().unwrap();
+        //let path = PathBuf::from(&tempdir.path());
+        // let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        // let db_output_path = db_path_unwrapped;
 
-        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        let db_output_path = db_path_unwrapped;
+        let db_output_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/");
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        //let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        let testfilelists = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/source_files/");
 
         let demo_name = String::from("demo");
 
         create_igd_f(&db_output_path, &testfilelists, &demo_name);
+    }
+    #[rstest]
+    fn test_igd_create_short_long_regions() {
+        // Depending on start and end coordinates which are divided by nbp=16384
+        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        let db_output_path = db_path_unwrapped;
+
+        //let db_output_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/");
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+        //let testfilelists = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/source_files/");
+
+        let demo_name = String::from("demo");
+
+        let igd = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        assert_eq!(igd.ctg[0].name, "chr1");
+        assert_eq!(igd.ctg[1].name, "chr2");
+        assert_eq!(igd.ctg[2].name, "chr3");
+        assert_eq!(igd.nctg, 3);
+
+
+
+        assert_eq!(igd.ctg[0].mTiles, 4); // chr1 has 4 Tiles because of the 32768, and 49152 starts
+        assert_eq!(igd.ctg[1].mTiles, 1);  // chr only has 1 Tile due to the 200 start
+
+        assert_eq!(igd.ctg[0].gTile[0].gList[0].start, 1);
+        assert_eq!(igd.ctg[0].gTile[(igd.ctg[0].mTiles-1)as usize].gList[0].start,49152)
+
+
     }
 
     // #[rstest]
@@ -146,28 +181,34 @@ mod tests {
         // First must create temp igd
 
         // Temp dir to hold igd
-        let tempdir = tempfile::tempdir().unwrap();
-        let path = PathBuf::from(&tempdir.path());
-        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        let db_output_path = db_path_unwrapped;
+        // let tempdir = tempfile::tempdir().unwrap();
+        // let path = PathBuf::from(&tempdir.path());
+        // let db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        // let db_output_path = db_path_unwrapped;
+        //
+        // // bed files used to create IGD
+        // let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        // let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        //
+        // let demo_name = String::from("demo");
+        //
+        // // Create IGD from directory of bed files
+        // create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        //
+        // // Get a query file path from test files
+        // let query_file = format!(
+        //     "{}{}",
+        //     path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
+        // );
+        //
+        // // the final db path will be constructed within igd_save_db like so
+        // let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
 
-        // bed files used to create IGD
-        let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        // let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/rust_test.igd");
+        // let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/search_file/query4.bed");
 
-        let demo_name = String::from("demo");
-
-        // Create IGD from directory of bed files
-        create_igd_f(&db_output_path, &testfilelists, &demo_name);
-
-        // Get a query file path from test files
-        let query_file = format!(
-            "{}{}",
-            path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
-        );
-
-        // the final db path will be constructed within igd_save_db like so
-        let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
+        let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/output_files/rust_test2.igd");
+        let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/query2.bed");
 
         let res = igd_search(&final_db_save_path, &query_file).expect("Error during testing:");
 

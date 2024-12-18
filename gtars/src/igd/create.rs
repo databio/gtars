@@ -100,11 +100,11 @@ pub fn igd_get_create_matches(matches: &ArgMatches) {
         .get_one::<String>("dbname")
         .expect("File list path is required");
 
-    create_igd_f(output_path, filelist, db_output_name);
+    let _igd = create_igd_f(output_path, filelist, db_output_name);
 }
 
 /// Creates IGD database from a directory of bed files.
-pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) {
+pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) -> igd_t {
     //println!("{}",db_output_name);
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
@@ -381,6 +381,8 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         total_avg_size / total_regions as f32
     );
     println!("nctg:{}  nbp:{}", igd.nctg, igd.nbp);
+
+    igd // return for testing purposes
 }
 
 /// Saves the primary .igd database file by reading the temp_tiles, sorting them, and then writing the sorted tiles to disk.

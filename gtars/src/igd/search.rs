@@ -303,7 +303,7 @@ fn get_overlaps(
             // );
 
             //println!("Seek start here: {}",IGD.tIdx[ichr as usize][n1 as usize]);
-
+            //let ichr = 1;
             db_reader
                 .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
                 .unwrap();
@@ -567,7 +567,7 @@ pub fn get_igd_info(
     reader.read_exact(&mut buffer)?;
     let nCtg = i32::from_le_bytes(buffer);
 
-    //println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
 
     igd.nbp = nbp;
     igd.gType = gType;
