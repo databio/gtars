@@ -110,7 +110,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_igd_create() {
+    fn test_igd_create_local() {
         //let tempdir = tempfile::tempdir().unwrap();
         //let path = PathBuf::from(&tempdir.path());
         // let db_path_unwrapped = path.into_os_string().into_string().unwrap();
@@ -135,11 +135,8 @@ mod tests {
         let db_path_unwrapped = path.into_os_string().into_string().unwrap();
         let db_output_path = db_path_unwrapped;
 
-        //let db_output_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/");
-
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
-        //let testfilelists = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/source_files/");
 
         let demo_name = String::from("demo");
 
@@ -148,8 +145,6 @@ mod tests {
         assert_eq!(igd.ctg[1].name, "chr2");
         assert_eq!(igd.ctg[2].name, "chr3");
         assert_eq!(igd.nctg, 3);
-
-
 
         assert_eq!(igd.ctg[0].mTiles, 4); // chr1 has 4 Tiles because of the 32768, and 49152 starts
         assert_eq!(igd.ctg[1].mTiles, 1);  // chr only has 1 Tile due to the 200 start
@@ -161,6 +156,7 @@ mod tests {
         assert_eq!(igd.ctg[0].gTile[1].nCnts, 0); // look at nCnts
         assert_eq!(igd.ctg[0].gTile[2].nCnts, 1); // look at nCnts
 
+        // Overall stats
         assert_eq!(igd.total_regions, 8);
         assert_eq!(igd.total_average, 998.0);
         assert_eq!(igd.average_length, 124.75);
@@ -168,6 +164,7 @@ mod tests {
 
     }
 
+    // TODO this test will need to copy files to temp directory, create a new textfile with the temp files and then read in the txt file
     // #[rstest]
     // fn test_igd_create_txt() {
     //     let tempdir = tempfile::tempdir().unwrap();
