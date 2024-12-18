@@ -562,7 +562,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                 let _ = main_db_file.write_all(&temp_buffer);
             }
 
-            q.nCnts = 0;
+            //q.nCnts = 0;
         }
     }
 

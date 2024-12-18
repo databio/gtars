@@ -154,8 +154,12 @@ mod tests {
         assert_eq!(igd.ctg[0].mTiles, 4); // chr1 has 4 Tiles because of the 32768, and 49152 starts
         assert_eq!(igd.ctg[1].mTiles, 1);  // chr only has 1 Tile due to the 200 start
 
-        assert_eq!(igd.ctg[0].gTile[0].gList[0].start, 1);
-        assert_eq!(igd.ctg[0].gTile[(igd.ctg[0].mTiles-1)as usize].gList[0].start,49152)
+        assert_eq!(igd.ctg[0].gTile[0].gList[0].start, 1); // look specific tile's start
+        assert_eq!(igd.ctg[0].gTile[(igd.ctg[0].mTiles-1)as usize].gList[0].start,49152); // look specific tile's start
+
+        assert_eq!(igd.ctg[0].gTile[0].nCnts, 2); // look at nCnts
+        assert_eq!(igd.ctg[0].gTile[1].nCnts, 0); // look at nCnts
+        assert_eq!(igd.ctg[0].gTile[2].nCnts, 1); // look at nCnts
 
 
     }
