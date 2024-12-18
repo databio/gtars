@@ -73,7 +73,7 @@ fn path_to_core_bedgraph_output() -> &'static str {
 mod tests {
     use super::*;
     use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
-    use gtars::igd::search::igd_search;
+    use gtars::igd::search::{getOverlaps, get_file_info_tsv, get_igd_info, get_tsv_path, igd_search, igd_t_from_disk};
 
     use gtars::uniwig::{uniwig_main, Chromosome};
 
@@ -85,6 +85,7 @@ mod tests {
     use gtars::uniwig::writing::write_bw_files;
 
     use std::collections::HashMap;
+    use gtars::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
     // IGD TESTS
 
     #[rstest]
@@ -181,6 +182,63 @@ mod tests {
     //     create_igd_f(&db_output_path, &testfilelists, &demo_name);
     // }
 
+    #[rstest]
+    fn test_igd_create_then_load_from_disk() {
+        // Depending on start and end coordinates which are divided by nbp=16384
+        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        db_path_unwrapped.push_str("/");
+        let db_output_path = db_path_unwrapped.clone();
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+
+        let demo_name = String::from("demo");
+
+        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+
+        println!("dboutput_path {}", db_output_path);
+
+        db_path_unwrapped.push_str("/demo.igd");
+
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
+
+        // Create IGD Struct from database
+        let mut igd_from_disk: igd_t_from_disk = get_igd_info(&db_path_unwrapped, &mut hash_table).expect("Could not open IGD");
+        let tsv_path = get_tsv_path(db_path_unwrapped.as_str()).unwrap();
+        get_file_info_tsv(tsv_path, &mut igd_from_disk).unwrap(); //sets igd.finfo
+
+        assert_eq!(igd_saved.ctg.len(), igd_from_disk.nCtg as usize);
+
+        assert_eq!(igd_from_disk.nFiles, 1);
+
+        assert_eq!(igd_from_disk.nCnt[0].len(), igd_saved.ctg[0].mTiles as usize);
+        assert_eq!(igd_from_disk.nCnt[1].len(), igd_saved.ctg[1].mTiles as usize);
+        assert_eq!(igd_from_disk.nCnt[2].len(), igd_saved.ctg[2].mTiles as usize);
+
+        assert_eq!(igd_from_disk.nCnt[0][0], igd_saved.ctg[0].gTile[0].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][1], igd_saved.ctg[0].gTile[1].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][2], igd_saved.ctg[0].gTile[2].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][3], igd_saved.ctg[0].gTile[3].nCnts);
+
+        //assert_eq!(igd.total_regions, 8);
+
+        // Finally, can we get overlaps?
+        let mut hits: Vec<i64> = vec![0; igd_from_disk.nFiles as usize];
+
+        let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_2.bed");
+
+        let overlaps = getOverlaps(&mut igd_from_disk,&db_path_unwrapped,&queryfile,&mut hits, &mut hash_table);
+
+        assert_eq!(overlaps, igd_saved.total_regions);
+
+        println!("done");
+
+
+
+    }
     #[rstest]
     fn test_igd_search() {
         // First must create temp igd
