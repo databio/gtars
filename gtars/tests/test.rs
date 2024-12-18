@@ -161,6 +161,10 @@ mod tests {
         assert_eq!(igd.ctg[0].gTile[1].nCnts, 0); // look at nCnts
         assert_eq!(igd.ctg[0].gTile[2].nCnts, 1); // look at nCnts
 
+        assert_eq!(igd.total_regions, 8);
+        assert_eq!(igd.total_average, 998.0);
+        assert_eq!(igd.average_length, 124.75);
+
 
     }
 
