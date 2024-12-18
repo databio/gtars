@@ -633,7 +633,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 }
                 file.write_all(&buffer).unwrap();
 
-                current_tile.nCnts = current_tile.ncnts + 1;
+                current_tile.nCnts = current_tile.nCnts + current_tile.ncnts;
 
                 if current_tile.ncnts > 8 {
                     current_tile.mcnts = 8;
