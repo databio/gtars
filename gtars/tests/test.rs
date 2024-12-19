@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+
 use rstest::*;
 
 #[fixture]
@@ -72,8 +73,8 @@ fn path_to_core_bedgraph_output() -> &'static str {
 
 mod tests {
     use super::*;
-    use gtars::igd::create::{create_igd_f, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
-    use gtars::igd::search::igd_search;
+    use gtars::igd::create::{create_igd_f, gdata_t, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed};
+    use gtars::igd::search::{getOverlaps, get_file_info_tsv, get_igd_info, get_tsv_path, igd_search, igd_t_from_disk};
 
     use gtars::uniwig::{uniwig_main, Chromosome};
 
@@ -85,6 +86,11 @@ mod tests {
     use gtars::uniwig::writing::write_bw_files;
 
     use std::collections::HashMap;
+    use std::collections::HashSet;
+    use std::fs::OpenOptions;
+    use std::io::{Seek, SeekFrom};
+    use anyhow::Context;
+    use byteorder::{LittleEndian, ReadBytesExt};
     // IGD TESTS
 
     #[rstest]
@@ -110,69 +116,209 @@ mod tests {
     }
 
     #[rstest]
-    fn test_igd_create() {
+    fn test_igd_create_short_long_regions() {
+        // Depending on start and end coordinates which are divided by nbp=16384
+        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
-
         let db_path_unwrapped = path.into_os_string().into_string().unwrap();
         let db_output_path = db_path_unwrapped;
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
 
         let demo_name = String::from("demo");
 
-        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        let igd = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        assert_eq!(igd.ctg[0].name, "chr1");
+        assert_eq!(igd.ctg[1].name, "chr2");
+        assert_eq!(igd.ctg[2].name, "chr3");
+        assert_eq!(igd.nctg, 3);
+
+        assert_eq!(igd.ctg[0].mTiles, 4); // chr1 has 4 Tiles because of the 32768, and 49152 starts
+        assert_eq!(igd.ctg[1].mTiles, 1);  // chr only has 1 Tile due to the 200 start
+
+        assert_eq!(igd.ctg[0].gTile[0].gList[0].start, 1); // look specific tile's start
+        assert_eq!(igd.ctg[0].gTile[(igd.ctg[0].mTiles-1)as usize].gList[0].start,49152); // look specific tile's start
+
+        assert_eq!(igd.ctg[0].gTile[0].nCnts, 2); // look at nCnts
+        assert_eq!(igd.ctg[0].gTile[1].nCnts, 0); // look at nCnts
+        assert_eq!(igd.ctg[0].gTile[2].nCnts, 1); // look at nCnts
+
+        // Overall stats
+        assert_eq!(igd.total_regions, 8);
+        assert_eq!(igd.total_average, 998.0);
+        assert_eq!(igd.average_length, 124.75);
+
+
     }
 
-    // #[rstest]
-    // fn test_igd_create_txt() {
-    //     let tempdir = tempfile::tempdir().unwrap();
-    //     let path = PathBuf::from(&tempdir.path());
-    //
-    //     let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-    //     let db_output_path = db_path_unwrapped;
-    //
-    //     let path_to_crate = env!("CARGO_MANIFEST_DIR");
-    //     let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igdlist.txt");
-    //
-    //     let demo_name = String::from("demo");
-    //
-    //     create_igd_f(&db_output_path, &testfilelists, &demo_name);
-    // }
 
     #[rstest]
-    fn test_igd_search() {
-        // First must create temp igd
-
-        // Temp dir to hold igd
+    fn test_igd_create_then_load_from_disk() {
+        // Depending on start and end coordinates which are divided by nbp=16384
+        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
-        let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        let db_output_path = db_path_unwrapped;
+        let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        db_path_unwrapped.push_str("/");
+        let db_output_path = db_path_unwrapped.clone();
 
-        // bed files used to create IGD
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
 
         let demo_name = String::from("demo");
 
-        // Create IGD from directory of bed files
-        create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
 
-        // Get a query file path from test files
-        let query_file = format!(
-            "{}{}",
-            path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
-        );
+        println!("dboutput_path {}", db_output_path);
 
-        // the final db path will be constructed within igd_save_db like so
-        let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
+        db_path_unwrapped.push_str("/demo.igd");
 
-        let res = igd_search(&final_db_save_path, &query_file).expect("Error during testing:");
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
 
+        // Create IGD Struct from database
+        let mut igd_from_disk: igd_t_from_disk = get_igd_info(&db_path_unwrapped, &mut hash_table).expect("Could not open IGD");
+        let tsv_path = get_tsv_path(db_path_unwrapped.as_str()).unwrap();
+        get_file_info_tsv(tsv_path, &mut igd_from_disk).unwrap(); //sets igd.finfo
+
+        assert_eq!(igd_saved.ctg.len(), igd_from_disk.nCtg as usize);
+
+        assert_eq!(igd_from_disk.nFiles, 1);
+
+        assert_eq!(igd_from_disk.nCnt[0].len(), igd_saved.ctg[0].mTiles as usize);
+        assert_eq!(igd_from_disk.nCnt[1].len(), igd_saved.ctg[1].mTiles as usize);
+        assert_eq!(igd_from_disk.nCnt[2].len(), igd_saved.ctg[2].mTiles as usize);
+
+        assert_eq!(igd_from_disk.nCnt[0][0], igd_saved.ctg[0].gTile[0].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][1], igd_saved.ctg[0].gTile[1].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][2], igd_saved.ctg[0].gTile[2].nCnts);
+        assert_eq!(igd_from_disk.nCnt[0][3], igd_saved.ctg[0].gTile[3].nCnts);
+
+        // Check to see if the regions on disk are the same as the original igd (minus the unused zeros)
+        let dbpath = std::path::Path::new(&db_path_unwrapped);
+        let db_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .read(true)
+            .open(dbpath)
+            .unwrap();
+        let mut db_reader = BufReader::new(db_file);
+
+        for k in 0..3 {
+            let nCnt_len = igd_from_disk.nCnt[k].len();
+
+            for l in 0..nCnt_len {
+                let mut a: HashSet<i32>= Default::default();
+                let mut b: HashSet<i32>= Default::default();
+
+                let tmpi = igd_from_disk.nCnt[k][l]; // number of gdata_t to read
+
+                //println!("Here is k {}, l {}, and igd_from_disk.tIdx[k][l] {}",k,l, igd_from_disk.tIdx[k][l]);
+                db_reader
+                    .seek(SeekFrom::Start(igd_from_disk.tIdx[k][l] as u64)) // [k]contig [l] tile position
+                    .unwrap();
+
+                let mut gData: Vec<gdata_t> = Vec::new();
+
+                //println!("Creating gData with tmpi {}", tmpi);
+                for j in 0..tmpi {
+                    gData.push(gdata_t::default())
+                }
+
+                for i in 0..tmpi { // number of gdata_t to read
+                    //println!("Iterating with i {} of tmpi {} ",i,tmpi);
+                    let mut buf = [0u8; 16];
+
+                    let n = db_reader.read(&mut buf).unwrap();
+
+                    if n == 0 {
+                        //println!("Breaking loop while reading tempfile");
+                        break;
+                    } else if n != 16 {
+                        //panic!("Cannot read temp file.");
+                        break;
+                    }
+
+                    let mut rdr = &buf[..] as &[u8];
+                    let idx = rdr.read_i32::<LittleEndian>().unwrap();
+                    let start = rdr.read_i32::<LittleEndian>().unwrap();
+                    let end = rdr.read_i32::<LittleEndian>().unwrap();
+                    let value = rdr.read_i32::<LittleEndian>().unwrap();
+
+                    //println!("Looping through g_datat in temp files");
+                    //println!("Chr_name: {} Filename: {}  start: {} end: {}", igd_from_disk.cName[k], igd_from_disk.file_info[idx as usize].fileName, start, end);
+
+                    gData[i as usize] = gdata_t {
+                        idx: idx,
+                        start,
+                        end,
+                        value,
+                    };
+                }
+
+                //println!("here is k {}, l {}",k,l);
+                for g in gData.iter(){
+                    //println!("Inserting {} from gData on Disk", g.start);
+                    a.insert(g.start);
+                }
+
+                for g in igd_saved.ctg[k].gTile[l].gList.iter(){
+                    //println!("Inserting {} from original gList ", g.start);
+                    b.insert(g.start);
+                }
+                //println!("A: {:?}", a);
+                //println!("B: {:?}", b);
+                // There difference should at most be a 0 from unused tiles, therefore the difference length should at MOST be 1.
+                let diff = b.difference(&a).collect::<Vec<&i32>>();
+                //println!("Difference: {:?}", diff);
+                assert!(diff.len() <=1 )
+            }
+    }
 
     }
+
+    #[rstest]
+    #[case("/tests/data/igd_file_list_01/","/tests/data/igd_query_files/query1.bed" ,8, 8)]
+    #[case("/tests/data/igd_file_list_02/","/tests/data/igd_query_files/query2.bed" ,4, 1)]
+    fn test_igd_create_then_search(#[case] input: &str, #[case] query_file: &str,#[case] expected_regions: u32, #[case] expected_hits: u32) {
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        db_path_unwrapped.push_str("/");
+        let db_output_path = db_path_unwrapped.clone();
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, input);
+
+        let demo_name = String::from("demo");
+
+        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+
+        println!("dboutput_path {}", db_output_path);
+
+        db_path_unwrapped.push_str("/demo.igd");
+
+        let queryfile = format!("{}{}", path_to_crate, query_file);
+        let res = igd_search(&db_path_unwrapped, &queryfile).expect("Error during testing:");
+        let mut res_iter = res[1].split('\t');
+
+        // Skip the first two columns
+        res_iter.next().unwrap();
+
+        // Extract the third and fourth columns
+        let second_column = res_iter.next().unwrap().to_string();
+        let third_column = res_iter.next().unwrap().to_string();
+
+        println!("Number of Regions: {}", second_column);
+        println!("Number of Hits: {}", third_column);
+
+        assert_eq!(second_column,expected_regions.to_string());
+        assert_eq!(third_column,expected_hits.to_string());
+
+    }
+
 
     #[rstest]
     fn test_igd_add() {
