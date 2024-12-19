@@ -91,7 +91,6 @@ mod tests {
     use std::io::{Seek, SeekFrom};
     use anyhow::Context;
     use byteorder::{LittleEndian, ReadBytesExt};
-    use gtars::common::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
     // IGD TESTS
 
     #[rstest]
@@ -116,23 +115,6 @@ mod tests {
         assert_eq!(end, 32787);
     }
 
-    #[rstest]
-    fn test_igd_create_local() {
-        //let tempdir = tempfile::tempdir().unwrap();
-        //let path = PathBuf::from(&tempdir.path());
-        // let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        // let db_output_path = db_path_unwrapped;
-
-        let db_output_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/");
-
-        let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        //let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
-        let testfilelists = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/source_files/");
-
-        let demo_name = String::from("demo");
-
-        create_igd_f(&db_output_path, &testfilelists, &demo_name);
-    }
     #[rstest]
     fn test_igd_create_short_long_regions() {
         // Depending on start and end coordinates which are divided by nbp=16384
@@ -171,22 +153,6 @@ mod tests {
 
     }
 
-    // TODO this test will need to copy files to temp directory, create a new textfile with the temp files and then read in the txt file
-    // #[rstest]
-    // fn test_igd_create_txt() {
-    //     let tempdir = tempfile::tempdir().unwrap();
-    //     let path = PathBuf::from(&tempdir.path());
-    //
-    //     let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-    //     let db_output_path = db_path_unwrapped;
-    //
-    //     let path_to_crate = env!("CARGO_MANIFEST_DIR");
-    //     let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igdlist.txt");
-    //
-    //     let demo_name = String::from("demo");
-    //
-    //     create_igd_f(&db_output_path, &testfilelists, &demo_name);
-    // }
 
     #[rstest]
     fn test_igd_create_then_load_from_disk() {
@@ -310,23 +276,13 @@ mod tests {
             }
     }
 
-
-    // Finally, can we get overlaps?
-        //let mut hits: Vec<i64> = vec![0; igd_from_disk.nFiles as usize];
-        //let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_1.bed");
-
-        //let _overlaps = getOverlaps(&mut igd_from_disk,&db_path_unwrapped,&queryfile,&mut hits, &mut hash_table);
-
-        //assert_eq!(hits.len(), igd_saved.total_regions);
-
-        println!("done");
-
     }
 
     #[rstest]
-    fn test_igd_create_then_search() {
-        // Depending on start and end coordinates which are divided by nbp=16384
-        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
+    #[case("/tests/data/igd_file_list_01/","/tests/data/igd_query_files/query1.bed" ,8, 8)]
+    #[case("/tests/data/igd_file_list_02/","/tests/data/igd_query_files/query2.bed" ,4, 1)]
+    fn test_igd_create_then_search(#[case] input: &str, #[case] query_file: &str,#[case] expected_regions: u32, #[case] expected_hits: u32) {
+
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
         let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
@@ -334,7 +290,7 @@ mod tests {
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+        let testfilelists = format!("{}{}", path_to_crate, input);
 
         let demo_name = String::from("demo");
 
@@ -344,7 +300,7 @@ mod tests {
 
         db_path_unwrapped.push_str("/demo.igd");
 
-        let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_1.bed");
+        let queryfile = format!("{}{}", path_to_crate, query_file);
         let res = igd_search(&db_path_unwrapped, &queryfile).expect("Error during testing:");
         let mut res_iter = res[1].split('\t');
 
@@ -358,50 +314,11 @@ mod tests {
         println!("Number of Regions: {}", second_column);
         println!("Number of Hits: {}", third_column);
 
-        assert_eq!(second_column,"8");
-        assert_eq!(second_column,"8");
+        assert_eq!(second_column,expected_regions.to_string());
+        assert_eq!(third_column,expected_hits.to_string());
 
     }
 
-
-    #[rstest]
-    fn test_igd_search_local() {
-        // First must create temp igd
-
-        // Temp dir to hold igd
-        // let tempdir = tempfile::tempdir().unwrap();
-        // let path = PathBuf::from(&tempdir.path());
-        // let db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        // let db_output_path = db_path_unwrapped;
-        //
-        // // bed files used to create IGD
-        // let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        // let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list/");
-        //
-        // let demo_name = String::from("demo");
-        //
-        // // Create IGD from directory of bed files
-        // create_igd_f(&db_output_path, &testfilelists, &demo_name);
-        //
-        // // Get a query file path from test files
-        // let query_file = format!(
-        //     "{}{}",
-        //     path_to_crate, "/tests/data/igd_file_list/igd_bed_file_1.bed"
-        // );
-        //
-        // // the final db path will be constructed within igd_save_db like so
-        // let final_db_save_path = format!("{}{}{}", db_output_path, demo_name, ".igd");
-
-        // let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/rust_test.igd");
-        // let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/search_file/query4.bed");
-
-        let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/output/rust_test2.igd");
-        let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/test4/igd_bed_file_1.bed");
-
-        let res = igd_search(&final_db_save_path, &query_file).expect("Error during testing:");
-
-
-    }
 
     #[rstest]
     fn test_igd_add() {
