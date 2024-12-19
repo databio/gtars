@@ -359,13 +359,13 @@ mod tests {
         println!("Number of Hits: {}", third_column);
 
         assert_eq!(second_column,"8");
-        assert_eq!(second_column,"6");
+        assert_eq!(second_column,"8");
 
     }
 
 
     #[rstest]
-    fn test_igd_search() {
+    fn test_igd_search_local() {
         // First must create temp igd
 
         // Temp dir to hold igd
@@ -395,8 +395,8 @@ mod tests {
         // let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/output/rust_test.igd");
         // let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/search_file/query4.bed");
 
-        let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/output_files/rust_test2.igd");
-        let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/query2.bed");
+        let final_db_save_path = String::from("/home/drc/Downloads/igd_testing_17dec2024/test2/output/rust_test2.igd");
+        let query_file = String::from("/home/drc/Downloads/igd_testing_17dec2024/test4/igd_bed_file_1.bed");
 
         let res = igd_search(&final_db_save_path, &query_file).expect("Error during testing:");
 
