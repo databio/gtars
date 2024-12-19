@@ -185,9 +185,13 @@ pub fn run_uniwig(matches: &ArgMatches) {
     .expect("Uniwig failed.");
 }
 
-/// Ensures that the start position for every wiggle file is at a minimum equal to `1`
+/// Ensures that the start position is at a minimum equal to `1`
 fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
     std::cmp::max(1, start - smoothsize)
+}
+/// Ensure that the start position is at a minimum equal to `0`
+fn clamped_start_position_zero_pos(start: i32, smoothsize: i32) -> i32 {
+    std::cmp::max(0, start - smoothsize)
 }
 
 /// Main function
@@ -328,7 +332,7 @@ pub fn uniwig_main(
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
                                                     compress_counts(
                                                         &mut count_result,
-                                                        clamped_start_position(
+                                                        clamped_start_position_zero_pos(
                                                             primary_start.0,
                                                             smoothsize,
                                                         ),
@@ -349,7 +353,7 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(
+                                                    clamped_start_position_zero_pos(
                                                         primary_start.0,
                                                         smoothsize,
                                                     ),
@@ -367,7 +371,7 @@ pub fn uniwig_main(
                                                     &count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(
+                                                    clamped_start_position_zero_pos(
                                                         primary_start.0,
                                                         smoothsize,
                                                     ),
@@ -442,7 +446,7 @@ pub fn uniwig_main(
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position(
-                                                        primary_start.0,
+                                                        primary_end.0,
                                                         smoothsize,
                                                     ),
                                                     stepsize,
@@ -460,7 +464,7 @@ pub fn uniwig_main(
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position(
-                                                        primary_start.0,
+                                                        primary_end.0,
                                                         smoothsize,
                                                     ),
                                                     stepsize,
