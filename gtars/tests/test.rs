@@ -312,18 +312,58 @@ mod tests {
 
 
     // Finally, can we get overlaps?
-        let mut hits: Vec<i64> = vec![0; igd_from_disk.nFiles as usize];
-        let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_2.bed");
+        //let mut hits: Vec<i64> = vec![0; igd_from_disk.nFiles as usize];
+        //let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_1.bed");
 
-        let overlaps = getOverlaps(&mut igd_from_disk,&db_path_unwrapped,&queryfile,&mut hits, &mut hash_table);
+        //let _overlaps = getOverlaps(&mut igd_from_disk,&db_path_unwrapped,&queryfile,&mut hits, &mut hash_table);
 
-        //assert_eq!(overlaps, igd_saved.total_regions);
+        //assert_eq!(hits.len(), igd_saved.total_regions);
 
         println!("done");
 
+    }
 
+    #[rstest]
+    fn test_igd_create_then_search() {
+        // Depending on start and end coordinates which are divided by nbp=16384
+        // the number of tiles per ctg are adjusted, this tests to ensure they are created appropriately
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
+        db_path_unwrapped.push_str("/");
+        let db_output_path = db_path_unwrapped.clone();
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+
+        let demo_name = String::from("demo");
+
+        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+
+        println!("dboutput_path {}", db_output_path);
+
+        db_path_unwrapped.push_str("/demo.igd");
+
+        let queryfile = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/igd_bed_file_1.bed");
+        let res = igd_search(&db_path_unwrapped, &queryfile).expect("Error during testing:");
+        let mut res_iter = res[1].split('\t');
+
+        // Skip the first two columns
+        res_iter.next().unwrap();
+
+        // Extract the third and fourth columns
+        let second_column = res_iter.next().unwrap().to_string();
+        let third_column = res_iter.next().unwrap().to_string();
+
+        println!("Number of Regions: {}", second_column);
+        println!("Number of Hits: {}", third_column);
+
+        assert_eq!(second_column,"8");
+        assert_eq!(second_column,"6");
 
     }
+
+
     #[rstest]
     fn test_igd_search() {
         // First must create temp igd
