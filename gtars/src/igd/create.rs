@@ -820,6 +820,7 @@ pub fn igd_add(
         gdata.start = start;
         gdata.end = end;
         gdata.value = v;
+        //println!("Adding to igd, start {}, idx {}", start,idx);
         gdata.idx = idx as i32;
 
         igd.total += 1;

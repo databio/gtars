@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
+
 use rstest::*;
 
 #[fixture]
@@ -85,6 +86,7 @@ mod tests {
     use gtars::uniwig::writing::write_bw_files;
 
     use std::collections::HashMap;
+    use std::collections::HashSet;
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom};
     use anyhow::Context;
@@ -227,38 +229,39 @@ mod tests {
         assert_eq!(igd_from_disk.nCnt[0][2], igd_saved.ctg[0].gTile[2].nCnts);
         assert_eq!(igd_from_disk.nCnt[0][3], igd_saved.ctg[0].gTile[3].nCnts);
 
-        //assert_eq!(igd.total_regions, 8);
-
-        // let parent_path = db_path_unwrapped.clone();
+        // Check to see if the regions on disk are the same as the original igd (minus the unused zeros)
         let dbpath = std::path::Path::new(&db_path_unwrapped);
-
         let db_file = OpenOptions::new()
             .create(true)
             .append(true)
             .read(true)
             .open(dbpath)
             .unwrap();
-
         let mut db_reader = BufReader::new(db_file);
 
-        for k in 0..2 {
+        for k in 0..3 {
             let nCnt_len = igd_from_disk.nCnt[k].len();
 
             for l in 0..nCnt_len {
+                let mut a: HashSet<i32>= Default::default();
+                let mut b: HashSet<i32>= Default::default();
 
-                let tmpi = igd_from_disk.nCnt[k][l];
+                let tmpi = igd_from_disk.nCnt[k][l]; // number of gdata_t to read
 
+                //println!("Here is k {}, l {}, and igd_from_disk.tIdx[k][l] {}",k,l, igd_from_disk.tIdx[k][l]);
                 db_reader
-                    .seek(SeekFrom::Start(igd_from_disk.tIdx[k][l] as u64))
+                    .seek(SeekFrom::Start(igd_from_disk.tIdx[k][l] as u64)) // [k]contig [l] tile position
                     .unwrap();
 
                 let mut gData: Vec<gdata_t> = Vec::new();
 
+                //println!("Creating gData with tmpi {}", tmpi);
                 for j in 0..tmpi {
                     gData.push(gdata_t::default())
                 }
 
-                for i in 0..tmpi {
+                for i in 0..tmpi { // number of gdata_t to read
+                    //println!("Iterating with i {} of tmpi {} ",i,tmpi);
                     let mut buf = [0u8; 16];
 
                     let n = db_reader.read(&mut buf).unwrap();
@@ -278,7 +281,7 @@ mod tests {
                     let value = rdr.read_i32::<LittleEndian>().unwrap();
 
                     //println!("Looping through g_datat in temp files");
-                    //println!("idx: {}  start: {} end: {}", idx, start, end);
+                    //println!("Chr_name: {} Filename: {}  start: {} end: {}", igd_from_disk.cName[k], igd_from_disk.file_info[idx as usize].fileName, start, end);
 
                     gData[i as usize] = gdata_t {
                         idx: idx,
@@ -288,15 +291,25 @@ mod tests {
                     };
                 }
 
-                println!("here is k {}, l {}",k,l);
+                //println!("here is k {}, l {}",k,l);
                 for g in gData.iter(){
-                    println!("Start {}, End {}", g.start,g.end);
+                    //println!("Inserting {} from gData on Disk", g.start);
+                    a.insert(g.start);
                 }
 
-                //println!("Before assertion, k {}, l, {}, gData[0].start {},  igd_saved.ctg[k].gTile[l].gList[0].start {}",k,l,gData[0].start,igd_saved.ctg[k].gTile[l].gList[0].start);
-                //assert_eq!(gData[0].start, igd_saved.ctg[k].gTile[l].gList[0].start);
+                for g in igd_saved.ctg[k].gTile[l].gList.iter(){
+                    //println!("Inserting {} from original gList ", g.start);
+                    b.insert(g.start);
+                }
+                //println!("A: {:?}", a);
+                //println!("B: {:?}", b);
+                // There difference should at most be a 0 from unused tiles, therefore the difference length should at MOST be 1.
+                let diff = b.difference(&a).collect::<Vec<&i32>>();
+                //println!("Difference: {:?}", diff);
+                assert!(diff.len() <=1 )
             }
     }
+
 
     // Finally, can we get overlaps?
         let mut hits: Vec<i64> = vec![0; igd_from_disk.nFiles as usize];
