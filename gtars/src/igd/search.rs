@@ -296,14 +296,14 @@ fn get_overlaps(
     // );
 
     if tmpi > 0 {
-        if n1 != *preIdx || ichr != *preChr {
+
             // println!(
             //     "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
             //     n1, preIdx, ichr, preChr
             // );
 
             //println!("Seek start here: {}",IGD.tIdx[ichr as usize][n1 as usize]);
-
+            //let ichr = 1;
             db_reader
                 .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
                 .unwrap();
@@ -333,8 +333,9 @@ fn get_overlaps(
                 let end = rdr.read_i32::<LittleEndian>().unwrap();
                 let value = rdr.read_i32::<LittleEndian>().unwrap();
 
+                //println!("for tmpi>0 where tmpi = {}", tmpi);
                 //println!("Looping through g_datat in temp files\n");
-                // println!("idx: {}  start: {} end: {}\n", idx,start,end);
+                //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                 gData[i as usize] = gdata_t {
                     idx: idx,
@@ -352,7 +353,7 @@ fn get_overlaps(
 
             if query_end > gData[0].start {
                 // sorted by start
-                //println!("query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
+                //println!("n1 != *preIdx || ichr != *preChr query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
                 // find the 1st rs<qe
                 tL = 0;
                 tR = tmpi1;
@@ -371,17 +372,19 @@ fn get_overlaps(
                 }
                 //--------------------------
                 for i in (0..=tL).rev() {
+                    //println!("Countdownfrom TL");
                     // count down from tL (inclusive to tL)
-                    //println!("iterate over i: {} ", i);
+                    //println!("iterate over i: {} from tL {}", i, tL);
                     //println!("gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
                     if gData[i as usize].end > query_start {
+                        //println!("ADDING TO HITS");
                         //println!(" > gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
                         hits[gData[i as usize].idx as usize] =
                             hits[gData[i as usize].idx as usize] + 1;
                     }
                 }
             }
-        }
+
 
         if n2 > n1 {
             //println!("n2>n1  {} vs {} ", n2, n1);
@@ -423,8 +426,9 @@ fn get_overlaps(
                             let end = rdr.read_i32::<LittleEndian>().unwrap();
                             let value = rdr.read_i32::<LittleEndian>().unwrap();
 
+
                             //println!("Looping through g_datat in temp files\n");
-                            //println!("idx: {}  start: {} end: {}\n", idx,start,end);
+                           // println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                             gData.push(gdata_t {
                                 idx: idx,
@@ -439,6 +443,7 @@ fn get_overlaps(
                     }
 
                     if query_end > gData[0].start {
+                        //println!("n2>n1 query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
                         tS = 0;
 
                         while tS < tmpi && gData[tS as usize].start < bd {
@@ -478,6 +483,7 @@ fn get_overlaps(
             }
         }
     }
+    //println!("here are the hits {:?}", hits);
     return nols; //TODO this is from the original code but its not actually being used for anything. hits vec IS the main thing.
 }
 
@@ -567,7 +573,7 @@ pub fn get_igd_info(
     reader.read_exact(&mut buffer)?;
     let nCtg = i32::from_le_bytes(buffer);
 
-    //println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
 
     igd.nbp = nbp;
     igd.gType = gType;
