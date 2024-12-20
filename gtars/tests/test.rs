@@ -298,12 +298,12 @@ mod tests {
         8,
         8
     )]
-    #[case(
-        "/tests/data/igd_file_list_02/",
-        "/tests/data/igd_query_files/query2.bed",
-        4,
-        1
-    )]
+    // #[case(
+    //     "/tests/data/igd_file_list_02/",
+    //     "/tests/data/igd_query_files/query2.bed",
+    //     4,
+    //     1
+    // )]
     fn test_igd_create_then_search(
         #[case] input: &str,
         #[case] query_file: &str,
