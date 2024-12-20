@@ -17,16 +17,19 @@
 //! ```rust
 //! use gtars::digests::sha512t24u;
 //!
-//! let digest = sha512t24u("hello world")
+//! let digest = sha512t24u("hello world");
 //! ```
-use sha2::{Digest, Sha512};
-use md5::Md5;
-use seq_io::fasta::{Reader, RefRecord, Record};
 use std::io::prelude::{Read, Write};
-use std::fs::File;
-use flate2::read::MultiGzDecoder;
 use std::io;
+use std::fs::File;
+use std::path::Path;
 
+use anyhow::Result;
+use md5::Md5;
+use sha2::{Digest, Sha512};
+use seq_io::fasta::{Reader, RefRecord, Record};
+
+use crate::common::utils::get_dynamic_reader;
 
 /// A struct representing the digest of a given string.
 #[derive(Debug)]
@@ -36,7 +39,6 @@ pub struct DigestResult {
     pub sha512t24u: String,
     pub md5: String,
 }
-
 
 /// Processes a given string to compute its GA4GH sha512t24u digest.
 ///
@@ -73,19 +75,6 @@ pub fn md5(string: &str) -> String {
     format!("{:x}", result)
 }
 
-/// Returns a `Read` object for a given file path.
-fn get_file_reader(file_path: &str) -> Result<Box<dyn Read>, io::Error> {
-    if file_path == "-" {
-        Ok(Box::new(std::io::stdin()) as Box<dyn Read>)
-    } else if file_path.ends_with(".gz") {
-        let file = File::open(file_path)?;
-        Ok(Box::new(MultiGzDecoder::new(file)) as Box<dyn Read>)
-    } else {
-        let file = File::open(file_path)?;
-        Ok(Box::new(file) as Box<dyn Read>)
-    }
-}
-
 
 /// Processes a FASTA file to compute the digests of each sequence in the file.
 ///
@@ -109,8 +98,9 @@ fn get_file_reader(file_path: &str) -> Result<Box<dyn Read>, io::Error> {
 /// # Examples
 ///
 ///
-pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>, io::Error> {
-    let file_reader = get_file_reader(&file_path)?;
+pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>> {
+    let path = Path::new(&file_path);
+    let file_reader = get_dynamic_reader(&path)?;
     let mut fasta_reader = Reader::new(file_reader);
     let mut results = Vec::new();
     while let Some(record) = fasta_reader.next() {  // returns a RefRecord object
