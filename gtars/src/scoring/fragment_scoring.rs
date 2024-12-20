@@ -18,7 +18,6 @@ pub fn region_scoring_from_fragments(
     consensus: &ConsensusSet,
     scoring_mode: ScoringMode,
 ) -> Result<CountMatrix<u32>> {
-
     let rows = fragments.len();
     let cols = consensus.len();
 
@@ -116,7 +115,6 @@ mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use rstest::*;
-    
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
@@ -132,12 +130,12 @@ mod tests {
     fn output_file() -> &'static str {
         "tests/data/out/region_scoring_count.csv.gz"
     }
-    
+
     #[rstest]
     fn test_region_scoring_from_fragments_atac(
         path_to_fragment_files: &str,
         consensus_set: &str,
-        output_file: &str
+        output_file: &str,
     ) {
         let mut fragments = FragmentFileGlob::new(path_to_fragment_files).unwrap();
         let consensus = ConsensusSet::new(consensus_set.into()).unwrap();
@@ -165,6 +163,5 @@ mod tests {
 
         let res = count_mat.write_to_file(output_file);
         assert_eq!(res.is_ok(), true);
-        
     }
 }

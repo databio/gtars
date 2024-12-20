@@ -57,7 +57,6 @@ impl BarcodeToClusterMap {
             }
 
             if let (Some(barcode), Some(cluster_id)) = (barcode, cluster_id) {
-
                 map.insert(barcode.to_string(), cluster_id.to_string());
                 if !cluster_labels.contains(cluster_id) {
                     cluster_labels.insert(cluster_id.to_string());

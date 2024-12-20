@@ -69,6 +69,9 @@ pub struct igd_t {
     pub mctg: i32,       //data type: 0, 1, 2 etc; size differs
     pub total: i64,      // total region in each ctg
     pub ctg: Vec<ctg_t>, // this is the list of contigs (of size n-ctg)  // this might need to be a reference
+    pub total_regions: i32,
+    pub total_average: f32,
+    pub average_length: f32,
 }
 
 impl igd_t {
@@ -100,11 +103,11 @@ pub fn igd_get_create_matches(matches: &ArgMatches) {
         .get_one::<String>("dbname")
         .expect("File list path is required");
 
-    create_igd_f(output_path, filelist, db_output_name);
+    let _igd = create_igd_f(output_path, filelist, db_output_name);
 }
 
 /// Creates IGD database from a directory of bed files.
-pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) {
+pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &String) -> igd_t {
     //println!("{}",db_output_name);
     //Initialize IGD into Memory
     let mut igd = igd_t::new();
@@ -373,14 +376,19 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     // Sort tile data and save into single files per ctg
     igd_save_db(&mut igd, output_path, db_output_name);
 
+    igd.total_regions = total_regions;
+    igd.total_average = total_avg_size;
+    igd.average_length = total_avg_size / total_regions as f32;
+
     let save_path = format!("{}{}{}", output_path, db_output_name, ".igd");
     println!("IGD saved to: {}", save_path);
     println!(
         "Total Intervals: {}, l_avg: {}",
-        total_regions,
-        total_avg_size / total_regions as f32
+        igd.total_regions, igd.average_length
     );
     println!("nctg:{}  nbp:{}", igd.nctg, igd.nbp);
+
+    igd // return for testing purposes
 }
 
 /// Saves the primary .igd database file by reading the temp_tiles, sorting them, and then writing the sorted tiles to disk.
@@ -560,7 +568,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                 let _ = main_db_file.write_all(&temp_buffer);
             }
 
-            q.nCnts = 0;
+            //q.nCnts = 0;
         }
     }
 
@@ -631,7 +639,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 }
                 file.write_all(&buffer).unwrap();
 
-                current_tile.nCnts = current_tile.ncnts + 1;
+                current_tile.nCnts = current_tile.nCnts + current_tile.ncnts;
 
                 if current_tile.ncnts > 8 {
                     current_tile.mcnts = 8;
@@ -811,6 +819,7 @@ pub fn igd_add(
         gdata.start = start;
         gdata.end = end;
         gdata.value = v;
+        //println!("Adding to igd, start {}, idx {}", start,idx);
         gdata.idx = idx as i32;
 
         igd.total += 1;
