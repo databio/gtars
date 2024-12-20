@@ -9,7 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - add scaling argument for `bam` to `bw` workflow [#53](https://github.com/databio/gtars/issues/53)
 - fix accumulation issue for `bam` workflow [#56](https://github.com/databio/gtars/issues/56)
 - fix wiggle file (core) beginning at 0 [#43](https://github.com/databio/gtars/issues/43)
+- fix npy file (end) using start instead of end [#61](https://github.com/databio/gtars/issues/61)
 - force zoom to 1 for bed/narrowPeak to bw [#34](https://github.com/databio/gtars/issues/34)
+- fix IGD overlap issue [#45](https://github.com/databio/gtars/issues/45)
+- add ga4gh refget digest functionality [#58](https://github.com/databio/gtars/pull/58)
 
 ## [0.1.1]
 - hot fix for broken python bindings; remove IGD from the python bindings for now
