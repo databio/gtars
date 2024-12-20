@@ -11,10 +11,6 @@ env:
 
 jobs:
   coverage:
-    status:
-      project:
-        default:
-          target: 60%
     runs-on: ubuntu-latest
     env:
       CARGO_TERM_COLOR: always
