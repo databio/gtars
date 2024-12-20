@@ -41,9 +41,9 @@ pub mod handlers {
                 let supplied_mode = ScoringMode::from_str(mode);
                 match supplied_mode {
                     Ok(mode) => mode,
-                    Err(_err) => anyhow::bail!("Unknown scoring mode supplied: {}", mode)
+                    Err(_err) => anyhow::bail!("Unknown scoring mode supplied: {}", mode),
                 }
-            },
+            }
             None => DEFAULT_SCORING_MODE,
         };
 
@@ -52,11 +52,7 @@ pub mod handlers {
         let consensus = PathBuf::from(consensus);
         let consensus = ConsensusSet::new(consensus)?;
 
-        let count_mat = region_scoring_from_fragments(
-            &mut fragments,
-            &consensus,
-            mode,
-        )?;
+        let count_mat = region_scoring_from_fragments(&mut fragments, &consensus, mode)?;
 
         count_mat.write_to_file(output)?;
 

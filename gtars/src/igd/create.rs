@@ -376,16 +376,15 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     // Sort tile data and save into single files per ctg
     igd_save_db(&mut igd, output_path, db_output_name);
 
-    igd.total_regions=total_regions;
-    igd.total_average=total_avg_size;
-    igd.average_length= total_avg_size / total_regions as f32;
+    igd.total_regions = total_regions;
+    igd.total_average = total_avg_size;
+    igd.average_length = total_avg_size / total_regions as f32;
 
     let save_path = format!("{}{}{}", output_path, db_output_name, ".igd");
     println!("IGD saved to: {}", save_path);
     println!(
         "Total Intervals: {}, l_avg: {}",
-        igd.total_regions,
-        igd.average_length
+        igd.total_regions, igd.average_length
     );
     println!("nctg:{}  nbp:{}", igd.nctg, igd.nbp);
 

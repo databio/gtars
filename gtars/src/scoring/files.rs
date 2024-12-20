@@ -126,5 +126,4 @@ impl FindOverlaps for ConsensusSet {
             Some(olaps)
         }
     }
-
 }

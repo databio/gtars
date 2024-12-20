@@ -7,8 +7,8 @@ use std::fs::{create_dir_all, OpenOptions};
 use std::io;
 use std::io::{BufWriter, Write};
 
-use std::sync::{Arc, Mutex};
 use noodles::sam::alignment::record::Flags;
+use std::sync::{Arc, Mutex};
 
 #[derive(Debug)]
 pub enum BAMRecordError {
@@ -1214,7 +1214,7 @@ pub fn bam_to_bed_no_counts(
         let end_site = unwrapped_coord.alignment_end().unwrap().unwrap().get() as i32;
 
         // we must shift the start position by -1 to convert bam/sam 1 based position to bed 0 based pos
-        let shifted_pos = get_shifted_pos(&flags, start_site-1, end_site);
+        let shifted_pos = get_shifted_pos(&flags, start_site - 1, end_site);
 
         // Relevant comment from original bamSitesToWig.py:
         // The bed file needs 6 columns (even though some are dummy)
@@ -1240,14 +1240,15 @@ pub fn bam_to_bed_no_counts(
     Ok(())
 }
 
-pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
-                               chrom_size: i32,
-                               smoothsize: i32,
-                               stepsize: i32,
-                               chromosome_name: &String,
-                               out_sel: &str,
-                               write_fd: Arc<Mutex<PipeWriter>>,
-                                   bam_scale:f32,
+pub fn variable_shifted_bam_to_bw(
+    records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
+    chrom_size: i32,
+    smoothsize: i32,
+    stepsize: i32,
+    chromosome_name: &String,
+    out_sel: &str,
+    write_fd: Arc<Mutex<PipeWriter>>,
+    bam_scale: f32,
 ) -> Result<(), BAMRecordError> {
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
@@ -1292,7 +1293,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
         }
     };
 
-    let flags =first_record.flags();
+    let flags = first_record.flags();
 
     let start_site = first_record.alignment_start().unwrap().unwrap().get() as i32;
 
@@ -1316,7 +1317,6 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
     }
 
     for coord in records {
-
         let unwrapped_coord = coord.unwrap().clone();
         let flags = unwrapped_coord.flags().clone();
 
@@ -1328,7 +1328,6 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
         adjusted_start_site = shifted_pos - smoothsize;
 
-
         if adjusted_start_site < 0 {
             adjusted_start_site = 0;
         }
@@ -1337,9 +1336,9 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
         //println!("adjusted start site for new coord: {}", adjusted_start_site);
         //println!("new endsite for new coord: {}", new_end_site);
 
-        if new_end_site < current_end_site || coordinate_position > adjusted_start_site{
+        if new_end_site < current_end_site || coordinate_position > adjusted_start_site {
             continue;
-        } else{
+        } else {
             collected_end_sites.push(new_end_site);
         }
 
@@ -1373,7 +1372,10 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
             if count != prev_count {
                 let single_line = format!(
                     "{}\t{}\t{}\t{}\n",
-                    chromosome_name, bg_prev_coord, coordinate_position, prev_count/bam_scale
+                    chromosome_name,
+                    bg_prev_coord,
+                    coordinate_position,
+                    prev_count / bam_scale
                 );
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
@@ -1391,7 +1393,7 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
     }
 
     count = count + 1.0; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
-    // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+                         // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -1413,7 +1415,10 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
         if count != prev_count {
             let single_line = format!(
                 "{}\t{}\t{}\t{}\n",
-                chromosome_name, bg_prev_coord, coordinate_position, prev_count/bam_scale
+                chromosome_name,
+                bg_prev_coord,
+                coordinate_position,
+                prev_count / bam_scale
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
@@ -1431,7 +1436,6 @@ pub fn variable_shifted_bam_to_bw( records: &mut Box<Query<noodles::bgzf::reader
 
     Ok(())
 }
-
 
 /// Set up header for wiggle or no header if bedGraph
 /// This is for bed/narrowPeak to wiggle/bedGraph workflows.
@@ -1486,8 +1490,7 @@ fn set_up_file_output(
     }
 }
 
-pub fn get_shifted_pos(flags: &Flags, start_site:i32, end_site:i32) -> i32 {
-
+pub fn get_shifted_pos(flags: &Flags, start_site: i32, end_site: i32) -> i32 {
     let shifted_pos: i32;
     // GET shifted pos and Strand
     // TODO ONLY ATAC SHIFTING IS SUPPORTED

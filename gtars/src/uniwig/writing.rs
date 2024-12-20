@@ -118,7 +118,8 @@ pub fn write_to_wig_file(
 
     let mut buf = BufWriter::new(file);
 
-    for count in counts.iter().take(chrom_size as usize) { // must set upper bound for wiggles based on reported chromsize, this is for downstream tool interoperability
+    for count in counts.iter().take(chrom_size as usize) {
+        // must set upper bound for wiggles based on reported chromsize, this is for downstream tool interoperability
         writeln!(&mut buf, "{}", count).unwrap();
     }
     buf.flush().unwrap();

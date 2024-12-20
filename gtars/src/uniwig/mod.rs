@@ -8,7 +8,10 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
-use crate::uniwig::counting::{bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw, variable_shifted_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError};
+use crate::uniwig::counting::{
+    bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,
+    variable_shifted_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError,
+};
 use crate::uniwig::reading::read_chromosome_sizes;
 use crate::uniwig::utils::{compress_counts, get_final_chromosomes};
 use crate::uniwig::writing::{
@@ -154,7 +157,9 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .expect("requires int value");
 
     let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
-    let bam_shift = matches.get_one::<bool>("no-bamshift").unwrap_or_else(|| &true);
+    let bam_shift = matches
+        .get_one::<bool>("no-bamshift")
+        .unwrap_or_else(|| &true);
 
     let debug = matches.get_one::<bool>("debug").unwrap_or_else(|| &false);
 
@@ -247,19 +252,19 @@ pub fn uniwig_main(
     match input_filetype {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
-
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
             let mut output_type = output_type;
             if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
             }
-            if output_type == "wig"{
+            if output_type == "wig" {
                 wig_shift = 1;
             }
 
             // Pare down chromosomes if necessary
-            let mut final_chromosomes = get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
+            let mut final_chromosomes =
+                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
@@ -298,8 +303,6 @@ pub fn uniwig_main(
                                         );
 
                                         match output_type {
-
-
                                             "file" => {
                                                 panic!("Writing to file currently not supported");
                                             }
@@ -397,7 +400,6 @@ pub fn uniwig_main(
                                                 panic!("Write to CSV. Not Implemented");
                                             }
                                             "bedGraph" => {
-
                                                 let file_name = format!(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "end", output_type
@@ -479,7 +481,7 @@ pub fn uniwig_main(
                                             &chromosome.ends,
                                             current_chrom_size,
                                             stepsize,
-                                            wig_shift
+                                            wig_shift,
                                         );
                                         match output_type {
                                             "file" => {
@@ -515,10 +517,7 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(
-                                                        primary_start.0,
-                                                        0,
-                                                    ),
+                                                    clamped_start_position(primary_start.0, 0),
                                                     stepsize,
                                                     current_chrom_size,
                                                 );
@@ -588,8 +587,11 @@ pub fn uniwig_main(
             match og_output_type {
                 "bw" | "bigWig" => {
                     println!("Writing bigWig files");
-                    if zoom !=1{
-                        println!("Only zoom level 1 is supported at this time, zoom level supplied {}", zoom);
+                    if zoom != 1 {
+                        println!(
+                            "Only zoom level 1 is supported at this time, zoom level supplied {}",
+                            zoom
+                        );
                     }
                     let zoom = 1; //overwrite zoom
                     write_bw_files(bwfileheader, chromsizerefpath, num_threads, zoom);
@@ -649,7 +651,7 @@ fn process_bam(
     output_type: &str,
     debug: bool,
     bam_shift: bool,
-    bam_scale: f32
+    bam_scale: f32,
 ) -> Result<(), Box<dyn Error>> {
     println!("Begin bam processing workflow...");
     let fp_string = filepath.to_string();
@@ -702,11 +704,10 @@ fn process_bam(
 
     //let out_selection_vec: Vec<&str>;
 
-    if !bam_shift{
+    if !bam_shift {
         //do nothing, just keep user output selection for starts, ends, core
-    }
-    else{
-        if vec_count_type.len()>1{
+    } else {
+        if vec_count_type.len() > 1 {
             println!("bam_shift defaults to true for bam processing, but more than one count_type was selected. Defaulting to shift workflow which will produce a single file count file.");
         }
         vec_count_type = vec!["shift"];
@@ -720,9 +721,7 @@ fn process_bam(
                 final_chromosomes
                     .par_iter()
                     .for_each(|chromosome_string: &String| {
-
-                        let out_selection_vec=vec_count_type.clone();
-
+                        let out_selection_vec = vec_count_type.clone();
 
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
@@ -775,7 +774,6 @@ fn process_bam(
                                         bam_shift,
                                         bam_scale,
                                     );
-
                                 }
                                 &"shift" => {
                                     process_bw_in_threads(
@@ -792,7 +790,6 @@ fn process_bam(
                                         bam_shift,
                                         bam_scale,
                                     );
-
                                 }
                                 _ => {
                                     println!("Must specify start, end, or core.")
@@ -1091,7 +1088,7 @@ fn process_bw_in_threads(
     fp_string: &String,
     chrom_sizes_ref_path_string: &String,
     sel: &str,
-    bam_shift:bool,
+    bam_shift: bool,
     bam_scale: f32,
 ) {
     let (reader, writer) = os_pipe::pipe().unwrap();
@@ -1196,89 +1193,79 @@ fn determine_counting_func(
     bam_shift: bool,
     bam_scale: f32,
 ) -> Result<(), BAMRecordError> {
-
     //let bam_shift: bool = true; // This is to ensure a shifted position workflow is used when doing bams
 
-    let count_result: Result<(), BAMRecordError> =
-
-        match bam_shift{
-
-            true =>{
-
-                match variable_shifted_bam_to_bw(
-                    &mut records,
-                    current_chrom_size_cloned,
-                    smoothsize_cloned,
-                    stepsize_cloned,
-                    &chromosome_string_cloned,
-                    sel_clone,
-                    write_fd,
-                    bam_scale,
-                ) {
-                    Ok(_) => Ok(()),
-                    Err(err) => {
-                        //eprintln!("Error processing records for {} {:?}", sel_clone,err);
-                        Err(err)
+    let count_result: Result<(), BAMRecordError> = match bam_shift {
+        true => {
+            match variable_shifted_bam_to_bw(
+                &mut records,
+                current_chrom_size_cloned,
+                smoothsize_cloned,
+                stepsize_cloned,
+                &chromosome_string_cloned,
+                sel_clone,
+                write_fd,
+                bam_scale,
+            ) {
+                Ok(_) => Ok(()),
+                Err(err) => {
+                    //eprintln!("Error processing records for {} {:?}", sel_clone,err);
+                    Err(err)
+                }
+            }
+        }
+        false => {
+            match sel_clone {
+                "start" | "end" => {
+                    match variable_start_end_counts_bam_to_bw(
+                        &mut records,
+                        current_chrom_size_cloned,
+                        smoothsize_cloned,
+                        stepsize_cloned,
+                        &chromosome_string_cloned,
+                        sel_clone,
+                        write_fd,
+                    ) {
+                        Ok(_) => Ok(()),
+                        Err(err) => {
+                            //eprintln!("Error processing records for {} {:?}", sel_clone,err);
+                            Err(err)
+                        }
                     }
                 }
 
-            }
-            false => {
-
-                match sel_clone {
-                    "start" | "end" => {
-                        match variable_start_end_counts_bam_to_bw(
-                            &mut records,
-                            current_chrom_size_cloned,
-                            smoothsize_cloned,
-                            stepsize_cloned,
-                            &chromosome_string_cloned,
-                            sel_clone,
-                            write_fd,
-                        ) {
-                            Ok(_) => Ok(()),
-                            Err(err) => {
-                                //eprintln!("Error processing records for {} {:?}", sel_clone,err);
-                                Err(err)
-                            }
+                "core" => {
+                    match variable_core_counts_bam_to_bw(
+                        &mut records,
+                        current_chrom_size_cloned,
+                        stepsize_cloned,
+                        &chromosome_string_cloned,
+                        write_fd,
+                    ) {
+                        Ok(_) => {
+                            //eprintln!("Processing successful for {}", chromosome_string_cloned);
+                            Ok(())
+                        }
+                        Err(err) => {
+                            //eprintln!("Error processing records for {}: {:?}", sel_clone,err);
+                            Err(err)
                         }
                     }
+                }
 
-                    "core" => {
-                        match variable_core_counts_bam_to_bw(
-                            &mut records,
-                            current_chrom_size_cloned,
-                            stepsize_cloned,
-                            &chromosome_string_cloned,
-                            write_fd,
-                        ) {
-                            Ok(_) => {
-                                //eprintln!("Processing successful for {}", chromosome_string_cloned);
-                                Ok(())
-                            }
-                            Err(err) => {
-                                //eprintln!("Error processing records for {}: {:?}", sel_clone,err);
-                                Err(err)
-                            }
-                        }
-                    }
-
-                    &_ => {
-                        eprintln!(
-                            "Error processing records, improper selection: {}",
-                            sel_clone
-                        );
-                        Err(BAMRecordError::IncorrectSel)
-                    }
+                &_ => {
+                    eprintln!(
+                        "Error processing records, improper selection: {}",
+                        sel_clone
+                    );
+                    Err(BAMRecordError::IncorrectSel)
+                }
             }
-
         }
-
     };
 
     count_result
 }
-
 
 /// Creates the bigwig writer struct for use with the BigTools crate
 pub fn create_bw_writer(
