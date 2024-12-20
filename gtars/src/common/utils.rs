@@ -21,7 +21,7 @@ use crate::common::models::universe::Universe;
 ///
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let is_gzipped = path.extension() == Some(OsStr::new("gz"));
-    let file = File::open(path).with_context(|| "Failed to open bed file.")?;
+    let file = File::open(path).with_context(|| "Failed to open file.")?;
 
     let file: Box<dyn Read> = match is_gzipped {
         true => Box::new(MultiGzDecoder::new(file)),
