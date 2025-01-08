@@ -7,11 +7,12 @@
 
 `gtars` is a rust crate that provides a set of tools for working with genomic interval data. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well.
 
-`gtars` provides three things:
+`gtars` provides these things:
 
 1. A rust library crate.
 2. A command-line interface, written in rust.
-3. A Python package that provides bindings to the rust library.
+3. A Python package that provides Python bindings to the rust library.
+4. An R package that provides R bindings to the rust library
 
 ## Repository organization (for developers)
 
