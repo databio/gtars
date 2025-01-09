@@ -34,7 +34,6 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::runtime;
-use serde_json;
 
 pub mod cli;
 pub mod counting;
@@ -249,17 +248,9 @@ pub fn uniwig_main(
         }
     };
 
-    let mut npy_meta_data: HashMap<String, HashMap<String, i32>> = HashMap::new();
-    let mut arc_npy_meta_data = Arc::new(Mutex::new(npy_meta_data));
-    let mut chromosome_data_clone = Arc::clone(&arc_npy_meta_data);
-
     match input_filetype {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
-            // Pare down chromosomes if necessary
-            let mut final_chromosomes =
-                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
-
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
             let mut output_type = output_type;
@@ -267,25 +258,9 @@ pub fn uniwig_main(
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
             }
 
-            if output_type == "npy"{
-                // populate hashmap for the npy meta data
-                let mut arc_npy_meta_data_locked =  arc_npy_meta_data.lock().unwrap();
-                for chromosome in final_chromosomes.iter(){
-                    let chr_name = chromosome.chrom.clone();
-                    let current_chrom_size =
-                        *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
-
-                    arc_npy_meta_data_locked.insert(
-                        chr_name,
-                        HashMap::from([
-                            ("stepsize".to_string(), stepsize),
-                            ("reported_chrom_size".to_string(), current_chrom_size),
-                        ]),
-                    );
-
-                }
-
-            }
+            // Pare down chromosomes if necessary
+            let mut final_chromosomes =
+                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
@@ -373,7 +348,6 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
                                                 );
-
                                                 write_to_npy_file(
                                                     &count_result.0,
                                                     file_name.clone(),
@@ -382,8 +356,8 @@ pub fn uniwig_main(
                                                         primary_start.0,
                                                         smoothsize,
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "start",
+                                                    stepsize,
+                                                    meta_data_file_names[0].clone(),
                                                 );
                                             }
                                             _ => {
@@ -400,8 +374,8 @@ pub fn uniwig_main(
                                                         primary_start.0,
                                                         smoothsize,
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "start",
+                                                    stepsize,
+                                                    meta_data_file_names[0].clone(),
                                                 );
                                             }
                                         }
@@ -475,8 +449,8 @@ pub fn uniwig_main(
                                                         smoothsize,
                                                         0
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "end",
+                                                    stepsize,
+                                                    meta_data_file_names[1].clone(),
                                                 );
                                             }
                                             _ => {
@@ -494,8 +468,8 @@ pub fn uniwig_main(
                                                         smoothsize,
                                                         0
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "end",
+                                                    stepsize,
+                                                    meta_data_file_names[1].clone(),
                                                 );
                                             }
                                         }
@@ -562,8 +536,8 @@ pub fn uniwig_main(
                                                         primary_start.0,
                                                         0,
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "core",
+                                                    stepsize,
+                                                    meta_data_file_names[2].clone(),
                                                 );
                                             }
                                             _ => {
@@ -580,8 +554,8 @@ pub fn uniwig_main(
                                                         primary_start.0,
                                                         0,
                                                     ),
-                                                    &mut chromosome_data_clone,
-                                                    "core",
+                                                    stepsize,
+                                                    meta_data_file_names[2].clone(),
                                                 );
                                             }
                                         }
@@ -612,14 +586,6 @@ pub fn uniwig_main(
                             &final_chromosomes,
                         );
                     }
-                }
-                "npy" => {
-                    //write combined metadata
-                    let json_string = serde_json::to_string_pretty(&npy_meta_data).unwrap();
-                    let combined_npy_meta_file_path = format!("{}{}.{}", bwfileheader, "npy_meta", "json");
-                    let mut file = File::create(combined_npy_meta_file_path).unwrap();
-                    file.write_all(json_string.as_bytes()).unwrap();
-
                 }
                 _ => {}
             }
