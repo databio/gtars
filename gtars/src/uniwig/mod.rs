@@ -5,7 +5,7 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{remove_file, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use crate::uniwig::counting::{
@@ -237,6 +237,8 @@ pub fn uniwig_main(
     meta_data_file_names[1] = format!("{}{}.{}", bwfileheader, "end", "meta");
     meta_data_file_names[2] = format!("{}{}.{}", bwfileheader, "core", "meta");
 
+    let mut npy_meta_data_map: HashMap<String, HashMap<String, i32>> = HashMap::new();
+
     let chrom_sizes = match read_chromosome_sizes(chromsizerefpath) {
         // original program gets chromosome size from a .sizes file, e.g. chr1 248956422
         // the original program simply pushes 0's until the end of the chromosome length and writes these to file.
@@ -251,16 +253,16 @@ pub fn uniwig_main(
     match input_filetype {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+            // Pare down chromosomes if necessary
+            let mut final_chromosomes =
+                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
+
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
             let mut output_type = output_type;
             if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
             }
-
-            // Pare down chromosomes if necessary
-            let mut final_chromosomes =
-                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
@@ -586,6 +588,59 @@ pub fn uniwig_main(
                             &final_chromosomes,
                         );
                     }
+                }
+                "npy" =>{
+                    // populate hashmap for the npy meta data
+                    for chromosome in final_chromosomes.iter(){
+                        let chr_name = chromosome.chrom.clone();
+                        let current_chrom_size =
+                            *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+                        npy_meta_data_map.insert(
+                            chr_name,
+                            HashMap::from([
+                                ("stepsize".to_string(), stepsize),
+                                ("reported_chrom_size".to_string(), current_chrom_size),
+                            ]),
+                        );
+                    }
+
+                    for location in vec_count_type.iter() {
+
+                        let temp_meta_file_name = format!("{}{}.{}", bwfileheader, *location, "meta");
+
+                        if let Ok(file) = File::open(&temp_meta_file_name) {
+
+                            let reader = BufReader::new(file);
+
+                            for line in reader.lines() {
+                                let line = line.unwrap();
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if parts.len() >= 3 {
+                                    let chrom = parts[1].split('=')
+                                        .nth(1)
+                                        .expect("Processing npy metadata file: Missing chromosome in line");
+                                    let start_str = parts[2].split('=')
+                                        .nth(1)
+                                        .expect("Processing npy metadata file: Missing start position in line");
+                                    let starting_position: i32 = start_str.parse().expect("Processing npy metadata file: Invalid start position");
+
+                                    if let Some(current_chr_data) = npy_meta_data_map.get_mut(chrom) {
+                                        current_chr_data.insert((*location.to_string()).parse().unwrap(), starting_position);
+                                    }
+                                }
+                            }
+                            // Remove the file after it is used.
+                            let path = std::path::Path::new(&temp_meta_file_name);
+                            let _ = remove_file(path).unwrap();
+                        }
+
+                    }
+                    //write combined metadata as json
+                    let json_string = serde_json::to_string_pretty(&npy_meta_data_map).unwrap();
+                    let combined_npy_meta_file_path = format!("{}{}.{}", bwfileheader, "npy_meta", "json");
+                    let mut file = File::create(combined_npy_meta_file_path).unwrap();
+                    file.write_all(json_string.as_bytes()).unwrap();
+
                 }
                 _ => {}
             }
