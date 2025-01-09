@@ -673,10 +673,12 @@ mod tests {
 
         let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/test5.bed");
         let combinedbedpath = tempbedpath.as_str();
-        //let combinedbedpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/dummy4.bed";
+        let combinedbedpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/dummy3.bed";
+        //let combinedbedpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/chr1415.bed";
 
         let chromsizerefpath = combinedbedpath;
-        //let chromsizerefpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/dummy.chrom.sizes";
+        let chromsizerefpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/dummy.chrom.sizes";
+        //let chromsizerefpath = "/home/drc/Downloads/unwig_testing_19dec2024/input/test.chrom.sizes";
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -685,16 +687,16 @@ mod tests {
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
 
-        //let bwfileheader = "/home/drc/Downloads/unwig_testing_19dec2024/output/npy_output/";
+        let bwfileheader = "/home/drc/Downloads/unwig_testing_19dec2024/output/npy_output/";
         //let bwfileheader = "/home/drc/Downloads/unwig_testing_19dec2024/output/wig_output/";
 
-        let smoothsize: i32 = 2;
+        let smoothsize: i32 = 10;
         let output_type = "npy";
         //let output_type = "wig";
         let filetype = "bed";
         let num_threads = 6;
         let score = false;
-        let stepsize = 1;
+        let stepsize = 5;
         let zoom = 0;
         let vec_count_type = vec!["start", "end", "core"];
 

@@ -8,16 +8,20 @@ use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 use std::{fs, io};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-/// Write output to npy files
+/// Write output to npy files AND update the meta_data hashmap
 pub fn write_to_npy_file(
     counts: &[u32],
     filename: String,
     chromname: String,
     start_position: i32,
-    stepsize: i32,
-    metafilename: String,
+    npy_meta_data_map: &mut Arc<Mutex<HashMap<String, HashMap<String, i32>>>>,
+    out_selection: &str,
 ) {
+    let mut chromosome_data_guard = npy_meta_data_map.lock().unwrap();
+
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
 
@@ -25,27 +29,11 @@ pub fn write_to_npy_file(
     let arr = Array::from_vec(counts.to_vec());
     let _ = write_npy(filename, &arr);
 
-    // Write to the metadata file.
-    // Note: there should be a single metadata file for starts, ends and core
+    // Write to the metadata hashmap
+    if let Some(current_chr_data) =  chromosome_data_guard.get_mut(chromname.as_str()) {
+        current_chr_data.insert(out_selection.to_string(), start_position);
+    }
 
-    let path = std::path::Path::new(&metafilename).parent().unwrap();
-    let _ = create_dir_all(path);
-
-    let mut file = OpenOptions::new()
-        .create(true) // Create the file if it doesn't exist
-        .append(true) // Append data to the existing file if it does exist
-        .open(metafilename)
-        .unwrap();
-
-    // The original wiggle file header. This can be anything we wish it to be. Currently space delimited.
-    let mut wig_header = "fixedStep chrom=".to_string()
-        + chromname.as_str()
-        + " start="
-        + start_position.to_string().as_str()
-        + " step="
-        + stepsize.to_string().as_str();
-    wig_header.push('\n');
-    file.write_all(wig_header.as_ref()).unwrap();
 }
 
 /// Write either combined bedGraph, wiggle files, and bed files
