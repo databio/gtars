@@ -191,7 +191,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 }
 
 /// Ensures that the start position is at a minimum equal to `1`
-fn clamped_start_position(start: i32, smoothsize: i32, wig_shift:i32) -> i32 {
+fn clamped_start_position(start: i32, smoothsize: i32, wig_shift: i32) -> i32 {
     std::cmp::max(1, start - smoothsize + wig_shift)
 }
 /// Ensure that the start position is at a minimum equal to `0`
@@ -221,7 +221,6 @@ pub fn uniwig_main(
         .num_threads(num_threads as usize)
         .build()
         .unwrap();
-
 
     // Determine Input File Type
     let input_filetype = FileType::from_str(filetype.to_lowercase().as_str());
@@ -319,7 +318,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_start.0,
                                                         smoothsize,
-                                                        1 //must shift wiggle starts and core by 1 since it is 1 based
+                                                        1, //must shift wiggle starts and core by 1 since it is 1 based
                                                     ),
                                                     stepsize,
                                                     current_chrom_size,
@@ -449,7 +448,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
-                                                        0
+                                                        0,
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -468,7 +467,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
-                                                        0
+                                                        0,
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -520,7 +519,7 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, 0,1), //starts are 1 based must be shifted by 1
+                                                    clamped_start_position(primary_start.0, 0, 1), //starts are 1 based must be shifted by 1
                                                     stepsize,
                                                     current_chrom_size,
                                                 );
@@ -589,9 +588,9 @@ pub fn uniwig_main(
                         );
                     }
                 }
-                "npy" =>{
+                "npy" => {
                     // populate hashmap for the npy meta data
-                    for chromosome in final_chromosomes.iter(){
+                    for chromosome in final_chromosomes.iter() {
                         let chr_name = chromosome.chrom.clone();
                         let current_chrom_size =
                             *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
@@ -605,27 +604,32 @@ pub fn uniwig_main(
                     }
 
                     for location in vec_count_type.iter() {
-
-                        let temp_meta_file_name = format!("{}{}.{}", bwfileheader, *location, "meta");
+                        let temp_meta_file_name =
+                            format!("{}{}.{}", bwfileheader, *location, "meta");
 
                         if let Ok(file) = File::open(&temp_meta_file_name) {
-
                             let reader = BufReader::new(file);
 
                             for line in reader.lines() {
                                 let line = line.unwrap();
                                 let parts: Vec<&str> = line.split_whitespace().collect();
                                 if parts.len() >= 3 {
-                                    let chrom = parts[1].split('=')
-                                        .nth(1)
-                                        .expect("Processing npy metadata file: Missing chromosome in line");
+                                    let chrom = parts[1].split('=').nth(1).expect(
+                                        "Processing npy metadata file: Missing chromosome in line",
+                                    );
                                     let start_str = parts[2].split('=')
                                         .nth(1)
                                         .expect("Processing npy metadata file: Missing start position in line");
-                                    let starting_position: i32 = start_str.parse().expect("Processing npy metadata file: Invalid start position");
+                                    let starting_position: i32 = start_str.parse().expect(
+                                        "Processing npy metadata file: Invalid start position",
+                                    );
 
-                                    if let Some(current_chr_data) = npy_meta_data_map.get_mut(chrom) {
-                                        current_chr_data.insert((*location.to_string()).parse().unwrap(), starting_position);
+                                    if let Some(current_chr_data) = npy_meta_data_map.get_mut(chrom)
+                                    {
+                                        current_chr_data.insert(
+                                            (*location.to_string()).parse().unwrap(),
+                                            starting_position,
+                                        );
                                     }
                                 }
                             }
@@ -633,14 +637,13 @@ pub fn uniwig_main(
                             let path = std::path::Path::new(&temp_meta_file_name);
                             let _ = remove_file(path).unwrap();
                         }
-
                     }
                     //write combined metadata as json
                     let json_string = serde_json::to_string_pretty(&npy_meta_data_map).unwrap();
-                    let combined_npy_meta_file_path = format!("{}{}.{}", bwfileheader, "npy_meta", "json");
+                    let combined_npy_meta_file_path =
+                        format!("{}{}.{}", bwfileheader, "npy_meta", "json");
                     let mut file = File::create(combined_npy_meta_file_path).unwrap();
                     file.write_all(json_string.as_bytes()).unwrap();
-
                 }
                 _ => {}
             }

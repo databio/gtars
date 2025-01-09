@@ -35,7 +35,6 @@ pub fn start_end_counts(
     smoothsize: i32,
     stepsize: i32,
 ) -> (Vec<u32>, Vec<i32>) {
-
     let mut v_coordinate_positions: Vec<i32> = Vec::new(); // these are the final coordinates after any adjustments
     let mut v_coord_counts: Vec<u32> = Vec::new(); // u8 stores 0:255 This may be insufficient. u16 max is 65535
 
