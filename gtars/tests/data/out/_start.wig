@@ -1,4 +1,4 @@
-fixedStep chrom=chr1 start=1 step=1
+fixedStep chrom=chr1 start=2 step=1
 2
 2
 3
@@ -7,6 +7,7 @@ fixedStep chrom=chr1 start=1 step=1
 2
 1
 1
+0
 0
 0
 0

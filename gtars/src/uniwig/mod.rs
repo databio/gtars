@@ -191,8 +191,8 @@ pub fn run_uniwig(matches: &ArgMatches) {
 }
 
 /// Ensures that the start position is at a minimum equal to `1`
-fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
-    std::cmp::max(1, start - smoothsize)
+fn clamped_start_position(start: i32, smoothsize: i32, wig_shift:i32) -> i32 {
+    std::cmp::max(1, start - smoothsize + wig_shift)
 }
 /// Ensure that the start position is at a minimum equal to `0`
 fn clamped_start_position_zero_pos(start: i32, smoothsize: i32) -> i32 {
@@ -222,7 +222,6 @@ pub fn uniwig_main(
         .build()
         .unwrap();
 
-    let mut wig_shift: i32 = 0; // This will be set to 1 when writing to wiggle files, else always set to 0
 
     // Determine Input File Type
     let input_filetype = FileType::from_str(filetype.to_lowercase().as_str());
@@ -257,9 +256,6 @@ pub fn uniwig_main(
             let mut output_type = output_type;
             if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
-            }
-            if output_type == "wig" {
-                wig_shift = 1;
             }
 
             // Pare down chromosomes if necessary
@@ -299,7 +295,6 @@ pub fn uniwig_main(
                                             current_chrom_size,
                                             smoothsize,
                                             stepsize,
-                                            wig_shift,
                                         );
 
                                         match output_type {
@@ -322,6 +317,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_start.0,
                                                         smoothsize,
+                                                        1 //must shift wiggle starts and core by 1 since it is 1 based
                                                     ),
                                                     stepsize,
                                                     current_chrom_size,
@@ -390,7 +386,6 @@ pub fn uniwig_main(
                                             current_chrom_size,
                                             smoothsize,
                                             stepsize,
-                                            wig_shift,
                                         );
                                         match output_type {
                                             "file" => {
@@ -411,6 +406,7 @@ pub fn uniwig_main(
                                                         clamped_start_position(
                                                             primary_end.0,
                                                             smoothsize,
+                                                            0,
                                                         ),
                                                     );
                                                 write_to_bed_graph_file(
@@ -432,6 +428,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0, // ends already 1 based, do not shift further
                                                     ),
                                                     stepsize,
                                                     current_chrom_size,
@@ -450,6 +447,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -468,6 +466,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -481,7 +480,6 @@ pub fn uniwig_main(
                                             &chromosome.ends,
                                             current_chrom_size,
                                             stepsize,
-                                            wig_shift,
                                         );
                                         match output_type {
                                             "file" => {
@@ -499,7 +497,10 @@ pub fn uniwig_main(
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
                                                     compress_counts(
                                                         &mut core_results,
-                                                        primary_start.0,
+                                                        clamped_start_position_zero_pos(
+                                                            primary_start.0,
+                                                            0,
+                                                        ),
                                                     );
                                                 write_to_bed_graph_file(
                                                     &count_info,
@@ -517,7 +518,7 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, 0),
+                                                    clamped_start_position(primary_start.0, 0,1), //starts are 1 based must be shifted by 1
                                                     stepsize,
                                                     current_chrom_size,
                                                 );
@@ -531,7 +532,10 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    primary_start.0,
+                                                    clamped_start_position_zero_pos(
+                                                        primary_start.0,
+                                                        0,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[2].clone(),
                                                 );
@@ -546,7 +550,10 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    primary_start.0,
+                                                    clamped_start_position_zero_pos(
+                                                        primary_start.0,
+                                                        0,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[2].clone(),
                                                 );
