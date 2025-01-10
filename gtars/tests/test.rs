@@ -1079,7 +1079,6 @@ mod tests {
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = _path_to_dummy_bed_file;
 
-
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
 
@@ -1112,7 +1111,7 @@ mod tests {
             true,
             1.0,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
 
         Ok(())
     }
