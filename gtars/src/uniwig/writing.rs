@@ -6,7 +6,7 @@ use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 /// Write output to npy files
@@ -165,7 +165,15 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
     //Collect all bedGraph files in the given location/directory
     let mut bed_graph_files = Vec::new();
 
-    for entry in fs::read_dir(location).unwrap() {
+    let mut location_path = location;
+
+    if !location_path.ends_with("/"){
+        let mut temp_path = Path::new(location_path);
+        let parent_location_path = temp_path.parent().unwrap();
+        location_path = parent_location_path.to_str().unwrap();
+    }
+
+    for entry in fs::read_dir( location_path).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
 

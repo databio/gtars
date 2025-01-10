@@ -1069,4 +1069,51 @@ mod tests {
 
         Ok(())
     }
+
+    #[rstest]
+    fn test_process_bed_to_bw(
+        _path_to_dummy_bed_file: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/hg38.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let combinedbedpath = _path_to_dummy_bed_file;
+
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 1;
+        let output_type = "bw";
+        let filetype = "bed";
+        let num_threads = 2;
+        let score = true;
+        let stepsize = 1;
+        let zoom = 1;
+        let vec_count_type = vec!["start", "end", "core"];
+
+        uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        )
+            .expect("Uniwig main failed!");
+
+        Ok(())
+    }
 }
