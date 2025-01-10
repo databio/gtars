@@ -5,7 +5,7 @@ use indicatif::ProgressBar;
 
 use rayon::prelude::*;
 use std::error::Error;
-use std::fs::File;
+use std::fs::{remove_file, File};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 
 use crate::uniwig::counting::{
@@ -191,8 +191,8 @@ pub fn run_uniwig(matches: &ArgMatches) {
 }
 
 /// Ensures that the start position is at a minimum equal to `1`
-fn clamped_start_position(start: i32, smoothsize: i32) -> i32 {
-    std::cmp::max(1, start - smoothsize)
+fn clamped_start_position(start: i32, smoothsize: i32, wig_shift: i32) -> i32 {
+    std::cmp::max(1, start - smoothsize + wig_shift)
 }
 /// Ensure that the start position is at a minimum equal to `0`
 fn clamped_start_position_zero_pos(start: i32, smoothsize: i32) -> i32 {
@@ -222,8 +222,6 @@ pub fn uniwig_main(
         .build()
         .unwrap();
 
-    let mut wig_shift: i32 = 0; // This will be set to 1 when writing to wiggle files, else always set to 0
-
     // Determine Input File Type
     let input_filetype = FileType::from_str(filetype.to_lowercase().as_str());
     // Set up output file names
@@ -237,6 +235,8 @@ pub fn uniwig_main(
     meta_data_file_names[0] = format!("{}{}.{}", bwfileheader, "start", "meta");
     meta_data_file_names[1] = format!("{}{}.{}", bwfileheader, "end", "meta");
     meta_data_file_names[2] = format!("{}{}.{}", bwfileheader, "core", "meta");
+
+    let mut npy_meta_data_map: HashMap<String, HashMap<String, i32>> = HashMap::new();
 
     let chrom_sizes = match read_chromosome_sizes(chromsizerefpath) {
         // original program gets chromosome size from a .sizes file, e.g. chr1 248956422
@@ -252,19 +252,16 @@ pub fn uniwig_main(
     match input_filetype {
         //BED AND NARROWPEAK WORKFLOW
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+            // Pare down chromosomes if necessary
+            let mut final_chromosomes =
+                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
+
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
             let mut output_type = output_type;
             if output_type == "bedgraph" || output_type == "bw" || output_type == "bigwig" {
                 output_type = "bedGraph" // we must create bedgraphs first before creating bigwig files
             }
-            if output_type == "wig" {
-                wig_shift = 1;
-            }
-
-            // Pare down chromosomes if necessary
-            let mut final_chromosomes =
-                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
 
             let bar = ProgressBar::new(final_chromosomes.len() as u64);
 
@@ -299,7 +296,6 @@ pub fn uniwig_main(
                                             current_chrom_size,
                                             smoothsize,
                                             stepsize,
-                                            wig_shift,
                                         );
 
                                         match output_type {
@@ -322,6 +318,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_start.0,
                                                         smoothsize,
+                                                        1, //must shift wiggle starts and core by 1 since it is 1 based
                                                     ),
                                                     stepsize,
                                                     current_chrom_size,
@@ -390,7 +387,6 @@ pub fn uniwig_main(
                                             current_chrom_size,
                                             smoothsize,
                                             stepsize,
-                                            wig_shift,
                                         );
                                         match output_type {
                                             "file" => {
@@ -411,6 +407,7 @@ pub fn uniwig_main(
                                                         clamped_start_position(
                                                             primary_end.0,
                                                             smoothsize,
+                                                            0,
                                                         ),
                                                     );
                                                 write_to_bed_graph_file(
@@ -432,6 +429,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0, // ends already 1 based, do not shift further
                                                     ),
                                                     stepsize,
                                                     current_chrom_size,
@@ -450,6 +448,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0,
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -468,6 +467,7 @@ pub fn uniwig_main(
                                                     clamped_start_position(
                                                         primary_end.0,
                                                         smoothsize,
+                                                        0,
                                                     ),
                                                     stepsize,
                                                     meta_data_file_names[1].clone(),
@@ -481,7 +481,6 @@ pub fn uniwig_main(
                                             &chromosome.ends,
                                             current_chrom_size,
                                             stepsize,
-                                            wig_shift,
                                         );
                                         match output_type {
                                             "file" => {
@@ -499,7 +498,10 @@ pub fn uniwig_main(
                                                 let count_info: (Vec<u32>, Vec<u32>, Vec<u32>) =
                                                     compress_counts(
                                                         &mut core_results,
-                                                        primary_start.0,
+                                                        clamped_start_position_zero_pos(
+                                                            primary_start.0,
+                                                            0,
+                                                        ),
                                                     );
                                                 write_to_bed_graph_file(
                                                     &count_info,
@@ -517,7 +519,7 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, 0),
+                                                    clamped_start_position(primary_start.0, 0, 1), //starts are 1 based must be shifted by 1
                                                     stepsize,
                                                     current_chrom_size,
                                                 );
@@ -531,7 +533,10 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    primary_start.0,
+                                                    clamped_start_position_zero_pos(
+                                                        primary_start.0,
+                                                        0,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[2].clone(),
                                                 );
@@ -546,7 +551,10 @@ pub fn uniwig_main(
                                                     &core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
-                                                    primary_start.0,
+                                                    clamped_start_position_zero_pos(
+                                                        primary_start.0,
+                                                        0,
+                                                    ),
                                                     stepsize,
                                                     meta_data_file_names[2].clone(),
                                                 );
@@ -579,6 +587,63 @@ pub fn uniwig_main(
                             &final_chromosomes,
                         );
                     }
+                }
+                "npy" => {
+                    // populate hashmap for the npy meta data
+                    for chromosome in final_chromosomes.iter() {
+                        let chr_name = chromosome.chrom.clone();
+                        let current_chrom_size =
+                            *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
+                        npy_meta_data_map.insert(
+                            chr_name,
+                            HashMap::from([
+                                ("stepsize".to_string(), stepsize),
+                                ("reported_chrom_size".to_string(), current_chrom_size),
+                            ]),
+                        );
+                    }
+
+                    for location in vec_count_type.iter() {
+                        let temp_meta_file_name =
+                            format!("{}{}.{}", bwfileheader, *location, "meta");
+
+                        if let Ok(file) = File::open(&temp_meta_file_name) {
+                            let reader = BufReader::new(file);
+
+                            for line in reader.lines() {
+                                let line = line.unwrap();
+                                let parts: Vec<&str> = line.split_whitespace().collect();
+                                if parts.len() >= 3 {
+                                    let chrom = parts[1].split('=').nth(1).expect(
+                                        "Processing npy metadata file: Missing chromosome in line",
+                                    );
+                                    let start_str = parts[2].split('=')
+                                        .nth(1)
+                                        .expect("Processing npy metadata file: Missing start position in line");
+                                    let starting_position: i32 = start_str.parse().expect(
+                                        "Processing npy metadata file: Invalid start position",
+                                    );
+
+                                    if let Some(current_chr_data) = npy_meta_data_map.get_mut(chrom)
+                                    {
+                                        current_chr_data.insert(
+                                            (*location.to_string()).parse().unwrap(),
+                                            starting_position,
+                                        );
+                                    }
+                                }
+                            }
+                            // Remove the file after it is used.
+                            let path = std::path::Path::new(&temp_meta_file_name);
+                            let _ = remove_file(path).unwrap();
+                        }
+                    }
+                    //write combined metadata as json
+                    let json_string = serde_json::to_string_pretty(&npy_meta_data_map).unwrap();
+                    let combined_npy_meta_file_path =
+                        format!("{}{}.{}", bwfileheader, "npy_meta", "json");
+                    let mut file = File::create(combined_npy_meta_file_path).unwrap();
+                    file.write_all(json_string.as_bytes()).unwrap();
                 }
                 _ => {}
             }

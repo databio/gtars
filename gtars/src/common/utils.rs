@@ -39,8 +39,8 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
 ///
 /// - file_path: path to the file to read, or '-' for stdin
 ///
-/// # Returns 
-/// 
+/// # Returns
+///
 /// A `BufReader` object for a given file path or stdin.
 pub fn get_dynamic_reader_w_stdin(file_path_str: &str) -> Result<BufReader<Box<dyn Read>>> {
     if file_path_str == "-" {
@@ -50,7 +50,6 @@ pub fn get_dynamic_reader_w_stdin(file_path_str: &str) -> Result<BufReader<Box<d
         return get_dynamic_reader(&file_path);
     }
 }
-
 
 ///
 /// Create a region-to-id hash-map from a list of regions

@@ -486,7 +486,6 @@ mod tests {
                 &chromosome.ends,
                 current_chrom_size,
                 stepsize,
-                0,
             );
         }
     }
@@ -507,7 +506,6 @@ mod tests {
                 current_chrom_size,
                 smooth_size,
                 stepsize,
-                0,
             );
         }
     }
@@ -685,7 +683,7 @@ mod tests {
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
 
-        let smoothsize: i32 = 5;
+        let smoothsize: i32 = 2;
         let output_type = "npy";
         let filetype = "bed";
         let num_threads = 6;

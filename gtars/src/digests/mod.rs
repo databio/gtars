@@ -13,21 +13,21 @@
 //! # Usage
 //!
 //! The `sha512t24u` function can be used to compute the GA4GH sha512t24 checksum of a string.
-//! 
+//!
 //! ```rust
 //! use gtars::digests::sha512t24u;
 //!
 //! let digest = sha512t24u("hello world");
 //! ```
-use std::io::prelude::{Read, Write};
-use std::io;
 use std::fs::File;
+use std::io;
+use std::io::prelude::{Read, Write};
 use std::path::Path;
 
 use anyhow::Result;
 use md5::Md5;
+use seq_io::fasta::{Reader, Record, RefRecord};
 use sha2::{Digest, Sha512};
-use seq_io::fasta::{Reader, RefRecord, Record};
 
 use crate::common::utils::get_dynamic_reader;
 
@@ -75,7 +75,6 @@ pub fn md5(string: &str) -> String {
     format!("{:x}", result)
 }
 
-
 /// Processes a FASTA file to compute the digests of each sequence in the file.
 ///
 /// This function reads a FASTA file, computes the SHA-512 and MD5 digests for each sequence,
@@ -103,7 +102,8 @@ pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>> {
     let file_reader = get_dynamic_reader(&path)?;
     let mut fasta_reader = Reader::new(file_reader);
     let mut results = Vec::new();
-    while let Some(record) = fasta_reader.next() {  // returns a RefRecord object
+    while let Some(record) = fasta_reader.next() {
+        // returns a RefRecord object
         let record = record.expect("Error found when retrieving next record.");
         let id = record.id().expect("No ID found for the FASTA record");
         let mut sha512_hasher = Sha512::new();
@@ -123,7 +123,7 @@ pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>> {
             id: id.to_string(),
             length: length,
             sha512t24u: sha512,
-            md5: md5
+            md5: md5,
         });
     }
     Ok(results)
@@ -169,7 +169,7 @@ mod tests {
         assert_eq!(results[0].sha512t24u, "iYtREV555dUFKg2_agSJW6suquUyPpMw");
         assert_eq!(results[0].md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
     }
-    
+
     #[test]
     fn bogus_fasta_file() {
         let result = digest_fasta("tests/data/bogus.fa");
