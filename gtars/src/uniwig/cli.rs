@@ -48,6 +48,15 @@ pub fn create_uniwig_cli() -> Command {
                 .required(true),
         )
         .arg(
+            Arg::new("bamscale")
+                .long("bamscale")
+                .short('e')
+                .default_value("1.0")
+                .value_parser(clap::value_parser!(f32))
+                .help("Integer for scaling bam read values, default is 1")
+                .required(false),
+        )
+        .arg(
             Arg::new("fileheader")
                 .long("fileheader")
                 .short('l')
@@ -66,7 +75,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("counttype")
                 .short('u')
                 .default_value("all")
-                .help("Select to only output start, end, or core. Defaults to all.")
+                .help("Select to only output start, end, or core. Select `shift` for bam workflows. Defaults to all.")
                 .required(false),
         )
         .arg(
@@ -86,10 +95,17 @@ pub fn create_uniwig_cli() -> Command {
                 .action(ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("no-bamshift")
+                .long("no-bamshift")
+                .short('a')
+                .help("Set bam shift to False, i.e. uniwig will count raw reads without considering read direction.")
+                .action(ArgAction::SetFalse),
+        )
+        .arg(
             Arg::new("zoom")
                 .long("zoom")
                 .short('z')
-                .default_value("5")
+                .default_value("1")
                 .value_parser(clap::value_parser!(i32))
                 .help("Number of zoom levels (for bw file output only")
                 .required(false),

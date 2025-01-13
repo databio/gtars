@@ -6,16 +6,17 @@ use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use rust_lapper::{Interval, Lapper};
 
 use crate::common::models::region::Region;
 use crate::common::models::universe::Universe;
 
 ///
-/// Function to return a reader for either a gzip'd or non-gzip'd file.
+/// Get a reader for either a gzip'd or non-gzip'd file.
 ///
 /// # Arguments
+///
 /// - path: path to the file to read
 ///
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
@@ -23,13 +24,31 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let file = File::open(path).with_context(|| "Failed to open bed file.")?;
 
     let file: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
+        true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
     };
 
     let reader = BufReader::new(file);
 
     Ok(reader)
+}
+
+/// Get a reader for either a gzipped, non-gzipped file, or stdin
+///
+/// # Arguments
+///
+/// - file_path: path to the file to read, or '-' for stdin
+///
+/// # Returns
+///
+/// A `BufReader` object for a given file path or stdin.
+pub fn get_dynamic_reader_w_stdin(file_path_str: &str) -> Result<BufReader<Box<dyn Read>>> {
+    if file_path_str == "-" {
+        Ok(BufReader::new(Box::new(std::io::stdin()) as Box<dyn Read>))
+    } else {
+        let file_path = Path::new(file_path_str);
+        return get_dynamic_reader(&file_path);
+    }
 }
 
 ///

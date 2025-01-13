@@ -19,6 +19,8 @@ Searches an IGD database for region overlaps with an input BED file
 }
 \examples{
 \dontrun{
+# Search database with default name
+r_igd_search("path/to/database", "path/to/query/file")
 }
 
 }

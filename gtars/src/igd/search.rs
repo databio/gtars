@@ -143,8 +143,10 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Ve
                         "{}\t{}\t{}\t{}",
                         i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName
                     );
-                    let format_string = format!("{}\t{}\t{}\t{}",
-                                               i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName);
+                    let format_string = format!(
+                        "{}\t{}\t{}\t{}",
+                        i, IGD.file_info[i].nr, hit, IGD.file_info[i].fileName
+                    );
                     final_string_vec.push(format_string);
                 }
                 total += hit;
@@ -281,11 +283,7 @@ fn get_overlaps(
     }
 
     // Min between n2 and mTile
-    n2 = if n2 < mTile {
-        n2
-    } else {
-        mTile
-    };
+    n2 = if n2 < mTile { n2 } else { mTile };
 
     tmpi = IGD.nCnt[ichr as usize][n1 as usize];
     tmpi1 = tmpi - 1;
@@ -296,89 +294,89 @@ fn get_overlaps(
     // );
 
     if tmpi > 0 {
-        if n1 != *preIdx || ichr != *preChr {
-            // println!(
-            //     "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
-            //     n1, preIdx, ichr, preChr
-            // );
+        // println!(
+        //     "n1 != *preIdx || ichr!= *preChr {} vs {}  {} vs {} \n",
+        //     n1, preIdx, ichr, preChr
+        // );
 
-            //println!("Seek start here: {}",IGD.tIdx[ichr as usize][n1 as usize]);
+        //println!("Seek start here: {}",IGD.tIdx[ichr as usize][n1 as usize]);
+        //let ichr = 1;
+        db_reader
+            .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
+            .unwrap();
 
-            db_reader
-                .seek(SeekFrom::Start(IGD.tIdx[ichr as usize][n1 as usize] as u64))
-                .unwrap();
+        let mut gData: Vec<gdata_t> = Vec::new();
+        for j in 0..tmpi {
+            gData.push(gdata_t::default())
+        }
+        //let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
 
-            let mut gData: Vec<gdata_t> = Vec::new();
-            for j in 0..tmpi {
-                gData.push(gdata_t::default())
-            }
-            //let mut gData: Vec<gdata_t> = Vec::with_capacity(tmpi as usize);
+        for i in 0..tmpi {
+            let mut buf = [0u8; 16];
 
-            for i in 0..tmpi {
-                let mut buf = [0u8; 16];
+            let n = db_reader.read(&mut buf).unwrap();
 
-                let n = db_reader.read(&mut buf).unwrap();
-
-                if n == 0 {
-                    //println!("Breaking loop while reading tempfile");
-                    break;
-                } else if n != 16 {
-                    //panic!("Cannot read temp file.");
-                    break;
-                }
-
-                let mut rdr = &buf[..] as &[u8];
-                let idx = rdr.read_i32::<LittleEndian>().unwrap();
-                let start = rdr.read_i32::<LittleEndian>().unwrap();
-                let end = rdr.read_i32::<LittleEndian>().unwrap();
-                let value = rdr.read_i32::<LittleEndian>().unwrap();
-
-                //println!("Looping through g_datat in temp files\n");
-                // println!("idx: {}  start: {} end: {}\n", idx,start,end);
-
-                gData[i as usize] = gdata_t {
-                    idx: idx,
-                    start,
-                    end,
-                    value,
-                };
-
-                *preIdx = n1;
-                *preChr = ichr;
+            if n == 0 {
+                //println!("Breaking loop while reading tempfile");
+                break;
+            } else if n != 16 {
+                //panic!("Cannot read temp file.");
+                break;
             }
 
-            // check this code block. original code has outside this first check but that would potentially cause access to wrong
-            // object in memory if it was not de-allocated?
+            let mut rdr = &buf[..] as &[u8];
+            let idx = rdr.read_i32::<LittleEndian>().unwrap();
+            let start = rdr.read_i32::<LittleEndian>().unwrap();
+            let end = rdr.read_i32::<LittleEndian>().unwrap();
+            let value = rdr.read_i32::<LittleEndian>().unwrap();
 
-            if query_end > gData[0].start {
-                // sorted by start
-                //println!("query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
-                // find the 1st rs<qe
-                tL = 0;
-                tR = tmpi1;
+            //println!("for tmpi>0 where tmpi = {}", tmpi);
+            //println!("Looping through g_datat in temp files\n");
+            //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
-                while tL < tR - 1 {
-                    tM = (tL + tR) / 2; //result: tR=tL+1, tL.s<qe
-                                        //println!("What is tM? {}", tM);
-                    if gData[tM as usize].start < query_end {
-                        tL = tM; //right side
-                    } else {
-                        tR = tM; //left side
-                    }
+            gData[i as usize] = gdata_t {
+                idx: idx,
+                start,
+                end,
+                value,
+            };
+
+            *preIdx = n1;
+            *preChr = ichr;
+        }
+
+        // check this code block. original code has outside this first check but that would potentially cause access to wrong
+        // object in memory if it was not de-allocated?
+
+        if query_end > gData[0].start {
+            // sorted by start
+            //println!("n1 != *preIdx || ichr != *preChr query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
+            // find the 1st rs<qe
+            tL = 0;
+            tR = tmpi1;
+
+            while tL < tR - 1 {
+                tM = (tL + tR) / 2; //result: tR=tL+1, tL.s<qe
+                                    //println!("What is tM? {}", tM);
+                if gData[tM as usize].start < query_end {
+                    tL = tM; //right side
+                } else {
+                    tR = tM; //left side
                 }
-                if gData[tR as usize].start < query_end {
-                    tL = tR;
-                }
-                //--------------------------
-                for i in (0..=tL).rev() {
-                    // count down from tL (inclusive to tL)
-                    //println!("iterate over i: {} ", i);
-                    //println!("gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
-                    if gData[i as usize].end > query_start {
-                        //println!(" > gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
-                        hits[gData[i as usize].idx as usize] =
-                            hits[gData[i as usize].idx as usize] + 1;
-                    }
+            }
+            if gData[tR as usize].start < query_end {
+                tL = tR;
+            }
+            //--------------------------
+            for i in (0..=tL).rev() {
+                //println!("Countdownfrom TL");
+                // count down from tL (inclusive to tL)
+                //println!("iterate over i: {} from tL {}", i, tL);
+                //println!("gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
+                if gData[i as usize].end > query_start {
+                    //println!("ADDING TO HITS");
+                    //println!(" > gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
+                    hits[gData[i as usize].idx as usize] = hits[gData[i as usize].idx as usize] + 1;
                 }
             }
         }
@@ -424,7 +422,7 @@ fn get_overlaps(
                             let value = rdr.read_i32::<LittleEndian>().unwrap();
 
                             //println!("Looping through g_datat in temp files\n");
-                            //println!("idx: {}  start: {} end: {}\n", idx,start,end);
+                            // println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                             gData.push(gdata_t {
                                 idx: idx,
@@ -439,6 +437,7 @@ fn get_overlaps(
                     }
 
                     if query_end > gData[0].start {
+                        //println!("n2>n1 query_end > gData[0].start:  {} > {}", query_end,gData[0].start);
                         tS = 0;
 
                         while tS < tmpi && gData[tS as usize].start < bd {
@@ -478,6 +477,7 @@ fn get_overlaps(
             }
         }
     }
+    //println!("here are the hits {:?}", hits);
     return nols; //TODO this is from the original code but its not actually being used for anything. hits vec IS the main thing.
 }
 
@@ -567,7 +567,7 @@ pub fn get_igd_info(
     reader.read_exact(&mut buffer)?;
     let nCtg = i32::from_le_bytes(buffer);
 
-    //println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp,gType,nCtg);
+    println!("Found:\n nbp:{} gtype: {} nCtg: {}", nbp, gType, nCtg);
 
     igd.nbp = nbp;
     igd.gType = gType;

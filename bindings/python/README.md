@@ -1,18 +1,23 @@
 # gtars
-This is a python wrapper around the `gtars` crate. It provides an easy interface for using `gtars` in python. It is currently in early development, and as such, it does not have a lot of functionality yet, but new tools are being worked on right now.
 
-## Installation
-You can get `gtars` from PyPI:
-```bash
-pip install gtars
+This is a Python package that wraps the `gtars` crate so you can call gtars code from Python.
+
+Documentation for Python bindings is hosted at: https://docs.bedbase.org/gtars/
+
+## Brief instructions
+
+To install the development version, you'll have to build it locally. Build Python bindings like this:
+
+```console
+cd bindings/python
+maturin build --interpreter 3.11  --release
 ```
 
-## Usage
-Import the package, and use the tools:
-```python
-import gtars as gt
+Then install the local wheel that was just built:
 
-gt.prune_universe(...)
+```console
+gtars_version=`grep '^version =' Cargo.toml | cut -d '"' -f 2`
+python_version=$(python --version | awk '{print $2}' | cut -d '.' -f1-2 | tr -d '.')
+wheel_path=$(find target/wheels/gtars-${gtars_version}-cp${python_version}-cp${python_version}-*.whl)
+pip install --force-reinstall ${wheel_path}
 ```
-## Developer docs
-Write the develop docs here...

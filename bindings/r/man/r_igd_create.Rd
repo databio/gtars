@@ -28,7 +28,7 @@ Creates an IGD (Indexed Genomic Data) database from a collection of BED files.
 \examples{
 \dontrun{
 # Create database with default name
-igd_create("path/to/output", "path/to/bed/files")
+r_igd_create("path/to/output", "path/to/bed/files")
 }
 
 }

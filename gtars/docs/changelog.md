@@ -4,6 +4,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] 
+- add position shift workflow for bam to bw (was previously added for bam to bed)
+- add scaling argument for bam to bw workflow [#53](https://github.com/databio/gtars/issues/53)
+- fix accumulation issue for bam workflow [#56](https://github.com/databio/gtars/issues/56)
+- fix wiggle file (core) beginning at 0 [#43](https://github.com/databio/gtars/issues/43)
+- fix npy file (end) using start instead of end [#61](https://github.com/databio/gtars/issues/61)
+- force zoom to 1 for bed/narrowPeak to bw [#34](https://github.com/databio/gtars/issues/34)
+- fix IGD overlap issue [#45](https://github.com/databio/gtars/issues/45)
+- add ga4gh refget digest functionality [#58](https://github.com/databio/gtars/issues/58)
+- fix wig and npy inconsistency [#64](https://github.com/databio/gtars/issues/64)
+- fix narrowPeak to bw zoom  [#34](https://github.com/databio/gtars/issues/34)
+- fix bed to bw fileheader consistency issue  [#52](https://github.com/databio/gtars/issues/52)
+- change npy metadata file structure [#65](https://github.com/databio/gtars/issues/65)
+
+## [0.1.2]
+- add position shift workflow for `bam` to `bw` (was previously added for `bam` to `bed`)
+- add scaling argument for `bam` to `bw` workflow [#53](https://github.com/databio/gtars/issues/53)
+- fix accumulation issue for `bam` workflow [#56](https://github.com/databio/gtars/issues/56)
+- fix wiggle file (core) beginning at 0 [#43](https://github.com/databio/gtars/issues/43)
+- fix npy file (end) using start instead of end [#61](https://github.com/databio/gtars/issues/61)
+- force zoom to 1 for bed/narrowPeak to bw [#34](https://github.com/databio/gtars/issues/34)
+- fix IGD overlap issue [#45](https://github.com/databio/gtars/issues/45)
+- add ga4gh refget digest functionality [#58](https://github.com/databio/gtars/pull/58)
+
 ## [0.1.1]
 - hot fix for broken python bindings; remove IGD from the python bindings for now
 

@@ -1,6 +1,6 @@
 [package]
 name = "gtars"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2021"
 description = "Performance-critical tools to manipulate, analyze, and process genomic interval data. Primarily focused on building tools for geniml - our genomic machine learning python package."
 license = "MIT"
@@ -28,10 +28,14 @@ bigtools = "0.5.4"
 tokio = "1.40.0"
 os_pipe = "1.2.1"
 glob = "0.3.1"
-
+base64-url = "2.0.0"
+sha2 = "0.10.7"
+md-5 = "0.10.5"
+seq_io = "0.3.2"
+serde_json = "1.0.135"
 
 
 [dev-dependencies]
-rstest = "0.18.2"
+rstest = "0.23.0"
 tempfile = "3.8.1"
 pretty_assertions = "1.4.0"

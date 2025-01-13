@@ -18,7 +18,7 @@ NULL
 #' @examples
 #' \dontrun{
 #' # Create database with default name
-#' igd_create("path/to/output", "path/to/bed/files")
+#' r_igd_create("path/to/output", "path/to/bed/files")
 #' }
 #' 
 #' @export
@@ -49,6 +49,8 @@ r_igd_create <- function(output_path, filelist, db_name = "igd_database") {
 #' 
 #' @examples
 #' \dontrun{
+#' # Search database with default name
+#' r_igd_search("path/to/database", "path/to/query/file")
 #' }
 #' 
 #' @export

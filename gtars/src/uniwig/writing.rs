@@ -6,7 +6,7 @@ use ndarray::Array;
 use ndarray_npy::write_npy;
 use std::fs::{create_dir_all, remove_file, File, OpenOptions};
 use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 /// Write output to npy files
@@ -96,6 +96,7 @@ pub fn write_to_wig_file(
     chromname: String,
     start_position: i32,
     stepsize: i32,
+    chrom_size: i32,
 ) {
     let path = std::path::Path::new(&filename).parent().unwrap();
     let _ = create_dir_all(path);
@@ -117,7 +118,8 @@ pub fn write_to_wig_file(
 
     let mut buf = BufWriter::new(file);
 
-    for count in counts.iter() {
+    for count in counts.iter().take(chrom_size as usize) {
+        // must set upper bound for wiggles based on reported chromsize, this is for downstream tool interoperability
         writeln!(&mut buf, "{}", count).unwrap();
     }
     buf.flush().unwrap();
@@ -163,7 +165,15 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
     //Collect all bedGraph files in the given location/directory
     let mut bed_graph_files = Vec::new();
 
-    for entry in fs::read_dir(location).unwrap() {
+    let mut location_path = location;
+
+    if !location_path.ends_with("/") {
+        let mut temp_path = Path::new(location_path);
+        let parent_location_path = temp_path.parent().unwrap();
+        location_path = parent_location_path.to_str().unwrap();
+    }
+
+    for entry in fs::read_dir(location_path).unwrap() {
         let entry = entry.unwrap();
         let path = entry.path();
 
