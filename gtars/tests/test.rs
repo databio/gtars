@@ -1124,7 +1124,7 @@ mod tests {
 
 
     #[rstest]
-    fn read_bw(
+    fn test_read_bw_and_get_max(
         path_to_bw_file: &str,
     ) {
         let bw_path = path_to_bw_file;

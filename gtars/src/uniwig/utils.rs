@@ -7,8 +7,16 @@ use crate::uniwig::{Chromosome, FileType};
 
 /// Read in bigwig file and return as object.
 pub fn read_bw_file(path_to_bw: &str) -> BigWigRead<ReopenableFile> {
-    let bigwig = BigWigRead::open_file(path_to_bw).unwrap();
-    bigwig
+    let bigwig = BigWigRead::open_file(path_to_bw);
+
+    match bigwig {
+        Ok(bigwig) => {
+            bigwig
+        }
+        Err(err) => {
+            panic!("Error reading BigWig file: {}", err);
+        }
+    }
 
     // Leaving here for future work if we need to return more complicated infos, e.g. summary or header data
     // let bw_info = bigwig.info();
@@ -24,7 +32,6 @@ pub fn read_bw_file(path_to_bw: &str) -> BigWigRead<ReopenableFile> {
     //println!("max: {}", max);
     //let mean = bw_values.
 
-
 }
 
 /// Get maximum value across an interval over a specific chromosome within a bigwig file
@@ -36,7 +43,7 @@ pub fn get_max_val_chr_bw(mut bigwig: BigWigRead<ReopenableFile>, chr_name: &str
         .reduce(f32::max)
         .unwrap();
 
-    max
+    max // should this return something else if it errors? So that downstream python can return a None?
 }
 
 
