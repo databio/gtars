@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::path::PathBuf;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyIterator};
@@ -51,6 +52,28 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
     let regions = regions.into_iter().collect::<Result<Vec<_>>>()?;
 
     Ok(RegionSet::from(regions))
+}
+
+#[pyclass(name = "Coverage", module="gtars.utils")]
+#[derive(Clone, Debug)]
+pub struct PyCoverage {
+    bw_file: PathBuf
+}
+
+#[pymethods]
+impl PyCoverage {
+    #[new]
+    pub fn new(path: String) -> Result<Self> {
+        let bw_file = PathBuf::from(&path);
+
+        Ok(PyCoverage {
+            bw_file
+        })
+    }
+
+    pub fn stats(&self, chr: String, start: usize, end: usize, type_: String) -> Result<f64> {
+        Ok(4.0)
+    }
 }
 
 #[pyfunction]
