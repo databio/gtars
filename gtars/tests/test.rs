@@ -1129,9 +1129,9 @@ mod tests {
     ) {
         let bw_path = path_to_bw_file;
 
-        let bw_info = read_bw_file(bw_path);
+        let bw_info = read_bw_file(bw_path).unwrap();
 
-        let max =  get_max_val_chr_bw(bw_info, "chr1",0,29);
+        let max =  get_max_val_chr_bw(bw_info, "chr1",0,29).unwrap();
 
         assert_eq!(max, 4.0);
     }
