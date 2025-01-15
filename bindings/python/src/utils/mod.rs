@@ -1,11 +1,16 @@
 use std::path::Path;
 use std::path::PathBuf;
 
+use pyo3::exceptions::PyNotImplementedError;
+use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyIterator};
 
 use anyhow::Result;
 use gtars::common::models::{Region, RegionSet};
+use gtars::uniwig::utils::{
+    read_bw_file, get_max_val_chr_bw
+};
 
 // this is for internal use only
 pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionSet> {
@@ -57,23 +62,49 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
 #[pyclass(name = "Coverage", module="gtars.utils")]
 #[derive(Clone, Debug)]
 pub struct PyCoverage {
-    bw_file: PathBuf
+    bw_file: String
 }
 
 #[pymethods]
 impl PyCoverage {
     #[new]
     pub fn new(path: String) -> Result<Self> {
-        let bw_file = PathBuf::from(&path);
-
         Ok(PyCoverage {
-            bw_file
+            bw_file: path
         })
     }
 
-    pub fn stats(&self, chr: String, start: usize, end: usize, type_: String) -> Result<f64> {
-        Ok(4.0)
+    pub fn stats(&self, chr: String, start: usize, end: usize, stat_type: String) -> Result<f64> {
+        let bigwig = read_bw_file(&self.bw_file)?;
+        match stat_type.as_str() {
+            "max" => {
+                if let Some(val) = get_max_val_chr_bw(bigwig, &chr, start as u32, end as u32) {
+                    Ok(val as f64)
+                } else {
+                    Err(PyValueError::new_err("Could not get value for {chr}:{start}-{end}. Please check your chrom name and coordinates.").into())
+                }
+            },
+            _ => {
+                Err(PyNotImplementedError::new_err("Only max is supported at this time.").into())
+            }
+        }
     }
+
+    pub fn __repr__(&self) -> String {
+        format!(
+            "Coverage({})",
+            self.bw_file
+        )
+    }
+
+    pub fn __str__(&self) -> String {
+        format!(
+            "Coverage({})",
+            self.bw_file
+        )
+    }
+
+
 }
 
 #[pyfunction]
