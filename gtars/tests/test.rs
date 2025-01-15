@@ -15,6 +15,11 @@ fn path_to_bed_file() -> &'static str {
 }
 
 #[fixture]
+fn path_to_bw_file() -> &'static str {
+    "tests/data/test_all_core.bw"
+}
+
+#[fixture]
 fn path_to_sorted_small_bed_file() -> &'static str {
     "tests/data/test_sorted_small.bed"
 }
@@ -87,6 +92,7 @@ mod tests {
     };
 
     use gtars::uniwig::writing::write_bw_files;
+    use gtars::uniwig::utils::{get_max_val_chr_bw, read_bw_file};
 
     use anyhow::Context;
     use byteorder::{LittleEndian, ReadBytesExt};
@@ -1114,5 +1120,19 @@ mod tests {
         .expect("Uniwig main failed!");
 
         Ok(())
+    }
+
+
+    #[rstest]
+    fn read_bw(
+        path_to_bw_file: &str,
+    ) {
+        let bw_path = path_to_bw_file;
+
+        let bw_info = read_bw_file(bw_path);
+
+        let max =  get_max_val_chr_bw(bw_info, "chr1",0,29);
+
+        assert_eq!(max, 4.0);
     }
 }

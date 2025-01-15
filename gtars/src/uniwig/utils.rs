@@ -1,5 +1,44 @@
+use bigtools::{BigWigRead, BigWigReadOpenError};
+use bigtools::utils::reopen::ReopenableFile;
 use crate::uniwig::reading::{read_bed_vec, read_narrow_peak_vec};
 use crate::uniwig::{Chromosome, FileType};
+
+
+
+/// Read in bigwig file and return as object.
+pub fn read_bw_file(path_to_bw: &str) -> BigWigRead<ReopenableFile> {
+    let bigwig = BigWigRead::open_file(path_to_bw).unwrap();
+    bigwig
+
+    // Leaving here for future work if we need to return more complicated infos, e.g. summary or header data
+    // let bw_info = bigwig.info();
+    // let bw_chroms = bigwig.chroms();
+    // for chrom in bigwig.info().chrom_info.iter() {
+    //     println!("\t{} {}", chrom.name, chrom.length,);
+    // }
+    //let bw_values = bigwig.values("chr1",0,29).unwrap();
+    // let max = bw_values.into_iter()
+    //     .reduce(f32::max)
+    //     .unwrap();
+    //println!("bw_files: {:?}", bw_values);
+    //println!("max: {}", max);
+    //let mean = bw_values.
+
+
+}
+
+/// Get maximum value across an interval over a specific chromosome within a bigwig file
+pub fn get_max_val_chr_bw(mut bigwig: BigWigRead<ReopenableFile>, chr_name: &str, start: u32, end: u32) -> f32 {
+
+    let bw_values = bigwig.values(chr_name,start,end).unwrap();
+
+    let max = bw_values.into_iter()
+        .reduce(f32::max)
+        .unwrap();
+
+    max
+}
+
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
