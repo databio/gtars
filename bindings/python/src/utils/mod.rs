@@ -103,8 +103,13 @@ impl PyCoverage {
             self.bw_file
         )
     }
+}
 
-
+#[pyfunction]
+pub fn read_big_wig_to_coverage(filename: &str) -> Result<PyCoverage> {
+    Ok(PyCoverage {
+        bw_file: filename.to_string()
+    })
 }
 
 #[pyfunction]
@@ -131,5 +136,7 @@ pub fn utils(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(write_tokens_to_gtok))?;
     m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok))?;
     m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok_as_strings))?;
+    m.add_wrapped(wrap_pyfunction!(read_big_wig_to_coverage))?;
+    m.add_class::<PyCoverage>()?;
     Ok(())
 }
