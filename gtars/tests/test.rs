@@ -1044,7 +1044,8 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
         let bwfileheader = bwfileheader_path.as_str();
 
         let smoothsize: i32 = 1;
