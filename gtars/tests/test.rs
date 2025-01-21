@@ -443,10 +443,10 @@ mod tests {
 
     #[rstest]
     fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
-        let result1 = read_bed_vec(path_to_bed_file);
+        let result1 = read_bed_vec(path_to_bed_file, false);
         assert_eq!(result1.len(), 20);
 
-        let result2 = read_bed_vec(path_to_bed_file_gzipped);
+        let result2 = read_bed_vec(path_to_bed_file_gzipped, false);
         assert_eq!(result2.len(), 20);
     }
 
@@ -512,7 +512,7 @@ mod tests {
 
     #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
-        let chromosomes: Vec<Chromosome> = read_bed_vec(path_to_sorted_small_bed_file);
+        let chromosomes: Vec<Chromosome> = read_bed_vec(path_to_sorted_small_bed_file, false);
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
@@ -567,6 +567,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
 
@@ -613,6 +614,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
 
@@ -660,6 +662,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
 
@@ -707,6 +710,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -773,6 +777,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         );
 
         assert!(result.is_ok());
@@ -841,6 +846,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         );
 
         assert!(result.is_ok());
@@ -955,6 +961,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         );
 
         assert!(result.is_ok());
@@ -1064,6 +1071,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
 
@@ -1110,6 +1118,7 @@ mod tests {
             false,
             true,
             1.0,
+            false
         )
         .expect("Uniwig main failed!");
 

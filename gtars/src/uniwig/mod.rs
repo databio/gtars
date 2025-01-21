@@ -157,6 +157,9 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .expect("requires int value");
 
     let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
+
+    let skip = matches.get_one::<bool>("skip-sort").unwrap_or_else(|| &false);
+
     let bam_shift = matches
         .get_one::<bool>("no-bamshift")
         .unwrap_or_else(|| &true);
@@ -186,6 +189,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *debug,
         *bam_shift,
         *bam_scale,
+        *skip,
     )
     .expect("Uniwig failed.");
 }
@@ -215,6 +219,7 @@ pub fn uniwig_main(
     debug: bool,
     bam_shift: bool,
     bam_scale: f32,
+    skip_sort: bool,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -254,7 +259,7 @@ pub fn uniwig_main(
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
             // Pare down chromosomes if necessary
             let mut final_chromosomes =
-                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
+                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score, skip_sort);
 
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion

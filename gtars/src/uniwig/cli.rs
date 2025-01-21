@@ -95,6 +95,13 @@ pub fn create_uniwig_cli() -> Command {
                 .action(ArgAction::SetTrue),
         )
         .arg(
+            Arg::new("skip-sort")
+                .long("skip-sort")
+                .short('k')
+                .help("Skip sorting starts and ends during reading of bed files.")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
             Arg::new("no-bamshift")
                 .long("no-bamshift")
                 .short('a')

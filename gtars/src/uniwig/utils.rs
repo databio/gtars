@@ -52,18 +52,19 @@ pub fn get_final_chromosomes(
     filepath: &str,
     chrom_sizes: &std::collections::HashMap<String, u32>,
     score: bool,
+    skip_sort: bool,
 ) -> Vec<Chromosome> {
     let chromosomes: Vec<Chromosome> = match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath),
+        Ok(FileType::BED) => read_bed_vec(filepath, skip_sort),
         Ok(FileType::NARROWPEAK) => {
             if score {
                 println!("FileType is NarrowPeak and Score = True...Counting based on Score");
                 read_narrow_peak_vec(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
             } else {
-                read_bed_vec(filepath)
+                read_bed_vec(filepath, skip_sort)
             }
         }
-        _ => read_bed_vec(filepath),
+        _ => read_bed_vec(filepath, skip_sort),
     };
 
     let num_chromosomes = chromosomes.len();

@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// Reads combined bed file from a given path.
 /// Returns Vec of Chromosome struct
-pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+pub fn read_bed_vec(combinedbedpath: &str, skip_sort: bool,) -> Vec<Chromosome> {
     let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
 
@@ -59,8 +59,10 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         if String::from(parsed_chr.trim()) != chrom {
             // If the parsed chrom is not the same as the current, sort, and then push to vector
             // then reset chromosome struct using the newest parsed_chr
-            chromosome.starts.sort_unstable();
-            chromosome.ends.sort_unstable();
+            if !skip_sort {
+                chromosome.starts.sort_unstable();
+                chromosome.ends.sort_unstable();
+            }
 
             chromosome_vec.push(chromosome.clone());
 
@@ -75,9 +77,11 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         chromosome.ends.push((parsed_end, default_score));
     }
 
-    // Is this final sort and push actually necessary?
-    chromosome.starts.sort_unstable();
-    chromosome.ends.sort_unstable();
+    if !skip_sort {
+        // Is this final sort and push actually necessary?
+        chromosome.starts.sort_unstable();
+        chromosome.ends.sort_unstable();
+    }
     chromosome_vec.push(chromosome.clone());
 
     println!("Reading Bed file complete.");
