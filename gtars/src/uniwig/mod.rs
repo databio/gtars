@@ -728,6 +728,7 @@ fn process_bam(
     // pre-process chromosomes that are actually in the bam file BEFORE spawning threads.
     for chromosome in list_of_valid_chromosomes.iter() {
         let region = chromosome.parse().unwrap();
+        //TODO if no .bai file exists, the below line will fail and won't properly tell you WHY it failed, issue #57
         let mut reader = bam::io::indexed_reader::Builder::default()
             .build_from_path(filepath)
             .unwrap();
