@@ -906,26 +906,26 @@ fn process_bam(
                         Ok(mut bw) =>
                             {
                                 //let chroms = bw.chroms();
-                                let summary = bw.get_summary()?;
+                                // let summary = bw.get_summary()?;
+                                //
+                                // println!("max_val: {}", summary.max_val);
+                                // //println!("chrom length {}", chroms[0].length);
+                                // // let first_interval = bw
+                                // //     .get_interval("chr1", 123556200, 123600000)?
+                                // //     .next()
+                                // //     .unwrap()
+                                // //     .unwrap();
+                                //
+                                // let mut intervals =bw.get_interval("chr1", 123556200, 123600000)?;
+                                //
+                                //
+                                // //for interval in
+                                // while let Some(Ok(value)) = intervals.next() {
+                                //
+                                //     println!("Here are starts ends values {}  {}  {}", value.start, value.end, value.value);
+                                // }
 
-                                println!("max_val: {}", summary.max_val);
-                                //println!("chrom length {}", chroms[0].length);
-                                // let first_interval = bw
-                                //     .get_interval("chr1", 123556200, 123600000)?
-                                //     .next()
-                                //     .unwrap()
-                                //     .unwrap();
-
-                                let mut intervals =bw.get_interval("chr1", 123556200, 123600000)?;
-
-
-                                //for interval in
-                                while let Some(Ok(value)) = intervals.next() {
-
-                                    println!("Here are starts ends values {}  {}  {}", value.start, value.end, value.value);
-                                }
-
-                            //    bigwigs.push(bw)
+                            bigwigs.push(bw)
                             }
                         ,
                         Err(e) => {
@@ -971,25 +971,25 @@ fn process_bam(
                 // }
 
 
-                // let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
-                // for item in iter{
-                //
-                //     // let value = item.unwrap();
-                //     // let value2 = value.0;
-                //     // let value3 = value.1;
-                //     // let value4 = value.2;
-                //     // println!("Here is value2: {}", value2);
-                //     // println!("Here is value3: {}", value3);
-                //     // let mut x = value4.iter;
-                //     // let y = x.peek().unwrap().clone();
-                //     // let z = y.unwrap().start.clone();
-                //
-                //     let mut merging_values = item.unwrap().2;
-                //     if let Some(last_value) = merging_values.get_last_value() {
-                //         println!("here is last value: {:?}",last_value);
-                //     }
-                //
-                // }
+                let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
+                for item in iter{
+
+                    // let value = item.unwrap();
+                    // let value2 = value.0;
+                    // let value3 = value.1;
+                    // let value4 = value.2;
+                    // println!("Here is value2: {}", value2);
+                    // println!("Here is value3: {}", value3);
+                    // let mut x = value4.iter;
+                    // let y = x.peek().unwrap().clone();
+                    // let z = y.unwrap().start.clone();
+
+                    let mut merging_values = item.unwrap().2;
+                    if let Some(last_value) = merging_values.get_last_value() {
+                        println!("here is last value: {:?}",last_value);
+                    }
+
+                }
 
 
                 // let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
@@ -1322,6 +1322,7 @@ pub fn get_merged_vals(
             Ok((chrom, size, mergingvalues))
         } else {
             println!("else statement for bws.len() > max_bw_fds");
+            println!("WHat is size here: {}",size);
             let iters: Vec<_> = bws
                 .into_iter()
                 .map(|b| {
@@ -1330,6 +1331,7 @@ pub fn get_merged_vals(
                     b.get_interval_move(&chrom, 1, size).map(|i| i.map(|r| r.map_err(|e| MergingValuesError::BBIReadError(e))))
                 })
                 .collect::<Result<Vec<_>, _>>()?;
+
             let mergingvalues = MergingValues::new(iters, threshold, adjust, clip);
 
             println!("merging value else statement");
