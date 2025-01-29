@@ -1246,6 +1246,7 @@ pub fn variable_shifted_bam_to_bw(
     write_fd: Arc<Mutex<PipeWriter>>,
     bam_scale: f32,
 ) -> Result<(), BAMRecordError> {
+    //println!("VARIABLE SHIFTED variable_shifted_bam_to_bw");
     let mut write_lock = write_fd.lock().unwrap(); // Acquire lock for writing
     let mut writer = BufWriter::new(&mut *write_lock);
 
@@ -1375,7 +1376,7 @@ pub fn variable_shifted_bam_to_bw(
                 );
                 writer.write_all(single_line.as_bytes())?;
                 writer.flush()?;
-                //eprintln!("{}\n",single_line);
+                //eprintln!("{}",single_line);
                 //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
 
                 prev_count = count;
@@ -1418,6 +1419,7 @@ pub fn variable_shifted_bam_to_bw(
             );
             writer.write_all(single_line.as_bytes())?;
             writer.flush()?;
+            //eprintln!("{}",single_line);
             //eprintln!("{}",single_line);
             //eprintln!("count {} Current Endsite {} adjusted Start {} Coordnate pos {} prev end site {}, bg_prev_coord {}\n", count,current_end_site,adjusted_start_site,coordinate_position, prev_end_site, bg_prev_coord);
 

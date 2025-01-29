@@ -1,8 +1,8 @@
 use clap::ArgMatches;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 use indicatif::ProgressBar;
-
+use crossbeam_channel::unbounded;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{remove_file, File};
@@ -20,10 +20,10 @@ use crate::uniwig::writing::{
 };
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
-use bigtools::utils::cli::bigwigmerge::{get_merged_vals, ChromGroupReadImpl};
+use bigtools::utils::cli::bigwigmerge::{ChromGroupReadImpl, MergingValuesError};
 use bigtools::utils::cli::BBIWriteArgs;
 use bigtools::utils::reopen::ReopenableFile;
-use bigtools::{BigWigRead, BigWigWrite, InputSortType};
+use bigtools::{BBIReadError, BigWigRead, BigWigWrite, InputSortType, Value};
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bgzf::Reader;
@@ -33,6 +33,9 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use bigtools::utils::cli::bigwiginfo::{bigwiginfo, BigWigInfoArgs};
+use bigtools::utils::cli::bigwigtobedgraph::{bigwigtobedgraph, BigWigToBedGraphArgs};
+use bigtools::utils::merge::merge_sections_many;
 use tokio::runtime;
 
 pub mod cli;
@@ -909,47 +912,97 @@ fn process_bam(
                         }
                     }
                 }
+                
+                // for input in inputs{
+                //     bigwigtobedgraph(BigWigToBedGraphArgs {
+                //         bigwig: "/home/drc/Downloads/gtars_74_issue/output/test_chr1_shift.bw".to_string(),
+                //         bedgraph: "/home/drc/Downloads/gtars_74_issue/output/test_chr1_shift.bedGraph".to_string(),
+                //         chrom: None,
+                //         start: None,
+                //         end: None,
+                //         overlap_bed: None,
+                //         nthreads: 2,
+                //         inmemory: false,
+                //     })?
+                //
+                // }
+
 
                 let threshold = 0.0; // default
                 let adjust = Some(0.0); // default
                 let clip = Some(100000000.0); // arbitrary but large because we don't want to clip
+
+                println!("GET MERGED VALS");
+
+
+
+                // for bw in inputs{
+                //
+                //     bigwiginfo(BigWigInfoArgs {
+                //         bigwig: bw.to_string(),
+                //         chroms: false,
+                //         zooms: false,
+                //         minmax: true,
+                //     })?
+                // }
+
+
                 let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
+                for item in iter{
 
-                let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
-                let runtime = if num_threads == 1 {
-                    runtime::Builder::new_current_thread().build().unwrap()
-                } else {
-                    runtime::Builder::new_multi_thread()
-                        .worker_threads(num_threads as usize)
-                        .build()
-                        .unwrap()
-                };
-                let all_values = ChromGroupReadImpl {
-                    iter: Box::new(iter),
-                };
+                    // let value = item.unwrap();
+                    // let value2 = value.0;
+                    // let value3 = value.1;
+                    // let value4 = value.2;
+                    // println!("Here is value2: {}", value2);
+                    // println!("Here is value3: {}", value3);
+                    // let mut x = value4.iter;
+                    // let y = x.peek().unwrap().clone();
+                    // let z = y.unwrap().start.clone();
 
-                //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
-                // outb.write(all_values, runtime)?;
-
-                match outb.write(all_values, runtime) {
-                    Ok(_) => {
-                        eprintln!("Successfully wrote file: {}", final_file_path);
+                    let mut merging_values = item.unwrap().2;
+                    if let Some(last_value) = merging_values.get_last_value() {
+                        println!("here is last value: {:?}",last_value);
                     }
-                    Err(err) => {
-                        eprintln!("Error writing to BigWig file: {}", err);
-                        // Delete the partially written file
-                        std::fs::remove_file(final_file_path).unwrap_or_else(|e| {
-                            eprintln!("Error deleting file: {}", e);
-                        });
-                    }
+
                 }
 
-                // CLean up after writing merged bigwig
-                for input in inputs_clone.iter() {
-                    std::fs::remove_file(input).unwrap_or_else(|e| {
-                        eprintln!("Error deleting file: {}", e);
-                    });
-                }
+
+                // let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
+                // let runtime = if num_threads == 1 {
+                //     runtime::Builder::new_current_thread().build().unwrap()
+                // } else {
+                //     runtime::Builder::new_multi_thread()
+                //         .worker_threads(num_threads as usize)
+                //         .build()
+                //         .unwrap()
+                // };
+                // let all_values = ChromGroupReadImpl {
+                //     iter: Box::new(iter),
+                // };
+                //
+                // //println!("WRITING COMBINED BW FILE: {}", combined_bw_file_name.clone());
+                // // outb.write(all_values, runtime)?;
+                //
+                // match outb.write(all_values, runtime) {
+                //     Ok(_) => {
+                //         eprintln!("Successfully wrote file: {}", final_file_path);
+                //     }
+                //     Err(err) => {
+                //         eprintln!("Error writing to BigWig file: {}", err);
+                //         // Delete the partially written file
+                //         std::fs::remove_file(final_file_path).unwrap_or_else(|e| {
+                //             eprintln!("Error deleting file: {}", e);
+                //         });
+                //     }
+                // }
+                //
+                // // CLean up after writing merged bigwig
+                // for input in inputs_clone.iter() {
+                //     std::fs::remove_file(input).unwrap_or_else(|e| {
+                //         eprintln!("Error deleting file: {}", e);
+                //     });
+                // }
             }
         }
 
@@ -1026,6 +1079,51 @@ fn process_bam(
     Ok(())
 }
 
+pub struct MergingValues {
+    // We Box<dyn Iterator> because other this would be a mess to try to type
+    iter: std::iter::Peekable<Box<dyn Iterator<Item = Result<Value, MergingValuesError>> + Send>>,
+    last_value: Option<Value>,
+}
+
+impl MergingValues {
+    pub fn new<I: 'static>(
+        iters: Vec<I>,
+        threshold: f32,
+        adjust: Option<f32>,
+        clip: Option<f32>,
+    ) -> Self
+    where
+        I: Iterator<Item = Result<Value, MergingValuesError>> + Send,
+    {
+        let adjust = adjust.unwrap_or(0.0);
+        let iter: Box<dyn Iterator<Item = Result<Value, MergingValuesError>> + Send> = Box::new(
+            merge_sections_many(iters)
+                .map(move |x| {
+                    x.map(|mut v| {
+                        if let Some(clip) = clip {
+                            v.value = clip.min(v.value);
+                        }
+                        v.value += adjust;
+                        v
+                    })
+                })
+                .filter(move |x| x.as_ref().map_or(true, |v| v.value > threshold)),
+        );
+        MergingValues {
+            iter: iter.peekable(),
+            last_value: None,
+        }
+    }
+    pub fn get_last_value(&mut self) -> Option<&Value> {
+        // Consume the iterator until it's empty
+        while let Some(Ok(value)) = self.iter.next() {
+            self.last_value = Some(value);
+        }
+        self.last_value.as_ref()
+    }
+
+}
+
 /// This option is for outputting BAM counts to any other file type that is not BW
 /// Currently this will use FIXED step counting while outputting to bw uses variable step counting
 // fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
@@ -1074,6 +1172,152 @@ fn process_bam(
 //
 //
 // }
+pub fn get_merged_vals(
+    bigwigs: Vec<BigWigRead<ReopenableFile>>,
+    max_zooms: usize,
+    threshold: f32,
+    adjust: Option<f32>,
+    clip: Option<f32>,
+) -> Result<
+    (
+        impl Iterator<Item = Result<(String, u32, MergingValues), MergingValuesError>>,
+        HashMap<String, u32>,
+    ),
+    MergingValuesError,
+> {
+
+    println!("ENTERING get_merged values");
+    let (chrom_sizes, chrom_map) = {
+        // NOTE: We don't need to worry about max fds here because chroms are cached.
+
+        // Get sizes for each and check that all files (that have the chrom) agree
+        // Check that all chrom sizes match for all files
+        let mut chrom_sizes = BTreeMap::new();
+        let mut chrom_map = HashMap::new();
+        for chrom in bigwigs
+            .iter()
+            .flat_map(BigWigRead::chroms)
+            .map(|c| c.name.clone())
+        {
+            if chrom_sizes.get(&chrom).is_some() {
+                println!("continuing/skiping");
+                continue;
+            }
+            let mut size = None;
+            let mut bws = Vec::with_capacity(bigwigs.len());
+            for w in bigwigs.iter() {
+                let chroms = w.chroms();
+                let res = chroms.iter().find(|v| v.name == chrom);
+                let res = match res {
+                    Some(res) => {
+                        println!("here is res: {:?}", res);
+                        res},
+                    None => continue,
+                };
+                match size {
+                    Some(all_size) => {
+                        println!("Here is all_size {}", all_size);
+                        if all_size != res.length {
+                            eprintln!("Chrom '{:?}' had different sizes in the bigwig files. (Are you using the same assembly?)", chrom);
+                            return Err(MergingValuesError::MismatchedChroms(
+                                "Invalid input (nonmatching chroms)".to_owned(),
+                            ));
+                        }
+                    }
+                    None => {
+                        println!("None statement for all_size, res.length {}", res.length);
+                        size = Some(res.length);
+                    }
+                }
+                // We don't want to a new file descriptor for every chrom
+                bws.push((w.info().clone(), w.inner_read().path.clone()));
+            }
+            let size = size.unwrap();
+
+            chrom_sizes.insert(chrom.clone(), (size, bws));
+            chrom_map.insert(chrom.clone(), size);
+        }
+
+        (chrom_sizes, chrom_map)
+    };
+
+    const MAX_FDS: usize = 1000;
+    const PARALLEL_CHROMS: usize = 1;
+    // This might be a *bit* conservative, but is really mostly an estimate
+    let max_bw_fds: usize = MAX_FDS
+        - 1 /* output bigWig (data) */
+        - 1 /* index */
+        - (1 /* data sections */ + 1  /* index sections */ + max_zooms /* zoom data sections */ + max_zooms /* zoom index sections */) * PARALLEL_CHROMS;
+
+    println!("Anything happening down here?");
+    let iter = chrom_sizes.into_iter().map(move |(chrom, (size, bws))| {
+        println!("Before: bws.len() > max_bw_fds");
+        if bws.len() > max_bw_fds {
+            eprintln!("Number of bigWigs to merge would exceed the maximum number of file descriptors. Splitting into chunks.");
+
+            let mut merges: Vec<Box<dyn Iterator<Item = Result<Value, MergingValuesError>> + Send>> = bws
+                .into_iter()
+                .map(|b| {
+                    let f = ReopenableFile { file: File::open(&b.1)?, path: b.1 };
+                    let b = BigWigRead::with_info(b.0, f);
+                    let iter = b.get_interval_move(&chrom, 1, size).map(|i| i.map(|r| r.map_err(|e| MergingValuesError::BBIReadError(e))))?;
+                    Ok(Box::new(iter) as Box<_>)
+                })
+                .collect::<Result<Vec<_>, BBIReadError>>()?;
+            //println!("Here is len: {}",merges.len());
+            while merges.len() > max_bw_fds {
+                merges = {
+                    let len = merges.len();
+                    //rintln!("Here is len: {}",len);
+                    let mut vals = merges.into_iter().peekable();
+                    let mut merges: Vec<Box<dyn Iterator<Item = Result<Value, MergingValuesError>> + Send>> = Vec::with_capacity(len/max_bw_fds+1);
+                    println!("After merges initialization.");
+                    while vals.peek().is_some() {
+                        let chunk = vals.by_ref().take(max_bw_fds).collect::<Vec<_>>();
+                        let mut mergingvalues = MergingValues::new(chunk, threshold, adjust, clip);
+                        let (sender, receiver) = unbounded::<Value>();
+                        loop {
+                            let val = match mergingvalues.iter.next() {
+                                Some(Ok(v)) => {
+                                    println!("Here is a val: {:?}", v);
+                                    v},
+                                Some(Err(e)) => Err(e)?,
+                                None => break,
+                            };
+                            sender.send(val).unwrap();
+                        }
+
+                        merges.push(Box::new(receiver.into_iter().map(Result::Ok)));
+                    }
+                    merges
+                };
+            }
+
+            let mergingvalues = MergingValues::new(merges, threshold, adjust, clip);
+            println!("merging value if statement");
+            Ok((chrom, size, mergingvalues))
+        } else {
+            println!("else statement for bws.len() > max_bw_fds");
+            let iters: Vec<_> = bws
+                .into_iter()
+                .map(|b| {
+                    let f = ReopenableFile { file: File::open(&b.1)?, path: b.1 };
+                    let b = BigWigRead::with_info(b.0, f);
+                    b.get_interval_move(&chrom, 1, size).map(|i| i.map(|r| r.map_err(|e| MergingValuesError::BBIReadError(e))))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mergingvalues = MergingValues::new(iters, threshold, adjust, clip);
+
+            println!("merging value else statement");
+            Ok((chrom, size, mergingvalues))
+        }
+    });
+
+    println!("After an inter call");
+    Ok((iter, chrom_map))
+
+    //Ok(())
+}
 
 /// Creates a Producer/Consumer workflow for reading bam sequences and outputting to Bed files across threads.
 fn process_bed_in_threads(
