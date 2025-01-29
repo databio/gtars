@@ -903,7 +903,31 @@ fn process_bam(
 
                 for input in inputs {
                     match BigWigRead::open_file(&input) {
-                        Ok(bw) => bigwigs.push(bw),
+                        Ok(mut bw) =>
+                            {
+                                //let chroms = bw.chroms();
+                                let summary = bw.get_summary()?;
+
+                                println!("max_val: {}", summary.max_val);
+                                //println!("chrom length {}", chroms[0].length);
+                                // let first_interval = bw
+                                //     .get_interval("chr1", 123556200, 123600000)?
+                                //     .next()
+                                //     .unwrap()
+                                //     .unwrap();
+
+                                let mut intervals =bw.get_interval("chr1", 123556200, 123600000)?;
+
+
+                                //for interval in
+                                while let Some(Ok(value)) = intervals.next() {
+
+                                    println!("Here are ends {}", value.end);
+                                }
+
+                            //    bigwigs.push(bw)
+                            }
+                        ,
                         Err(e) => {
                             eprintln!(
                                 "Error when opening bigwig {}. Skipping due to error: {:?}",
@@ -947,25 +971,25 @@ fn process_bam(
                 // }
 
 
-                let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
-                for item in iter{
-
-                    // let value = item.unwrap();
-                    // let value2 = value.0;
-                    // let value3 = value.1;
-                    // let value4 = value.2;
-                    // println!("Here is value2: {}", value2);
-                    // println!("Here is value3: {}", value3);
-                    // let mut x = value4.iter;
-                    // let y = x.peek().unwrap().clone();
-                    // let z = y.unwrap().start.clone();
-
-                    let mut merging_values = item.unwrap().2;
-                    if let Some(last_value) = merging_values.get_last_value() {
-                        println!("here is last value: {:?}",last_value);
-                    }
-
-                }
+                // let (iter, chrom_map) = get_merged_vals(bigwigs, 10, threshold, adjust, clip)?;
+                // for item in iter{
+                //
+                //     // let value = item.unwrap();
+                //     // let value2 = value.0;
+                //     // let value3 = value.1;
+                //     // let value4 = value.2;
+                //     // println!("Here is value2: {}", value2);
+                //     // println!("Here is value3: {}", value3);
+                //     // let mut x = value4.iter;
+                //     // let y = x.peek().unwrap().clone();
+                //     // let z = y.unwrap().start.clone();
+                //
+                //     let mut merging_values = item.unwrap().2;
+                //     if let Some(last_value) = merging_values.get_last_value() {
+                //         println!("here is last value: {:?}",last_value);
+                //     }
+                //
+                // }
 
 
                 // let outb = BigWigWrite::create_file(combined_bw_file_name, chrom_map)?;
