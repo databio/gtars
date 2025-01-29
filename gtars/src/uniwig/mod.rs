@@ -922,7 +922,7 @@ fn process_bam(
                                 //for interval in
                                 while let Some(Ok(value)) = intervals.next() {
 
-                                    println!("Here are ends {}", value.end);
+                                    println!("Here are starts ends values {}  {}  {}", value.start, value.end, value.value);
                                 }
 
                             //    bigwigs.push(bw)
