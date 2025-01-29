@@ -634,8 +634,8 @@ pub fn uniwig_main(
                                 }
                             }
                             // Remove the file after it is used.
-                            let path = std::path::Path::new(&temp_meta_file_name);
-                            let _ = remove_file(path).unwrap();
+                            // let path = std::path::Path::new(&temp_meta_file_name);
+                            // let _ = remove_file(path).unwrap();
                         }
                     }
                     //write combined metadata as json
