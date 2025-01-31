@@ -23,7 +23,7 @@ impl PyAIList {
                 data: x.data.clone()
             })
             .collect();
-        let ailist = AIList::new(&mut interval_list, minimum_coverage_length.unwrap_or(3));
+        let ailist = AIList::new(interval_list, minimum_coverage_length.unwrap_or(3));
         PyAIList { ailist }
     }
 

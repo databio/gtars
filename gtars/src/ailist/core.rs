@@ -32,8 +32,9 @@ impl<T: Clone> AIList<T> {
     ///
     /// # Returns
     /// - AIList struct
-    pub fn new(intervals: &mut Vec<Interval<T>>, minimum_coverage_length: usize) -> AIList<T> {
+    pub fn new(intervals: Vec<Interval<T>>, minimum_coverage_length: usize) -> AIList<T> {
         // in the future, clone and sort...
+        let mut intervals = intervals;
         intervals.sort_by_key(|key| key.start);
 
         let mut starts = Vec::new();
@@ -43,14 +44,13 @@ impl<T: Clone> AIList<T> {
         let mut header_list = vec![0];
 
         loop {
-            let mut results = Self::decompose(intervals, minimum_coverage_length);
+            let mut results = Self::decompose(&intervals, minimum_coverage_length);
 
             starts.append(&mut results.0);
             ends.append(&mut results.1);
             max_ends.append(&mut results.2);
             data_list.append(&mut results.3);
-
-            *intervals = results.4;
+            intervals = results.4;
 
             if intervals.is_empty() {
                 break;
@@ -69,7 +69,7 @@ impl<T: Clone> AIList<T> {
     }
 
     fn decompose(
-        intervals: &mut [Interval<T>],
+        intervals: &[Interval<T>],
         minimum_coverage_length: usize,
     ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<T>, Vec<Interval<T>>) {
         // look at the next minL*2 intervals
@@ -197,7 +197,7 @@ impl<T: Clone> fmt::Display for AIList<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pretty_assertions::assert_eq;
+    // use pretty_assertions::assert_eq;
     use rstest::*;
 
     #[fixture]
@@ -213,5 +213,17 @@ mod tests {
     #[fixture]
     fn output_file() -> &'static str {
         "tests/data/out/region_scoring_count.csv.gz"
+    }
+
+    #[rstest]
+    fn test_create_ailist() {
+        let mut intervals = vec![
+            Interval { start: 0, end: 5, data: 1 },
+            Interval { start: 5, end: 20, data: 2 },
+            Interval { start: 20, end: 25, data: 1 }
+        ];
+
+        let ailist = AIList::new(intervals, 10);
+        
     }
 }
