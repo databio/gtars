@@ -1,11 +1,12 @@
 use std::fmt;
 
-pub struct Interval {
+pub struct Interval<T: Clone> {
     pub start: u32,
     pub end: u32,
+    pub data: T
 }
 
-impl fmt::Display for Interval {
+impl<T: Clone> fmt::Display for Interval<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "({}, {})", self.start, self.end)
     }
@@ -14,14 +15,15 @@ impl fmt::Display for Interval {
 ///
 /// The Augmented Interval List (AIList), enumerates intersections between a query interval q and an interval set R.
 ///
-pub struct AIList {
+pub struct AIList<T: Clone> {
     starts: Vec<u32>,
     ends: Vec<u32>,
     max_ends: Vec<u32>,
     header_list: Vec<usize>,
+    data_list: Vec<T>
 }
 
-impl AIList {
+impl<T: Clone> AIList<T> {
     ///
     /// Create a new AIList struct
     ///
@@ -30,14 +32,15 @@ impl AIList {
     ///
     /// # Returns
     /// - AIList struct
-    pub fn new(intervals: &mut Vec<Interval>, minimum_coverage_length: usize) -> AIList {
+    pub fn new(intervals: &mut Vec<Interval<T>>, minimum_coverage_length: usize) -> AIList<T> {
         // in the future, clone and sort...
         intervals.sort_by_key(|key| key.start);
 
-        let mut starts: Vec<u32> = Vec::new();
-        let mut ends: Vec<u32> = Vec::new();
-        let mut max_ends: Vec<u32> = Vec::new();
-        let mut header_list: Vec<usize> = vec![0];
+        let mut starts = Vec::new();
+        let mut ends = Vec::new();
+        let mut max_ends= Vec::new();
+        let mut data_list = Vec::new();
+        let mut header_list = vec![0];
 
         loop {
             let mut results = Self::decompose(intervals, minimum_coverage_length);
@@ -45,8 +48,9 @@ impl AIList {
             starts.append(&mut results.0);
             ends.append(&mut results.1);
             max_ends.append(&mut results.2);
+            data_list.append(&mut results.3);
 
-            *intervals = results.3;
+            *intervals = results.4;
 
             if intervals.is_empty() {
                 break;
@@ -60,18 +64,20 @@ impl AIList {
             ends,
             max_ends,
             header_list,
+            data_list
         }
     }
 
     fn decompose(
-        intervals: &mut [Interval],
+        intervals: &mut [Interval<T>],
         minimum_coverage_length: usize,
-    ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<Interval>) {
+    ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<T>, Vec<Interval<T>>) {
         // look at the next minL*2 intervals
-        let mut starts: Vec<u32> = Vec::new();
-        let mut ends: Vec<u32> = Vec::new();
-        let mut max_ends: Vec<u32> = Vec::new();
-        let mut l2: Vec<Interval> = Vec::new();
+        let mut starts = Vec::new();
+        let mut ends = Vec::new();
+        let mut max_ends = Vec::new();
+        let mut data_list = Vec::new();
+        let mut l2 = Vec::new();
 
         for (index, interval) in intervals.iter().enumerate() {
             let mut count = 0;
@@ -89,10 +95,12 @@ impl AIList {
                 l2.push(Interval {
                     start: interval.start,
                     end: interval.end,
+                    data: interval.data.clone()
                 });
             } else {
                 starts.push(interval.start);
-                ends.push(interval.end)
+                ends.push(interval.end);
+                data_list.push(interval.data.clone());
             }
         }
 
@@ -103,16 +111,18 @@ impl AIList {
             max_ends.push(max);
         }
 
-        (starts, ends, max_ends, l2)
+        (starts, ends, max_ends, data_list, l2)
     }
 
+    
     fn query_slice(
-        interval: &Interval,
+        interval: &Interval<T>,
         starts: &[u32],
         ends: &[u32],
         max_ends: &[u32],
-    ) -> Vec<Interval> {
-        let mut results_list: Vec<Interval> = Vec::new();
+        data_list: &[T]
+    ) -> Vec<Interval<T>> {
+        let mut results_list = Vec::new();
         let mut i = starts.partition_point(|&x| x < interval.end);
 
         while i > 0 {
@@ -127,14 +137,15 @@ impl AIList {
                 results_list.push(Interval {
                     start: starts[i],
                     end: ends[i],
+                    data: data_list[i].clone()
                 })
             }
         }
         results_list
     }
 
-    pub fn query(&self, interval: &Interval) -> Vec<Interval> {
-        let mut results_list: Vec<Interval> = Vec::new();
+    pub fn query(&self, interval: &Interval<T>) -> Vec<Interval<T>> {
+        let mut results_list = Vec::new();
 
         for i in 0..(self.header_list.len() - 1) {
             results_list.append(&mut Self::query_slice(
@@ -142,6 +153,7 @@ impl AIList {
                 &self.starts[self.header_list[i]..self.header_list[i + 1]],
                 &self.ends[self.header_list[i]..self.header_list[i + 1]],
                 &self.max_ends[self.header_list[i]..self.header_list[i + 1]],
+                &self.data_list[self.header_list[i]..self.header_list[i + 1]],
             ));
         }
         // now do the last decomposed ailist
@@ -151,13 +163,14 @@ impl AIList {
             &self.starts[self.header_list[i]..],
             &self.ends[self.header_list[i]..],
             &self.max_ends[self.header_list[i]..],
+            &self.data_list[self.header_list[i]..self.header_list[i + 1]],
         ));
 
         results_list
     }
 }
 
-impl fmt::Display for AIList {
+impl<T: Clone> fmt::Display for AIList<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut string = String::new();
         string.push('\n');
@@ -178,5 +191,27 @@ impl fmt::Display for AIList {
         }
         string.push('\n');
         write!(f, "{string}")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    fn path_to_fragment_files() -> &'static str {
+        "tests/data/fragments/region_scoring/*.bed.gz"
+    }
+
+    #[fixture]
+    fn consensus_set() -> &'static str {
+        "tests/data/consensus/consensus1.bed"
+    }
+
+    #[fixture]
+    fn output_file() -> &'static str {
+        "tests/data/out/region_scoring_count.csv.gz"
     }
 }

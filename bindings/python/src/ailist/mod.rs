@@ -5,7 +5,7 @@ use crate::models::PyInterval;
 
 #[pyclass(name = "AIList", module="gtars.ailist")]
 struct PyAIList {
-    ailist: AIList,
+    ailist: AIList<usize>,
 }
 
 #[pymethods]
@@ -15,20 +15,23 @@ impl PyAIList {
         py_interval_list: Vec<PyRef<PyInterval>>,
         minimum_coverage_length: Option<usize>,
     ) -> PyAIList {
-        let mut interval_list: Vec<Interval> = py_interval_list
+        let mut interval_list = py_interval_list
             .into_iter()
             .map(|x| Interval {
                 start: x.start,
                 end: x.end,
+                data: x.data
             })
             .collect();
         let ailist = AIList::new(&mut interval_list, minimum_coverage_length.unwrap_or(3));
         PyAIList { ailist }
     }
+
     fn query(&self, py_interval: &PyInterval) -> Vec<PyInterval> {
-        let interval: Interval = Interval {
+        let interval = Interval {
             start: py_interval.start,
             end: py_interval.end,
+            data: py_interval.data
         };
         self.ailist
             .query(&interval)
@@ -36,6 +39,7 @@ impl PyAIList {
             .map(|x| PyInterval {
                 start: x.start,
                 end: x.end,
+                data: x.data
             })
             .collect()
     }
