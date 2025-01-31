@@ -7,13 +7,13 @@ pub struct PyInterval {
     #[pyo3(get, set)]
     pub end: u32,
     #[pyo3(get, set)]
-    pub data: usize,
+    pub data: PyObject,
 }
 
 #[pymethods]
 impl PyInterval {
     #[new]
-    pub fn new(start: u32, end: u32, data: usize) -> PyInterval {
+    pub fn new(start: u32, end: u32, data: PyObject) -> PyInterval {
         PyInterval { start, end, data }
     }
     pub fn __repr__(&self) -> String {
