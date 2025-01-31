@@ -15,7 +15,7 @@ impl PyAIList {
         py_interval_list: Vec<PyRef<PyInterval>>,
         minimum_coverage_length: Option<usize>,
     ) -> PyAIList {
-        let mut interval_list = py_interval_list
+        let interval_list = py_interval_list
             .into_iter()
             .map(|x| Interval {
                 start: x.start,
