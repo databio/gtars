@@ -1,5 +1,6 @@
 use std::fmt;
 
+#[derive(Debug, PartialEq)]
 pub struct Interval<T: Clone> {
     pub start: u32,
     pub end: u32,
@@ -219,13 +220,16 @@ mod tests {
     #[rstest]
     fn test_create_ailist() {
         let intervals = vec![
-            Interval { start: 0, end: 5, data: 1 },
-            Interval { start: 5, end: 20, data: 2 },
-            Interval { start: 20, end: 25, data: 1 }
+            Interval { start: 0, end: 5, data: 0 },
+            Interval { start: 5, end: 20, data: 0 },
+            Interval { start: 20, end: 25, data: 0 }
         ];
 
         let ailist = AIList::new(intervals, 10);
         let res = ailist.query(6, 11);
+
+        assert_eq!(res.first(), Some(&Interval { start: 5, end: 7, data: 0 }));
+        
         
     }
 }
