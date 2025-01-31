@@ -28,13 +28,8 @@ impl PyAIList {
     }
 
     fn query(&self, py_interval: &PyInterval) -> Vec<PyInterval> {
-        let interval = Interval {
-            start: py_interval.start,
-            end: py_interval.end,
-            data: py_interval.data.clone()
-        };
         self.ailist
-            .query(&interval)
+            .query(py_interval.start, py_interval.end)
             .into_iter()
             .map(|x| PyInterval {
                 start: x.start,

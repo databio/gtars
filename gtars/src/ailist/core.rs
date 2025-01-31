@@ -116,20 +116,21 @@ impl<T: Clone> AIList<T> {
 
     
     fn query_slice(
-        interval: &Interval<T>,
+        start: u32,
+        end: u32,
         starts: &[u32],
         ends: &[u32],
         max_ends: &[u32],
         data_list: &[T]
     ) -> Vec<Interval<T>> {
         let mut results_list = Vec::new();
-        let mut i = starts.partition_point(|&x| x < interval.end);
+        let mut i = starts.partition_point(|&x| x < end);
 
         while i > 0 {
             i -= 1;
-            if interval.start > ends[i] {
+            if start > ends[i] {
                 //this means that there is no intersection
-                if interval.start > max_ends[i] {
+                if start > max_ends[i] {
                     //there is no further intersection
                     return results_list;
                 }
@@ -144,12 +145,12 @@ impl<T: Clone> AIList<T> {
         results_list
     }
 
-    pub fn query(&self, interval: &Interval<T>) -> Vec<Interval<T>> {
+    pub fn query(&self, start: u32, end: u32) -> Vec<Interval<T>> {
         let mut results_list = Vec::new();
 
         for i in 0..(self.header_list.len() - 1) {
             results_list.append(&mut Self::query_slice(
-                interval,
+                start, end,
                 &self.starts[self.header_list[i]..self.header_list[i + 1]],
                 &self.ends[self.header_list[i]..self.header_list[i + 1]],
                 &self.max_ends[self.header_list[i]..self.header_list[i + 1]],
@@ -159,7 +160,7 @@ impl<T: Clone> AIList<T> {
         // now do the last decomposed ailist
         let i = self.header_list.len() - 1;
         results_list.extend(Self::query_slice(
-            interval,
+            start, end,
             &self.starts[self.header_list[i]..],
             &self.ends[self.header_list[i]..],
             &self.max_ends[self.header_list[i]..],
@@ -217,13 +218,14 @@ mod tests {
 
     #[rstest]
     fn test_create_ailist() {
-        let mut intervals = vec![
+        let intervals = vec![
             Interval { start: 0, end: 5, data: 1 },
             Interval { start: 5, end: 20, data: 2 },
             Interval { start: 20, end: 25, data: 1 }
         ];
 
         let ailist = AIList::new(intervals, 10);
+        let res = ailist.query(6, 11);
         
     }
 }
