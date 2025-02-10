@@ -45,6 +45,10 @@ pub fn region_scoring_from_fragments(
         for line in reader.lines() {
             let line = line?;
 
+            if line.starts_with('#') {
+                continue;
+            }
+
             // convert to fragment and then get new positions of start and end
             let fragment = Fragment::from_str(&line)?;
 
