@@ -115,7 +115,6 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          pattern: wheels-*
           path: ./bindings/python/dist
       - name: List contents
         run: |
