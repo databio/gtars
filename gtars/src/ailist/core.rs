@@ -1,30 +1,37 @@
+use num_traits::{PrimInt, Unsigned};
 use std::fmt;
 
-#[derive(Debug, PartialEq)]
-pub struct Interval<T: Clone> {
-    pub start: u32,
-    pub end: u32,
-    pub data: T
-}
-
-impl<T: Clone> fmt::Display for Interval<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "({}, {})", self.start, self.end)
-    }
+#[derive(Eq, Debug, Clone, PartialEq)]
+pub struct Interval<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
+    pub start: I,
+    pub end: I,
+    pub data: T,
 }
 
 ///
 /// The Augmented Interval List (AIList), enumerates intersections between a query interval q and an interval set R.
 ///
-pub struct AIList<T: Clone> {
-    starts: Vec<u32>,
-    ends: Vec<u32>,
-    max_ends: Vec<u32>,
+pub struct AIList<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
+    starts: Vec<I>,
+    ends: Vec<I>,
+    max_ends: Vec<I>,
     header_list: Vec<usize>,
-    data_list: Vec<T>
+    data_list: Vec<T>,
 }
 
-impl<T: Clone> AIList<T> {
+impl<I, T> AIList<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
     ///
     /// Create a new AIList struct
     ///
@@ -33,14 +40,14 @@ impl<T: Clone> AIList<T> {
     ///
     /// # Returns
     /// - AIList struct
-    pub fn new(intervals: Vec<Interval<T>>, minimum_coverage_length: usize) -> AIList<T> {
+    pub fn new(intervals: Vec<Interval<I, T>>, minimum_coverage_length: usize) -> AIList<I, T> {
         // in the future, clone and sort...
         let mut intervals = intervals;
         intervals.sort_by_key(|key| key.start);
 
         let mut starts = Vec::new();
         let mut ends = Vec::new();
-        let mut max_ends= Vec::new();
+        let mut max_ends = Vec::new();
         let mut data_list = Vec::new();
         let mut header_list = vec![0];
 
@@ -65,14 +72,14 @@ impl<T: Clone> AIList<T> {
             ends,
             max_ends,
             header_list,
-            data_list
+            data_list,
         }
     }
 
     fn decompose(
-        intervals: &[Interval<T>],
+        intervals: &[Interval<I, T>],
         minimum_coverage_length: usize,
-    ) -> (Vec<u32>, Vec<u32>, Vec<u32>, Vec<T>, Vec<Interval<T>>) {
+    ) -> (Vec<I>, Vec<I>, Vec<I>, Vec<T>, Vec<Interval<I, T>>) {
         // look at the next minL*2 intervals
         let mut starts = Vec::new();
         let mut ends = Vec::new();
@@ -96,7 +103,7 @@ impl<T: Clone> AIList<T> {
                 l2.push(Interval {
                     start: interval.start,
                     end: interval.end,
-                    data: interval.data.clone()
+                    data: interval.data.clone(),
                 });
             } else {
                 starts.push(interval.start);
@@ -105,7 +112,7 @@ impl<T: Clone> AIList<T> {
             }
         }
 
-        let mut max: u32 = 0;
+        let mut max: I = I::zero();
 
         for end in ends.iter() {
             max = if max > *end { max } else { *end };
@@ -115,15 +122,14 @@ impl<T: Clone> AIList<T> {
         (starts, ends, max_ends, data_list, l2)
     }
 
-    
     fn query_slice(
-        start: u32,
-        end: u32,
-        starts: &[u32],
-        ends: &[u32],
-        max_ends: &[u32],
-        data_list: &[T]
-    ) -> Vec<Interval<T>> {
+        start: I,
+        end: I,
+        starts: &[I],
+        ends: &[I],
+        max_ends: &[I],
+        data_list: &[T],
+    ) -> Vec<Interval<I, T>> {
         let mut results_list = Vec::new();
         let mut i = starts.partition_point(|&x| x < end);
 
@@ -139,19 +145,20 @@ impl<T: Clone> AIList<T> {
                 results_list.push(Interval {
                     start: starts[i],
                     end: ends[i],
-                    data: data_list[i].clone()
+                    data: data_list[i].clone(),
                 })
             }
         }
         results_list
     }
 
-    pub fn query(&self, start: u32, end: u32) -> Vec<Interval<T>> {
+    pub fn query(&self, start: I, end: I) -> Vec<Interval<I, T>> {
         let mut results_list = Vec::new();
 
         for i in 0..(self.header_list.len() - 1) {
             results_list.append(&mut Self::query_slice(
-                start, end,
+                start,
+                end,
                 &self.starts[self.header_list[i]..self.header_list[i + 1]],
                 &self.ends[self.header_list[i]..self.header_list[i + 1]],
                 &self.max_ends[self.header_list[i]..self.header_list[i + 1]],
@@ -161,7 +168,8 @@ impl<T: Clone> AIList<T> {
         // now do the last decomposed ailist
         let i = self.header_list.len() - 1;
         results_list.extend(Self::query_slice(
-            start, end,
+            start,
+            end,
             &self.starts[self.header_list[i]..],
             &self.ends[self.header_list[i]..],
             &self.max_ends[self.header_list[i]..],
@@ -170,29 +178,13 @@ impl<T: Clone> AIList<T> {
 
         results_list
     }
-}
 
-impl<T: Clone> fmt::Display for AIList<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut string = String::new();
-        string.push('\n');
-        for element in self.starts.iter() {
-            string.push_str(format!("{element}").as_str());
-        }
-        string.push('\n');
-        for element in self.ends.iter() {
-            string.push_str(format!("{element}").as_str());
-        }
-        string.push('\n');
-        for element in self.max_ends.iter() {
-            string.push_str(format!("{element}").as_str());
-        }
-        string.push('\n');
-        for element in self.header_list.iter() {
-            string.push_str(format!("{element}").as_str());
-        }
-        string.push('\n');
-        write!(f, "{string}")
+    pub fn len(&self) -> usize {
+        self.starts.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.starts.is_empty()
     }
 }
 
@@ -220,9 +212,21 @@ mod tests {
     #[rstest]
     fn test_create_ailist() {
         let intervals = vec![
-            Interval { start: 0, end: 5, data: 0 },
-            Interval { start: 5, end: 20, data: 0 },
-            Interval { start: 20, end: 25, data: 0 }
+            Interval {
+                start: 0_u32,
+                end: 5_u32,
+                data: 0_u32,
+            },
+            Interval {
+                start: 5_u32,
+                end: 20_u32,
+                data: 0_u32,
+            },
+            Interval {
+                start: 20_u32,
+                end: 25_u32,
+                data: 0_u32,
+            },
         ];
 
         let _ailist = AIList::new(intervals, 10);
@@ -231,9 +235,21 @@ mod tests {
     #[rstest]
     fn test_query_ailist() {
         let universe_intervals = vec![
-            Interval { start: 0, end: 5, data: 0 },
-            Interval { start: 5, end: 20, data: 0 },
-            Interval { start: 20, end: 25, data: 0 }
+            Interval {
+                start: 0_u32,
+                end: 5_u32,
+                data: 0_u32,
+            },
+            Interval {
+                start: 5_u32,
+                end: 20_u32,
+                data: 0_u32,
+            },
+            Interval {
+                start: 20_u32,
+                end: 25_u32,
+                data: 0_u32,
+            },
         ];
         let ailist = AIList::new(universe_intervals, 10);
 
@@ -241,6 +257,13 @@ mod tests {
 
         let res = ailist.query(query_interval.0, query_interval.1);
 
-        assert_eq!(res.first(), Some(&Interval { start: 5, end: 20, data: 0 }));
+        assert_eq!(
+            res.first(),
+            Some(&Interval {
+                start: 5,
+                end: 20,
+                data: 0
+            })
+        );
     }
 }
