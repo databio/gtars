@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] 
+- allow comments at the beginning of fragment files
+- bump bigtools to 0.5.5, fixing [#74](https://github.com/databio/gtars/issues/74) and [#77](https://github.com/databio/gtars/issues/77)
+
 ## [0.2.0] 
 - add position shift workflow for bam to bw (was previously added for bam to bed)
 - add scaling argument for bam to bw workflow [#53](https://github.com/databio/gtars/issues/53)
