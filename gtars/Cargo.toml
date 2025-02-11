@@ -24,7 +24,7 @@ noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
 bstr = "1.10.0"
 rayon = "1.10.0"
 indicatif = "0.17.8"
-bigtools = "0.5.4"
+bigtools = "0.5.5"
 tokio = "1.40.0"
 os_pipe = "1.2.1"
 glob = "0.3.1"
