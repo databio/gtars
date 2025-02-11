@@ -165,7 +165,7 @@ impl<T: Clone> AIList<T> {
             &self.starts[self.header_list[i]..],
             &self.ends[self.header_list[i]..],
             &self.max_ends[self.header_list[i]..],
-            &self.data_list[self.header_list[i]..self.header_list[i + 1]],
+            &self.data_list[self.header_list[i]..],
         ));
 
         results_list
@@ -228,7 +228,7 @@ mod tests {
         let ailist = AIList::new(intervals, 10);
         let res = ailist.query(6, 11);
 
-        assert_eq!(res.first(), Some(&Interval { start: 5, end: 7, data: 0 }));
+        assert_eq!(res.first(), Some(&Interval { start: 5, end: 20, data: 0 }));
         
         
     }
