@@ -225,11 +225,22 @@ mod tests {
             Interval { start: 20, end: 25, data: 0 }
         ];
 
-        let ailist = AIList::new(intervals, 10);
-        let res = ailist.query(6, 11);
+        let _ailist = AIList::new(intervals, 10);
+    }
+
+    #[rstest]
+    fn test_query_ailist() {
+        let universe_intervals = vec![
+            Interval { start: 0, end: 5, data: 0 },
+            Interval { start: 5, end: 20, data: 0 },
+            Interval { start: 20, end: 25, data: 0 }
+        ];
+        let ailist = AIList::new(universe_intervals, 10);
+
+        let query_interval = (6, 11);
+
+        let res = ailist.query(query_interval.0, query_interval.1);
 
         assert_eq!(res.first(), Some(&Interval { start: 5, end: 20, data: 0 }));
-        
-        
     }
 }
