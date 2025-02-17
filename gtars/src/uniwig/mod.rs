@@ -1092,7 +1092,6 @@ fn process_bed_in_threads(
     let chromosome_string_cloned = chromosome_string.clone();
 
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
-    println!("Here is my formatted file_name.... {}", file_name.clone());
 
     let fpclone = fp_string.clone(); // we must clone this string here, not before, else we get lifetime issues.
 
