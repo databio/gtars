@@ -1092,6 +1092,7 @@ fn process_bed_in_threads(
     let chromosome_string_cloned = chromosome_string.clone();
 
     let file_name = format!("{}{}_{}", bwfileheader, chromosome_string, sel);
+    println!("Here is my formatted file_name.... {}", file_name.clone());
 
     let fpclone = fp_string.clone(); // we must clone this string here, not before, else we get lifetime issues.
 
@@ -1123,10 +1124,10 @@ fn process_bed_in_threads(
         let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
         let reader = std::io::BufReader::new(&mut *file_lock);
 
-        let file_path = PathBuf::from(file_name);
-        let new_file_path = file_path.with_extension("bed");
+        let file_path_with_ext = format!("{}.bed", file_name);
+        let file_path = PathBuf::from(file_path_with_ext);
 
-        let new_file_path = new_file_path.to_str().unwrap();
+        let new_file_path = file_path.to_str().unwrap();
 
         // Create a new file
         let mut writer = std::fs::File::create(new_file_path).unwrap();
