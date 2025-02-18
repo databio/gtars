@@ -1123,10 +1123,10 @@ fn process_bed_in_threads(
         let mut file_lock = read_fd.lock().unwrap(); // Acquire lock for writing
         let reader = std::io::BufReader::new(&mut *file_lock);
 
-        let file_path = PathBuf::from(file_name);
-        let new_file_path = file_path.with_extension("bed");
+        let file_path_with_ext = format!("{}.bed", file_name);
+        let file_path = PathBuf::from(file_path_with_ext);
 
-        let new_file_path = new_file_path.to_str().unwrap();
+        let new_file_path = file_path.to_str().unwrap();
 
         // Create a new file
         let mut writer = std::fs::File::create(new_file_path).unwrap();
