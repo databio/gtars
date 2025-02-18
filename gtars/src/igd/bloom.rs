@@ -202,14 +202,193 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
     println!("SEARCH BLOOM FILTER");
     let bloom_files = find_bloom_files(path_to_bloom_directory).unwrap();
 
-    for (key, value) in bloom_files {  // &map to borrow, not take ownership
-        println!("Key: {}, Value: {:?}", key, value); // key is child directory  value is the absolute path to the bed file
+    // TODO ensure there ARE actually bloom files before bothering to proceed.
 
-        // once we have blooms for each chromosome, load them up as we look at bed files.
+    // Create universe and tokenize the query using the universe
+    // THIS SHOULD BE THE SAME UNIVERSE THAT THE BLOOMFILTER WAS CREATED FROM.
+    let universe_path = Path::new(&path_to_universe);
+    let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+    let bed = Path::new(&query_bed_file);
+    let regions = RegionSet::try_from(bed)
+        .with_context(|| "There was an error reading in the bedfile to be tokenized!").unwrap();
+    let tokenized_regions = universe_tree_tokenizer.tokenize_region_set(&regions);
+    let mut tokenized_regions_iter = tokenized_regions.into_iter();
+
+    let mut hits: HashMap<String, u32> = Default::default(); // key is file path value is counts
+    let mut bloom_path_maps : HashMap<Bloom<String>, String> = Default::default(); //TODO this might be a poor way to keep track of this relationship.
+
+    let mut found = false;
+    let first_region: Region  = tokenized_regions_iter.next().unwrap().into();
+    let mut chr_copy = first_region.chr.clone();
+    let mut start_copy = first_region.start.clone();
+    let mut end_copy = first_region.end.clone();
+
+
+    // skip regions if NO bloom filter exist
+    while !found {
+        if bloom_files.contains_key(&chr_copy) {
+            found = true;
+        } else {
+            match tokenized_regions_iter.next() {
+                Some(region_str) => {
+                    let next_region: Region = region_str.into();
+                    chr_copy = next_region.chr.clone();
+                    start_copy = next_region.start.clone();
+                    end_copy = next_region.end.clone();
+                }
+                None => {
+                    println!("No more regions to process.");
+                    break;
+                }
+            }
+        }
+    }
+
+    let previous_chrom = chr_copy.clone();
+    println!("Found initial region with chromosome: {}", chr_copy);
+    let mut paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
+    let mut bloom_filters: Vec<Bloom<String>>= vec![];
+
+    for path in paths_to_blooms.iter(){
+        let path_copy = path.clone();
+        let current_bloom_filter = load_bloom_filter_from_disk(path_copy);
+        bloom_filters.push(current_bloom_filter);
+
+    }
+
+    // Check the very first region
+    if bloom_filters.len()>0{
+        println!("Checking first value.....");
+        // implies we found bloom filters related to the current chromosome
+        let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
+
+        for filter in bloom_filters.iter(){
+
+            let result = filter.check(&line);
+
+            println!("Found something: {}", result);
+            if result {
+                //*hits.entry(key).or_insert(0) += 1; // Increment by 1
+            }
+
+
+        }
+
 
     }
 
 
+
+    for tokenized_region in tokenized_regions_iter{
+
+        // First check if there is even a bloom filter anywhere for this chromosome
+        let region: Region = tokenized_region.into();
+
+        chr_copy = region.chr.clone();
+        start_copy = region.start.clone();
+        end_copy = region.end.clone();
+
+        if chr_copy != previous_chrom{
+            // if switching chromosomes...load new bloom filters
+            // best performance if query bed files is already sorted by chromosome.
+
+
+            if !bloom_files.contains_key(&chr_copy){
+                continue
+
+
+            } else{
+                println!("KEY EXISTS: {}", chr_copy);
+
+                paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
+                bloom_filters.clear(); // clear to prepare pushing new bloom filters from disk into memory
+
+                for path in paths_to_blooms.iter(){
+                    let path_copy = path.clone();
+                    let current_bloom_filter = load_bloom_filter_from_disk(path_copy);
+                    bloom_filters.push(current_bloom_filter);
+
+                }
+
+                if bloom_filters.len()>0{
+                    // implies we found bloom filters related to the current chromosome
+                    let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
+                    for filter in bloom_filters.iter(){
+
+                        let result = filter.check(&line);
+
+                        println!("Found something: {}", result);
+
+
+                    }
+
+
+                }
+
+
+
+            }
+
+        } else{
+
+            let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
+            for filter in bloom_filters.iter(){
+                let result = filter.check(&line);
+                println!("Found something: {}", result);
+            }
+
+            // if !bloom_files.contains_key(&chr_copy){
+            //     continue
+            //
+            //
+            // } else{
+            //     println!("KEY EXISTS: {}", chr_copy);
+            //
+            //     paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
+            //
+            //     for path in paths_to_blooms{
+            //         println!("Here are found paths: {}", path);
+            //     }
+            //
+            //
+            //
+            // }
+
+
+
+        }
+
+        // if !bloom_files.contains_key(&chr_copy){
+        //     continue
+        //
+        //
+        // } else{
+        //     println!("KEY EXISTS: {}", chr_copy);
+        //
+        //     paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
+        //
+        //     for path in paths_to_blooms{
+        //         println!("Here are found paths: {}", path);
+        //     }
+        //
+        //
+        //
+        // }
+
+
+
+
+    }
+
+    // for (key, value) in bloom_files {  // &map to borrow, not take ownership
+    //     println!("Key: {}, Value: {:?}", key, value); // key is child directory  value is the absolute path to the bed file
+    //
+    //     // once we have blooms for each chromosome, load them up as we look at bed files.
+    //
+    //
+    //
+    //
+    // }
 
 
 }
