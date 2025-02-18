@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2]
+- fix [#90](https://github.com/databio/gtars/issues/90)
+- fix [#89](https://github.com/databio/gtars/issues/89)
+
+
 ## [0.2.1] 
 - allow comments at the beginning of fragment files
 - bump bigtools to 0.5.5, fixing [#74](https://github.com/databio/gtars/issues/74) and [#77](https://github.com/databio/gtars/issues/77)
