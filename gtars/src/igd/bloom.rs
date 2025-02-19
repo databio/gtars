@@ -11,6 +11,14 @@ use bloomfilter::Bloom;
 use crate::common::models::{Region, RegionSet};
 use crate::tokenizers::{Tokenizer, TreeTokenizer};
 
+
+/// struct that contains the file path that was used to create the bloom filter as well as the parent
+pub struct bloom_filter_local {
+    pub parent_directory: String,
+    pub bloom_file_path: String,
+    pub bloom_filter: Bloom<String>
+}
+
 pub fn create_bloom_filter_main(){
 
     let universe_file  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
@@ -247,24 +255,34 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
     let previous_chrom = chr_copy.clone();
     println!("Found initial region with chromosome: {}", chr_copy);
     let mut paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
-    let mut bloom_filters: Vec<Bloom<String>>= vec![];
+    let mut bloom_filter_structs: Vec<bloom_filter_local> = vec![];
 
     for path in paths_to_blooms.iter(){
+        println!("Here are paths for loading bloom filters: {}", path);
         let path_copy = path.clone();
-        let current_bloom_filter = load_bloom_filter_from_disk(path_copy);
-        bloom_filters.push(current_bloom_filter);
+        let path = Path::new(path);
+        let parent = path.parent().and_then(|p| p.to_str()).unwrap();
+        let current_bloom_filter = load_bloom_filter_from_disk(path_copy.clone());
+
+        let current_bloom_struct = bloom_filter_local{
+            parent_directory: parent.to_string(),
+            bloom_file_path: path_copy.to_string(),
+            bloom_filter: current_bloom_filter,
+        };
+
+        bloom_filter_structs.push(current_bloom_struct);
 
     }
 
     // Check the very first region
-    if bloom_filters.len()>0{
+    if bloom_filter_structs.len()>0{
         println!("Checking first value.....");
         // implies we found bloom filters related to the current chromosome
         let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
 
-        for filter in bloom_filters.iter(){
+        for s in bloom_filter_structs.iter(){
 
-            let result = filter.check(&line);
+            let result = s.bloom_filter.check(&line);
 
             println!("Found something: {}", result);
             if result {
@@ -292,104 +310,60 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
             // if switching chromosomes...load new bloom filters
             // best performance if query bed files is already sorted by chromosome.
 
-
             if !bloom_files.contains_key(&chr_copy){
                 continue
-
 
             } else{
                 println!("KEY EXISTS: {}", chr_copy);
 
                 paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
-                bloom_filters.clear(); // clear to prepare pushing new bloom filters from disk into memory
+                //bloom_filters.clear(); // clear to prepare pushing new bloom filters from disk into memory
+                bloom_filter_structs.clear();
 
                 for path in paths_to_blooms.iter(){
                     let path_copy = path.clone();
-                    let current_bloom_filter = load_bloom_filter_from_disk(path_copy);
-                    bloom_filters.push(current_bloom_filter);
+                    let path = Path::new(path);
+                    let parent = path.parent().and_then(|p| p.to_str()).unwrap();
+                    let current_bloom_filter = load_bloom_filter_from_disk(path_copy.clone());
+
+                    let current_bloom_struct = bloom_filter_local{
+                        parent_directory: parent.to_string(),
+                        bloom_file_path: path_copy.to_string(),
+                        bloom_filter: current_bloom_filter,
+                    };
+
+                    bloom_filter_structs.push(current_bloom_struct);
+
 
                 }
 
-                if bloom_filters.len()>0{
+                if bloom_filter_structs.len()>0{
                     // implies we found bloom filters related to the current chromosome
                     let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
-                    for filter in bloom_filters.iter(){
+                    for s in bloom_filter_structs.iter(){
 
-                        let result = filter.check(&line);
+                        let result = s.bloom_filter.check(&line);
 
                         println!("Found something: {}", result);
 
-
                     }
 
-
                 }
-
-
 
             }
 
         } else{
 
             let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
-            for filter in bloom_filters.iter(){
-                let result = filter.check(&line);
+            for s in bloom_filter_structs.iter(){
+                let result = s.bloom_filter.check(&line);
                 println!("Found something: {}", result);
             }
-
-            // if !bloom_files.contains_key(&chr_copy){
-            //     continue
-            //
-            //
-            // } else{
-            //     println!("KEY EXISTS: {}", chr_copy);
-            //
-            //     paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
-            //
-            //     for path in paths_to_blooms{
-            //         println!("Here are found paths: {}", path);
-            //     }
-            //
-            //
-            //
-            // }
-
 
 
         }
 
-        // if !bloom_files.contains_key(&chr_copy){
-        //     continue
-        //
-        //
-        // } else{
-        //     println!("KEY EXISTS: {}", chr_copy);
-        //
-        //     paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
-        //
-        //     for path in paths_to_blooms{
-        //         println!("Here are found paths: {}", path);
-        //     }
-        //
-        //
-        //
-        // }
-
-
-
-
     }
-
-    // for (key, value) in bloom_files {  // &map to borrow, not take ownership
-    //     println!("Key: {}, Value: {:?}", key, value); // key is child directory  value is the absolute path to the bed file
-    //
-    //     // once we have blooms for each chromosome, load them up as we look at bed files.
-    //
-    //
-    //
-    //
-    // }
-
 
 }
 fn find_bloom_files(root_dir: &str) -> Result<HashMap<String, Vec<String>>, std::io::Error> {
