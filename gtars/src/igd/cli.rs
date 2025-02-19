@@ -53,7 +53,7 @@ pub fn create_igd_cli() -> Command {
                         .required(false).short('m'),
                 )
         )
-        .subcommand(Command::new("bloom").about("WIP bloom filter implementation").arg(arg!(--database <VALUE> "Path to the igd database.").required(true).short('d'))
+        .subcommand(Command::new("bloom").about("WIP bloom filter implementation")
             .arg(
                 arg!(--action <VALUE> "create or search")
                     .required(true).short('a'),
@@ -80,11 +80,13 @@ pub fn create_igd_cli() -> Command {
             )
             .arg(
                 arg!(--numitems <VALUE> "number of items(bits) in bloom filter")
-                    .required(false).short('n'),
+                    .required(false).short('n').default_value("10000")
+                    .value_parser(clap::value_parser!(usize)),
             )
             .arg(
                 arg!(--falsepositive <VALUE> "falsepositiverate")
-                    .required(true).short('f'),
+                    .required(true).short('f').default_value("0.001")
+                    .value_parser(clap::value_parser!(f64)),
             )
 
         )

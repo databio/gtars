@@ -52,11 +52,11 @@ pub fn igd_get_bloom_matches(matches: &ArgMatches){
 
     let numitems = matches
         .get_one::<usize>("numitems")
-        .unwrap_or_else(|| &0);
+        .expect("number of items required");
 
     let falsepositive = matches
         .get_one::<f64>("falsepositive")
-        .unwrap_or_else(|| &0.0);
+        .expect("number of items required");
 
 
     let parent_directory = format!("{}{}/",bloomdirectory.clone(),bloomname.clone());
@@ -556,10 +556,31 @@ mod tests{
     #[rstest]
     fn test_true_is_true(){
 
-        // let parent_directory = format!("{}{}/",bloomdirectory.clone(),bloomname.clone());
-        // create_bloom_filter_main("create");
-        // create_bloom_filter_main("search");
+        let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
 
+        //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
+        let querybed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
+
+        // Just create the universe once
+        let universe_path = Path::new(&universe);
+        let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+
+        let numitems = 10000;
+        let falsepositive = 0.001;
+
+        // make parent directory to hold sub directories
+        let save_path ="/home/drc/Downloads/bloom_testing/test1/";
+        let name = "test";
+        let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
+        make_parent_directory(parent_directory.as_str()).unwrap();
+
+        //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
+        //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
+        let bedfilesuniverse = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+
+        create_bloom_filters(parent_directory.clone(), bedfilesuniverse, universe_tree_tokenizer, numitems, falsepositive);
+
+        search_bloom_filter(parent_directory.as_str(), universe, querybed);
 
         pretty_assertions::assert_eq!(true, true);
 
