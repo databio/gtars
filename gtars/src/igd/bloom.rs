@@ -222,7 +222,7 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
     let tokenized_regions = universe_tree_tokenizer.tokenize_region_set(&regions);
     let mut tokenized_regions_iter = tokenized_regions.into_iter();
 
-    let mut hits: HashMap<String, u32> = Default::default(); // key is file path value is counts
+    let mut hits: HashMap<String, HashMap<String, u32>> = Default::default(); // key is file path value is counts
     let mut bloom_path_maps : HashMap<Bloom<String>, String> = Default::default(); //TODO this might be a poor way to keep track of this relationship.
 
     let mut found = false;
@@ -252,6 +252,8 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
         }
     }
 
+    // We have to do some work to check the very first region and ensure the proper filters are loaded
+    // before engaging the main loop
     let previous_chrom = chr_copy.clone();
     println!("Found initial region with chromosome: {}", chr_copy);
     let mut paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
@@ -287,11 +289,15 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
             println!("Found something: {}", result);
             if result {
                 //*hits.entry(key).or_insert(0) += 1; // Increment by 1
+                let outerkey = s.parent_directory.clone(); //will tell us the parent file this bloom was created form
+                let innerkey = s.bloom_file_path.clone(); // will tell us the chromosome this came from
+                *hits.entry(outerkey.clone()) // Clone key1 for entry()
+                    .or_insert_with(HashMap::new) // If key1 doesn't exist, create it
+                    .entry(innerkey) // Get the entry for key2 in the inner HashMap
+                    .or_insert(0) += 1; // Increment the count (or initialize to 0 if it doesn't exist)
             }
 
-
         }
-
 
     }
 
@@ -344,7 +350,16 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
 
                         let result = s.bloom_filter.check(&line);
 
-                        println!("Found something: {}", result);
+                        if result {
+                            let outerkey = s.parent_directory.clone(); //will tell us the parent file this bloom was created form
+                            let innerkey = s.bloom_file_path.clone(); // will tell us the chromosome this came from
+                            *hits.entry(outerkey.clone()) // Clone key1 for entry()
+                                .or_insert_with(HashMap::new) // If key1 doesn't exist, create it
+                                .entry(innerkey) // Get the entry for key2 in the inner HashMap
+                                .or_insert(0) += 1; // Increment the count (or initialize to 0 if it doesn't exist)
+
+                        }
+
 
                     }
 
@@ -357,12 +372,29 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
             let line = format!("{}|{}|{}", chr_copy.clone(), start_copy.clone(), end_copy.clone());
             for s in bloom_filter_structs.iter(){
                 let result = s.bloom_filter.check(&line);
-                println!("Found something: {}", result);
+                if result {
+                    let outerkey = s.parent_directory.clone(); //will tell us the parent file this bloom was created form
+                    let innerkey = s.bloom_file_path.clone(); // will tell us the chromosome this came from
+                    *hits.entry(outerkey.clone()) // Clone key1 for entry()
+                        .or_insert_with(HashMap::new) // If key1 doesn't exist, create it
+                        .entry(innerkey) // Get the entry for key2 in the inner HashMap
+                        .or_insert(0) += 1; // Increment the count (or initialize to 0 if it doesn't exist)
+
+                }
             }
 
 
         }
 
+    }
+
+    // Print the hashmap
+    println!("HERE ARE THE FINAL RESULTS:");
+    for (outer_key, inner_map) in &hits {
+        println!("Outer key: {}", outer_key);
+        for (inner_key, count) in inner_map {
+            println!("  Inner key: {}, Count: {}", inner_key, count);
+        }
     }
 
 }
