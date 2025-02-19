@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::env::current_exe;
+use std::ffi::OsStr;
 use std::fs;
 use std::fs::File;
 use std::io::{Error, Read, Write};
@@ -19,11 +20,12 @@ pub struct bloom_filter_local {
     pub bloom_filter: Bloom<String>
 }
 
-pub fn create_bloom_filter_main(){
+pub fn create_bloom_filter_main(action: &str){
 
     let universe_file  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
 
-    let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
+    //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
+    let query_bed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
 
     // Just create the universe once
     let universe_path = Path::new(&universe_file);
@@ -35,11 +37,27 @@ pub fn create_bloom_filter_main(){
 
     // make parent directory to hold sub directories
     let save_path ="/home/drc/Downloads/bloom_testing/test1/";
-    let name = "test";
+    let name = "test2";
     let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
     make_parent_directory(parent_directory.as_str()).unwrap();
 
-    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
+    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
+    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
+
+    match action{
+
+        "create" => {create_bloom_filters(parent_directory.clone(),bed_directory,universe_tree_tokenizer, num_of_items,false_positive_rate);}
+        "search" => {search_bloom_filter(parent_directory.as_str(), universe_file, query_bed);}
+
+
+        _ => {println!("No action given, Select search or create")}
+    }
+
+
+}
+
+fn create_bloom_filters(parent_directory: String, bed_directory: &str, universe_tree_tokenizer: TreeTokenizer, num_of_items: usize, false_positive_rate: f64) {
+    println!("Entering create bloomfilters");
     let mut child_meta_data_map: HashMap<String, String> = HashMap::new(); // File name and directory to store files
     // For now we will store the individual bloom filters in child directories
     make_child_directories(parent_directory.clone(), bed_directory, &mut child_meta_data_map);
@@ -53,8 +71,6 @@ pub fn create_bloom_filter_main(){
 
     }
 
-    search_bloom_filter(parent_directory.clone().as_str(), universe_file, query_bed)
-
 }
 
 fn make_child_directories(parent_directory: String, bed_directory: &str, meta_data: &mut HashMap<String, String>) {
@@ -65,26 +81,33 @@ fn make_child_directories(parent_directory: String, bed_directory: &str, meta_da
         let path = entry.path();
 
         if path.is_file() {
+            println!("Found a file....");
             if let Some(extension) = path.extension() {
-                if extension == "bed" {
-                    let full_name = path.to_str().unwrap().to_string();
-                    println!("Here is the full name: {}", full_name.clone());
+                if let Some(extension) = extension.to_str(){
+                    println!("Found this extension: {}", extension);
+                match extension{
+                    "bed" | "gz" => {
+                        let full_name = path.to_str().unwrap().to_string();
+                        println!("Here is the full name: {}", full_name.clone());
 
-                    let name_without_extension = path
-                        .file_stem()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string();
-                    println!("Here is the name without extension: {}", name_without_extension.clone());
+                        let name_without_extension = path
+                            .file_stem()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .to_string();
+                        println!("Here is the name without extension: {}", name_without_extension.clone());
 
 
-                    let single_parent_directory = format!("{}{}/",parent_directory,name_without_extension);
-                    make_parent_directory(single_parent_directory.as_str());
+                        let single_parent_directory = format!("{}{}/",parent_directory,name_without_extension);
+                        make_parent_directory(single_parent_directory.as_str());
 
-                    meta_data.insert(single_parent_directory,full_name.clone());
+                        meta_data.insert(single_parent_directory,full_name.clone());
+                    }
 
-                }
+                    _ => {}
+                }}
+
             }
         }
     }
@@ -254,7 +277,7 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
 
     // We have to do some work to check the very first region and ensure the proper filters are loaded
     // before engaging the main loop
-    let previous_chrom = chr_copy.clone();
+    let mut previous_chrom = chr_copy.clone();
     println!("Found initial region with chromosome: {}", chr_copy);
     let mut paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
     let mut bloom_filter_structs: Vec<bloom_filter_local> = vec![];
@@ -320,6 +343,7 @@ pub fn search_bloom_filter(path_to_bloom_directory: &str, path_to_universe: &str
                 continue
 
             } else{
+                previous_chrom = chr_copy.clone();
                 println!("KEY EXISTS: {}", chr_copy);
 
                 paths_to_blooms =  bloom_files.get(&chr_copy).unwrap();
@@ -483,7 +507,8 @@ mod tests{
     #[rstest]
     fn test_true_is_true(){
 
-        create_bloom_filter_main();
+        //create_bloom_filter_main("create");
+        create_bloom_filter_main("search");
         pretty_assertions::assert_eq!(true, true);
 
     }
