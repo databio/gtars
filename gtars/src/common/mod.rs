@@ -27,7 +27,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     use super::models::{Region, RegionSet};
-    use super::utils::extract_regions_from_bed_file;
+    // use super::utils::extract_regions_from_bed_file;
     use std::io::Read;
     use std::path::Path;
 
@@ -72,6 +72,7 @@ mod tests {
             chr: "chr1".to_string(),
             start: 100,
             end: 200,
+            rest: String::new(),
         };
 
         assert_eq!(region.chr, "chr1");
@@ -82,18 +83,19 @@ mod tests {
     #[rstest]
     fn test_extract_regions_from_bed_file(path_to_bed_file: &str) {
         let path = Path::new(path_to_bed_file);
-        let regions = extract_regions_from_bed_file(path);
-        assert!(regions.is_ok(), "Failed to extract regions from BED file");
-        let regions = regions.unwrap();
+        let regions = RegionSet::try_from(path).unwrap().regions;
+        // assert!(regions.is_ok(), "Failed to extract regions from BED file");
+        // let regions = regions.unwrap();
         assert!(regions.len() == 25);
     }
 
     #[rstest]
     fn test_extract_regions_from_bed_file_gzipped(path_to_bed_file_gzipped: &str) {
         let path = Path::new(path_to_bed_file_gzipped);
-        let regions = extract_regions_from_bed_file(path);
-        assert!(regions.is_ok(), "Failed to extract regions from BED file");
-        let regions = regions.unwrap();
+        // let regions = extract_regions_from_bed_file(path);
+        let regions = RegionSet::try_from(path).unwrap().regions;
+        // assert!(regions.is_ok(), "Failed to extract regions from BED file");
+        // let regions = regions.unwrap();
         assert_eq!(regions.len(), 25);
     }
 

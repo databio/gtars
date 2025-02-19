@@ -4,9 +4,8 @@ use std::path::Path;
 use anyhow::{Context, Result};
 
 use crate::common::models::region::Region;
-use crate::common::utils::{
-    extract_regions_from_bed_file, generate_id_to_region_map, generate_region_to_id_map,
-};
+use crate::common::models::region_set::RegionSet;
+use crate::common::utils::{generate_id_to_region_map, generate_region_to_id_map};
 
 #[derive(Clone, Eq, PartialEq, Default)]
 pub struct Universe {
@@ -33,6 +32,7 @@ impl Universe {
             chr: chr.to_string(),
             start,
             end,
+            rest: String::new(),
         };
         self.convert_region_to_id(&region)
     }
@@ -75,8 +75,7 @@ impl TryFrom<&Path> for Universe {
     type Error = anyhow::Error;
 
     fn try_from(value: &Path) -> Result<Self> {
-        let regions = extract_regions_from_bed_file(value)
-            .with_context(|| "There was an error reading the universe file!")?;
+        let regions = RegionSet::try_from(value).unwrap().regions;
 
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);

@@ -6,7 +6,7 @@ use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
-use crate::common::utils::{create_interval_tree_from_universe, extract_regions_from_bed_file};
+use crate::common::utils::create_interval_tree_from_universe;
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
@@ -79,7 +79,9 @@ impl TryFrom<&Path> for TreeTokenizer {
                                 value.parent().unwrap().join(hierarchical_universe);
 
                             let hierarchical_universe_regions =
-                                extract_regions_from_bed_file(&hierarchical_universe_path)?;
+                                RegionSet::try_from(hierarchical_universe_path.as_path())
+                                    .unwrap()
+                                    .regions;
 
                             let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> =
                                 HashMap::new();
@@ -133,7 +135,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             }
             // else assume its a bed file
             _ => {
-                let regions = extract_regions_from_bed_file(value)?;
+                let regions = RegionSet::try_from(value).unwrap().regions;
                 let universe = Universe::from(regions);
                 let tree = create_interval_tree_from_universe(&universe);
 
@@ -152,6 +154,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
+            rest: String::new(),
         });
 
         // pad
@@ -159,6 +162,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
+            rest: String::new(),
         });
 
         // mask
@@ -166,6 +170,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
+            rest: String::new(),
         });
 
         // eos
@@ -173,6 +178,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
+            rest: String::new(),
         });
 
         // bos
@@ -180,6 +186,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
+            rest: String::new(),
         });
 
         // cls
@@ -187,6 +194,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
+            rest: String::new(),
         });
 
         // sep
@@ -194,6 +202,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
+            rest: String::new(),
         });
 
         Ok(TreeTokenizer {
@@ -323,6 +332,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -331,6 +341,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -339,6 +350,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -347,6 +359,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -355,6 +368,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -363,6 +377,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -371,6 +386,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -419,7 +435,7 @@ impl SpecialTokens for TreeTokenizer {
 
 impl TreeTokenizer {
     pub fn tokenize_bed_file(&self, bed_file: &Path) -> Result<TokenizedRegionSet> {
-        let regions = extract_regions_from_bed_file(bed_file)?;
+        let regions = RegionSet::try_from(bed_file).unwrap().regions;
         let rs = RegionSet::from(regions);
 
         Ok(self.tokenize_region_set(&rs))
@@ -523,6 +539,7 @@ mod tests {
             chr: "chr1".to_string(),
             start: 100,
             end: 200,
+            rest: String::new(),
         });
         assert_eq!(res.len(), 1);
 
@@ -544,6 +561,7 @@ mod tests {
             chr: "chrFOO".to_string(),
             start: 100,
             end: 200,
+            rest: String::new(),
         });
         assert_eq!(res.len(), 1);
 
