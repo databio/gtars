@@ -9,6 +9,7 @@ use anyhow::Context;
 // for now use simple implementation of bloom filter in rust
 use bloomfilter;
 use bloomfilter::Bloom;
+use clap::ArgMatches;
 use crate::common::models::{Region, RegionSet};
 use crate::tokenizers::{Tokenizer, TreeTokenizer};
 
@@ -20,42 +21,93 @@ pub struct bloom_filter_local {
     pub bloom_filter: Bloom<String>
 }
 
-pub fn create_bloom_filter_main(action: &str){
+pub fn igd_get_bloom_matches(matches: &ArgMatches){
 
-    let universe_file  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
+    let action = matches
+        .get_one::<String>("action")
+        .expect("Action (search or create) is required").as_str();
 
-    //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
-    let query_bed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
+    let universe = matches
+        .get_one::<String>("universe")
+        .expect("universe path is required");
 
-    // Just create the universe once
-    let universe_path = Path::new(&universe_file);
-    let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+    let bedfilesuniverse = matches
+        .get_one::<String>("bedfilesuniverse")
+        .map(String::as_str)
+        .unwrap_or_default();
 
-    let num_of_items = 10000;
-    let false_positive_rate = 0.001;
-    let seed = 42;
 
-    // make parent directory to hold sub directories
-    let save_path ="/home/drc/Downloads/bloom_testing/test1/";
-    let name = "test";
-    let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
-    make_parent_directory(parent_directory.as_str()).unwrap();
+    let querybed = matches
+        .get_one::<String>("querybed")
+        .map(String::as_str)
+        .unwrap_or_default();
 
-    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
-    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
-    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+    let bloomdirectory = matches
+        .get_one::<String>("bloomdirectory")
+        .expect("bloomdirectory is required");
+
+    let bloomname = matches
+        .get_one::<String>("bloomdirectory")
+        .expect("bloomname is required");
+
+    let numitems = matches
+        .get_one::<usize>("numitems")
+        .unwrap_or_else(|| &0);
+
+    let falsepositive = matches
+        .get_one::<f64>("falsepositive")
+        .unwrap_or_else(|| &0.0);
+
+
+    let parent_directory = format!("{}{}/",bloomdirectory.clone(),bloomname.clone());
+
 
     match action{
 
-        "create" => {create_bloom_filters(parent_directory.clone(),bed_directory,universe_tree_tokenizer, num_of_items,false_positive_rate);}
-        "search" => {search_bloom_filter(parent_directory.as_str(), universe_file, query_bed);}
+        "create" => {
+            let universe_path = Path::new(&universe);
+            let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+            make_parent_directory(parent_directory.as_str()).unwrap();
+
+            create_bloom_filters(parent_directory.clone(), bedfilesuniverse, universe_tree_tokenizer, *numitems, *falsepositive);
+
+
+        }
+        "search" => {search_bloom_filter(parent_directory.as_str(), universe, querybed);}
 
 
         _ => {println!("No action given, Select search or create")}
     }
 
-
 }
+
+// pub fn create_bloom_filter_main(action: &str){
+//
+//     let universe_file  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
+//
+//     //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
+//     let query_bed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
+//
+//     // Just create the universe once
+//     let universe_path = Path::new(&universe_file);
+//     let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+//
+//     let num_of_items = 10000;
+//     let false_positive_rate = 0.001;
+//     //let seed = 42;
+//
+//     // make parent directory to hold sub directories
+//     let save_path ="/home/drc/Downloads/bloom_testing/test1/";
+//     let name = "test";
+//     let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
+//     make_parent_directory(parent_directory.as_str()).unwrap();
+//
+//     //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
+//     //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
+//     let bed_directory = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+//
+//
+// }
 
 fn create_bloom_filters(parent_directory: String, bed_directory: &str, universe_tree_tokenizer: TreeTokenizer, num_of_items: usize, false_positive_rate: f64) {
     println!("Creating bloomfilters");
@@ -504,11 +556,16 @@ mod tests{
     #[rstest]
     fn test_true_is_true(){
 
-        create_bloom_filter_main("create");
-        create_bloom_filter_main("search");
+        // let parent_directory = format!("{}{}/",bloomdirectory.clone(),bloomname.clone());
+        // create_bloom_filter_main("create");
+        // create_bloom_filter_main("search");
+
+
         pretty_assertions::assert_eq!(true, true);
 
     }
+
+
 
 }
 

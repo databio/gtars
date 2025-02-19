@@ -50,6 +50,9 @@ fn main() -> Result<()> {
             Some((igd::consts::IGD_SEARCH, matches)) => {
                 igd::search::igd_get_search_matches(matches);
             }
+            Some((igd::consts::IGD_BLOOM, matches)) => {
+                igd::bloom::igd_get_bloom_matches(matches);
+            }
             _ => unreachable!("IGD Subcommand not found"),
         },
         Some((scoring::consts::FSCORING_CMD, matches)) => {

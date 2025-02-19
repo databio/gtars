@@ -53,4 +53,40 @@ pub fn create_igd_cli() -> Command {
                         .required(false).short('m'),
                 )
         )
+        .subcommand(Command::new("bloom").about("WIP bloom filter implementation").arg(arg!(--database <VALUE> "Path to the igd database.").required(true).short('d'))
+            .arg(
+                arg!(--action <VALUE> "create or search")
+                    .required(true).short('a'),
+            )
+            .arg(
+                arg!(--universe <VALUE> "pathe to universe bed file")
+                    .required(true).short('u'),
+            )
+            .arg(
+                arg!(--bedfilesuniverse <VALUE> "original bedfiles for the universe")
+                    .required(false).short('e'),
+            )
+            .arg(
+                arg!(--querybed <VALUE> "bedfile for query against bloom filters")
+                    .required(false).short('q'),
+            )
+            .arg(
+                arg!(--bloomdirectory <VALUE> "directory to place bloom ")
+                    .required(true).short('l'),
+            )
+            .arg(
+                arg!(--bloomname <VALUE> "parent name")
+                    .required(true).short('p'),
+            )
+            .arg(
+                arg!(--numitems <VALUE> "number of items(bits) in bloom filter")
+                    .required(false).short('n'),
+            )
+            .arg(
+                arg!(--falsepositive <VALUE> "falsepositiverate")
+                    .required(true).short('f'),
+            )
+
+        )
+
 }
