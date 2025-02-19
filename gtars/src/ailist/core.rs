@@ -191,22 +191,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::common::utils::extract_regions_from_bed_file;
+    use std::path::Path;
     // use pretty_assertions::assert_eq;
     use rstest::*;
 
     #[fixture]
-    fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments/region_scoring/*.bed.gz"
-    }
-
-    #[fixture]
     fn consensus_set() -> &'static str {
         "tests/data/consensus/consensus1.bed"
-    }
-
-    #[fixture]
-    fn output_file() -> &'static str {
-        "tests/data/out/region_scoring_count.csv.gz"
     }
 
     #[rstest]
@@ -265,5 +257,10 @@ mod tests {
                 data: 0
             })
         );
+    }
+
+    #[rstest]
+    fn test_ailist_tokenizer() {
+        let bed_file_path = Path::new("tests/data/peaks.bed.gz");
     }
 }
