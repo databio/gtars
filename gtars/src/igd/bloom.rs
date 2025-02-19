@@ -24,8 +24,8 @@ pub fn create_bloom_filter_main(action: &str){
 
     let universe_file  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
 
-    //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
-    let query_bed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
+    let query_bed = "/home/drc/Downloads/bloom_testing/test1/query1.bed";
+    //let query_bed = "/home/drc/Downloads/bloom_testing/test1/query2.bed";
 
     // Just create the universe once
     let universe_path = Path::new(&universe_file);
@@ -37,17 +37,17 @@ pub fn create_bloom_filter_main(action: &str){
 
     // make parent directory to hold sub directories
     let save_path ="/home/drc/Downloads/bloom_testing/test1/";
-    let name = "test2";
+    let name = "test";
     let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
     make_parent_directory(parent_directory.as_str()).unwrap();
 
-    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
-    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
+    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files/";
+    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
 
     match action{
 
         "create" => {create_bloom_filters(parent_directory.clone(),bed_directory,universe_tree_tokenizer, num_of_items,false_positive_rate);}
-        "search" => {search_bloom_filter(parent_directory.as_str(), universe_file, query_bed);}
+        //"search" => {search_bloom_filter(parent_directory.as_str(), universe_file, query_bed);}
 
 
         _ => {println!("No action given, Select search or create")}
@@ -57,17 +57,15 @@ pub fn create_bloom_filter_main(action: &str){
 }
 
 fn create_bloom_filters(parent_directory: String, bed_directory: &str, universe_tree_tokenizer: TreeTokenizer, num_of_items: usize, false_positive_rate: f64) {
-    println!("Entering create bloomfilters");
+    println!("Creating bloomfilters");
     let mut child_meta_data_map: HashMap<String, String> = HashMap::new(); // File name and directory to store files
     // For now we will store the individual bloom filters in child directories
     make_child_directories(parent_directory.clone(), bed_directory, &mut child_meta_data_map);
 
     //DEBUG CHECK TO ENSURE WE CHANGED HASHMAP
     for (key, value) in child_meta_data_map {  // &map to borrow, not take ownership
-        println!("Key: {}, Value: {}", key, value); // key is child directory  value is the absolute path to the bed file
-
+        //println!("Key: {}, Value: {}", key, value); // key is child directory  value is the absolute path to the bed file
         tokenize_then_create_bloom(&universe_tree_tokenizer, value.as_str(), key.as_str(), num_of_items, false_positive_rate)
-
 
     }
 
@@ -81,14 +79,14 @@ fn make_child_directories(parent_directory: String, bed_directory: &str, meta_da
         let path = entry.path();
 
         if path.is_file() {
-            println!("Found a file....");
+            //println!("Found a file....");
             if let Some(extension) = path.extension() {
                 if let Some(extension) = extension.to_str(){
-                    println!("Found this extension: {}", extension);
+                    //println!("Found this extension: {}", extension);
                 match extension{
                     "bed" | "gz" => {
                         let full_name = path.to_str().unwrap().to_string();
-                        println!("Here is the full name: {}", full_name.clone());
+                        //println!("Here is the full name: {}", full_name.clone());
 
                         let name_without_extension = path
                             .file_stem()
@@ -96,7 +94,7 @@ fn make_child_directories(parent_directory: String, bed_directory: &str, meta_da
                             .to_str()
                             .unwrap()
                             .to_string();
-                        println!("Here is the name without extension: {}", name_without_extension.clone());
+                        //println!("Here is the name without extension: {}", name_without_extension.clone());
 
 
                         let single_parent_directory = format!("{}{}/",parent_directory,name_without_extension);
@@ -119,7 +117,6 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
     // we must first tokenize against a universe and then create a bloom filter for each chromosome
     // from that tokenization
 
-
     // First tokenize regions
     let bed = Path::new(&bed_file);
     let regions = RegionSet::try_from(bed)
@@ -135,10 +132,10 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
     let mut current_bloom_filter: Bloom<String> = bloomfilter::Bloom::new_for_fp_rate(num_of_items, false_positive_rate).unwrap();
 
     if file_exists(&*bloom_filter_path) {
-        println!("File exists!");
+        println!("File exists: {}", bloom_filter_path);
         current_bloom_filter = load_bloom_filter_from_disk(bloom_filter_path);
     } else {
-        println!("File does not exist! creating bloom filter in memory");
+        println!("File does not exist! creating bloom filter in memory: {}", bloom_filter_path);
         current_bloom_filter = bloomfilter::Bloom::new_for_fp_rate(num_of_items, false_positive_rate).unwrap();
     }
 
@@ -146,7 +143,7 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
     let line = format!("{}|{}|{}", first_region.chr.clone(), first_region.start.clone(), first_region.end.clone());
     current_bloom_filter.set(&line);
 
-    // set current to previous
+    // set previous to current
     let mut previous_chrom: String = chr_copy.clone();
 
 
@@ -156,7 +153,7 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
         chr_copy = region.chr.clone();
 
         if chr_copy != previous_chrom{
-            println!("Switching chromsomes...{}  {}", chr_copy, previous_chrom);
+            println!("Switching chromsomes to {}  Previous: {}", chr_copy, previous_chrom);
 
             // save any progress made to disk
             let previous_bloom_filter_path = format!("{}{}.bloom",child_directory, previous_chrom);
@@ -166,28 +163,25 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
 
             // Look for bloom filter at new location:
             let bloom_filter_path = format!("{}{}.bloom",child_directory, chr_copy);
-            println!("Searching for bloomfilter: {}", bloom_filter_path);
+            //println!("Searching for bloomfilter: {}", bloom_filter_path);
             if file_exists(&*bloom_filter_path) {
-                println!("File exists!");
+                println!("File exists: {}", bloom_filter_path);
                 current_bloom_filter = load_bloom_filter_from_disk(bloom_filter_path);
             } else {
-                println!("File does not exist! creating bloom filter in memory");
+                println!("File does not exist! creating bloom filter in memory: {}", bloom_filter_path);
                 current_bloom_filter = bloomfilter::Bloom::new_for_fp_rate(num_of_items, false_positive_rate).unwrap();
             }
         }
-
+        println!("Setting region");
         let line = format!("{}|{}|{}", region.chr.clone(), region.start.clone(), region.end.clone());
         current_bloom_filter.set(&line);
 
-       println!("{}",line);
+       //println!("{}",line);
     }
 
     println!("What is this value at the end? {}", chr_copy);
     bloom_filter_path = format!("{}{}.bloom",child_directory, chr_copy);
     write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
-
-
-
 
 }
 
@@ -216,7 +210,7 @@ pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
 
 pub fn write_bloom_filter_to_disk(igd_bloom_filter: Bloom<String>, save_path: String){
 
-    println!("Here is final save path: {}", save_path);
+    println!("Writing bloom filter to path: {}", save_path);
 
     let slice = igd_bloom_filter.as_slice();
 
@@ -472,7 +466,7 @@ fn find_bloom_files(root_dir: &str) -> Result<HashMap<String, Vec<String>>, std:
 
 pub fn load_bloom_filter_from_disk(load_path: String) -> Bloom<String>
 {
-    println!("Loading Bloom Filter");
+    println!("Loading Bloom Filter: {}", load_path);
     let mut file = File::open(load_path).unwrap();
 
     let mut buffer = Vec::new();
@@ -487,9 +481,9 @@ pub fn load_bloom_filter_from_disk(load_path: String) -> Bloom<String>
     let num_hashes = loaded_igd_bloom_filter.number_of_hash_functions();
     let bloom_len = loaded_igd_bloom_filter.len();
 
-    println!("Bloom empty: {}", is_empty);
-    println!("Num hashes: {}", num_hashes);
-    println!("Bloom length: {}", bloom_len);
+    // println!("Bloom empty: {}", is_empty);
+    // println!("Num hashes: {}", num_hashes);
+    // println!("Bloom length: {}", bloom_len);
 
     loaded_igd_bloom_filter
 
@@ -507,8 +501,8 @@ mod tests{
     #[rstest]
     fn test_true_is_true(){
 
-        //create_bloom_filter_main("create");
-        create_bloom_filter_main("search");
+        create_bloom_filter_main("create");
+        //create_bloom_filter_main("search");
         pretty_assertions::assert_eq!(true, true);
 
     }
