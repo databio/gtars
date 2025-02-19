@@ -85,7 +85,7 @@ pub fn create_igd_cli() -> Command {
             )
             .arg(
                 arg!(--falsepositive <VALUE> "falsepositiverate")
-                    .required(true).short('f').default_value("0.001")
+                    .required(false).short('f').default_value("0.001")
                     .value_parser(clap::value_parser!(f64)),
             )
 

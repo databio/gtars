@@ -554,7 +554,7 @@ mod tests{
     use rstest::rstest;
 
     #[rstest]
-    fn test_true_is_true(){
+    fn test_manual(){
 
         let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
 
