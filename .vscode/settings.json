@@ -3,5 +3,8 @@
         "./gtars/Cargo.toml",
         "./bindings/python/Cargo.toml",
         "./bindings/r/src/rust/Cargo.toml",
-    ]
+    ],
+    "files.watcherExclude": {
+        "gtars/target/**": true
+    }
 }
