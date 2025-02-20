@@ -59,36 +59,6 @@ pub fn sha512t24u<T: AsRef<[u8]>>(input: T) -> String {
     base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
 }
 
-#[allow(dead_code)]
-pub fn sha512t24u_stack<T: AsRef<[u8]>>(input: T) -> String {
-    let mut sha512_hasher = Sha512::new(); // no Box
-    for chunk in input.as_ref().chunks(1024) {
-        sha512_hasher.update(chunk);
-    }
-    base64_url::encode(&sha512_hasher.finalize_reset()[0..24])
-}
-
-// Unused single-type versions, replaced by the generic version sha512t24u
-// Might want to keep around for testing or learning purposes in the future.
-#[allow(dead_code)]
-fn sha512t24u_bytes(bytes: &[u8]) -> String {
-    let mut sha512_hasher_box = Box::new(Sha512::new());
-    for chunk in bytes.chunks(1024) {
-        sha512_hasher_box.as_mut().update(chunk);
-    }
-    base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
-}
-
-#[allow(dead_code)]
-fn sha512t24u_str(string: &str) -> String {
-    let mut sha512_hasher_box = Box::new(Sha512::new());
-    for chunk in string.as_bytes().chunks(1024) {
-        sha512_hasher_box.as_mut().update(chunk);
-    }
-    base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
-}
-
-
 /// Process a string to compute its md5 digest
 ///
 /// # Arguments
@@ -104,27 +74,6 @@ pub fn md5<T: AsRef<[u8]>>(input:T) -> String {
         hasher.update(chunk);
     }
     format!("{:x}", hasher.finalize())
-}
-
-// Unused single-type versions, replaced by the generic version md5
-#[allow(dead_code)]
-fn md5_bytes(bytes: &[u8]) -> String {
-    let mut hasher = Md5::new();
-    for chunk in bytes.chunks(1024) {
-        hasher.update(chunk);
-    }
-    let result = hasher.finalize();
-    format!("{:x}", result)
-}
-
-#[allow(dead_code)]
-fn md5_str(string: &str) -> String {
-    let mut hasher = Md5::new();
-    for chunk in string.as_bytes().chunks(1024) {
-        hasher.update(chunk);
-    }
-    let result = hasher.finalize();
-    format!("{:x}", result)
 }
 
 /// Processes a FASTA file to compute the digests of each sequence in the file.
@@ -149,41 +98,8 @@ fn md5_str(string: &str) -> String {
 /// # Examples
 ///
 ///
-
 pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<Vec<DigestResult>> {
     let file_reader = get_dynamic_reader(file_path.as_ref())?;
-    let mut fasta_reader = Reader::new(file_reader);
-    let mut results = Vec::new();
-    while let Some(record) = fasta_reader.next() {
-        // returns a RefRecord object
-        let record = record.expect("Error found when retrieving next record.");
-        let id = record.id().expect("No ID found for the FASTA record");
-        let mut sha512_hasher = Sha512::new();
-        let mut md5_hasher = Md5::new();
-        let mut length = 0;
-        for seq_line in record.seq_lines() {
-            // let seq_line = seq_line.expect("Error found when retrieving next sequence line.");
-            sha512_hasher.update(seq_line.to_ascii_uppercase());
-            md5_hasher.update(seq_line.to_ascii_uppercase());
-            length += seq_line.len();
-        }
-        // let result = sha512_hasher.finalize();
-        let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
-        let md5 = format!("{:x}", md5_hasher.finalize_reset());
-        results.push(DigestResult {
-            id: id.to_string(),
-            length: length,
-            sha512t24u: sha512,
-            md5: md5,
-        });
-    }
-    Ok(results)
-}
-
-#[allow(dead_code)]
-pub fn digest_fasta_old(file_path: &str) -> Result<Vec<DigestResult>> {
-    let path = Path::new(&file_path);
-    let file_reader = get_dynamic_reader(&path)?;
     let mut fasta_reader = Reader::new(file_reader);
     let mut results = Vec::new();
     while let Some(record) = fasta_reader.next() {
