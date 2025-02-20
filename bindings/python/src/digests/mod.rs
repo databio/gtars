@@ -4,8 +4,10 @@ use pyo3::prelude::*;
 use gtars::digests::{sha512t24u, md5, DigestResult};
 
 #[pyfunction]
-pub fn sha512t24u_digest(readable: &str) -> String {
-    return sha512t24u(readable);
+pub fn sha512t24u_digest(readable: &PyAny) -> PyResult<String> {
+    // Extract the input as bytes
+    let input_bytes = readable.extract::<Vec<u8>>()?;
+    Ok(sha512t24u(&input_bytes))
 }
 
 #[pyfunction]

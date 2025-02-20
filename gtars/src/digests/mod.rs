@@ -49,10 +49,10 @@ pub struct DigestResult {
 /// # Returns
 ///
 /// A string SHA-512 digest of the input string.
-pub fn sha512t24u(string: &str) -> String {
+pub fn sha512t24u(bytes: &[u8]) -> String {
     let mut sha512_hasher_box = Box::new(Sha512::new());
-    for s in string.as_bytes().chunks(800) {
-        sha512_hasher_box.as_mut().update(s);
+    for chunk in bytes.chunks(800) {
+        sha512_hasher_box.as_mut().update(chunk);
     }
     base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
 }
