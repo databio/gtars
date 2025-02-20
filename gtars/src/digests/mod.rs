@@ -19,14 +19,11 @@
 //!
 //! let digest = sha512t24u("hello world");
 //! ```
-use std::fs::File;
-use std::io;
-use std::io::prelude::{Read, Write};
 use std::path::Path;
 
 use anyhow::Result;
 use md5::Md5;
-use seq_io::fasta::{Reader, Record, RefRecord};
+use seq_io::fasta::{Reader, Record};
 use sha2::{Digest, Sha512};
 
 use crate::common::utils::get_dynamic_reader;
@@ -42,34 +39,89 @@ pub struct DigestResult {
 
 /// Processes a given string to compute its GA4GH sha512t24u digest.
 ///
+/// This function processes a given string to compute its GA4GH sha512t24u digest. The input string
+/// is processed in chunks of 800 bytes, and the digest is computed incrementally. The final digest
+/// is a 24-byte string encoded using base64url encoding. You can provide either a string slice or
+/// a byte slice as input.
+///
 /// # Arguments
 ///
-/// * `string` - The input string to be processed.
+/// * `input` - The input string to be processed, as a string slice or byte slice.
 ///
 /// # Returns
 ///
 /// A string SHA-512 digest of the input string.
-pub fn sha512t24u(bytes: &[u8]) -> String {
+pub fn sha512t24u<T: AsRef<[u8]>>(input: T) -> String {
     let mut sha512_hasher_box = Box::new(Sha512::new());
-    for chunk in bytes.chunks(800) {
+    for chunk in input.as_ref().chunks(1024) {
         sha512_hasher_box.as_mut().update(chunk);
     }
     base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
 }
 
+#[allow(dead_code)]
+pub fn sha512t24u_stack<T: AsRef<[u8]>>(input: T) -> String {
+    let mut sha512_hasher = Sha512::new(); // no Box
+    for chunk in input.as_ref().chunks(1024) {
+        sha512_hasher.update(chunk);
+    }
+    base64_url::encode(&sha512_hasher.finalize_reset()[0..24])
+}
+
+// Unused single-type versions, replaced by the generic version sha512t24u
+// Might want to keep around for testing or learning purposes in the future.
+#[allow(dead_code)]
+fn sha512t24u_bytes(bytes: &[u8]) -> String {
+    let mut sha512_hasher_box = Box::new(Sha512::new());
+    for chunk in bytes.chunks(1024) {
+        sha512_hasher_box.as_mut().update(chunk);
+    }
+    base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
+}
+
+#[allow(dead_code)]
+fn sha512t24u_str(string: &str) -> String {
+    let mut sha512_hasher_box = Box::new(Sha512::new());
+    for chunk in string.as_bytes().chunks(1024) {
+        sha512_hasher_box.as_mut().update(chunk);
+    }
+    base64_url::encode(&sha512_hasher_box.as_mut().finalize_reset()[0..24])
+}
+
+
 /// Process a string to compute its md5 digest
 ///
 /// # Arguments
 ///
-/// * `string` - The input string to be processed.
+/// * `input` - The input string to be processed, as a string slice or byte slice.
 ///
 /// # Returns
 ///
 /// A string MD5 digest of the input string.
-pub fn md5(string: &str) -> String {
+pub fn md5<T: AsRef<[u8]>>(input:T) -> String {
     let mut hasher = Md5::new();
-    for s in string.as_bytes().chunks(800) {
-        hasher.update(s);
+    for chunk in input.as_ref().chunks(1024) {
+        hasher.update(chunk);
+    }
+    format!("{:x}", hasher.finalize())
+}
+
+// Unused single-type versions, replaced by the generic version md5
+#[allow(dead_code)]
+fn md5_bytes(bytes: &[u8]) -> String {
+    let mut hasher = Md5::new();
+    for chunk in bytes.chunks(1024) {
+        hasher.update(chunk);
+    }
+    let result = hasher.finalize();
+    format!("{:x}", result)
+}
+
+#[allow(dead_code)]
+fn md5_str(string: &str) -> String {
+    let mut hasher = Md5::new();
+    for chunk in string.as_bytes().chunks(1024) {
+        hasher.update(chunk);
     }
     let result = hasher.finalize();
     format!("{:x}", result)
@@ -97,7 +149,39 @@ pub fn md5(string: &str) -> String {
 /// # Examples
 ///
 ///
-pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>> {
+
+pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<Vec<DigestResult>> {
+    let file_reader = get_dynamic_reader(file_path.as_ref())?;
+    let mut fasta_reader = Reader::new(file_reader);
+    let mut results = Vec::new();
+    while let Some(record) = fasta_reader.next() {
+        // returns a RefRecord object
+        let record = record.expect("Error found when retrieving next record.");
+        let id = record.id().expect("No ID found for the FASTA record");
+        let mut sha512_hasher = Sha512::new();
+        let mut md5_hasher = Md5::new();
+        let mut length = 0;
+        for seq_line in record.seq_lines() {
+            // let seq_line = seq_line.expect("Error found when retrieving next sequence line.");
+            sha512_hasher.update(seq_line.to_ascii_uppercase());
+            md5_hasher.update(seq_line.to_ascii_uppercase());
+            length += seq_line.len();
+        }
+        // let result = sha512_hasher.finalize();
+        let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
+        let md5 = format!("{:x}", md5_hasher.finalize_reset());
+        results.push(DigestResult {
+            id: id.to_string(),
+            length: length,
+            sha512t24u: sha512,
+            md5: md5,
+        });
+    }
+    Ok(results)
+}
+
+#[allow(dead_code)]
+pub fn digest_fasta_old(file_path: &str) -> Result<Vec<DigestResult>> {
     let path = Path::new(&file_path);
     let file_reader = get_dynamic_reader(&path)?;
     let mut fasta_reader = Reader::new(file_reader);
@@ -109,7 +193,6 @@ pub fn digest_fasta(file_path: &str) -> Result<Vec<DigestResult>> {
         let mut sha512_hasher = Sha512::new();
         let mut md5_hasher = Md5::new();
         let mut length = 0;
-        // let result = process_sequence(record, verbose);
         for seq_line in record.seq_lines() {
             // let seq_line = seq_line.expect("Error found when retrieving next sequence line.");
             sha512_hasher.update(seq_line.to_ascii_uppercase());
@@ -134,19 +217,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_sha512t24u() {
+    fn digests_sha512t24u_bytes() {
+        let digest = sha512t24u(b"hello world");
+        assert_eq!(digest, "MJ7MSJwS1utMxA9QyQLytNDtd-5RGnx6");
+    }
+
+    #[test]
+    fn digests_sha512t24u_str() {
         let digest = sha512t24u("hello world");
         assert_eq!(digest, "MJ7MSJwS1utMxA9QyQLytNDtd-5RGnx6");
     }
 
     #[test]
-    fn test_md5() {
+    fn digests_md5() {
         let digest = md5("hello world");
         assert_eq!(digest, "5eb63bbbe01eeed093cb22bb8f5acdc3");
     }
 
     #[test]
-    fn test_digest_fasta() {
+    fn digests_digest_fasta() {
         let results = digest_fasta("tests/data/base.fa").expect("Can't open test fasta file");
         println!("{:?}", results);
         assert_eq!(results.len(), 3);
@@ -161,8 +250,11 @@ mod tests {
         assert_eq!(results[2].md5, "92c6a56c9e9459d8a42b96f7884710bc");
     }
 
+    // #[test]
+    // fn
+
     #[test]
-    fn test_digest_gzipped_fasta() {
+    fn digests_digest_gzipped_fasta() {
         let results = digest_fasta("tests/data/base.fa.gz").expect("Can't open test fasta file");
         println!("{:?}", results);
         assert_eq!(results[0].length, 8);
@@ -171,7 +263,7 @@ mod tests {
     }
 
     #[test]
-    fn bogus_fasta_file() {
+    fn digests_bogus_fasta_file() {
         let result = digest_fasta("tests/data/bogus.fa");
         assert!(result.is_err(), "Expected an error for a bogus fasta file");
     }

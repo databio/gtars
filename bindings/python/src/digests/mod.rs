@@ -2,22 +2,39 @@
 
 use pyo3::prelude::*;
 use gtars::digests::{sha512t24u, md5, DigestResult};
+use pyo3::exceptions::PyTypeError;
+use pyo3::types::{PyBytes, PyString};
+
+
 
 #[pyfunction]
-pub fn sha512t24u_digest(readable: &PyAny) -> PyResult<String> {
-    // Extract the input as bytes
-    let input_bytes = readable.extract::<Vec<u8>>()?;
-    Ok(sha512t24u(&input_bytes))
+pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = readable.downcast::<PyString>() {
+        Ok(sha512t24u(s.to_str()?)) // Borrowed, no copying
+    } else if let Ok(b) = readable.downcast::<PyBytes>() {
+        Ok(sha512t24u(b.as_bytes())) // Borrowed, no copying
+    } else {
+        Err(PyTypeError::new_err("Expected str or bytes"))
+    }
 }
 
 #[pyfunction]
-pub fn md5_digest(readable: &str) -> String {
-    return md5(readable);
+pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
+    if let Ok(s) = readable.downcast::<PyString>() {
+        Ok(md5(s.to_str()?)) // Borrowed, no copying
+    } else if let Ok(b) = readable.downcast::<PyBytes>() {
+        Ok(md5(b.as_bytes())) // Borrowed, no copying
+    } else {
+        Err(PyTypeError::new_err("Expected str or bytes"))
+    }
 }
 
+// This can take either a PosixPath or a string
+// The `&Bound<'_, PyAny>` references any Python object, bound to the Python runtime.
 #[pyfunction]
-pub fn digest_fasta(fasta: &str) -> PyResult<Vec<PyDigestResult>> {
-    match gtars::digests::digest_fasta(fasta) {
+pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<Vec<PyDigestResult>> {
+    let fasta = fasta.to_string();
+    match gtars::digests::digest_fasta(&fasta) {
         Ok(digest_results) => {
             let py_digest_results: Vec<PyDigestResult> = digest_results.into_iter().map(PyDigestResult::from).collect();
             Ok(py_digest_results)
