@@ -170,6 +170,9 @@ pub fn tokenize_then_create_bloom(universe_tree_tokenizer: &TreeTokenizer, bed_f
     // we must first tokenize against a universe and then create a bloom filter for each chromosome
     // from that tokenization
 
+    //TODO implement random generation of seed and create filters from this seed.
+    let mut seed = [0u8; 32];
+
     // First tokenize regions
     let bed = Path::new(&bed_file);
     let regions = RegionSet::try_from(bed)
@@ -548,6 +551,113 @@ fn file_exists(path: &str) -> bool {
     Path::new(path).exists() && Path::new(path).is_file()
 }
 
+
+pub fn create_bloom_tree(){
+
+    // Some notes to consider for a tree implementation
+    // I assume the leaf nodes are bloom filters created at the granularity of bedfile_chr#
+    // all the bloom filters must use the same hash functions for this to work given the XOR operation
+    // all the bloom filters must be the same length due to the xor function
+    // height_tree = log2(number_of_leaves)
+    // we must provide a tree from a list of bloom filters, and then decorate the tree with Union of bloom filters
+    // so that we can create nodes that union subsets of the bloom filters.
+
+
+    // make parent directory to hold sub directories
+    let save_path ="/home/drc/Downloads/bloom_testing/test_tree/";
+    let name = "bloom_tree";
+    let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
+    make_parent_directory(parent_directory.as_str()).unwrap();
+
+    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+
+    let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
+    let universe_path = Path::new(&universe);
+    let universe_tree_tokenizer = TreeTokenizer::try_from(universe_path).unwrap();
+
+    create_bloom_filters(parent_directory.clone(), bed_directory, universe_tree_tokenizer, 10000, 0.01);
+
+    // Now that we have created a directory of directories containing .bloom files, create a tree (balanced)
+    //
+
+    let all_bloom_files = find_bloom_files(&*parent_directory).unwrap();
+
+    let mut all_bloom_files_vec: Vec<String> = vec![];
+
+    for (key, value) in all_bloom_files{
+
+        for bloom_file_path in value.iter(){
+            all_bloom_files_vec.push((*bloom_file_path.clone()).parse().unwrap())
+        }
+
+    }
+
+    //println!("Here are my files: {:?}", all_bloom_files_vec);
+
+    let root = build_binary_tree(&*all_bloom_files_vec);
+
+    if let Some(r) = root {
+        print_tree(&Some(r), 0);
+    } else {
+        println!("No .bloom files found or tree is empty.");
+    }
+
+}
+#[derive(Debug)]
+struct BloomFilterNode {
+    value: Option<String>,
+    left: Option<Box<BloomFilterNode>>,
+    right: Option<Box<BloomFilterNode>>,
+}
+
+pub fn build_binary_tree(files: &[String])-> Option<Box<BloomFilterNode>> {
+
+    // Given a list of bloom files, build a binary tree.
+    // height = log2(num_files)
+
+    if files.is_empty() {
+        return None;
+    }
+
+    let n = files.len();
+    if n == 1 {
+        return Some(Box::new(BloomFilterNode {
+            value: Some(files[0].clone()),
+            left: None,
+            right: None,
+        }));
+    }
+
+    let mid = n / 2;
+    let root = Box::new(BloomFilterNode {
+        value: Some(files[mid].clone()),
+        left: None,
+        right: None,
+    });
+
+    let left_files = &files[..mid];
+    let right_files = &files[mid + 1..];
+
+    let left_subtree = build_binary_tree(left_files);
+    let right_subtree = build_binary_tree(right_files);
+
+    let mut root_node = *root; // Dereference to move ownership
+    root_node.left = left_subtree;
+    root_node.right = right_subtree;
+
+    Some(Box::new(root_node)) // Re-box and return
+
+}
+fn print_tree(node: &Option<Box<BloomFilterNode>>, level: usize) {
+    if let Some(n) = node {
+        if let Some(val) = &n.value {
+            println!("{}{}", "  ".repeat(level), val);
+        }
+        print_tree(&n.left, level + 1);
+        print_tree(&n.right, level + 1);
+    }
+}
+
 #[cfg(test)]
 mod tests{
     use super::*;
@@ -582,6 +692,7 @@ mod tests{
         //
         // search_bloom_filter(parent_directory.as_str(), universe, querybed);
 
+        create_bloom_tree();
         pretty_assertions::assert_eq!(true, true);
 
     }
