@@ -5,11 +5,10 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
-use std::fmt::{self, Display};
-// use std::io::prelude::*;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use std::fmt::Debug;
+use std::fmt::{self, Display};
 use std::io::{BufWriter, Write};
 
 use crate::common::models::Region;
@@ -18,7 +17,7 @@ use crate::common::utils::{get_dynamic_reader, get_dynamic_reader_from_url};
 #[derive(Clone, Debug)]
 pub struct RegionSet {
     pub regions: Vec<Region>,
-    pub header: String,
+    pub header: Option<String>,
     pub path: Option<PathBuf>,
 }
 
@@ -36,9 +35,7 @@ impl TryFrom<&Path> for RegionSet {
     /// # Arguments:
     /// - value: path to bed file on disk.
     fn try_from(value: &Path) -> Result<Self> {
-        // let regions = extract_regions_from_bed_file(value)?;
-        // Ok(RegionSet { regions })
-        let path = value.clone();
+        let path = value;
         println!(
             "Initiating regionSet object from: {}",
             value.to_str().unwrap()
@@ -93,20 +90,30 @@ impl TryFrom<&Path> for RegionSet {
 
         Ok(RegionSet {
             regions: new_regions,
-            header: header,
+            header: match header.is_empty() {
+                true => None,
+                false => Some(header),
+            },
             path: Some(PathBuf::new().to_path_buf()),
         })
     }
 }
 
+impl TryFrom<&str> for RegionSet {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &str) -> Result<Self> {
+        RegionSet::try_from(Path::new(value))
+    }
+}
+
 impl From<Vec<Region>> for RegionSet {
     fn from(regions: Vec<Region>) -> Self {
-        let header = String::new();
         let path = None;
 
         RegionSet {
             regions,
-            header,
+            header: None,
             path,
         }
     }
@@ -123,7 +130,7 @@ impl From<&[u8]> for RegionSet {
                 let chr = parts[0].to_string();
                 let start = parts[1].parse::<u32>().unwrap();
                 let end = parts[2].parse::<u32>().unwrap();
-                let rest = String::new();
+                let rest = parts[3..].join("\t");
 
                 Region {
                     chr,
@@ -134,13 +141,10 @@ impl From<&[u8]> for RegionSet {
             })
             .collect();
 
-        let header = String::new();
-        let path = None;
-
         RegionSet {
             regions,
-            header,
-            path,
+            header: None,
+            path: None,
         }
     }
 }
