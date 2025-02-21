@@ -64,7 +64,7 @@ pub fn pseudobulk_fragment_files(
 
     let mut handle_map: HashMap<String, BufWriter<GzEncoder<File>>> = HashMap::new();
     for cluster_id in mapping.get_cluster_labels() {
-        let file_name = format!("cluster_{cluster_id}.bed.gz");
+        let file_name = format!("cluster_{cluster_id}.tsv.gz");
         let file_path = output.join(file_name);
         let file_path = Path::new(&file_path);
         let file = File::create(file_path)?;
@@ -118,6 +118,8 @@ pub fn pseudobulk_fragment_files(
                 (chr, start, end, barcode, read_support)
             {
                 // merge file stem + barcode to get lookup values
+                // the "+" is a key here... the mapping table usings a "file_stem + barcode"
+                // convention to actually map cells around
                 let lookup_value = format!("{}+{}", file_stem, barcode);
                 let cluster = mapping.get_cluster_from_barcode(&lookup_value);
                 if let Some(cluster) = cluster {
