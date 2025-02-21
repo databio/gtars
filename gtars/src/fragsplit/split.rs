@@ -106,6 +106,9 @@ pub fn pseudobulk_fragment_files(
 
         for (index, line) in reader.lines().enumerate() {
             let line = line?;
+            if line.starts_with('#') {
+                continue;
+            }
             let mut parts = line.split_whitespace();
 
             let chr = parts.next();
