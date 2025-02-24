@@ -18,7 +18,7 @@
 
 This repo is organized like so:
 
-1. The main gtars rust package in `/gtars`, which contains two crates:
+1. The main gtars rust package (in subfolder `/gtars`), which contains two crates:
     1a. A rust library crate (`/gtars/lib.rs`) that provides functions, traits, and structs for working with genomic interval data.
     1b. A rust binary crate (in `/gtars/main.rs`), a small, wrapper command-line interface for the library crate.
 2. Python bindings (in `/bindings/python`), which consists of a rust package with a library crate (no binary crate) and Python package.
