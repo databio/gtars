@@ -6,21 +6,33 @@ use numpy::ndarray::Array;
 use numpy::{IntoPyArray, PyArray1};
 
 use anyhow::Result;
-use gtars::common::utils::extract_regions_from_bed_file;
 
 use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
+use gtars::common::models::{Region, RegionSet};
+
 
 #[pyclass(name = "RegionSet", module="gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
-    pub regions: Vec<PyRegion>,
+    pub regionset: RegionSet,
     curr: usize,
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
     fn from(value: Vec<PyRegion>) -> Self {
+        let mut rust_regions: Vec<Region> = Vec::new();
+        for region in value {
+            rust_regions.push(
+                Region {
+                    chr: region.chr,
+                    start: region.start,
+                    end: region.end,
+                    rest: region.rest,
+                }
+            )
+        }
         PyRegionSet {
-            regions: value,
+            regionset: RegionSet::from(rust_regions),
             curr: 0,
         }
     }
@@ -29,22 +41,28 @@ impl From<Vec<PyRegion>> for PyRegionSet {
 #[pymethods]
 impl PyRegionSet {
     #[new]
-    pub fn new(path: String) -> Result<Self> {
-        let path = Path::new(&path);
-        let regions = extract_regions_from_bed_file(path)?;
-
-        Ok(PyRegionSet {
-            regions: regions.into_iter().map(|region| region.into()).collect(),
+    fn py_new(path: &str) -> PyResult<Self> {
+        Ok(Self {
+            regionset: RegionSet::try_from(path)?,
             curr: 0,
         })
     }
 
-    pub fn __repr__(&self) -> String {
-        format!("RegionSet({} regions)", self.regions.len())
+    #[getter]
+    fn get_identifier(&self) -> PyResult<String> {
+        Ok(self.regionset.identifier())
     }
 
-    pub fn __len__(&self) -> usize {
-        self.regions.len()
+    fn __repr__(&self) -> String {
+        self.regionset.to_string()
+    }
+
+    fn __str__(&self) -> String {
+        self.regionset.to_string()
+    }
+
+    fn __len__(&self) -> usize {
+        self.regionset.len()
     }
 
     fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
@@ -52,36 +70,66 @@ impl PyRegionSet {
     }
 
     pub fn __next__(&mut self) -> Option<PyRegion> {
-        if self.curr < self.regions.len() {
-            let region = self.regions[self.curr].clone();
+        if self.curr < self.regionset.regions.len() {
+            let region = self.regionset.regions[self.curr].clone();
             self.curr += 1;
 
             Some(PyRegion {
                 chr: region.chr,
                 start: region.start,
                 end: region.end,
+                rest: region.rest,
             })
         } else {
             None
         }
     }
 
-    pub fn __getitem__(&self, indx: isize) -> Result<PyRegion> {
+    pub fn __getitem__(&self, indx: isize) -> PyResult<PyRegion> {
+        let len = self.regionset.regions.len() as isize;
+
         let indx = if indx < 0 {
-            self.regions.len() as isize + indx
+            len + indx  // Convert negative index to positive
         } else {
             indx
         };
-        if indx < 0 || indx >= self.regions.len() as isize {
-            anyhow::bail!(PyIndexError::new_err("Index out of bounds"));
+
+        if indx < 0 || indx >= len {
+            Err(PyIndexError::new_err("Index out of bounds"))
         } else {
-            let r = self.regions[indx as usize].clone();
+            let r = &self.regionset.regions[indx as usize];
             Ok(PyRegion {
-                chr: r.chr,
+                chr: r.chr.clone(),
                 start: r.start,
                 end: r.end,
+                rest: r.rest.clone(),
             })
         }
+    }
+
+    fn to_bigbed(&self, out_path: &str, chrom_size: &str) -> PyResult<()> {
+        let chrom_size_path = Path::new(chrom_size);
+        let out_path_path = Path::new(out_path);
+
+        self.regionset.to_bigbed(out_path_path, chrom_size_path);
+        Ok(())
+    }
+
+    fn to_bed(&self, path: &str) -> PyResult<()> {
+        let path = Path::new(path);
+        self.regionset.to_bed(path)?;
+        Ok(())
+    }
+
+    fn to_bed_gz(&self, path: &str) -> PyResult<()> {
+        let path = Path::new(path);
+        self.regionset.to_bed_gz(path)?;
+        Ok(())
+    }
+
+    fn sort(&mut self) -> PyResult<()> {
+        self.regionset.sort();
+        Ok(())
     }
 }
 

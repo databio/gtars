@@ -57,6 +57,7 @@ impl PyUniverse {
             chr: chr.to_string(),
             start,
             end,
+            rest: String::new(),
         };
         self.convert_region_to_id(&region)
     }
