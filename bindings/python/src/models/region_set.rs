@@ -10,8 +10,7 @@ use anyhow::Result;
 use crate::models::{PyRegion, PyTokenizedRegion, PyUniverse};
 use gtars::common::models::{Region, RegionSet};
 
-
-#[pyclass(name = "RegionSet", module="gtars.models")]
+#[pyclass(name = "RegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyRegionSet {
     pub regionset: RegionSet,
@@ -22,14 +21,12 @@ impl From<Vec<PyRegion>> for PyRegionSet {
     fn from(value: Vec<PyRegion>) -> Self {
         let mut rust_regions: Vec<Region> = Vec::new();
         for region in value {
-            rust_regions.push(
-                Region {
-                    chr: region.chr,
-                    start: region.start,
-                    end: region.end,
-                    rest: region.rest,
-                }
-            )
+            rust_regions.push(Region {
+                chr: region.chr,
+                start: region.start,
+                end: region.end,
+                rest: region.rest,
+            })
         }
         PyRegionSet {
             regionset: RegionSet::from(rust_regions),
@@ -41,6 +38,13 @@ impl From<Vec<PyRegion>> for PyRegionSet {
 #[pymethods]
 impl PyRegionSet {
     #[new]
+    /// Create a new RegionSet object
+    ///
+    /// Args:
+    ///     path: path to the bed, or bed.gz file
+    ///
+    /// Returns:
+    ///     RegionSet object
     fn py_new(path: &str) -> PyResult<Self> {
         Ok(Self {
             regionset: RegionSet::try_from(path)?,
@@ -89,7 +93,7 @@ impl PyRegionSet {
         let len = self.regionset.regions.len() as isize;
 
         let indx = if indx < 0 {
-            len + indx  // Convert negative index to positive
+            len + indx // Convert negative index to positive
         } else {
             indx
         };
@@ -111,7 +115,7 @@ impl PyRegionSet {
         let chrom_size_path = Path::new(chrom_size);
         let out_path_path = Path::new(out_path);
 
-        self.regionset.to_bigbed(out_path_path, chrom_size_path);
+        self.regionset.to_bigbed(out_path_path, chrom_size_path)?;
         Ok(())
     }
 
@@ -133,7 +137,7 @@ impl PyRegionSet {
     }
 }
 
-#[pyclass(name = "TokenizedRegionSet", module="gtars.models")]
+#[pyclass(name = "TokenizedRegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegionSet {
     pub ids: Vec<u32>,

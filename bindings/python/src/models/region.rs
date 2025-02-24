@@ -9,7 +9,7 @@ use gtars::common::models::region::Region;
 
 use crate::models::PyUniverse;
 
-#[pyclass(name = "Region", module="gtars.models")]
+#[pyclass(name = "Region", module = "gtars.models")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct PyRegion {
     #[pyo3(get)]
@@ -31,7 +31,7 @@ impl From<Region> for PyRegion {
             chr: region.chr,
             start: region.start,
             end: region.end,
-            rest: region.rest
+            rest: region.rest,
         }
     }
 }
@@ -51,7 +51,12 @@ impl PyRegion {
 impl PyRegion {
     #[new]
     pub fn new(chr: String, start: u32, end: u32, rest: String) -> Self {
-        PyRegion { chr, start, end, rest }
+        PyRegion {
+            chr,
+            start,
+            end,
+            rest,
+        }
     }
 
     fn __repr__(&self) -> String {
@@ -79,7 +84,7 @@ impl PyRegion {
     }
 }
 
-#[pyclass(name = "TokenizedRegion", module="gtars.models")]
+#[pyclass(name = "TokenizedRegion", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
     pub id: u32,
