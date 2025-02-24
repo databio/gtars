@@ -99,7 +99,7 @@ impl TryFrom<&Path> for RegionSet {
                 true => None,
                 false => Some(header),
             },
-            path: Some(PathBuf::new().to_path_buf()),
+            path: Some(value.to_owned()),
         })
     }
 }
@@ -109,6 +109,14 @@ impl TryFrom<&str> for RegionSet {
 
     fn try_from(value: &str) -> Result<Self> {
         RegionSet::try_from(Path::new(value))
+    }
+}
+
+impl TryFrom<String> for RegionSet {
+    type Error = anyhow::Error;
+
+    fn try_from(value: String) -> Result<Self> {
+        RegionSet::try_from(Path::new(&value))
     }
 }
 
@@ -267,7 +275,7 @@ impl RegionSet {
         bed_digest
     }
 
-    pub fn to_bigbed(&self, out_path: &Path, chrom_size: &Path) -> () {
+    pub fn to_bigbed(&self, out_path: &Path, chrom_size: &Path) -> Result<()> {
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
         let region_vector = self.regions.iter().map(|i| {
@@ -302,12 +310,8 @@ impl RegionSet {
         bb_out.options.max_zooms = 8;
 
         let data = BedParserStreamingIterator::wrap_iter(region_vector.into_iter(), true);
-        match bb_out.write(data, runtime) {
-            Err(e) => {
-                println!("{}", e)
-            }
-            Ok(_) => {}
-        }
+        bb_out.write(data, runtime)?;
+        Ok(())
     }
 
     pub fn sort(&mut self) -> () {
@@ -323,5 +327,105 @@ impl RegionSet {
 impl Display for RegionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RegionSet with {} regions.", self.len())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
+        let file_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("tests/data/regionset")
+            .join(file_name);
+        Ok(file_path)
+    }
+
+    #[test]
+    fn test_open_from_path() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        assert!(RegionSet::try_from(file_path.as_path()).is_ok());
+    }
+
+    #[test]
+    fn test_open_from_string() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn test_open_bed_gz() {
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn test_calculate_identifier() {
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
+    }
+
+    #[test]
+    fn test_save_bed_gz() {
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        new_file_path.push("new_file.bed.gz");
+
+        assert!(region_set.to_bed_gz(new_file_path.as_path()).is_ok());
+
+        let new_region = RegionSet::try_from(new_file_path.as_path());
+        assert!(new_region.is_ok());
+        assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
+    }
+
+    #[test]
+    fn test_save_bed() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let tempdir = tempfile::tempdir().unwrap();
+
+        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        new_file_path.push("new_bedfile.bed");
+
+        assert!(region_set.to_bed(new_file_path.as_path()).is_ok());
+
+        let new_region = RegionSet::try_from(new_file_path.as_path());
+        assert!(new_region.is_ok());
+        assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
+    }
+
+    #[test]
+    fn test_save_bigbed() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let chrom_sizes_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("tests/data/regionset/dummy_chrom_sizes");
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        new_file_path.push("new.bigbed");
+
+        assert!(region_set
+            .to_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
+            .is_ok());
+    }
+
+    #[test]
+    fn test_read_headers() {
+        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert!(!region_set.header.is_none());
+        assert_eq!(region_set.path.unwrap(), file_path);
     }
 }
