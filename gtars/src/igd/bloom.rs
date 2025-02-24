@@ -569,7 +569,8 @@ pub fn create_bloom_tree(){
     let parent_directory = format!("{}{}/",save_path.clone(),name.clone());
     make_parent_directory(parent_directory.as_str()).unwrap();
 
-    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+    //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
+    let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files";
 
     let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
     let universe_path = Path::new(&universe);
@@ -578,7 +579,6 @@ pub fn create_bloom_tree(){
     create_bloom_filters(parent_directory.clone(), bed_directory, universe_tree_tokenizer, 10000, 0.01);
 
     // Now that we have created a directory of directories containing .bloom files, create a tree (balanced)
-    //
 
     let all_bloom_files = find_bloom_files(&*parent_directory).unwrap();
 
@@ -594,13 +594,19 @@ pub fn create_bloom_tree(){
 
     //println!("Here are my files: {:?}", all_bloom_files_vec);
 
-    let root = build_binary_tree(&*all_bloom_files_vec);
+    //Building binary tree from just the file list
+    // let root = build_binary_tree(&*all_bloom_files_vec);
+    // if let Some(r) = root {
+    //     print_tree(&Some(r), 0);
+    // } else {
+    //     println!("No .bloom files found or tree is empty.");
+    // }
 
-    if let Some(r) = root {
-        print_tree(&Some(r), 0);
-    } else {
-        println!("No .bloom files found or tree is empty.");
-    }
+    // Build nodes and then assign leaf nodes the pre-computed bloom filters
+    let num_leaves = all_bloom_files_vec.len();
+    let num_nodes = 2*num_leaves - 1;
+
+
 
 }
 #[derive(Debug)]
@@ -610,10 +616,58 @@ struct BloomFilterNode {
     right: Option<Box<BloomFilterNode>>,
 }
 
+#[derive(Debug)]
+struct BloomFilterNode2 {
+    path: Option<String>, // only used for leaf nodes that tell us which chrom the bloom was constructed from
+    left: Option<Box<BloomFilterNode>>,
+    right: Option<Box<BloomFilterNode>>,
+    bloomfilter: Option<Bloom<String>>
+}
+
 pub fn build_binary_tree(files: &[String])-> Option<Box<BloomFilterNode>> {
 
     // Given a list of bloom files, build a binary tree.
     // height = log2(num_files)
+
+    if files.is_empty() {
+        return None;
+    }
+
+    let n = files.len();
+    if n == 1 {
+        return Some(Box::new(BloomFilterNode {
+            value: Some(files[0].clone()),
+            left: None,
+            right: None,
+        }));
+    }
+
+    let mid = n / 2;
+    let root = Box::new(BloomFilterNode {
+        value: Some(files[mid].clone()),
+        left: None,
+        right: None,
+    });
+
+    let left_files = &files[..mid];
+    let right_files = &files[mid + 1..];
+
+    let left_subtree = build_binary_tree(left_files);
+    let right_subtree = build_binary_tree(right_files);
+
+    let mut root_node = *root; // Dereference to move ownership
+    root_node.left = left_subtree;
+    root_node.right = right_subtree;
+
+    Some(Box::new(root_node)) // Re-box and return
+
+}
+
+pub fn build_binary_tree_2(files: &[String])-> Option<Box<BloomFilterNode>> {
+
+    // Given a list of bloom files, build a binary tree.
+    // height = log2(num_files)
+    //todo build actual bloom tree per chromosome
 
     if files.is_empty() {
         return None;
