@@ -207,3 +207,29 @@ pub fn create_interval_tree_from_universe(
 
     tree
 }
+
+pub fn get_chrom_sizes(path: &Path) -> HashMap<String, u32> {
+    let chrom_sizes_file = File::open(&path)
+        .with_context(|| format!("Failed to open chrom sizes file."))
+        .unwrap();
+
+    let mut chrom_sizes: HashMap<String, u32> = HashMap::new();
+
+    let file_buf = BufReader::new(chrom_sizes_file);
+
+    for line in file_buf.lines() {
+        let line_string: String = match line {
+            Ok(value) => value,
+            Err(_) => panic!("Error while reading chrom sizes file"),
+        };
+
+        let line_parts: Vec<String> = line_string
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        chrom_sizes.insert(line_parts[0].clone(), line_parts[1].parse::<u32>().unwrap());
+    }
+
+    chrom_sizes
+}

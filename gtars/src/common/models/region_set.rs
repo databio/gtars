@@ -7,12 +7,17 @@ use md5::{Digest, Md5};
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
+use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Error, Write};
+use tokio::runtime;
+
+use bigtools::beddata::BedParserStreamingIterator;
+use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_dynamic_reader, get_dynamic_reader_from_url};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
 #[derive(Clone, Debug)]
 pub struct RegionSet {
@@ -78,7 +83,7 @@ impl TryFrom<&Path> for RegionSet {
                     Ok(value) => value,
                     Err(e) => return Err(e.into()),
                 },
-                rest: parts[3..].join("\t"),
+                rest: (parts[3..].join("\t")),
             });
         }
         if new_regions.len() <= 1 {
@@ -260,6 +265,49 @@ impl RegionSet {
         let bed_digest: String = format!("{:x}", hash);
 
         bed_digest
+    }
+
+    pub fn to_bigbed(&self, out_path: &Path, chrom_size: &Path) -> () {
+        let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
+
+        let region_vector = self.regions.iter().map(|i| {
+            // This if is removing regions that are not in chrom sizes file.
+            if !chrom_sizes.contains_key(&i.chr) {
+                return None;
+            }
+            Some(Ok::<_, Error>((
+                i.chr.clone(),
+                BedEntry {
+                    start: i.start,
+                    end: i.end,
+                    rest: i.rest.clone(),
+                },
+            )))
+        });
+
+        let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
+
+        let runtime = runtime::Builder::new_multi_thread()
+            .worker_threads(
+                std::thread::available_parallelism()
+                    .map(|c| c.into())
+                    .unwrap_or(1),
+            )
+            .build()
+            .expect("Unable to create thread pool.");
+
+        let mut bb_out = BigBedWrite::create_file(out_path, chrom_sizes.clone())
+            .expect("Failed to create bigBed file.");
+
+        bb_out.options.max_zooms = 8;
+
+        let data = BedParserStreamingIterator::wrap_iter(region_vector.into_iter(), true);
+        match bb_out.write(data, runtime) {
+            Err(e) => {
+                println!("{}", e)
+            }
+            Ok(_) => {}
+        }
     }
 
     pub fn sort(&mut self) -> () {
