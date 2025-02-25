@@ -131,46 +131,6 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     id_to_region
 }
 
-// ///
-// /// Read in a bed file into a vector of [Region] structs. It handles detecting
-// /// the file-type, verifying each line, and error handling.
-// ///
-// /// # Arguments:
-// /// - path: path to the bed file to read in.
-// pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
-//     let reader = get_dynamic_reader(path)?;
-
-//     let mut regions = Vec::new();
-
-//     for line in reader.lines() {
-//         let line = line.with_context(|| "Failed parsing line in BED file")?;
-//         let fields: Vec<&str> = line.split('\t').collect();
-
-//         // check length of fields
-//         if fields.len() < 3 {
-//             anyhow::bail!("BED file line does not have at least 3 fields: {}", line);
-//         }
-
-//         let chr = fields[0];
-//         let start = fields[1].parse::<u32>().with_context(|| {
-//             format!("Failed to parse start position in BED file line: {}", line)
-//         })?;
-//         let end = fields[2]
-//             .parse::<u32>()
-//             .with_context(|| format!("Failed to parse end position in BED file line: {}", line))?;
-
-//         let region = Region {
-//             chr: chr.to_string(),
-//             start,
-//             end,
-//         };
-
-//         regions.push(region);
-//     }
-
-//     Ok(regions)
-// }
-
 ///
 /// Simple wrapper function that will create a [Lapper] object (an interval tree)
 /// from a [Universe] struct.

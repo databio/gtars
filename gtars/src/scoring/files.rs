@@ -59,7 +59,7 @@ impl Iterator for FragmentFileGlob {
 
 impl ConsensusSet {
     pub fn new(path: PathBuf) -> Result<Self> {
-        let regions = RegionSet::try_from(path.as_path()).unwrap().regions;
+        let regions = RegionSet::try_from(path.as_path())?.regions;
         let len = regions.len();
 
         let mut trees: HashMap<String, Lapper<u32, u32>> = HashMap::new();

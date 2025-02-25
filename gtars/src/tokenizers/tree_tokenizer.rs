@@ -135,7 +135,9 @@ impl TryFrom<&Path> for TreeTokenizer {
             }
             // else assume its a bed file
             _ => {
-                let regions = RegionSet::try_from(value).unwrap().regions;
+                let regions = RegionSet::try_from(value)
+                    .with_context(|| "There was an error reading the universe file!")?
+                    .regions;
                 let universe = Universe::from(regions);
                 let tree = create_interval_tree_from_universe(&universe);
 

@@ -75,7 +75,9 @@ impl TryFrom<&Path> for Universe {
     type Error = anyhow::Error;
 
     fn try_from(value: &Path) -> Result<Self> {
-        let regions = RegionSet::try_from(value).unwrap().regions;
+        let regions = RegionSet::try_from(value)
+            .with_context(|| "There was an error reading the universe file!")?
+            .regions;
 
         let region_to_id = generate_region_to_id_map(&regions);
         let id_to_region = generate_id_to_region_map(&regions);

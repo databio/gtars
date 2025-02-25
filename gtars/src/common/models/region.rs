@@ -1,5 +1,8 @@
 use std::fmt::{self, Display};
 
+///
+/// Region struct, representation of one Region in RegionSet files
+///
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct Region {
     pub chr: String,
@@ -10,6 +13,9 @@ pub struct Region {
 }
 
 impl Region {
+    ///
+    /// Get length of the file
+    ///
     pub fn width(self) -> u32 {
         self.end - self.start
     }

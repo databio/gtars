@@ -19,6 +19,10 @@ use bigtools::{BedEntry, BigBedWrite};
 use crate::common::models::Region;
 use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
+///
+/// RegionSet struct, the representation of the interval region set file,
+/// such as bed file.
+///
 #[derive(Clone, Debug)]
 pub struct RegionSet {
     pub regions: Vec<Region>,
@@ -190,7 +194,7 @@ impl<'a> IntoIterator for &'a RegionSet {
 
 impl RegionSet {
     ///
-    /// Dump a regionset to disk
+    /// Save a regionset to disk as bed file
     ///
     /// # Arguments
     /// - path: the path to the file to dump to
@@ -211,6 +215,11 @@ impl RegionSet {
         Ok(())
     }
 
+    ///
+    /// Save a regionset to disk as bed.gz file
+    ///
+    /// # Arguments
+    /// - path: the path to the file to dump to
     pub fn to_bed_gz(&self, path: &Path) -> std::io::Result<()> {
         if path.exists() {
             println!("Bed file already exists. Overwriting existing file")
@@ -232,6 +241,14 @@ impl RegionSet {
         Ok(())
     }
 
+    ///
+    /// Calculate identifier for RegionSet
+    ///
+    /// This function doesn't sort file, and identifer is based on
+    /// unsorted first 3 columns.
+    ///
+    /// # Returns
+    /// String containing RegionSet identifier
     pub fn identifier(&self) -> String {
         let mut chrs = String::new();
         let mut starts = String::new();
@@ -275,6 +292,13 @@ impl RegionSet {
         bed_digest
     }
 
+    ///
+    /// Save RegionSet as bigBed (binary version of bed file)
+    ///
+    /// # Arguments
+    /// - out_path: the path to the bigbed file which should be created
+    /// - chrom_size: the path to chrom sizes file
+    ///
     pub fn to_bigbed(&self, out_path: &Path, chrom_size: &Path) -> Result<()> {
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
@@ -314,11 +338,19 @@ impl RegionSet {
         Ok(())
     }
 
+    ///
+    /// Sort bed file based on first 3 columns
+    ///
     pub fn sort(&mut self) -> () {
         self.regions
             .sort_by(|a, b| a.chr.cmp(&b.chr).then_with(|| a.start.cmp(&b.start)));
     }
 
+    ///
+    /// Get number of regions in RegionSet
+    ///
+    /// Returns:
+    /// number of regions
     pub fn len(&self) -> usize {
         self.regions.len()
     }
