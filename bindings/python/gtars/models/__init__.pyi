@@ -35,6 +35,15 @@ class RegionSet:
         """
         ...
 
+    @property
+    def path(self) -> str:
+        """
+        Get RegionSet identifier
+
+        :return: bed file path
+        """
+        ...
+
     def to_bed(self, path: str) -> None:
         """
         Save RegionSet as bed file

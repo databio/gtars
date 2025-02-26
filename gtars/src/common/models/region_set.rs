@@ -10,7 +10,7 @@ use flate2::Compression;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::io::{BufWriter, Error, Write};
+use std::io::{BufWriter, Error, ErrorKind, Write};
 use tokio::runtime;
 
 use bigtools::beddata::BedParserStreamingIterator;
@@ -79,22 +79,20 @@ impl TryFrom<&Path> for RegionSet {
 
                 // To ensure that lines are regions, and we can parse it, we are using Result matching
                 // And it helps to skip lines that are headers.
-                start: match parts[1].parse() {
-                    Ok(value) => value,
-                    Err(e) => return Err(e.into()),
-                },
-                end: match parts[2].parse() {
-                    Ok(value) => value,
-                    Err(e) => return Err(e.into()),
-                },
+                start: parts[1].parse()?,
+                end: parts[2].parse()?,
                 rest: (parts[3..].join("\t")),
             });
         }
         if new_regions.len() <= 1 {
-            panic!(
-                "Incorrect file was provided! Unable to open: {}",
-                path.display()
-            )
+            let new_error = Error::new(
+                ErrorKind::Other,
+                format!(
+                    "Corrupted file. 0 regions found in the file: {}",
+                    path.display()
+                ),
+            );
+            return Err(new_error.into());
         }
 
         Ok(RegionSet {

@@ -57,6 +57,11 @@ impl PyRegionSet {
         Ok(self.regionset.identifier())
     }
 
+    #[getter]
+    fn get_path(&self) -> PyResult<String> {
+        Ok(self.regionset.path.clone().unwrap().to_str().unwrap().to_string())
+    }
+
     fn __repr__(&self) -> String {
         self.regionset.to_string()
     }
