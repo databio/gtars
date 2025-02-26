@@ -20,7 +20,7 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
             .into());
         }
 
-        let regions = gtars::common::utils::extract_regions_from_bed_file(regions);
+        let regions = gtars::common::models::RegionSet::try_from(regions);
         match regions {
             Ok(regions) => return Ok(RegionSet::from(regions)),
             Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(e.to_string()).into()),
@@ -43,8 +43,9 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
             let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
             let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
             let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
+            let rest: String = String::new();
 
-            Ok(Region { chr, start, end })
+            Ok(Region { chr, start, end, rest })
         })
         .collect::<Vec<_>>();
 

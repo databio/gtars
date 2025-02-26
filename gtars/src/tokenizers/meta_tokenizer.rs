@@ -107,6 +107,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                 chr: chr.to_string(),
                 start,
                 end,
+                rest: String::new(),
             };
 
             // construct the mapped meta token
@@ -114,6 +115,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                 chr: format!("chrM{}", meta_id),
                 start: 0,
                 end: 0,
+                rest: String::new(),
             };
 
             // update the universe with the metatoken
@@ -190,6 +192,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                             chr: chr.to_string(),
                             start,
                             end,
+                            rest: String::new(),
                         };
 
                         // extract meta region id
@@ -197,6 +200,7 @@ impl TryFrom<&Path> for MetaTokenizer {
                             chr: format!("chrM{}", meta_id),
                             start: 0,
                             end: 0,
+                            rest: String::new(),
                         };
 
                         // update the universe with the metatoken
@@ -236,6 +240,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
+            rest: String::new(),
         });
 
         // pad
@@ -243,6 +248,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
+            rest: String::new(),
         });
 
         // mask
@@ -250,6 +256,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
+            rest: String::new(),
         });
 
         // eos
@@ -257,6 +264,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
+            rest: String::new(),
         });
 
         // bos
@@ -264,6 +272,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
+            rest: String::new(),
         });
 
         // cls
@@ -271,6 +280,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
+            rest: String::new(),
         });
 
         // sep
@@ -278,6 +288,7 @@ impl TryFrom<&Path> for MetaTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
+            rest: String::new(),
         });
 
         Ok(MetaTokenizer {
@@ -296,6 +307,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -304,6 +316,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -312,6 +325,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -320,6 +334,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -328,6 +343,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -336,6 +352,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -344,6 +361,7 @@ impl SpecialTokens for MetaTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
+            rest: String::new(),
         }
     }
 
@@ -547,6 +565,7 @@ mod tests {
             chr: "chr4".to_string(),
             start: 16270184,
             end: 16270240,
+            rest: String::new(),
         };
 
         let r2 = Region {
@@ -554,6 +573,7 @@ mod tests {
             chr: "chr10".to_string(),
             start: 705762,
             end: 705762,
+            rest: String::new(),
         };
 
         let r3 = Region {
@@ -561,6 +581,7 @@ mod tests {
             chr: "chrY".to_string(),
             start: 1000000,
             end: 1000000,
+            rest: String::new(),
         };
 
         assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![1]);
@@ -577,6 +598,7 @@ mod tests {
             chr: "chr10".to_string(),
             start: 70576220,
             end: 70576251,
+            rest: String::new(),
         };
 
         let r2 = Region {
@@ -584,6 +606,7 @@ mod tests {
             chr: "chr2".to_string(),
             start: 203871487,
             end: 203871688,
+            rest: String::new(),
         };
 
         assert_eq!(tokenizer.tokenize_region(&r1).ids, vec![2]);

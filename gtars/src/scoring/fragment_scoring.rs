@@ -61,6 +61,7 @@ pub fn region_scoring_from_fragments(
                         chr: fragment.chr,
                         start: new_start,
                         end: new_start + 1,
+                        rest: String::new(),
                     };
 
                     let olaps = consensus.find_overlaps(&start_region);
@@ -76,6 +77,7 @@ pub fn region_scoring_from_fragments(
                         chr: start_region.chr,
                         start: new_end,
                         end: new_end - 1,
+                        rest: String::new(),
                     };
 
                     let olaps = consensus.find_overlaps(&end_region);

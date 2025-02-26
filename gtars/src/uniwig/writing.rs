@@ -76,11 +76,15 @@ pub fn write_combined_files(
             bwfileheader, chrom.chrom, location, output_type
         );
         let cloned_file_name = file_name.clone();
-        let path  = Path::new(&cloned_file_name);
-        if path.exists() { // Check if the file exists
+        let path = Path::new(&cloned_file_name);
+        if path.exists() {
+            // Check if the file exists
             inputs.push(file_name);
         } else {
-            eprintln!("Warning: Temp File '{}' does not exist. Skipping.", file_name);
+            eprintln!(
+                "Warning: Temp File '{}' does not exist. Skipping.",
+                file_name
+            );
         }
     }
 
