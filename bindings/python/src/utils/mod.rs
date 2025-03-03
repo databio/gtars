@@ -43,9 +43,13 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
             let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
             let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
             let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
-            let rest: String = String::new();
 
-            Ok(Region { chr, start, end, rest })
+            Ok(Region {
+                chr,
+                start,
+                end,
+                rest: None,
+            })
         })
         .collect::<Vec<_>>();
 
