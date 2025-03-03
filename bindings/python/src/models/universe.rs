@@ -7,7 +7,7 @@ use anyhow::Result;
 use crate::models::PyRegion;
 use gtars::common::models::Universe;
 
-#[pyclass(name = "Universe", module="gtars.models")]
+#[pyclass(name = "Universe", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyUniverse {
     pub regions: Vec<PyRegion>,
@@ -57,7 +57,7 @@ impl PyUniverse {
             chr: chr.to_string(),
             start,
             end,
-            rest: String::new(),
+            rest: None,
         };
         self.convert_region_to_id(&region)
     }

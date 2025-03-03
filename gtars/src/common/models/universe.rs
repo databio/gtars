@@ -32,7 +32,7 @@ impl Universe {
             chr: chr.to_string(),
             start,
             end,
-            rest: String::new(),
+            rest: None,
         };
         self.convert_region_to_id(&region)
     }

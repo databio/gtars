@@ -81,7 +81,7 @@ impl TryFrom<&Path> for RegionSet {
                 // And it helps to skip lines that are headers.
                 start: parts[1].parse()?,
                 end: parts[2].parse()?,
-                rest: (parts[3..].join("\t")),
+                rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
         if new_regions.len() <= 1 {
@@ -145,7 +145,7 @@ impl From<&[u8]> for RegionSet {
                 let chr = parts[0].to_string();
                 let start = parts[1].parse::<u32>().unwrap();
                 let end = parts[2].parse::<u32>().unwrap();
-                let rest = parts[3..].join("\t");
+                let rest = Some(parts[3..].join("\t")).filter(|s| !s.is_empty());
 
                 Region {
                     chr,
@@ -207,7 +207,10 @@ impl RegionSet {
             writeln!(
                 file,
                 "{}\t{}\t{}\t{}",
-                region.chr, region.start, region.end, region.rest
+                region.chr,
+                region.start,
+                region.end,
+                region.rest.as_deref().unwrap_or("")
             )?;
         }
         Ok(())
@@ -229,7 +232,10 @@ impl RegionSet {
         for region in &self.regions {
             buffer.push_str(&format!(
                 "{}\t{}\t{}\t{}\n",
-                region.chr, region.start, region.end, region.rest
+                region.chr,
+                region.start,
+                region.end,
+                region.rest.as_deref().unwrap_or("")
             ));
         }
 
@@ -310,7 +316,7 @@ impl RegionSet {
                 BedEntry {
                     start: i.start,
                     end: i.end,
-                    rest: i.rest.clone(),
+                    rest: i.rest.as_deref().unwrap_or("").to_string(),
                 },
             )))
         });
