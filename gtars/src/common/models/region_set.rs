@@ -45,10 +45,6 @@ impl TryFrom<&Path> for RegionSet {
     /// - value: path to bed file on disk.
     fn try_from(value: &Path) -> Result<Self> {
         let path = value;
-        println!(
-            "Initiating regionSet object from: {}",
-            value.to_str().unwrap()
-        );
 
         let mut new_regions: Vec<Region> = Vec::new();
 
@@ -303,7 +299,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    pub fn to_bigbed(&self, out_path: &Path, chrom_size: &Path) -> Result<()> {
+    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: &Path, chrom_size: T) -> Result<()> {
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
         let region_vector = self.regions.iter().map(|i| {

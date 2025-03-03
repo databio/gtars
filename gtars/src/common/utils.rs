@@ -168,8 +168,8 @@ pub fn create_interval_tree_from_universe(
     tree
 }
 
-pub fn get_chrom_sizes(path: &Path) -> HashMap<String, u32> {
-    let chrom_sizes_file = File::open(&path)
+pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
+    let chrom_sizes_file = File::open(path.as_ref())
         .with_context(|| format!("Failed to open chrom sizes file."))
         .unwrap();
 
