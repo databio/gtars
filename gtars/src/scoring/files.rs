@@ -118,7 +118,7 @@ impl FindOverlaps for ConsensusSet {
                             chr: region.chr.clone(),
                             start: region.start,
                             end: region.end,
-                            rest: String::new(),
+                            rest: None,
                         },
                         olap.val,
                     )

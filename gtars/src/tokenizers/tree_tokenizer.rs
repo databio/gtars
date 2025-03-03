@@ -156,7 +156,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // pad
@@ -164,7 +164,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // mask
@@ -172,7 +172,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // eos
@@ -180,7 +180,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // bos
@@ -188,7 +188,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // cls
@@ -196,7 +196,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         // sep
@@ -204,7 +204,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
-            rest: String::new(),
+            rest: None,
         });
 
         Ok(TreeTokenizer {
@@ -334,7 +334,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: UNKNOWN_CHR.to_string(),
             start: UNKNOWN_START as u32,
             end: UNKNOWN_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -343,7 +343,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: PAD_CHR.to_string(),
             start: PAD_START as u32,
             end: PAD_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -352,7 +352,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: MASK_CHR.to_string(),
             start: MASK_START as u32,
             end: MASK_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -361,7 +361,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: CLS_CHR.to_string(),
             start: CLS_START as u32,
             end: CLS_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -370,7 +370,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: BOS_CHR.to_string(),
             start: BOS_START as u32,
             end: BOS_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -379,7 +379,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: EOS_CHR.to_string(),
             start: EOS_START as u32,
             end: EOS_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -388,7 +388,7 @@ impl SpecialTokens for TreeTokenizer {
             chr: SEP_CHR.to_string(),
             start: SEP_START as u32,
             end: SEP_END as u32,
-            rest: String::new(),
+            rest: None,
         }
     }
 
@@ -541,7 +541,7 @@ mod tests {
             chr: "chr1".to_string(),
             start: 100,
             end: 200,
-            rest: String::new(),
+            rest: None,
         });
         assert_eq!(res.len(), 1);
 
@@ -563,7 +563,7 @@ mod tests {
             chr: "chrFOO".to_string(),
             start: 100,
             end: 200,
-            rest: String::new(),
+            rest: None,
         });
         assert_eq!(res.len(), 1);
 

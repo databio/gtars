@@ -22,7 +22,7 @@ pub struct PyRegion {
     pub end: u32,
 
     #[pyo3(get)]
-    pub rest: String,
+    pub rest: Option<String>,
 }
 
 impl From<Region> for PyRegion {
@@ -50,7 +50,7 @@ impl PyRegion {
 #[pymethods]
 impl PyRegion {
     #[new]
-    pub fn new(chr: String, start: u32, end: u32, rest: String) -> Self {
+    pub fn new(chr: String, start: u32, end: u32, rest: Option<String>) -> Self {
         PyRegion {
             chr,
             start,
@@ -64,7 +64,13 @@ impl PyRegion {
     }
 
     fn __str__(&self) -> String {
-        format!("{}\t{}\t{}\t{}", self.chr, self.start, self.end, self.rest)
+        format!(
+            "{}\t{}\t{}\t{}",
+            self.chr,
+            self.start,
+            self.end,
+            self.rest.as_deref().unwrap_or("")
+        )
     }
 
     fn __len__(&self) -> usize {

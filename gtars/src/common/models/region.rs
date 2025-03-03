@@ -9,7 +9,7 @@ pub struct Region {
     pub start: u32,
     pub end: u32,
 
-    pub rest: String,
+    pub rest: Option<String>,
 }
 
 impl Region {
@@ -26,7 +26,10 @@ impl Display for Region {
         write!(
             f,
             "Region: {}\t{}\t{}\t{}",
-            self.chr, self.start, self.end, self.rest
+            self.chr,
+            self.start,
+            self.end,
+            self.rest.as_deref().unwrap_or("")
         )
     }
 }

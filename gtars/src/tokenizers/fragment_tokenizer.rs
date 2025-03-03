@@ -125,7 +125,7 @@ where
                 chr: chr.to_string(),
                 start: start,
                 end: end,
-                rest: String::new(),
+                rest: None,
             };
 
             // get actual tokens
@@ -213,7 +213,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
-                rest: String::new(),
+                rest: None,
             };
 
             // get actual tokens
@@ -288,7 +288,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
-                rest: String::new(),
+                rest: None,
             };
 
             // get actual tokens
@@ -336,7 +336,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
-                rest: String::new(),
+                rest: None,
             };
 
             // get actual tokens

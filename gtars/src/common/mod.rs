@@ -71,7 +71,7 @@ mod tests {
             chr: "chr1".to_string(),
             start: 100,
             end: 200,
-            rest: String::new(),
+            rest: None,
         };
 
         assert_eq!(region.chr, "chr1");
