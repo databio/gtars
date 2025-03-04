@@ -9,12 +9,20 @@ use gtars::common::models::region::Region;
 
 use crate::models::PyUniverse;
 
-#[pyclass(name = "Region", module="gtars.models")]
+#[pyclass(name = "Region", module = "gtars.models")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct PyRegion {
+    #[pyo3(get)]
     pub chr: String,
+
+    #[pyo3(get)]
     pub start: u32,
+
+    #[pyo3(get)]
     pub end: u32,
+
+    #[pyo3(get)]
+    pub rest: Option<String>,
 }
 
 impl From<Region> for PyRegion {
@@ -23,6 +31,7 @@ impl From<Region> for PyRegion {
             chr: region.chr,
             start: region.start,
             end: region.end,
+            rest: region.rest,
         }
     }
 }
@@ -33,6 +42,7 @@ impl PyRegion {
             chr: self.chr.clone(),
             start: self.start,
             end: self.end,
+            rest: self.rest.clone(),
         }
     }
 }
@@ -40,26 +50,33 @@ impl PyRegion {
 #[pymethods]
 impl PyRegion {
     #[new]
-    pub fn new(chr: String, start: u32, end: u32) -> Self {
-        PyRegion { chr, start, end }
+    pub fn new(chr: String, start: u32, end: u32, rest: Option<String>) -> Self {
+        PyRegion {
+            chr,
+            start,
+            end,
+            rest,
+        }
     }
 
-    #[getter]
-    pub fn chr(&self) -> Result<&str> {
-        Ok(&self.chr)
+    fn __repr__(&self) -> String {
+        format!("Region -> {} {} {}", self.chr, self.start, self.end)
     }
 
-    #[getter]
-    pub fn start(&self) -> Result<u32> {
-        Ok(self.start)
+    fn __str__(&self) -> String {
+        format!(
+            "{}\t{}\t{}{}",
+            self.chr,
+            self.start,
+            self.end,
+            self.rest
+                .as_deref()
+                .map_or(String::new(), |s| format!("\t{}", s)),
+        )
     }
 
-    #[getter]
-    pub fn end(&self) -> Result<u32> {
-        Ok(self.end)
-    }
-    pub fn __repr__(&self) -> String {
-        format!("Region({}, {}, {})", self.chr, self.start, self.end)
+    fn __len__(&self) -> usize {
+        (self.end - self.start) as usize
     }
 
     pub fn __richcmp__(&self, other: PyRef<PyRegion>, op: CompareOp) -> Result<bool> {
@@ -75,7 +92,7 @@ impl PyRegion {
     }
 }
 
-#[pyclass(name = "TokenizedRegion", module="gtars.models")]
+#[pyclass(name = "TokenizedRegion", module = "gtars.models")]
 #[derive(Clone, Debug)]
 pub struct PyTokenizedRegion {
     pub id: u32,

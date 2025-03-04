@@ -47,6 +47,7 @@ impl From<Fragment> for Region {
             chr: val.chr,
             start: val.start,
             end: val.end,
+            rest: None,
         }
     }
 }

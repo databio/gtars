@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use flate2::read::MultiGzDecoder;
+use flate2::read::{GzDecoder, MultiGzDecoder};
+use reqwest::blocking::Client;
 use rust_lapper::{Interval, Lapper};
+use std::error::Error;
 
 use crate::common::models::region::Region;
 use crate::common::models::universe::Universe;
@@ -31,6 +33,46 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let reader = BufReader::new(file);
 
     Ok(reader)
+}
+
+///
+/// Get a reader for url ling. Either for gzip'd or non-gzip'd file
+///
+/// # Arguments
+///
+/// - path: path to the file to read
+///
+pub fn get_dynamic_reader_from_url(
+    url: &Path,
+) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
+    // Create an HTTP client and fetch the content
+    let mut url: String = url.to_str().unwrap().to_string();
+
+    let is_ftp: bool = url.starts_with("ftp");
+
+    if is_ftp {
+        println!("ftp is not fully implemented. Bugs could appear");
+        url = url.replacen("ftp://", "http://", 1);
+    }
+
+    let response = Client::new()
+        .get(&url)
+        .send()
+        .with_context(|| format!("Failed to fetch content from URL: {}", &url))?
+        .error_for_status()?
+        .bytes()?;
+
+    // Convert the response into a cursor for reading
+    let cursor = Cursor::new(response);
+
+    let is_gzipped = url.ends_with(".gz");
+
+    let reader: Box<dyn std::io::Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(cursor)),
+        false => Box::new(cursor),
+    };
+
+    Ok(BufReader::new(reader))
 }
 
 /// Get a reader for either a gzipped, non-gzipped file, or stdin
@@ -90,46 +132,6 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
 }
 
 ///
-/// Read in a bed file into a vector of [Region] structs. It handles detecting
-/// the file-type, verifying each line, and error handling.
-///
-/// # Arguments:
-/// - path: path to the bed file to read in.
-pub fn extract_regions_from_bed_file(path: &Path) -> Result<Vec<Region>> {
-    let reader = get_dynamic_reader(path)?;
-
-    let mut regions = Vec::new();
-
-    for line in reader.lines() {
-        let line = line.with_context(|| "Failed parsing line in BED file")?;
-        let fields: Vec<&str> = line.split('\t').collect();
-
-        // check length of fields
-        if fields.len() < 3 {
-            anyhow::bail!("BED file line does not have at least 3 fields: {}", line);
-        }
-
-        let chr = fields[0];
-        let start = fields[1].parse::<u32>().with_context(|| {
-            format!("Failed to parse start position in BED file line: {}", line)
-        })?;
-        let end = fields[2]
-            .parse::<u32>()
-            .with_context(|| format!("Failed to parse end position in BED file line: {}", line))?;
-
-        let region = Region {
-            chr: chr.to_string(),
-            start,
-            end,
-        };
-
-        regions.push(region);
-    }
-
-    Ok(regions)
-}
-
-///
 /// Simple wrapper function that will create a [Lapper] object (an interval tree)
 /// from a [Universe] struct.
 ///
@@ -164,4 +166,30 @@ pub fn create_interval_tree_from_universe(
     }
 
     tree
+}
+
+pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
+    let chrom_sizes_file = File::open(path.as_ref())
+        .with_context(|| format!("Failed to open chrom sizes file."))
+        .unwrap();
+
+    let mut chrom_sizes: HashMap<String, u32> = HashMap::new();
+
+    let file_buf = BufReader::new(chrom_sizes_file);
+
+    for line in file_buf.lines() {
+        let line_string: String = match line {
+            Ok(value) => value,
+            Err(_) => panic!("Error while reading chrom sizes file"),
+        };
+
+        let line_parts: Vec<String> = line_string
+            .split_whitespace()
+            .map(|s| s.to_string())
+            .collect();
+
+        chrom_sizes.insert(line_parts[0].clone(), line_parts[1].parse::<u32>().unwrap());
+    }
+
+    chrom_sizes
 }

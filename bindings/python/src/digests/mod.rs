@@ -1,11 +1,9 @@
 // This is intended to provide minimal Python bindings to functions in the `digests` module of the `gtars` crate.
 
-use pyo3::prelude::*;
-use gtars::digests::{sha512t24u, md5, DigestResult};
+use gtars::digests::{md5, sha512t24u, DigestResult};
 use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-
-
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -36,24 +34,30 @@ pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<Vec<PyDigestResult>> {
     let fasta = fasta.to_string();
     match gtars::digests::digest_fasta(&fasta) {
         Ok(digest_results) => {
-            let py_digest_results: Vec<PyDigestResult> = digest_results.into_iter().map(PyDigestResult::from).collect();
+            let py_digest_results: Vec<PyDigestResult> = digest_results
+                .into_iter()
+                .map(PyDigestResult::from)
+                .collect();
             Ok(py_digest_results)
-        },
-        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error processing FASTA file: {}", e))),
+        }
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+            "Error processing FASTA file: {}",
+            e
+        ))),
     }
 }
 
 #[pyclass]
-#[pyo3(name="DigestResult")]
+#[pyo3(name = "DigestResult")]
 pub struct PyDigestResult {
-    #[pyo3(get,set)]
+    #[pyo3(get, set)]
     pub id: String,
-    #[pyo3(get,set)]
+    #[pyo3(get, set)]
     pub length: usize,
-    #[pyo3(get,set)]
+    #[pyo3(get, set)]
     pub sha512t24u: String,
-    #[pyo3(get,set)]
-    pub md5: String
+    #[pyo3(get, set)]
+    pub md5: String,
 }
 
 #[pymethods]
@@ -63,7 +67,10 @@ impl PyDigestResult {
     }
 
     fn __str__(&self) -> PyResult<String> {
-        Ok(format!("DigestResult for sequence {}\n  length: {}\n  sha512t24u: {}\n  md5: {}", self.id, self.length, self.sha512t24u, self.md5))
+        Ok(format!(
+            "DigestResult for sequence {}\n  length: {}\n  sha512t24u: {}\n  md5: {}",
+            self.id, self.length, self.sha512t24u, self.md5
+        ))
     }
 }
 
@@ -73,7 +80,7 @@ impl From<DigestResult> for PyDigestResult {
             id: value.id,
             length: value.length,
             sha512t24u: value.sha512t24u,
-            md5: value.md5
+            md5: value.md5,
         }
     }
 }
@@ -87,4 +94,3 @@ pub fn digests(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyDigestResult>()?;
     Ok(())
 }
-

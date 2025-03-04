@@ -123,8 +123,9 @@ where
 
             let r = Region {
                 chr: chr.to_string(),
-                start,
-                end,
+                start: start,
+                end: end,
+                rest: None,
             };
 
             // get actual tokens
@@ -212,6 +213,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
+                rest: None,
             };
 
             // get actual tokens
@@ -286,6 +288,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
+                rest: None,
             };
 
             // get actual tokens
@@ -333,6 +336,7 @@ where
                 chr: chr.to_string(),
                 start,
                 end,
+                rest: None,
             };
 
             // get actual tokens
