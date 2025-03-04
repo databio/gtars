@@ -71,7 +71,7 @@ impl TryFrom<&Path> for RegionSet {
             }
 
             new_regions.push(Region {
-                chr: parts[0].clone(),
+                chr: parts[0].to_owned(),
 
                 // To ensure that lines are regions, and we can parse it, we are using Result matching
                 // And it helps to skip lines that are headers.
@@ -192,7 +192,8 @@ impl RegionSet {
     ///
     /// # Arguments
     /// - path: the path to the file to dump to
-    pub fn to_bed(&self, path: &Path) -> std::io::Result<()> {
+    pub fn to_bed<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
+        let path = path.as_ref();
         if path.exists() {
             println!("Bed file already exists. Overwriting existing file")
         }
@@ -200,14 +201,7 @@ impl RegionSet {
         let mut file = File::create(path).unwrap();
 
         for region in &self.regions {
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}",
-                region.chr,
-                region.start,
-                region.end,
-                region.rest.as_deref().unwrap_or("")
-            )?;
+            writeln!(file, "{}", region.as_string())?;
         }
         Ok(())
     }
@@ -217,7 +211,8 @@ impl RegionSet {
     ///
     /// # Arguments
     /// - path: the path to the file to dump to
-    pub fn to_bed_gz(&self, path: &Path) -> std::io::Result<()> {
+    pub fn to_bed_gz<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
+        let path = path.as_ref();
         if path.exists() {
             println!("Bed file already exists. Overwriting existing file")
         }
@@ -226,13 +221,7 @@ impl RegionSet {
         let mut buffer: String = String::new();
 
         for region in &self.regions {
-            buffer.push_str(&format!(
-                "{}\t{}\t{}\t{}\n",
-                region.chr,
-                region.start,
-                region.end,
-                region.rest.as_deref().unwrap_or("")
-            ));
+            buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
         let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::fast());
@@ -299,12 +288,23 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: &Path, chrom_size: T) -> Result<()> {
+    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
+        let out_path = out_path.as_ref();
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
+        let mut warnings_count: i32 = 0;
         let region_vector = self.regions.iter().map(|i| {
-            // This if is removing regions that are not in chrom sizes file.
+            // This if it is removing regions that are not in chrom sizes file.
             if !chrom_sizes.contains_key(&i.chr) {
+                eprintln!(
+                    "Warning:: Chromosome is not found in Chrom sizes file. Chr: '{}'",
+                    i.chr
+                );
+                if warnings_count > 40 {
+                    panic!("Incorrect chrom sizes provided. Unable to create bigBed file!");
+                }
+
+                warnings_count += 1;
                 return None;
             }
             Some(Ok::<_, Error>((
@@ -312,11 +312,13 @@ impl RegionSet {
                 BedEntry {
                     start: i.start,
                     end: i.end,
-                    rest: i.rest.as_deref().unwrap_or("").to_string(),
+                    rest: i
+                        .rest
+                        .as_deref()
+                        .map_or(String::new(), |s| format!("\t{}", s)),
                 },
             )))
         });
-
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()
@@ -339,11 +341,23 @@ impl RegionSet {
     }
 
     ///
-    /// Sort bed file based on first 3 columns
+    /// Sort bed file based on first 3 columns.
+    /// Sorting is happening inside the object,
+    /// where original order will be overwritten
     ///
-    pub fn sort(&mut self) -> () {
+    pub fn sort(&mut self) {
         self.regions
             .sort_by(|a, b| a.chr.cmp(&b.chr).then_with(|| a.start.cmp(&b.start)));
+    }
+
+    ///
+    /// Is regionSet empty?
+    ///
+    fn is_empty(&self) -> bool {
+        if self.regions.len() == 0 {
+            return true;
+        }
+        false
     }
 
     ///
@@ -459,5 +473,13 @@ mod tests {
 
         assert!(!region_set.header.is_none());
         assert_eq!(region_set.path.unwrap(), file_path);
+    }
+
+    #[test]
+    fn test_is_empty() {
+        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert!(!region_set.is_empty());
     }
 }
