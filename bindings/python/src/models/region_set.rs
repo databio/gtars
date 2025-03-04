@@ -59,7 +59,19 @@ impl PyRegionSet {
 
     #[getter]
     fn get_path(&self) -> PyResult<String> {
-        Ok(self.regionset.path.clone().unwrap().to_str().unwrap().to_string())
+        Ok(self
+            .regionset
+            .path
+            .clone()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string())
+    }
+
+    #[getter]
+    fn get_header(&self) -> PyResult<Option<String>> {
+        Ok(self.regionset.header.clone())
     }
 
     fn __repr__(&self) -> String {

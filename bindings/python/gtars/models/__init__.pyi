@@ -44,6 +44,13 @@ class RegionSet:
         """
         ...
 
+    @property
+    def header(self) -> str:
+        """
+        Header of the bed file
+        """
+        ...
+
     def to_bed(self, path: str) -> None:
         """
         Save RegionSet as bed file
