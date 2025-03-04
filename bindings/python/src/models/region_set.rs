@@ -45,7 +45,8 @@ impl PyRegionSet {
     ///
     /// Returns:
     ///     RegionSet object
-    fn py_new(path: &str) -> PyResult<Self> {
+    fn py_new(path: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let path = path.to_string();
         Ok(Self {
             regionset: RegionSet::try_from(path)?,
             curr: 0,
@@ -72,6 +73,10 @@ impl PyRegionSet {
     #[getter]
     fn get_header(&self) -> PyResult<Option<String>> {
         Ok(self.regionset.header.clone())
+    }
+
+    fn is_empty(&self) -> PyResult<bool> {
+        Ok(self.regionset.is_empty())
     }
 
     fn __repr__(&self) -> String {
@@ -128,23 +133,23 @@ impl PyRegionSet {
         }
     }
 
-    fn to_bigbed(&self, out_path: &str, chrom_size: &str) -> PyResult<()> {
-        let chrom_size_path = Path::new(chrom_size);
-        let out_path_path = Path::new(out_path);
-
-        self.regionset.to_bigbed(out_path_path, chrom_size_path)?;
+    fn to_bigbed(
+        &self,
+        out_path: &Bound<'_, PyAny>,
+        chrom_size: &Bound<'_, PyAny>,
+    ) -> PyResult<()> {
+        self.regionset
+            .to_bigbed(out_path.to_string(), chrom_size.to_string())?;
         Ok(())
     }
 
-    fn to_bed(&self, path: &str) -> PyResult<()> {
-        let path = Path::new(path);
-        self.regionset.to_bed(path)?;
+    fn to_bed(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.regionset.to_bed(path.to_string())?;
         Ok(())
     }
 
-    fn to_bed_gz(&self, path: &str) -> PyResult<()> {
-        let path = Path::new(path);
-        self.regionset.to_bed_gz(path)?;
+    fn to_bed_gz(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
+        self.regionset.to_bed_gz(path.to_string())?;
         Ok(())
     }
 

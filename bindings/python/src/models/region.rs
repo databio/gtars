@@ -65,11 +65,13 @@ impl PyRegion {
 
     fn __str__(&self) -> String {
         format!(
-            "{}\t{}\t{}\t{}",
+            "{}\t{}\t{}{}",
             self.chr,
             self.start,
             self.end,
-            self.rest.as_deref().unwrap_or("")
+            self.rest
+                .as_deref()
+                .map_or(String::new(), |s| format!("\t{}", s)),
         )
     }
 

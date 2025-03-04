@@ -1,10 +1,9 @@
 // This is intended to provide minimal Python bindings to functions in the `digests` module of the `gtars` crate.
 
-use pyo3::prelude::*;
-use gtars::digests::{sha512t24u, md5, DigestResult};
+use gtars::digests::{md5, sha512t24u, DigestResult};
 use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {

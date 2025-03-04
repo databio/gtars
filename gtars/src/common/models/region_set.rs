@@ -118,6 +118,14 @@ impl TryFrom<String> for RegionSet {
     }
 }
 
+impl TryFrom<PathBuf> for RegionSet {
+    type Error = anyhow::Error;
+
+    fn try_from(value: PathBuf) -> Result<Self> {
+        RegionSet::try_from(value.as_path())
+    }
+}
+
 impl From<Vec<Region>> for RegionSet {
     fn from(regions: Vec<Region>) -> Self {
         let path = None;
@@ -353,7 +361,7 @@ impl RegionSet {
     ///
     /// Is regionSet empty?
     ///
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         if self.regions.len() == 0 {
             return true;
         }
