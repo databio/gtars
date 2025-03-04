@@ -1,8 +1,6 @@
 // This is intended to provide minimal Python bindings to functions in the `digests` module of the `gtars` crate.
 
-use gtars::digests::{md5, sha512t24u, DigestResult};
 use pyo3::prelude::*;
-
 use gtars::digests::{sha512t24u, md5, DigestResult};
 use pyo3::exceptions::PyTypeError;
 use pyo3::types::{PyBytes, PyString};
