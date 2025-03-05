@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
+use std::hash::Hash;
 use std::io::prelude::*;
 // use std::io::{BufRead, BufReader, Cursor};
 use std::io::{BufRead, BufReader};
@@ -8,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 // use flate2::read::{GzDecoder, MultiGzDecoder};
-use flate2::read::{MultiGzDecoder};
+use flate2::read::MultiGzDecoder;
 // use reqwest::blocking::Client;
 use rust_lapper::{Interval, Lapper};
 // use std::error::Error;
@@ -194,4 +195,45 @@ pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     }
 
     chrom_sizes
+}
+
+///
+/// Gen
+pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(path: T) -> Result<HashMap<Region, f64>> {
+    let mut map = HashMap::new();
+
+    let reader = get_dynamic_reader(path.as_ref())?;
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split('\t').collect();
+
+        if parts.len() < 5 {
+            anyhow::bail!("BED file line does not have at least 4 fields: {}", line);
+        }
+
+        // parse the fields
+        let chr = parts[0];
+        let start = parts[1].parse::<u32>().with_context(|| {
+            format!("Failed to parse start position in BED file line: {}", line)
+        })?;
+
+        let end = parts[2].parse::<u32>().with_context(|| {
+            format!("Failed to parse end position in BED file line: {}", line)
+        })?;
+
+        let score = parts[4].parse::<f64>().with_context(|| {
+            format!("Failed to parse score in BED file line: {}", line)
+        })?;
+
+        let region = Region {
+            chr: chr.to_owned(), start, end, rest: None
+        };
+
+        map.insert(region, score);
+
+    }
+
+    Ok(map)
+
 }

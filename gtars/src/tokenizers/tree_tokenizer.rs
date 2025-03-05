@@ -6,7 +6,7 @@ use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
-use crate::common::utils::create_interval_tree_from_universe;
+use crate::common::utils::{create_interval_tree_from_universe, generate_ordering_map_for_universe_regions};
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
@@ -19,6 +19,7 @@ pub struct TreeTokenizer {
     config: TokenizerConfig,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
+    ordering: Option<HashMap<Region, f64>>
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
@@ -37,7 +38,7 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (config, mut universe, tree, secondary_trees, _exclude_ranges) = match file_extension {
+        let (config, mut universe, tree, secondary_trees, _exclude_ranges, mut ordering) = match file_extension {
             // parse config file
             "toml" => {
                 let config = TokenizerConfig::try_from(value).with_context(|| {
@@ -131,7 +132,22 @@ impl TryFrom<&Path> for TreeTokenizer {
                     None => None,
                 };
 
-                (config, universe, tree, secondary_trees, exclude_ranges)
+                let ordering = match &config.ordered {
+                    Some(true) => {
+                        if other_universes.is_some() {
+                            anyhow::bail!("Ordering is currently only available for single-universe tokenizers");
+                        }
+
+                        // parse score out of universe file.
+                        let ordering = generate_ordering_map_for_universe_regions(primary_universe)?;
+
+                        Some(ordering)
+                    },
+                    Some(false) => None,
+                    None => None
+                };
+
+                (config, universe, tree, secondary_trees, exclude_ranges, ordering)
             }
             // else assume its a bed file
             _ => {
@@ -146,7 +162,7 @@ impl TryFrom<&Path> for TreeTokenizer {
 
                 let config =
                     TokenizerConfig::new(Some("tree".to_string()), None, vec![universe_as_path], None);
-                (config, universe, tree, None, None)
+                (config, universe, tree, None, None, None)
             }
         };
 
@@ -207,11 +223,21 @@ impl TryFrom<&Path> for TreeTokenizer {
             rest: None,
         });
 
+        if let Some(ordering) = &mut ordering {
+            ordering.insert(Region {
+                chr: UNKNOWN_CHR.to_string(),
+                start: UNKNOWN_START as u32,
+                end: UNKNOWN_END as u32,
+                rest: None
+            }, -1_f64);
+        }
+
         Ok(TreeTokenizer {
             config,
             universe,
             tree,
             secondary_trees,
+            ordering
         })
     }
 }
@@ -291,6 +317,19 @@ impl Tokenizer for TreeTokenizer {
                     }
                 }
 
+                // sort according to order
+                if let Some(ordering) = &self.ordering {
+                    ids.sort_by(|a, b| {
+                    let a = self.universe.convert_id_to_region(*a).unwrap();
+                    let b = self.universe.convert_id_to_region(*b).unwrap();
+        
+                    let a_score = ordering.get(&a).unwrap();
+                    let b_score = ordering.get(&b).unwrap();
+        
+                    b_score.total_cmp(a_score)
+                    });
+                }
+
                 TokenizedRegionSet {
                     ids,
                     universe: &self.universe,
@@ -305,6 +344,19 @@ impl Tokenizer for TreeTokenizer {
         for region in region_set {
             let tokenized_region = self.tokenize_region(region);
             tokenized_regions.extend(tokenized_region.ids);
+        }
+
+        // sort according to order
+        if let Some(ordering) = &self.ordering {
+            tokenized_regions.sort_by(|a, b| {
+            let a = self.universe.convert_id_to_region(*a).unwrap();
+            let b = self.universe.convert_id_to_region(*b).unwrap();
+
+            let a_score = ordering.get(&a).unwrap();
+            let b_score = ordering.get(&b).unwrap();
+
+            b_score.total_cmp(a_score)
+            });
         }
 
         TokenizedRegionSet {
