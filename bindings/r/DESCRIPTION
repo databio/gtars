@@ -1,6 +1,6 @@
 Package: gtars
 Title: Performance critical genomic interval analysis using Rust, in R
-Version: 0.0.1
+Version: 0.2.3
 Authors@R: 
     person("Nathan", "LeRoy", , "nleroy917@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7354-7213"))
