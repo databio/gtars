@@ -199,7 +199,9 @@ pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
 
 ///
 /// Gen
-pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(path: T) -> Result<HashMap<Region, f64>> {
+pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(
+    path: T,
+) -> Result<HashMap<Region, f64>> {
     let mut map = HashMap::new();
 
     let reader = get_dynamic_reader(path.as_ref())?;
@@ -218,22 +220,23 @@ pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(path: T) -> Re
             format!("Failed to parse start position in BED file line: {}", line)
         })?;
 
-        let end = parts[2].parse::<u32>().with_context(|| {
-            format!("Failed to parse end position in BED file line: {}", line)
-        })?;
+        let end = parts[2]
+            .parse::<u32>()
+            .with_context(|| format!("Failed to parse end position in BED file line: {}", line))?;
 
-        let score = parts[4].parse::<f64>().with_context(|| {
-            format!("Failed to parse score in BED file line: {}", line)
-        })?;
+        let score = parts[4]
+            .parse::<f64>()
+            .with_context(|| format!("Failed to parse score in BED file line: {}", line))?;
 
         let region = Region {
-            chr: chr.to_owned(), start, end, rest: None
+            chr: chr.to_owned(),
+            start,
+            end,
+            rest: None,
         };
 
         map.insert(region, score);
-
     }
 
     Ok(map)
-
 }

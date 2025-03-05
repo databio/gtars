@@ -6,7 +6,9 @@ use rust_lapper::{Interval, Lapper};
 
 use crate::common::consts::special_tokens::*;
 use crate::common::models::{Region, RegionSet, TokenizedRegionSet, Universe};
-use crate::common::utils::{create_interval_tree_from_universe, generate_ordering_map_for_universe_regions};
+use crate::common::utils::{
+    create_interval_tree_from_universe, generate_ordering_map_for_universe_regions,
+};
 use crate::tokenizers::config::TokenizerConfig;
 use crate::tokenizers::traits::{Pad, SpecialTokens, Tokenizer};
 
@@ -19,7 +21,7 @@ pub struct TreeTokenizer {
     config: TokenizerConfig,
     tree: HashMap<String, Lapper<u32, u32>>,
     secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
-    ordering: Option<HashMap<Region, f64>>
+    ordering: Option<HashMap<Region, f64>>,
 }
 
 impl TryFrom<&Path> for TreeTokenizer {
@@ -38,133 +40,146 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (config, mut universe, tree, secondary_trees, _exclude_ranges, mut ordering) = match file_extension {
-            // parse config file
-            "toml" => {
-                let config = TokenizerConfig::try_from(value).with_context(|| {
-                    format!(
-                        "Invalid tokenizer configuration found for file: {}",
-                        value.to_str().unwrap()
-                    )
-                })?;
+        let (config, mut universe, tree, secondary_trees, _exclude_ranges, mut ordering) =
+            match file_extension {
+                // parse config file
+                "toml" => {
+                    let config = TokenizerConfig::try_from(value).with_context(|| {
+                        format!(
+                            "Invalid tokenizer configuration found for file: {}",
+                            value.to_str().unwrap()
+                        )
+                    })?;
 
-                if config.universes.is_empty() {
-                    anyhow::bail!(
+                    if config.universes.is_empty() {
+                        anyhow::bail!(
                         "You must have at least one universe in your universe list. Found zero."
                     )
+                    }
+
+                    let primary_universe = &config.universes[0];
+                    let other_universes = match config.universes.len() {
+                        1 => None,
+                        _ => Some(&config.universes[1..]),
+                    };
+
+                    // universe path is relative to the config file
+                    let universe_path = value.parent().unwrap().join(primary_universe);
+
+                    // create initial universe from the *required* universe field
+                    let mut universe = Universe::try_from(Path::new(&universe_path))?;
+
+                    let tree = create_interval_tree_from_universe(&universe);
+
+                    // create secondary trees if they exist
+                    let secondary_trees = match other_universes {
+                        Some(hierarchical_universes) => {
+                            let mut secondary_trees = Vec::new();
+                            for hierarchical_universe in hierarchical_universes {
+                                let mut hierarchical_tree: HashMap<String, Lapper<u32, u32>> =
+                                    HashMap::new();
+
+                                let hierarchical_universe_path =
+                                    value.parent().unwrap().join(hierarchical_universe);
+
+                                let hierarchical_universe_regions =
+                                    RegionSet::try_from(hierarchical_universe_path.as_path())
+                                        .unwrap()
+                                        .regions;
+
+                                let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> =
+                                    HashMap::new();
+                                for region in hierarchical_universe_regions {
+                                    universe.insert_token(&region);
+                                    let interval = Interval {
+                                        start: region.start,
+                                        stop: region.end,
+                                        val: universe.convert_region_to_id(&region).unwrap(),
+                                    };
+
+                                    intervals
+                                        .entry(region.chr.clone())
+                                        .or_default()
+                                        .push(interval);
+                                }
+
+                                for (chr, chr_intervals) in intervals.iter() {
+                                    let lapper: Lapper<u32, u32> =
+                                        Lapper::new(chr_intervals.to_owned());
+                                    hierarchical_tree.insert(chr.to_string(), lapper);
+                                }
+
+                                secondary_trees.push(hierarchical_tree);
+                            }
+
+                            Some(secondary_trees)
+                        }
+                        None => None,
+                    };
+
+                    // create exclude ranges if they exist
+                    let exclude_ranges = match &config.exclude_ranges {
+                        Some(exclude_ranges) => {
+                            let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
+
+                            // universe gets discarded since its not conasidered a part of the tokenizers universe
+                            let exclude_ranges_universe =
+                                Universe::try_from(exclude_ranges_path.as_path())?;
+
+                            let exclude_ranges_map =
+                                create_interval_tree_from_universe(&exclude_ranges_universe);
+
+                            Some(exclude_ranges_map)
+                        }
+
+                        None => None,
+                    };
+
+                    let ordering = match &config.ordered {
+                        Some(true) => {
+                            if other_universes.is_some() {
+                                anyhow::bail!("Ordering is currently only available for single-universe tokenizers");
+                            }
+
+                            // parse score out of universe file.
+                            let ordering =
+                                generate_ordering_map_for_universe_regions(universe_path)?;
+
+                            Some(ordering)
+                        }
+                        Some(false) => None,
+                        None => None,
+                    };
+
+                    (
+                        config,
+                        universe,
+                        tree,
+                        secondary_trees,
+                        exclude_ranges,
+                        ordering,
+                    )
                 }
+                // else assume its a bed file
+                _ => {
+                    let regions = RegionSet::try_from(value)
+                        .with_context(|| "There was an error reading the universe file!")?
+                        .regions;
+                    let universe = Universe::from(regions);
+                    let tree = create_interval_tree_from_universe(&universe);
 
-                let primary_universe = &config.universes[0];
-                let other_universes = match config.universes.len() {
-                    1 => None,
-                    _ => Some(&config.universes[1..]),
-                };
+                    let universe_as_path = Path::new(value).file_name().unwrap();
+                    let universe_as_path = universe_as_path.to_string_lossy().to_string();
 
-                // universe path is relative to the config file
-                let universe_path = value.parent().unwrap().join(primary_universe);
-
-                // create initial universe from the *required* universe field
-                let mut universe = Universe::try_from(Path::new(&universe_path))?;
-
-                let tree = create_interval_tree_from_universe(&universe);
-
-                // create secondary trees if they exist
-                let secondary_trees = match other_universes {
-                    Some(hierarchical_universes) => {
-                        let mut secondary_trees = Vec::new();
-                        for hierarchical_universe in hierarchical_universes {
-                            let mut hierarchical_tree: HashMap<String, Lapper<u32, u32>> =
-                                HashMap::new();
-
-                            let hierarchical_universe_path =
-                                value.parent().unwrap().join(hierarchical_universe);
-
-                            let hierarchical_universe_regions =
-                                RegionSet::try_from(hierarchical_universe_path.as_path())
-                                    .unwrap()
-                                    .regions;
-
-                            let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> =
-                                HashMap::new();
-                            for region in hierarchical_universe_regions {
-                                universe.insert_token(&region);
-                                let interval = Interval {
-                                    start: region.start,
-                                    stop: region.end,
-                                    val: universe.convert_region_to_id(&region).unwrap(),
-                                };
-
-                                intervals
-                                    .entry(region.chr.clone())
-                                    .or_default()
-                                    .push(interval);
-                            }
-
-                            for (chr, chr_intervals) in intervals.iter() {
-                                let lapper: Lapper<u32, u32> =
-                                    Lapper::new(chr_intervals.to_owned());
-                                hierarchical_tree.insert(chr.to_string(), lapper);
-                            }
-
-                            secondary_trees.push(hierarchical_tree);
-                        }
-
-                        Some(secondary_trees)
-                    }
-                    None => None,
-                };
-
-                // create exclude ranges if they exist
-                let exclude_ranges = match &config.exclude_ranges {
-                    Some(exclude_ranges) => {
-                        let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
-
-                        // universe gets discarded since its not conasidered a part of the tokenizers universe
-                        let exclude_ranges_universe =
-                            Universe::try_from(exclude_ranges_path.as_path())?;
-
-                        let exclude_ranges_map =
-                            create_interval_tree_from_universe(&exclude_ranges_universe);
-
-                        Some(exclude_ranges_map)
-                    }
-
-                    None => None,
-                };
-
-                let ordering = match &config.ordered {
-                    Some(true) => {
-                        if other_universes.is_some() {
-                            anyhow::bail!("Ordering is currently only available for single-universe tokenizers");
-                        }
-
-                        // parse score out of universe file.
-                        let ordering = generate_ordering_map_for_universe_regions(universe_path)?;
-
-                        Some(ordering)
-                    },
-                    Some(false) => None,
-                    None => None
-                };
-
-                (config, universe, tree, secondary_trees, exclude_ranges, ordering)
-            }
-            // else assume its a bed file
-            _ => {
-                let regions = RegionSet::try_from(value)
-                    .with_context(|| "There was an error reading the universe file!")?
-                    .regions;
-                let universe = Universe::from(regions);
-                let tree = create_interval_tree_from_universe(&universe);
-
-                let universe_as_path = Path::new(value).file_name().unwrap();
-                let universe_as_path = universe_as_path.to_string_lossy().to_string();
-
-                let config =
-                    TokenizerConfig::new(Some("tree".to_string()), None, vec![universe_as_path], None);
-                (config, universe, tree, None, None, None)
-            }
-        };
+                    let config = TokenizerConfig::new(
+                        Some("tree".to_string()),
+                        None,
+                        vec![universe_as_path],
+                        None,
+                    );
+                    (config, universe, tree, None, None, None)
+                }
+            };
 
         // add special tokens to the universe
         // unk
@@ -224,12 +239,15 @@ impl TryFrom<&Path> for TreeTokenizer {
         });
 
         if let Some(ordering) = &mut ordering {
-            ordering.insert(Region {
-                chr: UNKNOWN_CHR.to_string(),
-                start: UNKNOWN_START as u32,
-                end: UNKNOWN_END as u32,
-                rest: None
-            }, -1_f64);
+            ordering.insert(
+                Region {
+                    chr: UNKNOWN_CHR.to_string(),
+                    start: UNKNOWN_START as u32,
+                    end: UNKNOWN_END as u32,
+                    rest: None,
+                },
+                -1_f64,
+            );
         }
 
         Ok(TreeTokenizer {
@@ -237,7 +255,7 @@ impl TryFrom<&Path> for TreeTokenizer {
             universe,
             tree,
             secondary_trees,
-            ordering
+            ordering,
         })
     }
 }
@@ -320,13 +338,13 @@ impl Tokenizer for TreeTokenizer {
                 // sort according to order
                 if let Some(ordering) = &self.ordering {
                     ids.sort_by(|a, b| {
-                    let a = self.universe.convert_id_to_region(*a).unwrap();
-                    let b = self.universe.convert_id_to_region(*b).unwrap();
-        
-                    let a_score = ordering.get(&a).unwrap();
-                    let b_score = ordering.get(&b).unwrap();
-        
-                    b_score.total_cmp(a_score)
+                        let a = self.universe.convert_id_to_region(*a).unwrap();
+                        let b = self.universe.convert_id_to_region(*b).unwrap();
+
+                        let a_score = ordering.get(&a).unwrap();
+                        let b_score = ordering.get(&b).unwrap();
+
+                        b_score.total_cmp(a_score)
                     });
                 }
 
@@ -349,13 +367,13 @@ impl Tokenizer for TreeTokenizer {
         // sort according to order
         if let Some(ordering) = &self.ordering {
             tokenized_regions.sort_by(|a, b| {
-            let a = self.universe.convert_id_to_region(*a).unwrap();
-            let b = self.universe.convert_id_to_region(*b).unwrap();
+                let a = self.universe.convert_id_to_region(*a).unwrap();
+                let b = self.universe.convert_id_to_region(*b).unwrap();
 
-            let a_score = ordering.get(&a).unwrap();
-            let b_score = ordering.get(&b).unwrap();
+                let a_score = ordering.get(&a).unwrap();
+                let b_score = ordering.get(&b).unwrap();
 
-            b_score.total_cmp(a_score)
+                b_score.total_cmp(a_score)
             });
         }
 
@@ -614,14 +632,12 @@ mod tests {
                 start: 168247745,
                 end: 168247800,
                 rest: None,
-            },  
+            },
         ];
         let region_set = RegionSet::from(regions);
         let tokenized = tokenizer.tokenize_region_set(&region_set).into_region_vec();
-        
-        assert_eq!(tokenized.len() > 1, true)
-        
 
+        assert_eq!(tokenized.len() > 1, true)
     }
 
     #[rstest]

@@ -50,7 +50,7 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => anyhow::bail!("File not found!")
+            false => anyhow::bail!("File not found!"),
         };
 
         let mut header: String = String::new();

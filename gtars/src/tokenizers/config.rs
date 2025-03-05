@@ -21,7 +21,7 @@ impl TokenizerConfig {
     pub fn try_from(path: &Path) -> Result<TokenizerConfig> {
         let toml_str = read_to_string(path)?;
         let config: TokenizerConfig = toml::from_str(&toml_str)?;
-        
+
         Ok(config)
     }
 
