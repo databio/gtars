@@ -4,13 +4,13 @@ use gtars::digests::{md5, sha512t24u, DigestResult};
 use pyo3::prelude::*;
 
 use pyo3::exceptions::PyTypeError;
-use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.downcast::<PyString>() {
-        Ok(sha512t24u(s.to_str()?)) // Borrowed, no copying
+        // https://discord.com/channels/1209263839632424990/1229461480873922681/1229465185270370376
+        Ok(sha512t24u(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
     } else if let Ok(b) = readable.downcast::<PyBytes>() {
         Ok(sha512t24u(b.as_bytes())) // Borrowed, no copying
     } else {
@@ -21,7 +21,8 @@ pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 #[pyfunction]
 pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.downcast::<PyString>() {
-        Ok(md5(s.to_str()?)) // Borrowed, no copying
+        // https://discord.com/channels/1209263839632424990/1229461480873922681/1229465185270370376
+        Ok(md5(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
     } else if let Ok(b) = readable.downcast::<PyBytes>() {
         Ok(md5(b.as_bytes())) // Borrowed, no copying
     } else {
