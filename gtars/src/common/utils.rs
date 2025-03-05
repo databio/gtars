@@ -2,16 +2,14 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-// use std::io::{BufRead, BufReader, Cursor};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-// use flate2::read::{GzDecoder, MultiGzDecoder};
-use flate2::read::{MultiGzDecoder};
-// use reqwest::blocking::Client;
+use flate2::read::{GzDecoder, MultiGzDecoder};
+use reqwest::blocking::Client;
 use rust_lapper::{Interval, Lapper};
-// use std::error::Error;
+use std::error::Error;
 
 use crate::common::models::region::Region;
 use crate::common::models::universe::Universe;
