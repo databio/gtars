@@ -9,6 +9,7 @@ use pyo3::types::{PyBytes, PyString};
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.downcast::<PyString>() {
+        // https://discord.com/channels/1209263839632424990/1229461480873922681/1229465185270370376
         Ok(sha512t24u(s.to_cow()?.as_bytes())) // Borrowed, no copying
     } else if let Ok(b) = readable.downcast::<PyBytes>() {
         Ok(sha512t24u(b.as_bytes())) // Borrowed, no copying
@@ -20,6 +21,7 @@ pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 #[pyfunction]
 pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.downcast::<PyString>() {
+        // https://discord.com/channels/1209263839632424990/1229461480873922681/1229465185270370376
         Ok(md5(s.to_cow()?.as_bytes())) // Borrowed, no copying
     } else if let Ok(b) = readable.downcast::<PyBytes>() {
         Ok(md5(b.as_bytes())) // Borrowed, no copying
