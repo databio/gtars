@@ -228,11 +228,13 @@ pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(
             .parse::<f64>()
             .with_context(|| format!("Failed to parse score in BED file line: {}", line))?;
 
+            let rest = Some(parts[3..].join("\t")).filter(|s| !s.is_empty());
+
         let region = Region {
             chr: chr.to_owned(),
             start,
             end,
-            rest: None,
+            rest
         };
 
         map.insert(region, score);

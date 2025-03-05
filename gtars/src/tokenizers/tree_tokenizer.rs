@@ -298,6 +298,19 @@ impl Tokenizer for TreeTokenizer {
                     }
                 }
 
+                // sort according to order
+                if let Some(ordering) = &self.ordering {
+                    ids.sort_by(|a, b| {
+                        let a = self.universe.convert_id_to_region(*a).unwrap();
+                        let b = self.universe.convert_id_to_region(*b).unwrap();
+
+                        let a_score = ordering.get(&a).unwrap();
+                        let b_score = ordering.get(&b).unwrap();
+
+                        b_score.total_cmp(a_score)
+                    });
+                }
+
                 TokenizedRegionSet {
                     ids,
                     universe: &self.universe,
