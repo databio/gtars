@@ -145,7 +145,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                 let universe_as_path = universe_as_path.to_string_lossy().to_string();
 
                 let config =
-                    TokenizerConfig::new(Some("tree".to_string()), vec![universe_as_path], None);
+                    TokenizerConfig::new(Some("tree".to_string()), None, vec![universe_as_path], None);
                 (config, universe, tree, None, None)
             }
         };
