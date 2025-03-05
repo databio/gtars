@@ -4,6 +4,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.3]
+- Improved RegionSet, by adding a multiple new methods: `to_bed`, `to_bed_gz`, `to_bigbed`, `identifier()`, and others.
+- Fixed allowed `fasta_digest` to accept `Path` or `bytes` [#93](https://github.com/databio/gtars/issues/93)
+
 ## [0.2.2]
 - fix [#90](https://github.com/databio/gtars/issues/90)
 - fix [#89](https://github.com/databio/gtars/issues/89)

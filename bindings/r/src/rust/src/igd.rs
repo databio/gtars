@@ -26,8 +26,8 @@ pub fn rextendr_igd_search(database_path: &str, query_path: &str) -> std::result
     let result = igd_search(&dbpath, &qpath);
 
     match result {
-        Ok(vector_strings) => return Ok(vector_strings),
-        Err(e) => return Err(Error::from(e)),
+        Ok(vector_strings) => Ok(vector_strings),
+        Err(e) => Err(Error::from(e)),
     }
 
 }

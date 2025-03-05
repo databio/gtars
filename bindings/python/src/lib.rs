@@ -2,10 +2,10 @@ use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
 mod ailist;
+mod digests;
 mod models;
 mod tokenizers;
 mod utils;
-mod digests;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -5,8 +5,9 @@ use anyhow::Result;
 use glob::glob;
 use rust_lapper::{Interval, Lapper};
 
+use crate::common::models::region_set::RegionSet;
 use crate::common::models::Region;
-use crate::common::utils::{extract_regions_from_bed_file, generate_region_to_id_map};
+use crate::common::utils::generate_region_to_id_map;
 
 #[allow(unused)]
 pub struct OverlapResult(Region, pub(crate) u32);
@@ -58,7 +59,7 @@ impl Iterator for FragmentFileGlob {
 
 impl ConsensusSet {
     pub fn new(path: PathBuf) -> Result<Self> {
-        let regions = extract_regions_from_bed_file(&path)?;
+        let regions = RegionSet::try_from(path.as_path())?.regions;
         let len = regions.len();
 
         let mut trees: HashMap<String, Lapper<u32, u32>> = HashMap::new();
@@ -117,6 +118,7 @@ impl FindOverlaps for ConsensusSet {
                             chr: region.chr.clone(),
                             start: region.start,
                             end: region.end,
+                            rest: None,
                         },
                         olap.val,
                     )

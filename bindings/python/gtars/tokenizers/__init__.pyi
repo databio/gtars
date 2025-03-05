@@ -3,7 +3,7 @@ from typing import List, Tuple, Iterator
 class Universe:
     """
     A Universe object represents a set of regions.
-    
+
     All tokenizers are created from a Universe object.
     """
 
@@ -12,7 +12,7 @@ class Universe:
         """
         The regions in the universe.
         """
-    
+
     def insert_token(self, region: Region) -> None:
         """
         Insert a token into the universe.
@@ -89,7 +89,7 @@ class Region:
         :param start: The start position.
         :param end: The end position.
         """
-    
+
     @property
     def chr(self) -> str:
         """
@@ -120,13 +120,13 @@ class TokenizedRegion:
         """
         The chromosome name for this region.
         """
-    
+
     @property
     def start(self) -> int:
         """
         The start position for this region.
         """
-    
+
     @property
     def end(self) -> int:
         """
@@ -138,18 +138,18 @@ class TokenizedRegion:
         """
         The integer representation of the tokenized region.
         """
-    
+
     @property
     def universe(self) -> Universe:
         """
         The universe object.
         """
-    
+
     def to_region(self) -> Region:
         """
         Convert the tokenized region back to the original region.
         """
-    
+
     def __repr__(self) -> str: ...
 
 class RegionSet:
@@ -159,15 +159,11 @@ class RegionSet:
 
         :param path: The path to the BED file.
         """
-    
+
     def __repr__(self) -> str: ...
-
     def __len__(self) -> int: ...
-
     def __iter__(self) -> Iterator[Region]: ...
-
     def __next__(self) -> Region: ...
-
     def __getitem__(self, indx: int) -> Region: ...
 
 class TokenizedRegionSet:
@@ -178,13 +174,13 @@ class TokenizedRegionSet:
         :param regions: The original regions.
         :param tokens: The tokenized regions.
         """
-    
+
     @property
     def ids(self) -> List[int]:
         """
         Integer representation of the tokenized regions.
         """
-    
+
     @property
     def universe(self) -> Universe:
         """
@@ -195,26 +191,25 @@ class TokenizedRegionSet:
         """
         Convert the tokenized regions to a bit vector.
         """
-    
+
     def to_regions(self) -> List[Region]:
         """
         Convert the tokenized regions back to the original regions.
         """
-    
+
     def to_ids(self) -> List[int]:
         """
         Get the integer representations of the tokenized regions.
         """
-    
+
     def ids_as_strs(self) -> List[str]:
         """
         Get the integer representations of the tokenized regions as strings. This
         is useful for applications that require string representations of the
         tokenized regions.
         """
-    
-    def __len__(self) -> int: ...
 
+    def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
 
 class TreeTokenizer:
@@ -224,7 +219,7 @@ class TreeTokenizer:
 
         :param path: The path to the universe file. This should be a BED file.
         """
-    
+
     def unknown_token(self) -> Region:
         """
         Get the unknown token.
@@ -259,7 +254,7 @@ class TreeTokenizer:
         """
         Get the SEP token.
         """
-    
+
     def unknown_token_id(self) -> int:
         """
         Get the ID of the unknown token.
@@ -342,13 +337,13 @@ class TreeTokenizer:
 
         :return: The vocabulary as a list of tuples.
         """
-    
+
     @property
     def universe(self) -> Universe:
         """
         The universe object.
         """
-    
+
     def export(self, path: str):
         """
         Export the tokenizer configuration to a file.
@@ -382,8 +377,10 @@ class FragmentTokenizer:
 
         :param path: The path to the universe file. This should be a BED file.
         """
-    
-    def tokenize_fragments_to_gtoks(self, file_path: str, out_path: str = None, filter: List[str] = None) -> None:
+
+    def tokenize_fragments_to_gtoks(
+        self, file_path: str, out_path: str = None, filter: List[str] = None
+    ) -> None:
         """
         Tokenize a file containing fragments.
 
@@ -399,7 +396,7 @@ class MetaTokenizer:
 
         :param path: The path to the universe file. This should be a BED file.
         """
-    
+
     def unknown_token(self) -> Region:
         """
         Get the unknown token.
@@ -434,7 +431,7 @@ class MetaTokenizer:
         """
         Get the SEP token.
         """
-    
+
     def unknown_token_id(self) -> int:
         """
         Get the ID of the unknown token.
@@ -517,13 +514,13 @@ class MetaTokenizer:
 
         :return: The vocabulary as a list of tuples.
         """
-    
+
     @property
     def universe(self) -> Universe:
         """
         The universe object.
         """
-    
+
     def export(self, path: str):
         """
         Export the tokenizer configuration to a file.
