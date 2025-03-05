@@ -209,7 +209,7 @@ pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(path: T) -> Re
         let parts: Vec<&str> = line.split('\t').collect();
 
         if parts.len() < 5 {
-            anyhow::bail!("BED file line does not have at least 4 fields: {}", line);
+            anyhow::bail!("BED file line does not have at least 5 fields: {}. It needs to have chr, start, end, name, and score.", line);
         }
 
         // parse the fields

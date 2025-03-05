@@ -139,7 +139,7 @@ impl TryFrom<&Path> for TreeTokenizer {
                         }
 
                         // parse score out of universe file.
-                        let ordering = generate_ordering_map_for_universe_regions(primary_universe)?;
+                        let ordering = generate_ordering_map_for_universe_regions(universe_path)?;
 
                         Some(ordering)
                     },
@@ -521,6 +521,11 @@ mod tests {
     }
 
     #[fixture]
+    fn path_to_config_ordered_file() -> &'static str {
+        "tests/data/tokenizer_ordered.toml"
+    }
+
+    #[fixture]
     fn path_to_bad_config_file() -> &'static str {
         "tests/data/tokenizer_bad.toml"
     }
@@ -584,6 +589,39 @@ mod tests {
             .convert_id_to_region(tokenized_regions[3])
             .unwrap();
         assert!(unknown_token.chr == "chrUNK");
+    }
+
+    #[rstest]
+    fn test_ordered_scores(path_to_config_ordered_file: &str) {
+        let path = Path::new(path_to_config_ordered_file);
+        let tokenizer = TreeTokenizer::try_from(path).unwrap();
+        // Create a region set that includes some regions from the ordered bed
+        let regions = vec![
+            Region {
+                chr: "chr2".to_string(),
+                start: 203871387,
+                end: 203871588,
+                rest: None,
+            },
+            Region {
+                chr: "chr6".to_string(),
+                start: 7313181,
+                end: 7313245,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 168247745,
+                end: 168247800,
+                rest: None,
+            },  
+        ];
+        let region_set = RegionSet::from(regions);
+        let tokenized = tokenizer.tokenize_region_set(&region_set).into_region_vec();
+        
+        assert_eq!(tokenized.len() > 1, true)
+        
+
     }
 
     #[rstest]
