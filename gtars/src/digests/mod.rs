@@ -68,7 +68,7 @@ pub fn sha512t24u<T: AsRef<[u8]>>(input: T) -> String {
 /// # Returns
 ///
 /// A string MD5 digest of the input string.
-pub fn md5<T: AsRef<[u8]>>(input:T) -> String {
+pub fn md5<T: AsRef<[u8]>>(input: T) -> String {
     let mut hasher = Md5::new();
     for chunk in input.as_ref().chunks(1024) {
         hasher.update(chunk);

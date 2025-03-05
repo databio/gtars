@@ -4,8 +4,8 @@ use gtars::digests::{md5, sha512t24u, DigestResult};
 use pyo3::prelude::*;
 
 use pyo3::exceptions::PyTypeError;
+use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString};
-
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
