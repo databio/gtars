@@ -232,7 +232,7 @@ impl RegionSet {
             buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
-        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::fast());
+        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::best());
         encoder.write_all(buffer.as_bytes())?;
 
         Ok(())
