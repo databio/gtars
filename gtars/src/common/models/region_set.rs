@@ -50,7 +50,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => get_dynamic_reader_from_url(path).expect("!Can't get file neither from path or url!")
+            false => get_dynamic_reader_from_url(path)
+                .expect("!Can't get file neither from path or url!"),
         };
 
         let mut header: String = String::new();
@@ -366,6 +367,20 @@ impl RegionSet {
             return true;
         }
         false
+    }
+
+    pub fn mean_region_width(&self) -> u32 {
+        if self.is_empty() {
+            return 0;
+        }
+        let sum: u32 = self
+            .regions
+            .iter()
+            .map(|region| region.end - region.start)
+            .sum();
+        let count: u32 = self.regions.len() as u32;
+
+        sum / count
     }
 
     ///
