@@ -82,6 +82,12 @@ class RegionSet:
         """
         ...
 
+    def mean_region_width(self) -> int:
+        """
+        Mean width of the regions
+        """
+        ...
+
     def __len__(self) -> int:
         """
         Size of the regionset
