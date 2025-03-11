@@ -20,7 +20,6 @@ pub struct TreeTokenizer {
     pub universe: Universe,
     config: TokenizerConfig,
     tree: HashMap<String, Lapper<u32, u32>>,
-    secondary_trees: Option<Vec<HashMap<String, Lapper<u32, u32>>>>,
     ordering: Option<HashMap<Region, f64>>,
 }
 
@@ -40,7 +39,7 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (config, mut universe, tree, secondary_trees, _exclude_ranges, mut ordering) =
+        let (config, mut universe, tree, mut ordering) =
             match file_extension {
                 // parse config file
                 "toml" => {
@@ -67,73 +66,9 @@ impl TryFrom<&Path> for TreeTokenizer {
                     let universe_path = value.parent().unwrap().join(primary_universe);
 
                     // create initial universe from the *required* universe field
-                    let mut universe = Universe::try_from(Path::new(&universe_path))?;
+                    let universe = Universe::try_from(Path::new(&universe_path))?;
 
                     let tree = create_interval_tree_from_universe(&universe);
-
-                    // create secondary trees if they exist
-                    let secondary_trees = match other_universes {
-                        Some(hierarchical_universes) => {
-                            let mut secondary_trees = Vec::new();
-                            for hierarchical_universe in hierarchical_universes {
-                                let mut hierarchical_tree: HashMap<String, Lapper<u32, u32>> =
-                                    HashMap::new();
-
-                                let hierarchical_universe_path =
-                                    value.parent().unwrap().join(hierarchical_universe);
-
-                                let hierarchical_universe_regions =
-                                    RegionSet::try_from(hierarchical_universe_path.as_path())
-                                        .unwrap()
-                                        .regions;
-
-                                let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> =
-                                    HashMap::new();
-                                for region in hierarchical_universe_regions {
-                                    universe.insert_token(&region);
-                                    let interval = Interval {
-                                        start: region.start,
-                                        stop: region.end,
-                                        val: universe.convert_region_to_id(&region).unwrap(),
-                                    };
-
-                                    intervals
-                                        .entry(region.chr.clone())
-                                        .or_default()
-                                        .push(interval);
-                                }
-
-                                for (chr, chr_intervals) in intervals.iter() {
-                                    let lapper: Lapper<u32, u32> =
-                                        Lapper::new(chr_intervals.to_owned());
-                                    hierarchical_tree.insert(chr.to_string(), lapper);
-                                }
-
-                                secondary_trees.push(hierarchical_tree);
-                            }
-
-                            Some(secondary_trees)
-                        }
-                        None => None,
-                    };
-
-                    // create exclude ranges if they exist
-                    let exclude_ranges = match &config.exclude_ranges {
-                        Some(exclude_ranges) => {
-                            let exclude_ranges_path = value.parent().unwrap().join(exclude_ranges);
-
-                            // universe gets discarded since its not conasidered a part of the tokenizers universe
-                            let exclude_ranges_universe =
-                                Universe::try_from(exclude_ranges_path.as_path())?;
-
-                            let exclude_ranges_map =
-                                create_interval_tree_from_universe(&exclude_ranges_universe);
-
-                            Some(exclude_ranges_map)
-                        }
-
-                        None => None,
-                    };
 
                     let ordering = match &config.ordered {
                         Some(true) => {
@@ -155,8 +90,6 @@ impl TryFrom<&Path> for TreeTokenizer {
                         config,
                         universe,
                         tree,
-                        secondary_trees,
-                        exclude_ranges,
                         ordering,
                     )
                 }
@@ -175,9 +108,8 @@ impl TryFrom<&Path> for TreeTokenizer {
                         Some("tree".to_string()),
                         None,
                         vec![universe_as_path],
-                        None,
                     );
-                    (config, universe, tree, None, None, None)
+                    (config, universe, tree, None)
                 }
             };
 
@@ -254,7 +186,6 @@ impl TryFrom<&Path> for TreeTokenizer {
             config,
             universe,
             tree,
-            secondary_trees,
             ordering,
         })
     }
@@ -270,32 +201,8 @@ impl Tokenizer for TreeTokenizer {
                 let mut ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                 // tokenized to nothing... check secondary trees
-                if ids.is_empty() {
-                    // oh, we have no secondary trees, just return the unknown token
-                    if self.secondary_trees.is_none() {
-                        ids = vec![self.unknown_token_id()];
-                    // iterate over secondary trees and check if the region is in any of them
-                    } else {
-                        for s_tree in self.secondary_trees.as_ref().unwrap() {
-                            // default to unknown token
-                            ids = vec![self.unknown_token_id()];
-
-                            let s_lapper = s_tree.get(&region.chr);
-                            if s_lapper.is_none() {
-                                continue;
-                            }
-                            // get overlapped intervals -- map to regions
-                            let intervals = s_lapper.unwrap().find(region.start, region.end);
-                            let regions: Vec<u32> =
-                                intervals.map(|interval| interval.val).collect();
-
-                            // a hit
-                            if !regions.is_empty() {
-                                ids = regions;
-                                break;
-                            }
-                        }
-                    }
+                if ids.is_empty() {                   
+                    ids = vec![self.unknown_token_id()];
                 }
 
                 // sort according to order
@@ -319,47 +226,7 @@ impl Tokenizer for TreeTokenizer {
             // primary universe didnt have that chromosome/contig/seqname
             // so, check secondary trees
             None => {
-                let mut ids = Vec::new();
-                // oh, we have no secondary trees, just return the unknown token
-                if self.secondary_trees.is_none() {
-                    ids = vec![self.unknown_token_id()];
-                // iterate over secondary trees and check if the region is in any of them
-                } else {
-                    for s_tree in self.secondary_trees.as_ref().unwrap() {
-                        // default to unknown token
-                        ids = vec![self.unknown_token_id()];
-
-                        let s_lapper = s_tree.get(&region.chr);
-                        if s_lapper.is_none() {
-                            continue;
-                        }
-
-                        // get overlapped intervals -- map to regions
-                        let intervals = s_lapper.unwrap().find(region.start, region.end);
-                        let regions: Vec<u32> = intervals.map(|interval| interval.val).collect();
-
-                        // a hit
-                        if !regions.is_empty() {
-                            ids = regions;
-                            break;
-                        } else {
-                            ids = vec![self.unknown_token_id()];
-                        }
-                    }
-                }
-
-                // sort according to order
-                if let Some(ordering) = &self.ordering {
-                    ids.sort_by(|a, b| {
-                        let a = self.universe.convert_id_to_region(*a).unwrap();
-                        let b = self.universe.convert_id_to_region(*b).unwrap();
-
-                        let a_score = ordering.get(&a).unwrap();
-                        let b_score = ordering.get(&b).unwrap();
-
-                        b_score.total_cmp(a_score)
-                    });
-                }
+                let ids = vec![self.unknown_token_id()];
 
                 TokenizedRegionSet {
                     ids,

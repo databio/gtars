@@ -9,7 +9,6 @@ pub struct TokenizerConfig {
     pub tokenizer_type: Option<String>,
     pub ordered: Option<bool>,
     pub universes: Vec<String>,
-    pub exclude_ranges: Option<String>,
 }
 
 impl TokenizerConfig {
@@ -29,13 +28,11 @@ impl TokenizerConfig {
         tokenizer_type: Option<String>,
         ordered: Option<bool>,
         universes: Vec<String>,
-        exclude_ranges: Option<String>,
     ) -> TokenizerConfig {
         TokenizerConfig {
             tokenizer_type,
             ordered,
             universes,
-            exclude_ranges,
         }
     }
 }
