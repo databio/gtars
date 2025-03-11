@@ -39,79 +39,69 @@ impl TryFrom<&Path> for TreeTokenizer {
         // and allows for the new way of creating tokenizers from toml files
         let file_extension = value.extension().unwrap().to_str().unwrap();
 
-        let (config, mut universe, tree, mut ordering) =
-            match file_extension {
-                // parse config file
-                "toml" => {
-                    let config = TokenizerConfig::try_from(value).with_context(|| {
-                        format!(
-                            "Invalid tokenizer configuration found for file: {}",
-                            value.to_str().unwrap()
-                        )
-                    })?;
+        let (config, mut universe, tree, mut ordering) = match file_extension {
+            // parse config file
+            "toml" => {
+                let config = TokenizerConfig::try_from(value).with_context(|| {
+                    format!(
+                        "Invalid tokenizer configuration found for file: {}",
+                        value.to_str().unwrap()
+                    )
+                })?;
 
-                    if config.universes.is_empty() {
-                        anyhow::bail!(
+                if config.universes.is_empty() {
+                    anyhow::bail!(
                         "You must have at least one universe in your universe list. Found zero."
                     )
-                    }
+                }
 
-                    let primary_universe = &config.universes[0];
-                    let other_universes = match config.universes.len() {
-                        1 => None,
-                        _ => Some(&config.universes[1..]),
-                    };
+                let primary_universe = &config.universes[0];
+                let other_universes = match config.universes.len() {
+                    1 => None,
+                    _ => Some(&config.universes[1..]),
+                };
 
-                    // universe path is relative to the config file
-                    let universe_path = value.parent().unwrap().join(primary_universe);
+                // universe path is relative to the config file
+                let universe_path = value.parent().unwrap().join(primary_universe);
 
-                    // create initial universe from the *required* universe field
-                    let universe = Universe::try_from(Path::new(&universe_path))?;
+                // create initial universe from the *required* universe field
+                let universe = Universe::try_from(Path::new(&universe_path))?;
 
-                    let tree = create_interval_tree_from_universe(&universe);
+                let tree = create_interval_tree_from_universe(&universe);
 
-                    let ordering = match &config.ordered {
-                        Some(true) => {
-                            if other_universes.is_some() {
-                                anyhow::bail!("Ordering is currently only available for single-universe tokenizers");
-                            }
-
-                            // parse score out of universe file.
-                            let ordering =
-                                generate_ordering_map_for_universe_regions(universe_path)?;
-
-                            Some(ordering)
+                let ordering = match &config.ordered {
+                    Some(true) => {
+                        if other_universes.is_some() {
+                            anyhow::bail!("Ordering is currently only available for single-universe tokenizers");
                         }
-                        Some(false) => None,
-                        None => None,
-                    };
 
-                    (
-                        config,
-                        universe,
-                        tree,
-                        ordering,
-                    )
-                }
-                // else assume its a bed file
-                _ => {
-                    let regions = RegionSet::try_from(value)
-                        .with_context(|| "There was an error reading the universe file!")?
-                        .regions;
-                    let universe = Universe::from(regions);
-                    let tree = create_interval_tree_from_universe(&universe);
+                        // parse score out of universe file.
+                        let ordering = generate_ordering_map_for_universe_regions(universe_path)?;
 
-                    let universe_as_path = Path::new(value).file_name().unwrap();
-                    let universe_as_path = universe_as_path.to_string_lossy().to_string();
+                        Some(ordering)
+                    }
+                    Some(false) => None,
+                    None => None,
+                };
 
-                    let config = TokenizerConfig::new(
-                        Some("tree".to_string()),
-                        None,
-                        vec![universe_as_path],
-                    );
-                    (config, universe, tree, None)
-                }
-            };
+                (config, universe, tree, ordering)
+            }
+            // else assume its a bed file
+            _ => {
+                let regions = RegionSet::try_from(value)
+                    .with_context(|| "There was an error reading the universe file!")?
+                    .regions;
+                let universe = Universe::from(regions);
+                let tree = create_interval_tree_from_universe(&universe);
+
+                let universe_as_path = Path::new(value).file_name().unwrap();
+                let universe_as_path = universe_as_path.to_string_lossy().to_string();
+
+                let config =
+                    TokenizerConfig::new(Some("tree".to_string()), None, vec![universe_as_path]);
+                (config, universe, tree, None)
+            }
+        };
 
         // add special tokens to the universe
         // unk
@@ -201,7 +191,7 @@ impl Tokenizer for TreeTokenizer {
                 let mut ids: Vec<u32> = intervals.map(|interval| interval.val).collect();
 
                 // tokenized to nothing... check secondary trees
-                if ids.is_empty() {                   
+                if ids.is_empty() {
                     ids = vec![self.unknown_token_id()];
                 }
 
