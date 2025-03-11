@@ -21,12 +21,7 @@
 //! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
 //! println!("{:?}", tokenized_regions.ids);
 //! ```
-pub mod builder;
-pub mod cli;
 pub mod config;
-pub mod fragment_tokenizer;
-pub mod meta_tokenizer;
-pub mod soft_tokenizer;
 pub mod special_tokens;
 pub mod traits;
 pub mod tree_tokenizer;
@@ -34,14 +29,10 @@ pub mod tree_tokenizer;
 /// constants for the tokenizer module.
 pub mod consts {
     /// command for the `gtars` cli
-    pub const TOKENIZE_CMD: &str = "tokenize";
     pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
 }
 
 // expose the TreeTokenizer struct to users of this crate
-pub use builder::TokenizerBuilder;
 pub use config::TokenizerConfig;
-pub use fragment_tokenizer::FragmentTokenizer;
-pub use meta_tokenizer::MetaTokenizer;
-pub use traits::{SingleCellTokenizer, Tokenizer};
+pub use traits::Tokenizer;
 pub use tree_tokenizer::TreeTokenizer;
