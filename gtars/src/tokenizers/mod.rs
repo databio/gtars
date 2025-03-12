@@ -22,17 +22,5 @@
 //! println!("{:?}", tokenized_regions.ids);
 //! ```
 pub mod config;
-pub mod special_tokens;
-pub mod traits;
-pub mod tree_tokenizer;
-
-/// constants for the tokenizer module.
-pub mod consts {
-    /// command for the `gtars` cli
-    pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
-}
-
-// expose the TreeTokenizer struct to users of this crate
-pub use config::TokenizerConfig;
-pub use traits::Tokenizer;
-pub use tree_tokenizer::TreeTokenizer;
+pub mod tokenizers;
+pub mod utils;
