@@ -81,7 +81,7 @@ impl TryFrom<&Path> for RegionSet {
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
-        if new_regions.len() <= 1 {
+        if new_regions.len() < 1 {
             let new_error = Error::new(
                 ErrorKind::Other,
                 format!(
