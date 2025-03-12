@@ -17,7 +17,7 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -50,7 +50,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => anyhow::bail!("File not found!")
+            false => get_dynamic_reader_from_url(path)
+                .expect("!Can't get file neither from path or url!"),
         };
 
         let mut header: String = String::new();
@@ -80,7 +81,7 @@ impl TryFrom<&Path> for RegionSet {
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
-        if new_regions.len() <= 1 {
+        if new_regions.len() < 1 {
             let new_error = Error::new(
                 ErrorKind::Other,
                 format!(
@@ -232,7 +233,7 @@ impl RegionSet {
             buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
-        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::fast());
+        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::best());
         encoder.write_all(buffer.as_bytes())?;
 
         Ok(())
@@ -366,6 +367,20 @@ impl RegionSet {
             return true;
         }
         false
+    }
+
+    pub fn mean_region_width(&self) -> u32 {
+        if self.is_empty() {
+            return 0;
+        }
+        let sum: u32 = self
+            .regions
+            .iter()
+            .map(|region| region.end - region.start)
+            .sum();
+        let count: u32 = self.regions.len() as u32;
+
+        sum / count
     }
 
     ///
