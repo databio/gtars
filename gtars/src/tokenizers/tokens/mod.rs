@@ -1,3 +1,13 @@
+
+use std::fmt::Display;
+use std::fs::File;
+use std::io::Write;
+use std::ops::Index;
+use std::path::PathBuf;
+
+use crate::common::models::{Region, RegionSet};
+use crate::tokenizers::universe::Universe;
+
 #[derive(Eq, PartialEq, Clone)]
 pub struct TokenizedRegion<'a> {
     pub universe: &'a Universe,
@@ -111,7 +121,7 @@ impl<'a> TokenizedRegionSet<'a> {
     /// # Arguments
     /// * `path` - A PathBuf to write the BED file to
     ///
-    pub fn to_bed_file(&self, path: &PathBuf) -> Result<()> {
+    pub fn to_bed_file(&self, path: &PathBuf) -> Result<(), std::io::Error> {
         let mut file = File::create(path)?;
         for id in self.ids.iter() {
             let r = self.universe.id_to_region.get(id).unwrap();
