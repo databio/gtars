@@ -3,14 +3,15 @@ use std::path::Path;
 
 use rust_lapper::Lapper;
 
-use super::SpecialTokens;
-use super::Tokenizer;
+
+use super::GTokenize;
 use super::TokenizerError;
 use crate::common::models::Region;
 use crate::tokenizers::config::{SpecialToken, TokenizerConfig};
 use crate::tokenizers::tokens::TokenizedRegionSet;
 use crate::tokenizers::universe::Universe;
 use crate::tokenizers::utils::create_interval_tree_from_universe;
+use crate::tokenizers::utils::special_tokens::SpecialTokens;
 
 pub struct TreeTokenizer {
     /// The core interval tree. Actually, its **many** interval trees. The hash-map will map chrom names
@@ -19,7 +20,6 @@ pub struct TreeTokenizer {
     tree: HashMap<String, Lapper<u32, u32>>,
     universe: Universe,
     special_tokens: SpecialTokens,
-    padding: Option<usize>,
 }
 
 impl TryFrom<TokenizerConfig> for TreeTokenizer {
@@ -83,19 +83,11 @@ impl TryFrom<TokenizerConfig> for TreeTokenizer {
             tree,
             universe,
             special_tokens,
-            padding: None,
         })
     }
 }
 
-impl TreeTokenizer {
-    pub fn with_padding(mut self, padding: usize) -> Self {
-        self.padding = Some(padding);
-        self
-    }
-}
-
-impl Tokenizer for TreeTokenizer {
+impl GTokenize for TreeTokenizer {
     fn tokenize<T: Into<Vec<Region>>>(
         &self,
         regions: T,
@@ -116,19 +108,9 @@ impl Tokenizer for TreeTokenizer {
             }
         }
 
-        let mut attention_mask = vec![1_u8; tokenized_regions.len()];
-        if let Some(padding) = self.padding {
-            while tokenized_regions.len() < padding {
-                tokenized_regions.push(self.token_to_id(&self.special_tokens.pad).unwrap());
-                attention_mask.push(0_u8);
-            }
-        }
-        
-
         Ok(TokenizedRegionSet {
             ids: tokenized_regions,
             universe: &self.universe,
-            attention_mask,
         })
     }
 
@@ -367,30 +349,5 @@ mod tests {
 
         let vocab_size = tokenizer.get_vocab_size();
         assert!(vocab_size > 0);
-    }
-
-    #[rstest]
-    fn test_with_padding(tokenizer_config: TokenizerConfig) {
-        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap().with_padding(32);
-
-        let regions = vec![
-            Region {
-                chr: "chr2".to_string(),
-                start: 203871346,
-                end: 203871616,
-                rest: None,
-            },
-        ];
-
-        let tokenized = tokenizer.tokenize(regions);
-        assert!(tokenized.is_ok());
-
-        let tokenized = tokenized.unwrap();
-        assert_eq!(tokenized.attention_mask.len(), 32);
-        assert_eq!(tokenized.ids.len(), 32);
-        assert_eq!(tokenized.attention_mask.iter().filter(|&&x| x == 1).count(), 2);
-        assert_eq!(tokenized.attention_mask.iter().filter(|&&x| x == 0).count(), 30);
-
-        assert_eq!(tokenized.ids.iter().filter(|&&x| x == tokenizer.token_to_id(&tokenizer.special_tokens.pad).unwrap()).count(), 30);
     }
 }

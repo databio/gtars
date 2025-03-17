@@ -1,13 +1,10 @@
 pub mod tree_tokenizer;
 
-use std::{
-    default,
-    path::{Path, PathBuf},
-};
-
 use thiserror::Error;
 
 use crate::common::models::Region;
+use crate::tokenizers::utils::padding::PaddingParams;
+use crate::tokenizers::utils::truncation::TruncationParams;
 
 use super::tokens::TokenizedRegionSet;
 
@@ -19,7 +16,7 @@ pub enum TokenizerError {
     InvalidSpecialTokenConfig,
 }
 
-pub trait Tokenizer {
+pub trait GTokenize {
     /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`
     /// are expected to be relative to the given sequence.
     fn tokenize<T: Into<Vec<Region>>>(
@@ -34,70 +31,39 @@ pub trait Tokenizer {
     fn get_vocab_size(&self) -> usize;
 }
 
-#[derive(Clone, Debug)]
-pub struct SpecialTokens {
-    pub unk: Region,
-    pub pad: Region,
-    pub mask: Region,
-    pub cls: Region,
-    pub eos: Region,
-    pub bos: Region,
-    pub sep: Region,
+pub struct Tokenizer<T: GTokenize> {
+    core: T,
+    padding: Option<PaddingParams>,
+    truncation: Option<TruncationParams>,
 }
 
-impl Default for SpecialTokens {
-    fn default() -> Self {
-        SpecialTokens {
-            unk: Region {
-                chr: "chrUNK".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            pad: Region {
-                chr: "chrPAD".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            mask: Region {
-                chr: "chrMASK".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            cls: Region {
-                chr: "chrCLS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            eos: Region {
-                chr: "chrEOS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            bos: Region {
-                chr: "chrBOS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            sep: Region {
-                chr: "chrSEP".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
+impl<T> Tokenizer<T>
+where
+    T: GTokenize,
+{
+    pub fn new(tokenizer: T) -> Self {
+        Tokenizer {
+            core: tokenizer,
+            padding: None,
+            truncation: None,
         }
     }
-}
 
-impl From<SpecialTokens> for Vec<Region> {
-    fn from(val: SpecialTokens) -> Self {
-        vec![
-            val.unk, val.pad, val.mask, val.cls, val.eos, val.bos, val.sep,
-        ]
+    pub fn with_padding(mut self, padding: PaddingParams) -> Self {
+        self.padding = Some(padding);
+        self
+    }
+
+    pub fn get_padding_params(&self) -> Option<&PaddingParams> {
+        self.padding.as_ref()
+    }
+
+    pub fn with_truncation(mut self, truncation: TruncationParams) -> Self {
+        self.truncation = Some(truncation);
+        self
+    }
+
+    pub fn get_truncation_params(&self) -> Option<&TruncationParams> {
+        self.truncation.as_ref()
     }
 }

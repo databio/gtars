@@ -4,6 +4,10 @@ use rust_lapper::{Interval, Lapper};
 
 use super::universe::Universe;
 
+pub mod padding;
+pub mod truncation;
+pub mod special_tokens;
+
 ///
 /// Simple wrapper function that will create a [Lapper] object (an interval tree)
 /// from a [Universe] struct.
