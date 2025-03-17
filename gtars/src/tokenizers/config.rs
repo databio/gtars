@@ -14,7 +14,7 @@ pub enum SpecialToken {
     Cls,
     Bos,
     Eos,
-    Sep
+    Sep,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -52,7 +52,9 @@ impl TokenizerInputFileType {
     pub fn from_path(path: &Path) -> TokenizerConfigResult<Self> {
         match path.extension().and_then(OsStr::to_str) {
             Some("gz") => {
-                let file_stem = path.file_stem().ok_or(TokenizerConfigError::InvalidFileType)?;
+                let file_stem = path
+                    .file_stem()
+                    .ok_or(TokenizerConfigError::InvalidFileType)?;
                 let ext2 = Path::new(file_stem)
                     .extension()
                     .and_then(OsStr::to_str)
@@ -81,7 +83,10 @@ impl TryFrom<&Path> for TokenizerConfig {
 }
 
 impl TokenizerConfig {
-    pub fn new(universe: String, special_tokens: Option<Vec<SpecialTokenAssignment>>) -> TokenizerConfig {
+    pub fn new(
+        universe: String,
+        special_tokens: Option<Vec<SpecialTokenAssignment>>,
+    ) -> TokenizerConfig {
         TokenizerConfig {
             universe,
             special_tokens,
@@ -95,7 +100,7 @@ mod tests {
 
     use pretty_assertions::assert_eq;
     use rstest::rstest;
-    
+
     use std::path::PathBuf;
 
     #[rstest]

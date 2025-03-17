@@ -1,6 +1,9 @@
 pub mod tree_tokenizer;
 
-use std::{default, path::{Path, PathBuf}};
+use std::{
+    default,
+    path::{Path, PathBuf},
+};
 
 use thiserror::Error;
 
@@ -14,16 +17,19 @@ pub enum TokenizerError {
     Io(#[from] std::io::Error),
     #[error("Invalid special token configuration")]
     InvalidSpecialTokenConfig,
-}   
+}
 
 pub trait Tokenizer {
     /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`
     /// are expected to be relative to the given sequence.
-    fn tokenize(&self, sequence: &str) -> Result<TokenizedRegionSet, TokenizerError>;
+    fn tokenize<T: Into<Vec<Region>>>(
+        &self,
+        regions: T,
+    ) -> Result<TokenizedRegionSet, TokenizerError>;
     /// Find the ID associated to a string token
-    fn token_to_id(&self, token: &str) -> Option<u32>;
+    fn token_to_id(&self, token: &Region) -> Option<u32>;
     /// Find the string token associated to an ID
-    fn id_to_token(&self, id: u32) -> Option<String>;
+    fn id_to_token(&self, id: u32) -> Option<Region>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
     /// Save the current `Model` in the given folder, using the given `prefix` for the various
@@ -31,6 +37,7 @@ pub trait Tokenizer {
     fn save(&self, folder: &Path, prefix: Option<&str>) -> Result<Vec<PathBuf>, TokenizerError>;
 }
 
+#[derive(Clone, Debug)]
 pub struct SpecialTokens {
     pub unk: Region,
     pub pad: Region,
@@ -38,7 +45,7 @@ pub struct SpecialTokens {
     pub cls: Region,
     pub eos: Region,
     pub bos: Region,
-    pub sep: Region
+    pub sep: Region,
 }
 
 impl Default for SpecialTokens {
@@ -48,44 +55,52 @@ impl Default for SpecialTokens {
                 chr: "chrUNK".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             pad: Region {
                 chr: "chrPAD".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             mask: Region {
                 chr: "chrMASK".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             cls: Region {
                 chr: "chrCLS".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             eos: Region {
                 chr: "chrEOS".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             bos: Region {
                 chr: "chrBOS".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
+                rest: None,
             },
             sep: Region {
                 chr: "chrSEP".to_string(),
                 start: 0,
                 end: 0,
-                rest: None
-            }
+                rest: None,
+            },
         }
+    }
+}
+
+impl From<SpecialTokens> for Vec<Region> {
+    fn from(val: SpecialTokens) -> Self {
+        vec![
+            val.unk, val.pad, val.mask, val.cls, val.eos, val.bos, val.sep,
+        ]
     }
 }

@@ -3,12 +3,14 @@ use std::path::Path;
 
 use rust_lapper::Lapper;
 
+use super::SpecialTokens;
+use super::Tokenizer;
+use super::TokenizerError;
 use crate::common::models::Region;
-use crate::tokenizers::config::{TokenizerConfig, SpecialToken};
+use crate::tokenizers::config::{SpecialToken, TokenizerConfig};
+use crate::tokenizers::tokens::TokenizedRegionSet;
 use crate::tokenizers::universe::Universe;
 use crate::tokenizers::utils::create_interval_tree_from_universe;
-use super::SpecialTokens;
-use super::TokenizerError;
 
 pub struct TreeTokenizer {
     /// The core interval tree. Actually, its **many** interval trees. The hash-map will map chrom names
@@ -16,7 +18,7 @@ pub struct TreeTokenizer {
     /// the interval tree is [reported to be NlogN](https://academic.oup.com/bioinformatics/article/29/1/1/273289?login=false)
     tree: HashMap<String, Lapper<u32, u32>>,
     universe: Universe,
-    special_tokens: SpecialTokens
+    special_tokens: SpecialTokens,
 }
 
 impl TryFrom<TokenizerConfig> for TreeTokenizer {
@@ -24,7 +26,7 @@ impl TryFrom<TokenizerConfig> for TreeTokenizer {
 
     fn try_from(value: TokenizerConfig) -> Result<Self, Self::Error> {
         let universe = Path::new(&value.universe);
-        let universe = Universe::try_from(universe)?;
+        let mut universe = Universe::try_from(universe)?;
         let tree = create_interval_tree_from_universe(&universe);
 
         // we start with the default, then will replace as they exist in the config
@@ -44,14 +46,18 @@ impl TryFrom<TokenizerConfig> for TreeTokenizer {
                 if start_end.len() != 2 {
                     return Err(TokenizerError::InvalidSpecialTokenConfig);
                 }
-                let start = start_end[0].parse::<u32>().map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
-                let end = start_end[1].parse::<u32>().map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
+                let start = start_end[0]
+                    .parse::<u32>()
+                    .map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
+                let end = start_end[1]
+                    .parse::<u32>()
+                    .map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
 
                 let token_value = Region {
                     chr,
                     start,
                     end,
-                    rest: None
+                    rest: None,
                 };
 
                 match token_type {
@@ -67,12 +73,43 @@ impl TryFrom<TokenizerConfig> for TreeTokenizer {
         }
 
         // insert all new special tokens into the universe
+        let s_tokens: Vec<Region> = special_tokens.clone().into();
+        for s_token in s_tokens.iter() {
+            universe.insert_token(s_token);
+        }
 
         Ok(TreeTokenizer {
             tree,
             universe,
-            special_tokens
+            special_tokens,
         })
+    }
+}
 
+impl Tokenizer for TreeTokenizer {
+    fn tokenize<T: Into<Vec<Region>>>(
+        &self,
+        regions: T,
+    ) -> Result<TokenizedRegionSet, TokenizerError> {
+    }
+
+    fn token_to_id(&self, token: &Region) -> Option<u32> {
+        self.universe.convert_region_to_id(token)
+    }
+
+    fn id_to_token(&self, id: u32) -> Option<Region> {
+        self.universe.convert_id_to_region(id)
+    }
+
+    fn get_vocab_size(&self) -> usize {
+        self.universe.len()
+    }
+
+    fn save(
+        &self,
+        folder: &Path,
+        prefix: Option<&str>,
+    ) -> Result<Vec<std::path::PathBuf>, TokenizerError> {
+        todo!()
     }
 }

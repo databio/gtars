@@ -24,5 +24,5 @@
 pub mod config;
 pub mod tokenizers;
 pub mod tokens;
-pub mod utils;
 pub mod universe;
+pub mod utils;

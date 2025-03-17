@@ -3,10 +3,7 @@ use std::path::Path;
 
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
-use crate::common::utils::{
-    generate_id_to_region_map,
-    generate_region_to_id_map
-};
+use crate::common::utils::{generate_id_to_region_map, generate_region_to_id_map};
 
 #[derive(Clone, Eq, PartialEq, Default)]
 pub struct Universe {
