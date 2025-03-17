@@ -292,13 +292,13 @@ mod tests {
 
         // chr1:151399432-151399527 -- CONFIRMED IN IGV
         assert_eq!(tokenized[0].chr, "chr1");
-        assert_eq!(tokenized[0].start, 151399431);
+        assert_eq!(tokenized[0].start, 151399431); // igv shows 151399432 (but we are 0-based)
         assert_eq!(tokenized[0].end, 151399527);
         assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(6));
 
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
         assert_eq!(tokenized[1].chr, "chr2");
-        assert_eq!(tokenized[1].start, 203871200);
+        assert_eq!(tokenized[1].start, 203871200); // igv shows 203871201 (but we are 0-based)
         assert_eq!(tokenized[1].end, 203871375);
         assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(7));
 
@@ -311,15 +311,9 @@ mod tests {
 
         let regions = vec![
             Region {
-                chr: "chr1".to_string(),
-                start: 151399441,
-                end: 151399547,
-                rest: None,
-            },
-            Region {
                 chr: "chr2".to_string(),
-                start: 203871220,
-                end: 203871381,
+                start: 203871346,
+                end: 203871616,
                 rest: None,
             },
         ];
@@ -332,15 +326,18 @@ mod tests {
         
         let tokenized = tokenized.into_region_vec();
 
-        // chr1:151399432-151399527 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0].chr, "chr1");
-        assert_eq!(tokenized[0].start, 151399431);
-        assert_eq!(tokenized[0].end, 151399527);
-
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[0].chr, "chr2");
+        assert_eq!(tokenized[0].start, 203871200); // igv shows 203871201 (but we are 0-based)
+        assert_eq!(tokenized[0].end, 203871375);
+        assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(7));
+
+        // chr2:203871388-203871588 -- CONFIRMED IN IGV
         assert_eq!(tokenized[1].chr, "chr2");
-        assert_eq!(tokenized[1].start, 203871200);
-        assert_eq!(tokenized[1].end, 203871375);
+        assert_eq!(tokenized[1].start, 203871387); // igv shows 203871388 (but we are 0-based)
+        assert_eq!(tokenized[1].end, 203871588);
+        assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(8));
+
 
 
     }
