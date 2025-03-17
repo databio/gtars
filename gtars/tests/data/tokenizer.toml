@@ -1,2 +1,10 @@
-universes = ["peaks.bed.gz", "chroms.bed"]
-exclude_ranges = "excluderanges.bed.gz"
+universe = "peaks.bed.gz"
+special_tokens = [
+  { name = "Unk",  token = "chrUNK:0-0" },
+  { name = "Pad",  token = "chrPAD:0-0" },
+  { name = "Mask", token = "chrMASK:0-0" },
+  { name = "Cls",  token = "chrCLS:0-0" },
+  { name = "Sep",  token = "chrSEP:0-0" },
+  { name = "Bos",  token = "chrBOS:0-0" },
+  { name = "Eos",  token = "chrEOS:0-0" },
+]

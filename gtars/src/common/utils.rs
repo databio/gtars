@@ -15,7 +15,7 @@ use rust_lapper::{Interval, Lapper};
 // use std::error::Error;
 
 use crate::common::models::region::Region;
-use crate::common::models::universe::Universe;
+use crate::tokenizers::universe::Universe;
 
 ///
 /// Get a reader for either a gzip'd or non-gzip'd file.

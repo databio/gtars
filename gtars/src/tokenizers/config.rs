@@ -7,20 +7,26 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-pub struct SpecialTokensConfig {
-    pub unk: Option<String>,
-    pub pad: Option<String>,
-    pub bos: Option<String>,
-    pub eos: Option<String>,
-    pub cls: Option<String>,
-    pub sep: Option<String>,
-    pub mask: Option<String>,
+pub enum SpecialToken {
+    Unk,
+    Pad,
+    Mask,
+    Cls,
+    Bos,
+    Eos,
+    Sep
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
+pub struct SpecialTokenAssignment {
+    pub name: SpecialToken,
+    pub token: String, // must be valid chr:start-end
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct TokenizerConfig {
     pub universe: String,
-    pub special_tokens: Option<SpecialTokensConfig>,
+    pub special_tokens: Option<Vec<SpecialTokenAssignment>>,
 }
 
 #[derive(Debug)]
@@ -44,57 +50,91 @@ pub type TokenizerConfigResult<T> = std::result::Result<T, TokenizerConfigError>
 
 impl TokenizerInputFileType {
     pub fn from_path(path: &Path) -> TokenizerConfigResult<Self> {
-        // first extension, might be ".gz"
-        let ext1 = path
-            .extension()
-            .and_then(OsStr::to_str)
-            .ok_or(TokenizerConfigError::InvalidFileType)?;
-
-        if ext1 == "gz" {
-            // if it ends with .gz, we look at the file stem’s extension:
-            // e.g. "universe.bed.gz" → first strip .gz → "universe.bed"
-            // so now we check if *that* ends with ".bed"
-            let file_stem = path
-                .file_stem()
-                .ok_or(TokenizerConfigError::InvalidFileType)?;
-            let ext2 = Path::new(file_stem)
-                .extension()
-                .and_then(OsStr::to_str)
-                .ok_or(TokenizerConfigError::InvalidFileType)?;
-
-            if ext2 == "bed" {
-                Ok(TokenizerInputFileType::BedGz)
-            } else {
-                Err(TokenizerConfigError::InvalidFileType)
+        match path.extension().and_then(OsStr::to_str) {
+            Some("gz") => {
+                let file_stem = path.file_stem().ok_or(TokenizerConfigError::InvalidFileType)?;
+                let ext2 = Path::new(file_stem)
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .ok_or(TokenizerConfigError::InvalidFileType)?;
+                if ext2 == "bed" {
+                    Ok(TokenizerInputFileType::BedGz)
+                } else {
+                    Err(TokenizerConfigError::InvalidFileType)
+                }
             }
-        } else if ext1 == "toml" {
-            Ok(TokenizerInputFileType::Toml)
-        } else if ext1 == "bed" {
-            Ok(TokenizerInputFileType::Bed)
-        } else {
-            Err(TokenizerConfigError::InvalidFileType)
+            Some("toml") => Ok(TokenizerInputFileType::Toml),
+            Some("bed") => Ok(TokenizerInputFileType::Bed),
+            _ => Err(TokenizerConfigError::InvalidFileType),
         }
     }
 }
 
+impl TryFrom<&Path> for TokenizerConfig {
+    type Error = TokenizerConfigError;
 
-impl TokenizerConfig {
-    ///
-    /// Create a new tokenizer config.
-    ///
-    /// # Arguments
-    /// - path: Path to the config file (a .toml) file.
-    pub fn try_from(path: &Path) -> TokenizerConfigResult<TokenizerConfig> {
+    fn try_from(path: &Path) -> Result<Self, Self::Error> {
         let toml_str = read_to_string(path)?;
-        let config: TokenizerConfig = toml::from_str(&toml_str)?;
-
+        let config = toml::from_str(&toml_str)?;
         Ok(config)
     }
+}
 
-    pub fn new(universe: String, special_tokens: Option<SpecialTokensConfig>) -> TokenizerConfig {
+impl TokenizerConfig {
+    pub fn new(universe: String, special_tokens: Option<Vec<SpecialTokenAssignment>>) -> TokenizerConfig {
         TokenizerConfig {
             universe,
             special_tokens,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::common::consts::special_tokens;
+
+    use super::*;
+
+    use pretty_assertions::assert_eq;
+    use rstest::rstest;
+    
+    use std::path::PathBuf;
+
+    #[rstest]
+    fn test_try_from_toml() {
+        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let result = TokenizerConfig::try_from(&path);
+        assert_eq!(result.is_ok(), true);
+    }
+
+    #[rstest]
+    fn test_from_path_for_toml_extension() {
+        let path = PathBuf::from("dummy.toml");
+        let file_type = TokenizerInputFileType::from_path(&path);
+        assert_eq!(matches!(file_type, Ok(TokenizerInputFileType::Toml)), true);
+    }
+
+    #[rstest]
+    fn test_from_path_for_invalid_extension() {
+        let path = PathBuf::from("invalid.xyz");
+        let file_type = TokenizerInputFileType::from_path(&path);
+        assert_eq!(file_type.is_err(), true);
+    }
+
+    #[rstest]
+    fn test_get_universe_name() {
+        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let result = TokenizerConfig::try_from(&path).unwrap();
+
+        assert_eq!(result.universe, "peaks.bed.gz");
+    }
+
+    #[rstest]
+    fn test_get_special_tokens() {
+        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let result = TokenizerConfig::try_from(&path).unwrap();
+        let special_tokens = result.special_tokens;
+
+        assert_eq!(special_tokens.is_some(), true);
     }
 }

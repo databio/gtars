@@ -1,21 +1,12 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use thiserror::Error;
-
 use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
-use crate::common::utils::{generate_id_to_region_map, generate_region_to_id_map};
-
-#[derive(Error, Debug)]
-pub enum UniverseError {
-    #[error("Missing or invalid file extension in tokenizer config file. It must be `toml`, `bed` or `bed.gz`")]
-    InvalidFileType,
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error(transparent)]
-    Toml(#[from] toml::de::Error),
-}
+use crate::common::utils::{
+    generate_id_to_region_map,
+    generate_region_to_id_map
+};
 
 #[derive(Clone, Eq, PartialEq, Default)]
 pub struct Universe {
@@ -72,11 +63,11 @@ impl From<Vec<Region>> for Universe {
 }
 
 impl TryFrom<&Path> for Universe {
-    type Error = UniverseError;
+    type Error = std::io::Error;
 
-    fn try_from(value: &Path) -> Result<Self> {
+    fn try_from(value: &Path) -> Result<Self, Self::Error> {
         let regions = RegionSet::try_from(value)
-            .with_context(|| "There was an error reading the universe file!")?
+            .map_err(|err| std::io::Error::new(std::io::ErrorKind::Other, err))?
             .regions;
 
         let region_to_id = generate_region_to_id_map(&regions);
