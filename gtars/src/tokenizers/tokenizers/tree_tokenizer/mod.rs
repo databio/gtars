@@ -91,6 +91,26 @@ impl Tokenizer for TreeTokenizer {
         &self,
         regions: T,
     ) -> Result<TokenizedRegionSet, TokenizerError> {
+        let regions: Vec<Region> = regions.into();
+        let mut tokenized_regions = Vec::new();
+        for region in regions.iter() {
+            if let Some(tree) = self.tree.get(&region.chr) {
+                let overlapping_intervals = tree.find(region.start, region.end).map(|interval| interval.val).collect::<Vec<u32>>();
+                if overlapping_intervals.is_empty() {
+                    tokenized_regions.push(self.token_to_id(&self.special_tokens.unk).unwrap());
+                } else {
+                    // Assuming we take the first overlapping interval for simplicity
+                    tokenized_regions.extend(overlapping_intervals);
+                }
+            } else {
+                tokenized_regions.push(self.token_to_id(&self.special_tokens.unk).unwrap());
+            }
+        }
+
+        Ok(TokenizedRegionSet {
+            ids: tokenized_regions,
+            universe: &self.universe,
+        })
     }
 
     fn token_to_id(&self, token: &Region) -> Option<u32> {
@@ -104,12 +124,91 @@ impl Tokenizer for TreeTokenizer {
     fn get_vocab_size(&self) -> usize {
         self.universe.len()
     }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    fn save(
-        &self,
-        folder: &Path,
-        prefix: Option<&str>,
-    ) -> Result<Vec<std::path::PathBuf>, TokenizerError> {
-        todo!()
+    use rstest::*;
+    use pretty_assertions::assert_eq;
+
+    #[fixture]
+    fn tokenizer_config() -> TokenizerConfig {
+        TokenizerConfig {
+            universe: "tests/data/peaks.bed".to_string(),
+            special_tokens: None
+        }
+    }
+
+    #[rstest]
+    fn test_tree_tokenizer_creation(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config);
+        assert!(tokenizer.is_ok());
+    }
+
+    #[rstest]
+    fn test_tokenize_with_existing_intervals(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 50,
+                end: 150,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(regions);
+        assert!(tokenized.is_ok());
+        let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.ids.len(), 1);
+    }
+
+    #[rstest]
+    fn test_tokenize_with_non_existing_intervals(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let regions = vec![
+            Region {
+                chr: "chr2".to_string(),
+                start: 50,
+                end: 150,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(regions);
+        assert!(tokenized.is_ok());
+        let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.ids.len(), 1);
+        assert_eq!(tokenized.ids[0], tokenizer.token_to_id(&tokenizer.special_tokens.unk).unwrap());
+    }
+
+    #[rstest]
+    fn test_token_to_id_and_id_to_token(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let region = Region {
+            chr: "chr1".to_string(),
+            start: 0,
+            end: 100,
+            rest: None,
+        };
+
+        let id = tokenizer.token_to_id(&region);
+        assert!(id.is_some());
+
+        let converted_region = tokenizer.id_to_token(id.unwrap());
+        assert!(converted_region.is_some());
+        assert_eq!(converted_region.unwrap(), region);
+    }
+
+    #[rstest]
+    fn test_get_vocab_size(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let vocab_size = tokenizer.get_vocab_size();
+        assert!(vocab_size > 0);
     }
 }

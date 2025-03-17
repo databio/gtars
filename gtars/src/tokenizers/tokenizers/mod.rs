@@ -32,9 +32,6 @@ pub trait Tokenizer {
     fn id_to_token(&self, id: u32) -> Option<Region>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
-    /// Save the current `Model` in the given folder, using the given `prefix` for the various
-    /// files that need to be saved.
-    fn save(&self, folder: &Path, prefix: Option<&str>) -> Result<Vec<PathBuf>, TokenizerError>;
 }
 
 #[derive(Clone, Debug)]
