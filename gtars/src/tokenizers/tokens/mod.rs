@@ -38,6 +38,7 @@ impl Display for TokenizedRegion<'_> {
 /// to the regions in that universe this [TokenizedRegionSet] represents.
 pub struct TokenizedRegionSet<'a> {
     pub ids: Vec<u32>,
+    pub attention_mask: Vec<u8>,
     pub universe: &'a Universe,
 }
 
@@ -102,17 +103,6 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
 }
 
 impl<'a> TokenizedRegionSet<'a> {
-    ///
-    /// Create a new TokenizedRegionSet. the TokenizedRegionSet takes
-    /// a reference to a Universe.
-    ///
-    /// # Arguments
-    /// * `regions` - A vector of regions
-    /// * `universe` - A reference to a Universe
-    ///
-    pub fn new(ids: Vec<u32>, universe: &'a Universe) -> Self {
-        TokenizedRegionSet { ids, universe }
-    }
 
     ///
     /// Write a TokenizedRegionSet to a BED file
