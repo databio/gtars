@@ -143,7 +143,59 @@ mod tests {
     #[rstest]
     fn test_tree_tokenizer_creation(tokenizer_config: TokenizerConfig) {
         let tokenizer = TreeTokenizer::try_from(tokenizer_config);
-        assert!(tokenizer.is_ok());
+        assert_eq!(tokenizer.is_ok(), true);
+    }
+
+    #[rstest]
+    fn test_universe_size(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config);
+        assert_eq!(tokenizer.is_ok(), true);
+
+        let tokenizer = tokenizer.unwrap();
+        assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
+    }
+
+    #[rstest]
+    fn test_special_tokens(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config);
+        assert_eq!(tokenizer.is_ok(), true);
+
+        let tokenizer = tokenizer.unwrap();
+
+        // confirm the special tokens
+        assert_eq!(tokenizer.special_tokens.unk.chr, "chrUNK");
+        assert_eq!(tokenizer.special_tokens.pad.chr, "chrPAD");
+        assert_eq!(tokenizer.special_tokens.mask.chr, "chrMASK");
+        assert_eq!(tokenizer.special_tokens.cls.chr, "chrCLS");
+        assert_eq!(tokenizer.special_tokens.eos.chr, "chrEOS");
+        assert_eq!(tokenizer.special_tokens.bos.chr, "chrBOS");
+        assert_eq!(tokenizer.special_tokens.sep.chr, "chrSEP");
+
+        assert_eq!(tokenizer.special_tokens.unk.start, 0);
+        assert_eq!(tokenizer.special_tokens.pad.start, 0);
+        assert_eq!(tokenizer.special_tokens.mask.start, 0);
+        assert_eq!(tokenizer.special_tokens.cls.start, 0);
+        assert_eq!(tokenizer.special_tokens.eos.start, 0);
+        assert_eq!(tokenizer.special_tokens.bos.start, 0);
+        assert_eq!(tokenizer.special_tokens.sep.start, 0);
+
+
+        assert_eq!(tokenizer.special_tokens.unk.end, 0);
+        assert_eq!(tokenizer.special_tokens.pad.end, 0);
+        assert_eq!(tokenizer.special_tokens.mask.end, 0);
+        assert_eq!(tokenizer.special_tokens.cls.end, 0);
+        assert_eq!(tokenizer.special_tokens.eos.end, 0);
+        assert_eq!(tokenizer.special_tokens.bos.end, 0);
+        assert_eq!(tokenizer.special_tokens.sep.end, 0);
+        
+        // confirm id values
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.unk).unwrap(), 25);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.pad).unwrap(), 26);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.mask).unwrap(), 27);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.cls).unwrap(), 28);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.eos).unwrap(), 29);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.bos).unwrap(), 30);
+        assert_eq!(tokenizer.token_to_id(&tokenizer.special_tokens.sep).unwrap(), 31);
     }
 
     #[rstest]
