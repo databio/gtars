@@ -199,7 +199,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_tokenize_with_existing_intervals(tokenizer_config: TokenizerConfig) {
+    fn test_tokenize_single_region(tokenizer_config: TokenizerConfig) {
         let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
 
         let regions = vec![
@@ -218,10 +218,16 @@ mod tests {
     }
 
     #[rstest]
-    fn test_tokenize_with_non_existing_intervals(tokenizer_config: TokenizerConfig) {
+    fn test_tokenize_double_region(tokenizer_config: TokenizerConfig) {
         let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
 
         let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 50,
+                end: 150,
+                rest: None,
+            },
             Region {
                 chr: "chr2".to_string(),
                 start: 50,
@@ -233,8 +239,110 @@ mod tests {
         let tokenized = tokenizer.tokenize(regions);
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.ids.len(), 2);
+    }
+
+    #[rstest]
+    fn test_tokenize_unk_chrom(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let regions = vec![
+            Region {
+                chr: "chr999".to_string(),
+                start: 50,
+                end: 150,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(regions);
+        assert!(tokenized.is_ok());
+        let tokenized = tokenized.unwrap();
+
         assert_eq!(tokenized.ids.len(), 1);
         assert_eq!(tokenized.ids[0], tokenizer.token_to_id(&tokenizer.special_tokens.unk).unwrap());
+    }
+
+    #[rstest]
+    fn test_tokenize_on_two_crhoms(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 151399441,
+                end: 151399547,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 203871220,
+                end: 203871381,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(regions);
+        assert!(tokenized.is_ok());
+        
+        let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.len(), 2);
+        
+        let tokenized = tokenized.into_region_vec();
+
+        // chr1:151399432-151399527 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[0].chr, "chr1");
+        assert_eq!(tokenized[0].start, 151399431);
+        assert_eq!(tokenized[0].end, 151399527);
+        assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(6));
+
+        // chr2:203871201-203871375 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[1].chr, "chr2");
+        assert_eq!(tokenized[1].start, 203871200);
+        assert_eq!(tokenized[1].end, 203871375);
+        assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(7));
+
+
+    }
+
+    #[rstest]
+    fn test_tokenize_with_multi_overlap(tokenizer_config: TokenizerConfig) {
+        let tokenizer = TreeTokenizer::try_from(tokenizer_config).unwrap();
+
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 151399441,
+                end: 151399547,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 203871220,
+                end: 203871381,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(regions);
+        assert!(tokenized.is_ok());
+        
+        let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.len(), 2);
+        
+        let tokenized = tokenized.into_region_vec();
+
+        // chr1:151399432-151399527 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[0].chr, "chr1");
+        assert_eq!(tokenized[0].start, 151399431);
+        assert_eq!(tokenized[0].end, 151399527);
+
+        // chr2:203871201-203871375 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[1].chr, "chr2");
+        assert_eq!(tokenized[1].start, 203871200);
+        assert_eq!(tokenized[1].end, 203871375);
+
+
     }
 
     #[rstest]
