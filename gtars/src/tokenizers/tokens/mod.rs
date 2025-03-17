@@ -101,8 +101,7 @@ impl<'a> IntoIterator for &'a TokenizedRegionSet<'_> {
     }
 }
 
-impl<'a> TokenizedRegionSet<'a> {
-
+impl TokenizedRegionSet<'_> {
     ///
     /// Write a TokenizedRegionSet to a BED file
     ///
@@ -116,7 +115,6 @@ impl<'a> TokenizedRegionSet<'a> {
             let line = format!("{}\t{}\t{}\n", r.chr, r.start, r.end);
             file.write_all(line.as_bytes())?;
         }
-
         Ok(())
     }
 
@@ -149,7 +147,7 @@ impl<'a> TokenizedRegionSet<'a> {
     }
 }
 
-impl<'a> TokenizedRegionSet<'a> {
+impl TokenizedRegionSet<'_> {
     pub fn len(&self) -> usize {
         self.ids.len()
     }

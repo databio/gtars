@@ -5,6 +5,8 @@ use crate::common::models::region::Region;
 use crate::common::models::region_set::RegionSet;
 use crate::common::utils::{generate_id_to_region_map, generate_region_to_id_map};
 
+use super::utils::special_tokens::SpecialTokens;
+
 #[derive(Clone, Eq, PartialEq, Default)]
 pub struct Universe {
     pub regions: Vec<Region>,
@@ -13,7 +15,7 @@ pub struct Universe {
 }
 
 impl Universe {
-    pub fn insert_token(&mut self, region: &Region) {
+    pub fn add_token_to_universe(&mut self, region: &Region) {
         let new_id = self.region_to_id.len();
         self.region_to_id.insert(region.to_owned(), new_id as u32);
         self.id_to_region.insert(new_id as u32, region.to_owned());
@@ -39,6 +41,13 @@ impl Universe {
 
     pub fn contains_region(&self, region: &Region) -> bool {
         self.region_to_id.contains_key(region)
+    }
+
+    pub fn add_special_tokens(&mut self, special_tokens: &SpecialTokens) {
+        let special_tokens_vec: Vec<Region> = special_tokens.into();
+        for token in special_tokens_vec.iter() {
+            self.add_token_to_universe(token);
+        }
     }
 }
 

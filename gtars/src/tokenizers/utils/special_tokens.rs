@@ -67,3 +67,17 @@ impl From<SpecialTokens> for Vec<Region> {
         ]
     }
 }
+
+impl From<&SpecialTokens> for Vec<Region> {
+    fn from(val: &SpecialTokens) -> Self {
+        vec![
+            val.unk.clone(),
+            val.pad.clone(),
+            val.mask.clone(),
+            val.cls.clone(),
+            val.eos.clone(),
+            val.bos.clone(),
+            val.sep.clone(),
+        ]
+    }
+}

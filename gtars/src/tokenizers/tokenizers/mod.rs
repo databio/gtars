@@ -3,10 +3,9 @@ pub mod tree_tokenizer;
 use thiserror::Error;
 
 use crate::common::models::Region;
-use crate::tokenizers::utils::padding::PaddingParams;
-use crate::tokenizers::utils::truncation::TruncationParams;
 
 use super::tokens::TokenizedRegionSet;
+use super::universe::Universe;
 
 #[derive(Error, Debug)]
 pub enum TokenizerError {
@@ -29,41 +28,7 @@ pub trait GTokenize {
     fn id_to_token(&self, id: u32) -> Option<Region>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
-}
-
-pub struct Tokenizer<T: GTokenize> {
-    core: T,
-    padding: Option<PaddingParams>,
-    truncation: Option<TruncationParams>,
-}
-
-impl<T> Tokenizer<T>
-where
-    T: GTokenize,
-{
-    pub fn new(tokenizer: T) -> Self {
-        Tokenizer {
-            core: tokenizer,
-            padding: None,
-            truncation: None,
-        }
-    }
-
-    pub fn with_padding(mut self, padding: PaddingParams) -> Self {
-        self.padding = Some(padding);
-        self
-    }
-
-    pub fn get_padding_params(&self) -> Option<&PaddingParams> {
-        self.padding.as_ref()
-    }
-
-    pub fn with_truncation(mut self, truncation: TruncationParams) -> Self {
-        self.truncation = Some(truncation);
-        self
-    }
-
-    pub fn get_truncation_params(&self) -> Option<&TruncationParams> {
-        self.truncation.as_ref()
-    }
+    /// Retrieve the universe -- this is here to
+    /// enforce that the tokenizer has a universe
+    fn get_universe(&self) -> &Universe;
 }

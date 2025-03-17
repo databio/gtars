@@ -1,46 +1,26 @@
-use std::collections::HashMap;
+use std::path::Path;
 
-use rust_lapper::{Interval, Lapper};
+use special_tokens::SpecialTokens;
 
-use super::universe::Universe;
+use super::{tokenizers::TokenizerError, universe::Universe};
 
-pub mod padding;
-pub mod truncation;
 pub mod special_tokens;
 
 ///
-/// Simple wrapper function that will create a [Lapper] object (an interval tree)
-/// from a [Universe] struct.
+/// Prepare the universe and special tokens. This function will build
+/// the universe struct and prepare the special tokens if they are provided.
+///
+/// Doing these together is necessary, because the special tokens contribute
+/// to the universe/vocab.
 ///
 /// # Arguments:
-/// - universe: the universe to create the interval tree for.
-pub fn create_interval_tree_from_universe(
-    universe: &Universe,
-) -> HashMap<String, Lapper<u32, u32>> {
-    // instantiate the tree and list of intervals
-    let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
-    let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
-
-    for region in universe.regions.iter() {
-        // create interval
-        let interval = Interval {
-            start: region.start,
-            stop: region.end,
-            val: universe.convert_region_to_id(region).unwrap(),
-        };
-
-        // use chr to get the vector of intervals
-        let chr_intervals = intervals.entry(region.chr.clone()).or_default();
-
-        // push interval to vector
-        chr_intervals.push(interval);
-    }
-
-    // build the tree
-    for (chr, chr_intervals) in intervals.into_iter() {
-        let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals);
-        tree.insert(chr.to_string(), lapper);
-    }
-
-    tree
+/// - config: the tokenizer config
+///
+pub fn prepare_universe_and_special_tokens<P: AsRef<Path>>(
+    universe_file: P,
+    special_tokens: SpecialTokens,
+) -> Result<(Universe, SpecialTokens), TokenizerError> {
+    let mut universe = Universe::try_from(universe_file.as_ref())?;
+    universe.add_special_tokens(&special_tokens);
+    Ok((universe, special_tokens))
 }
