@@ -1,0 +1,10 @@
+universe = "peaks.bed.gz"
+special_tokens = [
+  { name = "unk",  token = "chrUNK:0-0" },
+  { name = "pad",  token = "chrPAD:0-0" },
+  { name = "mask", token = "chrMASK:0-0" },
+  { name = "cls",  token = "chrCLS:0-0" },
+  { name = "sep",  token = "chrSEP:0-0" },
+  { name = "bos",  token = "chrBOS:0-0" },
+  { name = "eos",  token = "chrEOS:0-0" },
+]

@@ -1,4 +1,4 @@
-use crate::common::models::Region;
+use crate::{common::models::Region, tokenizers::config::{SpecialToken, SpecialTokenAssignment}};
 
 #[derive(Clone, Debug)]
 pub struct SpecialTokens {
@@ -57,6 +57,56 @@ impl Default for SpecialTokens {
                 rest: None,
             },
         }
+    }
+}
+
+impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
+    fn from(value: Vec<SpecialTokenAssignment>) -> Self {
+        let mut special_tokens = SpecialTokens::default();
+
+        for token in value {
+            let region_str = token.token;
+            let token_assignment = token.name;
+
+            
+            let parts = region_str.split(":").collect::<Vec<&str>>();
+            
+            // todo: Make this better
+            if parts.len() != 2 {
+                println!("Invalid region string: {}... Skipping", region_str);
+                continue;
+            }
+
+            let chr = parts[0].to_string();
+            
+            let start_end = parts[1].split("-").collect::<Vec<&str>>();
+            if start_end.len() != 2 {
+                println!("Invalid start-end string: {}... Skipping", region_str);
+                continue;
+            }
+
+            let start = start_end[0].parse::<u32>().unwrap();
+            let end = start_end[1].parse::<u32>().unwrap();
+
+            let region = Region {
+                chr,
+                start,
+                end,
+                rest: None,
+            };
+            match token_assignment {
+                SpecialToken::Unk => special_tokens.unk = region,
+                SpecialToken::Pad => special_tokens.pad = region,
+                SpecialToken::Mask => special_tokens.mask = region,
+                SpecialToken::Cls => special_tokens.cls = region,
+                SpecialToken::Bos => special_tokens.bos = region,
+                SpecialToken::Eos => special_tokens.eos = region,
+                SpecialToken::Sep => special_tokens.sep = region,
+            }
+            
+        }
+
+        special_tokens
     }
 }
 

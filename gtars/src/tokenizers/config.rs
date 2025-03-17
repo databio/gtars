@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::ffi::OsStr;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
 pub enum SpecialToken {
     Unk,
     Pad,
@@ -24,9 +25,17 @@ pub struct SpecialTokenAssignment {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum TokenizerType {
+    #[serde(rename = "bits_tree")]
+    BitsTree,
+}
+
+#[derive(Deserialize, Serialize, Debug, PartialEq)]
 pub struct TokenizerConfig {
     pub universe: String,
     pub special_tokens: Option<Vec<SpecialTokenAssignment>>,
+    pub tokenizer_type: Option<TokenizerType>
 }
 
 #[derive(Debug)]
@@ -40,6 +49,8 @@ pub enum TokenizerInputFileType {
 pub enum TokenizerConfigError {
     #[error("Missing or invalid file extension in tokenizer config file. It must be `toml`, `bed` or `bed.gz`")]
     InvalidFileType,
+    #[error("Invalid tokenizer type in config file")]
+    InvalidTokenizerType,
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]
@@ -82,18 +93,6 @@ impl TryFrom<&Path> for TokenizerConfig {
     }
 }
 
-impl TokenizerConfig {
-    pub fn new(
-        universe: String,
-        special_tokens: Option<Vec<SpecialTokenAssignment>>,
-    ) -> TokenizerConfig {
-        TokenizerConfig {
-            universe,
-            special_tokens,
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,7 +104,7 @@ mod tests {
 
     #[rstest]
     fn test_try_from_toml() {
-        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let path = PathBuf::from("tests/data/tokenizers/tokenizer.toml");
         let result = TokenizerConfig::try_from(path.as_path());
         assert_eq!(result.is_ok(), true);
     }
@@ -126,7 +125,7 @@ mod tests {
 
     #[rstest]
     fn test_get_universe_name() {
-        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let path = PathBuf::from("tests/data/tokenizers/tokenizer.toml");
         let result = TokenizerConfig::try_from(path.as_path()).unwrap();
 
         assert_eq!(result.universe, "peaks.bed.gz");

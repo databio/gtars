@@ -3,6 +3,7 @@ pub mod utils;
 use std::collections::HashMap;
 
 use rust_lapper::Lapper;
+use rayon::prelude::*;
 
 use self::utils::create_interval_tree_from_universe;
 use super::GTokenize;
@@ -11,7 +12,7 @@ use crate::common::models::Region;
 use crate::tokenizers::tokens::TokenizedRegionSet;
 use crate::tokenizers::universe::Universe;
 
-pub struct TreeTokenizer {
+pub struct BitsTree {
     /// The core interval tree. Actually, its **many** interval trees. The hash-map will map chrom names
     /// to an interval tree for querying. The hash-map lookup should be constant time (O(1)), while
     /// the interval tree is [reported to be NlogN](https://academic.oup.com/bioinformatics/article/29/1/1/273289?login=false)
@@ -19,22 +20,22 @@ pub struct TreeTokenizer {
     universe: Universe,
 }
 
-impl From<Universe> for TreeTokenizer {
+impl From<Universe> for BitsTree {
     fn from(universe: Universe) -> Self {
         let tree = create_interval_tree_from_universe(&universe);
 
-        TreeTokenizer { tree, universe }
+        BitsTree { tree, universe }
     }
 }
 
-impl GTokenize for TreeTokenizer {
-    fn tokenize<T: Into<Vec<Region>>>(
+impl GTokenize for BitsTree {
+    fn tokenize(
         &self,
-        regions: T,
+        regions: &[Region],
     ) -> Result<TokenizedRegionSet, TokenizerError> {
         let regions: Vec<Region> = regions.into();
         let ids = regions
-            .iter()
+            .par_iter()
             .filter_map(|region| {
                 self.tree.get(&region.chr).map(|tree| {
                     tree.find(region.start, region.end)
@@ -82,7 +83,7 @@ mod tests {
 
     #[fixture]
     fn universe() -> Universe {
-        let universe_file = "tests/data/peaks.bed";
+        let universe_file = "tests/data/tokenizers/peaks.bed";
         let special_tokens = SpecialTokens::default();
 
         let (universe, _) = prepare_universe_and_special_tokens(universe_file, special_tokens)
@@ -93,18 +94,18 @@ mod tests {
 
     #[rstest]
     fn test_tree_tokenizer_creation(universe: Universe) {
-        let _tokenizer = TreeTokenizer::from(universe);
+        let _tokenizer = BitsTree::from(universe);
     }
 
     #[rstest]
     fn test_universe_size(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
     }
 
     #[rstest]
     fn test_special_tokens(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
         let special_tokens = SpecialTokens::default();
 
         // confirm the special tokens
@@ -144,7 +145,7 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_single_region_not_overlapping(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
 
         let regions = vec![Region {
             chr: "chr1".to_string(),
@@ -153,7 +154,7 @@ mod tests {
             rest: None,
         }];
 
-        let tokenized = tokenizer.tokenize(regions);
+        let tokenized = tokenizer.tokenize(&regions);
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.ids.len(), 0);
@@ -161,7 +162,7 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_unk_chrom(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
 
         let regions = vec![Region {
             chr: "chr999".to_string(),
@@ -170,7 +171,7 @@ mod tests {
             rest: None,
         }];
 
-        let tokenized = tokenizer.tokenize(regions);
+        let tokenized = tokenizer.tokenize(&regions);
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
 
@@ -179,7 +180,7 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_on_two_crhoms(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
 
         let regions = vec![
             Region {
@@ -196,7 +197,7 @@ mod tests {
             },
         ];
 
-        let tokenized = tokenizer.tokenize(regions);
+        let tokenized = tokenizer.tokenize(&regions);
         assert!(tokenized.is_ok());
 
         let tokenized = tokenized.unwrap();
@@ -219,7 +220,7 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_with_multi_overlap(universe: Universe) {
-        let tokenizer = TreeTokenizer::from(universe);
+        let tokenizer = BitsTree::from(universe);
 
         let regions = vec![Region {
             chr: "chr2".to_string(),
@@ -228,7 +229,7 @@ mod tests {
             rest: None,
         }];
 
-        let tokenized = tokenizer.tokenize(regions);
+        let tokenized = tokenizer.tokenize(&regions);
         assert!(tokenized.is_ok());
 
         let tokenized = tokenized.unwrap();
