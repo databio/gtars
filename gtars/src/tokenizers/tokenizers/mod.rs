@@ -9,7 +9,12 @@ use crate::common::models::Region;
 use super::tokens::TokenizedRegionSet;
 
 #[derive(Error, Debug)]
-pub enum TokenizerError {}
+pub enum TokenizerError {
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error("Invalid special token configuration")]
+    InvalidSpecialTokenConfig,
+}   
 
 pub trait Tokenizer {
     /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`

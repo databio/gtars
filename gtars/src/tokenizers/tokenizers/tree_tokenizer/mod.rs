@@ -1,25 +1,78 @@
 use std::collections::HashMap;
+use std::path::Path;
 
-use rust_lapper::{Interval, Lapper};
+use rust_lapper::Lapper;
 
-use crate::tokenizers::config::{self, TokenizerConfig};
-
+use crate::common::models::Region;
+use crate::tokenizers::config::{TokenizerConfig, SpecialToken};
+use crate::tokenizers::universe::Universe;
+use crate::tokenizers::utils::create_interval_tree_from_universe;
 use super::SpecialTokens;
+use super::TokenizerError;
 
 pub struct TreeTokenizer {
     /// The core interval tree. Actually, its **many** interval trees. The hash-map will map chrom names
     /// to an interval tree for querying. The hash-map lookup should be constant time (O(1)), while
     /// the interval tree is [reported to be NlogN](https://academic.oup.com/bioinformatics/article/29/1/1/273289?login=false)
     tree: HashMap<String, Lapper<u32, u32>>,
+    universe: Universe,
     special_tokens: SpecialTokens
 }
 
-impl From<TokenizerConfig> for TreeTokenizer {
-    fn from(value: TokenizerConfig) -> Self {
+impl TryFrom<TokenizerConfig> for TreeTokenizer {
+    type Error = TokenizerError;
+
+    fn try_from(value: TokenizerConfig) -> Result<Self, Self::Error> {
+        let universe = Path::new(&value.universe);
+        let universe = Universe::try_from(universe)?;
+        let tree = create_interval_tree_from_universe(&universe);
+
         // we start with the default, then will replace as they exist in the config
-        let special_tokens = SpecialTokens::default();
+        let mut special_tokens = SpecialTokens::default();
         if let Some(config_special_tokens) = value.special_tokens {
-            // if let Some(config_eos) = config_special_tokens.eos
+            for token in config_special_tokens {
+                let token_type = token.name;
+                let token_value = token.token;
+
+                let parts = token_value.split(':').collect::<Vec<&str>>();
+                if parts.len() != 2 {
+                    return Err(TokenizerError::InvalidSpecialTokenConfig);
+                }
+
+                let chr = parts[0].to_string();
+                let start_end = parts[1].split('-').collect::<Vec<&str>>();
+                if start_end.len() != 2 {
+                    return Err(TokenizerError::InvalidSpecialTokenConfig);
+                }
+                let start = start_end[0].parse::<u32>().map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
+                let end = start_end[1].parse::<u32>().map_err(|_| TokenizerError::InvalidSpecialTokenConfig)?;
+
+                let token_value = Region {
+                    chr,
+                    start,
+                    end,
+                    rest: None
+                };
+
+                match token_type {
+                    SpecialToken::Unk => special_tokens.unk = token_value,
+                    SpecialToken::Pad => special_tokens.pad = token_value,
+                    SpecialToken::Mask => special_tokens.mask = token_value,
+                    SpecialToken::Cls => special_tokens.cls = token_value,
+                    SpecialToken::Sep => special_tokens.sep = token_value,
+                    SpecialToken::Eos => special_tokens.eos = token_value,
+                    SpecialToken::Bos => special_tokens.bos = token_value,
+                }
+            }
         }
+
+        // insert all new special tokens into the universe
+
+        Ok(TreeTokenizer {
+            tree,
+            universe,
+            special_tokens
+        })
+
     }
 }

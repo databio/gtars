@@ -91,8 +91,6 @@ impl TokenizerConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::common::consts::special_tokens;
-
     use super::*;
 
     use pretty_assertions::assert_eq;
@@ -103,14 +101,14 @@ mod tests {
     #[rstest]
     fn test_try_from_toml() {
         let path = PathBuf::from("tests/data/tokenizer.toml");
-        let result = TokenizerConfig::try_from(&path);
+        let result = TokenizerConfig::try_from(path.as_path());
         assert_eq!(result.is_ok(), true);
     }
 
     #[rstest]
     fn test_from_path_for_toml_extension() {
         let path = PathBuf::from("dummy.toml");
-        let file_type = TokenizerInputFileType::from_path(&path);
+        let file_type = TokenizerInputFileType::from_path(path.as_path());
         assert_eq!(matches!(file_type, Ok(TokenizerInputFileType::Toml)), true);
     }
 
@@ -124,7 +122,7 @@ mod tests {
     #[rstest]
     fn test_get_universe_name() {
         let path = PathBuf::from("tests/data/tokenizer.toml");
-        let result = TokenizerConfig::try_from(&path).unwrap();
+        let result = TokenizerConfig::try_from(path.as_path()).unwrap();
 
         assert_eq!(result.universe, "peaks.bed.gz");
     }
@@ -132,7 +130,7 @@ mod tests {
     #[rstest]
     fn test_get_special_tokens() {
         let path = PathBuf::from("tests/data/tokenizer.toml");
-        let result = TokenizerConfig::try_from(&path).unwrap();
+        let result = TokenizerConfig::try_from(path.as_path()).unwrap();
         let special_tokens = result.special_tokens;
 
         assert_eq!(special_tokens.is_some(), true);
