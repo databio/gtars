@@ -1,6 +1,5 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
-use std::{path::Path, vec};
 
 use numpy::ndarray::Array;
 use numpy::{IntoPyArray, PyArray1};
