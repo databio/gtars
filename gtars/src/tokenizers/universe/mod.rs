@@ -98,7 +98,7 @@ impl TryFrom<&Path> for Universe {
                 let mut regions = vec![];
                 for line in lines {
                     let line = line?;
-                    let parts: Vec<&str> = line.split('\t').collect();
+                    let parts: Vec<&str> = line.split_whitespace().collect();
 
                     if parts.len() == 3 {
                         let region = Region {
@@ -163,5 +163,36 @@ impl TryFrom<&Path> for Universe {
             id_to_region,
             ordered
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    #[fixture]
+    fn vanilla_peaks_path() -> String {
+        "tests/data/tokenizers/peaks.bed".to_string()
+    }
+
+    #[fixture]
+    fn ordered_peaks_path() -> String {
+        "tests/data/tokenizers/peaks.scored.bed".to_string()
+    }
+
+    #[rstest]
+    fn test_create_vanilla_universe(vanilla_peaks_path: String) {
+        let universe = Universe::try_from(Path::new(&vanilla_peaks_path)).unwrap();
+        assert_eq!(universe.len(), 25); // there are 25 regions in the file
+        assert_eq!(universe.is_ordered(), false);
+    }
+
+    #[rstest]
+    fn test_create_ordered_universe(ordered_peaks_path: String) {
+        let universe = Universe::try_from(Path::new(&ordered_peaks_path)).unwrap();
+        assert_eq!(universe.len(), 25); // there are 25 regions in the file
+        assert_eq!(universe.is_ordered(), true);
     }
 }
