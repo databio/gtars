@@ -21,6 +21,8 @@ pub enum TokenizerError {
     InvalidSpecialTokenConfig,
     #[error(transparent)]
     Config(#[from] TokenizerConfigError),
+    #[error("Universe error: {0}")]
+    UniverseError(#[from] crate::tokenizers::universe::UniverseError),
 }
 
 pub trait GTokenize {
