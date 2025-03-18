@@ -23,7 +23,7 @@ pub struct BitsTree {
 impl From<Universe> for BitsTree {
     fn from(universe: Universe) -> Self {
         let tree = create_interval_tree_from_universe(&universe);
-
+        
         BitsTree { tree, universe }
     }
 }

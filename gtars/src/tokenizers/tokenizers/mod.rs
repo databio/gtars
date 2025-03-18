@@ -23,6 +23,8 @@ pub enum TokenizerError {
     Config(#[from] TokenizerConfigError),
     #[error("Universe error: {0}")]
     UniverseError(#[from] crate::tokenizers::universe::UniverseError),
+    #[error(transparent)]
+    Anyhow(#[from] anyhow::Error),
 }
 
 pub trait GTokenize {
@@ -182,6 +184,11 @@ mod tokenizer_tests {
 
     use rstest::*;
     use pretty_assertions::assert_eq;
+
+    #[fixture]
+    fn anndata_path() -> String {
+        "tests/data/tokenizers/pbmc_hg38.h5ad".to_string()
+    }
 
     #[rstest]
     fn test_tokenizer_creation_from_config() {
