@@ -51,23 +51,6 @@ impl Universe {
     }
 }
 
-impl From<Vec<Region>> for Universe {
-    fn from(value: Vec<Region>) -> Self {
-        // make a copy of the regions
-        let regions = value;
-
-        // create the region to id map and add the Unk token if it doesn't exist
-        let region_to_id = generate_region_to_id_map(&regions);
-        let id_to_region = generate_id_to_region_map(&regions);
-
-        Universe {
-            regions,
-            region_to_id,
-            id_to_region,
-        }
-    }
-}
-
 impl TryFrom<&Path> for Universe {
     type Error = std::io::Error;
 
