@@ -93,6 +93,10 @@ impl Tokenizer {
         })
     }
 
+    ///
+    /// Tokenize the given set of regions into tokens. This returns a `TokenizedRegionSet` which contains
+    /// the IDs of the tokens corresponding to the input regions and a pointer to the universe.
+    /// 
     pub fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError> {
         let mut res = self.core.tokenize(regions)?;
         if res.is_empty() {
@@ -101,16 +105,114 @@ impl Tokenizer {
         Ok(res)
     }
 
-    pub fn tokenize_batch(&self, regions: &[&[Region]]) -> Result<Vec<TokenizedRegionSet>, TokenizerError> {
-        let mut results = Vec::new();
-        for region_set in regions {
-            let mut res = self.core.tokenize(region_set)?;
-            if res.is_empty() {
-                res.ids.push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
-            }
-            results.push(res);
-        }
-        Ok(results)
+    pub fn token_to_id(&self, token: &Region) -> Option<u32> {
+        self.core.token_to_id(token)
     }
 
+    pub fn id_to_token(&self, id: u32) -> Option<Region> {
+        self.core.id_to_token(id)
+    }
+
+    pub fn get_vocab_size(&self) -> usize {
+        self.core.get_vocab_size()
+    }
+
+    pub fn get_universe(&self) -> &Universe {
+        self.core.get_universe()
+    }
+
+    pub fn get_special_tokens(&self) -> &SpecialTokens {
+        &self.special_tokens
+    }
+
+    pub fn get_unk_token(&self) -> &Region {
+        &self.special_tokens.unk
+    }
+
+    pub fn get_pad_token(&self) -> &Region {
+        &self.special_tokens.pad
+    }
+
+    pub fn get_mask_token(&self) -> &Region {
+        &self.special_tokens.mask
+    }
+
+    pub fn get_sep_token(&self) -> &Region {
+        &self.special_tokens.sep
+    }
+
+    pub fn get_bos_token(&self) -> &Region {
+        &self.special_tokens.bos
+    }
+
+    pub fn get_eos_token(&self) -> &Region {
+        &self.special_tokens.eos
+    }
+
+    pub fn get_unk_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.unk).unwrap()
+    }
+
+    pub fn get_pad_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.pad).unwrap()
+    }
+
+    pub fn get_mask_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.mask).unwrap()
+    }
+
+    pub fn get_sep_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.sep).unwrap()
+    }
+
+    pub fn get_bos_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.bos).unwrap()
+    }
+
+    pub fn get_eos_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.eos).unwrap()
+    }
+}
+
+#[cfg(test)]
+mod tokenizer_tests {
+    use super::*;
+
+    use rstest::*;
+    use pretty_assertions::assert_eq;
+
+    #[rstest]
+    fn test_tokenizer_creation_from_config() {
+        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let tokenizer = Tokenizer::from_config(cfg_path)
+            .expect("Failed to create tokenizer from config.");
+        assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
+    }
+
+    #[rstest]
+    fn test_tokenizer_bad_tokenizer_type() {
+        let cfg_path = "tests/data/tokenizers/tokenizer_bad_ttype.toml";
+        let tokenizer = Tokenizer::from_config(cfg_path);
+        assert_eq!(tokenizer.is_err(), true);
+    }
+
+    #[rstest]
+    fn test_tokenizer_custom_special_tokens() {
+        let cfg_path = "tests/data/tokenizers/tokenizer_custom_specials.toml";
+        let tokenizer = Tokenizer::from_config(cfg_path)
+            .expect("Failed to create tokenizer from config.");
+
+        assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
+
+        // check that unk was overridden
+        assert_eq!(tokenizer.get_unk_token().chr, "chrUNKNOWN");
+        assert_eq!(tokenizer.get_unk_token().start, 100);
+        assert_eq!(tokenizer.get_unk_token().end, 200);
+
+        // check that pad didnt change
+        assert_eq!(tokenizer.get_pad_token().chr, "chrPAD");
+        assert_eq!(tokenizer.get_pad_token().start, 0);
+        assert_eq!(tokenizer.get_pad_token().end, 0);
+        
+    }
 }
