@@ -1,4 +1,7 @@
-use crate::{common::models::Region, tokenizers::config::{SpecialToken, SpecialTokenAssignment}};
+use crate::{
+    common::models::Region,
+    tokenizers::config::{SpecialToken, SpecialTokenAssignment},
+};
 
 #[derive(Clone, Debug)]
 pub struct SpecialTokens {
@@ -68,9 +71,8 @@ impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
             let region_str = token.token;
             let token_assignment = token.name;
 
-            
             let parts = region_str.split(":").collect::<Vec<&str>>();
-            
+
             // todo: Make this better
             if parts.len() != 2 {
                 println!("Invalid region string: {}... Skipping", region_str);
@@ -78,7 +80,7 @@ impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
             }
 
             let chr = parts[0].to_string();
-            
+
             let start_end = parts[1].split("-").collect::<Vec<&str>>();
             if start_end.len() != 2 {
                 println!("Invalid start-end string: {}... Skipping", region_str);
@@ -103,7 +105,6 @@ impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
                 SpecialToken::Eos => special_tokens.eos = region,
                 SpecialToken::Sep => special_tokens.sep = region,
             }
-            
         }
 
         special_tokens

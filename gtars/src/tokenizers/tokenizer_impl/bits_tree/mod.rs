@@ -2,8 +2,8 @@ pub mod utils;
 
 use std::collections::HashMap;
 
-use rust_lapper::Lapper;
 use rayon::prelude::*;
+use rust_lapper::Lapper;
 
 use self::utils::create_interval_tree_from_universe;
 use super::GTokenize;
@@ -12,6 +12,7 @@ use crate::common::models::Region;
 use crate::tokenizers::tokens::TokenizedRegionSet;
 use crate::tokenizers::universe::Universe;
 
+#[derive(Clone, Debug)]
 pub struct BitsTree {
     /// The core interval tree. Actually, its **many** interval trees. The hash-map will map chrom names
     /// to an interval tree for querying. The hash-map lookup should be constant time (O(1)), while
@@ -23,16 +24,13 @@ pub struct BitsTree {
 impl From<Universe> for BitsTree {
     fn from(universe: Universe) -> Self {
         let tree = create_interval_tree_from_universe(&universe);
-        
+
         BitsTree { tree, universe }
     }
 }
 
 impl GTokenize for BitsTree {
-    fn tokenize(
-        &self,
-        regions: &[Region],
-    ) -> Result<TokenizedRegionSet, TokenizerError> {
+    fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError> {
         let regions: Vec<Region> = regions.into();
         let ids = regions
             .par_iter()

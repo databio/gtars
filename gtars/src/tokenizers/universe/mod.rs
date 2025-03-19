@@ -9,7 +9,9 @@ use thiserror::Error;
 use utils::UniverseFileType;
 
 use crate::common::models::region::Region;
-use crate::common::utils::{generate_id_to_region_map, generate_region_to_id_map, get_dynamic_reader};
+use crate::common::utils::{
+    generate_id_to_region_map, generate_region_to_id_map, get_dynamic_reader,
+};
 
 use super::utils::special_tokens::SpecialTokens;
 
@@ -28,7 +30,7 @@ pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
     pub id_to_region: HashMap<u32, Region>,
-    pub ordered: bool
+    pub ordered: bool,
 }
 
 impl Universe {
@@ -75,20 +77,18 @@ impl Universe {
         self.ordered = ordered;
         self
     }
-
 }
 
 impl TryFrom<&Path> for Universe {
     type Error = UniverseError;
 
     fn try_from(value: &Path) -> Result<Self, Self::Error> {
-        
-        let reader = get_dynamic_reader(value).map_err(|err| 
-            UniverseError::Io(err.downcast().unwrap())
-        )?;
-        
+        let reader =
+            get_dynamic_reader(value).map_err(|err| UniverseError::Io(err.downcast().unwrap()))?;
+
         let mut lines = reader.lines().peekable();
-        let first_line = lines.peek()
+        let first_line = lines
+            .peek()
             .ok_or(UniverseError::UnknownUniverseType)?
             .as_ref()
             .map_err(|_| UniverseError::UnknownUniverseType)?;
@@ -103,9 +103,13 @@ impl TryFrom<&Path> for Universe {
                     if parts.len() == 3 {
                         let region = Region {
                             chr: parts[0].to_string(),
-                            start: parts[1].parse().map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            end: parts[2].parse().map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            rest: None
+                            start: parts[1]
+                                .parse()
+                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
+                            end: parts[2]
+                                .parse()
+                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
+                            rest: None,
                         };
                         regions.push(region);
                     } else {
@@ -117,7 +121,6 @@ impl TryFrom<&Path> for Universe {
             }
             // contains a score, so order the regions
             UniverseFileType::BedFivePlus => {
-
                 let mut regions = vec![];
                 for line in lines {
                     let line = line?;
@@ -126,8 +129,12 @@ impl TryFrom<&Path> for Universe {
                     if parts.len() >= 5 {
                         let region = Region {
                             chr: parts[0].to_string(),
-                            start: parts[1].parse().map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            end: parts[2].parse().map_err(|_| UniverseError::ParsingError(line.clone()))?,
+                            start: parts[1]
+                                .parse()
+                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
+                            end: parts[2]
+                                .parse()
+                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
                             rest: Some(parts[4..].join("\t")),
                         };
                         regions.push(region);
@@ -135,13 +142,29 @@ impl TryFrom<&Path> for Universe {
                         return Err(UniverseError::ParsingError(line));
                     }
                 }
-                
+
                 // sort by the score in the 5th column
                 // sort high to low, this enables us to then order the regions
                 // post processing by score
                 regions.sort_by(|a, b| {
-                    let score_a: f32 = a.rest.as_ref().unwrap().split_whitespace().next().unwrap().parse().unwrap();
-                    let score_b: f32 = b.rest.as_ref().unwrap().split_whitespace().next().unwrap().parse().unwrap();
+                    let score_a: f32 = a
+                        .rest
+                        .as_ref()
+                        .unwrap()
+                        .split_whitespace()
+                        .next()
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    let score_b: f32 = b
+                        .rest
+                        .as_ref()
+                        .unwrap()
+                        .split_whitespace()
+                        .next()
+                        .unwrap()
+                        .parse()
+                        .unwrap();
 
                     score_b.partial_cmp(&score_a).unwrap()
                 });
@@ -161,7 +184,7 @@ impl TryFrom<&Path> for Universe {
             regions,
             region_to_id,
             id_to_region,
-            ordered
+            ordered,
         })
     }
 }

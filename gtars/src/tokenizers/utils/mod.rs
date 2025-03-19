@@ -2,7 +2,7 @@ use std::path::Path;
 
 use special_tokens::SpecialTokens;
 
-use super::{tokenizers::TokenizerError, universe::Universe};
+use super::{tokenizer_impl::TokenizerError, universe::Universe};
 
 pub mod special_tokens;
 

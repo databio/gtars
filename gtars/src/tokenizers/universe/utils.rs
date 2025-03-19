@@ -1,7 +1,7 @@
 pub enum UniverseFileType {
     BedThree,
     BedFivePlus,
-    Unknown
+    Unknown,
 }
 
 impl From<&String> for UniverseFileType {

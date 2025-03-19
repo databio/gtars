@@ -327,7 +327,7 @@ impl RegionSet {
                 },
             )))
         });
-        
+
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()

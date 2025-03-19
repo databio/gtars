@@ -3,8 +3,8 @@ pub mod bits_tree;
 use std::path::Path;
 
 use bits_tree::BitsTree;
-use thiserror::Error;
 use rayon::prelude::*;
+use thiserror::Error;
 
 use crate::common::models::Region;
 
@@ -31,10 +31,7 @@ pub enum TokenizerError {
 pub trait GTokenize: Send + Sync {
     /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`
     /// are expected to be relative to the given sequence.
-    fn tokenize(
-        &self,
-        regions: &[Region],
-    ) -> Result<TokenizedRegionSet, TokenizerError>;
+    fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError>;
     /// Find the ID associated to a string token
     fn token_to_id(&self, token: &Region) -> Option<u32>;
     /// Find the string token associated to an ID
@@ -48,28 +45,34 @@ pub trait GTokenize: Send + Sync {
 
 pub struct Tokenizer {
     core: Box<dyn GTokenize + Send + Sync>,
-    special_tokens: SpecialTokens
+    special_tokens: SpecialTokens,
 }
 
 impl Tokenizer {
     ///
     /// Create a new tokenizer with the given core GTokenizer
-    /// 
+    ///
     pub fn new(core: Box<dyn GTokenize>) -> Self {
         let special_tokens = SpecialTokens::default();
-        Tokenizer { core, special_tokens }
+        Tokenizer {
+            core,
+            special_tokens,
+        }
     }
 
     ///
     /// Add special tokens to the tokenizer
-    /// 
+    ///
     pub fn with_special_tokens(self, special_tokens: SpecialTokens) -> Self {
-        Tokenizer { core: self.core, special_tokens }
+        Tokenizer {
+            core: self.core,
+            special_tokens,
+        }
     }
 
     ///
     /// Create a new tokenizer from a config file
-    /// 
+    ///
     pub fn from_config<P: AsRef<Path>>(cfg_path: P) -> Result<Self, TokenizerError> {
         let config = TokenizerConfig::try_from(cfg_path.as_ref())?;
 
@@ -80,42 +83,39 @@ impl Tokenizer {
             None => SpecialTokens::default(),
         };
 
-        let (universe, special_tokens) = prepare_universe_and_special_tokens(universe_path, special_tokens)?;
+        let (universe, special_tokens) =
+            prepare_universe_and_special_tokens(universe_path, special_tokens)?;
 
         let core = match config.tokenizer_type {
-            Some(TokenizerType::BitsTree) => {
-                Box::new(BitsTree::from(universe))
-            },
+            Some(TokenizerType::BitsTree) => Box::new(BitsTree::from(universe)),
             // default to BitsTree if no tokenizer type is specified (yes, this means we only support BitsTree for now)
-            None => {
-                Box::new(BitsTree::from(universe))
-            },
+            None => Box::new(BitsTree::from(universe)),
         };
 
         Ok(Tokenizer {
             core,
-            special_tokens
+            special_tokens,
         })
     }
 
     ///
     /// Create a new tokenizer from a bed file
-    /// 
+    ///
     pub fn from_bed<P: AsRef<Path>>(bed_path: P) -> Result<Self, TokenizerError> {
-        
         let special_tokens = SpecialTokens::default();
-        let (universe, special_tokens) = prepare_universe_and_special_tokens(bed_path.as_ref(), special_tokens)?;
+        let (universe, special_tokens) =
+            prepare_universe_and_special_tokens(bed_path.as_ref(), special_tokens)?;
         let core = Box::new(BitsTree::from(universe));
 
         Ok(Tokenizer {
             core,
-            special_tokens
+            special_tokens,
         })
     }
 
     ///
     /// Create a new tokenizer from a file, automatically detecting the type
-    /// 
+    ///
     pub fn from_auto<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {
         let file_type = TokenizerInputFileType::from_path(path.as_ref())?;
         match file_type {
@@ -128,11 +128,12 @@ impl Tokenizer {
     ///
     /// Tokenize the given set of regions into tokens. This returns a `TokenizedRegionSet` which contains
     /// the IDs of the tokens corresponding to the input regions and a pointer to the universe.
-    /// 
+    ///
     pub fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError> {
         let mut res = self.core.tokenize(regions)?;
         if res.is_empty() {
-            res.ids.push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
+            res.ids
+                .push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
         }
         // sort ids for order
         res.ids.sort();
@@ -142,18 +143,22 @@ impl Tokenizer {
     ///
     /// Tokenize a batch of regions into tokens. This returns a `Vec<TokenizedRegionSet>` which contains
     /// the IDs of the tokens corresponding to the input regions and a pointer to the universe.
-    /// 
+    ///
     /// Note: we use `rayon` for parallel processing of the batch. To parameterize the level of parallelism,
     /// you can set the `RAYON_NUM_THREADS` environment variable.
-    /// 
-    pub fn tokenize_batch(&self, regions_batch: &[&[Region]]) -> Result<Vec<TokenizedRegionSet>, TokenizerError> {
+    ///
+    pub fn tokenize_batch(
+        &self,
+        regions_batch: &[&[Region]],
+    ) -> Result<Vec<TokenizedRegionSet>, TokenizerError> {
         regions_batch
             .par_iter()
             .map(|regions| {
                 let mut res = self.core.tokenize(regions)?;
                 if res.is_empty() {
                     // also consider handling the `token_to_id` call as a Result instead of unwrap()
-                    res.ids.push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
+                    res.ids
+                        .push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
                 }
                 res.ids.sort();
                 Ok(res)
@@ -234,8 +239,8 @@ impl Tokenizer {
 mod tokenizer_tests {
     use super::*;
 
-    use rstest::*;
     use pretty_assertions::assert_eq;
+    use rstest::*;
 
     #[fixture]
     fn anndata_path() -> String {
@@ -245,46 +250,45 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenizer_creation_from_config() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
     }
 
     #[rstest]
     fn test_tokenizer_creation_from_bed() {
         let bed_path = "tests/data/tokenizers/peaks.bed";
-        let tokenizer = Tokenizer::from_bed(bed_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_bed(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
     }
 
     #[rstest]
     fn test_tokenizer_creation_from_bed_gz() {
         let bed_path = "tests/data/tokenizers/peaks.bed.gz";
-        let tokenizer = Tokenizer::from_bed(bed_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_bed(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
     }
 
     #[rstest]
     fn test_tokenizer_creation_auto_all() {
         let bed_path = "tests/data/tokenizers/peaks.bed";
-        let tokenizer = Tokenizer::from_auto(bed_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_auto(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_auto(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_auto(cfg_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
         let bed_path = "tests/data/tokenizers/peaks.bed.gz";
-        let tokenizer = Tokenizer::from_auto(bed_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_auto(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
     }
 
-    
     #[rstest]
     fn test_tokenizer_bad_tokenizer_type() {
         let cfg_path = "tests/data/tokenizers/tokenizer_bad_ttype.toml";
@@ -295,8 +299,8 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenizer_custom_special_tokens() {
         let cfg_path = "tests/data/tokenizers/tokenizer_custom_specials.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
@@ -314,8 +318,8 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenize_single_region_not_overlapping() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
         let regions = vec![Region {
             chr: "chr1".to_string(),
@@ -329,14 +333,17 @@ mod tokenizer_tests {
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.ids.len(), 1);
         assert_eq!(tokenized.ids[0], tokenizer.get_unk_token_id());
-        assert_eq!(tokenizer.id_to_token(tokenized.ids[0]).unwrap().chr, "chrUNK");
+        assert_eq!(
+            tokenizer.id_to_token(tokenized.ids[0]).unwrap().chr,
+            "chrUNK"
+        );
     }
 
     #[rstest]
     fn test_tokenize_unk_chrom() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
         let regions = vec![Region {
             chr: "chr999".to_string(),
@@ -355,8 +362,8 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenize_on_two_crhoms() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
         let regions = vec![
             Region {
@@ -397,8 +404,8 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenize_with_multi_overlap() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
-        let tokenizer = Tokenizer::from_config(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
         let regions = vec![Region {
             chr: "chr2".to_string(),
@@ -431,8 +438,8 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenize_with_order() {
         let cfg_path = "tests/data/tokenizers/peaks.scored.bed";
-        let tokenizer = Tokenizer::from_auto(cfg_path)
-            .expect("Failed to create tokenizer from config.");
+        let tokenizer =
+            Tokenizer::from_auto(cfg_path).expect("Failed to create tokenizer from config.");
 
         let regions = vec![
             // overlaps chr9:3526184-3526269 (CONFIRMED IN IGV) (SCORE: 1.2233)
@@ -440,14 +447,14 @@ mod tokenizer_tests {
                 chr: "chr9".to_string(),
                 start: 3_526_178,
                 end: 3_526_249,
-                rest: None
+                rest: None,
             },
             // overlaps chr9:3526072-3526165 (CONFIRMED IN IGV) (SCORE: 23.8)
             Region {
                 chr: "chr9".to_string(),
                 start: 3_526_051,
                 end: 3_526_145,
-                rest: None
+                rest: None,
             },
         ];
 
@@ -470,5 +477,4 @@ mod tokenizer_tests {
         assert_eq!(tokenized[1].end, 3_526_269);
         assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(18));
     }
-
 }

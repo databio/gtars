@@ -22,7 +22,14 @@
 //! println!("{:?}", tokenized_regions.ids);
 //! ```
 pub mod config;
-pub mod tokenizers;
+pub mod tokenizer_impl;
 pub mod tokens;
 pub mod universe;
 pub mod utils;
+
+// re-export things
+pub use tokenizer_impl::bits_tree::*;
+pub use tokenizer_impl::*;
+pub use tokens::*;
+pub use universe::*;
+pub use utils::*;

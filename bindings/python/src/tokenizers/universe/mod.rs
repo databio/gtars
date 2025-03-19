@@ -1,7 +1,5 @@
 use pyo3::prelude::*;
 
-use anyhow::Result;
-
 use crate::models::PyRegion;
 use gtars::tokenizers::universe::Universe;
 
@@ -13,9 +11,7 @@ pub struct PyUniverse {
 
 impl From<Universe> for PyUniverse {
     fn from(value: Universe) -> Self {
-        PyUniverse {
-            universe: value,
-        }
+        PyUniverse { universe: value }
     }
 }
 
@@ -32,7 +28,9 @@ impl PyUniverse {
     }
 
     pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
-        self.universe.convert_id_to_region(id).map(|region| PyRegion::from(region))
+        self.universe
+            .convert_id_to_region(id)
+            .map(|region| PyRegion::from(region))
     }
 
     pub fn len(&self) -> usize {

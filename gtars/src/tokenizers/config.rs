@@ -35,7 +35,7 @@ pub enum TokenizerType {
 pub struct TokenizerConfig {
     pub universe: String,
     pub special_tokens: Option<Vec<SpecialTokenAssignment>>,
-    pub tokenizer_type: Option<TokenizerType>
+    pub tokenizer_type: Option<TokenizerType>,
 }
 
 #[derive(Debug)]
