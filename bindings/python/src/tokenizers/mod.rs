@@ -4,8 +4,10 @@ mod universe;
 
 use pyo3::prelude::*;
 
+use crate::tokenizers::py_tokenizers::PyTokenizer;
+
 #[pymodule]
 pub fn tokenizers(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    // will place stuff here -- I nuked the module lol
+    m.add_class::<PyTokenizer>()?;
     Ok(())
 }
