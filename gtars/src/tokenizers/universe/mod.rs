@@ -23,7 +23,7 @@ pub enum UniverseError {
     ParsingError(String),
 }
 
-#[derive(Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct Universe {
     pub regions: Vec<Region>,
     pub region_to_id: HashMap<Region, u32>,
