@@ -156,6 +156,10 @@ impl PyRegionSet {
         self.regionset.sort();
         Ok(())
     }
+
+    fn mean_region_width(&self) -> PyResult<u32> {
+        Ok(self.regionset.mean_region_width())
+    }
 }
 
 #[pyclass(name = "TokenizedRegionSet", module = "gtars.models")]
