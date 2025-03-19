@@ -10,7 +10,7 @@ use crate::common::models::Region;
 
 use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileType, TokenizerType};
 use super::tokens::TokenizedRegionSet;
-use super::universe::{self, Universe};
+use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
 
