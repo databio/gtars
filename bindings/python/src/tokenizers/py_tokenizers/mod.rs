@@ -7,6 +7,7 @@ use anyhow::Result;
 use crate::tokenizers::universe::PyUniverse;
 use crate::tokenizers::tokens::PyTokenizedRegionSet;
 use crate::models::PyRegion;
+use crate::utils::extract_regions_from_py_any;
 use gtars::tokenizers::Tokenizer;
 
 #[pyclass(name = "Tokenizer", module = "gtars.tokenizers")]
@@ -39,6 +40,22 @@ impl PyTokenizer {
                 universe: Py::new(py, universe)?,
             })
         })
+    }
+    pub fn tokenize(&self, regions: &Bound<'_, PyAny>) -> Result<PyTokenizedRegionSet> {
+        // attempt to map the list to a vector of regions
+        let rs = extract_regions_from_py_any(regions)?;
+        let tokenized = self.tokenizer.tokenize(&rs.regions)?;
+
+        Python::with_gil(|py| {
+            let py_tokenized_region_set = PyTokenizedRegionSet {
+                ids: tokenized.ids,
+                curr: 0,
+                universe: self.universe.clone_ref(py),
+            };
+
+            Ok(py_tokenized_region_set)
+        })
+
     }
 
     pub fn get_unk_token(&self) -> PyRegion {
@@ -99,5 +116,44 @@ impl PyTokenizer {
 
     pub fn get_vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size()
+    }
+
+    // encode returns a list of ids
+    pub fn encode(&self, regions: &Bound<'_, PyAny>) -> Result<Vec<u32>> {
+        // attempt to map the list to a vector of regions
+        let rs = extract_regions_from_py_any(regions)?;
+
+        // tokenize the RegionSet
+        let tokenized = self.tokenizer.tokenize(&rs.regions)?;
+
+        Ok(tokenized.ids)
+    }
+    
+    pub fn decode(&self, ids: Vec<u32>) -> Result<Vec<PyRegion>> {
+        Python::with_gil(|py| {
+            let regions = ids
+                .iter()
+                .map(|id| self.universe.borrow(py).convert_id_to_region(*id).unwrap_or(
+                    PyRegion {
+                        chr: "chrUNK".to_string(),
+                        start: 0,
+                        end: 0,
+                        rest: None,
+                    }
+                ))
+                .collect::<Vec<PyRegion>>();
+            Ok(regions)
+        })
+    }
+
+    pub fn __len__(&self) -> usize {
+        self.tokenizer.get_vocab_size()
+    }
+
+    pub fn __repr__(&self) -> String {
+        format!(
+            "TreeTokenizer({} total regions)",
+            self.tokenizer.get_vocab_size()
+        )
     }
 }
