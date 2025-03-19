@@ -26,4 +26,16 @@ impl PyTokenizer {
             })
         })
     }
+
+    #[classmethod]
+    pub fn from_bed(_cls: &Bound<'_, PyType>, path: &str) -> Result<Self> {
+        Python::with_gil(|py| {
+            let tokenizer = Tokenizer::from_bed(path)?;
+            let universe = PyUniverse::from(tokenizer.get_universe().clone());
+            Ok(PyTokenizer {
+                tokenizer,
+                universe: Py::new(py, universe)?,
+            })
+        })
+    }
 }
