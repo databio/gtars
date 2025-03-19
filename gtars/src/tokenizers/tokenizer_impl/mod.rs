@@ -198,6 +198,10 @@ impl Tokenizer {
         &self.special_tokens.mask
     }
 
+    pub fn get_cls_token(&self) -> &Region {
+        &self.special_tokens.cls
+    }
+
     pub fn get_sep_token(&self) -> &Region {
         &self.special_tokens.sep
     }
@@ -220,6 +224,10 @@ impl Tokenizer {
 
     pub fn get_mask_token_id(&self) -> u32 {
         self.token_to_id(&self.special_tokens.mask).unwrap()
+    }
+
+    pub fn get_cls_token_id(&self) -> u32 {
+        self.token_to_id(&self.special_tokens.cls).unwrap()
     }
 
     pub fn get_sep_token_id(&self) -> u32 {

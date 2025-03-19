@@ -5,6 +5,8 @@ use pyo3::types::PyType;
 use anyhow::Result;
 
 use crate::tokenizers::universe::PyUniverse;
+use crate::tokenizers::tokens::PyTokenizedRegionSet;
+use crate::models::PyRegion;
 use gtars::tokenizers::Tokenizer;
 
 #[pyclass(name = "Tokenizer", module = "gtars.tokenizers")]
@@ -37,5 +39,65 @@ impl PyTokenizer {
                 universe: Py::new(py, universe)?,
             })
         })
+    }
+
+    pub fn get_unk_token(&self) -> PyRegion {
+        self.tokenizer.get_unk_token().to_owned().into()
+    }
+
+    pub fn get_pad_token(&self) -> PyRegion {
+        self.tokenizer.get_pad_token().to_owned().into()
+    }
+
+    pub fn get_mask_token(&self) -> PyRegion {
+        self.tokenizer.get_mask_token().to_owned().into()
+    }
+
+    pub fn get_cls_token(&self) -> PyRegion {
+        self.tokenizer.get_cls_token().to_owned().into()
+    }
+
+    pub fn get_bos_token(&self) -> PyRegion {
+        self.tokenizer.get_bos_token().to_owned().into()
+    }
+
+    pub fn get_eos_token(&self) -> PyRegion {
+        self.tokenizer.get_eos_token().to_owned().into()
+    }
+
+    pub fn get_sep_token(&self) -> PyRegion {
+        self.tokenizer.get_sep_token().to_owned().into()
+    }
+
+    pub fn get_pad_token_id(&self) -> u32 {
+        self.tokenizer.get_pad_token_id()
+    }
+
+    pub fn get_mask_token_id(&self) -> u32 {
+        self.tokenizer.get_mask_token_id()
+    }
+
+    pub fn get_cls_token_id(&self) -> u32 {
+        self.tokenizer.get_cls_token_id()
+    }
+
+    pub fn get_bos_token_id(&self) -> u32 {
+        self.tokenizer.get_bos_token_id()
+    }
+
+    pub fn get_eos_token_id(&self) -> u32 {
+        self.tokenizer.get_eos_token_id()
+    }
+
+    pub fn get_sep_token_id(&self) -> u32 {
+        self.tokenizer.get_sep_token_id()
+    }
+
+    pub fn get_unk_token_id(&self) -> u32 {
+        self.tokenizer.get_unk_token_id()
+    }
+
+    pub fn get_vocab_size(&self) -> usize {
+        self.tokenizer.get_vocab_size()
     }
 }
