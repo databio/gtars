@@ -10,6 +10,11 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+dependencies = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "maturin>=1.8.1",
+]
 dynamic = ["version"]
 
 [tool.maturin]
