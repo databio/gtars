@@ -5,7 +5,6 @@ use clap::Command;
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
-use gtars::tokenizers;
 use gtars::uniwig;
 
 pub mod consts {

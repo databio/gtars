@@ -71,7 +71,7 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
 }
 
 #[allow(unused_variables)]
-pub fn igd_search(database_path: &String, query_file_path: &str) -> Result<Vec<String>, String> {
+pub fn igd_search(database_path: &str, query_file_path: &str) -> Result<Vec<String>, String> {
     // First check that BOTH the igd database and the query are the proper file types
     // else raise error
 
@@ -171,7 +171,7 @@ pub fn getOverlaps(
     IGD: &igd_t_from_disk,
     database_path: &str,
     query_file: &str,
-    hits: &mut Vec<i64>,
+    hits: &mut [i64],
     hash_table: &mut HashMap<String, i32>,
 ) -> i32 {
     let mut start = 0;
@@ -209,7 +209,7 @@ pub fn getOverlaps(
                 //println!("ctg successfully parsed {}", ctg);
 
                 let nl = get_overlaps(
-                    &IGD,
+                    IGD,
                     ctg,
                     start,
                     end,
@@ -227,20 +227,20 @@ pub fn getOverlaps(
         }
     }
 
-    return ols;
+    ols
 }
 
 // trait ReaderSeeker: Read + Seek {
 //
 // }
 
-#[allow(unused_variables)]
+#[allow(unused_variables, clippy::too_many_arguments)]
 fn get_overlaps(
     IGD: &igd_t_from_disk,
     ctg: String,
     query_start: i32,
     query_end: i32,
-    hits: &mut Vec<i64>,
+    hits: &mut [i64],
     hash_table: &mut HashMap<String, i32>,
     preChr: &mut i32,
     preIdx: &mut i32,
@@ -336,7 +336,7 @@ fn get_overlaps(
             //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
             gData[i as usize] = gdata_t {
-                idx: idx,
+                idx,
                 start,
                 end,
                 value,
@@ -377,7 +377,7 @@ fn get_overlaps(
                 if gData[i as usize].end > query_start {
                     //println!("ADDING TO HITS");
                     //println!(" > gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
-                    hits[gData[i as usize].idx as usize] = hits[gData[i as usize].idx as usize] + 1;
+                    hits[gData[i as usize].idx as usize] += 1;
                 }
             }
         }
@@ -426,7 +426,7 @@ fn get_overlaps(
                             // println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                             gData.push(gdata_t {
-                                idx: idx,
+                                idx,
                                 start,
                                 end,
                                 value,
@@ -443,7 +443,7 @@ fn get_overlaps(
 
                         while tS < tmpi && gData[tS as usize].start < bd {
                             //query start < bd
-                            tS = tS + 1;
+                            tS += 1;
                         }
 
                         tL = 0;
@@ -468,29 +468,28 @@ fn get_overlaps(
                             //println!("* gdata[i].end {} vs query start {}",gData[i as usize].end,query_start);
                             if gData[i as usize].end > query_start {
                                 //println!("* gData[i].end > query_start  {} > {}", gData[i as usize].end, query_start);
-                                hits[gData[i as usize].idx as usize] =
-                                    hits[gData[i as usize].idx as usize] + 1;
+                                hits[gData[i as usize].idx as usize] += 1;
                             }
                         }
                     }
                 }
-                bd = bd + IGD.nbp;
+                bd += IGD.nbp;
             }
         }
     }
     //println!("here are the hits {:?}", hits);
-    return nols; //TODO this is from the original code but its not actually being used for anything. hits vec IS the main thing.
+    nols //TODO this is from the original code but its not actually being used for anything. hits vec IS the main thing.
 }
 
 #[allow(unused_variables)]
 fn get_id(ctg: String, hash_table: &mut HashMap<String, i32>) -> i32 {
     let key_check = hash_table.contains_key(&ctg);
 
-    if key_check == false {
+    if !key_check {
         -1
     } else {
         let value = hash_table.get(&ctg).unwrap();
-        value.clone()
+        *value
     }
 }
 
@@ -529,7 +528,7 @@ pub fn get_tsv_path(igd_path: &str) -> Option<PathBuf> {
 // }
 #[allow(unused_variables)]
 pub fn get_igd_info(
-    database_path: &String,
+    database_path: &str,
     hash_table: &mut HashMap<String, i32>,
 ) -> Result<igd_t_from_disk, Error> {
     //println!("hello from get_igd_info");
@@ -538,7 +537,7 @@ pub fn get_igd_info(
 
     // Open file
 
-    let parent_path = database_path.clone();
+    let parent_path = database_path;
 
     let dbpath = std::path::Path::new(&parent_path);
 
@@ -602,7 +601,7 @@ pub fn get_igd_info(
     //println!("Initial chr loc: {}", chr_loc);
 
     for n in 0..m {
-        chr_loc = chr_loc + (n_Tile[n as usize] as i64) * 4;
+        chr_loc += (n_Tile[n as usize] as i64) * 4;
     }
 
     //println!("Skip to new chr loc: {}", chr_loc);
@@ -671,7 +670,7 @@ pub fn get_igd_info(
         hash_table.insert(name.to_string(), i as i32);
     }
 
-    return Ok(igd);
+    Ok(igd)
 }
 
 pub fn get_file_info_tsv(tsv_path: PathBuf, igd: &mut igd_t_from_disk) -> Result<(), Error> {
@@ -702,7 +701,7 @@ pub fn get_file_info_tsv(tsv_path: PathBuf, igd: &mut igd_t_from_disk) -> Result
 
     for line in lines {
         //println!("Reading tsv lines...");
-        count = count + 1;
+        count += 1;
         let line = line?;
         let fields: Vec<&str> = line.split('\t').collect();
 
