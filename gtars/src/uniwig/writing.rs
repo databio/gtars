@@ -178,7 +178,7 @@ pub fn write_bw_files(location: &str, chrom_sizes: &str, num_threads: i32, zoom_
     let mut location_path = location;
 
     if !location_path.ends_with("/") {
-        let mut temp_path = Path::new(location_path);
+        let temp_path = Path::new(location_path);
         let parent_location_path = temp_path.parent().unwrap();
         location_path = parent_location_path.to_str().unwrap();
     }

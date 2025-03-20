@@ -75,7 +75,7 @@ impl From<TokenizedRegionSet<'_>> for Vec<Region> {
     }
 }
 
-impl<'a> Index<usize> for TokenizedRegionSet<'a> {
+impl Index<usize> for TokenizedRegionSet<'_> {
     type Output = u32;
 
     fn index(&self, index: usize) -> &Self::Output {

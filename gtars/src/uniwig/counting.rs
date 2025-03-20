@@ -52,7 +52,7 @@ pub fn start_end_counts(
 
     adjusted_start_site = starts_vector[0]; // get first coordinate position
 
-    adjusted_start_site.0 = adjusted_start_site.0 - smoothsize;
+    adjusted_start_site.0 -= smoothsize;
 
     current_end_site = adjusted_start_site;
     current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
@@ -64,10 +64,10 @@ pub fn start_end_counts(
     while coordinate_position < adjusted_start_site.0 {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
-    for (_index, coord) in starts_vector.iter().enumerate() {
+    for coord in starts_vector.iter() {
         coordinate_value = *coord;
 
         adjusted_start_site = coordinate_value;
@@ -93,13 +93,13 @@ pub fn start_end_counts(
 
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count = count - current_end_site.1;
+                count -= current_end_site.1;
 
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site.0 = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -112,25 +112,25 @@ pub fn start_end_counts(
                 v_coordinate_positions.push(coordinate_position);
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = adjusted_start_site.0;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
-            count = count - current_end_site.1;
+            count -= current_end_site.1;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site.0 = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -143,7 +143,7 @@ pub fn start_end_counts(
             v_coordinate_positions.push(coordinate_position);
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     (v_coord_counts, v_coordinate_positions)
@@ -212,12 +212,12 @@ pub fn core_counts(
 
         while coordinate_position < current_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count = count - current_end_site.1;
+                count -= current_end_site.1;
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site.0 = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -230,17 +230,17 @@ pub fn core_counts(
                 v_coordinate_positions.push(coordinate_position);
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = current_start_site.0;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
-            count = count - current_end_site.1;
+            count -= current_end_site.1;
             if count < 0 {
                 count = 0;
             }
@@ -257,7 +257,7 @@ pub fn core_counts(
             v_coordinate_positions.push(coordinate_position);
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     (v_coord_counts, v_coordinate_positions)
@@ -267,6 +267,7 @@ pub fn core_counts(
 /// Primarily for use to count sequence reads in bam files.
 /// This sends directly to a file without using a producer/consumer workflow
 /// FIXED STEP
+#[allow(clippy::too_many_arguments)]
 pub fn fixed_start_end_counts_bam(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
@@ -305,7 +306,7 @@ pub fn fixed_start_end_counts_bam(
 
     //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
 
-    adjusted_start_site = adjusted_start_site - smoothsize;
+    adjusted_start_site -= smoothsize;
 
     //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
     let file = set_up_file_output(
@@ -330,7 +331,7 @@ pub fn fixed_start_end_counts_bam(
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
@@ -367,13 +368,13 @@ pub fn fixed_start_end_counts_bam(
 
         while coordinate_position < adjusted_start_site {
             while current_end_site == coordinate_position {
-                count = count - current_score;
+                count -= current_score;
 
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -402,13 +403,13 @@ pub fn fixed_start_end_counts_bam(
                 v_coordinate_positions.push(coordinate_position);
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = adjusted_start_site;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
@@ -416,12 +417,12 @@ pub fn fixed_start_end_counts_bam(
 
         while current_end_site == coordinate_position {
             let current_score = adjusted_start_site;
-            count = count - current_score;
+            count -= current_score;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -450,7 +451,7 @@ pub fn fixed_start_end_counts_bam(
             v_coordinate_positions.push(coordinate_position);
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     buf.flush().unwrap();
@@ -515,7 +516,7 @@ pub fn fixed_core_counts_bam_to_bw(
     while coordinate_position < current_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
@@ -538,12 +539,12 @@ pub fn fixed_core_counts_bam_to_bw(
 
         while coordinate_position < current_start_site {
             while current_end_site == coordinate_position {
-                count = count - 1;
+                count -= 1;
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -562,24 +563,24 @@ pub fn fixed_core_counts_bam_to_bw(
                 writer.flush()?;
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = current_start_site;
     }
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1;
+            count -= 1;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -599,7 +600,7 @@ pub fn fixed_core_counts_bam_to_bw(
             writer.flush()?;
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
     Ok(())
 }
@@ -675,7 +676,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         }
     };
 
-    adjusted_start_site = adjusted_start_site - smoothsize;
+    adjusted_start_site -= smoothsize;
 
     //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -687,7 +688,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
@@ -727,13 +728,13 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         while coordinate_position < adjusted_start_site {
             while current_end_site == coordinate_position {
-                count = count - 1;
+                count -= 1;
 
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -753,25 +754,25 @@ pub fn fixed_start_end_counts_bam_to_bw(
                 //eprintln!("{}",single_line);
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = adjusted_start_site;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1;
+            count -= 1;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -792,7 +793,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
             //eprintln!("{}",single_line);
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     drop(writer);
@@ -867,7 +868,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         }
     };
 
-    adjusted_start_site = adjusted_start_site - smoothsize;
+    adjusted_start_site -= smoothsize;
 
     //current_end_site = adjusted_start_site;
     current_end_site = adjusted_start_site + 1 + smoothsize * 2;
@@ -879,7 +880,7 @@ pub fn variable_start_end_counts_bam_to_bw(
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
@@ -920,7 +921,7 @@ pub fn variable_start_end_counts_bam_to_bw(
 
         while coordinate_position < adjusted_start_site {
             while current_end_site == coordinate_position {
-                count = count - 1;
+                count -= 1;
 
                 //prev_end_site = current_end_site;
 
@@ -928,7 +929,7 @@ pub fn variable_start_end_counts_bam_to_bw(
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -949,26 +950,26 @@ pub fn variable_start_end_counts_bam_to_bw(
                 bg_prev_coord = coordinate_position;
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = adjusted_start_site;
     }
 
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1;
+            count -= 1;
             //prev_end_site = current_end_site;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -989,7 +990,7 @@ pub fn variable_start_end_counts_bam_to_bw(
             bg_prev_coord = coordinate_position;
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     drop(writer);
@@ -1051,7 +1052,7 @@ pub fn variable_core_counts_bam_to_bw(
     while coordinate_position < current_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
@@ -1074,12 +1075,12 @@ pub fn variable_core_counts_bam_to_bw(
 
         while coordinate_position < current_start_site {
             while current_end_site == coordinate_position {
-                count = count - 1;
+                count -= 1;
                 if count < 0 {
                     count = 0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0)
@@ -1100,24 +1101,24 @@ pub fn variable_core_counts_bam_to_bw(
                 bg_prev_coord = coordinate_position;
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = current_start_site;
     }
-    count = count + 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                        // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1;
+            count -= 1;
             if count < 0 {
                 count = 0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -1138,7 +1139,7 @@ pub fn variable_core_counts_bam_to_bw(
             bg_prev_coord = coordinate_position;
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     drop(writer);
@@ -1232,6 +1233,7 @@ pub fn bam_to_bed_no_counts(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn variable_shifted_bam_to_bw(
     records: &mut Box<Query<noodles::bgzf::reader::Reader<std::fs::File>>>,
     chrom_size: i32,
@@ -1305,12 +1307,12 @@ pub fn variable_shifted_bam_to_bw(
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for coord in records {
         let unwrapped_coord = coord.unwrap().clone();
-        let flags = unwrapped_coord.flags().clone();
+        let flags = unwrapped_coord.flags();
 
         let start_site = unwrapped_coord.alignment_start().unwrap().unwrap().get() as i32;
 
@@ -1345,7 +1347,7 @@ pub fn variable_shifted_bam_to_bw(
             //println!("coordinate_position< adjusted_start_site: {} < {} . here is current endsite: {} ", coordinate_position, adjusted_start_site, current_end_site);
             while current_end_site == coordinate_position {
                 //println!("current_end_site == coordinate_position {} = {} adjusted start site: {}", current_end_site, coordinate_position, adjusted_start_site);
-                count = count - 1.0;
+                count -= 1.0;
 
                 //prev_end_site = current_end_site;
 
@@ -1353,7 +1355,7 @@ pub fn variable_shifted_bam_to_bw(
                     count = 0.0;
                 }
 
-                if collected_end_sites.last() == None {
+                if collected_end_sites.last().is_none() {
                     current_end_site = 0;
                 } else {
                     current_end_site = collected_end_sites.remove(0);
@@ -1378,26 +1380,26 @@ pub fn variable_shifted_bam_to_bw(
                 bg_prev_coord = coordinate_position;
             }
 
-            coordinate_position = coordinate_position + 1;
+            coordinate_position += 1;
         }
 
         prev_coordinate_value = adjusted_start_site;
     }
 
-    count = count + 1.0; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    count += 1.0; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                          // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
-            count = count - 1.0;
+            count -= 1.0;
             //prev_end_site = current_end_site;
             if count < 0.0 {
                 count = 0.0;
             }
 
-            if collected_end_sites.last() == None {
+            if collected_end_sites.last().is_none() {
                 current_end_site = 0;
             } else {
                 current_end_site = collected_end_sites.remove(0)
@@ -1421,7 +1423,7 @@ pub fn variable_shifted_bam_to_bw(
             bg_prev_coord = coordinate_position;
         }
 
-        coordinate_position = coordinate_position + 1;
+        coordinate_position += 1;
     }
 
     drop(writer);

@@ -46,6 +46,7 @@ pub mod consts {
 }
 
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms)]
 enum FileType {
     BED,
     BAM,
