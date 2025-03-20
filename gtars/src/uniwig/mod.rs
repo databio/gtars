@@ -1080,6 +1080,7 @@ fn process_bam(
 // }
 
 /// Creates a Producer/Consumer workflow for reading bam sequences and outputting to Bed files across threads.
+#[allow(clippy::ptr_arg)]
 fn process_bed_in_threads(
     chromosome_string: &String,
     smoothsize: i32,
@@ -1148,6 +1149,7 @@ fn process_bed_in_threads(
 
 /// Creates a Producer/Consumer workflow for reading bam sequences and outputting to bigwig files across threads.
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::ptr_arg)]
 fn process_bw_in_threads(
     chrom_sizes: &HashMap<String, u32>,
     chromosome_string: &String,
@@ -1217,7 +1219,7 @@ fn process_bw_in_threads(
 
         let new_file_path = new_file_path.to_str().unwrap();
 
-        let mut outb = create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+        let mut outb = create_bw_writer(&chr_sz_ref_clone, new_file_path, num_threads, zoom);
 
         let runtime = if num_threads == 1 {
             outb.options.channel_size = 0;
@@ -1253,6 +1255,7 @@ fn process_bw_in_threads(
 /// This function determines if the starts/end counting function should be selected or the core counting function
 /// Currently only variable step is supported, however, fixed_step has been written and can be added or replaced below if the user wishes.
 /// Replacing the variable funcs with fixed step funcs will result in performance loss and greater processing times.
+#[allow(clippy::too_many_arguments)]
 fn determine_counting_func(
     mut records: Box<Query<Reader<File>>>,
     current_chrom_size_cloned: i32,
@@ -1273,7 +1276,7 @@ fn determine_counting_func(
                 current_chrom_size_cloned,
                 smoothsize_cloned,
                 stepsize_cloned,
-                &chromosome_string_cloned,
+                chromosome_string_cloned,
                 sel_clone,
                 write_fd,
                 bam_scale,
@@ -1293,7 +1296,7 @@ fn determine_counting_func(
                         current_chrom_size_cloned,
                         smoothsize_cloned,
                         stepsize_cloned,
-                        &chromosome_string_cloned,
+                        chromosome_string_cloned,
                         sel_clone,
                         write_fd,
                     ) {
@@ -1310,7 +1313,7 @@ fn determine_counting_func(
                         &mut records,
                         current_chrom_size_cloned,
                         stepsize_cloned,
-                        &chromosome_string_cloned,
+                        chromosome_string_cloned,
                         write_fd,
                     ) {
                         Ok(_) => {

@@ -95,7 +95,7 @@ pub fn write_combined_files(
 
         // Remove the file after it is combined.
         let path = std::path::Path::new(&input_file);
-        let _ = remove_file(path).unwrap();
+        remove_file(path).unwrap();
     }
 }
 

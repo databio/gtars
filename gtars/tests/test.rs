@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -88,7 +89,6 @@ mod tests {
 
     use gtars::uniwig::writing::write_bw_files;
 
-    use anyhow::Context;
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashMap;
     use std::collections::HashSet;
@@ -164,7 +164,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
         let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        db_path_unwrapped.push_str("/");
+        db_path_unwrapped.push('/');
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
@@ -264,7 +264,7 @@ mod tests {
                     //println!("Chr_name: {} Filename: {}  start: {} end: {}", igd_from_disk.cName[k], igd_from_disk.file_info[idx as usize].fileName, start, end);
 
                     gData[i as usize] = gdata_t {
-                        idx: idx,
+                        idx,
                         start,
                         end,
                         value,
@@ -313,7 +313,7 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
         let mut db_path_unwrapped = path.into_os_string().into_string().unwrap();
-        db_path_unwrapped.push_str("/");
+        db_path_unwrapped.push('/');
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
@@ -321,7 +321,7 @@ mod tests {
 
         let demo_name = String::from("demo");
 
-        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        let _igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
 
         println!("dboutput_path {}", db_output_path);
 
@@ -830,7 +830,7 @@ mod tests {
             vec_count_type,
             smoothsize,
             combinedbedpath,
-            &chromsizerefpath,
+            chromsizerefpath,
             bwfileheader,
             output_type,
             filetype,
@@ -944,7 +944,7 @@ mod tests {
             vec_count_type,
             smoothsize,
             combinedbedpath,
-            &chromsizerefpath,
+            chromsizerefpath,
             bwfileheader,
             output_type,
             filetype,
