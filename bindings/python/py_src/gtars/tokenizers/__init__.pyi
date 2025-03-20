@@ -202,17 +202,19 @@ class TokenizedRegionSet:
         Get the integer representations of the tokenized regions.
         """
 
-    def ids_as_strs(self) -> List[str]:
-        """
-        Get the integer representations of the tokenized regions as strings. This
-        is useful for applications that require string representations of the
-        tokenized regions.
-        """
-
     def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
 
 class Tokenizer:
+
+    def __new__(cls, path: str) -> Tokenizer:
+        """
+        Try to auto-create a tokenizer "smartly" based on the provided path. This will
+        try to infer the type of tokenizer based on the file extension and create the
+        appropriate tokenizer.
+
+        :param path: The path to the configuration file or BED file.
+        """
     
     @classmethod
     def from_config(cls, path: str) -> Tokenizer:
@@ -330,6 +332,24 @@ class Tokenizer:
         :param ids: The integer representations of the tokenized regions.
 
         :return: The decoded regions.
+        """
+    
+    def convert_id_to_region(self, id: int) -> Region:
+        """
+        Convert an ID to its corresponding region.
+
+        :param id: The ID to convert.
+
+        :return: The region corresponding to the ID.
+        """
+
+    def convert_region_to_id(self, region: Region) -> int:
+        """
+        Convert a region to its corresponding ID.
+
+        :param region: The region to convert.
+
+        :return: The ID of the region.
         """
 
     @property

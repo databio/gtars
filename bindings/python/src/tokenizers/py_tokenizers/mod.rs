@@ -18,6 +18,19 @@ pub struct PyTokenizer {
 
 #[pymethods]
 impl PyTokenizer {
+
+    #[new]
+    pub fn new(path: &str) -> Result<Self> {
+        Python::with_gil(|py| {
+            let tokenizer = Tokenizer::from_auto(path)?;
+            let universe = PyUniverse::from(tokenizer.get_universe().clone());
+            Ok(PyTokenizer {
+                tokenizer,
+                universe: Py::new(py, universe).unwrap(),
+            })
+        })
+    }
+
     #[classmethod]
     pub fn from_config(_cls: &Bound<'_, PyType>, cfg: &str) -> Result<Self> {
         Python::with_gil(|py| {
@@ -116,6 +129,26 @@ impl PyTokenizer {
 
     pub fn get_vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size()
+    }
+
+    pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
+        Python::with_gil(|py| {
+            let region = self.universe.borrow(py).convert_id_to_region(id);
+            match region {
+                Some(r) => Some(r.into()),
+                None => None,
+            }
+        })
+    }
+
+    pub fn convert_region_to_id(&self, region: &PyRegion) -> Option<u32> {
+        Python::with_gil(|py| {
+            let id = self.universe.borrow(py).convert_region_to_id(region);
+            match id {
+                Some(i) => Some(i),
+                None => None,
+            }
+        })
     }
 
     // encode returns a list of ids
