@@ -14,6 +14,8 @@ dynamic = ["version"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+python-source = "py_src"
+module-name = "gtars._gtars"
 
 [tool.setuptools.dynamic]
 readme = {file = "README.md", content-type = "text/markdown"}
