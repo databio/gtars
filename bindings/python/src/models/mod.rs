@@ -8,7 +8,6 @@ mod universe;
 pub use self::interval::PyInterval;
 pub use self::region::PyRegion;
 pub use self::region_set::PyRegionSet;
-pub use self::universe::PyUniverse;
 
 #[pymodule]
 pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
