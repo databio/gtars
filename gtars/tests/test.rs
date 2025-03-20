@@ -76,7 +76,7 @@ mod tests {
         create_igd_f, gdata_t, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed,
     };
     use gtars::igd::search::{
-        getOverlaps, get_file_info_tsv, get_igd_info, get_tsv_path, igd_search, igd_t_from_disk,
+        get_file_info_tsv, get_igd_info, get_tsv_path, igd_search, igd_t_from_disk,
     };
 
     use gtars::uniwig::{uniwig_main, Chromosome};
@@ -235,7 +235,7 @@ mod tests {
                 let mut gData: Vec<gdata_t> = Vec::new();
 
                 //println!("Creating gData with tmpi {}", tmpi);
-                for j in 0..tmpi {
+                for _j in 0..tmpi {
                     gData.push(gdata_t::default())
                 }
 

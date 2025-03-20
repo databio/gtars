@@ -56,7 +56,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
             continue;
         }
 
-        if String::from(parsed_chr.trim()) != chrom {
+        if *parsed_chr.trim() != chrom {
             // If the parsed chrom is not the same as the current, sort, and then push to vector
             // then reset chromosome struct using the newest parsed_chr
             chromosome.starts.sort_unstable();
