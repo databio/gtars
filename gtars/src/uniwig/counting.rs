@@ -180,8 +180,6 @@ pub fn core_counts(
     current_start_site = starts_vector[0]; // get first coordinate position
     current_end_site = ends_vector[0];
 
-    current_start_site.0 = current_start_site.0;
-
     if current_start_site.0 < 1 {
         current_start_site.0 = 1;
     }
@@ -189,15 +187,13 @@ pub fn core_counts(
     while coordinate_position < current_start_site.0 {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
-        coordinate_position = coordinate_position + stepsize;
+        coordinate_position += stepsize;
     }
 
     for (index, coord) in starts_vector.iter().enumerate() {
         coordinate_value = *coord;
 
         current_start_site = coordinate_value;
-
-        current_start_site.0 = current_start_site.0;
 
         let current_score = current_start_site.1;
         count += current_score;
