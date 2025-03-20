@@ -53,6 +53,7 @@ impl PyTokenizer {
             })
         })
     }
+
     fn tokenize(&self, regions: &Bound<'_, PyAny>) -> Result<PyTokenizedRegionSet> {
         // attempt to map the list to a vector of regions
         let rs = extract_regions_from_py_any(regions)?;
@@ -67,7 +68,6 @@ impl PyTokenizer {
 
             Ok(py_tokenized_region_set)
         })
-
     }
 
     #[getter]
