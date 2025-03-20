@@ -232,77 +232,92 @@ class Tokenizer:
         :param path: The path to the BED file.
         """
 
-    def get_unk_token(self) -> Region:
+    @property
+    def unk_token(self) -> Region:
         """
         Get the unk token.
         """
 
-    def get_pad_token(self) -> Region:
+    @property
+    def pad_token(self) -> Region:
         """
         Get the pad token.
         """
 
-    def get_mask_token(self) -> Region:
+    @property
+    def mask_token(self) -> Region:
         """
         Get the mask token.
         """
 
-    def get_cls_token(self) -> Region:
+    @property
+    def cls_token(self) -> Region:
         """
         Get the CLS token.
         """
 
-    def get_bos_token(self) -> Region:
+    @property
+    def bos_token(self) -> Region:
         """
         Get the BOS token.
         """
 
-    def get_eos_token(self) -> Region:
+    @property
+    def eos_token(self) -> Region:
         """
         Get the EOS token.
         """
 
-    def get_sep_token(self) -> Region:
+    @property
+    def sep_token(self) -> Region:
         """
         Get the SEP token.
         """
 
-    def get_unk_token_id(self) -> int:
+    @property
+    def unk_token_id(self) -> int:
         """
         Get the ID of the unk token.
         """
 
-    def get_pad_token_id(self) -> int:
+    @property
+    def pad_token_id(self) -> int:
         """
         Get the ID of the pad token.
         """
 
-    def get_mask_token_id(self) -> int:
+    @property
+    def mask_token_id(self) -> int:
         """
         Get the ID of the mask token.
         """
 
-    def get_cls_token_id(self) -> int:
+    @property
+    def cls_token_id(self) -> int:
         """
         Get the ID of the CLS token.
         """
 
-    def get_bos_token_id(self) -> int:
+    @property
+    def bos_token_id(self) -> int:
         """
         Get the ID of the BOS token.
         """
 
-    def get_eos_token_id(self) -> int:
+    @property
+    def eos_token_id(self) -> int:
         """
         Get the ID of the EOS token.
         """
 
-    def get_sep_token_id(self) -> int:
+    @property
+    def sep_token_id(self) -> int:
         """
         Get the ID of the SEP token.
         """
 
-    def get_vocab_size(self) -> int:
+    @property
+    def vocab_size(self) -> int:
         """
         Get the vocabulary size.
         """
