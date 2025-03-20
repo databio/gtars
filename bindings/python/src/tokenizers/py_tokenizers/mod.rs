@@ -182,4 +182,8 @@ impl PyTokenizer {
             self.tokenizer.get_vocab_size()
         )
     }
+
+    pub fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyTokenizedRegionSet> {
+        self.tokenize(regions)
+    }
 }
