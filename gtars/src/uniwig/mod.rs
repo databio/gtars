@@ -6,7 +6,7 @@ use indicatif::ProgressBar;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{remove_file, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 
 use crate::uniwig::counting::{
     bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,

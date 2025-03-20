@@ -120,9 +120,9 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<Vec<DigestResult>> {
         let md5 = format!("{:x}", md5_hasher.finalize_reset());
         results.push(DigestResult {
             id: id.to_string(),
-            length: length,
+            length,
             sha512t24u: sha512,
-            md5: md5,
+            md5,
         });
     }
     Ok(results)

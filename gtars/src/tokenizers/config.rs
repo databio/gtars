@@ -133,7 +133,7 @@ mod tests {
 
     #[rstest]
     fn test_get_special_tokens() {
-        let path = PathBuf::from("tests/data/tokenizer.toml");
+        let path = PathBuf::from("tests/data/tokenizers/tokenizer_custom_specials.toml");
         let result = TokenizerConfig::try_from(path.as_path()).unwrap();
         let special_tokens = result.special_tokens;
 

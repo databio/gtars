@@ -11,7 +11,7 @@ fn path_to_data() -> &'static str {
 
 #[fixture]
 fn path_to_bed_file() -> &'static str {
-    "tests/data/peaks.bed"
+    "tests/data/tokenizers/peaks.bed"
 }
 
 #[fixture]
@@ -32,7 +32,7 @@ fn path_to_chrom_sizes_file() -> &'static str {
 
 #[fixture]
 fn path_to_bed_file_gzipped() -> &'static str {
-    "tests/data/peaks.bed.gz"
+    "tests/data/tokenizers/peaks.bed.gz"
 }
 
 #[fixture]

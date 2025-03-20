@@ -327,7 +327,8 @@ impl RegionSet {
                 },
             )))
         });
-
+        
+        #[allow(clippy::option_filter_map)] // I like this because its more readable and clear whats going on
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()
@@ -444,7 +445,7 @@ mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
 
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new_file.bed.gz");
 
         assert!(region_set.to_bed_gz(new_file_path.as_path()).is_ok());
@@ -461,7 +462,7 @@ mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
 
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new_bedfile.bed");
 
         assert!(region_set.to_bed(new_file_path.as_path()).is_ok());
@@ -481,7 +482,7 @@ mod tests {
             .join("tests/data/regionset/dummy_chrom_sizes");
 
         let tempdir = tempfile::tempdir().unwrap();
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new.bigbed");
 
         assert!(region_set
@@ -494,7 +495,7 @@ mod tests {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
-        assert!(!region_set.header.is_none());
+        assert!(region_set.header.is_some());
         assert_eq!(region_set.path.unwrap(), file_path);
     }
 

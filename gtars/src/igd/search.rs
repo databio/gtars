@@ -71,7 +71,7 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
 }
 
 #[allow(unused_variables)]
-pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Vec<String>, String> {
+pub fn igd_search(database_path: &String, query_file_path: &str) -> Result<Vec<String>, String> {
     // First check that BOTH the igd database and the query are the proper file types
     // else raise error
 
@@ -124,7 +124,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Ve
                 println!("gType = 0");
             } else {
                 getOverlaps(
-                    &mut IGD,
+                    &IGD,
                     database_path,
                     query_file_path,
                     &mut hits,
@@ -133,7 +133,7 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Ve
             }
 
             println!("index\t number of regions\t number of hits\t File_name");
-            let format_string = format!("index\t number of regions\t number of hits\t File_name");
+            let format_string = "index\t number of regions\t number of hits\t File_name".to_string();
             final_string_vec.push(format_string);
 
             let mut total: i64 = 0;
@@ -164,12 +164,13 @@ pub fn igd_search(database_path: &String, query_file_path: &String) -> Result<Ve
     println!("FINISHED");
 
     Ok(final_string_vec)
+
 }
 #[allow(unused_variables)]
 pub fn getOverlaps(
     IGD: &igd_t_from_disk,
-    database_path: &String,
-    query_file: &String,
+    database_path: &str,
+    query_file: &str,
     hits: &mut Vec<i64>,
     hash_table: &mut HashMap<String, i32>,
 ) -> i32 {
@@ -186,7 +187,7 @@ pub fn getOverlaps(
     let reader = get_dynamic_reader(path).unwrap();
 
     // Also get Reader for database file (.igd)
-    let parent_path = database_path.clone();
+    let parent_path = database_path;
 
     let dbpath = std::path::Path::new(&parent_path);
 

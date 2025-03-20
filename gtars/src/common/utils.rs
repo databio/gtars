@@ -46,7 +46,7 @@ pub fn get_dynamic_reader_w_stdin(file_path_str: &str) -> Result<BufReader<Box<d
         Ok(BufReader::new(Box::new(std::io::stdin()) as Box<dyn Read>))
     } else {
         let file_path = Path::new(file_path_str);
-        return get_dynamic_reader(&file_path);
+        get_dynamic_reader(file_path)
     }
 }
 
@@ -90,7 +90,7 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
 
 pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     let chrom_sizes_file = File::open(path.as_ref())
-        .with_context(|| format!("Failed to open chrom sizes file."))
+        .with_context(|| "Failed to open chrom sizes file.")
         .unwrap();
 
     let mut chrom_sizes: HashMap<String, u32> = HashMap::new();
