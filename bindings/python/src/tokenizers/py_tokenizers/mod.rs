@@ -178,7 +178,7 @@ impl PyTokenizer {
 
     pub fn __repr__(&self) -> String {
         format!(
-            "TreeTokenizer({} total regions)",
+            "Tokenizer({} total regions)",
             self.tokenizer.get_vocab_size()
         )
     }
