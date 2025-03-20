@@ -118,6 +118,7 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<Vec<DigestResult>> {
         // let result = sha512_hasher.finalize();
         let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
         let md5 = format!("{:x}", md5_hasher.finalize_reset());
+        #[allow(clippy::redundant_field_names)] // just for consistency, lets keep it
         results.push(DigestResult {
             id: id.to_string(),
             length: length,

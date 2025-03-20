@@ -1,4 +1,3 @@
-use gtars::tokenizers::config::TokenizerConfig;
 use pyo3::prelude::*;
 use pyo3::types::PyType;
 
@@ -134,20 +133,14 @@ impl PyTokenizer {
     pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
         Python::with_gil(|py| {
             let region = self.universe.borrow(py).convert_id_to_region(id);
-            match region {
-                Some(r) => Some(r.into()),
-                None => None,
-            }
+            region
         })
     }
 
     pub fn convert_region_to_id(&self, region: &PyRegion) -> Option<u32> {
         Python::with_gil(|py| {
             let id = self.universe.borrow(py).convert_region_to_id(region);
-            match id {
-                Some(i) => Some(i),
-                None => None,
-            }
+            id
         })
     }
 
@@ -185,7 +178,7 @@ impl PyTokenizer {
 
     pub fn __repr__(&self) -> String {
         format!(
-            "TreeTokenizer({} total regions)",
+            "Tokenizer({} total regions)",
             self.tokenizer.get_vocab_size()
         )
     }

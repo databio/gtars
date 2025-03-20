@@ -30,7 +30,7 @@ impl PyUniverse {
     pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
         self.universe
             .convert_id_to_region(id)
-            .map(|region| PyRegion::from(region))
+            .map(PyRegion::from)
     }
 
     pub fn len(&self) -> usize {
