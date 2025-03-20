@@ -10,10 +10,17 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+dependencies = [
+    "pytest>=8.3.4",
+    "pytest-cov>=6.0.0",
+    "maturin>=1.8.1",
+]
 dynamic = ["version"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
+python-source = "py_src"
+module-name = "gtars.gtars"
 
 [tool.setuptools.dynamic]
 readme = {file = "README.md", content-type = "text/markdown"}

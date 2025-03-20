@@ -2,17 +2,14 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufRead, BufReader, Cursor};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use flate2::read::{GzDecoder, MultiGzDecoder};
-use reqwest::blocking::Client;
-use rust_lapper::{Interval, Lapper};
-use std::error::Error;
+
+use flate2::read::MultiGzDecoder;
 
 use crate::common::models::region::Region;
-use crate::common::models::universe::Universe;
 
 ///
 /// Get a reader for either a gzip'd or non-gzip'd file.
@@ -33,46 +30,6 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let reader = BufReader::new(file);
 
     Ok(reader)
-}
-
-///
-/// Get a reader for url ling. Either for gzip'd or non-gzip'd file
-///
-/// # Arguments
-///
-/// - path: path to the file to read
-///
-pub fn get_dynamic_reader_from_url(
-    url: &Path,
-) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
-    // Create an HTTP client and fetch the content
-    let mut url: String = url.to_str().unwrap().to_string();
-
-    let is_ftp: bool = url.starts_with("ftp");
-
-    if is_ftp {
-        println!("ftp is not fully implemented. Bugs could appear");
-        url = url.replacen("ftp://", "http://", 1);
-    }
-
-    let response = Client::new()
-        .get(&url)
-        .send()
-        .with_context(|| format!("Failed to fetch content from URL: {}", &url))?
-        .error_for_status()?
-        .bytes()?;
-
-    // Convert the response into a cursor for reading
-    let cursor = Cursor::new(response);
-
-    let is_gzipped = url.ends_with(".gz");
-
-    let reader: Box<dyn std::io::Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(cursor)),
-        false => Box::new(cursor),
-    };
-
-    Ok(BufReader::new(reader))
 }
 
 /// Get a reader for either a gzipped, non-gzipped file, or stdin
@@ -131,43 +88,6 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     id_to_region
 }
 
-///
-/// Simple wrapper function that will create a [Lapper] object (an interval tree)
-/// from a [Universe] struct.
-///
-/// # Arguments:
-/// - universe: the universe to create the interval tree for.
-pub fn create_interval_tree_from_universe(
-    universe: &Universe,
-) -> HashMap<String, Lapper<u32, u32>> {
-    // instantiate the tree and list of intervals
-    let mut tree: HashMap<String, Lapper<u32, u32>> = HashMap::new();
-    let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
-
-    for region in universe.regions.iter() {
-        // create interval
-        let interval = Interval {
-            start: region.start,
-            stop: region.end,
-            val: universe.convert_region_to_id(region).unwrap(),
-        };
-
-        // use chr to get the vector of intervals
-        let chr_intervals = intervals.entry(region.chr.clone()).or_default();
-
-        // push interval to vector
-        chr_intervals.push(interval);
-    }
-
-    // build the tree
-    for (chr, chr_intervals) in intervals.into_iter() {
-        let lapper: Lapper<u32, u32> = Lapper::new(chr_intervals);
-        tree.insert(chr.to_string(), lapper);
-    }
-
-    tree
-}
-
 pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     let chrom_sizes_file = File::open(path.as_ref())
         .with_context(|| format!("Failed to open chrom sizes file."))
@@ -192,4 +112,50 @@ pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     }
 
     chrom_sizes
+}
+
+///
+/// Gen
+pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(
+    path: T,
+) -> Result<HashMap<Region, f64>> {
+    let mut map = HashMap::new();
+
+    let reader = get_dynamic_reader(path.as_ref())?;
+
+    for line in reader.lines() {
+        let line = line?;
+        let parts: Vec<&str> = line.split('\t').collect();
+
+        if parts.len() < 5 {
+            anyhow::bail!("BED file line does not have at least 5 fields: {}. It needs to have chr, start, end, name, and score.", line);
+        }
+
+        // parse the fields
+        let chr = parts[0];
+        let start = parts[1].parse::<u32>().with_context(|| {
+            format!("Failed to parse start position in BED file line: {}", line)
+        })?;
+
+        let end = parts[2]
+            .parse::<u32>()
+            .with_context(|| format!("Failed to parse end position in BED file line: {}", line))?;
+
+        let score = parts[4]
+            .parse::<f64>()
+            .with_context(|| format!("Failed to parse score in BED file line: {}", line))?;
+
+        let rest = Some(parts[3..].join("\t")).filter(|s| !s.is_empty());
+
+        let region = Region {
+            chr: chr.to_owned(),
+            start,
+            end,
+            rest,
+        };
+
+        map.insert(region, score);
+    }
+
+    Ok(map)
 }

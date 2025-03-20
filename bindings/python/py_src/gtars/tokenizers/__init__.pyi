@@ -202,113 +202,116 @@ class TokenizedRegionSet:
         Get the integer representations of the tokenized regions.
         """
 
-    def ids_as_strs(self) -> List[str]:
-        """
-        Get the integer representations of the tokenized regions as strings. This
-        is useful for applications that require string representations of the
-        tokenized regions.
-        """
-
     def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
 
-class TreeTokenizer:
-    def __new__(cls, path: str) -> TreeTokenizer:
-        """
-        Construct a new TreeTokenizer from a universe file.
+class Tokenizer:
 
-        :param path: The path to the universe file. This should be a BED file.
+    def __new__(cls, path: str) -> Tokenizer:
+        """
+        Try to auto-create a tokenizer "smartly" based on the provided path. This will
+        try to infer the type of tokenizer based on the file extension and create the
+        appropriate tokenizer.
+
+        :param path: The path to the configuration file or BED file.
+        """
+    
+    @classmethod
+    def from_config(cls, path: str) -> Tokenizer:
+        """
+        Construct a new Tokenizer object from a configuration file.
+
+        :param path: The path to the configuration file.
         """
 
-    def unknown_token(self) -> Region:
+    @classmethod
+    def from_bed(cls, path: str) -> Tokenizer:
         """
-        Get the unknown token.
+        Construct a new Tokenizer object from a BED file.
+
+        :param path: The path to the BED file.
         """
 
-    def padding_token(self) -> Region:
+    def get_unk_token(self) -> Region:
         """
-        Get the padding token.
+        Get the unk token.
         """
 
-    def mask_token(self) -> Region:
+    def get_pad_token(self) -> Region:
+        """
+        Get the pad token.
+        """
+
+    def get_mask_token(self) -> Region:
         """
         Get the mask token.
         """
 
-    def cls_token(self) -> Region:
+    def get_cls_token(self) -> Region:
         """
         Get the CLS token.
         """
 
-    def bos_token(self) -> Region:
+    def get_bos_token(self) -> Region:
         """
         Get the BOS token.
         """
 
-    def eos_token(self) -> Region:
+    def get_eos_token(self) -> Region:
         """
         Get the EOS token.
         """
 
-    def sep_token(self) -> Region:
+    def get_sep_token(self) -> Region:
         """
         Get the SEP token.
         """
 
-    def unknown_token_id(self) -> int:
+    def get_unk_token_id(self) -> int:
         """
-        Get the ID of the unknown token.
-        """
-
-    def padding_token_id(self) -> int:
-        """
-        Get the ID of the padding token.
+        Get the ID of the unk token.
         """
 
-    def mask_token_id(self) -> int:
+    def get_pad_token_id(self) -> int:
+        """
+        Get the ID of the pad token.
+        """
+
+    def get_mask_token_id(self) -> int:
         """
         Get the ID of the mask token.
         """
 
-    def cls_token_id(self) -> int:
+    def get_cls_token_id(self) -> int:
         """
         Get the ID of the CLS token.
         """
 
-    def bos_token_id(self) -> int:
+    def get_bos_token_id(self) -> int:
         """
         Get the ID of the BOS token.
         """
 
-    def eos_token_id(self) -> int:
+    def get_eos_token_id(self) -> int:
         """
         Get the ID of the EOS token.
         """
 
-    def sep_token_id(self) -> int:
+    def get_sep_token_id(self) -> int:
         """
         Get the ID of the SEP token.
         """
 
-    def vocab_size(self) -> int:
+    def get_vocab_size(self) -> int:
         """
         Get the vocabulary size.
         """
 
-    def tokenize(self, regions: List[Region]) -> List[Region]:
+    def tokenize(self, regions: List[Region]) -> TokenizedRegionSet:
         """
         Tokenize a list of regions. This will only return the tokenized regions.
 
         :param regions: The regions to tokenize.
-
-        :return: The tokenized regions as a list.
-        """
-
-    def tokenize_bed_file(self, path: str) -> List[Region]:
-        """
-        Tokenize a BED file directly.
-
-        :param path: The path to the BED file.
 
         :return: The tokenized regions as a list.
         """
@@ -330,189 +333,23 @@ class TreeTokenizer:
 
         :return: The decoded regions.
         """
-
-    def vocab(self) -> List[Tuple[Region, int]]:
+    
+    def convert_id_to_region(self, id: int) -> Region:
         """
-        Get the vocabulary.
+        Convert an ID to its corresponding region.
 
-        :return: The vocabulary as a list of tuples.
-        """
+        :param id: The ID to convert.
 
-    @property
-    def universe(self) -> Universe:
-        """
-        The universe object.
+        :return: The region corresponding to the ID.
         """
 
-    def export(self, path: str):
+    def convert_region_to_id(self, region: Region) -> int:
         """
-        Export the tokenizer configuration to a file.
+        Convert a region to its corresponding ID.
 
-        :param path: The path to the output file.
-        """
+        :param region: The region to convert.
 
-    def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
-        """
-        Tokenize a list of regions.
-
-        :param regions: The regions to tokenize.
-
-        :return: A TokenizedRegionSet object.
-        """
-
-    def __len__(self) -> int:
-        """
-        Get the vocabulary size.
-        """
-
-    def __repr__(self) -> str:
-        """
-        Get a string representation of the tokenizer.
-        """
-
-class FragmentTokenizer:
-    def __new__(cls, path: str) -> FragmentTokenizer:
-        """
-        Construct a new FragmentTokenizer from a universe file.
-
-        :param path: The path to the universe file. This should be a BED file.
-        """
-
-    def tokenize_fragments_to_gtoks(
-        self, file_path: str, out_path: str = None, filter: List[str] = None
-    ) -> None:
-        """
-        Tokenize a file containing fragments.
-
-        :param file_path: The path to the file containing fragments.
-        :param out_path: The path to the output file. If None, the output is written to the standard output.
-        :param filter: A list of chromosomes to filter. If None, all chromosomes are included.
-        """
-
-class MetaTokenizer:
-    def __new__(cls, path: str) -> MetaTokenizer:
-        """
-        Construct a new MetaTokenizer from a universe file.
-
-        :param path: The path to the universe file. This should be a BED file.
-        """
-
-    def unknown_token(self) -> Region:
-        """
-        Get the unknown token.
-        """
-
-    def padding_token(self) -> Region:
-        """
-        Get the padding token.
-        """
-
-    def mask_token(self) -> Region:
-        """
-        Get the mask token.
-        """
-
-    def cls_token(self) -> Region:
-        """
-        Get the CLS token.
-        """
-
-    def bos_token(self) -> Region:
-        """
-        Get the BOS token.
-        """
-
-    def eos_token(self) -> Region:
-        """
-        Get the EOS token.
-        """
-
-    def sep_token(self) -> Region:
-        """
-        Get the SEP token.
-        """
-
-    def unknown_token_id(self) -> int:
-        """
-        Get the ID of the unknown token.
-        """
-
-    def padding_token_id(self) -> int:
-        """
-        Get the ID of the padding token.
-        """
-
-    def mask_token_id(self) -> int:
-        """
-        Get the ID of the mask token.
-        """
-
-    def cls_token_id(self) -> int:
-        """
-        Get the ID of the CLS token.
-        """
-
-    def bos_token_id(self) -> int:
-        """
-        Get the ID of the BOS token.
-        """
-
-    def eos_token_id(self) -> int:
-        """
-        Get the ID of the EOS token.
-        """
-
-    def sep_token_id(self) -> int:
-        """
-        Get the ID of the SEP token.
-        """
-
-    def vocab_size(self) -> int:
-        """
-        Get the vocabulary size.
-        """
-
-    def tokenize(self, regions: List[Region]) -> List[Region]:
-        """
-        Tokenize a list of regions. This will only return the tokenized regions.
-
-        :param regions: The regions to tokenize.
-
-        :return: The tokenized regions as a list.
-        """
-
-    def tokenize_bed_file(self, path: str) -> List[Region]:
-        """
-        Tokenize a BED file directly.
-
-        :param path: The path to the BED file.
-
-        :return: The tokenized regions as a list.
-        """
-
-    def encode(self, regions: List[Region]) -> List[int]:
-        """
-        Encode a list of regions. This will return the integer representation of the tokenized regions.
-
-        :param regions: The regions to encode.
-
-        :return: The integer representation of the tokenized regions.
-        """
-
-    def decode(self, ids: List[int]) -> List[Region]:
-        """
-        Decode a list of integer representations of the tokenized regions.
-
-        :param ids: The integer representations of the tokenized regions.
-
-        :return: The decoded regions.
-        """
-
-    def vocab(self) -> List[Tuple[Region, int]]:
-        """
-        Get the vocabulary.
-
-        :return: The vocabulary as a list of tuples.
+        :return: The ID of the region.
         """
 
     @property
@@ -521,12 +358,6 @@ class MetaTokenizer:
         The universe object.
         """
 
-    def export(self, path: str):
-        """
-        Export the tokenizer configuration to a file.
-
-        :param path: The path to the output file.
-        """
 
     def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
         """

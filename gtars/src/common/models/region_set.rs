@@ -17,7 +17,7 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -50,8 +50,7 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => get_dynamic_reader_from_url(path)
-                .expect("!Can't get file neither from path or url!"),
+            false => anyhow::bail!("File not found!"),
         };
 
         let mut header: String = String::new();
@@ -81,7 +80,7 @@ impl TryFrom<&Path> for RegionSet {
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
-        if new_regions.len() < 1 {
+        if new_regions.is_empty() {
             let new_error = Error::new(
                 ErrorKind::Other,
                 format!(
@@ -328,6 +327,7 @@ impl RegionSet {
                 },
             )))
         });
+
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()

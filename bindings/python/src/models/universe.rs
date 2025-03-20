@@ -5,7 +5,7 @@ use pyo3::prelude::*;
 use anyhow::Result;
 
 use crate::models::PyRegion;
-use gtars::common::models::Universe;
+use gtars::tokenizers::universe::Universe;
 
 #[pyclass(name = "Universe", module = "gtars.models")]
 #[derive(Clone, Debug)]
