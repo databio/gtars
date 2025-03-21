@@ -28,9 +28,7 @@ impl PyUniverse {
     }
 
     pub fn convert_id_to_token(&self, id: u32) -> Option<PyRegion> {
-        self.universe
-            .convert_id_to_token(id)
-            .map(PyRegion::from)
+        self.universe.convert_id_to_token(id).map(PyRegion::from)
     }
 
     pub fn len(&self) -> usize {

@@ -289,6 +289,25 @@ impl RegionSet {
         bed_digest
     }
 
+    pub fn file_digest(&self) -> String {
+
+        let mut region_copy = self.clone();
+        region_copy.sort();
+
+        let mut buffer: String = String::new();
+        for region in region_copy.regions {
+            buffer.push_str(&format!("{}\n", region.as_string(),));
+        }
+
+        let mut hasher = Md5::new();
+
+        hasher.update(buffer);
+        let hash = hasher.finalize();
+        let file_digest: String = format!("{:x}", hash);
+
+        file_digest
+    }
+
     ///
     /// Save RegionSet as bigBed (binary version of bed file)
     ///
@@ -505,5 +524,14 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(!region_set.is_empty());
+    }
+
+    #[test]
+    fn test_file_digest() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.file_digest(), "6224c4d40832b3e0889250f061e01120");
+        assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
     }
 }
