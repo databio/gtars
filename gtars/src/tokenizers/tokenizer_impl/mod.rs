@@ -138,6 +138,26 @@ impl Tokenizer {
         Ok(tokenized.into_iter().map(|t| t.value).collect())
     }
 
+    pub fn encode(
+        &self,
+        regions: &[Region],
+    ) -> Result<Vec<u32>, TokenizerError> {
+        let tokenized = self.core.tokenize(regions)?;
+        Ok(tokenized.into_iter().map(|t| t.id).collect())
+    }
+
+    pub fn decode(
+        &self,
+        ids: &[u32],
+    ) -> Result<Vec<String>, TokenizerError> {
+        let decoded: Vec<String> = ids.iter()
+            .map(|id| {
+                self.core.id_to_token(*id).unwrap_or(self.special_tokens.unk.clone())
+            })
+            .collect();
+        Ok(decoded)
+    }
+
     pub fn convert_token_to_id(&self, token: &str) -> Option<u32> {
         self.core.token_to_id(token)
     }
