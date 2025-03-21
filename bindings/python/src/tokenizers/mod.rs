@@ -5,8 +5,8 @@ mod universe;
 use pyo3::prelude::*;
 
 use crate::tokenizers::py_tokenizers::PyTokenizer;
-use crate::tokenizers::universe::PyUniverse;
 use crate::tokenizers::tokens::PyTokenizedRegionSet;
+use crate::tokenizers::universe::PyUniverse;
 
 #[pymodule]
 pub fn tokenizers(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
