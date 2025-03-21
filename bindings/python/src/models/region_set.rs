@@ -53,6 +53,11 @@ impl PyRegionSet {
     }
 
     #[getter]
+    fn get_file_digest(&self) -> PyResult<String> {
+        Ok(self.regionset.file_digest())
+    }
+
+    #[getter]
     fn get_path(&self) -> PyResult<String> {
         Ok(self
             .regionset

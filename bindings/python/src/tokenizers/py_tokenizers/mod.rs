@@ -3,9 +3,9 @@ use pyo3::types::PyType;
 
 use anyhow::Result;
 
-use crate::tokenizers::universe::PyUniverse;
-use crate::tokenizers::tokens::PyTokenizedRegionSet;
 use crate::models::PyRegion;
+use crate::tokenizers::tokens::PyTokenizedRegionSet;
+use crate::tokenizers::universe::PyUniverse;
 use crate::utils::extract_regions_from_py_any;
 use gtars::tokenizers::Tokenizer;
 
@@ -17,7 +17,6 @@ pub struct PyTokenizer {
 
 #[pymethods]
 impl PyTokenizer {
-
     #[new]
     fn new(path: &str) -> Result<Self> {
         Python::with_gil(|py| {
@@ -169,19 +168,22 @@ impl PyTokenizer {
 
         Ok(tokenized.ids)
     }
-    
+
     fn decode(&self, ids: Vec<u32>) -> Result<Vec<PyRegion>> {
         Python::with_gil(|py| {
             let regions = ids
                 .iter()
-                .map(|id| self.universe.borrow(py).convert_id_to_token(*id).unwrap_or(
-                    PyRegion {
-                        chr: "chrUNK".to_string(),
-                        start: 0,
-                        end: 0,
-                        rest: None,
-                    }
-                ))
+                .map(|id| {
+                    self.universe
+                        .borrow(py)
+                        .convert_id_to_token(*id)
+                        .unwrap_or(PyRegion {
+                            chr: "chrUNK".to_string(),
+                            start: 0,
+                            end: 0,
+                            rest: None,
+                        })
+                })
                 .collect::<Vec<PyRegion>>();
             Ok(regions)
         })
