@@ -110,48 +110,6 @@ class Region:
 
     def __repr__(self) -> str: ...
 
-class TokenizedRegion:
-    """
-    A TokenizedRegion object represents a tokenized region.
-    """
-
-    @property
-    def chr(self) -> str:
-        """
-        The chromosome name for this region.
-        """
-
-    @property
-    def start(self) -> int:
-        """
-        The start position for this region.
-        """
-
-    @property
-    def end(self) -> int:
-        """
-        The end position for this region.
-        """
-
-    @property
-    def id(self) -> int:
-        """
-        The integer representation of the tokenized region.
-        """
-
-    @property
-    def universe(self) -> Universe:
-        """
-        The universe object.
-        """
-
-    def to_region(self) -> Region:
-        """
-        Convert the tokenized region back to the original region.
-        """
-
-    def __repr__(self) -> str: ...
-
 class RegionSet:
     def __new__(cls, path: str) -> RegionSet:
         """

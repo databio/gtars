@@ -1,64 +1,26 @@
-use crate::{
-    common::models::Region,
-    tokenizers::config::{SpecialToken, SpecialTokenAssignment},
-};
+use crate::tokenizers::config::{SpecialToken, SpecialTokenAssignment};
 
 #[derive(Clone, Debug)]
 pub struct SpecialTokens {
-    pub unk: Region,
-    pub pad: Region,
-    pub mask: Region,
-    pub cls: Region,
-    pub eos: Region,
-    pub bos: Region,
-    pub sep: Region,
+    pub unk: String,
+    pub pad: String,
+    pub mask: String,
+    pub cls: String,
+    pub eos: String,
+    pub bos: String,
+    pub sep: String,
 }
 
 impl Default for SpecialTokens {
     fn default() -> Self {
         SpecialTokens {
-            unk: Region {
-                chr: "chrUNK".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            pad: Region {
-                chr: "chrPAD".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            mask: Region {
-                chr: "chrMASK".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            cls: Region {
-                chr: "chrCLS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            eos: Region {
-                chr: "chrEOS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            bos: Region {
-                chr: "chrBOS".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
-            sep: Region {
-                chr: "chrSEP".to_string(),
-                start: 0,
-                end: 0,
-                rest: None,
-            },
+            unk: "<unk>".to_string(),
+            pad: "<pad>".to_string(),
+            mask: "<mask>".to_string(),
+            cls: "<cls>".to_string(),
+            eos: "<eos>".to_string(),
+            bos: "<bos>".to_string(),
+            sep: "<sep>".to_string(),
         }
     }
 }
@@ -68,42 +30,15 @@ impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
         let mut special_tokens = SpecialTokens::default();
 
         for token in value {
-            let region_str = token.token;
             let token_assignment = token.name;
-
-            let parts = region_str.split(":").collect::<Vec<&str>>();
-
-            // todo: Make this better
-            if parts.len() != 2 {
-                println!("Invalid region string: {}... Skipping", region_str);
-                continue;
-            }
-
-            let chr = parts[0].to_string();
-
-            let start_end = parts[1].split("-").collect::<Vec<&str>>();
-            if start_end.len() != 2 {
-                println!("Invalid start-end string: {}... Skipping", region_str);
-                continue;
-            }
-
-            let start = start_end[0].parse::<u32>().unwrap();
-            let end = start_end[1].parse::<u32>().unwrap();
-
-            let region = Region {
-                chr,
-                start,
-                end,
-                rest: None,
-            };
             match token_assignment {
-                SpecialToken::Unk => special_tokens.unk = region,
-                SpecialToken::Pad => special_tokens.pad = region,
-                SpecialToken::Mask => special_tokens.mask = region,
-                SpecialToken::Cls => special_tokens.cls = region,
-                SpecialToken::Bos => special_tokens.bos = region,
-                SpecialToken::Eos => special_tokens.eos = region,
-                SpecialToken::Sep => special_tokens.sep = region,
+                SpecialToken::Unk => special_tokens.unk = token.token,
+                SpecialToken::Pad => special_tokens.pad = token.token,
+                SpecialToken::Mask => special_tokens.mask = token.token,
+                SpecialToken::Cls => special_tokens.cls = token.token,
+                SpecialToken::Bos => special_tokens.bos = token.token,
+                SpecialToken::Eos => special_tokens.eos = token.token,
+                SpecialToken::Sep => special_tokens.sep = token.token,
             }
         }
 
@@ -111,7 +46,7 @@ impl From<Vec<SpecialTokenAssignment>> for SpecialTokens {
     }
 }
 
-impl From<SpecialTokens> for Vec<Region> {
+impl From<SpecialTokens> for Vec<String> {
     fn from(val: SpecialTokens) -> Self {
         vec![
             val.unk, val.pad, val.mask, val.cls, val.eos, val.bos, val.sep,
@@ -119,7 +54,7 @@ impl From<SpecialTokens> for Vec<Region> {
     }
 }
 
-impl From<&SpecialTokens> for Vec<Region> {
+impl From<&SpecialTokens> for Vec<String> {
     fn from(val: &SpecialTokens) -> Self {
         vec![
             val.unk.clone(),

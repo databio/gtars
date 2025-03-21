@@ -8,9 +8,8 @@ use thiserror::Error;
 
 use utils::UniverseFileType;
 
-use crate::common::models::region::Region;
 use crate::common::utils::{
-    generate_id_to_region_map, generate_region_to_id_map, get_dynamic_reader,
+    generate_id_to_region_string_map, generate_region_string_to_id_map, get_dynamic_reader,
 };
 
 use super::utils::special_tokens::SpecialTokens;
@@ -25,28 +24,30 @@ pub enum UniverseError {
     ParsingError(String),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct Universe {
-    pub regions: Vec<Region>,
-    pub region_to_id: HashMap<Region, u32>,
-    pub id_to_region: HashMap<u32, Region>,
-    pub ordered: bool,
+    pub regions: Vec<String>,
+    pub region_to_id: HashMap<String, u32>,
+    pub id_to_region: HashMap<u32, String>,
+    pub names: Option<HashMap<String, String>>,
+    pub scores: Option<HashMap<String, f64>>,
+    pub special_tokens: Option<Vec<String>>,
 }
 
 impl Universe {
-    pub fn add_token_to_universe(&mut self, region: &Region) {
+    pub fn add_token_to_universe(&mut self, region: &str) {
         let new_id = self.region_to_id.len();
         self.region_to_id.insert(region.to_owned(), new_id as u32);
         self.id_to_region.insert(new_id as u32, region.to_owned());
         self.regions.push(region.to_owned());
     }
 
-    pub fn convert_token_to_id(&self, region: &Region) -> Option<u32> {
+    pub fn convert_token_to_id(&self, region: &str) -> Option<u32> {
         let id = self.region_to_id.get(region);
         id.map(|id| id.to_owned())
     }
 
-    pub fn convert_id_to_token(&self, id: u32) -> Option<Region> {
+    pub fn convert_id_to_token(&self, id: u32) -> Option<String> {
         self.id_to_region.get(&id).cloned()
     }
 
@@ -58,24 +59,16 @@ impl Universe {
         self.region_to_id.len() == 0
     }
 
-    pub fn contains_region(&self, region: &Region) -> bool {
+    pub fn contains_region(&self, region: &String) -> bool {
         self.region_to_id.contains_key(region)
     }
 
     pub fn add_special_tokens(&mut self, special_tokens: &SpecialTokens) {
-        let special_tokens_vec: Vec<Region> = special_tokens.into();
+        let special_tokens_vec: Vec<String> = special_tokens.into();
+        self.special_tokens = Some(special_tokens_vec.clone());
         for token in special_tokens_vec.iter() {
             self.add_token_to_universe(token);
         }
-    }
-
-    pub fn is_ordered(&self) -> bool {
-        self.ordered
-    }
-
-    pub fn with_ordered(mut self, ordered: bool) -> Self {
-        self.ordered = ordered;
-        self
     }
 }
 
@@ -93,7 +86,7 @@ impl TryFrom<&Path> for Universe {
             .as_ref()
             .map_err(|_| UniverseError::UnknownUniverseType)?;
 
-        let (ordered, regions) = match UniverseFileType::from(first_line) {
+        let (regions, names, scores) = match UniverseFileType::from(first_line) {
             UniverseFileType::BedThree => {
                 let mut regions = vec![];
                 for line in lines {
@@ -101,75 +94,41 @@ impl TryFrom<&Path> for Universe {
                     let parts: Vec<&str> = line.split_whitespace().collect();
 
                     if parts.len() == 3 {
-                        let region = Region {
-                            chr: parts[0].to_string(),
-                            start: parts[1]
-                                .parse()
-                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            end: parts[2]
-                                .parse()
-                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            rest: None,
-                        };
+                        let region = format!("{}:{}-{}", parts[0], parts[1], parts[2]);
                         regions.push(region);
                     } else {
                         return Err(UniverseError::ParsingError(line));
                     }
                 }
 
-                (false, regions)
+                (regions, None, None)
             }
             // contains a score, so order the regions
             UniverseFileType::BedFivePlus => {
                 let mut regions = vec![];
+                let mut names = HashMap::new();
+                let mut scores = HashMap::new();
                 for line in lines {
                     let line = line?;
                     let parts: Vec<&str> = line.split('\t').collect();
 
                     if parts.len() >= 5 {
-                        let region = Region {
-                            chr: parts[0].to_string(),
-                            start: parts[1]
-                                .parse()
-                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            end: parts[2]
-                                .parse()
-                                .map_err(|_| UniverseError::ParsingError(line.clone()))?,
-                            rest: Some(parts[4..].join("\t")),
-                        };
-                        regions.push(region);
+                        let region = format!("{}:{}-{}", parts[0], parts[1], parts[2]);
+                        regions.push(region.clone());
+
+                        
+                        let name = parts[3].to_string();
+                        let score: f64 = parts[4].trim().parse().unwrap();
+
+                        names.insert(region.clone(), name);
+                        scores.insert(region, score);
                     } else {
                         return Err(UniverseError::ParsingError(line));
                     }
                 }
 
-                // sort by the score in the 5th column
-                // sort high to low, this enables us to then order the regions
-                // post processing by score
-                regions.sort_by(|a, b| {
-                    let score_a: f32 = a
-                        .rest
-                        .as_ref()
-                        .unwrap()
-                        .split_whitespace()
-                        .next()
-                        .unwrap()
-                        .parse()
-                        .unwrap();
-                    let score_b: f32 = b
-                        .rest
-                        .as_ref()
-                        .unwrap()
-                        .split_whitespace()
-                        .next()
-                        .unwrap()
-                        .parse()
-                        .unwrap();
-
-                    score_b.partial_cmp(&score_a).unwrap()
-                });
-
-                (true, regions)
+                
+                (regions, Some(names), Some(scores))
             }
 
             UniverseFileType::Unknown => {
@@ -177,14 +136,16 @@ impl TryFrom<&Path> for Universe {
             }
         };
 
-        let region_to_id = generate_region_to_id_map(&regions);
-        let id_to_region = generate_id_to_region_map(&regions);
+        let region_to_id = generate_region_string_to_id_map(&regions);
+        let id_to_region = generate_id_to_region_string_map(&regions);
 
         Ok(Universe {
             regions,
             region_to_id,
             id_to_region,
-            ordered,
+            names,
+            scores,
+            special_tokens: None,
         })
     }
 }
@@ -209,13 +170,14 @@ mod tests {
     fn test_create_vanilla_universe(vanilla_peaks_path: String) {
         let universe = Universe::try_from(Path::new(&vanilla_peaks_path)).unwrap();
         assert_eq!(universe.len(), 25); // there are 25 regions in the file
-        assert_eq!(universe.is_ordered(), false);
+        assert_eq!(universe.scores.is_none(), true);
     }
 
     #[rstest]
     fn test_create_ordered_universe(ordered_peaks_path: String) {
         let universe = Universe::try_from(Path::new(&ordered_peaks_path)).unwrap();
         assert_eq!(universe.len(), 25); // there are 25 regions in the file
-        assert_eq!(universe.is_ordered(), true);
+        assert_eq!(universe.names.is_some(), true);
+        assert_eq!(universe.scores.is_some(), true);
     }
 }

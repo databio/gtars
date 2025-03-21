@@ -18,15 +18,39 @@ pub fn create_interval_tree_from_universe(
     let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
 
     for region in universe.regions.iter() {
+
+        // skip any special tokens that snuck into the regions
+        if let Some(special_tokens) = &universe.special_tokens {
+            if special_tokens.contains(&region.to_string()) {
+                continue;
+            }
+        }
+
+        let parts = region.split(":").collect::<Vec<&str>>();
+
+        let chr = parts[0].to_string();
+        let start_end = parts[1];
+
+
+        let start_end_parts = start_end.split("-").collect::<Vec<&str>>();
+        let start = start_end_parts[0];
+        let end = start_end_parts[1];
+
+        let start = start.parse::<u32>().unwrap();
+        let stop = end.parse::<u32>().unwrap();
+
+        let val = universe.convert_token_to_id(region).unwrap();
+
+
         // create interval
         let interval = Interval {
-            start: region.start,
-            stop: region.end,
-            val: universe.convert_token_to_id(region).unwrap(),
+            start,
+            stop,
+            val
         };
 
         // use chr to get the vector of intervals
-        let chr_intervals = intervals.entry(region.chr.clone()).or_default();
+        let chr_intervals = intervals.entry(chr.clone()).or_default();
 
         // push interval to vector
         chr_intervals.push(interval);

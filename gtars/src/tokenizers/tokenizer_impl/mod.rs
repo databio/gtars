@@ -1,15 +1,15 @@
 pub mod bits_tree;
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use bits_tree::BitsTree;
-use rayon::prelude::*;
 use thiserror::Error;
 
 use crate::common::models::Region;
 
 use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileType, TokenizerType};
-use super::tokens::TokenizedRegionSet;
+use super::encoding::{Encoding, BatchEncoding};
 use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
@@ -28,19 +28,34 @@ pub enum TokenizerError {
     Anyhow(#[from] anyhow::Error),
 }
 
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Token {
+    pub id: u32,
+    pub value: String,
+}
+
+impl Token {
+    pub fn new(id: u32, value: String) -> Self {
+        Self { id, value }
+    }
+}
+
 pub trait GTokenize: Send + Sync {
     /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`
     /// are expected to be relative to the given sequence.
-    fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError>;
+    fn tokenize(&self, regions: &[Region]) -> Result<Vec<Token>, TokenizerError>;
     /// Find the ID associated to a string token
-    fn token_to_id(&self, token: &Region) -> Option<u32>;
+    fn token_to_id(&self, token: &str) -> Option<u32>;
     /// Find the string token associated to an ID
-    fn id_to_token(&self, id: u32) -> Option<Region>;
+    fn id_to_token(&self, id: u32) -> Option<String>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
     /// Retrieve the universe -- this is here to
     /// enforce that the tokenizer has a universe
     fn get_universe(&self) -> &Universe;
+    /// Retrieve the entire vocabulary mapping (token -> id)
+    fn get_vocab(&self) -> HashMap<String, u32>;
 }
 
 pub struct Tokenizer {
@@ -56,16 +71,6 @@ impl Tokenizer {
         let special_tokens = SpecialTokens::default();
         Tokenizer {
             core,
-            special_tokens,
-        }
-    }
-
-    ///
-    /// Add special tokens to the tokenizer
-    ///
-    pub fn with_special_tokens(self, special_tokens: SpecialTokens) -> Self {
-        Tokenizer {
-            core: self.core,
             special_tokens,
         }
     }
@@ -125,52 +130,19 @@ impl Tokenizer {
         }
     }
 
-    ///
-    /// Tokenize the given set of regions into tokens. This returns a `TokenizedRegionSet` which contains
-    /// the IDs of the tokens corresponding to the input regions and a pointer to the universe.
-    ///
-    pub fn tokenize(&self, regions: &[Region]) -> Result<TokenizedRegionSet, TokenizerError> {
-        let mut res = self.core.tokenize(regions)?;
-        if res.is_empty() {
-            res.ids
-                .push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
+    pub fn tokenize(&self, regions: &[Region]) -> Result<Vec<String>, TokenizerError> {
+        let tokenized = self.core.tokenize(regions)?;
+        if tokenized.is_empty() {
+            return Ok(vec![self.special_tokens.unk.clone()]);
         }
-        // sort ids for order
-        res.ids.sort();
-        Ok(res)
+        Ok(tokenized.into_iter().map(|t| t.value).collect())
     }
 
-    ///
-    /// Tokenize a batch of regions into tokens. This returns a `Vec<TokenizedRegionSet>` which contains
-    /// the IDs of the tokens corresponding to the input regions and a pointer to the universe.
-    ///
-    /// Note: we use `rayon` for parallel processing of the batch. To parameterize the level of parallelism,
-    /// you can set the `RAYON_NUM_THREADS` environment variable.
-    ///
-    pub fn tokenize_batch(
-        &self,
-        regions_batch: &[&[Region]],
-    ) -> Result<Vec<TokenizedRegionSet>, TokenizerError> {
-        regions_batch
-            .par_iter()
-            .map(|regions| {
-                let mut res = self.core.tokenize(regions)?;
-                if res.is_empty() {
-                    // also consider handling the `token_to_id` call as a Result instead of unwrap()
-                    res.ids
-                        .push(self.core.token_to_id(&self.special_tokens.unk).unwrap());
-                }
-                res.ids.sort();
-                Ok(res)
-            })
-            .collect()
-    }
-
-    pub fn token_to_id(&self, token: &Region) -> Option<u32> {
+    pub fn convert_token_to_id(&self, token: &str) -> Option<u32> {
         self.core.token_to_id(token)
     }
 
-    pub fn id_to_token(&self, id: u32) -> Option<Region> {
+    pub fn convert_id_to_token(&self, id: u32) -> Option<String> {
         self.core.id_to_token(id)
     }
 
@@ -178,68 +150,40 @@ impl Tokenizer {
         self.core.get_vocab_size()
     }
 
-    pub fn get_universe(&self) -> &Universe {
-        self.core.get_universe()
+    pub fn get_vocab(&self) -> HashMap<String, u32> {
+        self.core.get_vocab()
+    }
+
+    pub fn get_unk_token(&self) -> String {
+        self.special_tokens.unk.clone()
+    }
+
+    pub fn get_pad_token(&self) -> String {
+        self.special_tokens.pad.clone()
+    }
+
+    pub fn get_mask_token(&self) -> String {
+        self.special_tokens.mask.clone()
+    }
+
+    pub fn get_cls_token(&self) -> String {
+        self.special_tokens.cls.clone()
+    }
+
+    pub fn get_eos_token(&self) -> String {
+        self.special_tokens.eos.clone()
+    }
+
+    pub fn get_bos_token(&self) -> String {
+        self.special_tokens.bos.clone()
+    }
+
+    pub fn get_sep_token(&self) -> String {
+        self.special_tokens.sep.clone()
     }
 
     pub fn get_special_tokens(&self) -> &SpecialTokens {
         &self.special_tokens
-    }
-
-    pub fn get_unk_token(&self) -> &Region {
-        &self.special_tokens.unk
-    }
-
-    pub fn get_pad_token(&self) -> &Region {
-        &self.special_tokens.pad
-    }
-
-    pub fn get_mask_token(&self) -> &Region {
-        &self.special_tokens.mask
-    }
-
-    pub fn get_cls_token(&self) -> &Region {
-        &self.special_tokens.cls
-    }
-
-    pub fn get_sep_token(&self) -> &Region {
-        &self.special_tokens.sep
-    }
-
-    pub fn get_bos_token(&self) -> &Region {
-        &self.special_tokens.bos
-    }
-
-    pub fn get_eos_token(&self) -> &Region {
-        &self.special_tokens.eos
-    }
-
-    pub fn get_unk_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.unk).unwrap()
-    }
-
-    pub fn get_pad_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.pad).unwrap()
-    }
-
-    pub fn get_mask_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.mask).unwrap()
-    }
-
-    pub fn get_cls_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.cls).unwrap()
-    }
-
-    pub fn get_sep_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.sep).unwrap()
-    }
-
-    pub fn get_bos_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.bos).unwrap()
-    }
-
-    pub fn get_eos_token_id(&self) -> u32 {
-        self.token_to_id(&self.special_tokens.eos).unwrap()
     }
 
 }
@@ -314,14 +258,10 @@ mod tokenizer_tests {
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
         // check that unk was overridden
-        assert_eq!(tokenizer.get_unk_token().chr, "chrUNKNOWN");
-        assert_eq!(tokenizer.get_unk_token().start, 100);
-        assert_eq!(tokenizer.get_unk_token().end, 200);
+        assert_eq!(tokenizer.get_unk_token(), "<unk>");
 
         // check that pad didnt change
-        assert_eq!(tokenizer.get_pad_token().chr, "chrPAD");
-        assert_eq!(tokenizer.get_pad_token().start, 0);
-        assert_eq!(tokenizer.get_pad_token().end, 0);
+        assert_eq!(tokenizer.get_pad_token(), "<pad>");
     }
 
     #[rstest]
@@ -340,12 +280,8 @@ mod tokenizer_tests {
         let tokenized = tokenizer.tokenize(&regions);
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
-        assert_eq!(tokenized.ids.len(), 1);
-        assert_eq!(tokenized.ids[0], tokenizer.get_unk_token_id());
-        assert_eq!(
-            tokenizer.id_to_token(tokenized.ids[0]).unwrap().chr,
-            "chrUNK"
-        );
+        assert_eq!(tokenized.len(), 1);
+        assert_eq!(tokenized[0], "<unk>");
     }
 
     #[rstest]
@@ -365,7 +301,7 @@ mod tokenizer_tests {
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
 
-        assert_eq!(tokenized.ids.len(), 1);
+        assert_eq!(tokenized.len(), 1);
     }
 
     #[rstest]
@@ -395,19 +331,13 @@ mod tokenizer_tests {
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.len(), 2);
 
-        let tokenized = tokenized.into_region_vec();
-
         // chr1:151399432-151399527 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0].chr, "chr1");
-        assert_eq!(tokenized[0].start, 151399431); // igv shows 151399432 (but we are 0-based)
-        assert_eq!(tokenized[0].end, 151399527);
-        assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(6));
+        assert_eq!(tokenized[0], "chr1:151399431-151399527");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[0]), Some(6));
 
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1].chr, "chr2");
-        assert_eq!(tokenized[1].start, 203871200); // igv shows 203871201 (but we are 0-based)
-        assert_eq!(tokenized[1].end, 203871375);
-        assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(7));
+        assert_eq!(tokenized[1], "chr2:203871200-203871375");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(7));
     }
 
     #[rstest]
@@ -429,19 +359,13 @@ mod tokenizer_tests {
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.len(), 2);
 
-        let tokenized = tokenized.into_region_vec();
-
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0].chr, "chr2");
-        assert_eq!(tokenized[0].start, 203871200); // igv shows 203871201 (but we are 0-based)
-        assert_eq!(tokenized[0].end, 203871375);
-        assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(7));
+        assert_eq!(tokenized[0],"chr2:203871200-203871375");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[0]), Some(7));
 
         // chr2:203871388-203871588 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1].chr, "chr2");
-        assert_eq!(tokenized[1].start, 203871387); // igv shows 203871388 (but we are 0-based)
-        assert_eq!(tokenized[1].end, 203871588);
-        assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(8));
+        assert_eq!(tokenized[1],"chr2:203871387-203871588");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(8));
     }
 
     #[rstest]
@@ -472,18 +396,16 @@ mod tokenizer_tests {
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.len(), 2);
-        let tokenized = tokenized.into_region_vec();
+        
 
         // chr9:3526071-3526165 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0].chr, "chr9");
-        assert_eq!(tokenized[0].start, 3_526_071); // igv shows 3526072 (but we are 0-based)
-        assert_eq!(tokenized[0].end, 3_526_165);
-        assert_eq!(tokenizer.token_to_id(&tokenized[0]), Some(11));
+        assert_eq!(tokenized[0], "chr9:3526071-3526165");
+        let first_id = tokenizer.convert_token_to_id(&tokenized[0]);
+        assert_eq!(first_id, Some(11));
 
         // chr9:3526183-3526269 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1].chr, "chr9");
-        assert_eq!(tokenized[1].start, 3_526_183); // igv shows 3526184 (but we are 0-based)
-        assert_eq!(tokenized[1].end, 3_526_269);
-        assert_eq!(tokenizer.token_to_id(&tokenized[1]), Some(18));
+        assert_eq!(tokenized[1], "chr9:3526183-3526269");
+        let second_id = tokenizer.convert_token_to_id(&tokenized[1]);
+        assert_eq!(second_id, Some(10));
     }
 }

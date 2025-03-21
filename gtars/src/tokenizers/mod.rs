@@ -6,13 +6,13 @@
 //! 
 pub mod config;
 pub mod tokenizer_impl;
-pub mod tokens;
+pub mod encoding;
 pub mod universe;
 pub mod utils;
 
 // re-export things
 pub use tokenizer_impl::bits_tree::*;
 pub use tokenizer_impl::*;
-pub use tokens::*;
+pub use encoding::*;
 pub use universe::*;
 pub use utils::*;

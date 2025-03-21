@@ -88,6 +88,44 @@ pub fn generate_id_to_region_map(regions: &[Region]) -> HashMap<u32, Region> {
     id_to_region
 }
 
+///
+/// Create a region-to-id hash-map from a list of region strings
+///
+/// # Arguments:
+/// - regions: vec![] of region strings in the form `chr:start-end`
+pub fn generate_region_string_to_id_map(regions: &[String]) -> HashMap<String, u32> {
+    let mut current_id = 0;
+    let mut region_to_id: HashMap<String, u32> = HashMap::new();
+    for region in regions.iter() {
+        region_to_id.entry(region.to_owned()).or_insert_with(|| {
+            let old_id = current_id;
+            current_id += 1;
+            old_id
+        });
+    }
+
+    region_to_id
+}
+
+///
+/// Generate an id-to-region string hash-map from a list of region strings
+///
+/// # Arguments:
+/// - regions: vec![] of region strings in the form `chr:start-end`
+pub fn generate_id_to_region_string_map(regions: &[String]) -> HashMap<u32, String> {
+    let mut current_id = 0;
+    let mut id_to_region: HashMap<u32, String> = HashMap::new();
+
+    for region in regions.iter() {
+        id_to_region.entry(current_id).or_insert_with(|| {
+            current_id += 1;
+            region.clone()
+        });
+    }
+
+    id_to_region
+}
+
 pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     let chrom_sizes_file = File::open(path.as_ref())
         .with_context(|| "Failed to open chrom sizes file.")
