@@ -41,7 +41,7 @@ impl PyTokenizedRegionSet {
                 .map(|id| {
                     self.universe
                         .borrow(py)
-                        .convert_id_to_region(*id)
+                        .convert_id_to_token(*id)
                         .unwrap()
                         .clone()
                 })
@@ -111,7 +111,7 @@ impl From<PyTokenizedRegion> for PyRegion {
             value
                 .universe
                 .borrow(py)
-                .convert_id_to_region(value.id)
+                .convert_id_to_token(value.id)
                 .unwrap()
         })
     }
@@ -125,7 +125,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_token(self.id)
                 .unwrap()
                 .chr)
         })
@@ -137,7 +137,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_token(self.id)
                 .unwrap()
                 .start)
         })
@@ -149,7 +149,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_token(self.id)
                 .unwrap()
                 .end)
         })
@@ -160,7 +160,7 @@ impl PyTokenizedRegion {
             Ok(self
                 .universe
                 .borrow(py)
-                .convert_id_to_region(self.id)
+                .convert_id_to_token(self.id)
                 .unwrap())
         })
     }

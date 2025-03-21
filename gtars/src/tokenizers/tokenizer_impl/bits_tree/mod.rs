@@ -51,11 +51,11 @@ impl GTokenize for BitsTree {
     }
 
     fn token_to_id(&self, token: &Region) -> Option<u32> {
-        self.universe.convert_region_to_id(token)
+        self.universe.convert_token_to_id(token)
     }
 
     fn id_to_token(&self, id: u32) -> Option<Region> {
-        self.universe.convert_id_to_region(id)
+        self.universe.convert_id_to_token(id)
     }
 
     fn get_vocab_size(&self) -> usize {

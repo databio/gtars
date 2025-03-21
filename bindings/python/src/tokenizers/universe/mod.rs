@@ -22,14 +22,14 @@ impl PyUniverse {
         self.universe.add_token_to_universe(&region);
     }
 
-    pub fn convert_region_to_id(&self, region: &PyRegion) -> Option<u32> {
+    pub fn convert_token_to_id(&self, region: &PyRegion) -> Option<u32> {
         let region = region.to_region();
-        self.universe.convert_region_to_id(&region)
+        self.universe.convert_token_to_id(&region)
     }
 
-    pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
+    pub fn convert_id_to_token(&self, id: u32) -> Option<PyRegion> {
         self.universe
-            .convert_id_to_region(id)
+            .convert_id_to_token(id)
             .map(PyRegion::from)
     }
 

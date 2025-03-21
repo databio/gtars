@@ -145,16 +145,16 @@ impl PyTokenizer {
         self.tokenizer.get_vocab_size()
     }
 
-    fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
+    fn convert_id_to_token(&self, id: u32) -> Option<PyRegion> {
         Python::with_gil(|py| {
-            let region = self.universe.borrow(py).convert_id_to_region(id);
+            let region = self.universe.borrow(py).convert_id_to_token(id);
             region
         })
     }
 
-    fn convert_region_to_id(&self, region: &PyRegion) -> Option<u32> {
+    fn convert_token_to_id(&self, region: &PyRegion) -> Option<u32> {
         Python::with_gil(|py| {
-            let id = self.universe.borrow(py).convert_region_to_id(region);
+            let id = self.universe.borrow(py).convert_token_to_id(region);
             id
         })
     }
@@ -174,7 +174,7 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             let regions = ids
                 .iter()
-                .map(|id| self.universe.borrow(py).convert_id_to_region(*id).unwrap_or(
+                .map(|id| self.universe.borrow(py).convert_id_to_token(*id).unwrap_or(
                     PyRegion {
                         chr: "chrUNK".to_string(),
                         start: 0,

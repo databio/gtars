@@ -47,7 +47,7 @@ impl PyUniverse {
         self.id_to_region.insert(new_id as u32, region.to_owned());
     }
 
-    pub fn convert_region_to_id(&self, region: &PyRegion) -> Option<u32> {
+    pub fn convert_token_to_id(&self, region: &PyRegion) -> Option<u32> {
         let id = self.region_to_id.get(region);
         id.map(|id| id.to_owned())
     }
@@ -59,10 +59,10 @@ impl PyUniverse {
             end,
             rest: None,
         };
-        self.convert_region_to_id(&region)
+        self.convert_token_to_id(&region)
     }
 
-    pub fn convert_id_to_region(&self, id: u32) -> Option<PyRegion> {
+    pub fn convert_id_to_token(&self, id: u32) -> Option<PyRegion> {
         self.id_to_region.get(&id).cloned()
     }
 

@@ -15,7 +15,7 @@ pub struct TokenizedRegion<'a> {
 
 impl From<TokenizedRegion<'_>> for Region {
     fn from(val: TokenizedRegion<'_>) -> Self {
-        val.universe.convert_id_to_region(val.id).unwrap()
+        val.universe.convert_id_to_token(val.id).unwrap()
     }
 }
 
@@ -27,7 +27,7 @@ impl TokenizedRegion<'_> {
 
 impl Display for TokenizedRegion<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let r = self.universe.convert_id_to_region(self.id).unwrap();
+        let r = self.universe.convert_id_to_token(self.id).unwrap();
         write!(f, "{}:{}-{}", r.chr, r.start, r.end)
     }
 }

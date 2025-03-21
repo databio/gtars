@@ -41,12 +41,12 @@ impl Universe {
         self.regions.push(region.to_owned());
     }
 
-    pub fn convert_region_to_id(&self, region: &Region) -> Option<u32> {
+    pub fn convert_token_to_id(&self, region: &Region) -> Option<u32> {
         let id = self.region_to_id.get(region);
         id.map(|id| id.to_owned())
     }
 
-    pub fn convert_id_to_region(&self, id: u32) -> Option<Region> {
+    pub fn convert_id_to_token(&self, id: u32) -> Option<Region> {
         self.id_to_region.get(&id).cloned()
     }
 

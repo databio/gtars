@@ -92,7 +92,7 @@ def test_tokenize_single_region_not_overlapping():
     assert tokenized is not None
     assert len(tokenized.ids) == 1
     assert tokenized.ids[0] == tokenizer.get_unk_token_id()
-    assert tokenizer.convert_id_to_region(tokenized.ids[0]).chr == "chrUNK"
+    assert tokenizer.convert_id_to_token(tokenized.ids[0]).chr == "chrUNK"
 
 def test_tokenize_unk_chrom():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -117,12 +117,12 @@ def test_tokenize_on_two_chroms():
     assert tokenized_regions[0].chr == "chr1"
     assert tokenized_regions[0].start == 151399431
     assert tokenized_regions[0].end == 151399527
-    assert tokenizer.convert_region_to_id(tokenized_regions[0]) == 6
+    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 6
 
     assert tokenized_regions[1].chr == "chr2"
     assert tokenized_regions[1].start == 203871200
     assert tokenized_regions[1].end == 203871375
-    assert tokenizer.convert_region_to_id(tokenized_regions[1]) == 7
+    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 7
 
 def test_tokenize_with_multi_overlap():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -136,12 +136,12 @@ def test_tokenize_with_multi_overlap():
     assert tokenized_regions[0].chr == "chr2"
     assert tokenized_regions[0].start == 203871200
     assert tokenized_regions[0].end == 203871375
-    assert tokenizer.convert_region_to_id(tokenized_regions[0]) == 7
+    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 7
 
     assert tokenized_regions[1].chr == "chr2"
     assert tokenized_regions[1].start == 203871387
     assert tokenized_regions[1].end == 203871588
-    assert tokenizer.convert_region_to_id(tokenized_regions[1]) == 8
+    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 8
 
 def test_tokenize_with_order():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
@@ -158,9 +158,9 @@ def test_tokenize_with_order():
     assert tokenized_regions[0].chr == "chr9"
     assert tokenized_regions[0].start == 3526071
     assert tokenized_regions[0].end == 3526165
-    assert tokenizer.convert_region_to_id(tokenized_regions[0]) == 11
+    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 11
 
     assert tokenized_regions[1].chr == "chr9"
     assert tokenized_regions[1].start == 3526183
     assert tokenized_regions[1].end == 3526269
-    assert tokenizer.convert_region_to_id(tokenized_regions[1]) == 18
+    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 18

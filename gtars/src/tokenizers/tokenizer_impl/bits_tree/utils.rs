@@ -22,7 +22,7 @@ pub fn create_interval_tree_from_universe(
         let interval = Interval {
             start: region.start,
             stop: region.end,
-            val: universe.convert_region_to_id(region).unwrap(),
+            val: universe.convert_token_to_id(region).unwrap(),
         };
 
         // use chr to get the vector of intervals

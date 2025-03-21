@@ -23,7 +23,7 @@ class Universe:
         self.region_to_id[region] = new_id
         self.id_to_region[new_id] = region
 
-    def convert_region_to_id(self, region: Region) -> int:
+    def convert_token_to_id(self, region: Region) -> int:
         """
         Convert a region to its corresponding ID.
 
@@ -44,9 +44,9 @@ class Universe:
         :return: The ID of the region, or None if the region is not found.
         """
         region = Region(chrom, start, end)
-        return self.convert_region_to_id(region)
+        return self.convert_token_to_id(region)
 
-    def convert_id_to_region(self, id: int) -> Region:
+    def convert_id_to_token(self, id: int) -> Region:
         """
         Convert an ID to its corresponding region.
 
@@ -349,7 +349,7 @@ class Tokenizer:
         :return: The decoded regions.
         """
     
-    def convert_id_to_region(self, id: int) -> Region:
+    def convert_id_to_token(self, id: int) -> Region:
         """
         Convert an ID to its corresponding region.
 
@@ -358,7 +358,7 @@ class Tokenizer:
         :return: The region corresponding to the ID.
         """
 
-    def convert_region_to_id(self, region: Region) -> int:
+    def convert_token_to_id(self, region: Region) -> int:
         """
         Convert a region to its corresponding ID.
 

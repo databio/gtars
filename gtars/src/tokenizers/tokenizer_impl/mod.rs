@@ -241,6 +241,7 @@ impl Tokenizer {
     pub fn get_eos_token_id(&self) -> u32 {
         self.token_to_id(&self.special_tokens.eos).unwrap()
     }
+
 }
 
 #[cfg(test)]
