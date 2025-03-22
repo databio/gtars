@@ -201,6 +201,35 @@ impl Tokenizer {
         self.special_tokens.sep.clone()
     }
 
+    // ids
+    pub fn get_unk_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.unk).unwrap()
+    }
+
+    pub fn get_pad_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.pad).unwrap()
+    }
+
+    pub fn get_mask_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.mask).unwrap()
+    }
+
+    pub fn get_cls_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.cls).unwrap()
+    }
+
+    pub fn get_eos_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.eos).unwrap()
+    }
+
+    pub fn get_bos_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.bos).unwrap()
+    }
+
+    pub fn get_sep_token_id(&self) -> u32 {
+        self.convert_token_to_id(&self.special_tokens.sep).unwrap()
+    }
+
     pub fn get_special_tokens_mask(&self, tokens: &[String]) -> Vec<bool> {
         tokens.iter().map(|token| {
             token == &self.special_tokens.unk ||
