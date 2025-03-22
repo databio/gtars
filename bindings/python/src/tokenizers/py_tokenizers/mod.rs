@@ -96,7 +96,7 @@ impl PyTokenizer {
         })
     }
 
-    fn convert_ids_to_token(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+    fn convert_ids_to_tokens(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
         Python::with_gil(|py| {
             // if a single id is passed
             if let Ok(id) = id.extract::<u32>() {
@@ -114,7 +114,7 @@ impl PyTokenizer {
         })
     }
 
-    fn convert_token_to_ids(&self, region: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+    fn convert_tokens_to_ids(&self, region: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
         Python::with_gil(|py| {
             // if a single token is passed
             if let Ok(token) = region.extract::<String>() {
