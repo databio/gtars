@@ -60,16 +60,40 @@ impl PyTokenizer {
     }
 
     // encode returns a list of ids
-    fn encode(&self, regions: &Bound<'_, PyAny>) -> Result<Vec<u32>> {
-        let rs = extract_regions_from_py_any(regions)?;
-        let tokenized = self.tokenizer.encode(&rs.regions)?;
-
-        Ok(tokenized)
-        
+    fn encode(&self, tokens: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            // if a single id is passed
+            if let Ok(token) = tokens.extract::<String>() {
+                return Ok(self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id()).into_py(py))
+            }
+            // if a list of ids is passed
+            else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
+                let ids: Vec<u32> = tokens.iter()
+                    .map(|token| self.tokenizer.convert_token_to_id(token).unwrap_or(self.get_unk_token_id()))
+                    .collect();
+                return Ok(ids.into_py(py))
+            } else {
+                return Err(PyValueError::new_err("Invalid input type for convert_ids_to_token"))
+            }
+        })
     }
 
-    fn decode(&self, ids: Vec<u32>) -> Result<Vec<String>> {
-        
+    fn decode(&self, ids: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            // if a single id is passed
+            if let Ok(id) = ids.extract::<u32>() {
+                return Ok(self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()).into_py(py))
+            }
+            // if a list of ids is passed
+            else if let Ok(ids) = ids.extract::<Vec<u32>>() {
+                let tokens: Vec<String> = ids.iter()
+                    .map(|&id| self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()))
+                    .collect();
+                return Ok(tokens.into_py(py))
+            } else {
+                return Err(PyValueError::new_err("Invalid input type for convert_ids_to_token"))
+            }
+        })
     }
 
     fn convert_ids_to_token(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
