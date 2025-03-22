@@ -9,7 +9,6 @@ use thiserror::Error;
 use crate::common::models::Region;
 
 use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileType, TokenizerType};
-use super::encoding::{Encoding, BatchEncoding};
 use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
@@ -202,8 +201,24 @@ impl Tokenizer {
         self.special_tokens.sep.clone()
     }
 
+    pub fn get_special_tokens_mask(&self, tokens: &[String]) -> Vec<bool> {
+        tokens.iter().map(|token| {
+            token == &self.special_tokens.unk ||
+            token == &self.special_tokens.pad ||
+            token == &self.special_tokens.mask ||
+            token == &self.special_tokens.cls ||
+            token == &self.special_tokens.eos ||
+            token == &self.special_tokens.bos ||
+            token == &self.special_tokens.sep
+        }).collect()
+    }
+
     pub fn get_special_tokens(&self) -> &SpecialTokens {
         &self.special_tokens
+    }
+
+    pub fn get_universe(&self) -> &Universe {
+        self.core.get_universe()
     }
 
 }
