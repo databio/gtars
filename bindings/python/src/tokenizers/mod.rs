@@ -1,4 +1,3 @@
-mod encoding;
 mod py_tokenizers;
 mod universe;
 

@@ -204,10 +204,4 @@ impl PyTokenizer {
             self.tokenizer.get_vocab_size()
         )
     }
-
-    // This needs to sort of mimic the behavior of the PreTrainedTokenizer __call__ in Huggingface
-    // Where it returns a batch encoding with variable-type input ids and attention masks
-    // fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<> {
-        
-    // }
 }
