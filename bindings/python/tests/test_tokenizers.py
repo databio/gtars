@@ -37,17 +37,17 @@ def test_tokenizer_initialization(tokenizer_config: str):
     tokenizer = Tokenizer.from_config(tokenizer_config)
 
     assert tokenizer is not None
-    assert tokenizer.get_vocab_size() == 32 # 25 + 7 special tokens
+    assert tokenizer.vocab_size == 32 # 25 + 7 special tokens
     
 def test_tokenizer_creation_from_bed(tokenizer_peaks_bed: str):
     tokenizer = Tokenizer.from_bed(tokenizer_peaks_bed)
     assert tokenizer is not None
-    assert tokenizer.get_vocab_size() == 32 # 25 + 7 special tokens
+    assert tokenizer.vocab_size == 32 # 25 + 7 special tokens
 
 def test_tokenizer_creation_from_bed_gz(tokenizer_peaks_bed_gz: str):
     tokenizer = Tokenizer.from_bed(tokenizer_peaks_bed_gz)
     assert tokenizer is not None
-    assert tokenizer.get_vocab_size() == 32 # 25 + 7 special tokens
+    assert tokenizer.vocab_size == 32 # 25 + 7 special tokens
 
 @pytest.mark.parametrize("path", [
     os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.bed"),
@@ -59,7 +59,7 @@ def test_tokenizer_creation_from_bed_gz(tokenizer_peaks_bed_gz: str):
 def test_tokenizer_creation_auto_all(path: str):
     tokenizer = Tokenizer(path)
     assert tokenizer is not None
-    assert tokenizer.get_vocab_size() == 32 # 25 + 7 special tokens  
+    assert tokenizer.vocab_size == 32 # 25 + 7 special tokens  
     
 def test_tokenizer_bad_tokenizer_type():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer_bad_ttype.toml")
@@ -70,19 +70,16 @@ def test_tokenizer_custom_special_tokens():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer_custom_specials.toml")
     tokenizer = Tokenizer.from_config(cfg_path)
     assert tokenizer is not None
-    assert tokenizer.get_vocab_size() == 32 # 25 + 7 special tokens
+    assert tokenizer.vocab_size == 32 # 25 + 7 special tokens
 
     # check that unk was overridden
-    unk_token = tokenizer.get_unk_token()
-    assert unk_token.chr == "chrUNKNOWN"
-    assert unk_token.start == 100
-    assert unk_token.end == 200
+    unk_token = tokenizer.unk_token
+    assert unk_token == "<UNKNOWN>"
 
     # check that pad didn't change
-    pad_token = tokenizer.get_pad_token()
-    assert pad_token.chr == "chrPAD"
-    assert pad_token.start == 0
-    assert pad_token.end == 0
+    pad_token = tokenizer.pad_token
+    assert pad_token == "<pad>"
+    
 
 def test_tokenize_single_region_not_overlapping():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -90,9 +87,8 @@ def test_tokenize_single_region_not_overlapping():
     regions = [Region("chr1", 50, 150)]
     tokenized = tokenizer.tokenize(regions)
     assert tokenized is not None
-    assert len(tokenized.ids) == 1
-    assert tokenized.ids[0] == tokenizer.get_unk_token_id()
-    assert tokenizer.convert_id_to_token(tokenized.ids[0]).chr == "chrUNK"
+    assert len(tokenized) == 1
+    assert tokenizer.convert_tokens_to_ids(tokenized[0]) == 25
 
 def test_tokenize_unk_chrom():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -100,7 +96,8 @@ def test_tokenize_unk_chrom():
     regions = [Region("chr999", 50, 150)]
     tokenized = tokenizer.tokenize(regions)
     assert tokenized is not None
-    assert len(tokenized.ids) == 1
+    assert len(tokenized) == 1
+    assert tokenizer.convert_tokens_to_ids(tokenized[0]) == 25
 
 def test_tokenize_on_two_chroms():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -113,16 +110,11 @@ def test_tokenize_on_two_chroms():
     assert tokenized is not None
     assert len(tokenized) == 2
 
-    tokenized_regions = tokenized.to_regions()
-    assert tokenized_regions[0].chr == "chr1"
-    assert tokenized_regions[0].start == 151399431
-    assert tokenized_regions[0].end == 151399527
-    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 6
+    assert tokenized[0] == "chr1:151399431-151399527"
+    assert tokenizer.convert_tokens_to_ids(tokenized[0]) == 6
 
-    assert tokenized_regions[1].chr == "chr2"
-    assert tokenized_regions[1].start == 203871200
-    assert tokenized_regions[1].end == 203871375
-    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 7
+    assert tokenized[1] == "chr2:203871200-203871375"
+    assert tokenizer.convert_tokens_to_ids(tokenized[1]) == 7
 
 def test_tokenize_with_multi_overlap():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "tokenizer.toml")
@@ -132,16 +124,11 @@ def test_tokenize_with_multi_overlap():
     assert tokenized is not None
     assert len(tokenized) == 2
 
-    tokenized_regions = tokenized.to_regions()
-    assert tokenized_regions[0].chr == "chr2"
-    assert tokenized_regions[0].start == 203871200
-    assert tokenized_regions[0].end == 203871375
-    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 7
+    assert tokenized[0] == "chr2:203871200-203871375"
+    assert tokenizer.convert_tokens_to_ids(tokenized[0]) == 7
 
-    assert tokenized_regions[1].chr == "chr2"
-    assert tokenized_regions[1].start == 203871387
-    assert tokenized_regions[1].end == 203871588
-    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 8
+    assert tokenized[1] == "chr2:203871387-203871588"
+    assert tokenizer.convert_tokens_to_ids(tokenized[1]) == 8
 
 def test_tokenize_with_order():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
@@ -153,14 +140,33 @@ def test_tokenize_with_order():
     tokenized = tokenizer.tokenize(regions)
     assert tokenized is not None
     assert len(tokenized) == 2
+    assert tokenized[0] == "chr9:3526071-3526165"
+    assert tokenizer.convert_tokens_to_ids(tokenized[0]) == 11
 
-    tokenized_regions = tokenized.to_regions()
-    assert tokenized_regions[0].chr == "chr9"
-    assert tokenized_regions[0].start == 3526071
-    assert tokenized_regions[0].end == 3526165
-    assert tokenizer.convert_token_to_id(tokenized_regions[0]) == 11
+    assert tokenized[1] == "chr9:3526183-3526269"
+    assert tokenizer.convert_tokens_to_ids(tokenized[1]) == 10
 
-    assert tokenized_regions[1].chr == "chr9"
-    assert tokenized_regions[1].start == 3526183
-    assert tokenized_regions[1].end == 3526269
-    assert tokenizer.convert_token_to_id(tokenized_regions[1]) == 18
+def test_get_vocab():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
+
+    vocab = tokenizer.get_vocab()
+    assert vocab is not None
+    assert len(vocab) == 32 # 25 + 7 special tokens
+    assert all([
+        isinstance(k, str) and isinstance(v, int)
+        for k, v in vocab.items()
+    ])
+
+def test_special_tokens_map():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
+
+    special_tokens_map = tokenizer.special_tokens_map()
+    assert special_tokens_map is not None
+    assert isinstance(special_tokens_map, dict)
+    assert all([
+        isinstance(k, str) and isinstance(v, str)
+        for k, v in special_tokens_map.items()
+    ])
+        

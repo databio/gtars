@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use pyo3::prelude::*;
 use pyo3::exceptions::PyValueError;
-use pyo3::types::PyType;
+use pyo3::types::{PyDict, PyType};
 
 use anyhow::Result;
 
@@ -105,7 +107,7 @@ impl PyTokenizer {
             // if a single token is passed
             if let Ok(token) = region.extract::<String>() {
                 let id = self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id());
-                Ok(vec![id].into_py(py))
+                Ok(id.into_py(py))
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = region.extract::<Vec<String>>() {
@@ -192,6 +194,26 @@ impl PyTokenizer {
     #[getter]
     fn get_vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size()
+    }
+
+    #[getter]
+    fn get_special_tokens_map(&self) -> PyResult<Py<PyDict>> {
+        let special_tokens = self.tokenizer.get_special_tokens();
+        Python::with_gil(|py| {
+            let dict = PyDict::new_bound(py);
+            dict.set_item("unk_token", special_tokens.unk.clone())?;
+            dict.set_item("pad_token", special_tokens.pad.clone())?;
+            dict.set_item("mask_token", special_tokens.mask.clone())?;
+            dict.set_item("cls_token", special_tokens.cls.clone())?;
+            dict.set_item("eos_token", special_tokens.eos.clone())?;
+            dict.set_item("bos_token", special_tokens.bos.clone())?;
+            dict.set_item("sep_token", special_tokens.sep.clone())?;
+            Ok(dict.into())
+        })
+    }
+
+    fn get_vocab(&self) -> HashMap<String, u32> {
+        self.tokenizer.get_vocab()
     }
 
     fn __len__(&self) -> usize {
