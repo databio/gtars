@@ -50,11 +50,11 @@ impl PyTokenizer {
     // encode returns a list of ids
     fn encode(&self, tokens: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
         Python::with_gil(|py| {
-            // if a single id is passed
+            // if a single token is passed
             if let Ok(token) = tokens.extract::<String>() {
-                Ok(self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id()).into_py(py))
+                Ok(vec![self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id())].into_py(py))
             }
-            // if a list of ids is passed
+            // if a list of tokens is passed
             else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
                 let ids: Vec<u32> = tokens.iter()
                     .map(|token| self.tokenizer.convert_token_to_id(token).unwrap_or(self.get_unk_token_id()))
@@ -70,7 +70,7 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             // if a single id is passed
             if let Ok(id) = ids.extract::<u32>() {
-                Ok(self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()).into_py(py))
+                Ok(vec![self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token())].into_py(py))
             }
             // if a list of ids is passed
             else if let Ok(ids) = ids.extract::<Vec<u32>>() {

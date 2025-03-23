@@ -162,11 +162,30 @@ def test_special_tokens_map():
     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
     tokenizer = Tokenizer(cfg_path)
 
-    special_tokens_map = tokenizer.special_tokens_map()
+    special_tokens_map = tokenizer.special_tokens_map
     assert special_tokens_map is not None
     assert isinstance(special_tokens_map, dict)
     assert all([
         isinstance(k, str) and isinstance(v, str)
         for k, v in special_tokens_map.items()
     ])
+
+def test_encode_tokens():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
+
+    encoded = tokenizer.encode("chr9:3526071-3526165")
+    assert encoded is not None
+    assert isinstance(encoded, list)
+    assert len(encoded) == 1
+    assert encoded == [11]
+
+def test_decode_tokens():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
+
+    decoded = tokenizer.decode([11])
+    assert decoded is not None
+    assert isinstance(decoded, list)
+    assert decoded == ["chr9:3526071-3526165"]
         
