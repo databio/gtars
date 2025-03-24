@@ -1,3 +1,7 @@
+//!
+//! This module contains utility functions for tokenizers. Basic things 
+//! like universe prapration and special token handling are done here.
+//! 
 use std::path::Path;
 
 use special_tokens::SpecialTokens;
