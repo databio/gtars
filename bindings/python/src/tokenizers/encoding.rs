@@ -1,5 +1,4 @@
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 
 #[pyclass(name="Encoding", module = "gtars.tokenizers")]
 #[derive(Clone)]
@@ -8,9 +7,22 @@ pub struct PyEncoding {
     pub attention_mask: Vec<u32>,
 }
 
-#[pyclass(extends=PyDict, name="BatchEncoding", module = "gtars.tokenizers")]
+#[pyclass(name="BatchEncoding", module = "gtars.tokenizers")]
 #[derive(Clone)]
 pub struct PyBatchEncoding {
+    pub input_ids: PyObject,
+    pub attention_mask: PyObject,
     #[pyo3(get)]
     pub encodings: Vec<PyEncoding>,
+}
+
+#[pymethods]
+impl PyBatchEncoding {
+    fn __getitem__(&self, key: &str) -> PyResult<PyObject> {
+        match key {
+            "input_ids" => Ok(self.input_ids.clone()),
+            "attention_mask" => Ok(self.attention_mask.clone()),
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!("Invalid key: {}", key))),
+        }
+    }
 }

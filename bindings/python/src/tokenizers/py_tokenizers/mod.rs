@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::types::{PyDict, PyType};
 
 use anyhow::Result;
@@ -234,24 +234,31 @@ impl PyTokenizer {
         )
     }
 
-    fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyBatchEncoding> {
-        let rs = extract_regions_from_py_any(regions)?;
-        let encoded = self.tokenizer.encode(&rs.regions)?;
-        let attention_mask = encoded.iter().map(|id| {
-            if *id == self.get_pad_token_id() {
-                0
-            } else {
-                1
-            }
-        })
-        .collect();
+    fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            let rs = extract_regions_from_py_any(regions)?;
+            let encoded = self.tokenizer.encode(&rs.regions)
+                .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
+            let attention_mask = encoded.iter().map(|id| {
+                if *id == self.get_pad_token_id() {
+                    0
+                } else {
+                    1
+                }
+            })
+            .collect();
 
-        Ok(PyBatchEncoding {
-            encodings: vec![PyEncoding {
+            let encoding = PyEncoding {
                 ids: encoded,
                 attention_mask,
-            }],
+            };
+
+            Ok(PyBatchEncoding {
+                input_ids: encoding.clone().ids.into_py(py),
+                attention_mask: encoding.clone().attention_mask.into_py(py),
+                encodings: vec![encoding],
+            }.into_py(py))
         })
-        
     }
+    
 }
