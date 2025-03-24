@@ -9,6 +9,8 @@ use anyhow::Result;
 use crate::utils::extract_regions_from_py_any;
 use gtars::tokenizers::Tokenizer;
 
+use super::encoding::{PyBatchEncoding, PyEncoding};
+
 #[pyclass(name = "Tokenizer", module = "gtars.tokenizers")]
 pub struct PyTokenizer {
     tokenizer: Tokenizer,
@@ -230,5 +232,26 @@ impl PyTokenizer {
             "Tokenizer({} total regions)",
             self.tokenizer.get_vocab_size()
         )
+    }
+
+    fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyBatchEncoding> {
+        let rs = extract_regions_from_py_any(regions)?;
+        let encoded = self.tokenizer.encode(&rs.regions)?;
+        let attention_mask = encoded.iter().map(|id| {
+            if *id == self.get_pad_token_id() {
+                0
+            } else {
+                1
+            }
+        })
+        .collect();
+
+        Ok(PyBatchEncoding {
+            encodings: vec![PyEncoding {
+                ids: encoded,
+                attention_mask,
+            }],
+        })
+        
     }
 }

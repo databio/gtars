@@ -1,5 +1,6 @@
 mod py_tokenizers;
 mod universe;
+mod encoding;
 
 use pyo3::prelude::*;
 
