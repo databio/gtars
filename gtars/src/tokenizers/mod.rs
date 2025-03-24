@@ -4,6 +4,24 @@
 //! tokenization of genomic data into a known vocabulary. This is especially useful for genomic data machine
 //! learning models that are based on NLP-models like tranformers.
 //! 
+//! # Example
+//! ```rust
+//! use std::path::Path;
+//! 
+//! use gtars::tokenizers::Tokenizer;
+//! use gtars::common::models::Region;
+//! 
+//! let tokenizer = Tokenizer::from_bed(Path::new("tests/data/tokenizers/peaks.bed")).unwrap();
+//! 
+//! let regions = vec![Region {
+//!     chr: "chr1".to_string(),
+//!     start: 100,  
+//!     end: 200,
+//!     rest: None,
+//! }];
+//! let tokens = tokenizer.tokenize(&regions);
+//! ```
+//! 
 pub mod config;
 pub mod tokenizer_impl;
 pub mod encoding;

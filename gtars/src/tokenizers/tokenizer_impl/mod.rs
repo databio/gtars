@@ -322,7 +322,7 @@ mod tokenizer_tests {
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
         // check that unk was overridden
-        assert_eq!(tokenizer.get_unk_token(), "<unk>");
+        assert_eq!(tokenizer.get_unk_token(), "<UNKNOWN>");
 
         // check that pad didnt change
         assert_eq!(tokenizer.get_pad_token(), "<pad>");

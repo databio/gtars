@@ -60,6 +60,13 @@ pub enum TokenizerConfigError {
 pub type TokenizerConfigResult<T> = std::result::Result<T, TokenizerConfigError>;
 
 impl TokenizerInputFileType {
+    ///
+    /// Determine the type of the tokenizer input file based on its extension.
+    /// # Arguments
+    /// * `path` - A reference to a `Path` object representing the file path.
+    /// # Returns
+    /// * `TokenizerInputFileType` - An enum representing the type of the tokenizer input file.
+    /// 
     pub fn from_path(path: &Path) -> TokenizerConfigResult<Self> {
         match path.extension().and_then(OsStr::to_str) {
             Some("gz") => {
