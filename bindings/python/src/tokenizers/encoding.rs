@@ -25,4 +25,12 @@ impl PyBatchEncoding {
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!("Invalid key: {}", key))),
         }
     }
+
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.encodings.len())
+    }
+
+    fn __repr__(&self) -> PyResult<String> {
+        Ok(format!("BatchEncoding(num_encodings={})", self.encodings.len()))
+    }
 }

@@ -200,3 +200,17 @@ def test_special_tokens_mask():
     assert isinstance(special_tokens_mask, list)
     assert len(special_tokens_mask) == 3
     assert special_tokens_mask == [1, 0, 1]  # Assuming <pad> and <unk> are special tokens
+
+def test_tokenizer_call_magic_method():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
+
+    rs = [Region("chr9", 3526178, 3526249)]
+    encoded = tokenizer(rs)
+
+    assert encoded['input_ids'] == [10]
+    assert encoded['attention_mask'] == [1]
+    with pytest.raises(Exception):
+        encoded['token_type_ids']
+
+    
