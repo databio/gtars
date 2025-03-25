@@ -219,7 +219,6 @@ def test_tokenizer_is_subclassable():
             return super().__new__(cls, *args, **kwargs)
         
         def __init__(self, *args, **kwargs):
-            self.value = kwargs.get('value')
             super().__init__()
         
         def add_two(self, x, y):
