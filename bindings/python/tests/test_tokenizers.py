@@ -213,4 +213,34 @@ def test_tokenizer_call_magic_method():
     with pytest.raises(Exception):
         encoded['token_type_ids']
 
-    
+def test_tokenizer_is_subclassable():
+    class MoreTokenizer(Tokenizer):
+        def __new__(cls, *args, **kwargs):
+            return super().__new__(cls, *args, **kwargs)
+        
+        def __init__(self, *args, **kwargs):
+            self.value = kwargs.get('value')
+            super().__init__()
+        
+        def add_two(self, x, y):
+            return x + y
+
+        @property
+        def value(self):
+            return self._value
+
+        @value.setter
+        def value(self, val):
+            self._value = val
+
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = MoreTokenizer(cfg_path)
+    tokenizer.value = 5
+
+    rs = [Region("chr9", 3526178, 3526249)]
+    encoded = tokenizer(rs)
+
+    assert encoded['input_ids'] == [10]
+    assert encoded['attention_mask'] == [1]
+    assert tokenizer.add_two(2, 3) == 5
+    assert tokenizer.value == 5

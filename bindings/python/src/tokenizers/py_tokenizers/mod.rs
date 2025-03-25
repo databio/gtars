@@ -11,7 +11,7 @@ use gtars::tokenizers::Tokenizer;
 
 use super::encoding::{PyBatchEncoding, PyEncoding};
 
-#[pyclass(name = "Tokenizer", module = "gtars.tokenizers")]
+#[pyclass(name = "Tokenizer", module = "gtars.tokenizers", subclass)]
 pub struct PyTokenizer {
     tokenizer: Tokenizer,
 }
