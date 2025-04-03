@@ -9,6 +9,7 @@ use special_tokens::SpecialTokens;
 use super::{tokenizer_impl::TokenizerError, universe::Universe};
 
 pub mod special_tokens;
+pub mod r2v;
 
 ///
 /// Prepare the universe and special tokens. This function will build

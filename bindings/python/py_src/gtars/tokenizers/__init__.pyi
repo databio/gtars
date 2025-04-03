@@ -173,3 +173,20 @@ class Tokenizer:
             Returns:
                 str: A string describing the Universe.
             """
+
+def create_instances(
+        sequences: Union[List[int], List[List[int]]],
+        window_size: int,
+        algorithm: str,
+    ) -> List[Dict[str, Union[int, List[int]]]]:
+        """
+        Creates training instances for a given sequence or list of sequences.
+
+        Args:
+            sequences (Union[List[int], List[List[int]]]): A sequence or list of sequences of token IDs.
+            window_size (int): The size of the context window.
+            algorithm (str): The algorithm to use ('cbow' or 'sg').
+
+        Returns:
+            List[Dict[str, Union[int, List[int]]]]: A list of dictionaries representing the training instances.
+        """

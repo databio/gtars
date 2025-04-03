@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use pyo3::prelude::*;
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
+use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyType};
 
 use anyhow::Result;
@@ -19,27 +19,21 @@ pub struct PyTokenizer {
 #[pymethods]
 impl PyTokenizer {
     #[new]
-    fn new(path: &str) -> Result<Self> {    
+    fn new(path: &str) -> Result<Self> {
         let tokenizer = Tokenizer::from_auto(path)?;
-        Ok(PyTokenizer {
-            tokenizer,
-        })
+        Ok(PyTokenizer { tokenizer })
     }
 
     #[classmethod]
-    fn from_config(_cls: &Bound<'_, PyType>, cfg: &str) -> Result<Self> {    
+    fn from_config(_cls: &Bound<'_, PyType>, cfg: &str) -> Result<Self> {
         let tokenizer = Tokenizer::from_config(cfg)?;
-        Ok(PyTokenizer {
-            tokenizer,
-        })
+        Ok(PyTokenizer { tokenizer })
     }
 
     #[classmethod]
     fn from_bed(_cls: &Bound<'_, PyType>, path: &str) -> Result<Self> {
         let tokenizer = Tokenizer::from_bed(path)?;
-        Ok(PyTokenizer {
-            tokenizer,
-        })
+        Ok(PyTokenizer { tokenizer })
     }
 
     fn tokenize(&self, regions: &Bound<'_, PyAny>) -> Result<Vec<String>> {
@@ -54,16 +48,27 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             // if a single token is passed
             if let Ok(token) = tokens.extract::<String>() {
-                Ok(vec![self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id())].into_py(py))
+                Ok(vec![self
+                    .tokenizer
+                    .convert_token_to_id(&token)
+                    .unwrap_or(self.get_unk_token_id())]
+                .into_py(py))
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
-                let ids: Vec<u32> = tokens.iter()
-                    .map(|token| self.tokenizer.convert_token_to_id(token).unwrap_or(self.get_unk_token_id()))
+                let ids: Vec<u32> = tokens
+                    .iter()
+                    .map(|token| {
+                        self.tokenizer
+                            .convert_token_to_id(token)
+                            .unwrap_or(self.get_unk_token_id())
+                    })
                     .collect();
                 Ok(ids.into_py(py))
             } else {
-                Err(PyValueError::new_err("Invalid input type for convert_ids_to_token"))
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_ids_to_token",
+                ))
             }
         })
     }
@@ -72,16 +77,27 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             // if a single id is passed
             if let Ok(id) = ids.extract::<u32>() {
-                Ok(vec![self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token())].into_py(py))
+                Ok(vec![self
+                    .tokenizer
+                    .convert_id_to_token(id)
+                    .unwrap_or(self.get_unk_token())]
+                .into_py(py))
             }
             // if a list of ids is passed
             else if let Ok(ids) = ids.extract::<Vec<u32>>() {
-                let tokens: Vec<String> = ids.iter()
-                    .map(|&id| self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()))
+                let tokens: Vec<String> = ids
+                    .iter()
+                    .map(|&id| {
+                        self.tokenizer
+                            .convert_id_to_token(id)
+                            .unwrap_or(self.get_unk_token())
+                    })
                     .collect();
                 Ok(tokens.into_py(py))
             } else {
-                Err(PyValueError::new_err("Invalid input type for convert_ids_to_token"))
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_ids_to_token",
+                ))
             }
         })
     }
@@ -90,16 +106,27 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             // if a single id is passed
             if let Ok(id) = id.extract::<u32>() {
-                Ok(self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()).into_py(py))
+                Ok(self
+                    .tokenizer
+                    .convert_id_to_token(id)
+                    .unwrap_or(self.get_unk_token())
+                    .into_py(py))
             }
             // if a list of ids is passed
             else if let Ok(ids) = id.extract::<Vec<u32>>() {
-                let tokens: Vec<String> = ids.iter()
-                    .map(|&id| self.tokenizer.convert_id_to_token(id).unwrap_or(self.get_unk_token()))
+                let tokens: Vec<String> = ids
+                    .iter()
+                    .map(|&id| {
+                        self.tokenizer
+                            .convert_id_to_token(id)
+                            .unwrap_or(self.get_unk_token())
+                    })
                     .collect();
                 Ok(tokens.into_py(py))
             } else {
-                Err(PyValueError::new_err("Invalid input type for convert_ids_to_token"))
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_ids_to_token",
+                ))
             }
         })
     }
@@ -108,17 +135,27 @@ impl PyTokenizer {
         Python::with_gil(|py| {
             // if a single token is passed
             if let Ok(token) = region.extract::<String>() {
-                let id = self.tokenizer.convert_token_to_id(&token).unwrap_or(self.get_unk_token_id());
+                let id = self
+                    .tokenizer
+                    .convert_token_to_id(&token)
+                    .unwrap_or(self.get_unk_token_id());
                 Ok(id.into_py(py))
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = region.extract::<Vec<String>>() {
-                let ids: Vec<u32> = tokens.iter()
-                    .map(|token| self.tokenizer.convert_token_to_id(token).unwrap_or(self.get_unk_token_id()))
+                let ids: Vec<u32> = tokens
+                    .iter()
+                    .map(|token| {
+                        self.tokenizer
+                            .convert_token_to_id(token)
+                            .unwrap_or(self.get_unk_token_id())
+                    })
                     .collect();
                 Ok(ids.into_py(py))
             } else {
-                Err(PyValueError::new_err("Invalid input type for convert_token_to_ids"))
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_token_to_ids",
+                ))
             }
         })
     }
@@ -232,16 +269,14 @@ impl PyTokenizer {
     fn __call__(&self, regions: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
         Python::with_gil(|py| {
             let rs = extract_regions_from_py_any(regions)?;
-            let encoded = self.tokenizer.encode(&rs.regions)
+            let encoded = self
+                .tokenizer
+                .encode(&rs.regions)
                 .map_err(|err| PyRuntimeError::new_err(err.to_string()))?;
-            let attention_mask = encoded.iter().map(|id| {
-                if *id == self.get_pad_token_id() {
-                    0
-                } else {
-                    1
-                }
-            })
-            .collect();
+            let attention_mask = encoded
+                .iter()
+                .map(|id| if *id == self.get_pad_token_id() { 0 } else { 1 })
+                .collect();
 
             let encoding = PyEncoding {
                 ids: encoded,
@@ -252,8 +287,8 @@ impl PyTokenizer {
                 input_ids: encoding.clone().ids.into_py(py),
                 attention_mask: encoding.clone().attention_mask.into_py(py),
                 encodings: vec![encoding],
-            }.into_py(py))
+            }
+            .into_py(py))
         })
     }
-    
 }

@@ -1,13 +1,13 @@
 use pyo3::prelude::*;
 
-#[pyclass(name="Encoding", module = "gtars.tokenizers")]
+#[pyclass(name = "Encoding", module = "gtars.tokenizers")]
 #[derive(Clone)]
 pub struct PyEncoding {
     pub ids: Vec<u32>,
     pub attention_mask: Vec<u32>,
 }
 
-#[pyclass(name="BatchEncoding", module = "gtars.tokenizers")]
+#[pyclass(name = "BatchEncoding", module = "gtars.tokenizers")]
 #[derive(Clone)]
 pub struct PyBatchEncoding {
     pub input_ids: PyObject,
@@ -22,7 +22,10 @@ impl PyBatchEncoding {
         match key {
             "input_ids" => Ok(self.input_ids.clone()),
             "attention_mask" => Ok(self.attention_mask.clone()),
-            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!("Invalid key: {}", key))),
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "Invalid key: {}",
+                key
+            ))),
         }
     }
 
