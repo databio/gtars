@@ -1,352 +1,175 @@
-from typing import List, Tuple, Iterator
-
-class Universe:
-    """
-    A Universe object represents a set of regions.
-
-    All tokenizers are created from a Universe object.
-    """
-
-    @property
-    def regions(self) -> List[Region]:
-        """
-        The regions in the universe.
-        """
-
-    def insert_token(self, region: Region) -> None:
-        """
-        Insert a token into the universe.
-
-        :param region: The region to insert.
-        """
-        new_id = len(self.regions) + 1
-        self.region_to_id[region] = new_id
-        self.id_to_region[new_id] = region
-
-    def convert_token_to_id(self, region: Region) -> int:
-        """
-        Convert a region to its corresponding ID.
-
-        :param region: The region to convert.
-
-        :return: The ID of the region, or None if the region is not found.
-        """
-        return self.region_to_id.get(region)
-
-    def convert_chr_start_end_to_id(self, chrom: str, start: int, end: int) -> int:
-        """
-        Convert chromosome, start, and end positions to the corresponding ID.
-
-        :param chrom: The chromosome name.
-        :param start: The start position.
-        :param end: The end position.
-
-        :return: The ID of the region, or None if the region is not found.
-        """
-        region = Region(chrom, start, end)
-        return self.convert_token_to_id(region)
-
-    def convert_id_to_token(self, id: int) -> Region:
-        """
-        Convert an ID to its corresponding region.
-
-        :param id: The ID to convert.
-
-        :return: The region corresponding to the ID, or None if the ID is not found.
-        """
-        return self.id_to_region.get(id)
-
-    def __len__(self) -> int:
-        """
-        Get the number of regions in the universe.
-
-        :return: The number of regions.
-        """
-        return len(self.regions)
-
-    def is_empty(self) -> bool:
-        """
-        Check if the universe is empty.
-
-        :return: True if the universe is empty, False otherwise.
-        """
-        return len(self.regions) == 0
-
-    def __repr__(self) -> str:
-        """
-        Get a string representation of the universe.
-
-        :return: The string representation.
-        """
-        return f"Universe with {len(self)} regions"
-
-class Region:
-    def __new__(cls, chrom: str, start: int, end: int) -> Region:
-        """
-        Construct a new Region object.
-
-        :param chrom: The chromosome name.
-        :param start: The start position.
-        :param end: The end position.
-        """
-
-    @property
-    def chr(self) -> str:
-        """
-        The chromosome name for this region.
-        """
-
-    @property
-    def start(self) -> int:
-        """
-        The start position for this region.
-        """
-
-    @property
-    def end(self) -> int:
-        """
-        The end position for this region.
-        """
-
-    def __repr__(self) -> str: ...
-
-class RegionSet:
-    def __new__(cls, path: str) -> RegionSet:
-        """
-        Construct a new RegionSet object.
-
-        :param path: The path to the BED file.
-        """
-
-    def __repr__(self) -> str: ...
-    def __len__(self) -> int: ...
-    def __iter__(self) -> Iterator[Region]: ...
-    def __next__(self) -> Region: ...
-    def __getitem__(self, indx: int) -> Region: ...
-
-class TokenizedRegionSet:
-    def __new__(cls, regions: List[Region], tokens: List[int]) -> TokenizedRegionSet:
-        """
-        Construct a new TokenizedRegionSet object.
-
-        :param regions: The original regions.
-        :param tokens: The tokenized regions.
-        """
-
-    @property
-    def ids(self) -> List[int]:
-        """
-        Integer representation of the tokenized regions.
-        """
-
-    @property
-    def universe(self) -> Universe:
-        """
-        The universe object.
-        """
-
-    def to_bit_vector(self) -> List[int]:
-        """
-        Convert the tokenized regions to a bit vector.
-        """
-
-    def to_regions(self) -> List[Region]:
-        """
-        Convert the tokenized regions back to the original regions.
-        """
-
-    def to_ids(self) -> List[int]:
-        """
-        Get the integer representations of the tokenized regions.
-        """
-
-    def __len__(self) -> int: ...
-    def __repr__(self) -> str: ...
+from typing import Any, Dict, List, Optional, Union
 
 class Tokenizer:
-
-    def __new__(cls, path: str) -> Tokenizer:
+    def __init__(self, path: str) -> None: ...
+    
+    @classmethod
+    def from_config(cls, cfg: str) -> 'Tokenizer':
         """
-        Try to auto-create a tokenizer "smartly" based on the provided path. This will
-        try to infer the type of tokenizer based on the file extension and create the
-        appropriate tokenizer.
-
-        :param path: The path to the configuration file or BED file.
+        Loads a tokenizer from a configuration file.
+        Args:
+            cfg (str): The path to the configuration file.
+        Returns:
+            Tokenizer: An instance of the Tokenizer class.
         """
     
     @classmethod
-    def from_config(cls, path: str) -> Tokenizer:
+    def from_bed(cls, path: str) -> 'Tokenizer':
         """
-        Construct a new Tokenizer object from a configuration file.
-
-        :param path: The path to the configuration file.
-        """
-
-    @classmethod
-    def from_bed(cls, path: str) -> Tokenizer:
-        """
-        Construct a new Tokenizer object from a BED file.
-
-        :param path: The path to the BED file.
-        """
-
-    @property
-    def unk_token(self) -> Region:
-        """
-        Get the unk token.
-        """
-
-    @property
-    def pad_token(self) -> Region:
-        """
-        Get the pad token.
-        """
-
-    @property
-    def mask_token(self) -> Region:
-        """
-        Get the mask token.
-        """
-
-    @property
-    def cls_token(self) -> Region:
-        """
-        Get the CLS token.
-        """
-
-    @property
-    def bos_token(self) -> Region:
-        """
-        Get the BOS token.
-        """
-
-    @property
-    def eos_token(self) -> Region:
-        """
-        Get the EOS token.
-        """
-
-    @property
-    def sep_token(self) -> Region:
-        """
-        Get the SEP token.
-        """
-
-    @property
-    def unk_token_id(self) -> int:
-        """
-        Get the ID of the unk token.
-        """
-
-    @property
-    def pad_token_id(self) -> int:
-        """
-        Get the ID of the pad token.
-        """
-
-    @property
-    def mask_token_id(self) -> int:
-        """
-        Get the ID of the mask token.
-        """
-
-    @property
-    def cls_token_id(self) -> int:
-        """
-        Get the ID of the CLS token.
-        """
-
-    @property
-    def bos_token_id(self) -> int:
-        """
-        Get the ID of the BOS token.
-        """
-
-    @property
-    def eos_token_id(self) -> int:
-        """
-        Get the ID of the EOS token.
-        """
-
-    @property
-    def sep_token_id(self) -> int:
-        """
-        Get the ID of the SEP token.
-        """
-
-    @property
-    def vocab_size(self) -> int:
-        """
-        Get the vocabulary size.
-        """
-
-    def tokenize(self, regions: List[Region]) -> TokenizedRegionSet:
-        """
-        Tokenize a list of regions. This will only return the tokenized regions.
-
-        :param regions: The regions to tokenize.
-
-        :return: The tokenized regions as a list.
-        """
-
-    def encode(self, regions: List[Region]) -> List[int]:
-        """
-        Encode a list of regions. This will return the integer representation of the tokenized regions.
-
-        :param regions: The regions to encode.
-
-        :return: The integer representation of the tokenized regions.
-        """
-
-    def decode(self, ids: List[int]) -> List[Region]:
-        """
-        Decode a list of integer representations of the tokenized regions.
-
-        :param ids: The integer representations of the tokenized regions.
-
-        :return: The decoded regions.
+        Loads a tokenizer from a BED file.
+        Args:
+            path (str): The path to the BED file.
+        Returns:
+            Tokenizer: An instance of the Tokenizer class.
         """
     
-    def convert_id_to_token(self, id: int) -> Region:
+    def tokenize(self, regions: Any) -> List[str]:
         """
-        Convert an ID to its corresponding region.
-
-        :param id: The ID to convert.
-
-        :return: The region corresponding to the ID.
+        Tokenizes the input regions into a list of tokens.
+        Args:
+            regions (Any): The input regions to tokenize.
+        Returns:
+            List[str]: A list of tokens.
         """
-
-    def convert_token_to_id(self, region: Region) -> int:
+    
+    def encode(self, tokens: Any) -> Union[List[int], int]:
         """
-        Convert a region to its corresponding ID.
-
-        :param region: The region to convert.
-
-        :return: The ID of the region.
+        Encodes the input tokens into a list of token IDs.
+        Args:
+            tokens (Any): The input tokens to encode.
+        Returns:
+            Union[List[int], int]: A list of token IDs or a single token ID.
         """
+    
+    def decode(self, ids: Any) -> Union[List[str], str]:
+        """
+        Decodes the input token IDs into a list of tokens.
+        Args:
+            ids (Any): The input token IDs to decode.
+        Returns:
+            Union[List[str], str]: A list of tokens or a single token.
+        """
+    
+    def convert_ids_to_tokens(self, id: Any) -> Union[List[str], str]:
+        """
+        Converts the input token IDs into a list of tokens.
+        Args:
+            id (Any): The input token IDs to convert.
+        Returns:
+            Union[List[str], str]: A list of tokens or a single token.
+        """
+    
+    def convert_tokens_to_ids(self, region: Any) -> Union[List[int], int]:
+        """
+        Converts the input tokens into a list of token IDs.
+        Args:
+            region (Any): The input tokens to convert.
+        Returns:
+            Union[List[int], int]: A list of token IDs or a single token ID.
+        """
+    
+    @property
+    def get_unk_token(self) -> str: ...
 
     @property
-    def universe(self) -> Universe:
+    def get_pad_token(self) -> str: ...
+    
+    @property
+    def get_mask_token(self) -> str: ...
+    
+    @property
+    def get_cls_token(self) -> str: ...
+    
+    @property
+    def get_bos_token(self) -> str: ...
+    
+    @property
+    def get_eos_token(self) -> str: ...
+    
+    @property
+    def get_sep_token(self) -> str: ...
+    
+    @property
+    def get_pad_token_id(self) -> int: ...
+    
+    @property
+    def get_mask_token_id(self) -> int: ...
+    
+    @property
+    def get_cls_token_id(self) -> int: ...
+    
+    @property
+    def get_bos_token_id(self) -> int: ...
+    
+    @property
+    def get_eos_token_id(self) -> int: ...
+    
+    @property
+    def get_sep_token_id(self) -> int: ...
+    
+    @property
+    def get_unk_token_id(self) -> int: ...
+    
+    @property
+    def get_vocab_size(self) -> int: ...
+    
+    @property
+    def get_special_tokens_map(self) -> Dict[str, Optional[str]]:
         """
-        The universe object.
+        Returns a dictionary mapping special tokens to their string representations.
+        Returns:
+            Dict[str, Optional[str]]: A dictionary mapping special tokens to their string representations.
         """
 
+    def get_vocab(self) -> Dict[str, int]:
+        """
+        Returns the vocabulary of the tokenizer.
+        Returns:
+            Dict[str, int]: A dictionary mapping tokens to their IDs.
+        """
+    
+    def __len__(self) -> int: ...
+    
+    def __repr__(self) -> str: ...
+    
+    def __call__(self, regions: Any) -> Any: ...
 
-    def __call__(self, regions: List[Region]) -> TokenizedRegionSet:
+    class Universe:
         """
-        Tokenize a list of regions.
-
-        :param regions: The regions to tokenize.
-
-        :return: A TokenizedRegionSet object.
+        A Python wrapper for the Universe class in Rust.
         """
 
-    def __len__(self) -> int:
-        """
-        Get the vocabulary size.
-        """
+        def __init__(self, universe: Any) -> None:
+            """
+            Initializes the Universe object.
+            Args:
+                universe (Any): The underlying Rust Universe object.
+            """
 
-    def __repr__(self) -> str:
-        """
-        Get a string representation of the tokenizer.
-        """
+        def len(self) -> int:
+            """
+            Returns the number of regions in the Universe.
+            Returns:
+                int: The number of regions.
+            """
+
+        def is_empty(self) -> bool:
+            """
+            Checks if the Universe is empty.
+            Returns:
+                bool: True if the Universe is empty, False otherwise.
+            """
+
+        def __len__(self) -> int:
+            """
+            Returns the number of regions in the Universe.
+            Returns:
+                int: The number of regions.
+            """
+
+        def __repr__(self) -> str:
+            """
+            Returns a string representation of the Universe.
+            Returns:
+                str: A string describing the Universe.
+            """

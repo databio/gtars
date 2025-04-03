@@ -31,6 +31,9 @@ impl PyBatchEncoding {
     }
 
     fn __repr__(&self) -> PyResult<String> {
-        Ok(format!("BatchEncoding(num_encodings={})", self.encodings.len()))
+        Ok(format!(
+            "BatchEncoding(input_ids={:?}, attention_mask={:?})",
+            self.input_ids, self.attention_mask
+        ))
     }
 }
