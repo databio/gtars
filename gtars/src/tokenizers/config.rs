@@ -66,7 +66,7 @@ impl TokenizerInputFileType {
     /// * `path` - A reference to a `Path` object representing the file path.
     /// # Returns
     /// * `TokenizerInputFileType` - An enum representing the type of the tokenizer input file.
-    /// 
+    ///
     pub fn from_path(path: &Path) -> TokenizerConfigResult<Self> {
         match path.extension().and_then(OsStr::to_str) {
             Some("gz") => {

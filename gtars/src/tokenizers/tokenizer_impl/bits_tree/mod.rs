@@ -43,7 +43,7 @@ impl GTokenize for BitsTree {
             .flatten()
             .map(|id| Token {
                 value: self.universe.convert_id_to_token(id).unwrap(),
-                id
+                id,
             })
             .collect::<Vec<Token>>();
 
@@ -78,7 +78,6 @@ impl GTokenize for BitsTree {
     fn get_vocab(&self) -> HashMap<String, u32> {
         self.universe.region_to_id.clone()
     }
-
 }
 
 #[cfg(test)]
@@ -200,11 +199,11 @@ mod tests {
         assert_eq!(tokenized.len(), 2);
 
         // chr1:151399432-151399527 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0].value, "chr1:151399431-151399527");  // igv shows 151399432 (but we are 0-based)
+        assert_eq!(tokenized[0].value, "chr1:151399431-151399527"); // igv shows 151399432 (but we are 0-based)
         assert_eq!(tokenizer.token_to_id(&tokenized[0].value), Some(6));
 
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1].value, "chr2:203871200-203871375");  // igv shows 203871201 (but we are 0-based)
+        assert_eq!(tokenized[1].value, "chr2:203871200-203871375"); // igv shows 203871201 (but we are 0-based)
         assert_eq!(tokenizer.token_to_id(&tokenized[1].value), Some(7));
     }
 

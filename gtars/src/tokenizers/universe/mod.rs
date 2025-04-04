@@ -1,10 +1,10 @@
 //!
 //! This module defines the `Universe` struct, which represents a collection of regions.
 //! It also provides methods to convert between region strings and their corresponding IDs.
-//! 
+//!
 //! The universe is at the core of all tokenizers. It can be thought of as the oracle of the tokenizer, providing the necessary
 //! information to convert between region strings and their corresponding IDs.
-//! 
+//!
 pub mod utils;
 
 use std::collections::HashMap;
@@ -44,10 +44,10 @@ pub struct Universe {
 impl Universe {
     ///
     /// Add a new region to the universe. Regions must be in the format `chr:start-end`.
-    /// 
+    ///
     /// # Arguments:
     /// - `region`: the region string to add
-    /// 
+    ///
     pub fn add_token_to_universe(&mut self, region: &str) {
         let new_id = self.region_to_id.len();
         self.region_to_id.insert(region.to_owned(), new_id as u32);
@@ -69,29 +69,29 @@ impl Universe {
 
     ///
     /// Convert an ID to its corresponding region string.
-    /// 
+    ///
     /// # Arguments:
     /// - `id`: the ID to convert
     /// # Returns:
     /// - `Option<String>`: the region string corresponding to the ID, or None if it doesn't exist
-    /// 
+    ///
     pub fn convert_id_to_token(&self, id: u32) -> Option<String> {
         self.id_to_region.get(&id).cloned()
     }
 
     ///
     /// Get the number of regions in the universe.
-    /// 
+    ///
     /// # Returns:
     /// - `usize`: the number of regions in the universe
-    /// 
+    ///
     pub fn len(&self) -> usize {
         self.region_to_id.len()
     }
 
     ///
     /// Check if the universe is empty.
-    /// 
+    ///
     pub fn is_empty(&self) -> bool {
         self.region_to_id.len() == 0
     }
@@ -110,7 +110,7 @@ impl Universe {
     ///
     /// Add special tokens to the universe. This will also add the special tokens
     /// to the universe as new regions.
-    /// 
+    ///
     pub fn add_special_tokens(&mut self, special_tokens: &SpecialTokens) {
         let special_tokens_vec: Vec<String> = special_tokens.into();
         self.special_tokens = Some(special_tokens_vec.clone());
@@ -164,7 +164,6 @@ impl TryFrom<&Path> for Universe {
                         let region = format!("{}:{}-{}", parts[0], parts[1], parts[2]);
                         regions.push(region.clone());
 
-                        
                         let name = parts[3].to_string();
                         let score: f64 = parts[4].trim().parse().unwrap();
 
@@ -175,7 +174,6 @@ impl TryFrom<&Path> for Universe {
                     }
                 }
 
-                
                 (regions, Some(names), Some(scores))
             }
 

@@ -1,7 +1,7 @@
 // bindings/r/src/rust/src/lib.rs
 use extendr_api::prelude::*;
-pub mod io;
 pub mod igd;
+pub mod io;
 
 #[extendr]
 fn __init__() {}

@@ -133,7 +133,8 @@ pub fn igd_search(database_path: &str, query_file_path: &str) -> Result<Vec<Stri
             }
 
             println!("index\t number of regions\t number of hits\t File_name");
-            let format_string = "index\t number of regions\t number of hits\t File_name".to_string();
+            let format_string =
+                "index\t number of regions\t number of hits\t File_name".to_string();
             final_string_vec.push(format_string);
 
             let mut total: i64 = 0;
@@ -164,7 +165,6 @@ pub fn igd_search(database_path: &str, query_file_path: &str) -> Result<Vec<Stri
     println!("FINISHED");
 
     Ok(final_string_vec)
-
 }
 #[allow(unused_variables)]
 pub fn getOverlaps(

@@ -1,15 +1,15 @@
 //!
-//! This module contains utility functions for tokenizers. Basic things 
+//! This module contains utility functions for tokenizers. Basic things
 //! like universe prapration and special token handling are done here.
-//! 
+//!
 use std::path::Path;
 
 use special_tokens::SpecialTokens;
 
 use super::{tokenizer_impl::TokenizerError, universe::Universe};
 
-pub mod special_tokens;
 pub mod r2v;
+pub mod special_tokens;
 
 ///
 /// Prepare the universe and special tokens. This function will build

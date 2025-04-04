@@ -27,7 +27,6 @@ pub enum TokenizerError {
     Anyhow(#[from] anyhow::Error),
 }
 
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
     pub id: u32,
@@ -137,21 +136,18 @@ impl Tokenizer {
         Ok(tokenized.into_iter().map(|t| t.value).collect())
     }
 
-    pub fn encode(
-        &self,
-        regions: &[Region],
-    ) -> Result<Vec<u32>, TokenizerError> {
+    pub fn encode(&self, regions: &[Region]) -> Result<Vec<u32>, TokenizerError> {
         let tokenized = self.core.tokenize(regions)?;
         Ok(tokenized.into_iter().map(|t| t.id).collect())
     }
 
-    pub fn decode(
-        &self,
-        ids: &[u32],
-    ) -> Result<Vec<String>, TokenizerError> {
-        let decoded: Vec<String> = ids.iter()
+    pub fn decode(&self, ids: &[u32]) -> Result<Vec<String>, TokenizerError> {
+        let decoded: Vec<String> = ids
+            .iter()
             .map(|id| {
-                self.core.id_to_token(*id).unwrap_or(self.special_tokens.unk.clone())
+                self.core
+                    .id_to_token(*id)
+                    .unwrap_or(self.special_tokens.unk.clone())
             })
             .collect();
         Ok(decoded)
@@ -231,15 +227,18 @@ impl Tokenizer {
     }
 
     pub fn get_special_tokens_mask(&self, tokens: &[String]) -> Vec<bool> {
-        tokens.iter().map(|token| {
-            token == &self.special_tokens.unk ||
-            token == &self.special_tokens.pad ||
-            token == &self.special_tokens.mask ||
-            token == &self.special_tokens.cls ||
-            token == &self.special_tokens.eos ||
-            token == &self.special_tokens.bos ||
-            token == &self.special_tokens.sep
-        }).collect()
+        tokens
+            .iter()
+            .map(|token| {
+                token == &self.special_tokens.unk
+                    || token == &self.special_tokens.pad
+                    || token == &self.special_tokens.mask
+                    || token == &self.special_tokens.cls
+                    || token == &self.special_tokens.eos
+                    || token == &self.special_tokens.bos
+                    || token == &self.special_tokens.sep
+            })
+            .collect()
     }
 
     pub fn get_special_tokens(&self) -> &SpecialTokens {
@@ -249,7 +248,6 @@ impl Tokenizer {
     pub fn get_universe(&self) -> &Universe {
         self.core.get_universe()
     }
-
 }
 
 #[cfg(test)]
@@ -424,11 +422,11 @@ mod tokenizer_tests {
         assert_eq!(tokenized.len(), 2);
 
         // chr2:203871201-203871375 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0],"chr2:203871200-203871375");
+        assert_eq!(tokenized[0], "chr2:203871200-203871375");
         assert_eq!(tokenizer.convert_token_to_id(&tokenized[0]), Some(7));
 
         // chr2:203871388-203871588 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1],"chr2:203871387-203871588");
+        assert_eq!(tokenized[1], "chr2:203871387-203871588");
         assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(8));
     }
 
@@ -460,7 +458,6 @@ mod tokenizer_tests {
         assert!(tokenized.is_ok());
         let tokenized = tokenized.unwrap();
         assert_eq!(tokenized.len(), 2);
-        
 
         // chr9:3526071-3526165 -- CONFIRMED IN IGV
         assert_eq!(tokenized[0], "chr9:3526071-3526165");

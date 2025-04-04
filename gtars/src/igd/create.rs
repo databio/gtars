@@ -241,7 +241,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
     let mut avg: Vec<i32> = vec![0; n_files]; //Can we use arrays? Is this an array? no, can we put an array on files.
-    
+
     let mut nr: Vec<i32> = vec![0; n_files];
 
     //--------------------
@@ -827,7 +827,6 @@ pub fn igd_add(
     //println!("DEBUG: Here is igd.total:  {}", igd.total);
 
     //println!("Finished from igd_add");
-    
 }
 
 #[derive(PartialEq)] // So that we can do comparisons with equality operator

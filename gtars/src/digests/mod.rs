@@ -167,8 +167,6 @@ mod tests {
         assert_eq!(results[2].md5, "92c6a56c9e9459d8a42b96f7884710bc");
     }
 
-
-
     #[test]
     fn digests_digest_gzipped_fasta() {
         let results = digest_fasta("tests/data/base.fa.gz").expect("Can't open test fasta file");
