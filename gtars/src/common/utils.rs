@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use anyhow::{Context, Result};
-
-use flate2::read::MultiGzDecoder;
+use flate2::read::{GzDecoder, MultiGzDecoder};
+use reqwest::blocking::Client;
+use std::error::Error;
 
 use crate::common::models::region::Region;
 
@@ -30,6 +31,46 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let reader = BufReader::new(file);
 
     Ok(reader)
+}
+
+///
+/// Get a reader for url ling. Either for gzip'd or non-gzip'd file
+///
+/// # Arguments
+///
+/// - path: path to the file to read
+///
+pub fn get_dynamic_reader_from_url(
+    url: &Path,
+) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
+    // Create an HTTP client and fetch the content
+    let mut url: String = url.to_str().unwrap().to_string();
+
+    let is_ftp: bool = url.starts_with("ftp");
+
+    if is_ftp {
+        println!("ftp is not fully implemented. Bugs could appear");
+        url = url.replacen("ftp://", "http://", 1);
+    }
+
+    let response = Client::new()
+        .get(&url)
+        .send()
+        .with_context(|| format!("Failed to fetch content from URL: {}", &url))?
+        .error_for_status()?
+        .bytes()?;
+
+    // Convert the response into a cursor for reading
+    let cursor = Cursor::new(response);
+
+    let is_gzipped = url.ends_with(".gz");
+
+    let reader: Box<dyn std::io::Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(cursor)),
+        false => Box::new(cursor),
+    };
+
+    Ok(BufReader::new(reader))
 }
 
 /// Get a reader for either a gzipped, non-gzipped file, or stdin

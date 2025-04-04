@@ -17,7 +17,7 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -50,7 +50,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => anyhow::bail!("File not found!"),
+            false => get_dynamic_reader_from_url(path)
+                .expect("!Can't get file neither from path or url!"),
         };
 
         let mut header: String = String::new();
@@ -290,7 +291,6 @@ impl RegionSet {
     }
 
     pub fn file_digest(&self) -> String {
-
         let mut region_copy = self.clone();
         region_copy.sort();
 
@@ -346,8 +346,9 @@ impl RegionSet {
                 },
             )))
         });
-        
-        #[allow(clippy::option_filter_map)] // I like this because its more readable and clear whats going on
+
+        #[allow(clippy::option_filter_map)]
+        // I like this because its more readable and clear whats going on
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()
