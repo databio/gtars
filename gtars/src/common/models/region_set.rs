@@ -91,14 +91,18 @@ impl TryFrom<&Path> for RegionSet {
             return Err(new_error.into());
         }
 
-        Ok(RegionSet {
+        let mut rs = RegionSet {
             regions: new_regions,
             header: match header.is_empty() {
                 true => None,
                 false => Some(header),
             },
             path: Some(value.to_owned()),
-        })
+        };
+        // This line needed for correct calculate identifier
+        rs.sort();
+
+        Ok(rs)
     }
 }
 
@@ -251,11 +255,8 @@ impl RegionSet {
         let mut starts = String::new();
         let mut ends = String::new();
 
-        let mut region_copy = self.clone();
-        region_copy.sort();
-
         let mut first = true;
-        for region in region_copy.regions {
+        for region in &self.regions {
             if !first {
                 chrs.push(',');
                 starts.push(',');
@@ -293,11 +294,8 @@ impl RegionSet {
     }
 
     pub fn file_digest(&self) -> String {
-        let mut region_copy = self.clone();
-        region_copy.sort();
-
         let mut buffer: String = String::new();
-        for region in region_copy.regions {
+        for region in &self.regions {
             buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
@@ -317,8 +315,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    pub fn to_bigbed<T: AsRef<Path>>(&mut self, out_path: T, chrom_size: T) -> Result<()> {
-        self.sort();
+    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
@@ -498,7 +495,7 @@ mod tests {
     #[test]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
-        let mut region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let chrom_sizes_path: PathBuf = std::env::current_dir()
             .unwrap()
