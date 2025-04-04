@@ -35,6 +35,9 @@ jobs:
       - name: Set environment to use system OpenSSL
         run: echo "OPENSSL_NO_VENDOR=1" >> $GITHUB_ENV
 
+      - name: Install Perl dependencies
+        run: sudo apt-get update && sudo apt-get install -y perl-modules-5.34
+
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
