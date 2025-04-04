@@ -6,7 +6,7 @@ use indicatif::ProgressBar;
 use rayon::prelude::*;
 use std::error::Error;
 use std::fs::{remove_file, File};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, Write};
 
 use crate::uniwig::counting::{
     bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,
@@ -46,6 +46,7 @@ pub mod consts {
 }
 
 #[derive(Debug)]
+#[allow(clippy::upper_case_acronyms)]
 enum FileType {
     BED,
     BAM,
@@ -156,12 +157,10 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<f32>("bamscale")
         .expect("requires int value");
 
-    let score = matches.get_one::<bool>("score").unwrap_or_else(|| &false);
-    let bam_shift = matches
-        .get_one::<bool>("no-bamshift")
-        .unwrap_or_else(|| &true);
+    let score = matches.get_one::<bool>("score").unwrap_or(&false);
+    let bam_shift = matches.get_one::<bool>("no-bamshift").unwrap_or(&true);
 
-    let debug = matches.get_one::<bool>("debug").unwrap_or_else(|| &false);
+    let debug = matches.get_one::<bool>("debug").unwrap_or(&false);
 
     let stepsize = matches
         .get_one::<i32>("stepsize")
@@ -200,6 +199,7 @@ fn clamped_start_position_zero_pos(start: i32, smoothsize: i32) -> i32 {
 }
 
 /// Main function
+#[allow(clippy::too_many_arguments)]
 pub fn uniwig_main(
     vec_count_type: Vec<&str>,
     smoothsize: i32,
@@ -272,8 +272,8 @@ pub fn uniwig_main(
                     .for_each(|chromosome: &mut Chromosome| {
                         bar.inc(1);
 
-                        let primary_start = chromosome.starts[0].clone();
-                        let primary_end = chromosome.ends[0].clone();
+                        let primary_start = chromosome.starts[0];
+                        let primary_end = chromosome.ends[0];
 
                         let current_chrom_size =
                             *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
@@ -581,7 +581,7 @@ pub fn uniwig_main(
                     for location in vec_count_type.iter() {
                         bar.inc(1);
                         write_combined_files(
-                            *location,
+                            location,
                             output_type,
                             bwfileheader,
                             &final_chromosomes,
@@ -635,7 +635,7 @@ pub fn uniwig_main(
                             }
                             // Remove the file after it is used.
                             let path = std::path::Path::new(&temp_meta_file_name);
-                            let _ = remove_file(path).unwrap();
+                            remove_file(path).unwrap();
                         }
                     }
                     //write combined metadata as json
@@ -702,6 +702,7 @@ pub fn uniwig_main(
 /// This is for bam workflows where bam is the input file.
 /// Currently, supports bam -> bigwig (start, end, core) and bam -> bed (shifted core values only).
 /// You must provide a .bai file alongside the bam file! Create one: `samtools index your_file.bam`
+#[allow(clippy::too_many_arguments)]
 fn process_bam(
     mut vec_count_type: Vec<&str>,
     filepath: &str,
@@ -792,8 +793,8 @@ fn process_bam(
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
-                            match selection {
-                                &"start" => {
+                            match *selection {
+                                "start" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -809,7 +810,7 @@ fn process_bam(
                                         bam_scale,
                                     );
                                 }
-                                &"end" => {
+                                "end" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -825,7 +826,7 @@ fn process_bam(
                                         bam_scale,
                                     );
                                 }
-                                &"core" => {
+                                "core" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -841,7 +842,7 @@ fn process_bam(
                                         bam_scale,
                                     );
                                 }
-                                &"shift" => {
+                                "shift" => {
                                     process_bw_in_threads(
                                         &chrom_sizes,
                                         chromosome_string,
@@ -962,23 +963,23 @@ fn process_bam(
                         //let out_selection_vec = vec![OutSelection::STARTS];
 
                         for selection in out_selection_vec.iter() {
-                            match selection {
-                                &"start" => {
+                            match *selection {
+                                "start" => {
                                     println!(
                                         "Only shift output is implemented for bam to BED file. (bamshift must be set to true)"
                                     );
                                 }
-                                &"end" => {
+                                "end" => {
                                     println!(
                                         "Only shift output is implemented for bam to BED file. (bamshift must be set to true)"
                                     );
                                 }
-                                &"core" => {
+                                "core" => {
                                     println!(
                                         "Only shift output is implemented for bam to BED file. (bamshift must be set to true)"
                                     );
                                 }
-                                &"shift" => {
+                                "shift" => {
                                     process_bed_in_threads(
                                         chromosome_string,
                                         smoothsize,
@@ -1013,7 +1014,7 @@ fn process_bam(
                     chromosome_vec.push(chromosome);
                 }
 
-                write_combined_files(*location, output_type, bwfileheader, &chromosome_vec);
+                write_combined_files(location, output_type, bwfileheader, &chromosome_vec);
             }
         }
 
@@ -1026,6 +1027,7 @@ fn process_bam(
     Ok(())
 }
 
+#[allow(clippy::empty_line_after_doc_comments)]
 /// This option is for outputting BAM counts to any other file type that is not BW
 /// Currently this will use FIXED step counting while outputting to bw uses variable step counting
 // fn output_bam_counts_non_bw(    chrom_sizes: &HashMap<String, u32>,
@@ -1076,6 +1078,7 @@ fn process_bam(
 // }
 
 /// Creates a Producer/Consumer workflow for reading bam sequences and outputting to Bed files across threads.
+#[allow(clippy::ptr_arg)]
 fn process_bed_in_threads(
     chromosome_string: &String,
     smoothsize: i32,
@@ -1087,7 +1090,7 @@ fn process_bed_in_threads(
     let write_fd = Arc::new(Mutex::new(writer));
     let read_fd = Arc::new(Mutex::new(reader));
 
-    let smoothsize_cloned = smoothsize.clone();
+    let smoothsize_cloned = smoothsize;
 
     let chromosome_string_cloned = chromosome_string.clone();
 
@@ -1143,6 +1146,8 @@ fn process_bed_in_threads(
 }
 
 /// Creates a Producer/Consumer workflow for reading bam sequences and outputting to bigwig files across threads.
+#[allow(clippy::too_many_arguments)]
+#[allow(clippy::ptr_arg)]
 fn process_bw_in_threads(
     chrom_sizes: &HashMap<String, u32>,
     chromosome_string: &String,
@@ -1163,9 +1168,9 @@ fn process_bw_in_threads(
 
     let current_chrom_size = *chrom_sizes.get(&chromosome_string.clone()).unwrap() as i32;
 
-    let current_chrom_size_cloned = current_chrom_size.clone();
-    let smoothsize_cloned = smoothsize.clone();
-    let stepsize_cloned = stepsize.clone();
+    let current_chrom_size_cloned = current_chrom_size;
+    let smoothsize_cloned = smoothsize;
+    let stepsize_cloned = stepsize;
     let chromosome_string_cloned = chromosome_string.clone();
     let sel_clone = String::from(sel); // for some reason, even cloning a &str will lead to errors below when sel is moved to a new thread.
 
@@ -1212,7 +1217,7 @@ fn process_bw_in_threads(
 
         let new_file_path = new_file_path.to_str().unwrap();
 
-        let mut outb = create_bw_writer(&*chr_sz_ref_clone, new_file_path, num_threads, zoom);
+        let mut outb = create_bw_writer(&chr_sz_ref_clone, new_file_path, num_threads, zoom);
 
         let runtime = if num_threads == 1 {
             outb.options.channel_size = 0;
@@ -1248,6 +1253,7 @@ fn process_bw_in_threads(
 /// This function determines if the starts/end counting function should be selected or the core counting function
 /// Currently only variable step is supported, however, fixed_step has been written and can be added or replaced below if the user wishes.
 /// Replacing the variable funcs with fixed step funcs will result in performance loss and greater processing times.
+#[allow(clippy::too_many_arguments)]
 fn determine_counting_func(
     mut records: Box<Query<Reader<File>>>,
     current_chrom_size_cloned: i32,
@@ -1268,7 +1274,7 @@ fn determine_counting_func(
                 current_chrom_size_cloned,
                 smoothsize_cloned,
                 stepsize_cloned,
-                &chromosome_string_cloned,
+                chromosome_string_cloned,
                 sel_clone,
                 write_fd,
                 bam_scale,
@@ -1288,7 +1294,7 @@ fn determine_counting_func(
                         current_chrom_size_cloned,
                         smoothsize_cloned,
                         stepsize_cloned,
-                        &chromosome_string_cloned,
+                        chromosome_string_cloned,
                         sel_clone,
                         write_fd,
                     ) {
@@ -1305,7 +1311,7 @@ fn determine_counting_func(
                         &mut records,
                         current_chrom_size_cloned,
                         stepsize_cloned,
-                        &chromosome_string_cloned,
+                        chromosome_string_cloned,
                         write_fd,
                     ) {
                         Ok(_) => {

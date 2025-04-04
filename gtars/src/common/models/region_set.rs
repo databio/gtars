@@ -17,7 +17,7 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -50,7 +50,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => anyhow::bail!("File not found!")
+            false => get_dynamic_reader_from_url(path)
+                .expect("!Can't get file neither from path or url!"),
         };
 
         let mut header: String = String::new();
@@ -80,7 +81,7 @@ impl TryFrom<&Path> for RegionSet {
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
-        if new_regions.len() <= 1 {
+        if new_regions.is_empty() {
             let new_error = Error::new(
                 ErrorKind::Other,
                 format!(
@@ -91,14 +92,18 @@ impl TryFrom<&Path> for RegionSet {
             return Err(new_error.into());
         }
 
-        Ok(RegionSet {
+        let mut rs = RegionSet {
             regions: new_regions,
             header: match header.is_empty() {
                 true => None,
                 false => Some(header),
             },
             path: Some(value.to_owned()),
-        })
+        };
+        // This line needed for correct calculate identifier
+        rs.sort();
+
+        Ok(rs)
     }
 }
 
@@ -232,7 +237,7 @@ impl RegionSet {
             buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
-        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::fast());
+        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::best());
         encoder.write_all(buffer.as_bytes())?;
 
         Ok(())
@@ -289,6 +294,21 @@ impl RegionSet {
         bed_digest
     }
 
+    pub fn file_digest(&self) -> String {
+        let mut buffer: String = String::new();
+        for region in &self.regions {
+            buffer.push_str(&format!("{}\n", region.as_string(),));
+        }
+
+        let mut hasher = Md5::new();
+
+        hasher.update(buffer);
+        let hash = hasher.finalize();
+        let file_digest: String = format!("{:x}", hash);
+
+        file_digest
+    }
+
     ///
     /// Save RegionSet as bigBed (binary version of bed file)
     ///
@@ -327,6 +347,9 @@ impl RegionSet {
                 },
             )))
         });
+
+        #[allow(clippy::option_filter_map)]
+        // I like this because its more readable and clear whats going on
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()
@@ -366,6 +389,20 @@ impl RegionSet {
             return true;
         }
         false
+    }
+
+    pub fn mean_region_width(&self) -> u32 {
+        if self.is_empty() {
+            return 0;
+        }
+        let sum: u32 = self
+            .regions
+            .iter()
+            .map(|region| region.end - region.start)
+            .sum();
+        let count: u32 = self.regions.len() as u32;
+
+        sum / count
     }
 
     ///
@@ -409,6 +446,12 @@ mod tests {
     }
 
     #[test]
+    fn test_open_from_url() {
+        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        assert!(RegionSet::try_from(file_path).is_ok());
+    }
+
+    #[test]
     fn test_open_bed_gz() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
@@ -429,7 +472,7 @@ mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
 
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new_file.bed.gz");
 
         assert!(region_set.to_bed_gz(new_file_path.as_path()).is_ok());
@@ -446,7 +489,7 @@ mod tests {
 
         let tempdir = tempfile::tempdir().unwrap();
 
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new_bedfile.bed");
 
         assert!(region_set.to_bed(new_file_path.as_path()).is_ok());
@@ -466,7 +509,7 @@ mod tests {
             .join("tests/data/regionset/dummy_chrom_sizes");
 
         let tempdir = tempfile::tempdir().unwrap();
-        let mut new_file_path = PathBuf::try_from(tempdir.into_path()).unwrap();
+        let mut new_file_path = tempdir.into_path();
         new_file_path.push("new.bigbed");
 
         assert!(region_set
@@ -479,7 +522,7 @@ mod tests {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
-        assert!(!region_set.header.is_none());
+        assert!(region_set.header.is_some());
         assert_eq!(region_set.path.unwrap(), file_path);
     }
 
@@ -489,5 +532,14 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(!region_set.is_empty());
+    }
+
+    #[test]
+    fn test_file_digest() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.file_digest(), "6224c4d40832b3e0889250f061e01120");
+        assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
     }
 }

@@ -37,12 +37,12 @@ mod tests {
 
     #[fixture]
     fn path_to_bed_file() -> &'static str {
-        "tests/data/peaks.bed"
+        "tests/data/tokenizers/peaks.bed"
     }
 
     #[fixture]
     fn path_to_bed_file_gzipped() -> &'static str {
-        "tests/data/peaks.bed.gz"
+        "tests/data/tokenizers/peaks.bed.gz"
     }
 
     #[fixture]

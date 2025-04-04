@@ -118,6 +118,7 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<Vec<DigestResult>> {
         // let result = sha512_hasher.finalize();
         let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
         let md5 = format!("{:x}", md5_hasher.finalize_reset());
+        #[allow(clippy::redundant_field_names)] // just for consistency, lets keep it
         results.push(DigestResult {
             id: id.to_string(),
             length: length,
@@ -165,9 +166,6 @@ mod tests {
         assert_eq!(results[2].sha512t24u, "AcLxtBuKEPk_7PGE_H4dGElwZHCujwH6");
         assert_eq!(results[2].md5, "92c6a56c9e9459d8a42b96f7884710bc");
     }
-
-    // #[test]
-    // fn
 
     #[test]
     fn digests_digest_gzipped_fasta() {

@@ -134,6 +134,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         let mut paths = Vec::new();
         if let Ok(file) = File::open(filelist) {
             let reader = BufReader::new(file);
+            #[allow(clippy::manual_flatten)] // just a little clearer whats going on, so its ok.
             for line in reader.lines() {
                 if let Ok(path) = line {
                     paths.push(PathBuf::from(path.trim()));
@@ -239,11 +240,9 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
     // og C code:
     //    int32_t *nr = calloc(n_files, sizeof(int32_t));
     //     double *avg = calloc(n_files, sizeof(double));
-    let mut avg: Vec<i32> = Vec::with_capacity(n_files); //Can we use arrays? Is this an array? no, can we put an array on files.
-    avg.resize(n_files, 0);
+    let mut avg: Vec<i32> = vec![0; n_files]; //Can we use arrays? Is this an array? no, can we put an array on files.
 
-    let mut nr: Vec<i32> = Vec::with_capacity(n_files);
-    nr.resize(n_files, 0);
+    let mut nr: Vec<i32> = vec![0; n_files];
 
     //--------------------
     // READ VALIDATED FILES
@@ -339,7 +338,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
         .open(tsv_save_path)
         .unwrap();
 
-    let initial_line = format!("Index\tFile\tNumber of Regions\t Avg size\n");
+    let initial_line = "Index\tFile\tNumber of Regions\t Avg size\n";
     let mut buffer = Vec::new();
     buffer.write_all((&initial_line).as_ref()).unwrap();
 
@@ -368,7 +367,7 @@ pub fn create_igd_f(output_path: &String, filelist: &String, db_output_name: &St
             nr[i],
             avg[i] / nr[i]
         );
-        buffer.write_all((&current_line).as_ref()).unwrap();
+        buffer.write_all((current_line).as_ref()).unwrap();
     }
 
     file.write_all(&buffer).unwrap();
@@ -421,7 +420,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     buffer.write_all(&igd.nctg.to_le_bytes()).unwrap();
 
     for i in 0..igd.nctg {
-        let idx = i.clone() as usize;
+        let idx = i as usize;
         let current_ctg = &igd.ctg[idx];
 
         buffer.write_all(&current_ctg.mTiles.to_le_bytes()).unwrap();
@@ -430,7 +429,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     }
 
     for i in 0..igd.nctg {
-        let idx = i.clone() as usize;
+        let idx = i as usize;
         let current_ctg = &igd.ctg[idx];
 
         //let j = igd.nctg;
@@ -440,7 +439,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         //println!("iterating current_ctg.mTile to database: {} ", current_ctg.mTiles);
 
         for j in 0..n {
-            let jdx = j.clone() as usize;
+            let jdx = j as usize;
 
             if current_ctg.gTile[jdx].nCnts != 0 {
                 //println!(" nCnts >0:  {} > 0, contig number: {}, mTile number: {}", current_ctg.gTile[jdx].nCnts, i ,j);
@@ -453,7 +452,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     }
 
     for i in 0..igd.nctg {
-        let idx = i.clone() as usize;
+        let idx = i as usize;
         let current_ctg = &igd.ctg[idx];
 
         let mut name_bytes = current_ctg.name.as_bytes().to_vec();
@@ -477,13 +476,13 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
     let _k: i32;
 
     for i in 0..igd.nctg {
-        let idx = i.clone() as usize;
+        let idx = i as usize;
 
         let current_ctg = &mut igd.ctg[idx];
         let n = current_ctg.mTiles;
         //println!("\ndebug mTiles for current contig: {}", current_ctg.mTiles);
         for j in 0..n {
-            let jdx = j.clone() as usize;
+            let jdx = j as usize;
 
             //current tile
             let q = &mut current_ctg.gTile[jdx];
@@ -545,7 +544,7 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
                     //println!("idx: {}  start: {} end: {}\n", idx,start,end);
 
                     gdata.push(gdata_t {
-                        idx: idx,
+                        idx,
                         start,
                         end,
                         value,
@@ -585,14 +584,14 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
     let mut nt = 0;
     //println!("Number of contigs to be saved {}", igd.nctg);
     for i in 0..igd.nctg {
-        let idx = i.clone() as usize;
+        let idx = i as usize;
         let idx_2 = idx;
         let current_ctg = &mut igd.ctg[idx_2];
-        nt = nt + current_ctg.mTiles;
+        nt += current_ctg.mTiles;
 
         //println!("Number of mTiles to be saved {}", current_ctg.mTiles);
         for j in 0..current_ctg.mTiles {
-            let jdx = j.clone() as usize;
+            let jdx = j as usize;
             let jdx_2 = jdx;
 
             let current_tile = &mut current_ctg.gTile[jdx_2];
@@ -639,7 +638,7 @@ pub fn igd_saveT(igd: &mut igd_t, output_file_path: &String) {
                 }
                 file.write_all(&buffer).unwrap();
 
-                current_tile.nCnts = current_tile.nCnts + current_tile.ncnts;
+                current_tile.nCnts += current_tile.ncnts;
 
                 if current_tile.ncnts > 8 {
                     current_tile.mcnts = 8;
@@ -712,7 +711,7 @@ pub fn igd_add(
 
     let key_check = hash_table.contains_key(&key);
 
-    if key_check == false {
+    if !key_check {
         // println!(
         //     "Key does not exist in hash map, creating for {}",
         //     key.clone()
@@ -760,9 +759,9 @@ pub fn igd_add(
     let keycloned = key.clone();
 
     let index = hash_table.get(&keycloned).unwrap();
-    let cloned_index = index.clone();
+    let cloned_index = index;
 
-    let p = &mut igd.ctg[cloned_index as usize];
+    let p = &mut igd.ctg[*cloned_index as usize];
 
     if n2 + 1 >= p.mTiles {
         //println!("TRUE:{} vs {}", (n2 + 1), p.mTiles.clone());
@@ -775,8 +774,8 @@ pub fn igd_add(
         // Supposedly we may not need to do this ...  p.gTile = Vec::resize()   ???
 
         for i in tt..p.mTiles {
-            let idx = i.clone() as usize;
-            let idx_2 = idx as usize;
+            let idx = i as usize;
+            let idx_2 = idx;
 
             let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
 
@@ -794,8 +793,8 @@ pub fn igd_add(
         //println!("Adding data elements, iteration: {}", i);
         //this is inclusive of n1 and n2
         // Get index as usize
-        let idx_1 = i.clone() as usize;
-        let idx_2 = idx_1 as usize;
+        let idx_1 = i as usize;
+        let idx_2 = idx_1;
         // get the tile for the contig
         let existing_tile: &mut tile_t = &mut p.gTile[idx_2];
 
@@ -812,9 +811,9 @@ pub fn igd_add(
             existing_tile.mcnts *= 2;
         }
 
-        let tile_idx = existing_tile.ncnts.clone() as usize;
+        let tile_idx = existing_tile.ncnts as usize;
         let gdata = &mut existing_tile.gList[tile_idx];
-        existing_tile.ncnts = existing_tile.ncnts + 1;
+        existing_tile.ncnts += 1;
 
         gdata.start = start;
         gdata.end = end;
@@ -828,7 +827,6 @@ pub fn igd_add(
     //println!("DEBUG: Here is igd.total:  {}", igd.total);
 
     //println!("Finished from igd_add");
-    return;
 }
 
 #[derive(PartialEq)] // So that we can do comparisons with equality operator
@@ -838,7 +836,7 @@ pub enum ParseBedResult {
 }
 
 /// Reads bed file, returning contig and modifying borrowed start and end coordinate
-pub fn parse_bed(line: &String, start: &mut i32, end: &mut i32, score: &mut i32) -> Option<String> {
+pub fn parse_bed(line: &str, start: &mut i32, end: &mut i32, score: &mut i32) -> Option<String> {
     //println!("HERE IS THE LINE TO PARSE: {}", line);
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.

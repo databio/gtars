@@ -4,44 +4,33 @@
 //! tokenization of genomic data into a known vocabulary. This is especially useful for genomic data machine
 //! learning models that are based on NLP-models like tranformers.
 //!
-//! ## Example
-//! ### Create a tokenizer and tokenize a bed file
+//! # Example
 //! ```rust
 //! use std::path::Path;
 //!
-//! use gtars::tokenizers::{Tokenizer, TreeTokenizer};
-//! use gtars::common::models::RegionSet;
+//! use gtars::tokenizers::Tokenizer;
+//! use gtars::common::models::Region;
 //!
-//! let path_to_bed_file = "tests/data/peaks.bed.gz";
-//! let tokenizer = TreeTokenizer::try_from(Path::new(path_to_bed_file)).unwrap();
+//! let tokenizer = Tokenizer::from_bed(Path::new("tests/data/tokenizers/peaks.bed")).unwrap();
 //!
-//! let path_to_tokenize_bed_file = "tests/data/to_tokenize.bed";
-//! let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
-//!
-//! let tokenized_regions = tokenizer.tokenize_region_set(&rs);
-//! println!("{:?}", tokenized_regions.ids);
+//! let regions = vec![Region {
+//!     chr: "chr1".to_string(),
+//!     start: 100,  
+//!     end: 200,
+//!     rest: None,
+//! }];
+//! let tokens = tokenizer.tokenize(&regions);
 //! ```
-pub mod builder;
-pub mod cli;
+//!
 pub mod config;
-pub mod fragment_tokenizer;
-pub mod meta_tokenizer;
-pub mod soft_tokenizer;
-pub mod special_tokens;
-pub mod traits;
-pub mod tree_tokenizer;
+pub mod encoding;
+pub mod tokenizer_impl;
+pub mod universe;
+pub mod utils;
 
-/// constants for the tokenizer module.
-pub mod consts {
-    /// command for the `gtars` cli
-    pub const TOKENIZE_CMD: &str = "tokenize";
-    pub const UNIVERSE_FILE_NAME: &str = "universe.bed";
-}
-
-// expose the TreeTokenizer struct to users of this crate
-pub use builder::TokenizerBuilder;
-pub use config::TokenizerConfig;
-pub use fragment_tokenizer::FragmentTokenizer;
-pub use meta_tokenizer::MetaTokenizer;
-pub use traits::{SingleCellTokenizer, Tokenizer};
-pub use tree_tokenizer::TreeTokenizer;
+// re-export things
+pub use encoding::*;
+pub use tokenizer_impl::bits_tree::*;
+pub use tokenizer_impl::*;
+pub use universe::*;
+pub use utils::*;

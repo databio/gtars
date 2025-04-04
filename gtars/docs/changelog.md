@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.5]
+- Rework tokenizer API to be more consistent with the HuggingFace tokenizers API.
+- Updates to `RegionSet` to improve performance and usability.
+- Added file_digest function to RegionSet struct
+- Fixed reqwest error in R bindings
+- Fixed [#107](https://github.com/databio/gtars/issues/107)
+
 ## [0.2.4]
 - Attempt to fix failing python bindings in CI linux [#104](https://github.com/databio/gtars/issues/104)
 

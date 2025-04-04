@@ -22,7 +22,7 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
 
         let regions = gtars::common::models::RegionSet::try_from(regions);
         match regions {
-            Ok(regions) => return Ok(RegionSet::from(regions)),
+            Ok(regions) => return Ok(regions),
             Err(e) => return Err(pyo3::exceptions::PyValueError::new_err(e.to_string()).into()),
         }
     }

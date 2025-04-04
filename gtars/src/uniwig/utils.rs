@@ -20,7 +20,7 @@ pub fn compress_counts(
 
     for (u, _i) in count_results.0.iter().zip(count_results.1.iter()) {
         let current_count = *u;
-        current_end = current_end + 1;
+        current_end += 1;
 
         if current_count != previous_count {
             final_starts.push(current_start);

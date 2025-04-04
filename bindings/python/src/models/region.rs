@@ -7,8 +7,6 @@ use pyo3::prelude::*;
 use anyhow::Result;
 use gtars::common::models::region::Region;
 
-use crate::models::PyUniverse;
-
 #[pyclass(name = "Region", module = "gtars.models")]
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct PyRegion {
@@ -43,6 +41,15 @@ impl PyRegion {
             start: self.start,
             end: self.end,
             rest: self.rest.clone(),
+        }
+    }
+
+    pub fn into_region(self) -> Region {
+        Region {
+            chr: self.chr,
+            start: self.start,
+            end: self.end,
+            rest: self.rest,
         }
     }
 }
@@ -89,86 +96,5 @@ impl PyRegion {
             }
             _ => anyhow::bail!(PyTypeError::new_err("Unsupported comparison operator")),
         }
-    }
-}
-
-#[pyclass(name = "TokenizedRegion", module = "gtars.models")]
-#[derive(Clone, Debug)]
-pub struct PyTokenizedRegion {
-    pub id: u32,
-    pub universe: Py<PyUniverse>,
-}
-
-impl From<PyTokenizedRegion> for PyRegion {
-    fn from(value: PyTokenizedRegion) -> Self {
-        Python::with_gil(|py| {
-            value
-                .universe
-                .borrow(py)
-                .convert_id_to_region(value.id)
-                .unwrap()
-        })
-    }
-}
-
-#[pymethods]
-impl PyTokenizedRegion {
-    #[getter]
-    pub fn chr(&self) -> Result<String> {
-        Python::with_gil(|py| {
-            Ok(self
-                .universe
-                .borrow(py)
-                .convert_id_to_region(self.id)
-                .unwrap()
-                .chr)
-        })
-    }
-
-    #[getter]
-    pub fn start(&self) -> Result<u32> {
-        Python::with_gil(|py| {
-            Ok(self
-                .universe
-                .borrow(py)
-                .convert_id_to_region(self.id)
-                .unwrap()
-                .start)
-        })
-    }
-
-    #[getter]
-    pub fn end(&self) -> Result<u32> {
-        Python::with_gil(|py| {
-            Ok(self
-                .universe
-                .borrow(py)
-                .convert_id_to_region(self.id)
-                .unwrap()
-                .end)
-        })
-    }
-
-    pub fn to_region(&self) -> Result<PyRegion> {
-        Python::with_gil(|py| {
-            Ok(self
-                .universe
-                .borrow(py)
-                .convert_id_to_region(self.id)
-                .unwrap())
-        })
-    }
-    #[getter]
-    pub fn id(&self) -> Result<u32> {
-        Ok(self.id)
-    }
-
-    pub fn __repr__(&self) -> String {
-        format!(
-            "TokenizedRegion({}, {}, {})",
-            self.chr().unwrap(),
-            self.start().unwrap(),
-            self.end().unwrap()
-        )
     }
 }

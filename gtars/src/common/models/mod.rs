@@ -9,6 +9,3 @@ pub mod universe;
 pub use self::fragments::Fragment;
 pub use self::region::Region;
 pub use self::region_set::RegionSet;
-pub use self::tokenized_region::TokenizedRegion;
-pub use self::tokenized_regionset::TokenizedRegionSet;
-pub use self::universe::Universe;

@@ -6,5 +6,10 @@
     ],
     "files.watcherExclude": {
         "gtars/target/**": true
-    }
+    },
+    "python.testing.pytestArgs": [
+        "bindings"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }
