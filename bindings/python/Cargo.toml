@@ -10,10 +10,10 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.82"
+openssl = { version = "0.10", features = ["vendored"] }
 gtars = { path = "../../gtars" }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
 numpy = "0.21"
 rayon = "1.10.0"
-# openssl = { version = "0.10", features = ["vendored"] }
 # pyo3-tch = { git = "https://github.com/LaurentMazare/tch-rs" }
 # torch-sys = { git = "https://github.com/LaurentMazare/tch-rs" }
