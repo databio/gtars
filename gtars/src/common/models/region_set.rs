@@ -17,7 +17,7 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -452,7 +452,7 @@ mod tests {
 
     #[test]
     fn test_calculate_identifier() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
