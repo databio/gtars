@@ -50,7 +50,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => anyhow::bail!("File not found!"),
+            false => get_dynamic_reader_from_url(path)
+                .expect("!Can't get file neither from path or url!"),
         };
 
         let mut header: String = String::new();
@@ -442,6 +443,12 @@ mod tests {
     fn test_open_from_string() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn test_open_from_url() {
+        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        assert!(RegionSet::try_from(file_path).is_ok());
     }
 
     #[test]
