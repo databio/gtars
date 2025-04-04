@@ -251,8 +251,11 @@ impl RegionSet {
         let mut starts = String::new();
         let mut ends = String::new();
 
+        let mut region_copy = self.clone();
+        region_copy.sort();
+
         let mut first = true;
-        for region in &self.regions {
+        for region in region_copy.regions {
             if !first {
                 chrs.push(',');
                 starts.push(',');
@@ -290,7 +293,6 @@ impl RegionSet {
     }
 
     pub fn file_digest(&self) -> String {
-
         let mut region_copy = self.clone();
         region_copy.sort();
 
@@ -315,7 +317,8 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
+    pub fn to_bigbed<T: AsRef<Path>>(&mut self, out_path: T, chrom_size: T) -> Result<()> {
+        self.sort();
         let out_path = out_path.as_ref();
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
@@ -346,8 +349,9 @@ impl RegionSet {
                 },
             )))
         });
-        
-        #[allow(clippy::option_filter_map)] // I like this because its more readable and clear whats going on
+
+        #[allow(clippy::option_filter_map)]
+        // I like this because its more readable and clear whats going on
         let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
 
         let runtime = runtime::Builder::new_multi_thread()
@@ -451,7 +455,7 @@ mod tests {
 
     #[test]
     fn test_calculate_identifier() {
-        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
@@ -494,7 +498,7 @@ mod tests {
     #[test]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let mut region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let chrom_sizes_path: PathBuf = std::env::current_dir()
             .unwrap()
