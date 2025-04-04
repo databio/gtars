@@ -92,14 +92,18 @@ impl TryFrom<&Path> for RegionSet {
             return Err(new_error.into());
         }
 
-        Ok(RegionSet {
+        let mut rs = RegionSet {
             regions: new_regions,
             header: match header.is_empty() {
                 true => None,
                 false => Some(header),
             },
             path: Some(value.to_owned()),
-        })
+        };
+        // This line needed for correct calculate identifier
+        rs.sort();
+
+        Ok(rs)
     }
 }
 
@@ -291,11 +295,8 @@ impl RegionSet {
     }
 
     pub fn file_digest(&self) -> String {
-        let mut region_copy = self.clone();
-        region_copy.sort();
-
         let mut buffer: String = String::new();
-        for region in region_copy.regions {
+        for region in &self.regions {
             buffer.push_str(&format!("{}\n", region.as_string(),));
         }
 
@@ -442,6 +443,12 @@ mod tests {
     fn test_open_from_string() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
+    }
+
+    #[test]
+    fn test_open_from_url() {
+        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        assert!(RegionSet::try_from(file_path).is_ok());
     }
 
     #[test]
