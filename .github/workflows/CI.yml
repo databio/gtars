@@ -28,16 +28,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libssl-dev libtext-template-perl
-      - name: Set environment to use system OpenSSL
-        run: echo "OPENSSL_NO_VENDOR=1" >> $GITHUB_ENV
-
-      - name: Install Perl dependencies
-        run: sudo apt-get update && sudo apt-get install -y perl-modules-5.34
-
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -46,6 +36,9 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: 'true'
           manylinux: auto
+          before-script-linux: |
+            sudo apt-get update
+            sudo apt-get install --yes --upgrade build-essential cmake protobuf-compiler libssl-dev glibc-source musl-tools
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
