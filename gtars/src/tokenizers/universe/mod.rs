@@ -120,6 +120,30 @@ impl Universe {
     }
 }
 
+impl Universe {
+    ///
+    /// This is for creating a universe from a vector/list of chrs, starts, and ends. Its
+    /// mostly useful for R bindings
+    /// 
+    pub fn from_vectors(chrs: &[String], starts: &[usize], ends: &[usize]) -> Self {
+        let regions: Vec<String> = chrs
+            .into_iter()
+            .zip(starts)
+            .zip(ends)
+            .map(|((chr, start), end)| format!("{}:{}-{}", chr, start, end))
+            .collect();
+
+        Universe {
+            regions: regions.clone(),
+            region_to_id: generate_region_string_to_id_map(&regions),
+            id_to_region: generate_id_to_region_string_map(&regions),
+            names: None,
+            scores: None,
+            special_tokens: None,
+        }
+    }
+}
+
 impl TryFrom<&Path> for Universe {
     type Error = UniverseError;
 
