@@ -2,6 +2,7 @@
 use extendr_api::prelude::*;
 pub mod igd;
 pub mod io;
+pub mod tokenizers;
 
 #[extendr]
 fn __init__() {}
