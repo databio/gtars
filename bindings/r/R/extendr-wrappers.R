@@ -38,7 +38,7 @@ Tokenizer <- new.env(parent = emptyenv())
 
 Tokenizer$new <- function(chrs, starts, ends) .Call(wrap__Tokenizer__new, chrs, starts, ends)
 
-Tokenizer$tokenize <- function(chrs, starts, ends) .Call(wrap__Tokenizer__tokenize, self, chrs, starts, ends)
+Tokenizer$tokenize <- function(gr) invisible(.Call(wrap__Tokenizer__tokenize, self, gr))
 
 Tokenizer$universe_length <- function() .Call(wrap__Tokenizer__universe_length, self)
 
