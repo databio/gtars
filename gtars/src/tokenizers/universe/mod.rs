@@ -127,7 +127,7 @@ impl Universe {
     /// 
     pub fn from_vectors(chrs: &[String], starts: &[usize], ends: &[usize]) -> Self {
         let regions: Vec<String> = chrs
-            .into_iter()
+            .iter()
             .zip(starts)
             .zip(ends)
             .map(|((chr, start), end)| format!("{}:{}-{}", chr, start, end))

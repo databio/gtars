@@ -80,6 +80,12 @@ impl GTokenize for BitsTree {
     }
 }
 
+impl BitsTree {
+    pub fn get_tree_for_chr(&self, chr: &str) -> Option<&Lapper<u32, u32>> {
+        self.tree.get(chr)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::tokenizers::utils::{

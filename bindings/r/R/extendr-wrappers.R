@@ -34,5 +34,19 @@ rextendr_igd_create <- function(output_path, filelist, db_name) .Call(wrap__rext
 #' @param query_path A string representing the path to the query bed file.
 rextendr_igd_search <- function(database_path, query_path) .Call(wrap__rextendr_igd_search, database_path, query_path)
 
+Tokenizer <- new.env(parent = emptyenv())
+
+Tokenizer$new <- function(chrs, starts, ends) .Call(wrap__Tokenizer__new, chrs, starts, ends)
+
+Tokenizer$tokenize <- function(chrs, starts, ends) .Call(wrap__Tokenizer__tokenize, self, chrs, starts, ends)
+
+Tokenizer$universe_length <- function() .Call(wrap__Tokenizer__universe_length, self)
+
+#' @export
+`$.Tokenizer` <- function (self, name) { func <- Tokenizer[[name]]; environment(func) <- environment(); func }
+
+#' @export
+`[[.Tokenizer` <- `$.Tokenizer`
+
 
 # nolint end
