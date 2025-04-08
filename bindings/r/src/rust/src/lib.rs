@@ -11,5 +11,6 @@ extendr_module! {
     mod gtars;
     use io;
     use igd;
+    use tokenizers;
     fn __init__;
 }
