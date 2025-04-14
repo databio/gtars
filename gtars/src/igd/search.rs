@@ -70,7 +70,6 @@ pub fn igd_get_search_matches(matches: &ArgMatches) {
     igd_search(database_path, query).expect("Error:");
 }
 
-#[allow(unused_variables)]
 pub fn igd_search(database_path: &str, query_file_path: &str) -> Result<Vec<String>, String> {
     // First check that BOTH the igd database and the query are the proper file types
     // else raise error
@@ -166,6 +165,7 @@ pub fn igd_search(database_path: &str, query_file_path: &str) -> Result<Vec<Stri
 
     Ok(final_string_vec)
 }
+
 #[allow(unused_variables)]
 pub fn getOverlaps(
     IGD: &igd_t_from_disk,
