@@ -69,52 +69,52 @@ class Tokenizer:
         """
     
     @property
-    def get_unk_token(self) -> str: ...
+    def unk_token(self) -> str: ...
 
     @property
-    def get_pad_token(self) -> str: ...
+    def pad_token(self) -> str: ...
     
     @property
-    def get_mask_token(self) -> str: ...
+    def mask_token(self) -> str: ...
     
     @property
-    def get_cls_token(self) -> str: ...
+    def cls_token(self) -> str: ...
     
     @property
-    def get_bos_token(self) -> str: ...
+    def bos_token(self) -> str: ...
     
     @property
-    def get_eos_token(self) -> str: ...
+    def eos_token(self) -> str: ...
     
     @property
-    def get_sep_token(self) -> str: ...
+    def sep_token(self) -> str: ...
     
     @property
-    def get_pad_token_id(self) -> int: ...
+    def pad_token_id(self) -> int: ...
     
     @property
-    def get_mask_token_id(self) -> int: ...
+    def mask_token_id(self) -> int: ...
     
     @property
-    def get_cls_token_id(self) -> int: ...
+    def cls_token_id(self) -> int: ...
     
     @property
-    def get_bos_token_id(self) -> int: ...
+    def bos_token_id(self) -> int: ...
     
     @property
-    def get_eos_token_id(self) -> int: ...
+    def eos_token_id(self) -> int: ...
     
     @property
-    def get_sep_token_id(self) -> int: ...
+    def sep_token_id(self) -> int: ...
     
     @property
-    def get_unk_token_id(self) -> int: ...
+    def unk_token_id(self) -> int: ...
     
     @property
-    def get_vocab_size(self) -> int: ...
+    def vocab_size(self) -> int: ...
     
     @property
-    def get_special_tokens_map(self) -> Dict[str, Optional[str]]:
+    def special_tokens_map(self) -> Dict[str, Optional[str]]:
         """
         Returns a dictionary mapping special tokens to their string representations.
         Returns:
@@ -134,45 +134,45 @@ class Tokenizer:
     
     def __call__(self, regions: Any) -> Any: ...
 
-    class Universe:
+class Universe:
+    """
+    A Python wrapper for the Universe class in Rust.
+    """
+
+    def __init__(self, universe: Any) -> None:
         """
-        A Python wrapper for the Universe class in Rust.
+        Initializes the Universe object.
+        Args:
+            universe (Any): The underlying Rust Universe object.
         """
 
-        def __init__(self, universe: Any) -> None:
-            """
-            Initializes the Universe object.
-            Args:
-                universe (Any): The underlying Rust Universe object.
-            """
+    def len(self) -> int:
+        """
+        Returns the number of regions in the Universe.
+        Returns:
+            int: The number of regions.
+        """
 
-        def len(self) -> int:
-            """
-            Returns the number of regions in the Universe.
-            Returns:
-                int: The number of regions.
-            """
+    def is_empty(self) -> bool:
+        """
+        Checks if the Universe is empty.
+        Returns:
+            bool: True if the Universe is empty, False otherwise.
+        """
 
-        def is_empty(self) -> bool:
-            """
-            Checks if the Universe is empty.
-            Returns:
-                bool: True if the Universe is empty, False otherwise.
-            """
+    def __len__(self) -> int:
+        """
+        Returns the number of regions in the Universe.
+        Returns:
+            int: The number of regions.
+        """
 
-        def __len__(self) -> int:
-            """
-            Returns the number of regions in the Universe.
-            Returns:
-                int: The number of regions.
-            """
-
-        def __repr__(self) -> str:
-            """
-            Returns a string representation of the Universe.
-            Returns:
-                str: A string describing the Universe.
-            """
+    def __repr__(self) -> str:
+        """
+        Returns a string representation of the Universe.
+        Returns:
+            str: A string describing the Universe.
+        """
 
 def create_instances(
         sequences: Union[List[int], List[List[int]]],
