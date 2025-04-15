@@ -9,6 +9,7 @@ use gtars::common::models::{Region, RegionSet};
 pub struct PyRegionSet {
     pub regionset: RegionSet,
     curr: usize,
+    identifier: Option<String>,
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
@@ -25,6 +26,7 @@ impl From<Vec<PyRegion>> for PyRegionSet {
         PyRegionSet {
             regionset: RegionSet::from(rust_regions),
             curr: 0,
+            identifier: None,
         }
     }
 }
@@ -44,12 +46,16 @@ impl PyRegionSet {
         Ok(Self {
             regionset: RegionSet::try_from(path)?,
             curr: 0,
+            identifier: None,
         })
     }
 
     #[getter]
-    fn get_identifier(&self) -> PyResult<String> {
-        Ok(self.regionset.identifier())
+    fn get_identifier(&mut self) -> PyResult<String> {
+        if self.identifier.is_none() {
+            self.identifier = Some(self.regionset.identifier());
+        };
+        Ok(self.identifier.clone().unwrap())
     }
 
     #[getter]
