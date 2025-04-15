@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.82"
+openssl = { version = "0.10", features = ["vendored"] }
 gtars = { path = "../../gtars" }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
 numpy = "0.21"
