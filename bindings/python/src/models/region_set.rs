@@ -106,6 +106,7 @@ impl PyRegionSet {
                 rest: region.rest,
             })
         } else {
+            self.curr = 0;
             None
         }
     }
