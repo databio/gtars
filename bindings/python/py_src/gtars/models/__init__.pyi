@@ -51,6 +51,13 @@ class RegionSet:
         """
         ...
 
+    @property
+    def file_digest(self) -> str:
+        """
+        Digest of whole bed file (with all columns)
+        """
+        ...
+
     def to_bed(self, path: str) -> None:
         """
         Save RegionSet as bed file
