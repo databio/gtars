@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.6]
+- Fixed Iterator bug in RegionSet Python bindings [#116](https://github.com/databio/gtars/issues/116)
+- Added caching of identifier in RegionSet in Python bindings
+
+
 ## [0.2.5]
 - Rework tokenizer API to be more consistent with the HuggingFace tokenizers API.
 - Updates to `RegionSet` to improve performance and usability.
