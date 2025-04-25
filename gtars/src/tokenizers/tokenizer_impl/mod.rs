@@ -1,5 +1,4 @@
 pub mod bits_tree;
-pub mod utils;
 
 use std::collections::HashMap;
 use std::path::Path;

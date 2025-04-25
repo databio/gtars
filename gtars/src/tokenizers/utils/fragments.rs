@@ -4,7 +4,7 @@ use std::{collections::HashMap, io::BufRead};
 use crate::common::models::Region;
 use crate::common::utils::get_dynamic_reader;
 
-use super::{Tokenizer, TokenizerError};
+use super::super::{Tokenizer, TokenizerError};
 
 pub fn tokenize_fragment_file<P: AsRef<Path>>(
     file: P,
