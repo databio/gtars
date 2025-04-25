@@ -171,19 +171,12 @@ class Universe:
             str: A string describing the Universe.
         """
 
-def create_instances(
-    sequences: Union[List[int], List[List[int]]],
-    window_size: int,
-    algorithm: str,
-) -> List[Dict[str, Union[int, List[int]]]]:
+def tokenize_fragment_file(file: str, tokenizer: Tokenizer) -> Dict[str, List[int]]:
     """
-    Creates training instances for a given sequence or list of sequences.
-
+    Tokenizes a fragment file using the specified tokenizer.
     Args:
-        sequences (Union[List[int], List[List[int]]]): A sequence or list of sequences of token IDs.
-        window_size (int): The size of the context window.
-        algorithm (str): The algorithm to use ('cbow' or 'sg').
-
+        file (str): The path to the fragment file.
+        tokenizer (Tokenizer): The tokenizer to use for tokenization.
     Returns:
-        List[Dict[str, Union[int, List[int]]]]: A list of dictionaries representing the training instances.
+        Dict[str, List[int]]: A dictionary mapping cell barcodes to lists of token IDs.
     """
