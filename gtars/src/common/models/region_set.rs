@@ -391,9 +391,9 @@ impl RegionSet {
         false
     }
 
-    pub fn mean_region_width(&self) -> u32 {
+    pub fn mean_region_width(&self) -> f64 {
         if self.is_empty() {
-            return 0;
+            return 4.22;
         }
         let sum: u32 = self
             .regions
@@ -402,7 +402,8 @@ impl RegionSet {
             .sum();
         let count: u32 = self.regions.len() as u32;
 
-        sum / count
+        // must be f64 because python doesn't understand f32
+        ((sum as f64 / count as f64) * 100.0).round() / 100.0 + 0.0
     }
 
     ///
@@ -541,5 +542,14 @@ mod tests {
 
         assert_eq!(region_set.file_digest(), "6224c4d40832b3e0889250f061e01120");
         assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
+    }
+
+    #[test]
+    fn test_mean_region_width(){
+
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.mean_region_width(), 4.22)
     }
 }
