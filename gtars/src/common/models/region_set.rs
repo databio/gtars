@@ -403,7 +403,7 @@ impl RegionSet {
         let count: u32 = self.regions.len() as u32;
 
         // must be f64 because python doesn't understand f32
-        ((sum as f64 / count as f64) * 100.0).round() / 100.0 + 0.0
+        ((sum as f64 / count as f64) * 100.0).round() / 100.0
     }
 
     ///
