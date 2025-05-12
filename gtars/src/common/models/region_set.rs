@@ -74,9 +74,20 @@ impl TryFrom<&Path> for RegionSet {
                 chr: parts[0].to_owned(),
 
                 // To ensure that lines are regions, and we can parse it, we are using Result matching
-                // And it helps to skip lines that are headers.
-                start: parts[1].parse()?,
-                end: parts[2].parse()?,
+                start: match parts[1].parse(){
+                    Ok(start) => start,
+                    Err(_err) => {
+                        return Err(Error::new(ErrorKind::Other,
+                        format!("Error in parsing start position: {:?}", parts[1]),).into())
+                      }
+                },
+                end: match parts[2].parse(){
+                    Ok(end) => end,
+                    Err(_err) => {
+                        return Err(Error::new(ErrorKind::Other,
+                        format!("Error in parsing end position: {:?}", parts[1]),).into())
+                      }
+                },
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
