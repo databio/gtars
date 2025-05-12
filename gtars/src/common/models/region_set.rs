@@ -74,19 +74,25 @@ impl TryFrom<&Path> for RegionSet {
                 chr: parts[0].to_owned(),
 
                 // To ensure that lines are regions, and we can parse it, we are using Result matching
-                start: match parts[1].parse(){
+                start: match parts[1].parse() {
                     Ok(start) => start,
                     Err(_err) => {
-                        return Err(Error::new(ErrorKind::Other,
-                        format!("Error in parsing start position: {:?}", parts[1]),).into())
-                      }
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Error in parsing start position: {:?}", parts),
+                        )
+                        .into())
+                    }
                 },
-                end: match parts[2].parse(){
+                end: match parts[2].parse() {
                     Ok(end) => end,
                     Err(_err) => {
-                        return Err(Error::new(ErrorKind::Other,
-                        format!("Error in parsing end position: {:?}", parts[1]),).into())
-                      }
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Error in parsing end position: {:?}", parts),
+                        )
+                        .into())
+                    }
                 },
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
@@ -560,15 +566,5 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.mean_region_width(), 4.22)
-    }
-
-    #[test]
-    fn test_file_opening() {
-        // let path_to_file: String = String::from("https://ftp.ncbi.nlm.nih.gov/geo/samples/GSM8256nnn/GSM8256970/suppl/GSM8256970_H3K27ac_mESC_INV_vs_Input_INV_Merged_Peaks.bed.gz");
-        // let path_to_file: String = String::from("/home/bnt4me/Downloads/GSM5642978_S34_AA23995_CTSS.bed.gz");
-        let path_to_file: String =
-            String::from("/home/bnt4me/Downloads/GSM6873750_RNAseq_KO_N_rep1_TPM.bed.gz");
-
-        let region_set = RegionSet::try_from(path_to_file.as_str()).unwrap();
     }
 }
