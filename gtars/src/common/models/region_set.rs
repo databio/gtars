@@ -72,7 +72,7 @@ impl TryFrom<&Path> for RegionSet {
                 continue;
             }
 
-            // Handling headers like `chr start end etc` without #
+            // Handling column headers like `chr start end etc` without #
             if first_line {
                 if parts.len() >= 3 {
                     let is_header: bool = match parts[1].parse::<u32>() {
