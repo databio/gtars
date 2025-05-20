@@ -56,6 +56,8 @@ impl TryFrom<&Path> for RegionSet {
 
         let mut header: String = String::new();
 
+        let mut first_line: bool = true;
+
         for line in reader.lines() {
             let string_line = line?;
 
@@ -66,10 +68,26 @@ impl TryFrom<&Path> for RegionSet {
                 | string_line.starts_with("#")
             {
                 header.push_str(&string_line);
+                first_line = false;
                 continue;
             }
 
-            // println!("parts: {:?} -- {:?}", parts, string_line);
+            // Handling column headers like `chr start end etc` without #
+            if first_line {
+                if parts.len() >= 3 {
+                    let is_header: bool = match parts[1].parse::<u32>() {
+                        Ok(_num) => false,
+                        Err(_) => true,
+                    };
+                    if is_header {
+                        header.push_str(&string_line);
+                        first_line = false;
+                        continue;
+                    }
+                }
+                first_line = false;
+            }
+
             new_regions.push(Region {
                 chr: parts[0].to_owned(),
 
@@ -566,5 +584,10 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.mean_region_width(), 4.22)
+    }
+    #[test]
+    fn test_open_file_with_incorrect_headers() {
+        let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
     }
 }
