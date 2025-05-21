@@ -426,9 +426,6 @@ impl RegionSet {
     }
 
     pub fn mean_region_width(&self) -> f64 {
-        if self.is_empty() {
-            return 4.22;
-        }
         let sum: u32 = self
             .regions
             .iter()
