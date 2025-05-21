@@ -164,7 +164,8 @@ impl PyRegionSet {
         Ok(())
     }
 
-    fn mean_region_width(&self) -> PyResult<u32> {
-        Ok(self.regionset.mean_region_width())
+    fn mean_region_width(&self) -> f64 {
+        let mean_width = self.regionset.mean_region_width();
+        mean_width
     }
 }

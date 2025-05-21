@@ -292,3 +292,9 @@ impl PyTokenizer {
         })
     }
 }
+
+impl PyTokenizer {
+    pub fn inner(&self) -> &Tokenizer {
+        &self.tokenizer
+    }
+}

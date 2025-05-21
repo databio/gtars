@@ -56,28 +56,62 @@ impl TryFrom<&Path> for RegionSet {
 
         let mut header: String = String::new();
 
+        let mut first_line: bool = true;
+
         for line in reader.lines() {
             let string_line = line?;
 
             let parts: Vec<String> = string_line.split('\t').map(|s| s.to_string()).collect();
 
-            if parts.len() < 3 {
-                if string_line.starts_with("browser")
-                    | string_line.starts_with("track")
-                    | string_line.starts_with("#")
-                {
-                    header.push_str(&string_line);
-                }
+            if string_line.starts_with("browser")
+                | string_line.starts_with("track")
+                | string_line.starts_with("#")
+            {
+                header.push_str(&string_line);
+                first_line = false;
                 continue;
+            }
+
+            // Handling column headers like `chr start end etc` without #
+            if first_line {
+                if parts.len() >= 3 {
+                    let is_header: bool = match parts[1].parse::<u32>() {
+                        Ok(_num) => false,
+                        Err(_) => true,
+                    };
+                    if is_header {
+                        header.push_str(&string_line);
+                        first_line = false;
+                        continue;
+                    }
+                }
+                first_line = false;
             }
 
             new_regions.push(Region {
                 chr: parts[0].to_owned(),
 
                 // To ensure that lines are regions, and we can parse it, we are using Result matching
-                // And it helps to skip lines that are headers.
-                start: parts[1].parse()?,
-                end: parts[2].parse()?,
+                start: match parts[1].parse() {
+                    Ok(start) => start,
+                    Err(_err) => {
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Error in parsing start position: {:?}", parts),
+                        )
+                        .into())
+                    }
+                },
+                end: match parts[2].parse() {
+                    Ok(end) => end,
+                    Err(_err) => {
+                        return Err(Error::new(
+                            ErrorKind::Other,
+                            format!("Error in parsing end position: {:?}", parts),
+                        )
+                        .into())
+                    }
+                },
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
@@ -391,10 +425,7 @@ impl RegionSet {
         false
     }
 
-    pub fn mean_region_width(&self) -> u32 {
-        if self.is_empty() {
-            return 0;
-        }
+    pub fn mean_region_width(&self) -> f64 {
         let sum: u32 = self
             .regions
             .iter()
@@ -402,7 +433,8 @@ impl RegionSet {
             .sum();
         let count: u32 = self.regions.len() as u32;
 
-        sum / count
+        // must be f64 because python doesn't understand f32
+        ((sum as f64 / count as f64) * 100.0).round() / 100.0
     }
 
     ///
@@ -541,5 +573,18 @@ mod tests {
 
         assert_eq!(region_set.file_digest(), "6224c4d40832b3e0889250f061e01120");
         assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
+    }
+
+    #[test]
+    fn test_mean_region_width() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.mean_region_width(), 4.22)
+    }
+    #[test]
+    fn test_open_file_with_incorrect_headers() {
+        let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
     }
 }
