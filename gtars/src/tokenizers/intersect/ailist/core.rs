@@ -10,6 +10,7 @@ where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
+    pub intervals: Vec<Interval<I, T>>,
     starts: Vec<I>,
     ends: Vec<I>,
     max_ends: Vec<I>,
@@ -63,6 +64,7 @@ where
             max_ends,
             header_list,
             data_list,
+            intervals,
         }
     }
 
