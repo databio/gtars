@@ -66,6 +66,7 @@ where
         }
     }
 
+    #[allow(clippy::type_complexity)]
     fn decompose(
         intervals: &[Interval<I, T>],
         minimum_coverage_length: usize,
@@ -181,8 +182,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
-    // use pretty_assertions::assert_eq;
     use rstest::*;
 
     #[fixture]
@@ -246,10 +245,5 @@ mod tests {
                 val: 0
             })
         );
-    }
-
-    #[rstest]
-    fn test_ailist_tokenizer() {
-        let bed_file_path = Path::new("tests/data/peaks.bed.gz");
     }
 }
