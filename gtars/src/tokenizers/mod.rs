@@ -27,6 +27,7 @@ pub mod encoding;
 pub mod tokenizer_impl;
 pub mod universe;
 pub mod utils;
+pub mod intersect;
 
 // re-export things
 pub use encoding::*;
