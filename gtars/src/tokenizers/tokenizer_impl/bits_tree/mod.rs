@@ -3,7 +3,7 @@ pub mod utils;
 use std::collections::HashMap;
 
 use rayon::prelude::*;
-use rust_lapper::Lapper;
+use crate::tokenizers::intersect::bits::Lapper;
 
 use self::utils::create_interval_tree_from_universe;
 use super::GTokenize;

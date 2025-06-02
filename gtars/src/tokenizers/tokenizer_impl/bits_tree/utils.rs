@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use rust_lapper::{Interval, Lapper};
+use crate::tokenizers::intersect::intervals::Interval;
+use crate::tokenizers::intersect::bits::Lapper;
 
 use crate::tokenizers::universe::Universe;
 
@@ -35,12 +36,12 @@ pub fn create_interval_tree_from_universe(
         let end = start_end_parts[1];
 
         let start = start.parse::<u32>().unwrap();
-        let stop = end.parse::<u32>().unwrap();
+        let end = end.parse::<u32>().unwrap();
 
         let val = universe.convert_token_to_id(region).unwrap();
 
         // create interval
-        let interval = Interval { start, stop, val };
+        let interval = Interval { start, end, val };
 
         // use chr to get the vector of intervals
         let chr_intervals = intervals.entry(chr.clone()).or_default();

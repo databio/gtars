@@ -4,8 +4,8 @@ use num_traits::{
     PrimInt, Unsigned,
 };
 
-/// Represent a range from [start, stop)
-/// Inclusive start, exclusive of stop
+/// Represent a range from [start, end)
+/// Inclusive start, exclusive of end
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
@@ -13,7 +13,7 @@ where
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
-    pub stop: I,
+    pub end: I,
     pub val: T,
 }
 
@@ -25,15 +25,15 @@ where
     /// Compute the intsect between two intervals
     #[inline]
     pub fn intersect(&self, other: &Interval<I, T>) -> I {
-        std::cmp::min(self.stop, other.stop)
+        std::cmp::min(self.end, other.end)
             .checked_sub(std::cmp::max(&self.start, &other.start))
             .unwrap_or_else(zero::<I>)
     }
 
     /// Check if two intervals overlap
     #[inline]
-    pub fn overlap(&self, start: I, stop: I) -> bool {
-        self.start < stop && self.stop > start
+    pub fn overlap(&self, start: I, end: I) -> bool {
+        self.start < end && self.end > start
     }
 }
 
@@ -47,7 +47,7 @@ where
         match self.start.cmp(&other.start) {
             Ordering::Less => Ordering::Less,
             Ordering::Greater => Ordering::Greater,
-            Ordering::Equal => self.stop.cmp(&other.stop),
+            Ordering::Equal => self.end.cmp(&other.end),
         }
     }
 }
@@ -70,6 +70,6 @@ where
 {
     #[inline]
     fn eq(&self, other: &Interval<I, T>) -> bool {
-        self.start == other.start && self.stop == other.stop
+        self.start == other.start && self.end == other.end
     }
 }
