@@ -159,6 +159,7 @@ pub fn read_u32_npy(npy_file_path: &Path) -> Result<Vec<u32>, Box<dyn std::error
 
 // two inputs are equivalent to --fileheader when running uniwig
 pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    //TODO add test
     // Read the JSON file
     let input_file_path = npy_header.join("npy_meta.json");
     let json_data = fs::read_to_string(&input_file_path)?;
