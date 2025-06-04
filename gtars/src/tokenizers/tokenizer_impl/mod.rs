@@ -49,6 +49,8 @@ pub trait GTokenize: Send + Sync {
     fn id_to_token(&self, id: u32) -> Option<String>;
     /// Retrieve the size of the vocabulary
     fn get_vocab_size(&self) -> usize;
+    /// Retrieve the size of the chrom vocab (no. unique chroms)
+    fn get_chrom_vocab_size(&self) -> usize;
     /// Retrieve the universe -- this is here to
     /// enforce that the tokenizer has a universe
     fn get_universe(&self) -> &Universe;
@@ -165,8 +167,20 @@ impl Tokenizer {
         self.core.id_to_token(id)
     }
 
+    pub fn convert_chrom_to_id(&self, chrom: &str) -> Option<u16> {
+        self.core.chrom_to_id(chrom)
+    }
+
+    pub fn convert_id_to_chrom(&self, id: u16) -> Option<String> {
+        self.core.id_to_chrom(id)
+    }
+
     pub fn get_vocab_size(&self) -> usize {
         self.core.get_vocab_size()
+    }
+
+    pub fn get_chrom_vocab_size(&self) -> usize {
+        self.core.get_chrom_vocab_size()
     }
 
     pub fn get_vocab(&self) -> HashMap<String, u32> {
@@ -228,6 +242,10 @@ impl Tokenizer {
 
     pub fn get_sep_token_id(&self) -> u32 {
         self.convert_token_to_id(&self.special_tokens.sep).unwrap()
+    }
+
+    pub fn get_chrom_pad_id(&self) -> u16 {
+        self.get_chrom_vocab_size() as u16
     }
 
     pub fn get_special_tokens_mask(&self, tokens: &[String]) -> Vec<bool> {

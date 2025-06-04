@@ -79,6 +79,11 @@ impl GTokenize for BitsTree {
         self.universe.len()
     }
 
+    fn get_chrom_vocab_size(&self) -> usize {
+        // we simply need a padding token, so just add one to vocab size
+        self.universe.chrom_to_chrom_id.len() + 1
+    }
+
     fn get_universe(&self) -> &Universe {
         &self.universe
     }
