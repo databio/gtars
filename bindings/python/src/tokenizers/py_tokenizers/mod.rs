@@ -196,6 +196,11 @@ impl PyTokenizer {
     }
 
     #[getter]
+    fn get_chrom_pad(&self) -> String {
+        self.tokenizer.get_chrom_pad_token().to_owned()
+    }
+
+    #[getter]
     fn get_pad_token_id(&self) -> u32 {
         self.tokenizer.get_pad_token_id()
     }
@@ -231,8 +236,18 @@ impl PyTokenizer {
     }
 
     #[getter]
+    fn get_chrom_pad_id(&self) -> u16 {
+        self.tokenizer.get_chrom_pad_id()
+    }
+
+    #[getter]
     fn get_vocab_size(&self) -> usize {
         self.tokenizer.get_vocab_size()
+    }
+
+    #[getter]
+    fn get_chrom_vocab_size(&self) -> usize {
+        self.tokenizer.get_chrom_vocab_size()
     }
 
     #[getter]

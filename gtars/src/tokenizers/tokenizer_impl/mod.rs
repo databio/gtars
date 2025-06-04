@@ -215,7 +215,7 @@ impl Tokenizer {
         self.special_tokens.sep.clone()
     }
 
-    pub fn get_chrom_pad_token() -> String {
+    pub fn get_chrom_pad_token(&self) -> String {
         // hard coded for now, just for demonstration purposes
         "chrPAD".to_string()
     }
