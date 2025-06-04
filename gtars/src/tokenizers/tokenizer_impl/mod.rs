@@ -54,6 +54,10 @@ pub trait GTokenize: Send + Sync {
     fn get_universe(&self) -> &Universe;
     /// Retrieve the entire vocabulary mapping (token -> id)
     fn get_vocab(&self) -> HashMap<String, u32>;
+    /// Find the ID associated with a chromosome ("chr1")
+    fn chrom_to_id(&self, chrom: &str) -> Option<u16>;
+    /// Find the string chrom name ("chr1") associated to an ID
+    fn id_to_chrom(&self, id: u16) -> Option<String>;
 }
 
 pub struct Tokenizer {

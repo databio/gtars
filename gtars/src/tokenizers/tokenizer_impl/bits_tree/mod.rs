@@ -67,6 +67,14 @@ impl GTokenize for BitsTree {
         self.universe.convert_id_to_token(id)
     }
 
+    fn chrom_to_id(&self, chrom: &str) -> Option<u16> {
+        self.universe.convert_chrom_to_id(chrom)
+    }
+
+    fn id_to_chrom(&self, id: u16) -> Option<String> {
+        self.universe.convert_chrom_id_to_chrom(id)
+    }
+
     fn get_vocab_size(&self) -> usize {
         self.universe.len()
     }

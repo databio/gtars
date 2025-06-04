@@ -167,6 +167,56 @@ pub fn generate_id_to_region_string_map(regions: &[String]) -> HashMap<u32, Stri
     id_to_region
 }
 
+///
+/// Generate a mapping from chrom ("chr1") to the chrom_id (1)
+/// 
+/// # Arguments:
+/// - regions: vec![] of region strings in the form `chr:start-end`
+pub fn generate_chrom_to_chrom_id_map(regions: &[String]) -> Result<HashMap<String, u16>> {
+    let mut current_id = 0;
+    let mut chrom_to_chrom_id: HashMap<String, u16> = HashMap::new();
+
+    for region in regions.iter() {
+        let parts = region.split(':');
+        let parts = parts.collect::<Vec<&str>>();
+        if parts.len() < 2 {
+            anyhow::bail!("Region string '{}' does not contain a ':' separator", region);
+        }
+        let chrom = parts[0].to_string();
+        chrom_to_chrom_id.entry(chrom).or_insert_with(|| {
+            let old_id = current_id;
+            current_id += 1;
+            old_id
+        });
+    }
+
+    Ok(chrom_to_chrom_id)
+}
+
+///
+/// Generate a mapping from chrom_id (1) to the chrom ("chr1")
+/// 
+/// # Arguments:
+/// - regions: vec![] of region strings in the form `chr:start-end`
+pub fn generate_chrom_id_to_chrom_map(regions: &[String]) -> Result<HashMap<u16, String>> {
+    let mut current_id = 0;
+    let mut chrom_id_to_chrom: HashMap<u16, String> = HashMap::new();
+
+    for region in regions.iter() {
+        let parts = region.split(':').collect::<Vec<&str>>();
+        if parts.len() < 2 {
+            anyhow::bail!("Region string '{}' does not contain a ':' separator", region);
+        }
+        let chrom = parts[0].to_string();
+        chrom_id_to_chrom.entry(current_id).or_insert_with(|| {
+            current_id += 1;
+            chrom
+        });
+    }
+
+    Ok(chrom_id_to_chrom)
+}
+
 pub fn get_chrom_sizes<T: AsRef<Path>>(path: T) -> HashMap<String, u32> {
     let chrom_sizes_file = File::open(path.as_ref())
         .with_context(|| "Failed to open chrom sizes file.")

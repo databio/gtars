@@ -585,6 +585,6 @@ mod tests {
     #[test]
     fn test_open_file_with_incorrect_headers() {
         let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let _region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
     }
 }

@@ -16,7 +16,11 @@ use thiserror::Error;
 use utils::UniverseFileType;
 
 use crate::common::utils::{
-    generate_id_to_region_string_map, generate_region_string_to_id_map, get_dynamic_reader,
+    generate_id_to_region_string_map,
+    generate_region_string_to_id_map,
+    get_dynamic_reader,
+    generate_chrom_to_chrom_id_map,
+    generate_chrom_id_to_chrom_map
 };
 
 use super::utils::special_tokens::SpecialTokens;
@@ -36,6 +40,8 @@ pub struct Universe {
     pub regions: Vec<String>,
     pub region_to_id: HashMap<String, u32>,
     pub id_to_region: HashMap<u32, String>,
+    pub chrom_to_chrom_id: HashMap<String, u16>,
+    pub chrom_id_to_chrom: HashMap<u16, String>,
     pub names: Option<HashMap<String, String>>,
     pub scores: Option<HashMap<String, f64>>,
     pub special_tokens: Option<Vec<String>>,
@@ -118,6 +124,20 @@ impl Universe {
             self.add_token_to_universe(token);
         }
     }
+
+    ///
+    /// Convert chrom (a string like "chr1") to its chrom_id
+    /// 
+    pub fn convert_chrom_to_id(&self, chrom: &str) -> Option<u16> {
+        self.chrom_to_chrom_id.get(chrom).copied()
+    }
+
+    ///
+    /// Convert a chrom_id to its chrom (a string like "chr1")
+    /// 
+    pub fn convert_chrom_id_to_chrom(&self, chrom_id: u16) -> Option<String> {
+        self.chrom_id_to_chrom.get(&chrom_id).cloned()
+    }
 }
 
 impl TryFrom<&Path> for Universe {
@@ -182,13 +202,24 @@ impl TryFrom<&Path> for Universe {
             }
         };
 
+        // generate maps for quick lookups
         let region_to_id = generate_region_string_to_id_map(&regions);
         let id_to_region = generate_id_to_region_string_map(&regions);
+        let chrom_to_chrom_id = generate_chrom_to_chrom_id_map(&regions)
+            .map_err(|err| {
+                UniverseError::ParsingError(err.to_string())
+            })?;
+        let chrom_id_to_chrom = generate_chrom_id_to_chrom_map(&regions)
+            .map_err(|err| {
+                UniverseError::ParsingError(err.to_string())
+            })?;
 
         Ok(Universe {
             regions,
             region_to_id,
             id_to_region,
+            chrom_to_chrom_id,
+            chrom_id_to_chrom,
             names,
             scores,
             special_tokens: None,
