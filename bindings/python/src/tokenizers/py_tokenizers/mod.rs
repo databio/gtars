@@ -160,6 +160,64 @@ impl PyTokenizer {
         })
     }
 
+    fn convert_chrom_ids_to_chroms(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            // if a single id is passed
+            if let Ok(id) = id.extract::<u16>() {
+                Ok(self
+                    .tokenizer
+                    .convert_id_to_chrom(id)
+                    .unwrap() // TODO: should not just unwrap this.
+                    .into_py(py))
+            }
+            // if a list of ids is passed
+            else if let Ok(ids) = id.extract::<Vec<u16>>() {
+                let tokens: Vec<String> = ids
+                    .iter()
+                    .map(|&id| {
+                        self.tokenizer
+                            .convert_id_to_chrom(id)
+                            .unwrap()
+                    })
+                    .collect();
+                Ok(tokens.into_py(py))
+            } else {
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_ids_to_token",
+                ))
+            }
+        })
+    }
+
+    fn convert_chroms_to_ids(&self, region: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            // if a single token is passed
+            if let Ok(token) = region.extract::<String>() {
+                let id = self
+                    .tokenizer
+                    .convert_chrom_to_id(&token)
+                    .unwrap(); // TODO: not good to just unwrap...
+                Ok(id.into_py(py))
+            }
+            // if a list of tokens is passed
+            else if let Ok(chroms) = region.extract::<Vec<String>>() {
+                let ids: Vec<u16> = chroms
+                    .iter()
+                    .map(|chrom| {
+                        self.tokenizer
+                            .convert_chrom_to_id(chrom)
+                            .unwrap() // TODO: not good to just unwrap...
+                    })
+                    .collect();
+                Ok(ids.into_py(py))
+            } else {
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_token_to_ids",
+                ))
+            }
+        })
+    }
+
     #[getter]
     fn get_unk_token(&self) -> String {
         self.tokenizer.get_unk_token().to_owned()
