@@ -215,6 +215,11 @@ impl Tokenizer {
         self.special_tokens.sep.clone()
     }
 
+    pub fn get_chrom_pad_token() -> String {
+        // hard coded for now, just for demonstration purposes
+        "chrPAD".to_string()
+    }
+
     // ids
     pub fn get_unk_token_id(&self) -> u32 {
         self.convert_token_to_id(&self.special_tokens.unk).unwrap()
