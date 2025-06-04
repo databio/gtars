@@ -1,5 +1,6 @@
 use num_traits::{PrimInt, Unsigned};
-use crate::tokenizers::intersect::intervals::Interval;
+
+use crate::tokenizers::intersect::Interval;
 
 /// anything that can answer “which stored intervals touch [start,end)?”
 pub trait Intersect<I, T>
@@ -9,9 +10,11 @@ where
 {
     type Iter<'a>: Iterator<Item = &'a Interval<I, T>> + 'a
     where
+        I: 'a,
+        T: 'a,
         Self: 'a;
 
-    fn find_overlaps<'a>(&'a self, start: I, end: I) -> Self::Iter<'a>;
+    fn find_overlaps(&self, start: I, end: I) -> Self::Iter<'_>;
 }
 
 pub trait IntervalCount {

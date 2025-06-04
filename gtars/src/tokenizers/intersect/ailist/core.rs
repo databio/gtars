@@ -1,6 +1,6 @@
 use num_traits::{PrimInt, Unsigned};
 
-use crate::tokenizers::intersect::intervals::Interval;
+use crate::tokenizers::intersect::{Intersect, Interval, IntervalCount};
 
 ///
 /// The Augmented Interval List (AIList), enumerates intersections between a query interval q and an interval set R.
@@ -15,7 +15,6 @@ where
     ends: Vec<I>,
     max_ends: Vec<I>,
     header_list: Vec<usize>,
-    data_list: Vec<T>,
 }
 
 impl<I, T> AIList<I, T>
@@ -39,7 +38,6 @@ where
         let mut starts = Vec::new();
         let mut ends = Vec::new();
         let mut max_ends = Vec::new();
-        let mut data_list = Vec::new();
         let mut header_list = vec![0];
 
         loop {
@@ -48,8 +46,7 @@ where
             starts.append(&mut results.0);
             ends.append(&mut results.1);
             max_ends.append(&mut results.2);
-            data_list.append(&mut results.3);
-            intervals = results.4;
+            intervals = results.3;
 
             if intervals.is_empty() {
                 break;
@@ -63,7 +60,6 @@ where
             ends,
             max_ends,
             header_list,
-            data_list,
             intervals,
         }
     }
@@ -72,12 +68,11 @@ where
     fn decompose(
         intervals: &[Interval<I, T>],
         minimum_coverage_length: usize,
-    ) -> (Vec<I>, Vec<I>, Vec<I>, Vec<T>, Vec<Interval<I, T>>) {
+    ) -> (Vec<I>, Vec<I>, Vec<I>, Vec<Interval<I, T>>) {
         // look at the next minL*2 intervals
         let mut starts = Vec::new();
         let mut ends = Vec::new();
         let mut max_ends = Vec::new();
-        let mut data_list = Vec::new();
         let mut l2 = Vec::new();
 
         for (index, interval) in intervals.iter().enumerate() {
@@ -101,7 +96,6 @@ where
             } else {
                 starts.push(interval.start);
                 ends.push(interval.end);
-                data_list.push(interval.val.clone());
             }
         }
 
@@ -112,71 +106,109 @@ where
             max_ends.push(max);
         }
 
-        (starts, ends, max_ends, data_list, l2)
+        (starts, ends, max_ends, l2)
     }
 
-    fn query_slice(
-        start: I,
-        end: I,
-        starts: &[I],
-        ends: &[I],
-        max_ends: &[I],
-        data_list: &[T],
-    ) -> Vec<Interval<I, T>> {
-        let mut results_list = Vec::new();
-        let mut i = starts.partition_point(|&x| x < end);
-
-        while i > 0 {
-            i -= 1;
-            if start > ends[i] {
-                //this means that there is no intersection
-                if start > max_ends[i] {
-                    //there is no further intersection
-                    return results_list;
-                }
-            } else {
-                results_list.push(Interval {
-                    start: starts[i],
-                    end: ends[i],
-                    val: data_list[i].clone(),
-                })
-            }
-        }
-        results_list
-    }
-
-    pub fn query(&self, start: I, end: I) -> Vec<Interval<I, T>> {
-        let mut results_list = Vec::new();
-
-        for i in 0..(self.header_list.len() - 1) {
-            results_list.append(&mut Self::query_slice(
-                start,
-                end,
-                &self.starts[self.header_list[i]..self.header_list[i + 1]],
-                &self.ends[self.header_list[i]..self.header_list[i + 1]],
-                &self.max_ends[self.header_list[i]..self.header_list[i + 1]],
-                &self.data_list[self.header_list[i]..self.header_list[i + 1]],
-            ));
-        }
-        // now do the last decomposed ailist
-        let i = self.header_list.len() - 1;
-        results_list.extend(Self::query_slice(
+    pub fn find_overlaps(&self, start: I, end: I) -> IterFind<I, T> {
+        IterFind {
+            inner: self,
             start,
             end,
-            &self.starts[self.header_list[i]..],
-            &self.ends[self.header_list[i]..],
-            &self.max_ends[self.header_list[i]..],
-            &self.data_list[self.header_list[i]..],
-        ));
-
-        results_list
+            idx:  0,
+            slice_pos: 0
+        }
     }
 
-    pub fn len(&self) -> usize {
+    #[inline]
+    fn slice_bounds(&self, slice: usize) -> (usize, usize) {
+        let lo = self.header_list[slice];
+        let hi = *self.header_list.get(slice + 1).unwrap_or(&self.starts.len());
+        (lo, hi)
+    }
+}
+
+pub struct IterFind<'a, I, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    inner: &'a AIList<I, T>,
+    start: I,
+    end: I,
+    idx: usize,
+    slice_pos: usize
+}
+
+impl<'a, I, T> Iterator for IterFind<'a, I, T>
+where
+    T: Eq + Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+{
+    type Item = &'a Interval<I, T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        // outer loop
+        while self.idx < self.inner.header_list.len() - 1 {
+            // inner loop
+            self.slice_pos = self.inner.starts.partition_point(|&x| x < self.end);
+
+            // get slice starts and ends
+            let starts = &self.inner.starts[self.inner.header_list[self.idx]..self.inner.header_list[self.idx + 1]];
+            let ends = &self.inner.ends[self.inner.header_list[self.idx]..self.inner.header_list[self.idx + 1]];
+            let max_ends = &self.inner.max_ends[self.inner.header_list[self.idx]..self.inner.header_list[self.idx + 1]];
+
+            while self.slice_pos > 0 {
+                self.slice_pos -= 1;
+                if starts[self.slice_pos] > ends[self.slice_pos] {
+                    if self.start > max_ends[self.slice_pos] {
+                        break
+                    }
+                } else {
+                    // TODO: this needs to be addressed, this is not right...
+                    // we need to return a reference to an interval.
+                    return Some(&self.inner.intervals[self.slice_pos])
+                }
+            }
+            self.idx += 1;
+        }
+
+        // final pass on decomposed list
+        if self.idx == self.inner.header_list.len() - 1 {
+            self.slice_pos = self.idx;
+
+            // get slice starts and ends
+            let starts = &self.inner.starts[self.inner.header_list[self.idx]..];
+            let ends = &self.inner.ends[self.inner.header_list[self.idx]..];
+            let max_ends = &self.inner.max_ends[self.inner.header_list[self.idx]..];
+            
+            while self.slice_pos > 0 {
+                self.slice_pos -= 1;
+                if starts[self.slice_pos] > ends[self.slice_pos] {
+                    if self.start > max_ends[self.slice_pos] {
+                        break
+                    }
+                } else {
+                    // TODO: this needs to be addressed, this is not right...
+                    // we need to return a reference to an interval.
+                    return Some(&self.inner.intervals[self.slice_pos])
+                }
+            }
+        }
+
+        None
+    }
+}
+
+impl<I, T> IntervalCount for AIList<I, T>
+where
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Eq + Clone + Send + Sync,
+{
+    fn len(&self) -> usize {
         self.starts.len()
     }
 
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }
 }
@@ -237,15 +269,16 @@ mod tests {
 
         let query_interval = (6, 11);
 
-        let res = ailist.query(query_interval.0, query_interval.1);
+        let res = ailist.find_overlaps(query_interval.0, query_interval.1);
+        let res = res.collect::<Vec<&Interval<u32, u32>>>();
 
         assert_eq!(
-            res.first(),
-            Some(&Interval {
+            *res[0],
+            Interval {
                 start: 5,
                 end: 20,
                 val: 0
-            })
+            }
         );
     }
 }
