@@ -160,7 +160,7 @@ impl PyTokenizer {
         })
     }
 
-    fn convert_chrom_ids_to_chroms(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+    fn convert_ids_to_chroms(&self, id: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
         Python::with_gil(|py| {
             // if a single id is passed
             if let Ok(id) = id.extract::<u16>() {
