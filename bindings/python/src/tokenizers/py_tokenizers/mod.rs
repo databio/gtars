@@ -224,6 +224,56 @@ impl PyTokenizer {
         })
     }
 
+    fn convert_tokens_to_chrom_ids(&self, tokens: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            let chrom_pad_id = self.get_chrom_pad_id();
+            let special_tokens = [
+                self.get_unk_token(),
+                self.get_pad_token(),
+                self.get_mask_token(),
+                self.get_cls_token(),
+                self.get_bos_token(),
+                self.get_eos_token(),
+                self.get_sep_token(),
+                self.get_chrom_pad(),
+            ];
+
+            // single token
+            if let Ok(token) = tokens.extract::<String>() {
+                let id = if special_tokens.contains(&token) {
+                    chrom_pad_id
+                } else {
+                    let chr = token.split(':').collect::<Vec<&str>>()[0];
+                    self.tokenizer
+                        .convert_chrom_to_id(chr)
+                        .unwrap()
+                };
+                Ok(id.into_py(py))
+            }
+            // list of tokens
+            else if let Ok(token_list) = tokens.extract::<Vec<String>>() {
+                let ids: Vec<u16> = token_list
+                    .iter()
+                    .map(|token| {
+                        if special_tokens.contains(token) {
+                            chrom_pad_id
+                        } else {
+                            let chr = token.split(':').collect::<Vec<&str>>()[0];
+                            self.tokenizer
+                                .convert_chrom_to_id(chr)
+                                .unwrap()
+                        }
+                    })
+                    .collect();
+                Ok(ids.into_py(py))
+            } else {
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_tokens_to_chrom_ids",
+                ))
+            }
+        })
+    }
+
     #[getter]
     fn get_unk_token(&self) -> String {
         self.tokenizer.get_unk_token().to_owned()

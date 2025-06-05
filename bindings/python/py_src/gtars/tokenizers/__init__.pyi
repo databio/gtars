@@ -84,6 +84,15 @@ class Tokenizer:
         Returns:
             Union[List[int], int]: A list of chromosome IDs or a single chromosome ID.
         """
+    
+    def convert_tokens_to_chrom_ids(self, tokens: Any) -> Union[List[int], int]:
+        """
+        Converts the input tokens into their corresponding chromosome IDs.
+        Args:
+            tokens (Any): The input tokens to convert.
+        Returns:
+            Union[List[int], int]: A list of chromosome IDs or a single chromosome ID.
+        """
 
     @property
     def unk_token(self) -> str: ...
