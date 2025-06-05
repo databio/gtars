@@ -274,7 +274,7 @@ impl Tokenizer {
     }
 
     pub fn get_chrom_pad_id(&self) -> u16 {
-        self.get_chrom_vocab_size() as u16
+        self.get_chrom_vocab_size() - 1 as u16
     }
 
     pub fn get_special_tokens_mask(&self, tokens: &[String]) -> Vec<bool> {
