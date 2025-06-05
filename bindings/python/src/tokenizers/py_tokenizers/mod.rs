@@ -274,6 +274,112 @@ impl PyTokenizer {
         })
     }
 
+    fn convert_tokens_to_starts(&self, tokens: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            let special_tokens = [
+                self.get_unk_token(),
+                self.get_pad_token(),
+                self.get_mask_token(),
+                self.get_cls_token(),
+                self.get_bos_token(),
+                self.get_eos_token(),
+                self.get_sep_token(),
+                self.get_chrom_pad(),
+            ];
+
+            // single token
+            if let Ok(token) = tokens.extract::<String>() {
+                let start = if special_tokens.contains(&token) {
+                    0
+                } else {
+                    let parts: Vec<&str> = token.split(':').collect();
+                    let start_end = parts[1].split('-').collect::<Vec<&str>>();
+                    let start = start_end[0];
+                    start.parse::<u32>().unwrap_or(0)
+                };
+                Ok(start.into_py(py))
+            }
+            // list of tokens
+            else if let Ok(token_list) = tokens.extract::<Vec<String>>() {
+                let starts: Vec<u32> = token_list
+                    .iter()
+                    .map(|token| {
+                        if special_tokens.contains(token) {
+                            0
+                        } else {
+                            let parts: Vec<&str> = token.split(':').collect();
+                            let start_end = parts[1].split('-').collect::<Vec<&str>>();
+                            let start = start_end[0];
+                            start.parse::<u32>().unwrap_or(0)
+                        }
+                    })
+                    .collect();
+                Ok(starts.into_py(py))
+            } else {
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_tokens_to_starts",
+                ))
+            }
+        })
+    }
+
+    fn convert_tokens_to_ends(&self, tokens: &Bound<'_, PyAny>) -> Result<PyObject, PyErr> {
+        Python::with_gil(|py| {
+            let special_tokens = [
+                self.get_unk_token(),
+                self.get_pad_token(),
+                self.get_mask_token(),
+                self.get_cls_token(),
+                self.get_bos_token(),
+                self.get_eos_token(),
+                self.get_sep_token(),
+                self.get_chrom_pad(),
+            ];
+
+            // single token
+            if let Ok(token) = tokens.extract::<String>() {
+                let end = if special_tokens.contains(&token) {
+                    0
+                } else {
+                    let parts: Vec<&str> = token.split(':').collect();
+                    let start_end = parts[1].split('-').collect::<Vec<&str>>();
+                    if start_end.len() > 1 {
+                        let end = start_end[1];
+                        end.parse::<u32>().unwrap_or(0)
+                    } else {
+                        0
+                    }
+                };
+                Ok(end.into_py(py))
+            }
+            // list of tokens
+            else if let Ok(token_list) = tokens.extract::<Vec<String>>() {
+                let ends: Vec<u32> = token_list
+                    .iter()
+                    .map(|token| {
+                        if special_tokens.contains(token) {
+                            0
+                        } else {
+                            let parts: Vec<&str> = token.split(':').collect();
+                            let start_end = parts[1].split('-').collect::<Vec<&str>>();
+                            if start_end.len() > 1 {
+                                let end = start_end[1];
+                                end.parse::<u32>().unwrap_or(0)
+                            } else {
+                                0
+                            }
+                        }
+                    })
+                    .collect();
+                Ok(ends.into_py(py))
+            } else {
+                Err(PyValueError::new_err(
+                    "Invalid input type for convert_tokens_to_ends",
+                ))
+            }
+        })
+    }
+
     #[getter]
     fn get_unk_token(&self) -> String {
         self.tokenizer.get_unk_token().to_owned()
