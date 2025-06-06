@@ -36,6 +36,12 @@ impl PyTokenizer {
         Ok(PyTokenizer { tokenizer })
     }
 
+    #[classmethod]
+    fn from_pretrained(_cls: &Bound<'_, PyType>, path: &str) -> Result<Self> {
+        let tokenizer = Tokenizer::from_pretrained(path)?;
+        Ok(PyTokenizer { tokenizer })
+    }
+
     fn tokenize(&self, regions: &Bound<'_, PyAny>) -> Result<Vec<String>> {
         // attempt to map the list to a vector of regions
         let rs = extract_regions_from_py_any(regions)?;
