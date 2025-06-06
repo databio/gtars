@@ -1,7 +1,7 @@
 pub mod bits_tree;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use bits_tree::BitsTree;
 use thiserror::Error;
@@ -12,6 +12,10 @@ use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileTyp
 use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
+
+use hf_hub::api::Api;
+
+pub const DEFAULT_UNIVERSE_FILENAME: &str = "universe.bed.gz";
 
 #[derive(Error, Debug)]
 pub enum TokenizerError {
@@ -114,6 +118,26 @@ impl Tokenizer {
             core,
             special_tokens,
         })
+    }
+
+        ///
+    /// Create a new tokenizer from a pre-trained model
+    /// 
+    pub fn from_pretrained<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {
+        // if local
+        let universe_file_path: PathBuf = if path.as_ref().exists() {
+            path.as_ref().join(DEFAULT_UNIVERSE_FILENAME)
+        } else {
+            let api = Api::new().unwrap();
+            let repo = api.model(path.as_ref().to_str().expect("Path is not valid UTF-8").to_string());
+            repo.get(DEFAULT_UNIVERSE_FILENAME).unwrap()
+        };
+        let file_type = TokenizerInputFileType::from_path(universe_file_path.as_path())?;
+        match file_type {
+            TokenizerInputFileType::Toml => Tokenizer::from_config(universe_file_path),
+            TokenizerInputFileType::Bed => Tokenizer::from_bed(universe_file_path),
+            TokenizerInputFileType::BedGz => Tokenizer::from_bed(universe_file_path),
+        }
     }
 
     ///
