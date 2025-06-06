@@ -13,7 +13,7 @@ use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
 
-use hf_hub::api::Api;
+use hf_hub::api::sync::Api;
 
 pub const DEFAULT_UNIVERSE_FILENAME: &str = "universe.bed.gz";
 
