@@ -159,10 +159,12 @@ pub fn read_u32_npy(npy_file_path: &Path) -> Result<Vec<u32>, Box<dyn std::error
 
 // two inputs are equivalent to --fileheader when running uniwig
 pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    std::fs::create_dir_all(wig_header)?;
     //TODO add test
     // Read the JSON file
     let input_file_path = npy_header.join("npy_meta.json");
     let json_data = fs::read_to_string(&input_file_path)?;
+
 
     // Deserialize JSON into a HashMap (unordered)
     let dictionary: HashMap<String, HashMap<String, i32>> = serde_json::from_str(&json_data)?;
@@ -180,10 +182,12 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
         println!("Preparing {} wiggle file", target_inner_key);
         // Construct the output file name
         let output_file_path = wig_header.join(format!("{}_{}.wig", wig_header.display(), target_inner_key));
+        println!("[DEBUG] Writing to {}", output_file_path.display());
         let mut output_file = File::create(&output_file_path)?;
 
         // Check this inner key across all sorted outer dictionaries
         for outer_key in &sorted_outer_keys {
+            println!("[DEBUG] Processing outer key: {}", outer_key);
             let inner_dict = dictionary.get(outer_key).unwrap();
             let mut value = *inner_dict.get(*target_inner_key).unwrap();
             if *target_inner_key == "start" || *target_inner_key == "core" {
@@ -205,7 +209,7 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
             }
         }
     }
-
+    println!("[DEBUG] Finished all wiggle file generations.");
     Ok(())
 }
 
