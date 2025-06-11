@@ -681,8 +681,7 @@ mod tests {
         let path = PathBuf::from(&tempdir.path());
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
-        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
-        bwfileheader_path.push_str("/final/");
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
 
         let smoothsize: i32 = 2;
@@ -711,13 +710,6 @@ mod tests {
             1.0,
         )
         .expect("Uniwig main failed!");
-
-        println!("Files in NPY header folder ({}):", bwfileheader);
-        for entry in std::fs::read_dir(bwfileheader)? {
-            let entry = entry?;
-            println!("  {}", entry.file_name().to_string_lossy());
-        }
-
         Ok(())
     }
 
@@ -1166,12 +1158,6 @@ mod tests {
             1.0,
         );
 
-        println!("Files in NPY header folder ({}):", npyfileheader);
-        for entry in std::fs::read_dir(npyfileheader)? {
-            let entry = entry?;
-            println!("  {}", entry.file_name().to_string_lossy());
-        }
-
         // Generate wig output
         let wigfileheader_path = format!("{}/wigfinal/", path.display());
         let wigfileheader = wigfileheader_path.as_str();
@@ -1192,12 +1178,6 @@ mod tests {
             true,
             1.0,
         );
-        println!("Files in WIG header folder ({}):", wigfileheader);
-        for entry in std::fs::read_dir(wigfileheader)? {
-            let entry = entry?;
-            println!("  {}", entry.file_name().to_string_lossy());
-        }
-
 
         // Run npy_to_wig
         let genwigfileheader_path = format!("{}/genwigfinal/", path.display());
