@@ -38,7 +38,7 @@ use tokio::runtime;
 pub mod cli;
 pub mod counting;
 pub mod reading;
-mod utils;
+pub mod utils;
 pub mod writing;
 
 pub mod consts {
