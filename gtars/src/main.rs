@@ -1,17 +1,26 @@
 use anyhow::Result;
 use clap::Command;
+use std::env;
+use once_cell::sync::Lazy;
 
 // go through the library crate to get the interfaces
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
 use gtars::uniwig;
+use gtars::bbclient;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
     pub const PKG_NAME: &str = env!("CARGO_PKG_NAME");
     pub const BIN_NAME: &str = env!("CARGO_PKG_NAME");
     pub const UNIWIG_CMD: &str = "uniwig";
+    pub const BBCLIENT_CMD: &str = "bbclient";
+
+    pub static DEFAULT_CACHE_FOLDER: Lazy<&'static str> = Lazy::new(|| {
+        Box::leak(Box::new(env::var("BBCLIENT_CACHE")
+            .unwrap_or_else(|_| format!("{}/.bbcache", env::var("HOME").unwrap_or_else(|_| String::from("/tmp"))))))
+    });
 }
 
 fn build_parser() -> Command {
@@ -23,6 +32,7 @@ fn build_parser() -> Command {
         .subcommand_required(true)
         .subcommand(fragsplit::cli::make_fragsplit_cli())
         .subcommand(uniwig::cli::create_uniwig_cli())
+        .subcommand(bbclient::cli::create_bbclient_cli())
         .subcommand(igd::cli::create_igd_cli())
         .subcommand(scoring::cli::make_fscoring_cli())
 }
@@ -37,6 +47,9 @@ fn main() -> Result<()> {
         }
         Some((uniwig::consts::UNIWIG_CMD, matches)) => {
             uniwig::run_uniwig(matches);
+        }
+        Some((bbclient::consts::BBCLIENT_CMD, matches)) => {
+            uniwig::run_bbclient(matches);
         }
         Some((igd::consts::IGD_CMD, matches)) => match matches.subcommand() {
             Some((igd::consts::IGD_CREATE, matches)) => {
