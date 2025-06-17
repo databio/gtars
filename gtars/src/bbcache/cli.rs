@@ -29,18 +29,6 @@ pub fn create_bbclient_cli() -> Command {
                     .help("Cache folder path"))
         )
         .subcommand(
-            Command::new("cache-bedset")
-                .about("Cache a BED set from local folder or BEDbase")
-                .arg(Arg::new("identifier")
-                    .required(true)
-                    .num_args(1)
-                    .help("BED set identifier, url, or file path"))
-                .arg(Arg::new("cache-folder")
-                    .long("cache-folder")
-                    .default_value(DEFAULT_CACHE_FOLDER)
-                    .help("Cache folder path"))
-        )
-        .subcommand(
             Command::new("cache-tokens")
                 .about("Cache tokens from local file or BEDbase")
                 .arg(Arg::new("bed-id")

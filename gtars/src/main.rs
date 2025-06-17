@@ -16,11 +16,6 @@ pub mod consts {
     pub const BIN_NAME: &str = env!("CARGO_PKG_NAME");
     pub const UNIWIG_CMD: &str = "uniwig";
     pub const BBCLIENT_CMD: &str = "bbclient";
-
-    pub static DEFAULT_CACHE_FOLDER: Lazy<&'static str> = Lazy::new(|| {
-        Box::leak(Box::new(env::var("BBCLIENT_CACHE")
-            .unwrap_or_else(|_| format!("{}/.bbcache", env::var("HOME").unwrap_or_else(|_| String::from("/tmp"))))))
-    });
 }
 
 fn build_parser() -> Command {
