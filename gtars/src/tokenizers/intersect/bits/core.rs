@@ -6,7 +6,7 @@ use crate::tokenizers::intersect::intervals::Interval;
 use std::collections::VecDeque;
 
 
-/// Primary object of the library. The public intervals holds all the intervals and can be used for
+/// primary object of the library. The public intervals holds all the intervals and can be used for
 /// iterating / pulling values out of the tree.
 #[derive(Debug, Clone)]
 pub struct Lapper<I, T>

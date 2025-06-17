@@ -4,8 +4,9 @@ use num_traits::{
     PrimInt, Unsigned,
 };
 
-/// Represent a range from [start, end)
-/// Inclusive start, exclusive of end
+/// represent a range from [start, end)
+/// inclusive start, exclusive of end
+/// ability to be associated with generic data T (e.g. an index or a name, or more complex data like a struct)
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
@@ -22,7 +23,7 @@ where
     I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
-    /// Compute the intsect between two intervals
+    /// compute the intsect between two intervals
     #[inline]
     pub fn intersect(&self, other: &Interval<I, T>) -> I {
         std::cmp::min(self.end, other.end)
