@@ -1,11 +1,12 @@
 use once_cell::sync::Lazy;
 use std::env;
 use std::path::PathBuf;
+use dirs::home_dir;
 
 /// Equivalent of Python's BBCLIENT_CACHE_ENV constant
 pub const BBCLIENT_CACHE_ENV: &str = "BBCLIENT_CACHE";
 
-pub const BEDFILE_URL_PATTERN: &str = "{bedbase_api}/v1/objects/bed.{bed_id}.bed_file/access/http/bytes";
+pub const BEDBASE_URL_PATTERN: &str = "{bedbase_api}/v1/objects/bed.{bed_id}.bed_file/access/http/bytes";
 
 pub const DEFAULT_BEDFILE_SUBFOLDER: &str = "bedfiles";
 
@@ -18,7 +19,7 @@ pub static DEFAULT_CACHE_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
         Err(_) => {
             let home = env::var("HOME")
                 .or_else(|_| {
-                    dirs::home_dir()
+                    home_dir()
                         .map(|p| p.to_string_lossy().into_owned())
                         .ok_or_else(|| std::env::VarError::NotPresent)
                 })

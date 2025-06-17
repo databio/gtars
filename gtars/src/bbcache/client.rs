@@ -46,7 +46,7 @@ impl BBClient {
     }
 
     pub fn load_bed(&mut self, bed_id: &str) -> Result<RegionSet> {
-        let bedfile_path = self.bedfile_path(bed_id, Some(false));
+        let bedfile_path = self.bedfile_path(bed_id, Some(true));
 
         if bedfile_path.exists() {
             info!("Loading cached BED file from {:?}", bedfile_path);
@@ -73,18 +73,19 @@ impl BBClient {
         force: Option<bool>,
     ) -> Result<RegionSet> {
         let bedfile_id = regionset.identifier();
-        let cache_path = self.cache_folder.join(format!("{}{}", bedfile_id, DEFAULT_BEDFILE_EXT));
+        let cache_path = self.bedfile_path(&bedfile_id, Some(true));
 
         if !force.unwrap_or(false) && self.bedfile_cache.contains_key(&bedfile_id) {
-            info!("RegionSet {} already cached at {:?}", bedfile_id, cache_path);
+            info!("{} already exists in cache", cache_path.clone().display());
             return Ok(regionset);
         }
 
-        let mut file = File::create(&cache_path)?;
-        file.write_all(regionset.to_bed_string().as_bytes())?;
-        self.bedfile_cache.insert(bedfile_id.clone(), cache_path);
+        // let mut file = File::create(&cache_path)?;
+        // file.write_all(regionset.to_bed_string().as_bytes())?;
+        regionset.to_bed_gz(cache_path.as_path())?;
+        self.bedfile_cache.insert(bedfile_id.clone(), cache_path.clone());
 
-        info!("Cached RegionSet {} at {:?}", bedfile_id, cache_path);
+        info!("Cached RegionSet {} at {:?}", bedfile_id, cache_path.display());
         Ok(regionset)
     }
 
@@ -144,7 +145,19 @@ impl BBClient {
         if file_path.exists() {
             Ok(file_path)
         } else {
-            Err(Error::new(ErrorKind::NotFound, format!("{} does not exist in cache.", identifier)))
+            Err(Error::new(ErrorKind::NotFound, format!("{} does not exist in cache.", identifier)).into())
+        }
+    }
+    
+    pub fn remove(&mut self, identifier: &str) -> Result<()> {
+        let file_path = self.bedfile_path(identifier, Some(false));
+        if file_path.exists() {
+            fs::remove_file(&file_path)?;
+            self.bedfile_cache.remove(identifier);
+            info!("{} is removed.", file_path.display());
+            Ok(())
+        } else {
+            Err(Error::new(ErrorKind::NotFound, format!("{} does not exist in cache.", file_path.display())).into())
         }
     }
 }

@@ -89,6 +89,8 @@ mod tests {
 
     use gtars::uniwig::writing::write_bw_files;
 
+    use gtars::bbcache::client::BBClient;
+
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashMap;
     use std::collections::HashSet;
@@ -1115,5 +1117,14 @@ mod tests {
         .expect("Uniwig main failed!");
 
         Ok(())
+    }
+    
+    #[rstest]
+    fn test_bbcache(){
+        let cache_folder: PathBuf = "/home/claudehu/Desktop/sandbox/gtars_bbcache".into();
+
+        let mut bbc = BBClient::new(Some(cache_folder), None).expect("Failed to create BBClient");
+        let _rs = bbc.load_bed("6b2e163a1d4319d99bd465c6c78a9741").expect("Failed to load bed file");
+        
     }
 }
