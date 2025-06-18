@@ -1,27 +1,19 @@
-use std::fs::{self, File, create_dir_all};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use std::io::{Error, ErrorKind};
+use anyhow::Result;
 use std::collections::HashMap;
-use anyhow::Result; 
+use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, write};
+use std::io::{Error, ErrorKind};
+use std::path::{Path, PathBuf};
 
 use log::info;
-use once_cell::sync::Lazy;
-use serde::Deserialize;
 use reqwest::blocking::get;
-use std::sync::Mutex;
 
-use super::utils::get_abs_path;
 use super::consts::{
-    DEFAULT_CACHE_FOLDER, DEFAULT_BEDBASE_API, BEDBASE_URL_PATTERN,
-    DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDFILE_EXT
+    BEDBASE_URL_PATTERN, DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER,
 };
+use super::utils::get_abs_path;
 use crate::common::models::region_set::RegionSet;
 
-
-
 static MODULE_NAME: &str = "bbcache";
-
 
 pub struct BBClient {
     pub cache_folder: PathBuf,
@@ -30,10 +22,7 @@ pub struct BBClient {
 }
 
 impl BBClient {
-    pub fn new(
-        cache_folder: Option<PathBuf>,
-        bedbase_api: Option<String>,
-    ) -> Result<Self> {
+    pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
         let bedbase_api = bedbase_api.unwrap_or_else(|| DEFAULT_BEDBASE_API.to_string());
         let bedfile_cache = HashMap::new();
@@ -54,15 +43,20 @@ impl BBClient {
         }
 
         let bed_data = self.download_bed_file_from_bb(bed_id)?;
-        fs::write(&bedfile_path, bed_data)?;
+        write(&bedfile_path, bed_data)?;
 
         let region_set = RegionSet::try_from(bedfile_path.as_path())?;
-        self.bedfile_cache.insert(bed_id.to_string(), bedfile_path.clone());
+        self.bedfile_cache
+            .insert(bed_id.to_string(), bedfile_path.clone());
 
         Ok(region_set)
     }
 
-    pub fn add_local_bed_to_cache(&mut self, bedfile: PathBuf, force: Option<bool>) -> Result<RegionSet> {
+    pub fn add_local_bed_to_cache(
+        &mut self,
+        bedfile: PathBuf,
+        force: Option<bool>,
+    ) -> Result<RegionSet> {
         let region_set = RegionSet::try_from(bedfile.as_path())?;
         self.add_regionset_to_cache(region_set, force)
     }
@@ -83,9 +77,14 @@ impl BBClient {
         // let mut file = File::create(&cache_path)?;
         // file.write_all(regionset.to_bed_string().as_bytes())?;
         regionset.to_bed_gz(cache_path.as_path())?;
-        self.bedfile_cache.insert(bedfile_id.clone(), cache_path.clone());
+        self.bedfile_cache
+            .insert(bedfile_id.clone(), cache_path.clone());
 
-        info!("Cached RegionSet {} at {:?}", bedfile_id, cache_path.display());
+        info!(
+            "Cached RegionSet {} at {:?}",
+            bedfile_id,
+            cache_path.display()
+        );
         Ok(regionset)
     }
 
@@ -96,7 +95,11 @@ impl BBClient {
 
         let response = get(&bed_url)?;
         if !response.status().is_success() {
-            anyhow::bail!("Request to {} failed with status {}", bed_url, response.status());
+            anyhow::bail!(
+                "Request to {} failed with status {}",
+                bed_url,
+                response.status()
+            );
         }
 
         Ok(response.bytes()?.to_vec())
@@ -140,24 +143,61 @@ impl BBClient {
         }
     }
 
-    pub fn seek(&self, identifier: &str) -> Result<PathBuf> {
-        let file_path = self.bedfile_path(identifier, Some(false));
-        if file_path.exists() {
-            Ok(file_path)
-        } else {
-            Err(Error::new(ErrorKind::NotFound, format!("{} does not exist in cache.", identifier)).into())
-        }
+    pub fn seek(&self, identifier: &str) -> Result<PathBuf,  std::io::Error> {
+        self.bedfile_cache
+            .get(identifier)
+            .cloned()
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::NotFound,
+                    format!("{} does not exist in cache.", identifier),
+                )
+            })
+
+        // let file_path = self.bedfile_path(identifier, Some(false));
+        // if file_path.exists() {
+        //     Ok(file_path)
+        // } else {
+        //     Err(Error::new(
+        //         ErrorKind::NotFound,
+        //         format!("{} does not exist in cache.", identifier),
+        //     )
+        //     .into())
+        // }
     }
-    
+
     pub fn remove(&mut self, identifier: &str) -> Result<()> {
         let file_path = self.bedfile_path(identifier, Some(false));
         if file_path.exists() {
-            fs::remove_file(&file_path)?;
+            // remove file and check if subfolders is cleaned
+            let sub_folder_2 = file_path.parent().map(PathBuf::from);
+            let sub_folder_1 = sub_folder_2
+                .as_ref()
+                .and_then(|p| p.parent().map(PathBuf::from));
+
+            remove_file(&file_path)?;
+
+            // Attempt to remove empty subfolders
+            if let Some(sub2) = sub_folder_2 {
+                if read_dir(&sub2)?.next().is_none() {
+                    remove_dir(&sub2)?;
+                    if let Some(sub1) = sub_folder_1 {
+                        if read_dir(&sub1)?.next().is_none() {
+                            remove_dir(&sub1)?;
+                        }
+                    }
+                }
+            }
+
             self.bedfile_cache.remove(identifier);
             info!("{} is removed.", file_path.display());
             Ok(())
         } else {
-            Err(Error::new(ErrorKind::NotFound, format!("{} does not exist in cache.", file_path.display())).into())
+            Err(Error::new(
+                ErrorKind::NotFound,
+                format!("{} does not exist in cache.", file_path.display()),
+            )
+            .into())
         }
     }
 }

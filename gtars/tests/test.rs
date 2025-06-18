@@ -71,6 +71,16 @@ fn path_to_core_bedgraph_output() -> &'static str {
     "tests/data/out/_core.bedGraph"
 }
 
+#[fixture]
+fn path_to_bed_gz_from_bb() -> &'static str {
+    "tests/data/6b2e163a1d4319d99bd465c6c78a9741.bed.gz"
+}
+
+#[fixture]
+fn bbid() -> &'static str {
+    "6b2e163a1d4319d99bd465c6c78a9741"
+}
+
 mod tests {
     use super::*;
     use gtars::igd::create::{
@@ -94,8 +104,9 @@ mod tests {
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashMap;
     use std::collections::HashSet;
-    use std::fs::OpenOptions;
+    use std::fs::{OpenOptions, read_dir};
     use std::io::{Seek, SeekFrom};
+    use flate2::read::GzDecoder;
     // IGD TESTS
 
     #[rstest]
@@ -1118,13 +1129,46 @@ mod tests {
 
         Ok(())
     }
-    
-    #[rstest]
-    fn test_bbcache(){
-        let cache_folder: PathBuf = "/home/claudehu/Desktop/sandbox/gtars_bbcache".into();
 
-        let mut bbc = BBClient::new(Some(cache_folder), None).expect("Failed to create BBClient");
-        let _rs = bbc.load_bed("6b2e163a1d4319d99bd465c6c78a9741").expect("Failed to load bed file");
+    #[rstest]
+    fn test_bbcache(_path_to_bed_gz_from_bb: &str, _bbid: &str) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        fn read_gzip_file(path: impl AsRef<std::path::Path>) -> Vec<u8> {
+            let file = File::open(path).expect("Failed to open file");
+            let mut decoder = GzDecoder::new(BufReader::new(file));
+            let mut contents = Vec::new();
+            decoder.read_to_end(&mut contents).expect("Failed to read decompressed contents");
+            contents
+        }
+        let tempdir = tempfile::tempdir()?; // use `?` for idiomatic error handling
+        let cache_folder = PathBuf::from(tempdir.path());
+        //let cache_folder: PathBuf = "/home/claudehu/Desktop/sandbox/gtars_bbcache".into();
+
+        let mut bbc = BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+        let _rs = bbc
+            .load_bed(_bbid)
+            .expect("Failed to load bed file");
+
+        assert!(bbc.bedfile_cache.contains_key(_bbid), "Cached bed file not found in cache");
+
+        let cached_bed_path = bbc.seek(_bbid)
+            .expect("Failed to seek cached bed file");
+        // println!("Cached bed file path: {:?}", cached_bed_path);
+        let cached_content = read_gzip_file(&cached_bed_path);
+        let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
+        assert_eq!(cached_content, comparison_content, "Cached content does not match the original content");
+
+        bbc.remove(_bbid)
+            .expect("Failed to remove cached bed file");
+        assert!(!bbc.bedfile_cache.contains_key(_bbid), "Cached bed file still exists after removal");
         
+        let bedfile_subfolder = cache_folder.join("bedfiles");
+        let mut entries = read_dir(&bedfile_subfolder)
+            .unwrap_or_else(|e| panic!("Failed to read directory {}: {}", bedfile_subfolder.display(), e));
+        assert!(
+            entries.next().is_none(),
+            "Empty subfolders are not cleaned up properly",
+        );
+
+        Ok(())
     }
 }

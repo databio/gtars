@@ -1,7 +1,6 @@
 use std::fs::create_dir_all;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 
-use anyhow::Result;
 use shellexpand;
 
 use super::consts::DEFAULT_CACHE_FOLDER;
@@ -24,5 +23,3 @@ pub fn get_abs_path(path: Option<PathBuf>, create_folder: Option<bool>) -> PathB
 
     abs_path
 }
-
-
