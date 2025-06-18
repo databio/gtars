@@ -10,7 +10,7 @@ use reqwest::blocking::get;
 use super::consts::{
     BEDBASE_URL_PATTERN, DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER,
 };
-use super::utils::get_abs_path;
+use super::utils::{bb_url_for_regionset, get_abs_path};
 use crate::common::models::region_set::RegionSet;
 
 static MODULE_NAME: &str = "bbcache";
@@ -42,14 +42,15 @@ impl BBClient {
             return RegionSet::try_from(bedfile_path.as_path());
         }
 
-        let bed_data = self.download_bed_file_from_bb(bed_id)?;
-        write(&bedfile_path, bed_data)?;
+        let regionset = self.download_bed_file_from_bb(bed_id)?;
+        // write(&bedfile_path, bed_data)?;
+        regionset.to_bed_gz(bedfile_path.clone().as_path())?;
 
-        let region_set = RegionSet::try_from(bedfile_path.as_path())?;
+        // let region_set = RegionSet::try_from(bedfile_path.as_path())?;
         self.bedfile_cache
             .insert(bed_id.to_string(), bedfile_path.clone());
 
-        Ok(region_set)
+        Ok(regionset)
     }
 
     pub fn add_local_bed_to_cache(
@@ -57,8 +58,8 @@ impl BBClient {
         bedfile: PathBuf,
         force: Option<bool>,
     ) -> Result<RegionSet> {
-        let region_set = RegionSet::try_from(bedfile.as_path())?;
-        self.add_regionset_to_cache(region_set, force)
+        let regionset = RegionSet::try_from(bedfile.as_path())?;
+        self.add_regionset_to_cache(regionset, force)
     }
 
     pub fn add_regionset_to_cache(
@@ -74,8 +75,6 @@ impl BBClient {
             return Ok(regionset);
         }
 
-        // let mut file = File::create(&cache_path)?;
-        // file.write_all(regionset.to_bed_string().as_bytes())?;
         regionset.to_bed_gz(cache_path.as_path())?;
         self.bedfile_cache
             .insert(bedfile_id.clone(), cache_path.clone());
@@ -88,21 +87,27 @@ impl BBClient {
         Ok(regionset)
     }
 
-    fn download_bed_file_from_bb(&self, bedfile: &str) -> Result<Vec<u8>> {
-        let bed_url = BEDBASE_URL_PATTERN
-            .replace("{bedbase_api}", &self.bedbase_api)
-            .replace("{bed_id}", bedfile);
+    fn download_bed_file_from_bb(&self, bedfile: &str) -> Result<RegionSet> {
+        // let bed_url = BEDBASE_URL_PATTERN
+        //     .replace("{bedbase_api}", &self.bedbase_api)
+        //     .replace("{bed_id}", bedfile);
+        let bed_url = bb_url_for_regionset(bedfile);
 
-        let response = get(&bed_url)?;
-        if !response.status().is_success() {
-            anyhow::bail!(
-                "Request to {} failed with status {}",
-                bed_url,
-                response.status()
-            );
-        }
+        let regionset = RegionSet::try_from(bed_url.clone())
+            .expect(&format!("Failed to create RegionSet from URL {}", bed_url));
 
-        Ok(response.bytes()?.to_vec())
+        Ok(regionset)
+
+        // let response = get(&bed_url)?;
+        // if !response.status().is_success() {
+        //     anyhow::bail!(
+        //         "Request to {} failed with status {}",
+        //         bed_url,
+        //         response.status()
+        //     );
+        // }
+
+        // Ok(response.bytes()?.to_vec())
     }
 
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
@@ -143,27 +148,13 @@ impl BBClient {
         }
     }
 
-    pub fn seek(&self, identifier: &str) -> Result<PathBuf,  std::io::Error> {
-        self.bedfile_cache
-            .get(identifier)
-            .cloned()
-            .ok_or_else(|| {
-                Error::new(
-                    ErrorKind::NotFound,
-                    format!("{} does not exist in cache.", identifier),
-                )
-            })
-
-        // let file_path = self.bedfile_path(identifier, Some(false));
-        // if file_path.exists() {
-        //     Ok(file_path)
-        // } else {
-        //     Err(Error::new(
-        //         ErrorKind::NotFound,
-        //         format!("{} does not exist in cache.", identifier),
-        //     )
-        //     .into())
-        // }
+    pub fn seek(&self, identifier: &str) -> Result<PathBuf, std::io::Error> {
+        self.bedfile_cache.get(identifier).cloned().ok_or_else(|| {
+            Error::new(
+                ErrorKind::NotFound,
+                format!("{} does not exist in cache.", identifier),
+            )
+        })
     }
 
     pub fn remove(&mut self, identifier: &str) -> Result<()> {

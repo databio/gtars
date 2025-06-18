@@ -1,5 +1,5 @@
 use std::fs::create_dir_all;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 
 use shellexpand;
 
@@ -22,4 +22,13 @@ pub fn get_abs_path(path: Option<PathBuf>, create_folder: Option<bool>) -> PathB
     }
 
     abs_path
+}
+
+pub fn bb_url_for_regionset(bbid: &str) -> String {
+    format!(
+        "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+        &bbid[0..1],
+        &bbid[1..2],
+        bbid
+    )
 }
