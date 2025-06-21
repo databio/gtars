@@ -6,6 +6,12 @@ use std::path::PathBuf;
 /// Equivalent of Python's BBCLIENT_CACHE_ENV constant
 pub const BBCLIENT_CACHE_ENV: &str = "BBCLIENT_CACHE";
 
+pub const BBCACHE_CMD: &str = "bbcache";
+pub const BBCACHE_CACHEBED: &str = "cache-bed";
+pub const BBCACHE_SEEK: &str = "seek";
+pub const BBCACHE_INSPECTBED: &str = "inspect-bedfiles";
+pub const BBCACHE_REMOVE: &str = "rm";
+
 pub const BEDBASE_URL_PATTERN: &str =
     "{bedbase_api}/v1/objects/bed.{bed_id}.bed_file/access/http/bytes";
 

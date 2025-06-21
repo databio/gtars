@@ -29,6 +29,7 @@ fn build_parser() -> Command {
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
         .subcommand(scoring::cli::make_fscoring_cli())
+        .subcommand(bbcache::cli::create_bbclient_cli())
 }
 
 fn main() -> Result<()> {
@@ -42,6 +43,21 @@ fn main() -> Result<()> {
         Some((uniwig::consts::UNIWIG_CMD, matches)) => {
             uniwig::run_uniwig(matches);
         }
+        Some((bbcache::consts::BBCACHE_CMD, matches)) => match matches.subcommand() {
+            Some((bbcache::consts::BBCACHE_CACHEBED, matches)) => {
+                igd::create::igd_get_create_matches(matches);
+            }
+            Some((bbcache::consts::BBCACHE_INSPECTBED, matches)) => {
+                igd::create::igd_get_create_matches(matches);
+            }
+            Some((bbcache::consts::BBCACHE_SEEK, matches)) => {
+                igd::create::igd_get_create_matches(matches);
+            }
+            Some((bbcache::consts::BBCACHE_REMOVE, matches)) => {
+                igd::create::igd_get_create_matches(matches);
+            }
+            _ => unreachable!("BBCACHE Subcommand not found"),
+        },
         Some((igd::consts::IGD_CMD, matches)) => match matches.subcommand() {
             Some((igd::consts::IGD_CREATE, matches)) => {
                 igd::create::igd_get_create_matches(matches);
