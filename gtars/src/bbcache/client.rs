@@ -1,14 +1,15 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
+use std::fs::{create_dir_all, read_dir, remove_dir, remove_file};
+use std::hash::Hash;
+use walkdir::WalkDir;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, write};
-use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
+use std::io::{Error, ErrorKind};
 
 use log::info;
-use reqwest::blocking::get;
 
 use super::consts::{
-    BEDBASE_URL_PATTERN, DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER,
+    DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER,
 };
 use super::utils::{bb_url_for_regionset, get_abs_path};
 use crate::common::models::region_set::RegionSet;
@@ -18,37 +19,32 @@ static MODULE_NAME: &str = "bbcache";
 pub struct BBClient {
     pub cache_folder: PathBuf,
     pub bedbase_api: String,
-    pub bedfile_cache: HashMap<String, PathBuf>,
 }
 
 impl BBClient {
     pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
         let bedbase_api = bedbase_api.unwrap_or_else(|| DEFAULT_BEDBASE_API.to_string());
-        let bedfile_cache = HashMap::new();
+
 
         Ok(BBClient {
             cache_folder,
             bedbase_api,
-            bedfile_cache,
         })
     }
 
     pub fn load_bed(&mut self, bed_id: &str) -> Result<RegionSet> {
-        let bedfile_path = self.bedfile_path(bed_id, Some(true));
+        let bedfile_path = self.bedfile_path(bed_id, Some(false));
 
         if bedfile_path.exists() {
-            info!("Loading cached BED file from {:?}", bedfile_path);
+            info!("Loading cached BED file from {:?}", bedfile_path.display());
             return RegionSet::try_from(bedfile_path.as_path());
         }
 
         let regionset = self.download_bed_file_from_bb(bed_id)?;
+        info!("Downloaded BED file from BEDbase: {}", bed_id);
         // write(&bedfile_path, bed_data)?;
         regionset.to_bed_gz(bedfile_path.clone().as_path())?;
-
-        // let region_set = RegionSet::try_from(bedfile_path.as_path())?;
-        self.bedfile_cache
-            .insert(bed_id.to_string(), bedfile_path.clone());
 
         Ok(regionset)
     }
@@ -70,44 +66,26 @@ impl BBClient {
         let bedfile_id = regionset.identifier();
         let cache_path = self.bedfile_path(&bedfile_id, Some(true));
 
-        if !force.unwrap_or(false) && self.bedfile_cache.contains_key(&bedfile_id) {
-            info!("{} already exists in cache", cache_path.clone().display());
+         if !force.unwrap_or(false) && cache_path.exists() {
+            info!("{} already exists in cache", cache_path.display());
             return Ok(regionset);
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
-        self.bedfile_cache
-            .insert(bedfile_id.clone(), cache_path.clone());
-
-        info!(
-            "Cached RegionSet {} at {:?}",
-            bedfile_id,
-            cache_path.display()
-        );
         Ok(regionset)
     }
 
     fn download_bed_file_from_bb(&self, bedfile: &str) -> Result<RegionSet> {
-        // let bed_url = BEDBASE_URL_PATTERN
-        //     .replace("{bedbase_api}", &self.bedbase_api)
-        //     .replace("{bed_id}", bedfile);
         let bed_url = bb_url_for_regionset(bedfile);
 
+        // let regionset = RegionSet::try_from(bed_url.clone())
+        //     .expect(&format!("Failed to create RegionSet from URL {}", bed_url));
+
         let regionset = RegionSet::try_from(bed_url.clone())
-            .expect(&format!("Failed to create RegionSet from URL {}", bed_url));
+            .with_context(|| format!("Failed to create RegionSet from URL {}", bed_url))?;
+
 
         Ok(regionset)
-
-        // let response = get(&bed_url)?;
-        // if !response.status().is_success() {
-        //     anyhow::bail!(
-        //         "Request to {} failed with status {}",
-        //         bed_url,
-        //         response.status()
-        //     );
-        // }
-
-        // Ok(response.bytes()?.to_vec())
     }
 
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
@@ -134,10 +112,11 @@ impl BBClient {
             self.create_cache_folder(Some(&folder_path));
         }
 
+        // Ok((folder_path.join(filename)))
         folder_path.join(filename)
     }
 
-    pub fn create_cache_folder(&self, subfolder_path: Option<&Path>) {
+    fn create_cache_folder(&self, subfolder_path: Option<&Path>) {
         let path = match subfolder_path {
             Some(p) => p.to_path_buf(),
             None => self.cache_folder.clone(),
@@ -148,13 +127,13 @@ impl BBClient {
         }
     }
 
-    pub fn seek(&self, identifier: &str) -> Result<PathBuf, std::io::Error> {
-        self.bedfile_cache.get(identifier).cloned().ok_or_else(|| {
-            Error::new(
-                ErrorKind::NotFound,
-                format!("{} does not exist in cache.", identifier),
-            )
-        })
+    pub fn seek(&self, identifier: &str) -> Result<PathBuf> {
+        let cache_path = self.bedfile_path(&identifier, Some(false));
+        if cache_path.exists() {
+            Ok(cache_path)
+        } else {
+            Err(anyhow::anyhow!("{} does not exist in cache.", cache_path.display()))
+        }
     }
 
     pub fn remove(&mut self, identifier: &str) -> Result<()> {
@@ -180,7 +159,6 @@ impl BBClient {
                 }
             }
 
-            self.bedfile_cache.remove(identifier);
             info!("{} is removed.", file_path.display());
             Ok(())
         } else {
@@ -190,5 +168,39 @@ impl BBClient {
             )
             .into())
         }
+    }
+
+    pub fn list_beds(&self) -> Result<HashMap<String, PathBuf>> {
+        let mut bedfile_map = HashMap::new();
+
+        let bedfile_dir = self.cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
+        if !bedfile_dir.exists() {
+            return Ok(bedfile_map); // return empty map if folder doesn't exist
+        }
+
+        for entry in WalkDir::new(&bedfile_dir).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+
+            if path.is_file() {
+                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                    if path
+                        .file_name()
+                        .and_then(|f| f.to_str())
+                        .map(|name| name.ends_with(DEFAULT_BEDFILE_EXT))
+                        .unwrap_or(false)
+                    {
+                        if let Some(file_stem) = path.file_name().and_then(|s| s.to_str()) {
+                            let id = file_stem
+                                .strip_suffix(DEFAULT_BEDFILE_EXT)
+                                .unwrap_or(file_stem)
+                                .to_string();
+                            bedfile_map.insert(id, path.to_path_buf());
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(bedfile_map)
     }
 }

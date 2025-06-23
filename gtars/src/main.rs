@@ -1,8 +1,5 @@
 use anyhow::Result;
 use clap::Command;
-use std::env;
-use once_cell::sync::Lazy;
-
 // go through the library crate to get the interfaces
 use gtars::fragsplit;
 use gtars::igd;

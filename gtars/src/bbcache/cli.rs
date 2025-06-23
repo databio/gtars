@@ -13,13 +13,16 @@ pub fn create_bbclient_cli() -> Command {
                 .about("Cache a BED file from local file or BEDbase")
                 .arg(
                     Arg::new("identifier")
+                        .long("identifier")
+                        .short('i')
                         .required(true)
                         .help("BED file identifier, url, or file path"),
                 )
                 .arg(
                     Arg::new("cache-folder")
                         .long("cache-folder")
-                        .default_value(DEFAULT_CACHE_FOLDER)
+                        .short('f')
+                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
@@ -28,13 +31,16 @@ pub fn create_bbclient_cli() -> Command {
                 .about("Seek the BED / BEDset path by giving identifier")
                 .arg(
                     Arg::new("identifier")
+                        .long("identifier")
+                        .short('i')
                         .required(true)
                         .help("BED file identifier, url, or file path"),
                 )
                 .arg(
                     Arg::new("cache-folder")
                         .long("cache-folder")
-                        .default_value(DEFAULT_CACHE_FOLDER)
+                        .short('f')
+                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
@@ -44,22 +50,26 @@ pub fn create_bbclient_cli() -> Command {
                 .arg(
                     Arg::new("cache-folder")
                         .long("cache-folder")
-                        .default_value(DEFAULT_CACHE_FOLDER)
+                        .short('f')
+                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
         .subcommand(
             Command::new("rm")
-                .about("Remove the BED/BEDset from cache with given identifier")
+                .about("Remove the BEDt from cache with given identifier")
                 .arg(
                     Arg::new("identifier")
+                        .long("identifier")
+                        .short('i')
                         .required(true)
                         .help("BED file identifier, url, or file path"),
                 )
                 .arg(
                     Arg::new("cache-folder")
                         .long("cache-folder")
-                        .default_value(DEFAULT_CACHE_FOLDER)
+                        .short('f')
+                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
