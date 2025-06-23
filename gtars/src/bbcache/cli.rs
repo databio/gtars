@@ -1,11 +1,11 @@
-use clap::{Arg, ArgAction, Command};
+use clap::{Arg, Command};
 
 use crate::bbcache::consts::{BBCACHE_CMD, DEFAULT_CACHE_FOLDER};
 
-pub fn create_bbclient_cli() -> Command {
+pub fn create_bbcache_cli() -> Command {
     Command::new(BBCACHE_CMD)
         .author("DRC")
-        .about("downloads, processes, and caches BED files and BED sets from the BEDbase API")
+        .about("downloads, processes, and caches BED files from the BEDbase API")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
@@ -28,7 +28,7 @@ pub fn create_bbclient_cli() -> Command {
         )
         .subcommand(
             Command::new("seek")
-                .about("Seek the BED / BEDset path by giving identifier")
+                .about("Seek the BED file path by giving identifier")
                 .arg(
                     Arg::new("identifier")
                         .long("identifier")
@@ -57,7 +57,7 @@ pub fn create_bbclient_cli() -> Command {
         )
         .subcommand(
             Command::new("rm")
-                .about("Remove the BEDt from cache with given identifier")
+                .about("Remove the BED file from cache with given identifier")
                 .arg(
                     Arg::new("identifier")
                         .long("identifier")

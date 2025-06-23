@@ -1184,10 +1184,10 @@ mod tests {
                 e
             )
         });
-        // assert!(
-        //     entries.next().is_none(),
-        //     "Empty subfolders are not cleaned up properly",
-        // );
+        assert!(
+            entries.next().is_none(),
+            "Empty subfolders are not cleaned up properly",
+        );
 
         Ok(())
     }

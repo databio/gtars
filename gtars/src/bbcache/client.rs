@@ -1,20 +1,15 @@
-use anyhow::{Result, Context};
-use std::fs::{create_dir_all, read_dir, remove_dir, remove_file};
-use std::hash::Hash;
-use walkdir::WalkDir;
+use anyhow::{Context, Result};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::fs::{create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{Error, ErrorKind};
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 use log::info;
 
-use super::consts::{
-    DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER,
-};
+use super::consts::{DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER};
 use super::utils::{bb_url_for_regionset, get_abs_path};
 use crate::common::models::region_set::RegionSet;
-
-static MODULE_NAME: &str = "bbcache";
 
 pub struct BBClient {
     pub cache_folder: PathBuf,
@@ -25,7 +20,6 @@ impl BBClient {
     pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
         let bedbase_api = bedbase_api.unwrap_or_else(|| DEFAULT_BEDBASE_API.to_string());
-
 
         Ok(BBClient {
             cache_folder,
@@ -66,7 +60,7 @@ impl BBClient {
         let bedfile_id = regionset.identifier();
         let cache_path = self.bedfile_path(&bedfile_id, Some(true));
 
-         if !force.unwrap_or(false) && cache_path.exists() {
+        if !force.unwrap_or(false) && cache_path.exists() {
             info!("{} already exists in cache", cache_path.display());
             return Ok(regionset);
         }
@@ -83,7 +77,6 @@ impl BBClient {
 
         let regionset = RegionSet::try_from(bed_url.clone())
             .with_context(|| format!("Failed to create RegionSet from URL {}", bed_url))?;
-
 
         Ok(regionset)
     }
@@ -132,7 +125,10 @@ impl BBClient {
         if cache_path.exists() {
             Ok(cache_path)
         } else {
-            Err(anyhow::anyhow!("{} does not exist in cache.", cache_path.display()))
+            Err(anyhow::anyhow!(
+                "{} does not exist in cache.",
+                cache_path.display()
+            ))
         }
     }
 
@@ -178,11 +174,14 @@ impl BBClient {
             return Ok(bedfile_map); // return empty map if folder doesn't exist
         }
 
-        for entry in WalkDir::new(&bedfile_dir).into_iter().filter_map(|e| e.ok()) {
+        for entry in WalkDir::new(&bedfile_dir)
+            .into_iter()
+            .filter_map(|e| e.ok())
+        {
             let path = entry.path();
 
             if path.is_file() {
-                if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+                if let Some(_ext) = path.extension().and_then(|s| s.to_str()) {
                     if path
                         .file_name()
                         .and_then(|f| f.to_str())

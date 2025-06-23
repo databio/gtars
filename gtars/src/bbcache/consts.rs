@@ -3,7 +3,6 @@ use once_cell::sync::Lazy;
 use std::env;
 use std::path::PathBuf;
 
-/// Equivalent of Python's BBCLIENT_CACHE_ENV constant
 pub const BBCLIENT_CACHE_ENV: &str = "BBCLIENT_CACHE";
 
 pub const BBCACHE_CMD: &str = "bbcache";
