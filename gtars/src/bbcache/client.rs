@@ -60,7 +60,8 @@ impl BBClient {
         let bedfile_id = regionset.identifier();
         let cache_path = self.bedfile_path(&bedfile_id, Some(true));
 
-        if !force.unwrap_or(false) && cache_path.exists() {
+        let force = force.unwrap_or(false);
+        if !force && cache_path.exists() {
             info!("{} already exists in cache", cache_path.display());
             return Ok(regionset);
         }

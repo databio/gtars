@@ -4,8 +4,8 @@ use crate::bbcache::consts::{BBCACHE_CMD, DEFAULT_CACHE_FOLDER};
 
 pub fn create_bbcache_cli() -> Command {
     Command::new(BBCACHE_CMD)
-        .author("DRC")
-        .about("downloads, processes, and caches BED files from the BEDbase API")
+        .author("ZH")
+        .about("Downloads, processes, and caches BED files from the BEDbase API")
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
