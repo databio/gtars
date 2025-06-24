@@ -1146,7 +1146,6 @@ mod tests {
         }
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
-        //let cache_folder: PathBuf = "/home/claudehu/Desktop/sandbox/gtars_bbcache".into();
 
         let mut bbc =
             BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
@@ -1162,7 +1161,6 @@ mod tests {
         );
 
         let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
-        // println!("Cached bed file path: {:?}", cached_bed_path);
         let cached_content = read_gzip_file(&cached_bed_path);
         let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
         assert_eq!(
@@ -1171,10 +1169,6 @@ mod tests {
         );
 
         bbc.remove(_bbid).expect("Failed to remove cached bed file");
-        // assert!(
-        //     !bbc.bedfile_cache.contains_key(_bbid),
-        //     "Cached bed file still exists after removal"
-        // );
 
         let bedfile_subfolder = cache_folder.join("bedfiles");
         let mut entries = read_dir(&bedfile_subfolder).unwrap_or_else(|e| {
