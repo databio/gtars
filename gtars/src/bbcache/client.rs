@@ -5,10 +5,8 @@ use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use log::info;
-
 use super::consts::{DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER};
-use super::utils::{bb_url_for_regionset, get_abs_path};
+use super::utils::get_abs_path;
 use crate::common::models::region_set::RegionSet;
 
 pub struct BBClient {
@@ -31,16 +29,15 @@ impl BBClient {
         let bedfile_path = self.bedfile_path(bed_id, Some(false));
 
         if bedfile_path.exists() {
-            info!("Loading cached BED file from {:?}", bedfile_path.display());
-            return RegionSet::try_from(bedfile_path.as_path());
+            println!("Loading cached BED file from {:?}", bedfile_path.display());
+            return RegionSet::try_from(bedfile_path);
         }
 
-        let regionset = self.download_bed_file_from_bb(bed_id)?;
-        info!("Downloaded BED file from BEDbase: {}", bed_id);
-        // write(&bedfile_path, bed_data)?;
-        regionset.to_bed_gz(bedfile_path.clone().as_path())?;
-
-        Ok(regionset)
+        let region_set = RegionSet::try_from(bed_id)
+            .with_context(|| format!("Failed to create RegionSet from BEDbase id {}", bed_id))?;
+        println!("Downloaded BED file from BEDbase: {}", bed_id);
+        region_set.to_bed_gz(bedfile_path.clone().as_path())?;
+        Ok(region_set)
     }
 
     pub fn add_local_bed_to_cache(
@@ -62,23 +59,11 @@ impl BBClient {
 
         let force = force.unwrap_or(false);
         if !force && cache_path.exists() {
-            info!("{} already exists in cache", cache_path.display());
+            println!("{} already exists in cache", cache_path.display());
             return Ok(regionset);
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
-        Ok(regionset)
-    }
-
-    fn download_bed_file_from_bb(&self, bedfile: &str) -> Result<RegionSet> {
-        let bed_url = bb_url_for_regionset(bedfile);
-
-        // let regionset = RegionSet::try_from(bed_url.clone())
-        //     .expect(&format!("Failed to create RegionSet from URL {}", bed_url));
-
-        let regionset = RegionSet::try_from(bed_url.clone())
-            .with_context(|| format!("Failed to create RegionSet from URL {}", bed_url))?;
-
         Ok(regionset)
     }
 
@@ -156,7 +141,7 @@ impl BBClient {
                 }
             }
 
-            info!("{} is removed.", file_path.display());
+            println!("{} is removed.", file_path.display());
             Ok(())
         } else {
             Err(Error::new(

@@ -50,8 +50,31 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => get_dynamic_reader_from_url(path)
-                .expect("!Can't get file neither from path or url!"),
+            false => {
+                // get_dynamic_reader_from_url(path)
+                // .expect("!Can't get file neither from path or url!")
+                match get_dynamic_reader_from_url(path) {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        // Extract bbid from the path (e.g., the file stem)
+                        let bbid = path.to_str().ok_or_else(|| {
+                            anyhow::anyhow!("BEDbase identifier is not valid UTF-8: {:?}", path)
+                        })?;
+
+                        let fallback_url = format!(
+                            "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+                            &bbid[0..1],
+                            &bbid[1..2],
+                            bbid
+                        );
+
+                        let fallback_path = PathBuf::from(fallback_url);
+
+                        get_dynamic_reader_from_url(&fallback_path)
+                            .expect("!Can't get file from path, url, or BEDbase identifier")
+                    }
+                }
+            }
         };
 
         let mut header: String = String::new();
@@ -207,6 +230,21 @@ impl From<&[u8]> for RegionSet {
     }
 }
 
+// impl FromBedBase<&str> for RegionSet{
+//     type Error = anyhow::Error;
+
+//     fn from_bedbase(value: &str) -> Result<Self>{
+//         let url = format!(
+//             "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+//             &value[0..1],
+//             &value[1..2],
+//             value
+//         );
+
+//         RegionSet::try_from(url.as_path())
+//     }
+// }
+
 impl<'a> Iterator for RegionSetIterator<'a> {
     type Item = &'a Region;
 
@@ -245,6 +283,10 @@ impl RegionSet {
             println!("Bed file already exists. Overwriting existing file")
         }
 
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let mut file = File::create(path).unwrap();
 
         for region in &self.regions {
@@ -262,6 +304,10 @@ impl RegionSet {
         let path = path.as_ref();
         if path.exists() {
             println!("Bed file already exists. Overwriting existing file")
+        }
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
 
         let file = File::create(path)?;
@@ -481,6 +527,17 @@ mod tests {
     fn test_open_from_url() {
         let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
         assert!(RegionSet::try_from(file_path).is_ok());
+    }
+
+    #[test]
+    fn test_open_from_bedbase() {
+        let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
+        let region_set = RegionSet::try_from(bbid);
+        assert_eq!(region_set.is_ok(), true);
+        assert_eq!(
+            region_set.unwrap().identifier(),
+            "6b2e163a1d4319d99bd465c6c78a9741"
+        );
     }
 
     #[test]
