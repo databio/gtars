@@ -64,6 +64,9 @@ impl BBClient {
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
+        
+        println!("{} added to cache", cache_path.display());
+        
         Ok(regionset)
     }
 
