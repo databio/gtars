@@ -13,7 +13,7 @@ use crate::uniwig::counting::{
     variable_shifted_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError,
 };
 use crate::uniwig::reading::read_chromosome_sizes;
-use crate::uniwig::utils::{compress_counts, get_final_chromosomes};
+use crate::uniwig::utils::{compress_counts, get_final_chromosomes, sort_and_merge_bed_like_files};
 use crate::uniwig::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
@@ -32,7 +32,7 @@ use rayon::ThreadPool;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::thread;
+use std::{fs, thread};
 use tokio::runtime;
 
 pub mod cli;
@@ -52,13 +52,6 @@ enum FileType {
     BAM,
     NARROWPEAK,
 }
-
-// #[derive(Debug)]
-// enum OutSelection {
-//     STARTS,
-//     ENDS,
-//     CORE,
-// }
 
 impl FromStr for FileType {
     type Err = String;
@@ -222,10 +215,66 @@ pub fn uniwig_main(
         .build()
         .unwrap();
 
+
+    let mut final_file_path = filepath.to_string();; // default to the og file path for now
     // Determine Input File Type
     let input_filetype = FileType::from_str(filetype.to_lowercase().as_str());
-    // Set up output file names
 
+    let path = PathBuf::from(filepath);
+
+    // First check if the input source is a directory OR a file
+    // If it is a directory of files, we need to ensure that all the files in the directory are
+    if path.is_dir() {
+        let mut all_bed_like_files: Vec<PathBuf> = Vec::new();
+        println!("Path is a directory: {}", path.display());
+
+        for entry in fs::read_dir(&path).expect("Failed to read directory") {
+            let entry = entry.expect("Failed to read directory entry");
+            let file_path = entry.path();
+
+            if file_path.is_file() {
+                // Get file extension and attempt to convert it to a FileType
+                if let Some(ext_str) = file_path.extension().and_then(|ext| ext.to_str()) {
+                    match FileType::from_str(ext_str) {
+                        Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+                            // Only add if the file's type matches the expected "bed-like" types
+                            all_bed_like_files.push(file_path);
+                        }
+                        Ok(FileType::BAM) => {
+                            println!("WARNING: Skipping BAM file ({}). Not supported at this time.", file_path.display());
+                        }
+                        Err(_) => {
+                            // Handle unknown or unparseable extensions gracefully
+                            println!("WARNING: Skipping file with unknown extension: {}", file_path.display());
+                        }
+                    }
+                } else {
+                    // Handle files with no extension
+                    println!("WARNING: Skipping file with no extension: {}", file_path.display());
+                }
+            }
+        }
+
+        // Only proceed if there are files to merge
+        if all_bed_like_files.is_empty() {
+            panic!("No BED or NARROWPEAK files found in directory: {}", path.display());
+        }
+
+        let combined_file_path_result = sort_and_merge_bed_like_files(&all_bed_like_files);
+
+        match combined_file_path_result {
+            Ok(merged_path_buf) => {
+                final_file_path = merged_path_buf.to_string_lossy().into_owned();
+                println!("Successfully combined files. New filepath: {}", filepath);
+            }
+            Err(e) => {
+                panic!("COULD NOT COMBINE ALL FILES IN DIRECTORY {}: {}", path.display(), e);
+            }
+        }
+    }
+
+
+    // Set up output file names
     let mut meta_data_file_names: [String; 3] = [
         "placeholder1".to_owned(),
         "placeholder2".to_owned(),
@@ -254,7 +303,7 @@ pub fn uniwig_main(
         Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
             // Pare down chromosomes if necessary
             let mut final_chromosomes =
-                get_final_chromosomes(&input_filetype, filepath, &chrom_sizes, score);
+                get_final_chromosomes(&input_filetype, &*final_file_path, &chrom_sizes, score);
 
             // Some housekeeping depending on output type
             let og_output_type = output_type; // need this later for conversion
@@ -667,13 +716,13 @@ pub fn uniwig_main(
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
-            if chromsizerefpath == filepath {
+            if chromsizerefpath == final_file_path {
                 panic!("Must provide a valid chrom.sizes file for processing bam files. Provided file: {}", chromsizerefpath);
             }
 
             let _ = process_bam(
                 vec_count_type,
-                filepath,
+                &*final_file_path,
                 bwfileheader,
                 chrom_sizes,
                 chromsizerefpath,
