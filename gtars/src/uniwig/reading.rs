@@ -382,3 +382,4 @@ pub fn read_bam_header(filepath: &str) -> Vec<Chromosome> {
 //         chromosome.chrom.clone()
 //     );
 // }
+

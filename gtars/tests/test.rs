@@ -726,6 +726,56 @@ mod tests {
     }
 
     #[rstest]
+    fn test_run_uniwig_main_directory_npy_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses the bed file to determine chromsizes for speed
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dir_beds/");
+        let combinedbedpath = tempbedpath.as_str();
+
+        //let chromsizerefpath = combinedbedpath;
+
+        let chromsizerefpath ="/home/drc/GITHUB/gtars/gtars/tests/data/dir_of_files/dummy.chrom.sizes";
+        
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
+
+        let smoothsize: i32 = 2;
+        let output_type = "wig";
+        let filetype = "bed";
+        let num_threads = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
+
+        uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        )
+            .expect("Uniwig main failed!");
+        Ok(())
+    }
+    
+    #[rstest]
     fn test_reading_chrom_sizes() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
