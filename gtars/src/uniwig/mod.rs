@@ -105,7 +105,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let chromsizerefpath = matches
         .get_one::<String>("chromref")
         .cloned()
-        .unwrap_or_else(|| filepath.clone());
+        .expect("chrom sizes is required!");
 
     let bwfileheader = matches
         .get_one::<String>("fileheader")
@@ -667,9 +667,6 @@ pub fn uniwig_main(
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
-            if chromsizerefpath == filepath {
-                panic!("Must provide a valid chrom.sizes file for processing bam files. Provided file: {}", chromsizerefpath);
-            }
 
             let _ = process_bam(
                 vec_count_type,
