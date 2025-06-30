@@ -4,8 +4,6 @@ use anyhow::Result;
 use md5::{Digest, Md5};
 use std::fmt::Debug;
 use std::path::{Path, PathBuf};
-use std::io::Error;
-// use std::io::Error;
 
 #[derive(Clone, Debug)]
 pub struct BedSet {
@@ -148,42 +146,38 @@ impl BedSet {
         self.region_sets.len()
     }
 
-    // pub fn identifier(&self) -> String {
-    //     let mut bedfile_ids = Vec::new();
-    //     for rs in &self.region_sets {
-    //         if let id = rs.identifier() {
-    //             bedfile_ids.push(id);
-    //         }
-    //     }
-    //     let mut hasher = Md5::new();
-    //     let combined = bedfile_ids.join("");
-    //     hasher.update(combined.as_bytes());
+    pub fn identifier(&self) -> String {
+        let mut bedfile_ids = Vec::new();
+        for rs in &self.region_sets {
+            if let id = rs.identifier() {
+                bedfile_ids.push(id);
+            }
+        }
+        bedfile_ids.sort();
+        let mut hasher = Md5::new();
+        let combined = bedfile_ids.join("");
+        hasher.update(combined.as_bytes());
 
-    //     let hash = hasher.finalize();
-    //     let bedset_digest: String = format!("{:x}", hash);
+        let hash = hasher.finalize();
+        let bedset_digest: String = format!("{:x}", hash);
 
-    //     bedset_digest
-    // }
+        bedset_digest
+    }
 }
-
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::fs::read_dir;
-    use tempfile::NamedTempFile;
+    use std::io::Error;
     use std::io::Write;
- 
-    fn get_test_bed_dir() ->  Result<PathBuf, Error> {
-        let folder_path = std::env::current_dir()
-            .unwrap()
-            .join("tests/data/bedset");
-        
+    use tempfile::NamedTempFile;
+
+    fn get_test_bed_dir() -> Result<PathBuf, Error> {
+        let folder_path = std::env::current_dir().unwrap().join("tests/data/bedset");
+
         Ok(folder_path)
     }
-
-
 
     fn get_test_bed_paths() -> Vec<PathBuf> {
         let dir = get_test_bed_dir();
@@ -191,11 +185,9 @@ mod tests {
         for entry in read_dir(dir.unwrap()).unwrap() {
             let entry = entry.unwrap();
             let path = entry.path();
-            if path.extension().map(|ext| ext == "bed" || ext == "narrowPeak").unwrap_or(false) {
-                paths.push(path);
-            }
+            paths.push(path);
         }
-        paths.sort(); // for consistent identifier
+        paths.sort();
         paths
     }
 
@@ -216,34 +208,27 @@ mod tests {
     fn test_open_from_file_path() {
         let paths = get_test_bed_paths(); // Returns Vec<PathBuf>
         let temp_file = write_temp_bedset_list(paths);
-        
-        // let bs = BedSet::try_from(file_path.unwrap().as_path());
         assert!(BedSet::try_from(temp_file.path()).is_ok());
     }
 
     #[test]
     fn test_try_from_pathbuf_vec() {
         let paths = get_test_bed_paths();
-        let bedset = BedSet::try_from(paths.clone());
-        assert!(bedset.is_ok());
-        let bedset = bedset.unwrap();
-        assert_eq!(bedset.len(), paths.len());
+        assert!(BedSet::try_from(paths).is_ok());
     }
 
     #[test]
     fn test_try_from_str_vec() {
         let paths = get_test_bed_paths();
         let path_strs: Vec<String> = paths.iter().map(|p| p.to_string_lossy().into()).collect();
-        let bedset = BedSet::try_from(path_strs);
-        assert!(bedset.is_ok());
+        assert!(BedSet::try_from(path_strs).is_ok());
     }
 
     #[test]
     fn test_try_from_path_vec() {
         let paths = get_test_bed_paths();
         let refs: Vec<&Path> = paths.iter().map(|p| p.as_path()).collect();
-        let bedset = BedSet::try_from(refs);
-        assert!(bedset.is_ok());
+        assert!(BedSet::try_from(refs).is_ok());
     }
 
     #[test]
@@ -264,16 +249,8 @@ mod tests {
         assert!(!bedset.is_empty());
     }
 
-    // #[test]
-    // fn test_bedset_identifier_consistency() {
-    //     let paths = get_test_bed_paths();
-    //     let bedset1 = BedSet::try_from(paths.clone()).unwrap();
-    //     let bedset2 = BedSet::try_from(paths).unwrap();
-    //     assert_eq!(bedset1.identifier(), bedset2.identifier());
-    // }
-
     #[test]
-    fn test_bedset_from_vec_regionset() {
+    fn test_from_vec_regionset() {
         let paths = get_test_bed_paths();
         let region_sets: Vec<RegionSet> = paths
             .iter()
@@ -281,5 +258,14 @@ mod tests {
             .collect();
         let bedset = BedSet::from(region_sets);
         assert_eq!(bedset.len(), paths.len());
+    }
+
+    #[test]
+    fn test_calculate_identifier() {
+        let paths = get_test_bed_paths(); // Returns Vec<PathBuf>
+        let temp_file = write_temp_bedset_list(paths);
+
+        let bs = BedSet::try_from(temp_file.path()).unwrap();
+        assert_eq!("17a10ce63638431b34e7d044c3eac186", bs.identifier());
     }
 }

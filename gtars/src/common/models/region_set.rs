@@ -595,8 +595,7 @@ mod tests {
 
     #[test]
     fn test_read_headers() {
-        // let file_path = get_test_path("dummy_headers.bed").unwrap();
-        let file_path = get_test_path("s1_a_headers.bed").unwrap();
+        let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(region_set.header.is_some());
