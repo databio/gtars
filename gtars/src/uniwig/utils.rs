@@ -76,24 +76,9 @@ pub fn get_final_chromosomes(
                         let ft_string = FileType::from_str(ext_str);
                         let single_file_path = single_file_path.to_str().unwrap();
                         match ft_string {
-                            Ok(FileType::BED) => {
-                                println!("Processing BED file: {}", single_file_path);
-                                let chromosomes_from_file = read_bed_vec(single_file_path);
-                                // Merge chromosomes from this file into the combined map
-                                for chrom_data in chromosomes_from_file {
-                                    let entry = combined_chromosome_map
-                                        .entry(chrom_data.chrom.clone())
-                                        .or_insert_with(|| Chromosome {
-                                            chrom: chrom_data.chrom,
-                                            starts: Vec::new(),
-                                            ends: Vec::new(),
-                                        });
-                                    entry.starts.extend(chrom_data.starts);
-                                    entry.ends.extend(chrom_data.ends);
-                                }
-                            }
-                            Ok(FileType::NARROWPEAK) => {
-                                println!("Processing NARROWPEAK file: {}", single_file_path);
+                            Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+                                println!("Processing file: {}", single_file_path);
+                                //let chromosomes_from_file = read_bed_vec(single_file_path);
                                 let chromosomes_from_file = if score {
                                     read_narrow_peak_vec(single_file_path)
                                 } else {
