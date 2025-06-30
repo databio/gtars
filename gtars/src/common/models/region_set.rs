@@ -176,6 +176,7 @@ impl TryFrom<String> for RegionSet {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self> {
+        println!("Converting String to Path: {}", value);
         RegionSet::try_from(Path::new(&value))
     }
 }
@@ -230,20 +231,6 @@ impl From<&[u8]> for RegionSet {
     }
 }
 
-// impl FromBedBase<&str> for RegionSet{
-//     type Error = anyhow::Error;
-
-//     fn from_bedbase(value: &str) -> Result<Self>{
-//         let url = format!(
-//             "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
-//             &value[0..1],
-//             &value[1..2],
-//             value
-//         );
-
-//         RegionSet::try_from(url.as_path())
-//     }
-// }
 
 impl<'a> Iterator for RegionSetIterator<'a> {
     type Item = &'a Region;
@@ -608,7 +595,8 @@ mod tests {
 
     #[test]
     fn test_read_headers() {
-        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        // let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let file_path = get_test_path("s1_a_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(region_set.header.is_some());
