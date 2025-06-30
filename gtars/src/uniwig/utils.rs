@@ -1,4 +1,3 @@
-use std::path::PathBuf;
 use crate::uniwig::reading::{read_bed_vec, read_narrow_peak_vec};
 use crate::uniwig::{Chromosome, FileType};
 
@@ -97,14 +96,4 @@ pub fn get_final_chromosomes(
     }
 
     final_chromosomes
-}
-
-pub fn sort_and_merge_bed_like_files(files: &[PathBuf]) -> Result<PathBuf, String> {
-    if files.is_empty() {
-        return Err("No files to merge.".to_string());
-    }
-    println!("Sorting and merging {} files...", files.len());
-    // In a real scenario, this would contain your actual merging logic.
-    // For demonstration, let's just return a dummy path.
-    Ok(PathBuf::from("/tmp/combined_merged_file.bed"))
 }
