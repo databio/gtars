@@ -6,8 +6,8 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::ops::Deref;
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
+use crate::uniwig::utils::get_file_info;
 //const UNMAPPED: &str = "*";
 
 /// Reads combined bed like file from a given path.
@@ -15,11 +15,12 @@ use std::path::Path;
 pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> {
     let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
-
+    let pathbuf = PathBuf::from(combinedbedpath);
+    let file_info = get_file_info(&pathbuf);
+    let is_gzipped =  file_info.is_gzipped;
+    
     let file = File::open(path).unwrap();
-
-    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
-
+    
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
         true => Box::new(GzDecoder::new(file)),
@@ -104,10 +105,10 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
     // For narrowpeak there is no default score, we attempt to parse it from the file
     //
     let path = Path::new(combinedbedpath);
-
+    let pathbuf = PathBuf::from(combinedbedpath);
+    let file_info = get_file_info(&pathbuf);
+    let is_gzipped =  file_info.is_gzipped;
     let file = File::open(path).unwrap();
-
-    let is_gzipped = path.extension().unwrap_or(&OsStr::from("narrowpeak")) == "gz";
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {

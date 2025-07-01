@@ -4,12 +4,12 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
-struct FileInfo {
-    file_type: FileType,
-    is_gzipped: bool,
+pub struct FileInfo {
+    pub file_type: FileType,
+    pub is_gzipped: bool,
 }
 
-fn get_file_info(path: &PathBuf) -> FileInfo {
+pub fn get_file_info(path: &PathBuf) -> FileInfo {
     let mut file_type = FileType::UNKNOWN;
     let mut is_gzipped = false;
 
