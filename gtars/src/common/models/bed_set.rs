@@ -11,10 +11,10 @@ pub struct BedSet {
     pub path: Option<PathBuf>,
 }
 
-// pub struct BedSetIterator<'a> {
-//     bed_set: &'a BedSet,
-//     index: usize,
-// }
+pub struct BedSetIterator<'a> {
+    bed_set: &'a BedSet,
+    index: usize,
+}
 
 impl TryFrom<&Path> for BedSet {
     type Error = anyhow::Error;
@@ -126,6 +126,32 @@ impl From<Vec<RegionSet>> for BedSet {
         BedSet {
             region_sets: region_sets,
             path: None,
+        }
+    }
+}
+
+impl<'a> Iterator for BedSetIterator<'a> {
+    type Item = &'a RegionSet;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index < self.bed_set.region_sets.len() {
+            let region_set = &self.bed_set.region_sets[self.index];
+            self.index += 1;
+            Some(region_set)
+        } else {
+            None
+        }
+    }
+}
+
+impl<'a> IntoIterator for &'a BedSet {
+    type Item = &'a RegionSet;
+    type IntoIter = BedSetIterator<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        BedSetIterator {
+            bed_set: self,
+            index: 0,
         }
     }
 }
