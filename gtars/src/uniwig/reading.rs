@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// Reads combined bed like file from a given path.
 /// Returns Vec of Chromosome struct with a default score of 1
-pub fn create_chrom_vec_no_score(combinedbedpath: &str) -> Vec<Chromosome> {
+pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> {
     let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
 

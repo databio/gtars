@@ -94,7 +94,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bedlike_file, read_bam_header, create_chrom_vec_no_score, read_chromosome_sizes, create_chrom_vec_scores,
+        parse_bedlike_file, read_bam_header, create_chrom_vec_default_score, read_chromosome_sizes, create_chrom_vec_scores,
     };
 
     use gtars::uniwig::writing::write_bw_files;
@@ -455,11 +455,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_chrom_vec_no_score(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
-        let result1 = create_chrom_vec_no_score(path_to_bed_file);
+    fn test_create_chrom_vec_default_score(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
+        let result1 = create_chrom_vec_default_score(path_to_bed_file);
         assert_eq!(result1.len(), 20);
 
-        let result2 = create_chrom_vec_no_score(path_to_bed_file_gzipped);
+        let result2 = create_chrom_vec_default_score(path_to_bed_file_gzipped);
         assert_eq!(result2.len(), 20);
     }
 
@@ -519,7 +519,7 @@ mod tests {
 
     #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
-        let chromosomes: Vec<Chromosome> = create_chrom_vec_no_score(path_to_sorted_small_bed_file);
+        let chromosomes: Vec<Chromosome> = create_chrom_vec_default_score(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
