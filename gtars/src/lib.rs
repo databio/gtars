@@ -16,3 +16,4 @@ pub mod io;
 pub mod scoring;
 pub mod tokenizers;
 pub mod uniwig;
+pub mod bbcache;

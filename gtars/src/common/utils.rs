@@ -238,3 +238,16 @@ pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(
 
     Ok(map)
 }
+
+
+pub fn read_bedset_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+
+    let bed_identifiers = reader
+        .lines()
+        .map(|line| line.map(|s| s.trim().to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(bed_identifiers)
+}
