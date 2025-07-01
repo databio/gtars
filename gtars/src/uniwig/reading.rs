@@ -45,7 +45,7 @@ pub fn create_chrom_vec_no_score(combinedbedpath: &str) -> Vec<Chromosome> {
         let line_string = line.unwrap();
         let s = line_string.as_str();
 
-        let (parsed_chr, parsed_start, parsed_end) = parse_bed_file(s).unwrap();
+        let (parsed_chr, parsed_start, parsed_end) = parse_bedlike_file(s).unwrap();
 
         if chrom.is_empty() {
             // Initial chromosome
@@ -135,7 +135,7 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
         let s = line_string.as_str();
 
         let (parsed_chr, parsed_start, parsed_end, parsed_score) =
-            parse_narrow_peak_file(s).unwrap();
+            parse_bedlike_file_with_scores(s).unwrap();
 
         if chrom.is_empty() {
             // Initial chromosome
@@ -191,8 +191,8 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec
 }
 
-/// Parses narrowPeak file grabbing chrom (ctg), start, end, and a numerical score in column 5
-pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
+/// Parses bed like file with score grabbing chrom (ctg), start, end, and a numerical score in column 5
+pub fn parse_bedlike_file_with_scores(line: &str) -> Option<(String, i32, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?;
@@ -219,9 +219,9 @@ pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
     Some((ctg.parse().unwrap(), st, en, narrow_peak_score))
 }
 
-/// Parses each line of given bed file into a contig (chromosome), starts and ends
+/// Parses each line of given bed like file into a contig (chromosome), starts and ends
 /// This ignores any other columns beyond start and ends.
-pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
+pub fn parse_bedlike_file(line: &str) -> Option<(String, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?;

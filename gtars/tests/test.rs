@@ -94,7 +94,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bed_file, read_bam_header, create_chrom_vec_no_score, read_chromosome_sizes, create_chrom_vec_scores,
+        parse_bedlike_file, read_bam_header, create_chrom_vec_no_score, read_chromosome_sizes, create_chrom_vec_scores,
     };
 
     use gtars::uniwig::writing::write_bw_files;
@@ -442,7 +442,7 @@ mod tests {
         let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
         println!("{:?}", first_line);
 
-        let result = parse_bed_file(&first_line);
+        let result = parse_bedlike_file(&first_line);
 
         if let Some((ctg, st, en)) = result {
             println!("ctg: {}", ctg);
@@ -455,7 +455,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
+    fn test_create_chrom_vec_no_score(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
         let result1 = create_chrom_vec_no_score(path_to_bed_file);
         assert_eq!(result1.len(), 20);
 
@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_narrow_peak_vec() {
+    fn test_create_chrom_vec_scores() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let result1 = create_chrom_vec_scores(&path_to_narrow_peak);
@@ -477,15 +477,9 @@ mod tests {
         assert_eq!(result2.len(), 1);
     }
 
-    #[rstest]
-    fn test_read_narrow_peak_chrom_sizes() {
-        let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
-        let _result1 = read_chromosome_sizes(path_to_narrow_peak.as_str());
-    }
 
     #[rstest]
-    fn test_read_narrow_peak_core_counts() {
+    fn test_read_scored_core_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
@@ -504,7 +498,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_narrow_peak_starts_counts() {
+    fn test_read_scored_starts_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
@@ -744,7 +738,7 @@ mod tests {
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
 
-        let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
+        //let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
 
         let smoothsize: i32 = 2;
         let output_type = "wig";
