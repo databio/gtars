@@ -10,8 +10,8 @@ use std::path::Path;
 
 //const UNMAPPED: &str = "*";
 
-/// Reads combined bed file from a given path.
-/// Returns Vec of Chromosome struct
+/// Reads combined bed like file from a given path.
+/// Returns Vec of Chromosome struct with a default score of 1
 pub fn create_chrom_vec_no_score(combinedbedpath: &str) -> Vec<Chromosome> {
     let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
@@ -97,10 +97,10 @@ pub fn create_chrom_vec_no_score(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec
 }
 
-/// Reads narrowPeak files and returns a `Vec<Chromosome>`
-/// Pushes narrowPeak scores along with chrom coordinates.
-/// Differs from read_bed_vec in that read_bed_vec pushes a default score (1).
-pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+/// Reads bed like files and returns a `Vec<Chromosome>`
+/// Pushes scores (column 5) along with chrom coordinates.
+/// Differs from create_chrom_vec_no_score in that create_chrom_vec_scores pushes a default score (1).
+pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
     // For narrowpeak there is no default score, we attempt to parse it from the file
     //
     let path = Path::new(combinedbedpath);

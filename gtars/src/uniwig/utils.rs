@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
-use crate::uniwig::reading::{create_chrom_vec_no_score, read_narrow_peak_vec};
+use crate::uniwig::reading::{create_chrom_vec_no_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
 
 /// Attempt to compress counts before writing to bedGraph
@@ -80,7 +80,7 @@ pub fn get_final_chromosomes(
                                 println!("Processing file: {}", single_file_path);
                                 //let chromosomes_from_file = read_bed_vec(single_file_path);
                                 let chromosomes_from_file = if score {
-                                    read_narrow_peak_vec(single_file_path)
+                                    create_chrom_vec_scores(single_file_path)
                                 } else {
                                     create_chrom_vec_no_score(single_file_path) // Use bed reader if score flag is false
                                 };
@@ -133,7 +133,7 @@ pub fn get_final_chromosomes(
             Ok(FileType::NARROWPEAK) => {
                 if score {
                     println!("FileType is NarrowPeak and Score = True...Counting based on Score");
-                    read_narrow_peak_vec(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+                    create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
                 } else {
                     create_chrom_vec_no_score(filepath)
                 }

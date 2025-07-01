@@ -94,7 +94,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bed_file, read_bam_header, create_chrom_vec_no_score, read_chromosome_sizes, read_narrow_peak_vec,
+        parse_bed_file, read_bam_header, create_chrom_vec_no_score, read_chromosome_sizes, create_chrom_vec_scores,
     };
 
     use gtars::uniwig::writing::write_bw_files;
@@ -467,13 +467,13 @@ mod tests {
     fn test_read_narrow_peak_vec() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
-        let result1 = read_narrow_peak_vec(&path_to_narrow_peak);
+        let result1 = create_chrom_vec_scores(&path_to_narrow_peak);
         assert_eq!(result1.len(), 1);
 
         let path_to_narrow_peak_gzipped =
             format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
 
-        let result2 = read_narrow_peak_vec(&path_to_narrow_peak_gzipped);
+        let result2 = create_chrom_vec_scores(&path_to_narrow_peak_gzipped);
         assert_eq!(result2.len(), 1);
     }
 
@@ -489,7 +489,7 @@ mod tests {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
@@ -508,7 +508,7 @@ mod tests {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
         let smooth_size = 1;
 
