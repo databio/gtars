@@ -788,7 +788,7 @@ mod tests {
         let bwfileheader_path = path.into_os_string().into_string().unwrap();
         let bwfileheader = bwfileheader_path.as_str();
 
-        let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
+        //let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
 
         let smoothsize: i32 = 2;
         let output_type = "wig";
