@@ -4,6 +4,45 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
+struct FileInfo {
+    file_type: FileType,
+    is_gzipped: bool,
+}
+
+fn get_file_info(path: &PathBuf) -> FileInfo {
+    let mut file_type = FileType::UNKNOWN;
+    let mut is_gzipped = false;
+
+    if let Some(os_str_filename) = path.file_name() {
+        if let Some(filename) = os_str_filename.to_str() {
+            // Check for .gz first
+            if filename.ends_with(".gz") {
+                is_gzipped = true;
+                if let Some(base_filename) = filename.strip_suffix(".gz") {
+                    // Try to get the extension before .gz
+                    if let Some(ext) = PathBuf::from(base_filename).extension().and_then(|e| e.to_str()) {
+                        file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                    } else {
+                        // If there's no extension before .gz (e.g., "my_data.gz"),
+                        // you might want to handle this specifically or leave as UNKNOWN.
+                        // For now, we'll try to parse the whole base_filename as a type
+                        file_type = FileType::from_str(base_filename).unwrap_or(FileType::UNKNOWN);
+                    }
+                }
+            } else {
+                // Not gzipped, just get the direct extension
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                }
+            }
+        }
+    }
+
+    FileInfo {
+        file_type,
+        is_gzipped,
+    }
+}
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
@@ -70,13 +109,15 @@ pub fn get_final_chromosomes(
             for entry_result in fs::read_dir(path).unwrap() {
                 let entry = entry_result.unwrap();
                 let single_file_path = entry.path();
+
+                
         
                 if single_file_path.is_file() {
-                    if let Some(ext_str) = single_file_path.extension().and_then(|ext| ext.to_str()) {
-                        let ft_string = FileType::from_str(ext_str);
+                    let file_info = get_file_info(&single_file_path);
                         let single_file_path = single_file_path.to_str().unwrap();
-                        match ft_string {
-                            Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
+                    match file_info.file_type {
+                        
+                            FileType::BED | FileType::NARROWPEAK => {
                                 println!("Processing file: {}", single_file_path);
                                 //let chromosomes_from_file = read_bed_vec(single_file_path);
                                 let chromosomes_from_file = if score {
@@ -97,16 +138,13 @@ pub fn get_final_chromosomes(
                                     entry.ends.extend(chrom_data.ends);
                                 }
                             }
-                            Ok(FileType::BAM) => {
+                            FileType::BAM => {
                                 println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
                             }
-                            Err(_) => {
+                            FileType::UNKNOWN => {
                                 println!("WARNING: Skipping file with unknown extension: {}", single_file_path);
                             }
                         }
-                    } else {
-                        println!("WARNING: Skipping file with no extension: {}", single_file_path.display());
-                    }
                 }
             }
         

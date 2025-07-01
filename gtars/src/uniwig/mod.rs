@@ -45,20 +45,14 @@ pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq)] // Add PartialEq and Eq for easier comparisons
 #[allow(clippy::upper_case_acronyms)]
 enum FileType {
     BED,
     BAM,
     NARROWPEAK,
+    UNKNOWN, // Add an UNKNOWN variant for unhandled types
 }
-
-// #[derive(Debug)]
-// enum OutSelection {
-//     STARTS,
-//     ENDS,
-//     CORE,
-// }
 
 impl FromStr for FileType {
     type Err = String;
@@ -68,7 +62,8 @@ impl FromStr for FileType {
             "bed" => Ok(FileType::BED),
             "bam" => Ok(FileType::BAM),
             "narrowpeak" => Ok(FileType::NARROWPEAK),
-            _ => Err(format!("Invalid file type: {}", s)),
+            _ => Ok(FileType::UNKNOWN), // Return UNKNOWN for unhandled types
+            //_ => Err(format!("Invalid file type: {}", s)),
         }
     }
 }
