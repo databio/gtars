@@ -45,7 +45,7 @@ pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)] // Add PartialEq and Eq for easier comparisons
+#[derive(Debug, Clone)]
 #[allow(clippy::upper_case_acronyms)]
 enum FileType {
     BED,
