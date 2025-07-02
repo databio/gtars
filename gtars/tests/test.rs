@@ -1146,6 +1146,7 @@ mod tests {
         }
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
+        // let cache_folder = PathBuf::from("/home/claudehu/Desktop/sandbox/gtars_bbcache");
 
         let mut bbc =
             BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
@@ -1171,16 +1172,18 @@ mod tests {
         bbc.remove(_bbid).expect("Failed to remove cached bed file");
 
         let bedfile_subfolder = cache_folder.join("bedfiles");
-        let mut entries = read_dir(&bedfile_subfolder).unwrap_or_else(|e| {
-            panic!(
-                "Failed to read directory {}: {}",
-                bedfile_subfolder.display(),
-                e
-            )
-        });
+        let subdirs: Vec<_> = read_dir(&bedfile_subfolder)
+            .unwrap_or_else(|e| panic!("Failed to read directory {}: {}", bedfile_subfolder.display(), e))
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_dir())
+            .collect();
+
+        // Assert no subdirectories exist
         assert!(
-            entries.next().is_none(),
-            "Empty subfolders are not cleaned up properly",
+            subdirs.is_empty(),
+            "Subfolders found in {}: {:?}",
+            bedfile_subfolder.display(),
+            subdirs.iter().map(|e| e.path()).collect::<Vec<_>>()
         );
 
         Ok(())

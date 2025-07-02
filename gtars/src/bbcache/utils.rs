@@ -1,12 +1,13 @@
+use super::consts::BBCLIENT_CACHE_ENV;
+use dirs::home_dir;
+use std::env;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
 
 use shellexpand;
 
-use super::consts::DEFAULT_CACHE_FOLDER;
-
 pub fn get_abs_path(path: Option<PathBuf>, create_folder: Option<bool>) -> PathBuf {
-    let raw_path = path.unwrap_or_else(|| PathBuf::from(DEFAULT_CACHE_FOLDER.clone()));
+    let raw_path = path.unwrap_or_else(get_default_cache_folder);
 
     // Convert to owned string early to avoid borrowing a temporary
     let raw_str = raw_path.to_string_lossy().into_owned();
@@ -22,4 +23,22 @@ pub fn get_abs_path(path: Option<PathBuf>, create_folder: Option<bool>) -> PathB
     }
 
     abs_path
+}
+
+pub fn get_default_cache_folder() -> PathBuf {
+    if let Ok(val) = env::var(BBCLIENT_CACHE_ENV) {
+        PathBuf::from(val)
+    } else {
+        let home = env::var("HOME")
+            .or_else(|_| {
+                home_dir()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .ok_or_else(|| std::env::VarError::NotPresent)
+            })
+            .unwrap_or_else(|_| "/tmp".to_string());
+
+        let mut path = PathBuf::from(home);
+        path.push(".bbcache/");
+        path
+    }
 }

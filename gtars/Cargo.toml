@@ -40,6 +40,8 @@ log = "0.4"
 dirs = "6.0.0"
 tabled = "0.20" 
 walkdir = "2.0"
+biocrs = { git = "https://github.com/khoroshevskyi/biocfilecachers.git"}
+
 
 
 [dev-dependencies]

@@ -1,17 +1,24 @@
 use anyhow::{Context, Result};
+use bigtools::bed;
+use biocrs::biocache::BioCache;
+use biocrs::models::NewResource;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
-use super::consts::{DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER};
+use super::consts::{
+    DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_SUBFOLDER,
+};
 use super::utils::get_abs_path;
 use crate::common::models::region_set::RegionSet;
 
 pub struct BBClient {
     pub cache_folder: PathBuf,
     pub bedbase_api: String,
+    bedfile_cache: BioCache,
+    // bedset_cache: BioCache,
 }
 
 impl BBClient {
@@ -19,10 +26,23 @@ impl BBClient {
         let cache_folder = get_abs_path(cache_folder, Some(true));
         let bedbase_api = bedbase_api.unwrap_or_else(|| DEFAULT_BEDBASE_API.to_string());
 
+        let bedfile_subfolder = &cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
+        create_dir_all(bedfile_subfolder)?;
+        let bedfile_cache = BioCache::new(bedfile_subfolder);
+
         Ok(BBClient {
             cache_folder,
             bedbase_api,
+            bedfile_cache,
+            // bedset_cache
         })
+    }
+
+    fn add_source_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
+        if bedfile {
+            let bed_resource = NewResource::new(cache_id, cache_path, None, None, None, None);
+            self.bedfile_cache.add(&bed_resource);
+        }
     }
 
     pub fn load_bed(&mut self, bed_id: &str) -> Result<RegionSet> {
@@ -36,7 +56,19 @@ impl BBClient {
         let region_set = RegionSet::try_from(bed_id)
             .with_context(|| format!("Failed to create RegionSet from BEDbase id {}", bed_id))?;
         println!("Downloaded BED file from BEDbase: {}", bed_id);
-        region_set.to_bed_gz(bedfile_path.clone().as_path())?;
+
+        self.add_source_to_cache(
+            bed_id,
+            bedfile_path.to_str().expect("Invalid BED file path"),
+            true,
+        );
+        // self.bedfile_cache.add(bed_resource);
+        println!(
+            "Downloaded BED file from to path: {}",
+            bedfile_path.display()
+        );
+        region_set.to_bed_gz(bedfile_path)?;
+        // println!("Downloaded BED file from to path: {}", bedfile_path.display());
         Ok(region_set)
     }
 
@@ -64,9 +96,16 @@ impl BBClient {
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
-        
+        self.add_source_to_cache(
+            &bedfile_id,
+            cache_path
+                .to_str()
+                .expect("cache path cannot be convert to &str"),
+            true,
+        );
+
         println!("{} added to cache", cache_path.display());
-        
+
         Ok(regionset)
     }
 
@@ -93,8 +132,6 @@ impl BBClient {
         if create.unwrap_or(true) {
             self.create_cache_folder(Some(&folder_path));
         }
-
-        // Ok((folder_path.join(filename)))
         folder_path.join(filename)
     }
 

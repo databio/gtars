@@ -1,6 +1,6 @@
 use clap::{Arg, Command};
+use crate::bbcache::consts::BBCACHE_CMD;
 
-use crate::bbcache::consts::{BBCACHE_CMD, DEFAULT_CACHE_FOLDER};
 
 pub fn create_bbcache_cli() -> Command {
     Command::new(BBCACHE_CMD)
@@ -22,7 +22,6 @@ pub fn create_bbcache_cli() -> Command {
                     Arg::new("cache-folder")
                         .long("cache-folder")
                         .short('f')
-                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
@@ -40,7 +39,6 @@ pub fn create_bbcache_cli() -> Command {
                     Arg::new("cache-folder")
                         .long("cache-folder")
                         .short('f')
-                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
@@ -51,7 +49,6 @@ pub fn create_bbcache_cli() -> Command {
                     Arg::new("cache-folder")
                         .long("cache-folder")
                         .short('f')
-                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )
@@ -69,7 +66,6 @@ pub fn create_bbcache_cli() -> Command {
                     Arg::new("cache-folder")
                         .long("cache-folder")
                         .short('f')
-                        .default_value(DEFAULT_CACHE_FOLDER.to_str().expect("Invalid UTF-8 path"))
                         .help("Cache folder path"),
                 ),
         )

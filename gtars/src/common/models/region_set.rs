@@ -385,6 +385,14 @@ impl RegionSet {
     ///
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
+
+        if out_path.exists() {
+            println!("Bed file already exists. Overwriting existing file")
+        }
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
         let mut warnings_count: i32 = 0;
