@@ -88,11 +88,12 @@ mod tests {
     };
 
     use gtars::uniwig::writing::write_bw_files;
+    use gtars::uniwig::utils::npy_to_wig;
 
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashMap;
     use std::collections::HashSet;
-    use std::fs::OpenOptions;
+    use std::fs::{read_dir, OpenOptions};
     use std::io::{Seek, SeekFrom};
     // IGD TESTS
 
@@ -1113,6 +1114,115 @@ mod tests {
             1.0,
         )
         .expect("Uniwig main failed!");
+
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_npy_to_wig(
+        _path_to_dummy_bed_file: &str,
+        _path_to_dummy_chromsizes: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        let chromsizerefpath = _path_to_dummy_chromsizes;
+        let combinedbedpath = _path_to_dummy_bed_file;
+        let tempdir = tempfile::tempdir()?; // use `?` for idiomatic error handling
+        let path = PathBuf::from(tempdir.path());
+
+        let smoothsize = 1;
+        let wig_output_type = "wig";
+        let npy_output_type = "npy";
+        let filetype = "bed";
+        let num_threads = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
+
+        // Generate npy output
+        let npyfileheader_path = format!("{}/npyfinal/", path.display());
+        let npyfileheader = npyfileheader_path.as_str();
+
+        uniwig_main(
+            vec_count_type.clone(),
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            npyfileheader,
+            npy_output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        );
+
+        // Generate wig output
+        let wigfileheader_path = format!("{}/wigfinal/", path.display());
+        let wigfileheader = wigfileheader_path.as_str();
+
+        uniwig_main(
+            vec_count_type.clone(),
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            wigfileheader,
+            wig_output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        );
+
+        // Run npy_to_wig
+        let genwigfileheader_path = format!("{}/genwigfinal/", path.display());
+        let genwigfileheader = genwigfileheader_path.as_str();
+
+        let npy_header_path = Path::new(npyfileheader);
+        let gen_wig_header_path = Path::new(genwigfileheader);
+        npy_to_wig(npy_header_path, gen_wig_header_path);
+
+        // Compare output directories
+        let ref_wig_header_path = Path::new(wigfileheader);
+
+        let mut files1: Vec<_> = read_dir(&ref_wig_header_path)?
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+        let mut files2: Vec<_> = read_dir(&gen_wig_header_path)?
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .collect();
+
+        files1.sort();
+        files2.sort();
+
+        assert_eq!(files1, files2, "Directory file names differ");
+
+        for file_name in files1 {
+            let path1 = gen_wig_header_path.join(&file_name);
+            let path2 = ref_wig_header_path.join(&file_name);
+
+            let mut f1 = File::open(&path1)?;
+            let mut f2 = File::open(&path2)?;
+
+            let mut buf1 = Vec::new();
+            let mut buf2 = Vec::new();
+
+            f1.read_to_end(&mut buf1)?;
+            f2.read_to_end(&mut buf2)?;
+
+            assert_eq!(
+                buf1, buf2,
+                "File contents differ between:\n  {}\nand\n  {}",
+                path1.display(),
+                path2.display()
+            );
+        }
 
         Ok(())
     }
