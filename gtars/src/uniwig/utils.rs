@@ -211,19 +211,3 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
 }
 
 
-// how npy_to_wig was run in local test:
-// fn main() {
-//     let args: Vec<String> = env::args().collect();
-//     if args.len() < 3 {
-//         eprintln!("Usage: cargo run <npy_file_header> <wiggle_file_header>");
-//         std::process::exit(1);
-//     }
-
-//     let npy_header = Path::new(&args[1]);
-//     let wig_header = Path::new(&args[2]);
-
-//     if let Err(e) = npy_to_wig(npy_header, wig_header) {
-//         eprintln!("Error: {}", e);
-//         std::process::exit(1);
-//     }
-// }
