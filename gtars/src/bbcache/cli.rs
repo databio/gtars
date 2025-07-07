@@ -1,6 +1,5 @@
-use clap::{Arg, Command};
 use crate::bbcache::consts::BBCACHE_CMD;
-
+use clap::{Arg, Command};
 
 pub fn create_bbcache_cli() -> Command {
     Command::new(BBCACHE_CMD)

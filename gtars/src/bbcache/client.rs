@@ -1,40 +1,47 @@
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Ok, Result};
 use bigtools::bed;
 use biocrs::biocache::BioCache;
 use biocrs::models::NewResource;
+use reqwest::blocking::get;
+use serde_json::Value;
 use std::collections::HashMap;
-use std::fs::{create_dir_all, read_dir, remove_dir, remove_file};
-use std::io::{Error, ErrorKind};
+use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, File};
+use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
 use super::consts::{
-    DEFAULT_BEDBASE_API, DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_SUBFOLDER,
+    DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
 };
-use super::utils::get_abs_path;
+use super::utils::{get_abs_path, get_bedbase_api};
+use crate::common::models::bed_set::BedSet;
 use crate::common::models::region_set::RegionSet;
 
 pub struct BBClient {
     pub cache_folder: PathBuf,
     pub bedbase_api: String,
     bedfile_cache: BioCache,
-    // bedset_cache: BioCache,
+    bedset_cache: BioCache,
 }
 
 impl BBClient {
     pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
-        let bedbase_api = bedbase_api.unwrap_or_else(|| DEFAULT_BEDBASE_API.to_string());
+        let bedbase_api = bedbase_api.unwrap_or_else(|| get_bedbase_api());
 
         let bedfile_subfolder = &cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
         create_dir_all(bedfile_subfolder)?;
         let bedfile_cache = BioCache::new(bedfile_subfolder);
 
+        let bedset_subfolder = &cache_folder.join(DEFAULT_BEDSET_SUBFOLDER);
+        create_dir_all(bedset_subfolder)?;
+        let bedset_cache = BioCache::new(bedset_subfolder);
+
         Ok(BBClient {
             cache_folder,
             bedbase_api,
             bedfile_cache,
-            // bedset_cache
+            bedset_cache,
         })
     }
 
@@ -72,6 +79,31 @@ impl BBClient {
         Ok(region_set)
     }
 
+    pub fn load_bedset(&mut self, bedset_id: &str) -> Result<BedSet> {
+        let bedset_path = self.bedset_path(bedset_id, Some(true));
+
+        if bedset_path.exists() {
+            println!("Loading cached BED file from {:?}", bedset_path.display());
+            return BedSet::try_from(bedset_path);
+        }
+
+        let bed_data = self.download_bedset_data(bedset_id);
+        let mut file = File::create(bedset_path.clone())?;
+        let mut region_sets = Vec::new();
+        for bbid in bed_data.unwrap() {
+            writeln!(file, "{}", bbid)?;
+            let rs = self.load_bed(&bbid);
+            region_sets.push(rs.unwrap());
+        }
+        self.add_source_to_cache(
+            bedset_id,
+            bedset_path.to_str().expect("Invalid BED set path"),
+            false,
+        );
+
+        Ok(BedSet::from(region_sets))
+    }
+
     pub fn add_local_bed_to_cache(
         &mut self,
         bedfile: PathBuf,
@@ -104,15 +136,63 @@ impl BBClient {
             true,
         );
 
-        println!("{} added to cache", cache_path.display());
+        // println!("{} added to cache", cache_path.display());
 
         Ok(regionset)
+    }
+
+    pub fn add_bedset_to_cache(&mut self, bedset: BedSet) -> Result<String> {
+        let bedset_id = bedset.identifier();
+        let bedset_path = self.bedset_path(&bedset_id, Some(true));
+        if bedset_path.exists() {
+            println!("{} already exists in cache", bedset_path.display());
+        } else {
+            let mut file = File::create(bedset_path.clone())?;
+            for rs in bedset.region_sets {
+                let bed_id = rs.identifier();
+                let _ = self.add_regionset_to_cache(rs, Some(false));
+                writeln!(file, "{}", bed_id)?;
+            }
+        }
+
+        self.add_source_to_cache(
+            &bedset_id,
+            bedset_path
+                .to_str()
+                .expect("cache path cannot be convert to &str"),
+            false,
+        );
+
+        Ok(bedset_id)
+    }
+
+    fn download_bedset_data(&self, bedset_id: &str) -> Result<Vec<String>> {
+        let bedset_url = format!("{}/v1/bedsets/{}", self.bedbase_api, bedset_id);
+        let response = get(&bedset_url)?.text()?;
+
+        let json: Value = serde_json::from_str(&response)?;
+        let results = json["results"]
+            .as_array()
+            .ok_or_else(|| anyhow!("`results` is not an array"))?;
+
+        let extracted_ids = results
+            .iter()
+            .filter_map(|entry| entry.get("id")?.as_str().map(|s| s.to_string()))
+            .collect();
+
+        Ok(extracted_ids)
     }
 
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
         let subfolder_name = DEFAULT_BEDFILE_SUBFOLDER;
         let file_extension = DEFAULT_BEDFILE_EXT;
         self.cache_path(bedfile_id, subfolder_name, file_extension, create)
+    }
+
+    fn bedset_path(&self, bedset_id: &str, create: Option<bool>) -> PathBuf {
+        let subfolder_name = DEFAULT_BEDSET_SUBFOLDER;
+        let file_extension = DEFAULT_BEDSET_EXT;
+        self.cache_path(bedset_id, subfolder_name, file_extension, create)
     }
 
     fn cache_path(
@@ -147,14 +227,16 @@ impl BBClient {
     }
 
     pub fn seek(&self, identifier: &str) -> Result<PathBuf> {
-        let cache_path = self.bedfile_path(&identifier, Some(false));
-        if cache_path.exists() {
-            Ok(cache_path)
+        let file_path = self.bedfile_path(&identifier, Some(false));
+        if file_path.exists() {
+            Ok(file_path)
         } else {
-            Err(anyhow::anyhow!(
-                "{} does not exist in cache.",
-                cache_path.display()
-            ))
+            let set_path = self.bedset_path(&identifier, Some(false));
+            if set_path.exists() {
+                Ok(set_path)
+            } else {
+                Err(anyhow::anyhow!("{} does not exist in cache.", identifier))
+            }
         }
     }
 
@@ -162,34 +244,60 @@ impl BBClient {
         let file_path = self.bedfile_path(identifier, Some(false));
         if file_path.exists() {
             // remove file and check if subfolders is cleaned
-            let sub_folder_2 = file_path.parent().map(PathBuf::from);
-            let sub_folder_1 = sub_folder_2
-                .as_ref()
-                .and_then(|p| p.parent().map(PathBuf::from));
-
-            remove_file(&file_path)?;
-
-            // Attempt to remove empty subfolders
-            if let Some(sub2) = sub_folder_2 {
-                if read_dir(&sub2)?.next().is_none() {
-                    remove_dir(&sub2)?;
-                    if let Some(sub1) = sub_folder_1 {
-                        if read_dir(&sub1)?.next().is_none() {
-                            remove_dir(&sub1)?;
-                        }
-                    }
-                }
-            }
+            let _ = self.local_removal(file_path.clone());
+            self.bedfile_cache.remove(identifier);
 
             println!("{} is removed.", file_path.display());
             Ok(())
         } else {
-            Err(Error::new(
-                ErrorKind::NotFound,
-                format!("{} does not exist in cache.", file_path.display()),
-            )
-            .into())
+            let set_path = self.bedset_path(identifier, Some(false));
+            if set_path.exists() {
+                let bedset_file = File::open(set_path.clone())?;
+                let reader = BufReader::new(bedset_file);
+
+                let bed_ids: Vec<String> = reader.lines().collect::<Result<_, _>>()?;
+
+                for bed_id in bed_ids {
+                    let _ = self.remove(&bed_id);
+                }
+
+                let _ = self.local_removal(set_path.clone());
+
+                self.bedset_cache.remove(identifier);
+
+                println!("{} is removed.", set_path.display());
+                Ok(())
+            } else {
+                Err(Error::new(
+                    ErrorKind::NotFound,
+                    format!("{} does not exist in cache.", file_path.display()),
+                )
+                .into())
+            }
         }
+    }
+
+    fn local_removal(&self, file_path: PathBuf) -> Result<()> {
+        let sub_folder_2 = file_path.parent().map(PathBuf::from);
+        let sub_folder_1 = sub_folder_2
+            .as_ref()
+            .and_then(|p| p.parent().map(PathBuf::from));
+
+        remove_file(&file_path)?;
+
+        // Attempt to remove empty subfolders
+        if let Some(sub2) = sub_folder_2 {
+            if read_dir(&sub2)?.next().is_none() {
+                remove_dir(&sub2)?;
+                if let Some(sub1) = sub_folder_1 {
+                    if read_dir(&sub1)?.next().is_none() {
+                        remove_dir(&sub1)?;
+                    }
+                }
+            }
+        }
+
+        Ok(())
     }
 
     pub fn list_beds(&self) -> Result<HashMap<String, PathBuf>> {
@@ -225,7 +333,6 @@ impl BBClient {
                 }
             }
         }
-
         Ok(bedfile_map)
     }
 }

@@ -1,8 +1,8 @@
 use once_cell::sync::Lazy;
 use std::env;
-use std::path::PathBuf;
 
 pub const BBCLIENT_CACHE_ENV: &str = "BBCLIENT_CACHE";
+pub const BEDBASE_API_ENV: &str = "BEDBASE_API";
 
 pub const BBCACHE_CMD: &str = "bbcache";
 pub const BBCACHE_CACHEBED: &str = "cache-bed";
@@ -10,18 +10,8 @@ pub const BBCACHE_SEEK: &str = "seek";
 pub const BBCACHE_INSPECTBED: &str = "inspect-bedfiles";
 pub const BBCACHE_REMOVE: &str = "rm";
 
-pub const BEDBASE_URL_PATTERN: &str =
-    "{bedbase_api}/v1/objects/bed.{bed_id}.bed_file/access/http/bytes";
-
 pub const DEFAULT_BEDFILE_SUBFOLDER: &str = "bedfiles";
 pub const DEFAULT_BEDSET_SUBFOLDER: &str = "bedsets";
 
 pub const DEFAULT_BEDFILE_EXT: &str = ".bed.gz";
-
-/// Equivalent of Python's DEFAULT_CACHE_FOLDER, but lazy-evaluated once at runtime
-
-pub static DEFAULT_BEDBASE_API: Lazy<&'static str> = Lazy::new(|| {
-    Box::leak(Box::new(
-        env::var("BEDBASE_API").unwrap_or_else(|_| "https://api.bedbase.org".to_string()),
-    ))
-});
+pub const DEFAULT_BEDSET_EXT: &str = ".txt";

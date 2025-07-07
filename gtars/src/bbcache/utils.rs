@@ -1,4 +1,4 @@
-use super::consts::BBCLIENT_CACHE_ENV;
+use super::consts::{BBCLIENT_CACHE_ENV, BEDBASE_API_ENV};
 use dirs::home_dir;
 use std::env;
 use std::fs::create_dir_all;
@@ -41,4 +41,8 @@ pub fn get_default_cache_folder() -> PathBuf {
         path.push(".bbcache/");
         path
     }
+}
+
+pub fn get_bedbase_api() -> String {
+    env::var(BEDBASE_API_ENV).unwrap_or_else(|_| "https://api.bedbase.org".to_string())
 }
