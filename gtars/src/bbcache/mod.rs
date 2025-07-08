@@ -1,10 +1,7 @@
 use biocrs::common::print_resources;
 use clap::ArgMatches;
 use client::BBClient;
-use std::fs;
-use std::path::{Path, PathBuf};
-use tabled::settings::Style;
-use tabled::{Table, Tabled};
+use std::path::PathBuf;
 
 pub mod cli;
 pub mod client;
@@ -13,20 +10,7 @@ pub mod utils;
 
 use crate::bbcache::utils::get_default_cache_folder;
 
-#[derive(Tabled)]
-struct BedEntry {
-    #[tabled(rename = "ID")]
-    id: String,
-    #[tabled(rename = "Path")]
-    path: String,
-}
-
 pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
-    // let cache_folder_str = matches
-    //     .get_one::<String>("cache-folder")
-    //     .expect("cache folder path is required");
-
-    // let cache_folder = PathBuf::from(cache_folder_str);
     let cache_folder = matches
         .get_one::<String>("cache-folder")
         .map(PathBuf::from)
@@ -36,11 +20,15 @@ pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
     match subcmd {
         consts::BBCACHE_INSPECTBED => {
             let bed_resources = bbc.list_beds().unwrap();
+            let n = bed_resources.len();
             print_resources(bed_resources);
+            println!("Number of BED files: {}", n);
         }
         consts::BBCACHE_INSPECTBEDSET => {
             let bedset_resources = bbc.list_bedsets().unwrap();
+            let n = bedset_resources.len();
             print_resources(bedset_resources);
+            println!("Number of BED sets: {}", n);
         }
         consts::BBCACHE_SEEK => {
             let bed_id = matches

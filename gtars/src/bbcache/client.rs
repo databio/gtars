@@ -3,11 +3,9 @@ use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
 use reqwest::blocking::get;
-use std::collections::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, File};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use super::consts::{
     DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
@@ -44,10 +42,12 @@ impl BBClient {
         })
     }
 
-    fn add_source_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
+    fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
+        let resource_to_add = NewResource::new(cache_id, cache_path, None, None, None, None);
         if bedfile {
-            let bed_resource = NewResource::new(cache_id, cache_path, None, None, None, None);
-            self.bedfile_cache.add(&bed_resource);
+            self.bedfile_cache.add(&resource_to_add);
+        } else {
+            self.bedset_cache.add(&resource_to_add);
         }
     }
 
@@ -63,7 +63,7 @@ impl BBClient {
             .with_context(|| format!("Failed to create RegionSet from BEDbase id {}", bed_id))?;
         println!("Downloaded BED file from BEDbase: {}", bed_id);
 
-        self.add_source_to_cache(
+        self.add_resource_to_cache(
             bed_id,
             bedfile_path.to_str().expect("Invalid BED file path"),
             true,
@@ -94,7 +94,7 @@ impl BBClient {
             let rs = self.load_bed(&bbid).unwrap();
             region_sets.push(rs);
         }
-        self.add_source_to_cache(
+        self.add_resource_to_cache(
             bedset_id,
             bedset_path.to_str().expect("Invalid BED set path"),
             false,
@@ -127,7 +127,7 @@ impl BBClient {
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
-        self.add_source_to_cache(
+        self.add_resource_to_cache(
             &bedfile_id,
             cache_path
                 .to_str()
@@ -154,7 +154,7 @@ impl BBClient {
             }
         }
 
-        self.add_source_to_cache(
+        self.add_resource_to_cache(
             &bedset_id,
             bedset_path
                 .to_str()
