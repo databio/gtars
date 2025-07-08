@@ -1175,12 +1175,7 @@ mod tests {
         // let _ = bbc.add_local_bed_to_cache(PathBuf::from(_path_to_bed_gz_from_bb.clone()), Some((true)));
         let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
 
-        let bed_cache_map = bbc.list_beds().unwrap();
-
-        assert!(
-            bed_cache_map.contains_key(_bbid),
-            "Cached bed file not found in cache"
-        );
+        assert!(bbc.seek(_bbid).is_ok());
 
         let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
         let cached_content = read_gzip_file(&cached_bed_path);
@@ -1191,6 +1186,7 @@ mod tests {
         );
 
         let bedset = bbc.load_bedset(_bsid).unwrap();
+        assert!(bbc.seek(_bsid).is_ok());
         for rs in bedset.region_sets{
             let bed_id = rs.identifier();
             assert!(bbc.seek(&bed_id.clone()).is_ok());

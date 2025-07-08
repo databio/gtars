@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Ok, Result};
 use biocrs::biocache::BioCache;
-use biocrs::models::NewResource;
+use biocrs::models::{NewResource, Resource};
+
 use reqwest::blocking::get;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, File};
@@ -164,6 +165,26 @@ impl BBClient {
         Ok(bedset_id)
     }
 
+    pub fn add_local_folder_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
+        let mut region_sets = Vec::new();
+        for entry in read_dir(&folder_path).expect("Failed to read directory") {
+            let entry = entry.expect("Failed to read directory entry");
+            let file_path = entry.path();
+
+            if file_path.is_file() {
+                let rs = RegionSet::try_from(file_path).unwrap();
+                region_sets.push(rs);
+            }
+        }
+        let bedset = BedSet::from(region_sets);
+        Ok(self.add_bedset_to_cache(bedset).unwrap())
+    }
+
+    pub fn add_local_file_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
+        let bedset = BedSet::try_from(folder_path).unwrap();
+        Ok(self.add_bedset_to_cache(bedset).unwrap())
+    }
+
     fn download_bedset_data(&self, bedset_id: &str) -> Result<Vec<String>> {
         let bedset_url = format!("{}/v1/bedset/{}/bedfiles", self.bedbase_api, bedset_id);
 
@@ -186,7 +207,6 @@ impl BBClient {
 
         Ok(extracted_ids)
     }
-
 
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
         let subfolder_name = DEFAULT_BEDFILE_SUBFOLDER;
@@ -305,39 +325,47 @@ impl BBClient {
         Ok(())
     }
 
-    pub fn list_beds(&self) -> Result<HashMap<String, PathBuf>> {
-        let mut bedfile_map = HashMap::new();
+    pub fn list_beds(&mut self) -> Result<Vec<Resource>> {
+        let bed_resources = self.bedfile_cache.list_resources(Some(20000 as i64));
+        Ok(bed_resources)
+        // print_resources(bed_resources);
+        // let mut bedfile_map = HashMap::new();
 
-        let bedfile_dir = self.cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
-        if !bedfile_dir.exists() {
-            return Ok(bedfile_map); // return empty map if folder doesn't exist
-        }
+        // let bedfile_dir = self.cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
+        // if !bedfile_dir.exists() {
+        //     return Ok(bedfile_map); // return empty map if folder doesn't exist
+        // }
 
-        for entry in WalkDir::new(&bedfile_dir)
-            .into_iter()
-            .filter_map(|e| e.ok())
-        {
-            let path = entry.path();
+        // for entry in WalkDir::new(&bedfile_dir)
+        //     .into_iter()
+        //     .filter_map(|e| e.ok())
+        // {
+        //     let path = entry.path();
 
-            if path.is_file() {
-                if let Some(_ext) = path.extension().and_then(|s| s.to_str()) {
-                    if path
-                        .file_name()
-                        .and_then(|f| f.to_str())
-                        .map(|name| name.ends_with(DEFAULT_BEDFILE_EXT))
-                        .unwrap_or(false)
-                    {
-                        if let Some(file_stem) = path.file_name().and_then(|s| s.to_str()) {
-                            let id = file_stem
-                                .strip_suffix(DEFAULT_BEDFILE_EXT)
-                                .unwrap_or(file_stem)
-                                .to_string();
-                            bedfile_map.insert(id, path.to_path_buf());
-                        }
-                    }
-                }
-            }
-        }
-        Ok(bedfile_map)
+        //     if path.is_file() {
+        //         if let Some(_ext) = path.extension().and_then(|s| s.to_str()) {
+        //             if path
+        //                 .file_name()
+        //                 .and_then(|f| f.to_str())
+        //                 .map(|name| name.ends_with(DEFAULT_BEDFILE_EXT))
+        //                 .unwrap_or(false)
+        //             {
+        //                 if let Some(file_stem) = path.file_name().and_then(|s| s.to_str()) {
+        //                     let id = file_stem
+        //                         .strip_suffix(DEFAULT_BEDFILE_EXT)
+        //                         .unwrap_or(file_stem)
+        //                         .to_string();
+        //                     bedfile_map.insert(id, path.to_path_buf());
+        //                 }
+        //             }
+        //         }
+        //     }
+        // }
+        // Ok(bedfile_map)
+    }
+
+    pub fn list_bedsets(&mut self) -> Result<Vec<Resource>> {
+        let bedset_resources = self.bedset_cache.list_resources(Some(20000 as i64));
+        Ok(bedset_resources)
     }
 }

@@ -25,6 +25,23 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("cache-bedset")
+                .about("Cache a BED set from local file or BEDbase")
+                .arg(
+                    Arg::new("identifier")
+                        .long("identifier")
+                        .short('i')
+                        .required(true)
+                        .help("BED set identifier, url, or file path"),
+                )
+                .arg(
+                    Arg::new("cache-folder")
+                        .long("cache-folder")
+                        .short('f')
+                        .help("Cache folder path"),
+                ),
+        )
+        .subcommand(
             Command::new("seek")
                 .about("Seek the BED file path by giving identifier")
                 .arg(
@@ -52,8 +69,18 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
+            Command::new("inspect-bedsets")
+                .about("Inspect the contents of bedsets cache folder")
+                .arg(
+                    Arg::new("cache-folder")
+                        .long("cache-folder")
+                        .short('f')
+                        .help("Cache folder path"),
+                ),
+        )
+        .subcommand(
             Command::new("rm")
-                .about("Remove the BED file from cache with given identifier")
+                .about("Remove the BED file or BED set from cache with given identifier")
                 .arg(
                     Arg::new("identifier")
                         .long("identifier")

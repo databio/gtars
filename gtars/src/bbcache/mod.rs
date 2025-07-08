@@ -1,3 +1,4 @@
+use biocrs::common::print_resources;
 use clap::ArgMatches;
 use client::BBClient;
 use std::fs;
@@ -34,34 +35,12 @@ pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
 
     match subcmd {
         consts::BBCACHE_INSPECTBED => {
-            let rows: Vec<BedEntry> = match bbc.list_beds() {
-                Ok(map) => map
-                    .iter()
-                    .filter_map(|(id, path)| {
-                        path.to_str().map(|p| BedEntry {
-                            id: id.clone(),
-                            path: p.to_string(),
-                        })
-                    })
-                    .collect(),
-                Err(e) => {
-                    eprintln!("Error reading cache: {e}");
-                    return;
-                }
-            };
-
-            if rows.is_empty() {
-                println!("Number of bed files: 0");
-            } else {
-                let styled_table = {
-                    let mut table = Table::new(&rows);
-                    table.with(Style::rounded());
-                    table
-                };
-
-                println!("{styled_table}");
-                println!("Number of bed files: {}", rows.len())
-            }
+            let bed_resources = bbc.list_beds().unwrap();
+            print_resources(bed_resources);
+        }
+        consts::BBCACHE_INSPECTBEDSET => {
+            let bedset_resources = bbc.list_bedsets().unwrap();
+            print_resources(bedset_resources);
         }
         consts::BBCACHE_SEEK => {
             let bed_id = matches
@@ -80,19 +59,9 @@ pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
 
             if path.is_dir() {
                 println!(
-                    "Detected '{}' as a directory. Adding all files within to cache...",
+                    "Detected '{}' as a directory. Please use `cache-bedset` command to cache all files as a BedSet",
                     path.display()
                 );
-                for entry in fs::read_dir(&path).expect("Failed to read directory") {
-                    let entry = entry.expect("Failed to read directory entry");
-                    let file_path = entry.path();
-
-                    if file_path.is_file() {
-                        println!("  Adding file: {}", file_path.display());
-                        bbc.add_local_bed_to_cache(file_path, None)
-                            .expect("Failed to add local BED file to cache");
-                    }
-                }
             } else if path.is_file() {
                 println!(
                     "Detected '{}' as a local file. Adding to cache...",
@@ -106,6 +75,32 @@ pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
                     path.display()
                 );
                 bbc.load_bed(bed_id)
+                    .expect("Failed to load BED file from BEDbase");
+            }
+        }
+        consts::BBCACHE_CACHEBEDSET => {
+            let bedset_id = matches
+                .get_one::<String>("identifier")
+                .expect("BED file identifier is required");
+
+            let path = PathBuf::from(bedset_id);
+
+            if path.is_dir() {
+                bbc.add_local_folder_as_bedset(path)
+                    .expect("Failed to cache BED set from folder");
+            } else if path.is_file() {
+                println!(
+                    "Detected '{}' as a local file. Adding to cache...",
+                    path.display()
+                );
+                bbc.add_local_file_as_bedset(path)
+                    .expect("Failed to add local file as a BED set to cache");
+            } else {
+                println!(
+                    "'{}' not found locally. Attempting to load from BEDbase...",
+                    path.display()
+                );
+                bbc.load_bedset(bedset_id)
                     .expect("Failed to load BED file from BEDbase");
             }
         }

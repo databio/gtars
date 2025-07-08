@@ -3,8 +3,10 @@ pub const BEDBASE_API_ENV: &str = "BEDBASE_API";
 
 pub const BBCACHE_CMD: &str = "bbcache";
 pub const BBCACHE_CACHEBED: &str = "cache-bed";
+pub const BBCACHE_CACHEBEDSET: &str = "cache-bedset";
 pub const BBCACHE_SEEK: &str = "seek";
 pub const BBCACHE_INSPECTBED: &str = "inspect-bedfiles";
+pub const BBCACHE_INSPECTBEDSET: &str = "inspect-bedsets";
 pub const BBCACHE_REMOVE: &str = "rm";
 
 pub const DEFAULT_BEDFILE_SUBFOLDER: &str = "bedfiles";
