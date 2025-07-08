@@ -1,9 +1,7 @@
 use anyhow::{anyhow, Context, Ok, Result};
-use bigtools::bed;
 use biocrs::biocache::BioCache;
 use biocrs::models::NewResource;
 use reqwest::blocking::get;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, File};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
@@ -87,13 +85,13 @@ impl BBClient {
             return BedSet::try_from(bedset_path);
         }
 
-        let bed_data = self.download_bedset_data(bedset_id);
+        let bed_data = self.download_bedset_data(bedset_id).unwrap();
         let mut file = File::create(bedset_path.clone())?;
         let mut region_sets = Vec::new();
-        for bbid in bed_data.unwrap() {
+        for bbid in bed_data {
             writeln!(file, "{}", bbid)?;
-            let rs = self.load_bed(&bbid);
-            region_sets.push(rs.unwrap());
+            let rs = self.load_bed(&bbid).unwrap();
+            region_sets.push(rs);
         }
         self.add_source_to_cache(
             bedset_id,
@@ -167,21 +165,28 @@ impl BBClient {
     }
 
     fn download_bedset_data(&self, bedset_id: &str) -> Result<Vec<String>> {
-        let bedset_url = format!("{}/v1/bedsets/{}", self.bedbase_api, bedset_id);
+        let bedset_url = format!("{}/v1/bedset/{}/bedfiles", self.bedbase_api, bedset_id);
+
         let response = get(&bedset_url)?.text()?;
 
-        let json: Value = serde_json::from_str(&response)?;
+        let json: serde_json::Value = serde_json::from_str(&response)?;
+
         let results = json["results"]
             .as_array()
             .ok_or_else(|| anyhow!("`results` is not an array"))?;
 
-        let extracted_ids = results
+        let extracted_ids: Vec<String> = results
             .iter()
-            .filter_map(|entry| entry.get("id")?.as_str().map(|s| s.to_string()))
+            .filter_map(|entry| {
+                let id_val = entry.get("id");
+                println!("[DEBUG] Entry ID field: {:?}", id_val);
+                id_val?.as_str().map(|s| s.to_string())
+            })
             .collect();
 
         Ok(extracted_ids)
     }
+
 
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
         let subfolder_name = DEFAULT_BEDFILE_SUBFOLDER;
