@@ -51,8 +51,6 @@ impl TryFrom<&Path> for RegionSet {
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
             false => {
-                // get_dynamic_reader_from_url(path)
-                // .expect("!Can't get file neither from path or url!")
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
                     Err(_) => {
