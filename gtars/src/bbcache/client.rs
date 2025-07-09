@@ -171,7 +171,7 @@ impl BBClient {
                 .expect("cache path cannot be convert to &str"),
             true,
         );
-        print!("BED file cached to {}", cache_path.display());
+        println!("BED file cached to {}", cache_path.display());
 
         Ok(bedfile_id)
     }
@@ -203,7 +203,7 @@ impl BBClient {
                 .expect("cache path cannot be convert to &str"),
             false,
         );
-        print!("BED set cached to {}", bedset_path.display());
+        println!("BED set cached to {}", bedset_path.display());
 
         Ok(bedset_id)
     }
