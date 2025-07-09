@@ -1,5 +1,48 @@
-use crate::uniwig::reading::{read_bed_vec, read_narrow_peak_vec};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use std::str::FromStr;
+use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
+pub struct FileInfo {
+    pub file_type: FileType,
+    pub is_gzipped: bool,
+}
+
+pub fn get_file_info(path: &PathBuf) -> FileInfo {
+    let mut file_type = FileType::UNKNOWN;
+    let mut is_gzipped = false;
+
+    if let Some(os_str_filename) = path.file_name() {
+        if let Some(filename) = os_str_filename.to_str() {
+            // Check for .gz first
+            if filename.ends_with(".gz") {
+                is_gzipped = true;
+                if let Some(base_filename) = filename.strip_suffix(".gz") {
+                    // Try to get the extension before .gz
+                    if let Some(ext) = PathBuf::from(base_filename).extension().and_then(|e| e.to_str()) {
+                        file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                    } else {
+                        // If there's no extension before .gz (e.g., "my_data.gz"),
+                        // you might want to handle this specifically or leave as UNKNOWN.
+                        // For now, we'll try to parse the whole base_filename as a type
+                        file_type = FileType::from_str(base_filename).unwrap_or(FileType::UNKNOWN);
+                    }
+                }
+            } else {
+                // Not gzipped, just get the direct extension
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                }
+            }
+        }
+    }
+
+    FileInfo {
+        file_type,
+        is_gzipped,
+    }
+}
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
@@ -53,18 +96,92 @@ pub fn get_final_chromosomes(
     chrom_sizes: &std::collections::HashMap<String, u32>,
     score: bool,
 ) -> Vec<Chromosome> {
-    let chromosomes: Vec<Chromosome> = match ft {
-        Ok(FileType::BED) => read_bed_vec(filepath),
-        Ok(FileType::NARROWPEAK) => {
-            if score {
-                println!("FileType is NarrowPeak and Score = True...Counting based on Score");
-                read_narrow_peak_vec(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
-            } else {
-                read_bed_vec(filepath)
+
+
+    let mut chromosomes: Vec<Chromosome> = Vec::new();
+    
+    let path = PathBuf::from(filepath);
+
+    if path.is_dir() {
+        
+            let mut combined_chromosome_map: HashMap<String, Chromosome> = HashMap::new();
+        
+            for entry_result in fs::read_dir(path).unwrap() {
+                let entry = entry_result.unwrap();
+                let single_file_path = entry.path();
+
+                
+        
+                if single_file_path.is_file() {
+                    let file_info = get_file_info(&single_file_path);
+                        let single_file_path = single_file_path.to_str().unwrap();
+                    match file_info.file_type {
+                        
+                            FileType::BED | FileType::NARROWPEAK => {
+                                println!("Processing file: {}", single_file_path);
+                                //let chromosomes_from_file = read_bed_vec(single_file_path);
+                                let chromosomes_from_file = if score {
+                                    create_chrom_vec_scores(single_file_path)
+                                } else {
+                                    create_chrom_vec_default_score(single_file_path) // Use bed reader if score flag is false
+                                };
+                                // Merge chromosomes from this file into the combined map
+                                for chrom_data in chromosomes_from_file {
+                                    let entry = combined_chromosome_map
+                                        .entry(chrom_data.chrom.clone())
+                                        .or_insert_with(|| Chromosome {
+                                            chrom: chrom_data.chrom,
+                                            starts: Vec::new(),
+                                            ends: Vec::new(),
+                                        });
+                                    entry.starts.extend(chrom_data.starts);
+                                    entry.ends.extend(chrom_data.ends);
+                                }
+                            }
+                            FileType::BAM => {
+                                println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
+                            }
+                            FileType::UNKNOWN => {
+                                println!("WARNING: Skipping file with unknown extension: {}", single_file_path);
+                            }
+                        }
+                }
             }
+        
+            // Convert the combined map back to a Vec<Chromosome> and ensure final sorting
+            //let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
+        //chromosomes = combined_chromosome_map.into_values().collect();
+        let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
+
+        for chromosome in &mut final_chromosomes {
+            // Sort the starts and ends for each chromosome after all data for it has been aggregated
+            chromosome.starts.sort_unstable_by_key(|&(pos, _)| pos);
+            chromosome.ends.sort_unstable_by_key(|&(pos, _)| pos);
         }
-        _ => read_bed_vec(filepath),
-    };
+        // And finally, sort the chromosomes themselves by name for consistent output
+        final_chromosomes.sort_unstable_by(|a, b| a.chrom.cmp(&b.chrom));
+        
+        chromosomes = final_chromosomes;
+    }
+    
+    else{
+
+        chromosomes = match ft {
+            Ok(FileType::BED) => create_chrom_vec_default_score(filepath),
+            Ok(FileType::NARROWPEAK) => {
+                if score {
+                    println!("FileType is NarrowPeak and Score = True...Counting based on Score");
+                    create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+                } else {
+                    create_chrom_vec_default_score(filepath)
+                }
+            }
+            _ => create_chrom_vec_default_score(filepath),
+        };
+        
+        
+    }
+    
 
     let num_chromosomes = chromosomes.len();
 

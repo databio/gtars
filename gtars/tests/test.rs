@@ -104,7 +104,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bed_file, read_bam_header, read_bed_vec, read_chromosome_sizes, read_narrow_peak_vec,
+        parse_bedlike_file, read_bam_header, create_chrom_vec_default_score, read_chromosome_sizes, create_chrom_vec_scores,
     };
 
     use gtars::uniwig::writing::write_bw_files;
@@ -452,7 +452,7 @@ mod tests {
         let first_line = reader.by_ref().lines().next().unwrap().expect("expect");
         println!("{:?}", first_line);
 
-        let result = parse_bed_file(&first_line);
+        let result = parse_bedlike_file(&first_line);
 
         if let Some((ctg, st, en)) = result {
             println!("ctg: {}", ctg);
@@ -465,41 +465,35 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_bed_vec(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
-        let result1 = read_bed_vec(path_to_bed_file);
+    fn test_create_chrom_vec_default_score(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
+        let result1 = create_chrom_vec_default_score(path_to_bed_file);
         assert_eq!(result1.len(), 20);
 
-        let result2 = read_bed_vec(path_to_bed_file_gzipped);
+        let result2 = create_chrom_vec_default_score(path_to_bed_file_gzipped);
         assert_eq!(result2.len(), 20);
     }
 
     #[rstest]
-    fn test_read_narrow_peak_vec() {
+    fn test_create_chrom_vec_scores() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
-        let result1 = read_narrow_peak_vec(&path_to_narrow_peak);
+        let result1 = create_chrom_vec_scores(&path_to_narrow_peak);
         assert_eq!(result1.len(), 1);
 
         let path_to_narrow_peak_gzipped =
             format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
 
-        let result2 = read_narrow_peak_vec(&path_to_narrow_peak_gzipped);
+        let result2 = create_chrom_vec_scores(&path_to_narrow_peak_gzipped);
         assert_eq!(result2.len(), 1);
     }
 
-    #[rstest]
-    fn test_read_narrow_peak_chrom_sizes() {
-        let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
-        let _result1 = read_chromosome_sizes(path_to_narrow_peak.as_str());
-    }
 
     #[rstest]
-    fn test_read_narrow_peak_core_counts() {
+    fn test_read_scored_core_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
@@ -514,11 +508,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_read_narrow_peak_starts_counts() {
+    fn test_read_scored_starts_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = read_narrow_peak_vec(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
         let smooth_size = 1;
 
@@ -535,7 +529,7 @@ mod tests {
 
     #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
-        let chromosomes: Vec<Chromosome> = read_bed_vec(path_to_sorted_small_bed_file);
+        let chromosomes: Vec<Chromosome> = create_chrom_vec_default_score(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
@@ -735,6 +729,106 @@ mod tests {
         Ok(())
     }
 
+    #[rstest]
+    fn test_run_uniwig_main_directory_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses the bed file to determine chromsizes for speed
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dir_beds/");
+        let combinedbedpath = tempbedpath.as_str();
+
+        //let chromsizerefpath = combinedbedpath;
+
+        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        //let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
+
+        let smoothsize: i32 = 2;
+        let output_type = "wig";
+        let filetype = "bed";
+        let num_threads = 6;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
+
+        uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        )
+            .expect("Uniwig main failed!");
+        Ok(())
+    }
+
+    #[rstest]
+    fn test_run_uniwig_main_directory_narrowpeaks_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        // This test uses the bed file to determine chromsizes for speed
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dir_narrowpeaks/");
+        let combinedbedpath = tempbedpath.as_str();
+
+        //let chromsizerefpath = combinedbedpath;
+
+        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        //let bwfileheader = "/home/drc/Downloads/gtars_uniwig_30june2025/output/";
+
+        let smoothsize: i32 = 2;
+        let output_type = "wig";
+        let filetype = "narrowpeak";
+        let num_threads = 6;
+        let score = true;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start", "end", "core"];
+
+        uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            true,
+            1.0,
+        )
+            .expect("Uniwig main failed!");
+        Ok(())
+    }
+    
     #[rstest]
     fn test_reading_chrom_sizes() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
