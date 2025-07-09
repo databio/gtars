@@ -18,6 +18,8 @@ pub fn write_to_npy_file(
     stepsize: i32,
     metafilename: String,
 ) {
+    let path = std::path::Path::new(&metafilename).parent().unwrap();
+    let _ = create_dir_all(path);
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
 
@@ -28,8 +30,7 @@ pub fn write_to_npy_file(
     // Write to the metadata file.
     // Note: there should be a single metadata file for starts, ends and core
 
-    let path = std::path::Path::new(&metafilename).parent().unwrap();
-    let _ = create_dir_all(path);
+    
 
     let mut file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
