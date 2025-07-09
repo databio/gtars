@@ -1167,12 +1167,10 @@ mod tests {
         }
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
-        // let cache_folder = PathBuf::from("/home/claudehu/Desktop/sandbox/gtars_bbcache");
 
         let mut bbc =
             BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
 
-        // let _ = bbc.add_local_bed_to_cache(PathBuf::from(_path_to_bed_gz_from_bb.clone()), Some((true)));
         let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
 
         assert!(bbc.seek(_bbid).is_ok());
