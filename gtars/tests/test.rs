@@ -86,6 +86,11 @@ fn bsid() -> &'static str {
     "gse127562"
 }
 
+#[fixture]
+fn path_to_bedset() -> &'static str {
+    "tests/data/bedset"
+}
+
 mod tests {
     use super::*;
     use gtars::igd::create::{
@@ -1136,7 +1141,58 @@ mod tests {
     }
 
     #[rstest]
-    fn test_bbcache(
+    fn test_bbcache_local(
+        _path_to_bed_gz_from_bb: &str,
+        _bbid: &str,
+        _path_to_bedset: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        fn cleaned_subfolders(subfolder: PathBuf) {
+            let subdirs: Vec<_> = read_dir(&subfolder)
+                .unwrap_or_else(|e| {
+                    panic!("Failed to read directory {}: {}", subfolder.display(), e)
+                })
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .collect();
+
+            // Assert no subdirectories exist
+            assert!(
+                subdirs.is_empty(),
+                "Subfolders found in {}: {:?}",
+                subfolder.display(),
+                subdirs.iter().map(|e| e.path()).collect::<Vec<_>>()
+            );
+        }
+        let tempdir = tempfile::tempdir()?;
+        let cache_folder = PathBuf::from(tempdir.path());
+
+        let mut bbc =
+            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+
+        let bed_id = bbc
+            .add_local_bed_to_cache(PathBuf::from(_path_to_bed_gz_from_bb), Some(false))
+            .unwrap();
+        assert_eq!(&bed_id, _bbid);
+
+        let bedset_id = bbc
+            .add_local_folder_as_bedset(PathBuf::from(_path_to_bedset))
+            .unwrap();
+        assert!(bbc.seek(&bedset_id).is_ok());
+
+        bbc.remove(&bedset_id)
+            .expect("Failed to remove bedset file and its bed files");
+        let bedset_subfolder = cache_folder.join("bedsets");
+        cleaned_subfolders(bedset_subfolder);
+
+        bbc.remove(_bbid).expect("Failed to remove cached bed file");
+        let bedfile_subfolder = cache_folder.join("bedfiles");
+        cleaned_subfolders(bedfile_subfolder);
+        Ok(())
+    }
+
+    #[cfg(feature = "bedbase")]
+    #[rstest]
+    fn test_bbcache_bedbase(
         _path_to_bed_gz_from_bb: &str,
         _bbid: &str,
         _bsid: &str,
@@ -1150,21 +1206,7 @@ mod tests {
                 .expect("Failed to read decompressed contents");
             contents
         }
-        fn cleaned_subfolders(subfolder: PathBuf){
-            let subdirs: Vec<_> = read_dir(&subfolder)
-                .unwrap_or_else(|e| panic!("Failed to read directory {}: {}", subfolder.display(), e))
-                .filter_map(Result::ok)
-                .filter(|entry| entry.path().is_dir())
-                .collect();
 
-            // Assert no subdirectories exist
-            assert!(
-                subdirs.is_empty(),
-                "Subfolders found in {}: {:?}",
-                subfolder.display(),
-                subdirs.iter().map(|e| e.path()).collect::<Vec<_>>()
-            );
-        }
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
 
@@ -1185,20 +1227,12 @@ mod tests {
 
         let bedset = bbc.load_bedset(_bsid).unwrap();
         assert!(bbc.seek(_bsid).is_ok());
-        for rs in bedset.region_sets{
+        for rs in bedset.region_sets {
             let bed_id = rs.identifier();
             assert!(bbc.seek(&bed_id.clone()).is_ok());
             let bed_in_set = bbc.load_bed(&bed_id).unwrap();
             assert_eq!(bed_id, bed_in_set.identifier());
         }
-
-        bbc.remove(_bsid).expect("Failed to remove bedset file and its bed files");
-        let bedset_subfolder = cache_folder.join("bedsets");
-        cleaned_subfolders(bedset_subfolder);
-
-        bbc.remove(_bbid).expect("Failed to remove cached bed file");
-        let bedfile_subfolder = cache_folder.join("bedfiles");
-        cleaned_subfolders(bedfile_subfolder);
 
         Ok(())
     }

@@ -54,7 +54,8 @@ impl BBClient {
     /// - bedfile: if the the id and file is a bed file
 
     fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
-        let resource_to_add = NewResource::new(cache_id, cache_path, None, None, None, None);
+        let resource_to_add =
+            NewResource::new(cache_id, cache_path, Some(cache_path), None, None, None);
         if bedfile {
             self.bedfile_cache.add(&resource_to_add);
         } else {
@@ -170,6 +171,7 @@ impl BBClient {
                 .expect("cache path cannot be convert to &str"),
             true,
         );
+        print!("BED file cached to {}", cache_path.display());
 
         Ok(bedfile_id)
     }
@@ -201,6 +203,7 @@ impl BBClient {
                 .expect("cache path cannot be convert to &str"),
             false,
         );
+        print!("BED set cached to {}", bedset_path.display());
 
         Ok(bedset_id)
     }
@@ -211,7 +214,6 @@ impl BBClient {
     ///
     /// # Returns
     /// - the identifier if the BedSet object
-
     pub fn add_local_folder_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
         let mut region_sets = Vec::new();
         for entry in read_dir(&folder_path).expect("Failed to read directory") {
@@ -259,7 +261,6 @@ impl BBClient {
             .iter()
             .filter_map(|entry| {
                 let id_val = entry.get("id");
-                println!("[DEBUG] Entry ID field: {:?}", id_val);
                 id_val?.as_str().map(|s| s.to_string())
             })
             .collect();

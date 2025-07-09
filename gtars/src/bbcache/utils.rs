@@ -1,10 +1,18 @@
 use super::consts::{BBCLIENT_CACHE_ENV, BEDBASE_API_ENV};
+use biocrs::models::Resource;
 use dirs::home_dir;
 use std::env;
 use std::fs::create_dir_all;
 use std::path::PathBuf;
+use tabled::{Table, Tabled};
 
 use shellexpand;
+
+#[derive(Tabled)]
+pub struct ResourcePrint {
+    Id: String,
+    Path: String,
+}
 
 /// Get absolute path to the folder and create it if it doesn't exist
 /// # Arguments
@@ -59,4 +67,19 @@ pub fn get_default_cache_folder() -> PathBuf {
 /// - BEDbase api for url
 pub fn get_bedbase_api() -> String {
     env::var(BEDBASE_API_ENV).unwrap_or_else(|_| "https://api.bedbase.org".to_string())
+}
+
+pub fn print_resources(resources: Vec<Resource>) -> () {
+    let mut resource_print: Vec<ResourcePrint> = Vec::new();
+
+    for resource in resources {
+        resource_print.push(ResourcePrint {
+            Id: resource.rname,
+            Path: resource.rpath,
+        })
+    }
+
+    let table = Table::new(resource_print);
+
+    println!("{}", table);
 }
