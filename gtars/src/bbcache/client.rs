@@ -22,6 +22,12 @@ pub struct BBClient {
 }
 
 impl BBClient {
+
+    /// BBClient to deal with download files from bedbase and caching them.
+    /// # Arguments
+    /// - cache_folder: path to local folder as cache of files from bedbase,
+    /// if not given it will be the environment variable `BBCLIENT_CACHE`
+    /// - bedbase_api: url to bedbase
     pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
         let bedbase_api = bedbase_api.unwrap_or_else(|| get_bedbase_api());
@@ -42,6 +48,12 @@ impl BBClient {
         })
     }
 
+    /// Add id and path of cached bed file or bed set into file cacher (SQLite).
+    /// # Arguments
+    /// - cache_id: id of bed file or bed set
+    /// - cache_path: path to the cached bed file or bed set
+    /// - bedfile: if the the id and file is a bed file
+
     fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
         let resource_to_add = NewResource::new(cache_id, cache_path, None, None, None, None);
         if bedfile {
@@ -50,7 +62,13 @@ impl BBClient {
             self.bedset_cache.add(&resource_to_add);
         }
     }
-
+    
+    /// Loads a BED file from cache, or downloads and caches it if it doesn't exist
+    /// # Arguments
+    /// - bed_id: unique identifier of a BED file
+    /// 
+    /// # Returns
+    /// - the RegionSet object of the loaded bed file
     pub fn load_bed(&mut self, bed_id: &str) -> Result<RegionSet> {
         let bedfile_path = self.bedfile_path(bed_id, Some(false));
 
@@ -61,23 +79,25 @@ impl BBClient {
 
         let region_set = RegionSet::try_from(bed_id)
             .with_context(|| format!("Failed to create RegionSet from BEDbase id {}", bed_id))?;
-        println!("Downloaded BED file from BEDbase: {}", bed_id);
+        
 
         self.add_resource_to_cache(
             bed_id,
             bedfile_path.to_str().expect("Invalid BED file path"),
             true,
         );
-        // self.bedfile_cache.add(bed_resource);
-        println!(
-            "Downloaded BED file from to path: {}",
-            bedfile_path.display()
-        );
-        region_set.to_bed_gz(bedfile_path)?;
-        // println!("Downloaded BED file from to path: {}", bedfile_path.display());
+
+        region_set.to_bed_gz(bedfile_path.clone())?;
+        println!("Downloaded BED file {} from BEDbase to path: {}", bed_id, bedfile_path.display());
         Ok(region_set)
     }
 
+    /// Load a BEDset from cache, or download and add it to the cache with its BED files
+    /// # Arguments
+    /// - bedset_id: unique identifier of a BED set
+    /// 
+    /// # Returns
+    /// - the BedSet object of the loaded bed set
     pub fn load_bedset(&mut self, bedset_id: &str) -> Result<BedSet> {
         let bedset_path = self.bedset_path(bedset_id, Some(true));
 
