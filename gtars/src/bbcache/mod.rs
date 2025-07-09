@@ -10,6 +10,10 @@ pub mod utils;
 
 use crate::bbcache::utils::get_default_cache_folder;
 
+/// Excute the input commands from CLI
+/// # Arguments
+/// - subcmd: the subcommand under bbcache
+/// - matches: matched items from CLAP args
 pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
     let cache_folder = matches
         .get_one::<String>("cache-folder")

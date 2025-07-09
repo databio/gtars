@@ -22,7 +22,6 @@ pub struct BBClient {
 }
 
 impl BBClient {
-
     /// BBClient to deal with download files from bedbase and caching them.
     /// # Arguments
     /// - cache_folder: path to local folder as cache of files from bedbase,
@@ -62,11 +61,11 @@ impl BBClient {
             self.bedset_cache.add(&resource_to_add);
         }
     }
-    
+
     /// Loads a BED file from cache, or downloads and caches it if it doesn't exist
     /// # Arguments
     /// - bed_id: unique identifier of a BED file
-    /// 
+    ///
     /// # Returns
     /// - the RegionSet object of the loaded bed file
     pub fn load_bed(&mut self, bed_id: &str) -> Result<RegionSet> {
@@ -79,7 +78,6 @@ impl BBClient {
 
         let region_set = RegionSet::try_from(bed_id)
             .with_context(|| format!("Failed to create RegionSet from BEDbase id {}", bed_id))?;
-        
 
         self.add_resource_to_cache(
             bed_id,
@@ -88,14 +86,18 @@ impl BBClient {
         );
 
         region_set.to_bed_gz(bedfile_path.clone())?;
-        println!("Downloaded BED file {} from BEDbase to path: {}", bed_id, bedfile_path.display());
+        println!(
+            "Downloaded BED file {} from BEDbase to path: {}",
+            bed_id,
+            bedfile_path.display()
+        );
         Ok(region_set)
     }
 
     /// Load a BEDset from cache, or download and add it to the cache with its BED files
     /// # Arguments
     /// - bedset_id: unique identifier of a BED set
-    /// 
+    ///
     /// # Returns
     /// - the BedSet object of the loaded bed set
     pub fn load_bedset(&mut self, bedset_id: &str) -> Result<BedSet> {
@@ -123,27 +125,41 @@ impl BBClient {
         Ok(BedSet::from(region_sets))
     }
 
+    ///  Add a BED file to the cache
+    /// # Arguments
+    /// - bedfile: a path or url to the BED file
+    /// - force: whether to overwrite the existing file in cache
+    ///
+    /// # Returns
+    /// - the RegionSet identifier
     pub fn add_local_bed_to_cache(
         &mut self,
         bedfile: PathBuf,
         force: Option<bool>,
-    ) -> Result<RegionSet> {
+    ) -> Result<String> {
         let regionset = RegionSet::try_from(bedfile.as_path())?;
         self.add_regionset_to_cache(regionset, force)
     }
 
+    ///  Add a RegionSet object to the cache
+    /// # Arguments
+    /// - regionset:  a RegionSet object
+    /// - force: whether to overwrite the existing file in cache
+    ///
+    /// # Returns
+    /// - the RegionSet identifier
     pub fn add_regionset_to_cache(
         &mut self,
         regionset: RegionSet,
         force: Option<bool>,
-    ) -> Result<RegionSet> {
+    ) -> Result<String> {
         let bedfile_id = regionset.identifier();
         let cache_path = self.bedfile_path(&bedfile_id, Some(true));
 
         let force = force.unwrap_or(false);
         if !force && cache_path.exists() {
             println!("{} already exists in cache", cache_path.display());
-            return Ok(regionset);
+            return Ok(bedfile_id);
         }
 
         regionset.to_bed_gz(cache_path.as_path())?;
@@ -155,11 +171,15 @@ impl BBClient {
             true,
         );
 
-        // println!("{} added to cache", cache_path.display());
-
-        Ok(regionset)
+        Ok(bedfile_id)
     }
 
+    ///  Add a BED set to the cache
+    /// # Arguments
+    /// - bedset: the BED set to be added, a BedSet class
+    ///
+    /// # Returns
+    /// - the identifier if the BedSet object
     pub fn add_bedset_to_cache(&mut self, bedset: BedSet) -> Result<String> {
         let bedset_id = bedset.identifier();
         let bedset_path = self.bedset_path(&bedset_id, Some(true));
@@ -185,6 +205,13 @@ impl BBClient {
         Ok(bedset_id)
     }
 
+    ///  Add a folder of bed files to the cache as a bedset
+    /// # Arguments
+    /// - folder_path: path to the folder where bed files are stored
+    ///
+    /// # Returns
+    /// - the identifier if the BedSet object
+
     pub fn add_local_folder_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
         let mut region_sets = Vec::new();
         for entry in read_dir(&folder_path).expect("Failed to read directory") {
@@ -200,11 +227,23 @@ impl BBClient {
         Ok(self.add_bedset_to_cache(bedset).unwrap())
     }
 
-    pub fn add_local_file_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
-        let bedset = BedSet::try_from(folder_path).unwrap();
+    ///  Add a local file that contains bed file paths as a bed set
+    /// # Arguments
+    /// - file_path: path to the file of bedset info
+    ///
+    /// # Returns
+    /// - the identifier if the BedSet object
+    pub fn add_local_file_as_bedset(&mut self, file_path: PathBuf) -> Result<String> {
+        let bedset = BedSet::try_from(file_path).unwrap();
         Ok(self.add_bedset_to_cache(bedset).unwrap())
     }
 
+    ///  Download BED set from BEDbase API and return the list of identifiers of BED files in the set
+    /// # Arguments
+    /// - bedset_id: unique identifier of a BED set
+    ///
+    /// # Returns
+    /// - the list of identifiers of BED files in the set
     fn download_bedset_data(&self, bedset_id: &str) -> Result<Vec<String>> {
         let bedset_url = format!("{}/v1/bedset/{}/bedfiles", self.bedbase_api, bedset_id);
 
@@ -228,18 +267,41 @@ impl BBClient {
         Ok(extracted_ids)
     }
 
+    ///  Get the path of a BED file's .bed.gz file with given identifier
+    /// # Arguments
+    /// - bedfile_id: the identifier of BED file
+    /// - create: whether the cache path needs creating
+    ///
+    /// # Returns
+    /// - the path to the .bed.gz file
     fn bedfile_path(&self, bedfile_id: &str, create: Option<bool>) -> PathBuf {
         let subfolder_name = DEFAULT_BEDFILE_SUBFOLDER;
         let file_extension = DEFAULT_BEDFILE_EXT;
         self.cache_path(bedfile_id, subfolder_name, file_extension, create)
     }
 
+    ///  Get the path of a BED set's .txt file with given identifier
+    /// # Arguments
+    /// - bedset_id: the identifier of BED set
+    /// - create: whether the cache path needs creating
+    ///
+    /// # Returns
+    /// - the path to the .txt file
     fn bedset_path(&self, bedset_id: &str, create: Option<bool>) -> PathBuf {
         let subfolder_name = DEFAULT_BEDSET_SUBFOLDER;
         let file_extension = DEFAULT_BEDSET_EXT;
         self.cache_path(bedset_id, subfolder_name, file_extension, create)
     }
 
+    ///  Get the path of a file in cache folder
+    /// # Arguments
+    /// - identifier: the identifier of BED set or BED file
+    /// - subfolder_name: "bedsets" or "bedfiles"
+    /// - file_extension: ".txt" or ".bed.gz"
+    /// - create: whether the cache path needs creating
+    ///
+    /// # Returns
+    /// - the path to the file
     fn cache_path(
         &self,
         identifier: &str,
@@ -260,6 +322,9 @@ impl BBClient {
         folder_path.join(filename)
     }
 
+    ///  Create cache folder if it doesn't exist
+    /// # Arguments
+    /// - subfolder_path: path to the subfolder
     fn create_cache_folder(&self, subfolder_path: Option<&Path>) {
         let path = match subfolder_path {
             Some(p) => p.to_path_buf(),
@@ -271,6 +336,12 @@ impl BBClient {
         }
     }
 
+    /// Get local path to BED file or BED set with specific identifier
+    /// # Arguments
+    /// - identifier: the unique identifier
+    ///
+    /// # Returns
+    /// - the local path of the file
     pub fn seek(&self, identifier: &str) -> Result<PathBuf> {
         let file_path = self.bedfile_path(&identifier, Some(false));
         if file_path.exists() {
@@ -285,6 +356,9 @@ impl BBClient {
         }
     }
 
+    /// Remove a BED file or BED set from the cache folder as well as biocfilcache (SQLite)
+    /// # Arguments
+    /// - identifier: the identifier of BED file / BED set to be removed
     pub fn remove(&mut self, identifier: &str) -> Result<()> {
         let file_path = self.bedfile_path(identifier, Some(false));
         if file_path.exists() {
@@ -322,6 +396,9 @@ impl BBClient {
         }
     }
 
+    /// Remove a BED file or BED set from the cache folder, and make sure the removal won't cause empty subfolders
+    /// # Arguments
+    /// - identifier: the identifier of BED file / BED set to be removed
     fn local_removal(&self, file_path: PathBuf) -> Result<()> {
         let sub_folder_2 = file_path.parent().map(PathBuf::from);
         let sub_folder_1 = sub_folder_2
@@ -345,45 +422,17 @@ impl BBClient {
         Ok(())
     }
 
+    /// List identifiers and paths of all BED files in cache
+    /// # Returns
+    /// - the list of resource stored in biocfilecache (identifiers & paths)
     pub fn list_beds(&mut self) -> Result<Vec<Resource>> {
         let bed_resources = self.bedfile_cache.list_resources(Some(20000 as i64));
         Ok(bed_resources)
-        // print_resources(bed_resources);
-        // let mut bedfile_map = HashMap::new();
-
-        // let bedfile_dir = self.cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
-        // if !bedfile_dir.exists() {
-        //     return Ok(bedfile_map); // return empty map if folder doesn't exist
-        // }
-
-        // for entry in WalkDir::new(&bedfile_dir)
-        //     .into_iter()
-        //     .filter_map(|e| e.ok())
-        // {
-        //     let path = entry.path();
-
-        //     if path.is_file() {
-        //         if let Some(_ext) = path.extension().and_then(|s| s.to_str()) {
-        //             if path
-        //                 .file_name()
-        //                 .and_then(|f| f.to_str())
-        //                 .map(|name| name.ends_with(DEFAULT_BEDFILE_EXT))
-        //                 .unwrap_or(false)
-        //             {
-        //                 if let Some(file_stem) = path.file_name().and_then(|s| s.to_str()) {
-        //                     let id = file_stem
-        //                         .strip_suffix(DEFAULT_BEDFILE_EXT)
-        //                         .unwrap_or(file_stem)
-        //                         .to_string();
-        //                     bedfile_map.insert(id, path.to_path_buf());
-        //                 }
-        //             }
-        //         }
-        //     }
-        // }
-        // Ok(bedfile_map)
     }
 
+    /// List identifiers and paths of all BED sets in cache
+    /// # Returns
+    /// - the list of resource stored in biocfilecache (identifiers & paths)
     pub fn list_bedsets(&mut self) -> Result<Vec<Resource>> {
         let bedset_resources = self.bedset_cache.list_resources(Some(20000 as i64));
         Ok(bedset_resources)
