@@ -729,8 +729,8 @@ mod tests {
 
         //let chromsizerefpath = combinedbedpath;
 
-        let tempchromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
-        let chromsizerefpath = tempchromsizerefpath.as_str();
+        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
 
@@ -779,8 +779,8 @@ mod tests {
 
         //let chromsizerefpath = combinedbedpath;
 
-        let tempchromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
-        let chromsizerefpath = tempchromsizerefpath.as_str();
+        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.as_str();
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
 
