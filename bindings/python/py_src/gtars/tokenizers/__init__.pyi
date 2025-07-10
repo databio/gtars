@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional, Union
 
 class Tokenizer:
     def __init__(self, path: str) -> None: ...
+    \
     @classmethod
     def from_config(cls, cfg: str) -> "Tokenizer":
         """
@@ -21,6 +22,17 @@ class Tokenizer:
         Returns:
             Tokenizer: An instance of the Tokenizer class.
         """
+    
+    @classmethod
+    def from_pretrained(cls, model_name: str) -> "Tokenizer":
+        """
+        Loads a pretrained tokenizer from model on Hugging Face.
+        Args:
+            model_name (str): The name of the pretrained model.
+        Returns:
+            Tokenizer: An instance of the Tokenizer class.
+        """
+
 
     def tokenize(self, regions: Any) -> List[str]:
         """
