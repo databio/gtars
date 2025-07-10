@@ -1,19 +1,13 @@
 use std::collections::HashMap;
-use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::env;
 use std::fs::{self, File};
 use std::path::Path;
 use std::io::Write;
 use std::io::Read;
 use byteorder::{LittleEndian, ReadBytesExt};
-use ndarray::{Array, Ix1};
-use ndarray_npy::read_npy;
 
 
 pub struct FileInfo {
