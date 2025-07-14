@@ -55,6 +55,18 @@ gtars = { git = "https://github.com/databio/gtars" }
 
 To run the tests, run `cargo test`.
 
+### Refget tests
+
+The default tests for this module are designed to run quickly on tiny fasta files.
+To run the test on a full-scale fasta file, you can look at `test_loading_large_fasta_file`.
+This is large test, which is ignored by default, so it doesn't run in the typical `cargo test`. 
+To run just this large test on a fasta file, try something like this:
+
+```
+FASTA_PATH=tests/data/subset.fa.gz cargo test tests::test_loading_large_fasta_file -- --nocapture --ignored
+FASTA_PATH=`refgenie seek test/fasta` cargo test tests::test_loading_large_fasta_file -- --nocapture --ignored
+```
+
 ## Contributing
 
 ### New internal library crate tools
