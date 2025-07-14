@@ -12,12 +12,13 @@ pub struct Alphabet {  // Maps the alphabet type to its encoding and decoding ar
 
 /// A struct to guess alphabet types based on the sequence content.
 ///
-/// This struct is meant to handle a sequence progressively, so it can be handled in
-/// a stream, to preserve memory when dealing with large sequences.
+/// This struct is meant to handle a sequence as a stream, to preserve memory 
+/// when dealing with large sequences.
 /// It is ameable to processing along with digesting the sequence.
 pub struct AlphabetGuesser {
     alphabet_type: AlphabetType,
 }
+
 
 impl AlphabetGuesser {
     /// Creates a new AlphabetGuesser with the initial alphabet type set to Dna2bit.
@@ -34,31 +35,16 @@ impl AlphabetGuesser {
 
         for &byte in sequence {
             let byte_upper = byte.to_ascii_uppercase();
-
-            // Check if the character fits in the current alphabet
-            match self.alphabet_type {
-                AlphabetType::Dna2bit => {
-                    if !matches!(byte_upper, b'A' | b'C' | b'G' | b'T') {
-                        self.alphabet_type = AlphabetType::Dna3bit;
-                    }
-                }
-                AlphabetType::Dna3bit => {
-                    if !matches!(byte_upper, b'A' | b'C' | b'G' | b'T' | b'N' | b'R' | b'Y') {
-                        self.alphabet_type = AlphabetType::DnaIupac;
-                    }
-                }
-                AlphabetType::DnaIupac => {
-                    if DNA_IUPAC_ENCODING_ARRAY[byte as usize] == 0 && byte_upper != b'N' {
-                        self.alphabet_type = AlphabetType::Protein;
-                    }
-                }
-                AlphabetType::Protein => {
-                    if PROTEIN_ENCODING_ARRAY[byte as usize] == 0 && byte != b'-' && byte != b'*' {
-                        self.alphabet_type = AlphabetType::Ascii;
-                        break; // No need to check further characters
-                    }
-                }
-                _ => break, // Already at ASCII, no need to check further
+            let char_required_alphabet = get_minimum_alphabet_for_char(byte_upper);
+            
+            // Upgrade to the more general alphabet if needed
+            if is_more_general_alphabet(char_required_alphabet, self.alphabet_type) {
+                self.alphabet_type = char_required_alphabet;
+            }
+            
+            // Early exit if we've reached ASCII
+            if self.alphabet_type == AlphabetType::Ascii {
+                break;
             }
         }
     }
@@ -485,7 +471,7 @@ fn is_more_general_alphabet(a: AlphabetType, b: AlphabetType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{AlphabetType, guess_alphabet, guess_alphabet_fast};
+    use super::{AlphabetType, guess_alphabet, guess_alphabet_fast, AlphabetGuesser};
     
     #[test]
     fn test_guess_alphabet() {
@@ -533,5 +519,74 @@ mod tests {
         assert_eq!(guess_alphabet_fast(b"ACTGM"), AlphabetType::Dna3bit); // Original is wrong
         assert_eq!(guess_alphabet(b"ACTGM"), AlphabetType::DnaIupac); // Accurate is correct
         
+    }
+
+    #[test]
+    fn test_alphabet_guesser_matches_guess_alphabet() {
+        let test_cases: Vec<&[u8]> = vec![
+            b"ACGT",
+            b"ACGTNRY",
+            b"ACGTRYMK",
+            b"EFILPQ",
+            b"Hello, World!",
+            b"ACTGEG",
+            b"ACTGM",
+            b"ACGTSKWV",
+            b"ACGTE",
+            b"ACGT*",
+            b"ACGT-",
+            b"actgEFIL",
+            b"ACGT123",
+            b"ACGT@#$",
+            b"A",
+            b"N",
+            b"M",
+            b"E",
+            b"1",
+        ];
+
+        for test_case in test_cases {
+            let mut guesser = AlphabetGuesser::new();
+            guesser.update(test_case);
+            let guesser_result = guesser.guess();
+            let function_result = guess_alphabet(test_case);
+            
+            assert_eq!(
+                guesser_result, 
+                function_result,
+                "AlphabetGuesser and guess_alphabet disagree on sequence: {:?}",
+                std::str::from_utf8(test_case).unwrap_or("(invalid UTF-8)")
+            );
+        }
+    }
+
+    #[test]
+    fn test_alphabet_guesser_streaming() {
+        // Test that the guesser works correctly when fed data in chunks
+        let mut guesser = AlphabetGuesser::new();
+        
+        // Start with DNA 2-bit
+        guesser.update(b"ACGT");
+        assert_eq!(guesser.guess(), AlphabetType::Dna2bit);
+        
+        // Add some 3-bit characters
+        guesser.update(b"NRY");
+        assert_eq!(guesser.guess(), AlphabetType::Dna3bit);
+        
+        // Add IUPAC characters
+        guesser.update(b"MKS");
+        assert_eq!(guesser.guess(), AlphabetType::DnaIupac);
+        
+        // Add protein characters
+        guesser.update(b"EFIL");
+        assert_eq!(guesser.guess(), AlphabetType::Protein);
+        
+        // Add ASCII characters
+        guesser.update(b"123");
+        assert_eq!(guesser.guess(), AlphabetType::Ascii);
+        
+        // Verify it matches the full sequence result
+        let full_sequence = b"ACGTNRYMSKEFILP123";
+        assert_eq!(guesser.guess(), guess_alphabet(full_sequence));
     }
 }
