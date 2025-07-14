@@ -496,8 +496,6 @@ mod tests {
         assert_eq!(guess_alphabet(b"EFILPQ"), AlphabetType::Protein);
         assert_eq!(guess_alphabet(b"Hello, World!"), AlphabetType::Ascii);
 
-        // TODO: This guesser is inaccurate for short sequences, becuase it doesn't upgrade
-        // high enough, it just upgrades one step and moves on; This fails:
         assert_eq!(guess_alphabet(b"ACTGEG"), AlphabetType::Protein);
 
         // Test cases where the original guess_alphabet would fail but guess_alphabet succeeds
@@ -531,7 +529,7 @@ mod tests {
         assert_eq!(guess_alphabet(b"1"), AlphabetType::Ascii);
         
         // Test that demonstrates the difference between original and accurate versions
-        // The original guess_alphabet would return Dna3bit for "ACTGM" but accurate returns DnaIupac
+        // The guess_alphabet_fast would return Dna3bit for "ACTGM" but, the better one returns DnaIupac
         assert_eq!(guess_alphabet_fast(b"ACTGM"), AlphabetType::Dna3bit); // Original is wrong
         assert_eq!(guess_alphabet(b"ACTGM"), AlphabetType::DnaIupac); // Accurate is correct
         
