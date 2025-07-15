@@ -558,19 +558,38 @@ mod tests {
 
     #[test]
     fn store_fa_to_farg() {
-        let seqcol: SequenceCollection = SequenceCollection::from_fasta("tests/data/fasta/base.fa").expect("Failed to create SeqColDigest from FASTA file");
-        println!("Created SequenceCollection: {:?}", seqcol);
-        seqcol.to_farg().expect("Failed to write farg file");
-        let loaded_seqcol = read_fasta_refget_file("tests/data/fasta/base.farg").expect("Failed to read refget file");
-        println!("Loaded SequenceCollection: {:?}", loaded_seqcol);
-        // Test round-trip integrity
-        for (original, loaded) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
-            assert_eq!(original.metadata.name, loaded.metadata.name);
-            assert_eq!(original.metadata.length, loaded.metadata.length);
-            assert_eq!(original.metadata.sha512t24u, loaded.metadata.sha512t24u);
-            assert_eq!(original.metadata.md5, loaded.metadata.md5);
-            assert_eq!(original.metadata.alphabet, loaded.metadata.alphabet);
-        }
+    // Create temporary directory
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    // Copy test FASTA file to temp directory
+    let test_fa = "tests/data/fasta/base.fa";
+    let temp_fa = temp_path.join("base.fa");
+    let temp_farg = temp_path.join("base.farg");
+    
+    std::fs::copy(test_fa, &temp_fa)
+        .expect("Failed to copy test FASTA file");
+
+    // Create sequence collection from temporary file
+    let seqcol = SequenceCollection::from_fasta(&temp_fa)
+        .expect("Failed to create SeqColDigest from FASTA file");
+    
+    // Write FARG to temporary directory
+    seqcol.to_farg()
+        .expect("Failed to write farg file");
+    
+    // Load and verify
+    let loaded_seqcol = read_fasta_refget_file(&temp_farg)
+        .expect("Failed to read refget file");
+    
+    // Test round-trip integrity
+    for (original, loaded) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
+        assert_eq!(original.metadata.name, loaded.metadata.name);
+        assert_eq!(original.metadata.length, loaded.metadata.length);
+        assert_eq!(original.metadata.sha512t24u, loaded.metadata.sha512t24u);
+        assert_eq!(original.metadata.md5, loaded.metadata.md5);
+        assert_eq!(original.metadata.alphabet, loaded.metadata.alphabet);
+    }
     }
 
 
