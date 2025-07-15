@@ -686,11 +686,20 @@ mod tests {
 
     #[test]
     fn test_import_fasta() {
-        let fasta_path = "tests/data/fasta/base.fa";
+            let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    // Copy test FASTA file to temp directory
+    let test_fa = "tests/data/fasta/base.fa";
+    let temp_fa = temp_path.join("base.fa");
+    
+    std::fs::copy(test_fa, &temp_fa)
+        .expect("Failed to copy test FASTA file");
+
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
         
         // Import the FASTA file
-        store.import_fasta(fasta_path).unwrap();
+        store.import_fasta(temp_fa).unwrap();
         
         // Check that the store has sequences
         assert!(!store.sequence_store.is_empty());
