@@ -116,6 +116,7 @@ mod tests {
     use flate2::read::GzDecoder;
     use std::collections::HashMap;
     use std::collections::HashSet;
+    use std::fs;
     use std::fs::{read_dir, OpenOptions};
     use std::io::{Seek, SeekFrom};
 
@@ -900,15 +901,21 @@ mod tests {
     fn test_uniwig_write_bw(_path_to_bed_file: &str) {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
-        // Read from sizes file
-        let directory_bed_graphs: String = format!("{}{}", path_to_crate, "/tests/data");
-        let chrom_sizes: String = format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
+        let original_bedgraph_path = format!("{}/tests/data/test1.bedGraph", path_to_crate);
+        let chrom_sizes_path = format!("{}/tests/data/dummy.chrom.sizes", path_to_crate);
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let temp_bedgraph_path = temp_dir.path().join("test1.bedGraph");
+
+        fs::copy(&original_bedgraph_path, &temp_bedgraph_path)
+            .expect("Failed to copy .bedGraph file to temporary directory");
+
         let num_threads = 2;
         let zoom = 0;
 
         write_bw_files(
-            directory_bed_graphs.as_str(),
-            chrom_sizes.as_str(),
+            temp_bedgraph_path.to_str().expect("Invalid temp path"), // Use the path in the temp directory
+            chrom_sizes_path.as_str(),
             num_threads,
             zoom,
         );
