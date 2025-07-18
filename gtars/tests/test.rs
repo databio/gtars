@@ -104,11 +104,12 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        parse_bedlike_file, read_bam_header, create_chrom_vec_default_score, read_chromosome_sizes, create_chrom_vec_scores,
+        create_chrom_vec_default_score, create_chrom_vec_scores, parse_bedlike_file,
+        read_bam_header, read_chromosome_sizes,
     };
 
-    use gtars::uniwig::writing::write_bw_files;
     use gtars::uniwig::utils::npy_to_wig;
+    use gtars::uniwig::writing::write_bw_files;
 
     use gtars::bbcache::client::BBClient;
 
@@ -489,13 +490,13 @@ mod tests {
         assert_eq!(result2.len(), 1);
     }
 
-
     #[rstest]
     fn test_read_scored_core_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> =
+            create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
@@ -514,7 +515,8 @@ mod tests {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let path_to_narrow_peak = format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak");
         let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
-        let narrow_peak_vec: Vec<Chromosome> = create_chrom_vec_scores(path_to_narrow_peak.as_str());
+        let narrow_peak_vec: Vec<Chromosome> =
+            create_chrom_vec_scores(path_to_narrow_peak.as_str());
         let stepsize = 1;
         let smooth_size = 1;
 
@@ -531,7 +533,8 @@ mod tests {
 
     #[rstest]
     fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
-        let chromosomes: Vec<Chromosome> = create_chrom_vec_default_score(path_to_sorted_small_bed_file);
+        let chromosomes: Vec<Chromosome> =
+            create_chrom_vec_default_score(path_to_sorted_small_bed_file);
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
@@ -741,7 +744,10 @@ mod tests {
 
         //let chromsizerefpath = combinedbedpath;
 
-        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = format!(
+            "{}{}",
+            path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes"
+        );
         let chromsizerefpath = chromsizerefpath.as_str();
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -777,21 +783,28 @@ mod tests {
             true,
             1.0,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
         Ok(())
     }
 
     #[rstest]
-    fn test_run_uniwig_main_directory_narrowpeaks_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_directory_narrowpeaks_type(
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
-        let tempbedpath = format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dir_narrowpeaks/");
+        let tempbedpath = format!(
+            "{}{}",
+            path_to_crate, "/tests/data/dir_of_files/dir_narrowpeaks/"
+        );
         let combinedbedpath = tempbedpath.as_str();
 
         //let chromsizerefpath = combinedbedpath;
 
-        let chromsizerefpath =format!("{}{}", path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = format!(
+            "{}{}",
+            path_to_crate, "/tests/data/dir_of_files/dummy.chrom.sizes"
+        );
         let chromsizerefpath = chromsizerefpath.as_str();
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -827,10 +840,10 @@ mod tests {
             true,
             1.0,
         )
-            .expect("Uniwig main failed!");
+        .expect("Uniwig main failed!");
         Ok(())
     }
-    
+
     #[rstest]
     fn test_reading_chrom_sizes() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
@@ -1241,7 +1254,7 @@ mod tests {
 
         Ok(())
     }
- 
+
     #[rstest]
     fn test_npy_to_wig(
         _path_to_dummy_bed_file: &str,
@@ -1341,7 +1354,8 @@ mod tests {
             f2.read_to_end(&mut buf2)?;
 
             assert_eq!(
-                buf1, buf2,
+                buf1,
+                buf2,
                 "File contents differ between:\n  {}\nand\n  {}",
                 path1.display(),
                 path2.display()
@@ -1350,7 +1364,7 @@ mod tests {
 
         Ok(())
     }
-  
+
     #[rstest]
     fn test_bbcache_local(
         _path_to_bed_gz_from_bb: &str,

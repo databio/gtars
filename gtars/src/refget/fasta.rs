@@ -1,16 +1,15 @@
+use anyhow::{Context, Result};
+use std::io::BufRead;
 use std::path::Path;
-use std::io::{BufRead};
-use anyhow::{Result, Context};
 
-use super::alphabet::{AlphabetType, AlphabetGuesser};
-use super::collection::{SequenceCollection, SequenceRecord, SequenceMetadata, SeqColDigestLvl1};
+use super::alphabet::{AlphabetGuesser, AlphabetType};
+use super::collection::{SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord};
 
 use crate::common::utils::get_dynamic_reader;
 
-
-use sha2::{Digest, Sha512};
-use seq_io::fasta::{Reader, Record};
 use md5::Md5;
+use seq_io::fasta::{Reader, Record};
+use sha2::{Digest, Sha512};
 
 /// Processes a FASTA file to compute the digests of each sequence in the file.
 ///
@@ -44,12 +43,18 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
     println!("Processing FASTA file: {}", file_path.as_ref().display());
     while let Some(record) = fasta_reader.next() {
         // returns a RefRecord object
-        let record = record.with_context(|| 
-            format!("Failed to read FASTA record from file: {}", file_path.as_ref().display())
-        )?;
-        let id = record.id().with_context(|| 
-            format!("FASTA record #{} is missing a sequence ID", results.len() + 1)
-        )?;
+        let record = record.with_context(|| {
+            format!(
+                "Failed to read FASTA record from file: {}",
+                file_path.as_ref().display()
+            )
+        })?;
+        let id = record.id().with_context(|| {
+            format!(
+                "FASTA record #{} is missing a sequence ID",
+                results.len() + 1
+            )
+        })?;
         let mut sha512_hasher = Sha512::new();
         let mut md5_hasher = Md5::new();
         let mut length = 0;
@@ -66,7 +71,7 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
         let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
         let md5 = format!("{:x}", md5_hasher.finalize_reset());
         let alphabet = alphabet_guesser.guess();
-        
+
         // Create SequenceRecord
         let metadata = SequenceMetadata {
             name: id.to_string(),
@@ -75,20 +80,20 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
             md5,
             alphabet,
         };
-        
+
         results.push(SequenceRecord {
             metadata,
             data: None,
         });
     }
-    
+
     // Compute lvl1 digests from the sequence records
     let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
     let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
-    
+
     // Compute collection digest from lvl1 digests
     let collection_digest = lvl1.to_digest();
-    
+
     Ok(SequenceCollection {
         sequences: results,
         digest: collection_digest,
@@ -98,10 +103,8 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
     })
 }
 
-
-
 /// Read a FARG file and return a SequenceCollection struct with all metadata.
-/// 
+///
 /// This will not read the actual sequence data, only the metadata.
 /// # Arguments
 /// * `file_path` - The path to the FARG file to be read.
@@ -109,16 +112,16 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
     let file = std::fs::File::open(&file_path)?;
     let reader = std::io::BufReader::new(file);
     let mut results = Vec::new();
-    
+
     // Variables to store header metadata
     let mut seqcol_digest = String::new();
     let mut names_digest = String::new();
     let mut sequences_digest = String::new();
     let mut lengths_digest = String::new();
-    
+
     for line in reader.lines() {
         let line = line?;
-        
+
         // Parse header metadata lines
         if line.starts_with("##") {
             if let Some(stripped) = line.strip_prefix("##") {
@@ -134,18 +137,18 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
             }
             continue;
         }
-        
+
         // Skip other comment lines
         if line.starts_with('#') {
             continue;
         }
-        
+
         // Parse sequence data lines
         let parts: Vec<&str> = line.split('\t').collect();
         if parts.len() != 5 {
             continue; // Skip lines that don't have exactly 5 columns
         }
-        
+
         let result = SequenceMetadata {
             name: parts[0].to_string(),
             length: parts[1].parse().unwrap_or(0),
@@ -153,7 +156,7 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
             sha512t24u: parts[3].to_string(),
             md5: parts[4].to_string(),
         };
-        
+
         let record = SequenceRecord {
             metadata: result,
             data: None,
@@ -162,7 +165,9 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
     }
     // If the digests were not found in the file, compute them
     let lvl1: SeqColDigestLvl1;
-    if (sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty()) && !results.is_empty() {
+    if (sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty())
+        && !results.is_empty()
+    {
         let metadata_vec: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
         lvl1 = SeqColDigestLvl1::from_metadata(&metadata_vec);
     } else {
@@ -177,7 +182,7 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
         // If seqcol_digest is not provided, compute it from lvl1
         seqcol_digest = lvl1.to_digest();
     }
-    
+
     // Return the complete SequenceCollection
     Ok(SequenceCollection {
         sequences: results,
@@ -187,7 +192,6 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
         has_data: false,
     })
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -200,26 +204,39 @@ mod tests {
         println!("{:?}", results);
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].metadata.length, 8);
-        assert_eq!(results[0].metadata.sha512t24u, "iYtREV555dUFKg2_agSJW6suquUyPpMw");
+        assert_eq!(
+            results[0].metadata.sha512t24u,
+            "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+        );
         assert_eq!(results[0].metadata.md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
         assert_eq!(results[0].metadata.alphabet, AlphabetType::Dna2bit);
         assert_eq!(results[1].metadata.length, 4);
-        assert_eq!(results[1].metadata.sha512t24u, "YBbVX0dLKG1ieEDCiMmkrTZFt_Z5Vdaj");
+        assert_eq!(
+            results[1].metadata.sha512t24u,
+            "YBbVX0dLKG1ieEDCiMmkrTZFt_Z5Vdaj"
+        );
         assert_eq!(results[1].metadata.md5, "31fc6ca291a32fb9df82b85e5f077e31");
         assert_eq!(results[1].metadata.alphabet, AlphabetType::Dna2bit);
         assert_eq!(results[2].metadata.length, 4);
-        assert_eq!(results[2].metadata.sha512t24u, "AcLxtBuKEPk_7PGE_H4dGElwZHCujwH6");
+        assert_eq!(
+            results[2].metadata.sha512t24u,
+            "AcLxtBuKEPk_7PGE_H4dGElwZHCujwH6"
+        );
         assert_eq!(results[2].metadata.md5, "92c6a56c9e9459d8a42b96f7884710bc");
         assert_eq!(results[2].metadata.alphabet, AlphabetType::Dna2bit);
     }
 
     #[test]
     fn digests_digest_gzipped_fasta() {
-        let seqcol = digest_fasta("tests/data/fasta/base.fa.gz").expect("Can't open test fasta file");
+        let seqcol =
+            digest_fasta("tests/data/fasta/base.fa.gz").expect("Can't open test fasta file");
         let results = seqcol.sequences;
         println!("{:?}", results);
         assert_eq!(results[0].metadata.length, 8);
-        assert_eq!(results[0].metadata.sha512t24u, "iYtREV555dUFKg2_agSJW6suquUyPpMw");
+        assert_eq!(
+            results[0].metadata.sha512t24u,
+            "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+        );
         assert_eq!(results[0].metadata.md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
         assert_eq!(results[0].metadata.alphabet, AlphabetType::Dna2bit);
     }
@@ -230,14 +247,14 @@ mod tests {
         assert!(result.is_err(), "Expected an error for a bogus fasta file");
     }
 
-
-
     #[test]
     fn digests_fa_to_farg() {
-        let seqcol = SequenceCollection::from_path_no_cache("tests/data/fasta/base.fa").expect("Failed to create SequenceCollection from FASTA file");
+        let seqcol = SequenceCollection::from_path_no_cache("tests/data/fasta/base.fa")
+            .expect("Failed to create SequenceCollection from FASTA file");
         seqcol.to_farg().expect("Failed to write farg file");
 
-        let loaded_seqcol = read_fasta_refget_file("tests/data/fasta/base.farg").expect("Failed to read refget file");
+        let loaded_seqcol = read_fasta_refget_file("tests/data/fasta/base.farg")
+            .expect("Failed to read refget file");
         println!("Original SequenceCollection: {}", seqcol);
         println!("Loaded SequenceCollection: {}", loaded_seqcol);
         // Test round-trip integrity
@@ -250,16 +267,24 @@ mod tests {
         }
     }
 
-
     #[test]
     fn digests_seqcol_from_fasta() {
-        let seqcol = SequenceCollection::from_fasta("tests/data/fasta/base.fa").expect("Failed to create SequenceCollection from FASTA file");
+        let seqcol = SequenceCollection::from_fasta("tests/data/fasta/base.fa")
+            .expect("Failed to create SequenceCollection from FASTA file");
         println!("SeqCol digest: {:?}", seqcol.digest);
-        println!("SeqCol sequences_digest: {:?}", seqcol.lvl1.sequences_digest);
+        println!(
+            "SeqCol sequences_digest: {:?}",
+            seqcol.lvl1.sequences_digest
+        );
         println!("SequenceCollection: {:?}", seqcol);
-        assert_eq!(seqcol.lvl1.sequences_digest, "0uDQVLuHaOZi1u76LjV__yrVUIz9Bwhr");
+        assert_eq!(
+            seqcol.lvl1.sequences_digest,
+            "0uDQVLuHaOZi1u76LjV__yrVUIz9Bwhr"
+        );
         assert_eq!(seqcol.lvl1.names_digest, "Fw1r9eRxfOZD98KKrhlYQNEdSRHoVxAG");
-        assert_eq!(seqcol.lvl1.lengths_digest, "cGRMZIb3AVgkcAfNv39RN7hnT5Chk7RX");
-    }        
-
+        assert_eq!(
+            seqcol.lvl1.lengths_digest,
+            "cGRMZIb3AVgkcAfNv39RN7hnT5Chk7RX"
+        );
+    }
 }

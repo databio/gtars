@@ -1,7 +1,7 @@
+pub mod bed_set;
 pub mod fragments;
 pub mod region;
 pub mod region_set;
-pub mod bed_set;
 pub mod tokenized_region;
 pub mod tokenized_regionset;
 pub mod universe;

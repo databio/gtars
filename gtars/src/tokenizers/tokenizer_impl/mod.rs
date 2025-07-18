@@ -120,16 +120,21 @@ impl Tokenizer {
         })
     }
 
-        ///
+    ///
     /// Create a new tokenizer from a pre-trained model
-    /// 
+    ///
     pub fn from_pretrained<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {
         // if local
         let universe_file_path: PathBuf = if path.as_ref().exists() {
             path.as_ref().join(DEFAULT_UNIVERSE_FILENAME)
         } else {
             let api = Api::new().unwrap();
-            let repo = api.model(path.as_ref().to_str().expect("Path is not valid UTF-8").to_string());
+            let repo = api.model(
+                path.as_ref()
+                    .to_str()
+                    .expect("Path is not valid UTF-8")
+                    .to_string(),
+            );
             repo.get(DEFAULT_UNIVERSE_FILENAME).unwrap()
         };
         let file_type = TokenizerInputFileType::from_path(universe_file_path.as_path())?;

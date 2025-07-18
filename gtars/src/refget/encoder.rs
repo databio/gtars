@@ -23,11 +23,11 @@ use super::alphabet::Alphabet;
 /// 3. Call the `finalize` method to retrieve the encoded sequence as a `Vec<u8>`.
 ///
 pub struct SequenceEncoder {
-    alphabet: & 'static alphabet::Alphabet,    // alphabet used by this encoder
-    encoded_sequence: Vec<u8>,                  // resulting encoded sequence
-    bit_pos: usize,                             // internal bit position in encoded sequence
-    buffer: u64,                                // internal bit buffer
-    buffer_bits: usize,                         // number of bits currently in buffer
+    alphabet: &'static alphabet::Alphabet, // alphabet used by this encoder
+    encoded_sequence: Vec<u8>,             // resulting encoded sequence
+    bit_pos: usize,                        // internal bit position in encoded sequence
+    buffer: u64,                           // internal bit buffer
+    buffer_bits: usize,                    // number of bits currently in buffer
 }
 
 impl SequenceEncoder {
@@ -71,11 +71,8 @@ impl SequenceEncoder {
     }
 }
 
-
-
-
 /// Encodes a sequence using the specified encoding array.
-/// 
+///
 /// This function takes a sequence of bytes and encodes it using the provided
 /// encoding array. The encoding is done by converting each byte in the sequence
 /// to its corresponding code in the encoding array, and then packing those
@@ -92,14 +89,11 @@ impl SequenceEncoder {
 /// # Returns
 ///
 /// A vector containing the encoded (bit-packed) sequence
-pub fn encode_sequence<T: AsRef<[u8]>>(
-    sequence: T,
-    alphabet: &Alphabet,
-) -> Vec<u8> {
+pub fn encode_sequence<T: AsRef<[u8]>>(sequence: T, alphabet: &Alphabet) -> Vec<u8> {
     let sequence = sequence.as_ref();
     let total_bits = sequence.len() * alphabet.bits_per_symbol;
     let mut bytes = vec![0u8; (total_bits + 7) / 8];
-    
+
     let mut bit_index = 0;
     for &byte in sequence {
         let code = alphabet.encoding_array[byte as usize];
@@ -120,7 +114,7 @@ pub fn encode_sequence<T: AsRef<[u8]>>(
 /// Decodes a substring from a bit-packed sequence of bytes.
 /// Decodes via the decoding array, which maps encoded
 /// values back to original symbols.
-/// 
+///
 /// # Arguments
 ///
 /// * `encoded_bytes` - A slice of bytes containing the bit-packed encoded sequence.
@@ -136,7 +130,7 @@ pub fn decode_substring_from_bytes(
     encoded_bytes: &[u8],
     start: usize,
     end: usize,
-    alphabet: &Alphabet
+    alphabet: &Alphabet,
 ) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(end - start);
     for i in start..end {
@@ -161,11 +155,10 @@ pub fn decode_substring_from_bytes(
     decoded
 }
 
-
 pub fn decode_string_from_bytes(
     encoded_bytes: &[u8],
     seq_len: usize,
-    alphabet: &Alphabet
+    alphabet: &Alphabet,
 ) -> Vec<u8> {
     let mut decoded = Vec::with_capacity(seq_len);
     for i in 0..seq_len {
@@ -202,7 +195,11 @@ mod tests {
         let ans = vec![0b10, 0b01, 0b11, 0b00];
         let packed: Vec<u8> = ans
             .chunks(8 / alphabet.bits_per_symbol) // Number of symbols that fit in a byte
-            .map(|chunk| chunk.iter().fold(0, |acc, &b| (acc << alphabet.bits_per_symbol) | b))
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold(0, |acc, &b| (acc << alphabet.bits_per_symbol) | b)
+            })
             .collect();
         assert_eq!(encoded, packed);
 
@@ -215,10 +212,16 @@ mod tests {
         let sequence = b"ACGTRYMK";
         let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet);
-        let ans =  vec![0b0001, 0b0010, 0b0100, 0b1000, 0b0101, 0b1010, 0b0011, 0b0111];
+        let ans = vec![
+            0b0001, 0b0010, 0b0100, 0b1000, 0b0101, 0b1010, 0b0011, 0b0111,
+        ];
         let packed: Vec<u8> = ans
             .chunks(8 / alphabet.bits_per_symbol) // Number of symbols that fit in a byte
-            .map(|chunk| chunk.iter().fold(0, |acc, &b| (acc << alphabet.bits_per_symbol) | b))
+            .map(|chunk| {
+                chunk
+                    .iter()
+                    .fold(0, |acc, &b| (acc << alphabet.bits_per_symbol) | b)
+            })
             .collect();
         assert_eq!(encoded, packed);
         let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
@@ -231,8 +234,11 @@ mod tests {
         let alphabet = &alphabet::PROTEIN_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet);
         // Don't want to re-implement bit-packing here for 5-bit symbols, so just check the length.
-        assert_eq!(encoded.len(), (sequence.len() * alphabet.bits_per_symbol + 7) / 8);
-        let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0,  sequence.len(), alphabet);
+        assert_eq!(
+            encoded.len(),
+            (sequence.len() * alphabet.bits_per_symbol + 7) / 8
+        );
+        let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
     }
 
@@ -245,17 +251,15 @@ mod tests {
         assert_eq!(decoded, sequence);
     }
 
-
-
     #[test]
     fn test_dna_3bit_encoding() {
-        let sequence = b"ACGTNRYX";  // 8 chars * 3 bits/char = 24 bits.
+        let sequence = b"ACGTNRYX"; // 8 chars * 3 bits/char = 24 bits.
         let alphabet = &alphabet::DNA_3BIT_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet);
         // let ans =  vec![0b000, 0b001, 0b010, 0b011, 0b100, 0b101, 0b110, 0b111];
-        let packed = vec![0b00000101, 0b00111001, 0b01110111];  //manually bit-packed above 3-bits
+        let packed = vec![0b00000101, 0b00111001, 0b01110111]; //manually bit-packed above 3-bits
         assert_eq!(encoded, packed);
-        let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0,  sequence.len(), alphabet);
+        let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
     }
 }

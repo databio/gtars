@@ -24,7 +24,6 @@ pub mod store;
 mod hashkeyable;
 mod utils;
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,16 +77,16 @@ mod tests {
     //     }
     // }
 
-
     use std::time::Instant;
-    use store::{GlobalRefgetStore};
-    use store::StorageMode;   
+    use store::GlobalRefgetStore;
+    use store::StorageMode;
     #[test]
     #[ignore]
-    fn test_loading_large_fasta_file() {       
+    fn test_loading_large_fasta_file() {
         // Path to a large FASTA file
         // let fasta_path = "GRCh38_full_analysis_set_plus_decoy_hla.fa";
-        let fasta_path = std::env::var("FASTA_PATH").expect("FASTA_PATH environment variable not set");
+        let fasta_path =
+            std::env::var("FASTA_PATH").expect("FASTA_PATH environment variable not set");
         // let fasta_path = "tests/data/subset.fa.gz";
         // let fasta_path = "tests/data/fasta/base.fa.gz";
         println!("Loading large FASTA file: {}", &fasta_path);
@@ -120,19 +119,27 @@ mod tests {
         let start_basic = 0;
         let end_basic = 3;
         let substring = store.get_substring(digest, start_basic, end_basic);
-        assert!(substring.is_some(), "Failed to retrieve substring with name: {:?}", digest_str);
+        assert!(
+            substring.is_some(),
+            "Failed to retrieve substring with name: {:?}",
+            digest_str
+        );
         println!("Retrieved substring: {:?}", substring.unwrap());
 
         // Retrieve substring via digest
-        let start = 148*70; let end = 148*70+70; 
+        let start = 148 * 70;
+        let end = 148 * 70 + 70;
         let substring2 = store.get_substring(digest, start, end);
-        assert!(substring2.is_some(), "Failed to retrieve substring with name: {:?}", digest_str);
-        
+        assert!(
+            substring2.is_some(),
+            "Failed to retrieve substring with name: {:?}",
+            digest_str
+        );
+
         let substring3 = store2.get_substring(digest, start, end);
         assert!(substring2 == substring3);
         println!("Retrieved substring: {:?}", substring2.unwrap());
         println!("Retrieved substring: {:?}", substring3.unwrap());
-
     }
 
     #[test]
@@ -149,30 +156,34 @@ mod tests {
         // let digest = &sequences[0];
         // let digest_str = String::from_utf8(digest.to_vec()).expect("Invalid ASCII data");
         // let digest = "Ya6Rs7DHhDeg7YaOSg1EoNi3U_nQ9SvO";  // from subset.fa.gz
-        let digest = "iYtREV555dUFKg2_agSJW6suquUyPpMw";  // from base.fa.gz
+        let digest = "iYtREV555dUFKg2_agSJW6suquUyPpMw"; // from base.fa.gz
         let digest_str = String::from_utf8(digest.as_bytes().to_vec()).expect("Invalid ASCII data");
-        
+
         // Test retrieval of a substring
         println!("Retrieving a substring of sequence named: {:?}", digest_str);
         let start = 2;
-        let end = start+5;
+        let end = start + 5;
         let substring = store.get_substring(digest, start, end);
-        assert!(substring.is_some(), "Failed to retrieve substring with name: {:?}", digest_str);
+        assert!(
+            substring.is_some(),
+            "Failed to retrieve substring with name: {:?}",
+            digest_str
+        );
         println!("Retrieved substring: {:?}", substring.clone().unwrap());
         assert!(substring.unwrap() == "GGGGA");
         // assert!(substring.unwrap() == "CCTAACCCTAACCCTAACCCTAACCCTAACCCCTAACCCCTAACCCTAACCCTAACCCTAACCCTAACCC");
 
-
         println!("Retrieving a substring of sequence named: {:?}", digest_str);
         let start = 3;
-        let end = start+2;
+        let end = start + 2;
         let substring = store.get_substring(digest, start, end);
-        assert!(substring.is_some(), "Failed to retrieve substring with name: {:?}", digest_str);
+        assert!(
+            substring.is_some(),
+            "Failed to retrieve substring with name: {:?}",
+            digest_str
+        );
         println!("Retrieved substring: {:?}", substring.clone().unwrap());
         assert!(substring.unwrap() == "GG");
         // assert!(substring.unwrap() == "TCTGACCTGAGGAGAACTGTGCTCCGCCTTCAGAGTACCACCGAAATCTGTGCAGAGGACAACGCAGCTC");
-
     }
-
-
 }

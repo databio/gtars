@@ -1,14 +1,13 @@
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::str::FromStr;
 use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
-use std::fs::{self, File};
-use std::path::Path;
-use std::io::Write;
-use std::io::Read;
 use byteorder::{LittleEndian, ReadBytesExt};
-
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
+use std::path::PathBuf;
+use std::str::FromStr;
 
 pub struct FileInfo {
     pub file_type: FileType,
@@ -26,7 +25,10 @@ pub fn get_file_info(path: &PathBuf) -> FileInfo {
                 is_gzipped = true;
                 if let Some(base_filename) = filename.strip_suffix(".gz") {
                     // Try to get the extension before .gz
-                    if let Some(ext) = PathBuf::from(base_filename).extension().and_then(|e| e.to_str()) {
+                    if let Some(ext) = PathBuf::from(base_filename)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                    {
                         file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
                     } else {
                         // If there's no extension before .gz (e.g., "my_data.gz"),
@@ -49,7 +51,6 @@ pub fn get_file_info(path: &PathBuf) -> FileInfo {
         is_gzipped,
     }
 }
-
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(
@@ -103,62 +104,60 @@ pub fn get_final_chromosomes(
     chrom_sizes: &std::collections::HashMap<String, u32>,
     score: bool,
 ) -> Vec<Chromosome> {
-
-
     let mut chromosomes: Vec<Chromosome> = Vec::new();
-    
+
     let path = PathBuf::from(filepath);
 
     if path.is_dir() {
-        
-            let mut combined_chromosome_map: HashMap<String, Chromosome> = HashMap::new();
-        
-            for entry_result in fs::read_dir(path).unwrap() {
-                let entry = entry_result.unwrap();
-                let single_file_path = entry.path();
+        let mut combined_chromosome_map: HashMap<String, Chromosome> = HashMap::new();
 
-                
-        
-                if single_file_path.is_file() {
-                    let file_info = get_file_info(&single_file_path);
-                        let single_file_path = single_file_path.to_str().unwrap();
-                    match file_info.file_type {
-                        
-                            FileType::BED | FileType::NARROWPEAK => {
-                                println!("Processing file: {}", single_file_path);
-                                //let chromosomes_from_file = read_bed_vec(single_file_path);
-                                let chromosomes_from_file = if score {
-                                    create_chrom_vec_scores(single_file_path)
-                                } else {
-                                    create_chrom_vec_default_score(single_file_path) // Use bed reader if score flag is false
-                                };
-                                // Merge chromosomes from this file into the combined map
-                                for chrom_data in chromosomes_from_file {
-                                    let entry = combined_chromosome_map
-                                        .entry(chrom_data.chrom.clone())
-                                        .or_insert_with(|| Chromosome {
-                                            chrom: chrom_data.chrom,
-                                            starts: Vec::new(),
-                                            ends: Vec::new(),
-                                        });
-                                    entry.starts.extend(chrom_data.starts);
-                                    entry.ends.extend(chrom_data.ends);
-                                }
-                            }
-                            FileType::BAM => {
-                                println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
-                            }
-                            FileType::UNKNOWN => {
-                                println!("WARNING: Skipping file with unknown extension: {}", single_file_path);
-                            }
+        for entry_result in fs::read_dir(path).unwrap() {
+            let entry = entry_result.unwrap();
+            let single_file_path = entry.path();
+
+            if single_file_path.is_file() {
+                let file_info = get_file_info(&single_file_path);
+                let single_file_path = single_file_path.to_str().unwrap();
+                match file_info.file_type {
+                    FileType::BED | FileType::NARROWPEAK => {
+                        println!("Processing file: {}", single_file_path);
+                        //let chromosomes_from_file = read_bed_vec(single_file_path);
+                        let chromosomes_from_file = if score {
+                            create_chrom_vec_scores(single_file_path)
+                        } else {
+                            create_chrom_vec_default_score(single_file_path) // Use bed reader if score flag is false
+                        };
+                        // Merge chromosomes from this file into the combined map
+                        for chrom_data in chromosomes_from_file {
+                            let entry = combined_chromosome_map
+                                .entry(chrom_data.chrom.clone())
+                                .or_insert_with(|| Chromosome {
+                                    chrom: chrom_data.chrom,
+                                    starts: Vec::new(),
+                                    ends: Vec::new(),
+                                });
+                            entry.starts.extend(chrom_data.starts);
+                            entry.ends.extend(chrom_data.ends);
                         }
+                    }
+                    FileType::BAM => {
+                        println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
+                    }
+                    FileType::UNKNOWN => {
+                        println!(
+                            "WARNING: Skipping file with unknown extension: {}",
+                            single_file_path
+                        );
+                    }
                 }
             }
-        
-            // Convert the combined map back to a Vec<Chromosome> and ensure final sorting
-            //let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
+        }
+
+        // Convert the combined map back to a Vec<Chromosome> and ensure final sorting
+        //let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
         //chromosomes = combined_chromosome_map.into_values().collect();
-        let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
+        let mut final_chromosomes: Vec<Chromosome> =
+            combined_chromosome_map.into_values().collect();
 
         for chromosome in &mut final_chromosomes {
             // Sort the starts and ends for each chromosome after all data for it has been aggregated
@@ -167,12 +166,9 @@ pub fn get_final_chromosomes(
         }
         // And finally, sort the chromosomes themselves by name for consistent output
         final_chromosomes.sort_unstable_by(|a, b| a.chrom.cmp(&b.chrom));
-        
-        chromosomes = final_chromosomes;
-    }
-    
-    else{
 
+        chromosomes = final_chromosomes;
+    } else {
         chromosomes = match ft {
             Ok(FileType::BED) => create_chrom_vec_default_score(filepath),
             Ok(FileType::NARROWPEAK) => {
@@ -185,10 +181,7 @@ pub fn get_final_chromosomes(
             }
             _ => create_chrom_vec_default_score(filepath),
         };
-        
-        
     }
-    
 
     let num_chromosomes = chromosomes.len();
 
@@ -222,13 +215,16 @@ pub fn get_final_chromosomes(
     final_chromosomes
 }
 
-
 /// Custom comparator for version sorting
 pub fn version_sort(a: &String, b: &String) -> std::cmp::Ordering {
     use std::cmp::Ordering;
 
-    let mut split_a = a.split(|c: char| !c.is_numeric()).filter_map(|s| s.parse::<usize>().ok());
-    let mut split_b = b.split(|c: char| !c.is_numeric()).filter_map(|s| s.parse::<usize>().ok());
+    let mut split_a = a
+        .split(|c: char| !c.is_numeric())
+        .filter_map(|s| s.parse::<usize>().ok());
+    let mut split_b = b
+        .split(|c: char| !c.is_numeric())
+        .filter_map(|s| s.parse::<usize>().ok());
 
     loop {
         match (split_a.next(), split_b.next()) {
@@ -269,7 +265,6 @@ pub fn read_u32_npy(npy_file_path: &Path) -> Result<Vec<u32>, Box<dyn std::error
     Ok(values)
 }
 
-
 // two inputs are equivalent to --fileheader when running uniwig
 pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn std::error::Error>> {
     //TODO add test
@@ -294,7 +289,8 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
     for target_inner_key in &inner_keys_filter {
         println!("Preparing {} wiggle file", target_inner_key);
         // Construct the output file name
-        let output_file_path = wig_header.join(format!("{}_{}.wig", wig_header.display(), target_inner_key));
+        let output_file_path =
+            wig_header.join(format!("{}_{}.wig", wig_header.display(), target_inner_key));
         let mut output_file = File::create(&output_file_path)?;
 
         // Check this inner key across all sorted outer dictionaries
@@ -323,5 +319,3 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
 
     Ok(())
 }
-
-

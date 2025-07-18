@@ -1,11 +1,11 @@
 use anyhow::Result;
 use clap::Command;
 // go through the library crate to get the interfaces
+use gtars::bbcache;
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
 use gtars::uniwig;
-use gtars::bbcache;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");

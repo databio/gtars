@@ -1,8 +1,6 @@
-
 use md5::Md5;
-use sha2::{Digest, Sha512};
 use serde_json::Value;
-
+use sha2::{Digest, Sha512};
 
 /// Processes a given string to compute its GA4GH sha512t24u digest.
 ///
@@ -43,19 +41,17 @@ pub fn md5<T: AsRef<[u8]>>(input: T) -> String {
     format!("{:x}", hasher.finalize())
 }
 
-
-
 /// Apply RFC-8785 JSON Canonicalization Scheme (JCS) to a JSON value
-/// 
+///
 /// This function canonicalizes a JSON value according to RFC-8785 by:
 /// 1. Removing whitespace
-/// 2. Sorting object keys lexicographically 
+/// 2. Sorting object keys lexicographically
 /// 3. Using consistent number formatting
 /// 4. Ensuring UTF-8 encoding
-/// 
+///
 /// # Arguments
 /// * `value` - The JSON value to canonicalize
-/// 
+///
 /// # Returns
 /// A canonicalized JSON string
 pub fn canonicalize_json(value: &Value) -> String {
@@ -75,7 +71,10 @@ pub fn canonicalize_json(value: &Value) -> String {
                 } else {
                     // Remove trailing zeros after decimal point
                     let formatted = format!("{}", f);
-                    formatted.trim_end_matches('0').trim_end_matches('.').to_string()
+                    formatted
+                        .trim_end_matches('0')
+                        .trim_end_matches('.')
+                        .to_string()
                 }
             } else {
                 n.to_string()
@@ -93,7 +92,7 @@ pub fn canonicalize_json(value: &Value) -> String {
             // Sort keys lexicographically (RFC-8785 requirement)
             let mut sorted_keys: Vec<&String> = obj.keys().collect();
             sorted_keys.sort();
-            
+
             let pairs: Vec<String> = sorted_keys
                 .iter()
                 .map(|key| {
@@ -102,13 +101,11 @@ pub fn canonicalize_json(value: &Value) -> String {
                     format!("{}:{}", key_str, value_str)
                 })
                 .collect();
-            
+
             format!("{{{}}}", pairs.join(","))
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -131,5 +128,4 @@ mod tests {
         let digest = md5("hello world");
         assert_eq!(digest, "5eb63bbbe01eeed093cb22bb8f5acdc3");
     }
-
 }

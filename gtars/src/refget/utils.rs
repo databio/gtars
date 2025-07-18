@@ -7,7 +7,6 @@ pub trait PathExtension {
 }
 
 impl<T: AsRef<Path>> PathExtension for T {
-
     fn replace_exts_with(&self, new_extension: &str) -> PathBuf {
         let path = self.as_ref();
         if let Some(file_name) = path.file_name() {
@@ -18,7 +17,7 @@ impl<T: AsRef<Path>> PathExtension for T {
             } else {
                 &file_name_str
             };
-            
+
             if let Some(parent) = path.parent() {
                 parent.join(format!("{}.{}", base_name, new_extension))
             } else {

@@ -30,8 +30,6 @@ pub fn write_to_npy_file(
     // Write to the metadata file.
     // Note: there should be a single metadata file for starts, ends and core
 
-    
-
     let mut file = OpenOptions::new()
         .create(true) // Create the file if it doesn't exist
         .append(true) // Append data to the existing file if it does exist

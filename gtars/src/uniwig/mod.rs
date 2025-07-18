@@ -63,7 +63,7 @@ impl FromStr for FileType {
             "bam" => Ok(FileType::BAM),
             "narrowpeak" => Ok(FileType::NARROWPEAK),
             _ => Ok(FileType::UNKNOWN), // Return UNKNOWN for unhandled types
-            //_ => Err(format!("Invalid file type: {}", s)),
+                                        //_ => Err(format!("Invalid file type: {}", s)),
         }
     }
 }
@@ -662,7 +662,6 @@ pub fn uniwig_main(
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
-
             let _ = process_bam(
                 vec_count_type,
                 filepath,

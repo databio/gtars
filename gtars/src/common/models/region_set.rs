@@ -229,7 +229,6 @@ impl From<&[u8]> for RegionSet {
     }
 }
 
-
 impl<'a> Iterator for RegionSetIterator<'a> {
     type Item = &'a Region;
 

@@ -1,9 +1,10 @@
-use serde::{Serialize, Deserialize};
-use std::str::FromStr;
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
+use std::str::FromStr;
 
 /// Represents an alphabet with its encoding and decoding arrays.
-pub struct Alphabet {  // Maps the alphabet type to its encoding and decoding arrays
+pub struct Alphabet {
+    // Maps the alphabet type to its encoding and decoding arrays
     pub alphabet_type: AlphabetType,
     pub encoding_array: &'static [u8; 256],
     pub decoding_array: &'static [u8; 256],
@@ -12,13 +13,12 @@ pub struct Alphabet {  // Maps the alphabet type to its encoding and decoding ar
 
 /// A struct to guess alphabet types based on the sequence content.
 ///
-/// This struct is meant to handle a sequence as a stream, to preserve memory 
+/// This struct is meant to handle a sequence as a stream, to preserve memory
 /// when dealing with large sequences.
 /// It is ameable to processing along with digesting the sequence.
 pub struct AlphabetGuesser {
     alphabet_type: AlphabetType,
 }
-
 
 impl AlphabetGuesser {
     /// Creates a new AlphabetGuesser with the initial alphabet type set to Dna2bit.
@@ -36,12 +36,12 @@ impl AlphabetGuesser {
         for &byte in sequence {
             let byte_upper = byte.to_ascii_uppercase();
             let char_required_alphabet = get_minimum_alphabet_for_char(byte_upper);
-            
+
             // Upgrade to the more general alphabet if needed
             if is_more_general_alphabet(char_required_alphabet, self.alphabet_type) {
                 self.alphabet_type = char_required_alphabet;
             }
-            
+
             // Early exit if we've reached ASCII
             if self.alphabet_type == AlphabetType::Ascii {
                 break;
@@ -53,8 +53,6 @@ impl AlphabetGuesser {
         self.alphabet_type
     }
 }
-
-
 
 /// Represents the type of alphabet used for sequence encoding.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -72,7 +70,6 @@ pub enum AlphabetType {
     /// Unknown alphabet type
     Unknown,
 }
-
 
 impl Display for AlphabetType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -103,7 +100,6 @@ impl FromStr for AlphabetType {
     }
 }
 
-
 /// A lookup table that maps ASCII characters representing DNA bases
 /// (T, C, A, G, and their lowercase counterparts) to their 2-bit encoding.
 /// This constant is used for efficient conversion of DNA sequences into a
@@ -111,10 +107,14 @@ impl FromStr for AlphabetType {
 const DNA_2BIT_ENCODING_ARRAY: [u8; 256] = {
     let mut arr = [0u8; 256];
     // UCSC 2bit encoding: T=00, C=01, A=10, G=11
-    arr[b'T' as usize] = 0b00; arr[b't' as usize] = 0b00;
-    arr[b'C' as usize] = 0b01; arr[b'c' as usize] = 0b01;
-    arr[b'A' as usize] = 0b10; arr[b'a' as usize] = 0b10;
-    arr[b'G' as usize] = 0b11; arr[b'g' as usize] = 0b11;
+    arr[b'T' as usize] = 0b00;
+    arr[b't' as usize] = 0b00;
+    arr[b'C' as usize] = 0b01;
+    arr[b'c' as usize] = 0b01;
+    arr[b'A' as usize] = 0b10;
+    arr[b'a' as usize] = 0b10;
+    arr[b'G' as usize] = 0b11;
+    arr[b'g' as usize] = 0b11;
     arr
 };
 
@@ -134,15 +134,22 @@ const DNA_2BIT_DECODING_ARRAY: [u8; 256] = {
 /// characters as X.
 const DNA_3BIT_ENCODING_ARRAY: [u8; 256] = {
     let mut arr = [0b111; 256]; // Default to 'X' (0b111)
-    // Define the 8 possible values in 3-bit encoding
-    arr[b'A' as usize] = 0b000; arr[b'a' as usize] = 0b000; // A
-    arr[b'C' as usize] = 0b001; arr[b'c' as usize] = 0b001; // C
-    arr[b'G' as usize] = 0b010; arr[b'g' as usize] = 0b010; // G
-    arr[b'T' as usize] = 0b011; arr[b't' as usize] = 0b011; // T
-    arr[b'N' as usize] = 0b100; arr[b'n' as usize] = 0b100; // N
-    arr[b'R' as usize] = 0b101; arr[b'r' as usize] = 0b101; // R
-    arr[b'Y' as usize] = 0b110; arr[b'y' as usize] = 0b110; // Y
-    // All other characters will be encoded as 'X' (0b111)
+                                // Define the 8 possible values in 3-bit encoding
+    arr[b'A' as usize] = 0b000;
+    arr[b'a' as usize] = 0b000; // A
+    arr[b'C' as usize] = 0b001;
+    arr[b'c' as usize] = 0b001; // C
+    arr[b'G' as usize] = 0b010;
+    arr[b'g' as usize] = 0b010; // G
+    arr[b'T' as usize] = 0b011;
+    arr[b't' as usize] = 0b011; // T
+    arr[b'N' as usize] = 0b100;
+    arr[b'n' as usize] = 0b100; // N
+    arr[b'R' as usize] = 0b101;
+    arr[b'r' as usize] = 0b101; // R
+    arr[b'Y' as usize] = 0b110;
+    arr[b'y' as usize] = 0b110; // Y
+                                // All other characters will be encoded as 'X' (0b111)
     arr
 };
 
@@ -179,15 +186,23 @@ const DNA_IUPAC_ENCODING_ARRAY: [u8; 256] = {
     arr[b'H' as usize] = 0b1110; // A or C or T
     arr[b'V' as usize] = 0b1111; // A or C or G
     arr[b'N' as usize] = 0b0000; // Any base
-    // Add lowercase variants
-    arr[b'a' as usize] = 0b0001; arr[b'c' as usize] = 0b0010;
-    arr[b'g' as usize] = 0b0100; arr[b't' as usize] = 0b1000;
-    arr[b'u' as usize] = 0b1000; arr[b'r' as usize] = 0b0101;
-    arr[b'y' as usize] = 0b1010; arr[b's' as usize] = 0b0110;
-    arr[b'w' as usize] = 0b1001; arr[b'k' as usize] = 0b0111;
-    arr[b'm' as usize] = 0b0011; arr[b'b' as usize] = 0b1100;
-    arr[b'd' as usize] = 0b1101; arr[b'h' as usize] = 0b1110;
-    arr[b'v' as usize] = 0b1111; arr[b'n' as usize] = 0b0000;
+                                 // Add lowercase variants
+    arr[b'a' as usize] = 0b0001;
+    arr[b'c' as usize] = 0b0010;
+    arr[b'g' as usize] = 0b0100;
+    arr[b't' as usize] = 0b1000;
+    arr[b'u' as usize] = 0b1000;
+    arr[b'r' as usize] = 0b0101;
+    arr[b'y' as usize] = 0b1010;
+    arr[b's' as usize] = 0b0110;
+    arr[b'w' as usize] = 0b1001;
+    arr[b'k' as usize] = 0b0111;
+    arr[b'm' as usize] = 0b0011;
+    arr[b'b' as usize] = 0b1100;
+    arr[b'd' as usize] = 0b1101;
+    arr[b'h' as usize] = 0b1110;
+    arr[b'v' as usize] = 0b1111;
+    arr[b'n' as usize] = 0b0000;
     arr
 };
 
@@ -214,32 +229,52 @@ const DNA_IUPAC_DECODING_ARRAY: [u8; 256] = {
     arr
 };
 
-
 const PROTEIN_ENCODING_ARRAY: [u8; 256] = {
     let mut arr = [0u8; 256];
     // Standard amino acids (20) + special characters
-    arr[b'A' as usize] = 0b00000; arr[b'a' as usize] = 0b00000; // Alanine
-    arr[b'C' as usize] = 0b00001; arr[b'c' as usize] = 0b00001; // Cysteine
-    arr[b'D' as usize] = 0b00010; arr[b'd' as usize] = 0b00010; // Aspartic acid
-    arr[b'E' as usize] = 0b00011; arr[b'e' as usize] = 0b00011; // Glutamic acid
-    arr[b'F' as usize] = 0b00100; arr[b'f' as usize] = 0b00100; // Phenylalanine
-    arr[b'G' as usize] = 0b00101; arr[b'g' as usize] = 0b00101; // Glycine
-    arr[b'H' as usize] = 0b00110; arr[b'h' as usize] = 0b00110; // Histidine
-    arr[b'I' as usize] = 0b00111; arr[b'i' as usize] = 0b00111; // Isoleucine
-    arr[b'K' as usize] = 0b01000; arr[b'k' as usize] = 0b01000; // Lysine
-    arr[b'L' as usize] = 0b01001; arr[b'l' as usize] = 0b01001; // Leucine
-    arr[b'M' as usize] = 0b01010; arr[b'm' as usize] = 0b01010; // Methionine
-    arr[b'N' as usize] = 0b01011; arr[b'n' as usize] = 0b01011; // Asparagine
-    arr[b'P' as usize] = 0b01100; arr[b'p' as usize] = 0b01100; // Proline
-    arr[b'Q' as usize] = 0b01101; arr[b'q' as usize] = 0b01101; // Glutamine
-    arr[b'R' as usize] = 0b01110; arr[b'r' as usize] = 0b01110; // Arginine
-    arr[b'S' as usize] = 0b01111; arr[b's' as usize] = 0b01111; // Serine
-    arr[b'T' as usize] = 0b10000; arr[b't' as usize] = 0b10000; // Threonine
-    arr[b'V' as usize] = 0b10001; arr[b'v' as usize] = 0b10001; // Valine
-    arr[b'W' as usize] = 0b10010; arr[b'w' as usize] = 0b10010; // Tryptophan
-    arr[b'Y' as usize] = 0b10011; arr[b'y' as usize] = 0b10011; // Tyrosine
+    arr[b'A' as usize] = 0b00000;
+    arr[b'a' as usize] = 0b00000; // Alanine
+    arr[b'C' as usize] = 0b00001;
+    arr[b'c' as usize] = 0b00001; // Cysteine
+    arr[b'D' as usize] = 0b00010;
+    arr[b'd' as usize] = 0b00010; // Aspartic acid
+    arr[b'E' as usize] = 0b00011;
+    arr[b'e' as usize] = 0b00011; // Glutamic acid
+    arr[b'F' as usize] = 0b00100;
+    arr[b'f' as usize] = 0b00100; // Phenylalanine
+    arr[b'G' as usize] = 0b00101;
+    arr[b'g' as usize] = 0b00101; // Glycine
+    arr[b'H' as usize] = 0b00110;
+    arr[b'h' as usize] = 0b00110; // Histidine
+    arr[b'I' as usize] = 0b00111;
+    arr[b'i' as usize] = 0b00111; // Isoleucine
+    arr[b'K' as usize] = 0b01000;
+    arr[b'k' as usize] = 0b01000; // Lysine
+    arr[b'L' as usize] = 0b01001;
+    arr[b'l' as usize] = 0b01001; // Leucine
+    arr[b'M' as usize] = 0b01010;
+    arr[b'm' as usize] = 0b01010; // Methionine
+    arr[b'N' as usize] = 0b01011;
+    arr[b'n' as usize] = 0b01011; // Asparagine
+    arr[b'P' as usize] = 0b01100;
+    arr[b'p' as usize] = 0b01100; // Proline
+    arr[b'Q' as usize] = 0b01101;
+    arr[b'q' as usize] = 0b01101; // Glutamine
+    arr[b'R' as usize] = 0b01110;
+    arr[b'r' as usize] = 0b01110; // Arginine
+    arr[b'S' as usize] = 0b01111;
+    arr[b's' as usize] = 0b01111; // Serine
+    arr[b'T' as usize] = 0b10000;
+    arr[b't' as usize] = 0b10000; // Threonine
+    arr[b'V' as usize] = 0b10001;
+    arr[b'v' as usize] = 0b10001; // Valine
+    arr[b'W' as usize] = 0b10010;
+    arr[b'w' as usize] = 0b10010; // Tryptophan
+    arr[b'Y' as usize] = 0b10011;
+    arr[b'y' as usize] = 0b10011; // Tyrosine
     arr[b'*' as usize] = 0b10100; // Stop codon
-    arr[b'X' as usize] = 0b10101; arr[b'x' as usize] = 0b10101; // Unknown
+    arr[b'X' as usize] = 0b10101;
+    arr[b'x' as usize] = 0b10101; // Unknown
     arr[b'-' as usize] = 0b10110; // Gap
     arr[b'.' as usize] = 0b10111; // Gap
     arr
@@ -271,7 +306,7 @@ const PROTEIN_DECODING_ARRAY: [u8; 256] = {
     arr[0b10101] = b'X'; // Unknown
     arr[0b10110] = b'-'; // Gap
     arr[0b10111] = b'.'; // Gap
-    // All other values default to 'X'
+                         // All other values default to 'X'
     arr
 };
 
@@ -322,7 +357,6 @@ pub const ASCII_ALPHABET: Alphabet = Alphabet {
     encoding_array: &ASCII_ENCODING_ARRAY,
     decoding_array: &ASCII_ENCODING_ARRAY,
 };
-
 
 /// Look up the alphabet for a given alphabet type.
 pub fn lookup_alphabet(alphabet_type: &AlphabetType) -> &'static Alphabet {
@@ -412,12 +446,12 @@ pub fn guess_alphabet(sequence: &[u8]) -> AlphabetType {
     for &byte in sequence {
         let byte_upper = byte.to_ascii_uppercase();
         let char_required_alphabet = get_minimum_alphabet_for_char(byte_upper);
-        
+
         // Upgrade to the more general alphabet if needed
         if is_more_general_alphabet(char_required_alphabet, required_alphabet) {
             required_alphabet = char_required_alphabet;
         }
-        
+
         // Early exit if we've reached ASCII
         if required_alphabet == AlphabetType::Ascii {
             break;
@@ -433,22 +467,22 @@ fn get_minimum_alphabet_for_char(byte: u8) -> AlphabetType {
     if matches!(byte, b'A' | b'C' | b'G' | b'T') {
         return AlphabetType::Dna2bit;
     }
-    
+
     // Check 3-bit DNA
     if matches!(byte, b'N' | b'R' | b'Y') {
         return AlphabetType::Dna3bit;
     }
-    
+
     // Check IUPAC DNA
     if DNA_IUPAC_ENCODING_ARRAY[byte as usize] != 0 || byte == b'N' {
         return AlphabetType::DnaIupac;
     }
-    
+
     // Check Protein
     if PROTEIN_ENCODING_ARRAY[byte as usize] != 0 || byte == b'-' || byte == b'*' {
         return AlphabetType::Protein;
     }
-    
+
     // Default to ASCII
     AlphabetType::Ascii
 }
@@ -462,17 +496,17 @@ fn is_more_general_alphabet(a: AlphabetType, b: AlphabetType) -> bool {
         AlphabetType::Protein,
         AlphabetType::Ascii,
     ];
-    
+
     let pos_a = alphabet_hierarchy.iter().position(|&x| x == a).unwrap_or(4);
     let pos_b = alphabet_hierarchy.iter().position(|&x| x == b).unwrap_or(4);
-    
+
     pos_a > pos_b
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{AlphabetType, guess_alphabet, guess_alphabet_fast, AlphabetGuesser};
-    
+    use super::{guess_alphabet, guess_alphabet_fast, AlphabetGuesser, AlphabetType};
+
     #[test]
     fn test_guess_alphabet() {
         assert_eq!(guess_alphabet(b"ACGT"), AlphabetType::Dna2bit);
@@ -487,38 +521,37 @@ mod tests {
         // Test cases where the original guess_alphabet would fail but guess_alphabet succeeds
         // ACTGM: Contains 'M' which is IUPAC DNA, but original would stop at 3-bit
         assert_eq!(guess_alphabet(b"ACTGM"), AlphabetType::DnaIupac);
-        
+
         // ACGTSKWV: Contains IUPAC codes that would force upgrade to IUPAC
         assert_eq!(guess_alphabet(b"ACGTSKWV"), AlphabetType::DnaIupac);
-        
+
         // ACGTE: Contains 'E' which is protein-only, should jump directly to Protein
         assert_eq!(guess_alphabet(b"ACGTE"), AlphabetType::Protein);
-        
+
         // ACGT*: Contains stop codon, should be protein
         assert_eq!(guess_alphabet(b"ACGT*"), AlphabetType::Protein);
-        
+
         // ACGT-: Contains gap character, should be protein
         assert_eq!(guess_alphabet(b"ACGT-"), AlphabetType::Protein);
-        
+
         // Mixed case with protein characters
         assert_eq!(guess_alphabet(b"actgEFIL"), AlphabetType::Protein);
-        
+
         // Test with non-standard characters that should force ASCII
         assert_eq!(guess_alphabet(b"ACGT123"), AlphabetType::Ascii);
         assert_eq!(guess_alphabet(b"ACGT@#$"), AlphabetType::Ascii);
-        
+
         // Edge cases with single characters
         assert_eq!(guess_alphabet(b"A"), AlphabetType::Dna2bit);
         assert_eq!(guess_alphabet(b"N"), AlphabetType::Dna3bit);
         assert_eq!(guess_alphabet(b"M"), AlphabetType::DnaIupac);
         assert_eq!(guess_alphabet(b"E"), AlphabetType::Protein);
         assert_eq!(guess_alphabet(b"1"), AlphabetType::Ascii);
-        
+
         // Test that demonstrates the difference between original and accurate versions
         // The guess_alphabet_fast would return Dna3bit for "ACTGM" but, the better one returns DnaIupac
         assert_eq!(guess_alphabet_fast(b"ACTGM"), AlphabetType::Dna3bit); // Original is wrong
         assert_eq!(guess_alphabet(b"ACTGM"), AlphabetType::DnaIupac); // Accurate is correct
-        
     }
 
     #[test]
@@ -550,9 +583,9 @@ mod tests {
             guesser.update(test_case);
             let guesser_result = guesser.guess();
             let function_result = guess_alphabet(test_case);
-            
+
             assert_eq!(
-                guesser_result, 
+                guesser_result,
                 function_result,
                 "AlphabetGuesser and guess_alphabet disagree on sequence: {:?}",
                 std::str::from_utf8(test_case).unwrap_or("(invalid UTF-8)")
@@ -564,27 +597,27 @@ mod tests {
     fn test_alphabet_guesser_streaming() {
         // Test that the guesser works correctly when fed data in chunks
         let mut guesser = AlphabetGuesser::new();
-        
+
         // Start with DNA 2-bit
         guesser.update(b"ACGT");
         assert_eq!(guesser.guess(), AlphabetType::Dna2bit);
-        
+
         // Add some 3-bit characters
         guesser.update(b"NRY");
         assert_eq!(guesser.guess(), AlphabetType::Dna3bit);
-        
+
         // Add IUPAC characters
         guesser.update(b"MKS");
         assert_eq!(guesser.guess(), AlphabetType::DnaIupac);
-        
+
         // Add protein characters
         guesser.update(b"EFIL");
         assert_eq!(guesser.guess(), AlphabetType::Protein);
-        
+
         // Add ASCII characters
         guesser.update(b"123");
         assert_eq!(guesser.guess(), AlphabetType::Ascii);
-        
+
         // Verify it matches the full sequence result
         let full_sequence = b"ACGTNRYMSKEFILP123";
         assert_eq!(guesser.guess(), guess_alphabet(full_sequence));
