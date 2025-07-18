@@ -96,12 +96,10 @@ class TestRefget:
         assert seq is not None
         assert seq.metadata.length == 8
 
-        # TODO This doesnt work
-        # Get known sequence by MD5
-        # md5 = "5f63cfaa3ef61f88c9635fb9d18ec945"
-        # seq = store.get_sequence_by_id(md5)
-        # assert seq is not None
-        # assert seq.metadata.length == 8
+        md5 = "5f63cfaa3ef61f88c9635fb9d18ec945"
+        seq = store.get_sequence_by_id(md5)
+        assert seq is not None
+        assert seq.metadata.length == 8
 
     def test_store_substring(self):
         """Test substring retrieval"""
@@ -149,9 +147,6 @@ class TestRefget:
         # Test getting non-existent sequence
         bogus_digest = "not_a_sequence"
         assert store.get_sequence_by_id(bogus_digest) is None
-
-        # TODO fix md5
-        #assert store.get_sequence_by_md5(bogus_digest) is None
 
         # Test invalid substring parameters
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"

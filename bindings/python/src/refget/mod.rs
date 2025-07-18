@@ -292,15 +292,19 @@ impl PyGlobalRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e)))
     }
 
-    // TODO suggested way uses &[8] do we actually need this?
-    // fn get_sequence_by_id(&self, seq_digest: &[u8]) -> Option<PySequenceRecord> {
-    //     self.inner.get_sequence_by_id(seq_digest)
-    //         .map(|record| PySequenceRecord::from(record.clone()))
-    // }
-    // #[pymethod]
-    fn get_sequence_by_id(&self, seq_digest: &str) -> PyResult<Option<PySequenceRecord>> {
-        Ok(self.inner.get_sequence_by_id(seq_digest.as_bytes())
-            .map(|record| PySequenceRecord::from(record.clone())))
+
+    fn get_sequence_by_id(&self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
+        // Try as SHA512t24u first (32 bytes)
+        let result = self.inner.get_sequence_by_id(digest.as_bytes())
+            .map(|record| PySequenceRecord::from(record.clone()));
+        
+        // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
+        if result.is_none() && digest.len() == 32 {
+            return Ok(self.inner.get_sequence_by_md5(digest.as_bytes())
+                .map(|record| PySequenceRecord::from(record.clone())));
+        }
+
+        Ok(result)
     }
 
     fn get_sequence_by_collection_and_name(&self, collection_digest: &str, sequence_name: &str) -> Option<PySequenceRecord> {
