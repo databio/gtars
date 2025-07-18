@@ -22,7 +22,6 @@ use crate::common::models::region::Region;
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let is_gzipped = path.extension() == Some(OsStr::new("gz"));
     let file = File::open(path).with_context(|| format!("Failed to open file: {:?}", path))?;
-
     let file: Box<dyn Read> = match is_gzipped {
         true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
