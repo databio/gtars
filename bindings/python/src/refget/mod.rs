@@ -3,11 +3,12 @@
 // and sequence collection objects from Python.
 
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyString};
+use pyo3::types::{PyBytes, PyString, PyType};
 use pyo3::exceptions::PyTypeError;
 
 
-// use gtars::refget::{GlobalRefgetStore, SequenceCollection};
+use gtars::refget::store::GlobalRefgetStore;
+use gtars::refget::store::StorageMode;
 use gtars::refget::digest::{md5, sha512t24u};
 use gtars::refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
 use gtars::refget::alphabet::AlphabetType;
@@ -245,6 +246,97 @@ impl From<SequenceCollection> for PySequenceCollection {
     }
 }
 
+#[pyclass]
+#[derive(Clone)]
+#[pyo3(name = "StorageMode")]
+pub enum PyStorageMode {
+    Raw,
+    Encoded,
+}
+
+impl From<StorageMode> for PyStorageMode {
+    fn from(mode: StorageMode) -> Self {
+        match mode {
+            StorageMode::Raw => PyStorageMode::Raw,
+            StorageMode::Encoded => PyStorageMode::Encoded,
+        }
+    }
+}
+
+impl From<PyStorageMode> for StorageMode {
+    fn from(mode: PyStorageMode) -> Self {
+        match mode {
+            PyStorageMode::Raw => StorageMode::Raw,
+            PyStorageMode::Encoded => StorageMode::Encoded,
+        }
+    }
+}
+
+#[pyclass]
+#[pyo3(name = "GlobalRefgetStore")]
+pub struct PyGlobalRefgetStore {
+    inner: GlobalRefgetStore,
+}
+
+#[pymethods]
+impl PyGlobalRefgetStore {
+    #[new]
+    fn new(mode: PyStorageMode) -> Self {
+        Self {
+            inner: GlobalRefgetStore::new(mode.into()),
+        }
+    }
+
+    fn import_fasta(&mut self, file_path: &str) -> PyResult<()> {
+        self.inner.import_fasta(file_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e)))
+    }
+
+
+    fn get_sequence_by_id(&self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
+        // Try as SHA512t24u first (32 bytes)
+        let result = self.inner.get_sequence_by_id(digest.as_bytes())
+            .map(|record| PySequenceRecord::from(record.clone()));
+        
+        // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
+        if result.is_none() && digest.len() == 32 {
+            return Ok(self.inner.get_sequence_by_md5(digest.as_bytes())
+                .map(|record| PySequenceRecord::from(record.clone())));
+        }
+
+        Ok(result)
+    }
+
+    fn get_sequence_by_collection_and_name(&self, collection_digest: &str, sequence_name: &str) -> Option<PySequenceRecord> {
+        self.inner.get_sequence_by_collection_and_name(collection_digest, sequence_name)
+            .map(|record| PySequenceRecord::from(record.clone()))
+    }
+
+    fn get_substring(&self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
+        self.inner.get_substring(seq_digest, start, end)
+    }
+
+    fn write_store_to_directory(&self, root_path: &str, seqdata_path_template: &str) -> PyResult<()> {
+        self.inner.write_store_to_directory(root_path, seqdata_path_template)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error writing store: {}", e)))
+    }
+
+    #[classmethod]
+    fn load_from_directory(_cls: &Bound<'_, PyType>, root_path: &str) -> PyResult<Self> {
+        let store = GlobalRefgetStore::load_from_directory(root_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading store: {}", e)))?;
+        Ok(Self { inner: store })
+    }
+
+    fn __str__(&self) -> String {
+        format!("{}", self.inner)
+    }
+
+    fn __repr__(&self) -> String {
+        format!("<GlobalRefgetStore with {} sequences>", self.inner.list_sequence_digests().len())
+    }
+}
+
 // This represents the Python module to be created
 #[pymodule]
 pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -256,5 +348,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequenceRecord>()?;
     m.add_class::<PySeqColDigestLvl1>()?;
     m.add_class::<PySequenceCollection>()?;
+    m.add_class::<PyStorageMode>()?;
+    m.add_class::<PyGlobalRefgetStore>()?;
     Ok(())
 }
