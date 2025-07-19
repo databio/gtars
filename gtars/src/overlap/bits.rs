@@ -401,3 +401,69 @@ where
         self.intervals.iter_mut()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use pretty_assertions::{assert_eq, assert_ne};
+    use rstest::{rstest, fixture};
+
+    #[fixture]
+    fn intervals() -> Vec<Interval<u32, &'static str>> {
+        vec![
+            Interval { start: 1, end: 5, val: "a" },
+            Interval { start: 3, end: 7, val: "b" },
+            Interval { start: 6, end: 10, val: "c" },
+            Interval { start: 8, end: 12, val: "d" },
+        ]
+    }
+
+    #[rstest]
+    fn test_build_and_len(intervals: Vec<Interval<u32, &'static str>>) {
+        let ailist = Bits::build(intervals.clone());
+        assert_eq!(ailist.len(), intervals.len());
+        assert_ne!(ailist.is_empty(), true);
+    }
+
+    #[rstest]
+    fn test_find_overlapping_intervals(intervals: Vec<Interval<u32, &'static str>>) {
+
+        let ailist = Bits::build(intervals);
+
+        // Query that overlaps with "a" and "b"
+        let results = ailist.find(2, 4);
+        let vals: Vec<&str> = results.iter().map(|i| i.val).collect();
+        assert_eq!(vals.contains(&"a"), true);
+        assert_eq!(vals.contains(&"b"), true);
+
+        // Query that overlaps with "c" and "d"
+        let results = ailist.find(9, 11);
+        let vals: Vec<&str> = results.iter().map(|i| i.val).collect();
+        assert_eq!(vals.contains(&"c"), true);
+        assert_eq!(vals.contains(&"d"), true);
+    }
+
+    #[rstest]
+    fn test_find_no_overlap(intervals: Vec<Interval<u32, &'static str>>) {
+        
+        let ailist = Bits::build(intervals);
+
+        // Query outside all intervals
+        let results = ailist.find(13, 15);
+        assert_eq!(results.is_empty(), true);
+    }
+
+    #[rstest]
+    fn test_empty_ailist() {
+
+        let ailist: Bits<u32, &str> = Bits::build(vec![]);
+
+        assert_eq!(ailist.len(), 0);
+        assert_eq!(ailist.is_empty(), true);
+
+        let results = ailist.find(1, 2);
+        
+        assert_eq!(results.is_empty(), true);
+    }
+}
