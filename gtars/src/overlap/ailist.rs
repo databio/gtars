@@ -222,12 +222,14 @@ mod tests {
         let vals: Vec<&str> = results.iter().map(|i| i.val).collect();
         assert_eq!(vals.contains(&"a"), true);
         assert_eq!(vals.contains(&"b"), true);
+        assert_eq!(vals.contains(&"c"), false);
 
         // Query that overlaps with "c" and "d"
         let results = ailist.find(9, 11);
         let vals: Vec<&str> = results.iter().map(|i| i.val).collect();
         assert_eq!(vals.contains(&"c"), true);
         assert_eq!(vals.contains(&"d"), true);
+        assert_eq!(vals.contains(&"1"), false);
     }
 
     #[rstest]
@@ -249,7 +251,7 @@ mod tests {
         assert_eq!(ailist.is_empty(), true);
 
         let results = ailist.find(1, 2);
-        
+
         assert_eq!(results.is_empty(), true);
     }
 }
