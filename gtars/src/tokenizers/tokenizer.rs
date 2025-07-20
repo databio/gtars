@@ -114,16 +114,32 @@ impl Tokenizer {
     }
 
     pub fn tokenize(&self, regions: &[Region]) -> Result<Vec<String>, TokenizerError> {
-        let tokenized = self.core.tokenize(regions)?;
-        if tokenized.is_empty() {
+        let tokens = regions
+            .iter()
+            .filter_map(|region| {
+                self.core.get(&region.chr).map(|tree| {
+                    tree.find(region.start, region.end)
+                        .iter()
+                        .map(|i| i.val)
+                        .collect::<Vec<u32>>()
+                })
+            })
+            .flatten()
+            .map(|id| Token {
+                value: self.universe.convert_id_to_token(id).unwrap(),
+                id,
+            })
+            .collect::<Vec<Token>>();
+            
+        if tokens.is_empty() {
             return Ok(vec![self.special_tokens.unk.clone()]);
         }
-        Ok(tokenized.into_iter().map(|t| t.value).collect())
+        Ok(tokens.into_iter().map(|t| t.value).collect())
     }
 
     pub fn encode(&self, regions: &[Region]) -> Result<Vec<u32>, TokenizerError> {
-        let tokenized = self.core.tokenize(regions)?;
-        Ok(tokenized.into_iter().map(|t| t.id).collect())
+        let tokenized = self.tokenize(regions)?;
+        Ok(tokenized.into_iter().map(|t| self.convert_token_to_id(&t).unwrap()).collect())
     }
 
     pub fn decode(&self, ids: &[u32]) -> Result<Vec<String>, TokenizerError> {
@@ -231,7 +247,7 @@ impl Tokenizer {
     }
 
     pub fn get_universe(&self) -> &Universe {
-        self.core.get_universe()
+        &self.universe
     }
 }
 
