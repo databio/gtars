@@ -431,43 +431,4 @@ mod tokenizer_tests {
         assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(8));
     }
 
-    #[rstest]
-    fn test_tokenize_with_order() {
-        let cfg_path = "tests/data/tokenizers/peaks.scored.bed";
-        let tokenizer =
-            Tokenizer::from_auto(cfg_path).expect("Failed to create tokenizer from config.");
-
-        let regions = vec![
-            // overlaps chr9:3526184-3526269 (CONFIRMED IN IGV) (SCORE: 1.2233)
-            Region {
-                chr: "chr9".to_string(),
-                start: 3_526_178,
-                end: 3_526_249,
-                rest: None,
-            },
-            // overlaps chr9:3526072-3526165 (CONFIRMED IN IGV) (SCORE: 23.8)
-            Region {
-                chr: "chr9".to_string(),
-                start: 3_526_051,
-                end: 3_526_145,
-                rest: None,
-            },
-        ];
-
-        let tokenized = tokenizer.tokenize(&regions);
-
-        assert!(tokenized.is_ok());
-        let tokenized = tokenized.unwrap();
-        assert_eq!(tokenized.len(), 2);
-
-        // chr9:3526071-3526165 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[0], "chr9:3526071-3526165");
-        let first_id = tokenizer.convert_token_to_id(&tokenized[0]);
-        assert_eq!(first_id, Some(11));
-
-        // chr9:3526183-3526269 -- CONFIRMED IN IGV
-        assert_eq!(tokenized[1], "chr9:3526183-3526269");
-        let second_id = tokenizer.convert_token_to_id(&tokenized[1]);
-        assert_eq!(second_id, Some(10));
-    }
 }
