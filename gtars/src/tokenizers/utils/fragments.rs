@@ -1,15 +1,22 @@
 use std::path::Path;
 use std::{collections::HashMap, io::BufRead};
 
+use num_traits::{PrimInt, Unsigned};
+
 use crate::common::models::Region;
 use crate::common::utils::get_dynamic_reader;
 
 use super::super::{Tokenizer, TokenizerError};
 
-pub fn tokenize_fragment_file<P: AsRef<Path>>(
+pub fn tokenize_fragment_file<P, T, I>(
     file: P,
-    tokenizer: &Tokenizer,
-) -> Result<HashMap<String, Vec<u32>>, TokenizerError> {
+    tokenizer: &Tokenizer<I, T>,
+) -> Result<HashMap<String, Vec<u32>>, TokenizerError> 
+where
+    P: AsRef<Path>,
+    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    T: Eq   + Clone    + Send + Sync,
+{
     let reader = get_dynamic_reader(file.as_ref())?;
     let mut res = HashMap::new();
 
@@ -58,7 +65,7 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_frament() {
-        let tokenizer = Tokenizer::from_bed("tests/data/consensus/consensus1.bed").unwrap();
+        let tokenizer: Tokenizer<u32, u32> = Tokenizer::from_bed("tests/data/consensus/consensus1.bed").unwrap();
         let result = tokenize_fragment_file("tests/data/fragments/region_scoring/fragments1.bed.gz", &tokenizer);
         assert_eq!(result.is_ok(), true);
 

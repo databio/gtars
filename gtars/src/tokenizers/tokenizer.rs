@@ -1,14 +1,11 @@
-pub mod bits_tree;
-
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use bits_tree::BitsTree;
-use thiserror::Error;
-
 use crate::common::models::Region;
+use crate::overlap::Overlapper;
 
 use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileType, TokenizerType};
+use super::error::TokenizerError;
 use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
@@ -16,20 +13,6 @@ use super::utils::special_tokens::SpecialTokens;
 use hf_hub::api::sync::Api;
 
 pub const DEFAULT_UNIVERSE_FILENAME: &str = "universe.bed.gz";
-
-#[derive(Error, Debug)]
-pub enum TokenizerError {
-    #[error(transparent)]
-    Io(#[from] std::io::Error),
-    #[error("Invalid special token configuration")]
-    InvalidSpecialTokenConfig,
-    #[error(transparent)]
-    Config(#[from] TokenizerConfigError),
-    #[error("Universe error: {0}")]
-    UniverseError(#[from] crate::tokenizers::universe::UniverseError),
-    #[error(transparent)]
-    Anyhow(#[from] anyhow::Error),
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Token {
@@ -43,40 +26,13 @@ impl Token {
     }
 }
 
-pub trait GTokenize: Send + Sync {
-    /// Tokenize the given sequence into multiple underlying `Token`. The `offsets` on the `Token`
-    /// are expected to be relative to the given sequence.
-    fn tokenize(&self, regions: &[Region]) -> Result<Vec<Token>, TokenizerError>;
-    /// Find the ID associated to a string token
-    fn token_to_id(&self, token: &str) -> Option<u32>;
-    /// Find the string token associated to an ID
-    fn id_to_token(&self, id: u32) -> Option<String>;
-    /// Retrieve the size of the vocabulary
-    fn get_vocab_size(&self) -> usize;
-    /// Retrieve the universe -- this is here to
-    /// enforce that the tokenizer has a universe
-    fn get_universe(&self) -> &Universe;
-    /// Retrieve the entire vocabulary mapping (token -> id)
-    fn get_vocab(&self) -> HashMap<String, u32>;
+pub struct Tokenizer<I, T> {
+    core: HashMap<String, Box<dyn Overlapper<I, T>>>,
+    universe: Universe,
+    special_tokens: SpecialTokens, 
 }
 
-pub struct Tokenizer {
-    core: Box<dyn GTokenize + Send + Sync>,
-    special_tokens: SpecialTokens,
-}
-
-impl Tokenizer {
-    ///
-    /// Create a new tokenizer with the given core GTokenizer
-    ///
-    pub fn new(core: Box<dyn GTokenize>) -> Self {
-        let special_tokens = SpecialTokens::default();
-        Tokenizer {
-            core,
-            special_tokens,
-        }
-    }
-
+impl<I, T> Tokenizer<I, T> {
     ///
     /// Create a new tokenizer from a config file
     ///
@@ -120,7 +76,7 @@ impl Tokenizer {
         })
     }
 
-        ///
+    ///
     /// Create a new tokenizer from a pre-trained model
     /// 
     pub fn from_pretrained<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {

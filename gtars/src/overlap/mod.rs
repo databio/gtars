@@ -6,3 +6,4 @@ pub mod ailist;
 // re-exports
 pub use self::traits::Overlapper;
 pub use self::bits::Bits;
+pub use self::ailist::AiList;
