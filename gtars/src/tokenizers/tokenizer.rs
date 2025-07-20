@@ -3,8 +3,9 @@ use std::path::{Path, PathBuf};
 
 use crate::common::models::Region;
 use crate::overlap::Overlapper;
+use crate::tokenizers::create_tokenize_core_from_universe;
 
-use super::config::{TokenizerConfig, TokenizerConfigError, TokenizerInputFileType, TokenizerType};
+use super::config::{TokenizerConfig, TokenizerInputFileType, TokenizerType};
 use super::error::TokenizerError;
 use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
@@ -26,13 +27,13 @@ impl Token {
     }
 }
 
-pub struct Tokenizer<I, T> {
-    core: HashMap<String, Box<dyn Overlapper<I, T>>>,
+pub struct Tokenizer {
+    core: HashMap<String, Box<dyn Overlapper<u32, u32>>>,
     universe: Universe,
     special_tokens: SpecialTokens, 
 }
 
-impl<I, T> Tokenizer<I, T> {
+impl Tokenizer {
     ///
     /// Create a new tokenizer from a config file
     ///
@@ -49,15 +50,15 @@ impl<I, T> Tokenizer<I, T> {
         let (universe, special_tokens) =
             prepare_universe_and_special_tokens(universe_path, special_tokens)?;
 
-        let core = match config.tokenizer_type {
-            Some(TokenizerType::BitsTree) => Box::new(BitsTree::from(universe)),
-            // default to BitsTree if no tokenizer type is specified (yes, this means we only support BitsTree for now)
-            None => Box::new(BitsTree::from(universe)),
-        };
+        let core = create_tokenize_core_from_universe(
+            &universe,
+            config.tokenizer_type.unwrap_or(TokenizerType::BitsTree)
+        );
 
         Ok(Tokenizer {
             core,
             special_tokens,
+            universe
         })
     }
 
@@ -68,11 +69,15 @@ impl<I, T> Tokenizer<I, T> {
         let special_tokens = SpecialTokens::default();
         let (universe, special_tokens) =
             prepare_universe_and_special_tokens(bed_path.as_ref(), special_tokens)?;
-        let core = Box::new(BitsTree::from(universe));
+        let core = create_tokenize_core_from_universe(
+            &universe,
+            TokenizerType::BitsTree
+        );
 
         Ok(Tokenizer {
             core,
             special_tokens,
+            universe
         })
     }
 
@@ -125,8 +130,8 @@ impl<I, T> Tokenizer<I, T> {
         let decoded: Vec<String> = ids
             .iter()
             .map(|id| {
-                self.core
-                    .id_to_token(*id)
+                self.universe
+                    .convert_id_to_token(*id)
                     .unwrap_or(self.special_tokens.unk.clone())
             })
             .collect();
@@ -134,19 +139,19 @@ impl<I, T> Tokenizer<I, T> {
     }
 
     pub fn convert_token_to_id(&self, token: &str) -> Option<u32> {
-        self.core.token_to_id(token)
+        self.universe.convert_token_to_id(token)
     }
 
     pub fn convert_id_to_token(&self, id: u32) -> Option<String> {
-        self.core.id_to_token(id)
+        self.universe.convert_id_to_token(id)
     }
 
     pub fn get_vocab_size(&self) -> usize {
-        self.core.get_vocab_size()
+        self.universe.len()
     }
 
     pub fn get_vocab(&self) -> HashMap<String, u32> {
-        self.core.get_vocab()
+        self.universe.region_to_id.clone()
     }
 
     pub fn get_unk_token(&self) -> String {
