@@ -86,7 +86,7 @@ pub fn create_tokenize_core_from_universe(
     // build the tree
     for (chr, chr_intervals) in intervals.into_iter() {
         let lapper: Box<dyn Overlapper<u32, u32>> = match overlapper_type {
-            TokenizerType::BitsTree => Box::new(Bits::build(chr_intervals)),
+            TokenizerType::Bits => Box::new(Bits::build(chr_intervals)),
             TokenizerType::AiList => Box::new(AiList::build(chr_intervals)),
         };
         core.insert(chr.to_string(), lapper);

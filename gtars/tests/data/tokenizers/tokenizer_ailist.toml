@@ -1,0 +1,2 @@
+universe = "peaks.bed.gz"
+tokenizer_type = "ailist"

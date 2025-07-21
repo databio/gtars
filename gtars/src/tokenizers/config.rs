@@ -27,8 +27,8 @@ pub struct SpecialTokenAssignment {
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum TokenizerType {
-    #[serde(rename = "bits_tree")]
-    BitsTree,
+    #[serde(rename = "bits")]
+    Bits,
     #[serde(rename = "ailist")]
     AiList
 }

@@ -52,7 +52,7 @@ impl Tokenizer {
 
         let core = create_tokenize_core_from_universe(
             &universe,
-            config.tokenizer_type.unwrap_or(TokenizerType::BitsTree)
+            config.tokenizer_type.unwrap_or(TokenizerType::Bits)
         );
 
         Ok(Tokenizer {
@@ -71,7 +71,7 @@ impl Tokenizer {
             prepare_universe_and_special_tokens(bed_path.as_ref(), special_tokens)?;
         let core = create_tokenize_core_from_universe(
             &universe,
-            TokenizerType::BitsTree
+            TokenizerType::Bits
         );
 
         Ok(Tokenizer {
@@ -370,6 +370,42 @@ mod tokenizer_tests {
     #[rstest]
     fn test_tokenize_on_two_crhoms() {
         let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let tokenizer =
+            Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
+
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 151399441,
+                end: 151399547,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 203871220,
+                end: 203871381,
+                rest: None,
+            },
+        ];
+
+        let tokenized = tokenizer.tokenize(&regions);
+        assert!(tokenized.is_ok());
+
+        let tokenized = tokenized.unwrap();
+        assert_eq!(tokenized.len(), 2);
+
+        // chr1:151399432-151399527 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[0], "chr1:151399431-151399527");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[0]), Some(6));
+
+        // chr2:203871201-203871375 -- CONFIRMED IN IGV
+        assert_eq!(tokenized[1], "chr2:203871200-203871375");
+        assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(7));
+    }
+
+    #[rstest]
+    fn test_tokenize_on_two_crhoms_ailist() {
+        let cfg_path = "tests/data/tokenizers/tokenizer_ailist.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
