@@ -25,6 +25,13 @@ class RegionSet:
         :param path: path to the bed file
         """
         ...
+    
+    @classmethod
+    def from_regions(cls, regions: List[Region]) -> "RegionSet":
+        """
+        :param regions: list of regions
+        """
+        ...
 
     @property
     def identifier(self) -> str:

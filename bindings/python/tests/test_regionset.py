@@ -18,3 +18,19 @@ class TestRegionSet:
         rs = RegionSet(bed_file)
 
         assert rs.mean_region_width() == 4.22
+
+
+    @pytest
+    def test_from_regions(self):
+        from gtars.models import Region
+
+        regions = [
+            Region(chrom="chr1", start=14, end=514),
+            Region(chrom="chr19", start=19, end=810),
+        ]
+        rs = RegionSet.from_regions(regions)
+        
+        assert isinstance(rs, RegionSet)
+        assert len(rs) == 2
+
+        

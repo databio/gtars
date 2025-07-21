@@ -50,6 +50,27 @@ impl PyRegionSet {
         })
     }
 
+    /// Alternate constructor from a list of PyRegion
+    /// Args:
+    ///     regions: a list/vec of PyRegion objects
+    ///
+    /// Returns:
+    ///     RegionSet object
+    #[staticmethod]
+    fn from_regions(regions: Vec<PyRegion>) -> PyResult<Self> {
+        let rust_regions: Vec<Region> = regions
+            .into_iter()
+            .map(PyRegion::into_region)
+            .collect();
+
+
+        Ok(Self {
+            regionset: RegionSet::from(rust_regions),
+            curr: 0,
+            identifier: None,
+        })
+    }
+
     #[getter]
     fn get_identifier(&mut self) -> PyResult<String> {
         if self.identifier.is_none() {
