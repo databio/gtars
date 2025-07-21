@@ -229,7 +229,7 @@ mod tests {
         let vals: Vec<&str> = results.iter().map(|i| i.val).collect();
         assert_eq!(vals.contains(&"c"), true);
         assert_eq!(vals.contains(&"d"), true);
-        assert_eq!(vals.contains(&"1"), false);
+        assert_eq!(vals.contains(&"a"), false);
     }
 
     #[rstest]
