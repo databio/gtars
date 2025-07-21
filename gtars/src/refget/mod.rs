@@ -12,7 +12,7 @@
 //! * `encoder.rs` - Contains functions for encoding sequences into compact representations.
 //! * `fasta.rs` - Provides functions for reading and writing FASTA files.
 //! * `store.rs` - Implements a sequence store that allows for efficient storage and retrieval of
-//!  sequences indexed by sha512t24u digest.
+//!     sequences indexed by sha512t24u digest.
 pub mod alphabet;
 pub mod collection;
 pub mod digest;

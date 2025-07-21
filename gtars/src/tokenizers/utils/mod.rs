@@ -15,7 +15,6 @@ use super::universe::Universe;
 use super::config::TokenizerType;
 
 pub mod fragments;
-pub mod r2v;
 pub mod special_tokens;
 
 ///

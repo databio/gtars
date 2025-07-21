@@ -108,7 +108,7 @@ impl GlobalRefgetStore {
         // Add to name lookup for the collection
         self.name_lookup
             .entry(collection_digest)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(
                 sequence_record.metadata.name.clone(),
                 sequence_record.metadata.sha512t24u.to_key(),

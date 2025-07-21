@@ -67,7 +67,7 @@ impl TryFrom<Vec<&Path>> for BedSet {
             region_sets.push(region_set);
         }
         Ok(BedSet {
-            region_sets: region_sets,
+            region_sets,
             path: None,
         })
     }
@@ -83,7 +83,7 @@ impl TryFrom<Vec<&str>> for BedSet {
             region_sets.push(region_set);
         }
         Ok(BedSet {
-            region_sets: region_sets,
+            region_sets,
             path: None,
         })
     }
@@ -99,7 +99,7 @@ impl TryFrom<Vec<String>> for BedSet {
             region_sets.push(region_set);
         }
         Ok(BedSet {
-            region_sets: region_sets,
+            region_sets,
             path: None,
         })
     }
@@ -115,7 +115,7 @@ impl TryFrom<Vec<PathBuf>> for BedSet {
             region_sets.push(region_set);
         }
         Ok(BedSet {
-            region_sets: region_sets,
+            region_sets,
             path: None,
         })
     }
@@ -124,7 +124,7 @@ impl TryFrom<Vec<PathBuf>> for BedSet {
 impl From<Vec<RegionSet>> for BedSet {
     fn from(region_sets: Vec<RegionSet>) -> Self {
         BedSet {
-            region_sets: region_sets,
+            region_sets,
             path: None,
         }
     }
@@ -175,9 +175,8 @@ impl BedSet {
     pub fn identifier(&self) -> String {
         let mut bedfile_ids = Vec::new();
         for rs in &self.region_sets {
-            if let id = rs.identifier() {
-                bedfile_ids.push(id);
-            }
+            let id = rs.identifier();
+            bedfile_ids.push(id);
         }
         bedfile_ids.sort();
         let mut hasher = Md5::new();
