@@ -1,3 +1,4 @@
+pub mod bed_set;
 pub mod fragments;
 pub mod region;
 pub mod region_set;

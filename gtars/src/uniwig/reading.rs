@@ -1,3 +1,4 @@
+use crate::uniwig::utils::get_file_info;
 use crate::uniwig::Chromosome;
 use clap::builder::OsStr;
 use flate2::read::GzDecoder;
@@ -6,19 +7,19 @@ use std::error::Error;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::ops::Deref;
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
 //const UNMAPPED: &str = "*";
 
-/// Reads combined bed file from a given path.
-/// Returns Vec of Chromosome struct
-pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+/// Reads combined bed like file from a given path.
+/// Returns Vec of Chromosome struct with a default score of 1
+pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> {
     let default_score = 1; // this will later be used for the count, which, by default, was originally = 1
     let path = Path::new(combinedbedpath);
+    let pathbuf = PathBuf::from(combinedbedpath);
+    let file_info = get_file_info(&pathbuf);
+    let is_gzipped = file_info.is_gzipped;
 
     let file = File::open(path).unwrap();
-
-    let is_gzipped = path.extension().unwrap_or(&OsStr::from("bed")) == "gz";
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
@@ -45,7 +46,7 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         let line_string = line.unwrap();
         let s = line_string.as_str();
 
-        let (parsed_chr, parsed_start, parsed_end) = parse_bed_file(s).unwrap();
+        let (parsed_chr, parsed_start, parsed_end) = parse_bedlike_file(s).unwrap();
 
         if chrom.is_empty() {
             // Initial chromosome
@@ -97,17 +98,17 @@ pub fn read_bed_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec
 }
 
-/// Reads narrowPeak files and returns a `Vec<Chromosome>`
-/// Pushes narrowPeak scores along with chrom coordinates.
-/// Differs from read_bed_vec in that read_bed_vec pushes a default score (1).
-pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
+/// Reads bed like files and returns a `Vec<Chromosome>`
+/// Pushes scores (column 5) along with chrom coordinates.
+/// Differs from create_chrom_vec_no_score in that create_chrom_vec_scores pushes a default score (1).
+pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
     // For narrowpeak there is no default score, we attempt to parse it from the file
     //
     let path = Path::new(combinedbedpath);
-
+    let pathbuf = PathBuf::from(combinedbedpath);
+    let file_info = get_file_info(&pathbuf);
+    let is_gzipped = file_info.is_gzipped;
     let file = File::open(path).unwrap();
-
-    let is_gzipped = path.extension().unwrap_or(&OsStr::from("narrowpeak")) == "gz";
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
@@ -135,7 +136,7 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
         let s = line_string.as_str();
 
         let (parsed_chr, parsed_start, parsed_end, parsed_score) =
-            parse_narrow_peak_file(s).unwrap();
+            parse_bedlike_file_with_scores(s).unwrap();
 
         if chrom.is_empty() {
             // Initial chromosome
@@ -191,8 +192,8 @@ pub fn read_narrow_peak_vec(combinedbedpath: &str) -> Vec<Chromosome> {
     chromosome_vec
 }
 
-/// Parses narrowPeak file grabbing chrom (ctg), start, end, and a numerical score in column 5
-pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
+/// Parses bed like file with score grabbing chrom (ctg), start, end, and a numerical score in column 5
+pub fn parse_bedlike_file_with_scores(line: &str) -> Option<(String, i32, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?;
@@ -219,9 +220,9 @@ pub fn parse_narrow_peak_file(line: &str) -> Option<(String, i32, i32, i32)> {
     Some((ctg.parse().unwrap(), st, en, narrow_peak_score))
 }
 
-/// Parses each line of given bed file into a contig (chromosome), starts and ends
+/// Parses each line of given bed like file into a contig (chromosome), starts and ends
 /// This ignores any other columns beyond start and ends.
-pub fn parse_bed_file(line: &str) -> Option<(String, i32, i32)> {
+pub fn parse_bedlike_file(line: &str) -> Option<(String, i32, i32)> {
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?;

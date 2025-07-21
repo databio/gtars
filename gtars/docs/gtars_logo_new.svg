@@ -2,12 +2,12 @@
 <!-- Created with Inkscape (http://www.inkscape.org/) -->
 
 <svg
-   width="100mm"
-   height="100mm"
-   viewBox="0 0 100 100"
+   width="250mm"
+   height="85mm"
+   viewBox="0 0 250.00001 85"
    version="1.1"
    id="svg1"
-   inkscape:version="1.3 (0e150ed, 2023-07-21)"
+   inkscape:version="1.2.2 (b0a8486541, 2022-12-01)"
    sodipodi:docname="gtars_logo_new.svg"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
@@ -24,15 +24,28 @@
      inkscape:pagecheckerboard="0"
      inkscape:deskcolor="#d1d1d1"
      inkscape:document-units="mm"
-     inkscape:zoom="0.89958333"
-     inkscape:cx="359.05512"
-     inkscape:cy="451.87587"
+     inkscape:zoom="0.70710678"
+     inkscape:cx="284.25693"
+     inkscape:cy="452.54834"
      inkscape:window-width="1392"
      inkscape:window-height="1246"
-     inkscape:window-x="406"
-     inkscape:window-y="1026"
+     inkscape:window-x="26"
+     inkscape:window-y="23"
      inkscape:window-maximized="0"
-     inkscape:current-layer="g47" />
+     inkscape:current-layer="g47"
+     showgrid="false"
+     showguides="true">
+    <sodipodi:guide
+       position="110.41045,82.564193"
+       orientation="0,-1"
+       id="guide2703"
+       inkscape:locked="false" />
+    <sodipodi:guide
+       position="100.6157,2.8008392"
+       orientation="0,-1"
+       id="guide2705"
+       inkscape:locked="false" />
+  </sodipodi:namedview>
   <defs
      id="defs1">
     <clipPath
@@ -48,7 +61,8 @@
   <g
      inkscape:label="Layer 1"
      inkscape:groupmode="layer"
-     id="layer1">
+     id="layer1"
+     transform="translate(-21.363983,-9.7094187)">
     <g
        id="g2"
        transform="matrix(0.65409133,0,0,0.65409133,-212.73508,44.883862)">
@@ -58,18 +72,12 @@
          inkscape:export-xdpi="96.038185"
          inkscape:export-ydpi="96.038185">
         <g
-           id="g1"
-           transform="matrix(0.57917969,0,0,0.57917969,137.15767,-135.23525)">
-          <circle
-             style="fill:#e4e4e4;fill-opacity:1;stroke:#0b2b40;stroke-width:3.343;stroke-dasharray:none;stroke-opacity:1"
-             id="path3-9"
-             cx="456.71808"
-             cy="246.99934"
-             r="125.29681" />
+           id="g2820"
+           transform="translate(5.3997124,3.7442865)">
           <g
              id="g21"
              clip-path="url(#clipPath21)"
-             transform="translate(-7.2332162,7.8116863)">
+             transform="matrix(0.57917969,0,0,0.57917969,132.96834,-130.71088)">
             <g
                inkscape:label="Clip"
                id="g20">
@@ -100,7 +108,8 @@
                    x="520.43225"
                    y="27.524712"
                    ry="0.60778099"
-                   transform="matrix(0.86583647,0.50032709,-0.49967298,0.86621413,0,0)" />
+                   transform="matrix(0.86583647,0.50032709,-0.49967298,0.86621413,0,0)"
+                   rx="0.60778099" />
                 <rect
                    style="fill:#0b2b40;fill-opacity:1;stroke:#000000;stroke-width:0.105827;stroke-opacity:0.0546666"
                    id="rect2-3-8-1"
@@ -109,7 +118,8 @@
                    x="519.41907"
                    y="27.81481"
                    transform="matrix(0.86652752,0.49912929,-0.48430014,0.87490192,0,0)"
-                   ry="0.62317997" />
+                   ry="0.62317997"
+                   rx="0.62317997" />
                 <rect
                    style="fill:#0b2b40;fill-opacity:1;stroke:#000000;stroke-width:0.105827;stroke-opacity:0.0546666"
                    id="rect2-3-8-0-9"
@@ -118,7 +128,8 @@
                    x="519.31824"
                    y="32.639702"
                    transform="matrix(0.86652752,0.49912929,-0.48430014,0.87490192,0,0)"
-                   ry="0.62317997" />
+                   ry="0.62317997"
+                   rx="0.62317997" />
                 <rect
                    style="fill:#0b2b40;fill-opacity:1;stroke:#000000;stroke-width:0.105827;stroke-opacity:0.0546666"
                    id="rect2-3-8-0-5-4"
@@ -127,7 +138,8 @@
                    x="519.12347"
                    y="36.856804"
                    transform="matrix(0.86652752,0.49912929,-0.48430014,0.87490192,0,0)"
-                   ry="0.62317997" />
+                   ry="0.62317997"
+                   rx="0.62317997" />
                 <rect
                    style="fill:#0b2b40;fill-opacity:1;stroke:none;stroke-width:3.51999;stroke-dasharray:1.67593, 6.70369"
                    id="rect8-7"
@@ -136,7 +148,8 @@
                    x="511.03778"
                    y="42.459404"
                    ry="1.1370513"
-                   transform="rotate(30)" />
+                   transform="rotate(30)"
+                   rx="1.1370513" />
                 <path
                    style="fill:#0b2b40;fill-opacity:1;stroke:none;stroke-width:3.51999;stroke-dasharray:1.67593, 6.70369"
                    d="m 423.4403,297.39193 7.79011,4.49762 7.7901,4.49762 c -6.37632,2.09589 -8.38579,1.03837 -10.34694,-0.0944 -1.96115,-1.13276 -3.87397,-2.34079 -5.23326,-8.90084 z"
@@ -338,6 +351,17 @@
                d="m 503.07975,190.35498 2.85213,-4.94005 1.94757,1.12444 -3.04964,5.28216 z"
                id="path31-4-7-8-4" />
           </g>
+          <text
+             xml:space="preserve"
+             style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:144.571px;line-height:0.85;font-family:'Forgotten Futurist';-inkscape-font-specification:'Forgotten Futurist, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;text-decoration:none;text-decoration-line:none;text-decoration-color:#000000;letter-spacing:0px;word-spacing:0px;opacity:0.8;fill:#0b2b40;fill-opacity:1;stroke-width:30.9208;-inkscape-stroke:none;paint-order:stroke markers fill;stop-color:#000000"
+             x="435.54153"
+             y="45.688805"
+             id="text1365"><tspan
+               sodipodi:role="line"
+               id="tspan1363"
+               style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:144.571px;font-family:'Forgotten Futurist';-inkscape-font-specification:'Forgotten Futurist, Normal';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#0b2b40;fill-opacity:1;stroke-width:30.9208"
+               x="435.54153"
+               y="45.688805">gtars</tspan></text>
         </g>
       </g>
     </g>

@@ -8,11 +8,12 @@
 //! for use as pre-processors to machine learning pipelines.
 //!
 pub mod ailist;
+pub mod bbcache;
 pub mod common;
-pub mod digests;
 pub mod fragsplit;
 pub mod igd;
 pub mod io;
+pub mod refget;
 pub mod scoring;
 pub mod overlap;
 pub mod tokenizers;
