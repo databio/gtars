@@ -2,8 +2,9 @@
 //! This module contains utility functions for tokenizers. Basic things
 //! like universe prapration and special token handling are done here.
 //!
-use std::collections::HashMap;
 use std::path::Path;
+
+use fxhash::{FxHashMap as HashMap};
 
 use special_tokens::SpecialTokens;
 
@@ -48,8 +49,8 @@ pub fn create_tokenize_core_from_universe(
 ) -> HashMap<String, Box<dyn Overlapper<u32, u32>>> {
     
     // instantiate the tree and list of intervals
-    let mut core: HashMap<String, Box<dyn Overlapper<u32, u32>>> = HashMap::new();
-    let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::new();
+    let mut core: HashMap<String, Box<dyn Overlapper<u32, u32>>> = HashMap::default();
+    let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::default();
 
     for region in universe.regions.iter() {
         // skip any special tokens that snuck into the regions

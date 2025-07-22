@@ -42,6 +42,7 @@ tabled = "0.20.0"
 bio = "1.3"     # For FASTA parsing
 memmap2 = "0.5"  # For memory-mapped file I/O
 chrono = { version = "0.4", features = ["serde"] }  # For timestamps
+fxhash = "0.2.1"
 
 [dev-dependencies]
 rstest = "0.25.0"

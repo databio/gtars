@@ -1,5 +1,7 @@
-use std::collections::HashMap;
+use std::collections::{HashMap as StdHashMap};
 use std::path::{Path, PathBuf};
+
+use fxhash::{FxHashMap as HashMap};
 
 use crate::common::models::Region;
 use crate::overlap::Overlapper;
@@ -187,7 +189,7 @@ impl Tokenizer {
         self.universe.len()
     }
 
-    pub fn get_vocab(&self) -> HashMap<String, u32> {
+    pub fn get_vocab(&self) -> StdHashMap<String, u32> {
         self.universe.region_to_id.clone()
     }
 
