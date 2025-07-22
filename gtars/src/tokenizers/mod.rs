@@ -28,6 +28,7 @@ pub mod error;
 pub mod tokenizer;
 pub mod universe;
 pub mod utils;
+pub mod cli;
 
 // re-export things
 pub use encoding::*;
@@ -35,3 +36,8 @@ pub use error::*;
 pub use tokenizer::*;
 pub use universe::*;
 pub use utils::*;
+
+// contants
+pub mod consts {
+    pub const TOKENIZERS_CMD: &str = "tokenize";
+}

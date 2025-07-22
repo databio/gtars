@@ -34,6 +34,22 @@ pub struct Tokenizer {
 }
 
 impl Tokenizer {
+
+    ///
+    /// Create a new tokenizer
+    /// 
+    pub fn new(
+        core: HashMap<String, Box<dyn Overlapper<u32, u32>>>,
+        universe: Universe,
+        special_tokens: SpecialTokens,
+    ) -> Self {
+        Self {
+            core,
+            universe,
+            special_tokens,
+        }
+    }
+
     ///
     /// Create a new tokenizer from a config file
     ///
