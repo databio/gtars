@@ -3,10 +3,8 @@ use num_traits::{
     PrimInt, Unsigned,
 };
 
-
-use crate::common::models::Interval;
 use super::Overlapper;
-
+use crate::common::models::Interval;
 
 #[derive(Debug, Clone)]
 pub struct Bits<I, T>
@@ -38,13 +36,16 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<usize, bool>>>();
     /// let bits = Bits::new(data);
     /// ```
-    fn build(mut intervals: Vec<Interval<I,T>>) -> Self  where Self: Sized {
+    fn build(mut intervals: Vec<Interval<I, T>>) -> Self
+    where
+        Self: Sized,
+    {
         intervals.sort();
         let (mut starts, mut ends): (Vec<_>, Vec<_>) =
             intervals.iter().map(|x| (x.start, x.end)).unzip();
@@ -74,14 +75,14 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let bits = Bits::new((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
     ///                                 .collect::<Vec<Interval<usize, bool>>>());
     /// assert_eq!(bits.find(5, 11).count(), 2);
     /// ```
     #[inline]
-    fn find(&self, start: I, stop: I) -> Vec<Interval<I,T>> {
+    fn find(&self, start: I, stop: I) -> Vec<Interval<I, T>> {
         let finder = IterFind {
             inner: self,
             off: Self::lower_bound(
@@ -91,11 +92,28 @@ where
             start,
             stop,
         };
-        
+
         // TODO: we are literally just collection the iterator, which feels like smell
         // but how do we write the trait in such a way that we return an actual
         // iterator instead of a vector of intervals?
         finder.into_iter().cloned().collect()
+    }
+
+    fn find_iter<'a>(
+        &'a self,
+        start: I,
+        stop: I,
+    ) -> Box<dyn Iterator<Item = &'a Interval<I, T>> + 'a> {
+        let finder = IterFind {
+            inner: self,
+            off: Self::lower_bound(
+                start.checked_sub(&self.max_len).unwrap_or_else(zero::<I>),
+                &self.intervals,
+            ),
+            start,
+            stop,
+        };
+        Box::new(finder)
     }
 }
 
@@ -112,7 +130,7 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let data : Vec<Interval<usize, usize>>= vec!{
     ///     Interval{start:0,  stop:5,  val:1},
     ///     Interval{start:6,  stop:10, val:2},
@@ -147,11 +165,11 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, stop: x + 10, val: true})
     ///                   .collect::<Vec<Interval<usize, bool>>>();
-    /// 
+    ///
     /// let bits = Bits::new(data);
     /// assert_eq!(bits.len(), 4);
     /// ```
@@ -164,7 +182,7 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let data: Vec<Interval<usize, bool>> = vec![];
     /// let bits = Bits::new(data);
     /// assert_eq!(bits.is_empty(), true);
@@ -239,7 +257,7 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let bits = Bits::new((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
     ///                                 .collect::<Vec<Interval<usize, bool>>>());
@@ -263,7 +281,7 @@ where
     /// ```
     /// use gtars::overlap::Bits;
     /// use gtars::common::models::Interval;
-    /// 
+    ///
     /// let bits = Bits::new((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, stop: x+2 , val: true})
     ///                                 .collect::<Vec<Interval<usize, bool>>>());
@@ -407,15 +425,31 @@ mod tests {
     use super::*;
 
     use pretty_assertions::{assert_eq, assert_ne};
-    use rstest::{rstest, fixture};
+    use rstest::{fixture, rstest};
 
     #[fixture]
     fn intervals() -> Vec<Interval<u32, &'static str>> {
         vec![
-            Interval { start: 1, end: 5, val: "a" },
-            Interval { start: 3, end: 7, val: "b" },
-            Interval { start: 6, end: 10, val: "c" },
-            Interval { start: 8, end: 12, val: "d" },
+            Interval {
+                start: 1,
+                end: 5,
+                val: "a",
+            },
+            Interval {
+                start: 3,
+                end: 7,
+                val: "b",
+            },
+            Interval {
+                start: 6,
+                end: 10,
+                val: "c",
+            },
+            Interval {
+                start: 8,
+                end: 12,
+                val: "d",
+            },
         ]
     }
 
@@ -428,7 +462,6 @@ mod tests {
 
     #[rstest]
     fn test_find_overlapping_intervals(intervals: Vec<Interval<u32, &'static str>>) {
-
         let ailist = Bits::build(intervals);
 
         // Query that overlaps with "a" and "b"
@@ -448,7 +481,6 @@ mod tests {
 
     #[rstest]
     fn test_find_no_overlap(intervals: Vec<Interval<u32, &'static str>>) {
-        
         let ailist = Bits::build(intervals);
 
         // Query outside all intervals
@@ -458,14 +490,13 @@ mod tests {
 
     #[rstest]
     fn test_empty_ailist() {
-
         let ailist: Bits<u32, &str> = Bits::build(vec![]);
 
         assert_eq!(ailist.len(), 0);
         assert_eq!(ailist.is_empty(), true);
 
         let results = ailist.find(1, 2);
-        
+
         assert_eq!(results.is_empty(), true);
     }
 }
