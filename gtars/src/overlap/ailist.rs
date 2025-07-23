@@ -9,7 +9,7 @@ use crate::common::models::Interval;
 #[derive(Debug, Clone)]
 pub struct AiList<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     starts: Vec<I>,
@@ -23,7 +23,7 @@ where
 #[derive(Debug, Default)]
 struct DecomposeResult<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Start positions.
@@ -40,7 +40,7 @@ where
 
 impl<I, T> DecomposeResult<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Clear the contents of the [`DecomposeResult`], maintaining capacity.
@@ -66,7 +66,7 @@ where
 
 impl<I, T> Overlapper<I, T> for AiList<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     ///
@@ -163,7 +163,7 @@ where
 
 impl<I, T> AiList<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     fn decompose(
@@ -247,7 +247,7 @@ where
 pub struct IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
 {
     inner: &'a AiList<I, T>,
     header_list_idx: usize,
@@ -258,7 +258,7 @@ where
 
 impl<'a, I, T> IterFind<'a, I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync + 'a,
+    I: PrimInt + Unsigned + Clone + Send + Sync + 'a,
     T: Eq + Clone + Send + Sync,
 {
     fn new(ailist: &'a AiList<I, T>, start: I, stop: I) -> Self {
@@ -274,7 +274,7 @@ where
 
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync + 'a,
 {
     type Item = &'a Interval<I, T>;

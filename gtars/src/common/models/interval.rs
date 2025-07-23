@@ -1,17 +1,13 @@
 // https://github.com/sstadick/rust-lapper/blob/7e3904daed85181f1faa39b15f51935f13945976/src/lib.rs#L92
-use num_traits::{
-    identities::zero,
-    PrimInt, Unsigned,
-};
+use num_traits::{identities::zero, PrimInt, Unsigned};
 use std::cmp::Ordering::{self};
-
 
 /// Represent a range from [start, end)
 /// Inclusive start, exclusive of end
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -19,10 +15,9 @@ where
     pub val: T,
 }
 
-
 impl<I, T> Ord for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -35,10 +30,9 @@ where
     }
 }
 
-
 impl<I, T> Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
@@ -58,7 +52,7 @@ where
 
 impl<I, T> PartialOrd for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -69,7 +63,7 @@ where
 
 impl<I, T> PartialEq for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]

@@ -1,18 +1,18 @@
 ///
 /// WIP
-/// 
+///
 use std::cmp::Ordering::{self};
 
 use num_traits::{PrimInt, Unsigned};
 
-use crate::common::models::Interval;
 use super::Overlapper;
+use crate::common::models::Interval;
 
 /// An internal wrapper that stores the extra `max` field required by the iitree.
 #[derive(Clone)]
 struct Node<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     start: I,
@@ -23,7 +23,7 @@ where
 
 impl<I, T> Ord for Node<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -33,7 +33,7 @@ where
 }
 impl<I, T> PartialOrd for Node<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -43,13 +43,13 @@ where
 }
 impl<I, T> Eq for Node<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
 }
 impl<I, T> PartialEq for Node<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -59,14 +59,14 @@ where
 }
 
 ///
-/// 
+///
 /// The Implicit interval tree, described in: https://academic.oup.com/bioinformatics/article/37/9/1315/5910546
 ///
 pub struct IITree<I, T>
 where
-    I: PrimInt + Unsigned + Ord + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Clone + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     max_level: usize,
-    nodes: Vec<Node<I, T>>
+    nodes: Vec<Node<I, T>>,
 }
