@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Command;
 // go through the library crate to get the interfaces
+use gtars::overlap;
 use gtars::bbcache;
 use gtars::fragsplit;
 use gtars::igd;
@@ -21,6 +22,7 @@ fn build_parser() -> Command {
         .author("Databio")
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
+        .subcommand(overlap::cli::create_overlap_cli())
         .subcommand(fragsplit::cli::make_fragsplit_cli())
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
@@ -35,7 +37,15 @@ fn main() -> Result<()> {
 
     match matches.subcommand() {
         //
+        // OVERLAP
+        //
+        Some((overlap::consts::OVERLAP_CMD, matches)) => {
+            overlap::cli::handlers::overlap_query_with_universe(matches)?;
+        }
+
+        //
         // FRAGMENT SPLITTING UTIL
+        //
         Some((fragsplit::consts::FRAGSPLIT_CMD, matches)) => {
             fragsplit::cli::handlers::split_fragment_files(matches)?;
         }

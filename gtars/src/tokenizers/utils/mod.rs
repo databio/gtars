@@ -84,7 +84,7 @@ pub fn create_tokenize_core_from_universe(
         chr_intervals.push(interval);
     }
 
-    // build the tree
+    // build the chromosome to tree mapping
     for (chr, chr_intervals) in intervals.into_iter() {
         let lapper: Box<dyn Overlapper<u32, u32>> = match overlapper_type {
             TokenizerType::Bits => Box::new(Bits::build(chr_intervals)),

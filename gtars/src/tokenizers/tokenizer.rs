@@ -157,6 +157,7 @@ impl Tokenizer {
         if tokens.is_empty() {
             return Ok(vec![self.special_tokens.unk.clone()]);
         }
+
         Ok(tokens.into_iter().map(|t| t.value).collect())
     }
 
@@ -427,7 +428,7 @@ mod tokenizer_tests {
     }
 
     #[rstest]
-    fn test_tokenize_on_two_crhoms_ailist() {
+    fn test_tokenize_on_two_chroms_ailist() {
         let cfg_path = "tests/data/tokenizers/tokenizer_ailist.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
