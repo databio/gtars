@@ -4,7 +4,7 @@
 
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString, PyType};
-use pyo3::exceptions::PyTypeError;
+use pyo3::exceptions::{PyTypeError, PyIndexError};
 
 
 use gtars::refget::store::GlobalRefgetStore;
@@ -182,6 +182,26 @@ impl PySequenceCollection {
             "SequenceCollection with {} sequences, digest: {}",
             self.sequences.len(), self.digest
         )
+    }
+    fn __len__(&self) -> PyResult<usize> {
+        Ok(self.sequences.len())
+    }
+    fn __getitem__(&self, idx: isize, py: Python) -> PyResult<PyObject> {
+        let len = self.sequences.len() as isize;
+
+        // Handle negative indexing like Python lists do
+        let index = if idx < 0 {
+            len + idx
+        } else {
+            idx
+        };
+
+        if index >= 0 && (index as usize) < self.sequences.len() {
+            // Convert the PySequenceRecord to a PyObject before returning
+            Ok(self.sequences[index as usize].clone().into_py(py))
+        } else {
+            Err(PyIndexError::new_err("SequenceCollection index out of range"))
+        }
     }
 }
 
