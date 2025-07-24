@@ -7,7 +7,7 @@ use std::cmp::Ordering::{self};
 #[derive(Eq, Debug, Clone)]
 pub struct Interval<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     pub start: I,
@@ -17,7 +17,7 @@ where
 
 impl<I, T> Ord for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -32,7 +32,7 @@ where
 
 impl<I, T> Interval<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Compute the intsect between two intervals
@@ -52,7 +52,7 @@ where
 
 impl<I, T> PartialOrd for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -63,7 +63,7 @@ where
 
 impl<I, T> PartialEq for Interval<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
