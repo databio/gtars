@@ -143,7 +143,7 @@ pub mod handlers {
 
             // Skip if chromosome not in universe
             if let Some(overlapper) = core.get(chr) {
-                let hits = overlapper.find(start, end);
+                let hits = overlapper.find_iter(start, end);
                 
                 // Batch output writing
                 for hit in hits {
