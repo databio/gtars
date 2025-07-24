@@ -80,6 +80,7 @@ mod tests {
     use std::time::Instant;
     use store::GlobalRefgetStore;
     use store::StorageMode;
+    use tempfile::tempdir;
     #[test]
     #[ignore]
     fn test_loading_large_fasta_file() {
@@ -144,13 +145,17 @@ mod tests {
 
     #[test]
     fn test_get_sequence_encoded() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
         // Create a new sequence store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
         // let fasta_path = "tests/data/subset.fa.gz";
         let fasta_path = "tests/data/fasta/base.fa.gz";
+        let temp_fasta = temp_path.join("base.fa.gz");
+        std::fs::copy(fasta_path, &temp_fasta).expect("Failed to copy base.fa.gz to tempdir");
 
         // Add sequences to the store
-        store.import_fasta(fasta_path).unwrap();
+        store.import_fasta(temp_fasta).unwrap();
         println!("Listing sequences in the store...");
         // let sequences = store.list_sequence_digests();
         // let digest = &sequences[0];
