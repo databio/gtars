@@ -74,18 +74,48 @@ class GlobalRefgetStore:
     A global store for refget sequences, allowing import, retrieval, and storage operations.
     """
     def __init__(self, mode: StorageMode) -> None: ...
-    def import_fasta(self, file_path: Union[str, PathLike]) -> None: ...
+    def import_fasta(self, file_path: Union[str, PathLike]) -> None:
+        """
+        Import a fasta into the GlobalRefgetStore
+        """
+        ...
     def get_sequence_by_id(self, digest: str) -> Optional[SequenceRecord]:
         """
         Retrieves a sequence record by its SHA512t24u or MD5 digest.
         """
         ...
-    def get_sequence_by_collection_and_name(self, collection_digest: str, sequence_name: str) -> Optional[SequenceRecord]: ...
-    def get_substring(self, seq_digest: str, start: int, end: int) -> Optional[str]: ...
-    def write_store_to_directory(self, root_path: Union[str, PathLike], seqdata_path_template: str) -> None: ...
+    def get_sequence_by_collection_and_name(self, collection_digest: str, sequence_name: str) -> Optional[SequenceRecord]:
+        """
+        Retrieve a SequenceRecord from the store by its collection digest and name
+        """
+
+        ...
+    def get_substring(self, seq_digest: str, start: int, end: int) -> Optional[str]:
+        """
+        Retrieves a substring from an encoded sequence by its SHA512t24u digest.
+        Args:
+                seq_digest - str - the path to import from
+                start - int - The start index of the substring (inclusive)
+                end - int - The end index of the substring (exclusive)
+        Returns:
+                substring - str - returns substring if found, None if not found
+
+        """
+        ...
+
+    def write_store_to_directory(self, root_path: Union[str, PathLike], seqdata_path_template: str) -> None:
+        """
+        Write a GlobalRefgetStore object to a directory
+        """
+        ...
 
     @classmethod
-    def load_from_directory(cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]) -> "GlobalRefgetStore": ...
+    def load_from_directory(cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]) -> "GlobalRefgetStore":
+        """
+        Load a GlobalRefgetStore from a directory path
+        """
+
+        ...
 
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
