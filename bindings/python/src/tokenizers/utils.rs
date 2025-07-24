@@ -10,7 +10,7 @@ pub fn py_tokenize_fragment_file(file: String, tokenizer: &PyTokenizer) -> PyRes
     let res = tokenize_fragment_file(&file, tokenizer.inner());
     match res {
         Ok(res) => Python::with_gil(|py| {
-            let py_dict = res.into_py_dict_bound(py);
+            let py_dict = res.into_py_dict(py);
             Ok(py_dict.into())
         }),
         Err(res) => Err(PyRuntimeError::new_err(res.to_string())),

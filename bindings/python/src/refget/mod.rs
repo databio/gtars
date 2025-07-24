@@ -197,8 +197,15 @@ impl PySequenceCollection {
         };
 
         if index >= 0 && (index as usize) < self.sequences.len() {
-            // Convert the PySequenceRecord to a PyObject before returning
-            Ok(self.sequences[index as usize].clone().into_py(py))
+            // Get the Rust PySequenceRecord instance
+            let sequence_record_instance = self.sequences[index as usize].clone();
+
+            // Convert the Rust instance to a PyO3 Bound object.
+            // This returns a Result, so we use '?' to propagate any error.
+            let bound_sequence_record = sequence_record_instance.into_pyobject(py)?;
+
+            // Convert the Bound<'_, PySequenceRecord> into a PyObject (Py<PyAny>)
+            Ok(bound_sequence_record.into()) // `Bound<'py, T>` implements `Into<PyObject>`
         } else {
             Err(PyIndexError::new_err("SequenceCollection index out of range"))
         }
@@ -317,7 +324,7 @@ impl PyGlobalRefgetStore {
         // Try as SHA512t24u first (32 bytes)
         let result = self.inner.get_sequence_by_id(digest.as_bytes())
             .map(|record| PySequenceRecord::from(record.clone()));
-        
+
         // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
         if result.is_none() && digest.len() == 32 {
             return Ok(self.inner.get_sequence_by_md5(digest.as_bytes())

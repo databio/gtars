@@ -8,7 +8,6 @@ pub struct PyEncoding {
 }
 
 #[pyclass(name = "BatchEncoding", module = "gtars.tokenizers")]
-#[derive(Clone)]
 pub struct PyBatchEncoding {
     pub input_ids: PyObject,
     pub attention_mask: PyObject,
@@ -20,13 +19,23 @@ pub struct PyBatchEncoding {
 impl PyBatchEncoding {
     fn __getitem__(&self, key: &str) -> PyResult<PyObject> {
         match key {
-            "input_ids" => Ok(self.input_ids.clone()),
-            "attention_mask" => Ok(self.attention_mask.clone()),
+            "input_ids" => Ok(self.input_ids),
+            "attention_mask" => Ok(self.attention_mask),
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
                 "Invalid key: {}",
                 key
             ))),
         }
+    }
+    fn __copy__<'py>(slf: PyRef<'py, Self>, py: Python<'py>) -> PyResult<Py<Self>> {
+        // Create a new PyBatchEncoding instance by "cloning" the fields.
+        // For PyObject fields, use `.clone_ref(py)`.
+        // For Vec<PyEncoding>, use `.clone()` assuming PyEncoding implements Clone.
+        Ok(Py::new(py, PyBatchEncoding {
+            input_ids: slf.input_ids.clone_ref(py),       // Use clone_ref for PyObject
+            attention_mask: slf.attention_mask.clone_ref(py), // Use clone_ref for PyObject
+            encodings: slf.encodings.clone(),              // This works if PyEncoding is Clone
+        })?)
     }
 
     fn __len__(&self) -> PyResult<usize> {

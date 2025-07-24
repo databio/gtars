@@ -23,7 +23,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(models_module)?;
     m.add_wrapped(refget_module)?;
 
-    let sys = PyModule::import_bound(py, "sys")?;
+    let sys = PyModule::import(py, "sys")?;
     let binding = sys.getattr("modules")?;
     let sys_modules: &Bound<'_, PyDict> = binding.downcast()?;
 

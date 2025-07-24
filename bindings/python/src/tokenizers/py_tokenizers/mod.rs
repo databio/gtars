@@ -58,7 +58,7 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id())]
-                .into_py(py))
+                    .into_pyobject(py))
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
@@ -70,7 +70,7 @@ impl PyTokenizer {
                             .unwrap_or(self.get_unk_token_id())
                     })
                     .collect();
-                Ok(ids.into_py(py))
+                Ok(ids.into_pyobject(py))
             } else {
                 Err(PyValueError::new_err(
                     "Invalid input type for convert_ids_to_token",
@@ -87,7 +87,7 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())]
-                .into_py(py))
+                    .into_pyobject(py))
             }
             // if a list of ids is passed
             else if let Ok(ids) = ids.extract::<Vec<u32>>() {
@@ -99,7 +99,7 @@ impl PyTokenizer {
                             .unwrap_or(self.get_unk_token())
                     })
                     .collect();
-                Ok(tokens.into_py(py))
+                Ok(tokens.into_pyobject(py))
             } else {
                 Err(PyValueError::new_err(
                     "Invalid input type for convert_ids_to_token",
@@ -116,7 +116,7 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())
-                    .into_py(py))
+                    .into_pyobject(py))
             }
             // if a list of ids is passed
             else if let Ok(ids) = id.extract::<Vec<u32>>() {
@@ -128,7 +128,7 @@ impl PyTokenizer {
                             .unwrap_or(self.get_unk_token())
                     })
                     .collect();
-                Ok(tokens.into_py(py))
+                Ok(tokens.into_pyobject(py))
             } else {
                 Err(PyValueError::new_err(
                     "Invalid input type for convert_ids_to_token",
@@ -145,7 +145,7 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id());
-                Ok(id.into_py(py))
+                Ok(id.into_pyobject(py))
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = region.extract::<Vec<String>>() {
@@ -157,7 +157,7 @@ impl PyTokenizer {
                             .unwrap_or(self.get_unk_token_id())
                     })
                     .collect();
-                Ok(ids.into_py(py))
+                Ok(ids.into_pyobject(py))
             } else {
                 Err(PyValueError::new_err(
                     "Invalid input type for convert_token_to_ids",
@@ -290,11 +290,11 @@ impl PyTokenizer {
             };
 
             Ok(PyBatchEncoding {
-                input_ids: encoding.clone().ids.into_py(py),
-                attention_mask: encoding.clone().attention_mask.into_py(py),
+                input_ids: encoding.clone().ids.into_pyobject(py),
+                attention_mask: encoding.clone().attention_mask.into_pyobject(py),
                 encodings: vec![encoding],
             }
-            .into_py(py))
+                .into_pyobject(py))
         })
     }
 }
