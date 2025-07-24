@@ -10,8 +10,8 @@ use shellexpand;
 
 #[derive(Tabled)]
 pub struct ResourcePrint {
-    Id: String,
-    Path: String,
+    id: String,
+    path: String,
 }
 
 /// Get absolute path to the folder and create it if it doesn't exist
@@ -51,7 +51,7 @@ pub fn get_default_cache_folder() -> PathBuf {
             .or_else(|_| {
                 home_dir()
                     .map(|p| p.to_string_lossy().into_owned())
-                    .ok_or_else(|| std::env::VarError::NotPresent)
+                    .ok_or(std::env::VarError::NotPresent)
             })
             .unwrap_or_else(|_| "/tmp".to_string());
 
@@ -69,13 +69,13 @@ pub fn get_bedbase_api() -> String {
     env::var(BEDBASE_API_ENV).unwrap_or_else(|_| "https://api.bedbase.org".to_string())
 }
 
-pub fn print_resources(resources: Vec<Resource>) -> () {
+pub fn print_resources(resources: Vec<Resource>) {
     let mut resource_print: Vec<ResourcePrint> = Vec::new();
 
     for resource in resources {
         resource_print.push(ResourcePrint {
-            Id: resource.rname,
-            Path: resource.rpath,
+            id: resource.rname,
+            path: resource.rpath,
         })
     }
 

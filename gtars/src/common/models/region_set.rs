@@ -495,6 +495,9 @@ impl Display for RegionSet {
 mod tests {
     use super::*;
 
+    use rstest::*;
+    use pretty_assertions::assert_eq;
+
     fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
         let file_path: PathBuf = std::env::current_dir()
             .unwrap()
@@ -503,25 +506,25 @@ mod tests {
         Ok(file_path)
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_path() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.as_path()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_string() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_url() {
         let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_bedbase() {
         let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
         let region_set = RegionSet::try_from(bbid);
@@ -532,13 +535,13 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn test_open_bed_gz() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_calculate_identifier() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -546,7 +549,7 @@ mod tests {
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bed_gz() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -563,7 +566,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -580,7 +583,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -598,7 +601,7 @@ mod tests {
             .is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_read_headers() {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -607,7 +610,7 @@ mod tests {
         assert_eq!(region_set.path.unwrap(), file_path);
     }
 
-    #[test]
+    #[rstest]
     fn test_is_empty() {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -615,7 +618,7 @@ mod tests {
         assert!(!region_set.is_empty());
     }
 
-    #[test]
+    #[rstest]
     fn test_file_digest() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -624,14 +627,14 @@ mod tests {
         assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
     }
 
-    #[test]
+    #[rstest]
     fn test_mean_region_width() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.mean_region_width(), 4.22)
     }
-    #[test]
+    #[rstest]
     fn test_open_file_with_incorrect_headers() {
         let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
         let _region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();

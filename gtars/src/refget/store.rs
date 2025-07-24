@@ -108,7 +108,7 @@ impl GlobalRefgetStore {
         // Add to name lookup for the collection
         self.name_lookup
             .entry(collection_digest)
-            .or_insert_with(HashMap::new)
+            .or_default()
             .insert(
                 sequence_record.metadata.name.clone(),
                 sequence_record.metadata.sha512t24u.to_key(),
@@ -737,13 +737,16 @@ mod tests {
         // Create a temporary directory for the test
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
+        let temp_fasta = temp_path.join("base.fa.gz");
+        std::fs::copy("tests/data/fasta/base.fa.gz", &temp_fasta)
+            .expect("Failed to copy base.fa.gz to tempdir");
 
         // Create a new sequence store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
 
         // Import a FASTA file into the store
         // store.import_fasta("tests/data/subset.fa.gz").unwrap();
-        store.import_fasta("tests/data/fasta/base.fa.gz").unwrap();
+        store.import_fasta(&temp_fasta).unwrap();
 
         // Get the sequence keys for verification (assuming we know the test file contains 3 sequences)
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();

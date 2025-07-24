@@ -172,9 +172,9 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
         lvl1 = SeqColDigestLvl1::from_metadata(&metadata_vec);
     } else {
         lvl1 = SeqColDigestLvl1 {
-            sequences_digest: sequences_digest,
-            names_digest: names_digest,
-            lengths_digest: lengths_digest,
+            sequences_digest,
+            names_digest,
+            lengths_digest,
         };
     }
 

@@ -25,11 +25,11 @@ impl BBClient {
     /// BBClient to deal with download files from bedbase and caching them.
     /// # Arguments
     /// - cache_folder: path to local folder as cache of files from bedbase,
-    /// if not given it will be the environment variable `BBCLIENT_CACHE`
+    ///     if not given it will be the environment variable `BBCLIENT_CACHE`
     /// - bedbase_api: url to bedbase
     pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
         let cache_folder = get_abs_path(cache_folder, Some(true));
-        let bedbase_api = bedbase_api.unwrap_or_else(|| get_bedbase_api());
+        let bedbase_api = bedbase_api.unwrap_or_else(get_bedbase_api);
 
         let bedfile_subfolder = &cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
         create_dir_all(bedfile_subfolder)?;
@@ -52,7 +52,7 @@ impl BBClient {
     /// - cache_id: id of bed file or bed set
     /// - cache_path: path to the cached bed file or bed set
     /// - bedfile: if the the id and file is a bed file
-
+    /// 
     fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
         let resource_to_add =
             NewResource::new(cache_id, cache_path, Some(cache_path), None, None, None);
@@ -344,11 +344,11 @@ impl BBClient {
     /// # Returns
     /// - the local path of the file
     pub fn seek(&self, identifier: &str) -> Result<PathBuf> {
-        let file_path = self.bedfile_path(&identifier, Some(false));
+        let file_path = self.bedfile_path(identifier, Some(false));
         if file_path.exists() {
             Ok(file_path)
         } else {
-            let set_path = self.bedset_path(&identifier, Some(false));
+            let set_path = self.bedset_path(identifier, Some(false));
             if set_path.exists() {
                 Ok(set_path)
             } else {
@@ -427,7 +427,7 @@ impl BBClient {
     /// # Returns
     /// - the list of resource stored in biocfilecache (identifiers & paths)
     pub fn list_beds(&mut self) -> Result<Vec<Resource>> {
-        let bed_resources = self.bedfile_cache.list_resources(Some(20000 as i64));
+        let bed_resources = self.bedfile_cache.list_resources(Some(20_000));
         Ok(bed_resources)
     }
 
@@ -435,7 +435,7 @@ impl BBClient {
     /// # Returns
     /// - the list of resource stored in biocfilecache (identifiers & paths)
     pub fn list_bedsets(&mut self) -> Result<Vec<Resource>> {
-        let bedset_resources = self.bedset_cache.list_resources(Some(20000 as i64));
+        let bedset_resources = self.bedset_cache.list_resources(Some(20_000));
         Ok(bedset_resources)
     }
 }
