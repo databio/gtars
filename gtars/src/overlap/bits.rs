@@ -9,7 +9,7 @@ use crate::common::models::Interval;
 #[derive(Debug, Clone)]
 pub struct Bits<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// List of intervals
@@ -28,7 +28,7 @@ where
 
 impl<I, T> Overlapper<I, T> for Bits<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Create a new instance of Bits by passing in a vector of Intervals. This vector will
@@ -119,7 +119,7 @@ where
 
 impl<I, T> Bits<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     /// Insert a new interval after the BITS has been created. This is very
@@ -321,7 +321,7 @@ where
 pub struct IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     inner: &'a Bits<I, T>,
     off: usize,
@@ -332,7 +332,7 @@ where
 impl<'a, I, T> Iterator for IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
 
@@ -358,7 +358,7 @@ where
 pub struct IterBits<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     inner: &'a Bits<I, T>,
     pos: usize,
@@ -367,7 +367,7 @@ where
 impl<'a, I, T> Iterator for IterBits<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
 
@@ -384,7 +384,7 @@ where
 impl<I, T> IntoIterator for Bits<I, T>
 where
     T: Eq + Clone + Send + Sync,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     type Item = Interval<I, T>;
     type IntoIter = ::std::vec::IntoIter<Self::Item>;
@@ -397,7 +397,7 @@ where
 impl<'a, I, T> IntoIterator for &'a Bits<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     type Item = &'a Interval<I, T>;
     type IntoIter = std::slice::Iter<'a, Interval<I, T>>;
@@ -410,7 +410,7 @@ where
 impl<'a, I, T> IntoIterator for &'a mut Bits<I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
 {
     type Item = &'a mut Interval<I, T>;
     type IntoIter = std::slice::IterMut<'a, Interval<I, T>>;

@@ -12,7 +12,7 @@ use crate::common::models::Interval;
 #[derive(Clone)]
 struct Node<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     start: I,
@@ -23,7 +23,7 @@ where
 
 impl<I, T> Ord for Node<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -33,7 +33,7 @@ where
 }
 impl<I, T> PartialOrd for Node<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -43,13 +43,13 @@ where
 }
 impl<I, T> Eq for Node<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
 }
 impl<I, T> PartialEq for Node<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     #[inline]
@@ -64,7 +64,7 @@ where
 ///
 pub struct IITree<I, T>
 where
-    I: PrimInt + Unsigned + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
     max_level: usize,
