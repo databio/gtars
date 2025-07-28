@@ -10,14 +10,17 @@ use chrono::Utc;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
-use std::io::{BufRead, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::str;
-
+use flate2::read::GzDecoder;
 use super::encoder::decode_substring_from_bytes;
 use super::encoder::SequenceEncoder;
 use crate::common::utils::get_dynamic_reader;
 use crate::refget::fasta::read_fasta_refget_file;
-use crate::refget::hashkeyable::HashKeyable; // Import the HashKeyable trait for converting types to a 32-byte key
+use crate::refget::hashkeyable::HashKeyable;
+use crate::uniwig::reading::parse_bedlike_file;
+use crate::uniwig::utils::get_file_info;
+// Import the HashKeyable trait for converting types to a 32-byte key
 
 // Import collection types
 use super::collection::{SequenceCollection, SequenceMetadata, SequenceRecord};
@@ -256,11 +259,59 @@ impl GlobalRefgetStore {
     pub fn get_seqs_bed_file<K: AsRef<[u8]>>(        &self,
                                                      collection_digest: K,
                                                      bed_file_path: &str,
-                                                     output_file_path: &str){
+                                                     output_file_path: &str) -> Result<()>{
 
         // Read each line of bed file
-        // for each line in befd file retrieve sequences
+        // for each line in bed file retrieve sequences
         // write them to fasta file
+
+        let path = Path::new(bed_file_path);
+        let pathbuf = PathBuf::from(bed_file_path);
+        let file_info = get_file_info(&pathbuf);
+        let is_gzipped = file_info.is_gzipped;
+        let opened_bed_file = File::open(path).unwrap();
+
+        let reader: Box<dyn Read> = match is_gzipped {
+            true => Box::new(GzDecoder::new(opened_bed_file)),
+            false => Box::new(opened_bed_file),
+        };
+        let reader = BufReader::new(reader);
+
+        let mut parsed_chr: String = String::new();
+        let mut last_parsed_chr: String = String::new();
+
+        // let mut seq_record: &SequenceRecord = SequenceRecord::new();
+
+        let mut current_seq_digest: String = String::new();
+
+        for line in reader.lines() {
+            //println!("Here is line{:?}", line);
+
+            // Must use a 2nd let statement to appease the borrow-checker
+            let line_string = line.unwrap();
+            let s = line_string.as_str();
+
+            let (parsed_chr, parsed_start, parsed_end) = parse_bedlike_file(s).unwrap();
+
+            if last_parsed_chr != parsed_chr{
+
+
+
+                last_parsed_chr = parsed_chr.clone();
+
+                let result = self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr).unwrap();
+                current_seq_digest = result.metadata.sha512t24u.clone();
+
+            }
+
+            let retrieved_substring = self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize).unwrap();
+
+            println!("{}", retrieved_substring);
+
+        }
+
+
+        Ok(())
 
 
 
@@ -647,16 +698,20 @@ mod tests {
         store.import_fasta("/home/drc/Downloads/test_adding_fastas/INPUT_FILE/100linesGRCH38.fa").unwrap();
 
         let known_seq_col_digest = "VRAhrMWmnghggvNFd4qNoRg-J3AqugDh";
-        let know_name = "1";
 
-        let result = store.get_sequence_by_collection_and_name(known_seq_col_digest, know_name).unwrap();
+        let output_file = "/home/drc/Downloads/test_adding_fastas/OUTPUT_FILES/mytest.fa";
 
-        let seq_digest = result.metadata.sha512t24u.clone();
-        println!("{}", seq_digest);
-
-        let retrieved_substring = store.get_substring(seq_digest, 100, 105).unwrap();
-
-        println!("{}", retrieved_substring);
+        let result  = store.get_seqs_bed_file(known_seq_col_digest,query_bed_str,output_file).unwrap();
+        // let know_name = "1";
+        //
+        // let result = store.get_sequence_by_collection_and_name(known_seq_col_digest, know_name).unwrap();
+        //
+        // let seq_digest = result.metadata.sha512t24u.clone();
+        // println!("{}", seq_digest);
+        //
+        // let retrieved_substring = store.get_substring(seq_digest, 100, 105).unwrap();
+        //
+        // println!("{}", retrieved_substring);
         println!("ok");
 
     }
