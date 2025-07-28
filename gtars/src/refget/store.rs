@@ -11,7 +11,7 @@ use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::str;
+use std::{io, str};
 use flate2::read::GzDecoder;
 use super::encoder::decode_substring_from_bytes;
 use super::encoder::SequenceEncoder;
@@ -256,95 +256,133 @@ impl GlobalRefgetStore {
 
     /// Given a Sequence Collection digest and a bed file path
     /// retrieve sequences and write to a file
-    pub fn get_seqs_bed_file<K: AsRef<[u8]>>(        &self,
-                                                     collection_digest: K,
-                                                     bed_file_path: &str,
-                                                     output_file_path: &str) -> Result<()>{
+    pub fn get_seqs_bed_file<K: AsRef<[u8]>>(
+        &self,
+        collection_digest: K,
+        bed_file_path: &str,
+        output_file_path: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        // Set up the output path and create directories if they don't exist
+        let output_path = Path::new(output_file_path)
+            .parent()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid output file path: parent directory not found"))?;
 
-        // Read each line of bed file
-        // for each line in bed file retrieve sequences
-        // write them to fasta file
-
-
-        // Set up the output path and the directories along the way
-        let output_path = std::path::Path::new(&output_file_path).parent().unwrap();
-        let _ = create_dir_all(output_path);
+        create_dir_all(output_path)?;
 
         // Open file for writing to
         let mut output_file = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(output_file_path)
-            .unwrap();
+            .open(output_file_path)?;
 
         // Read in Bed file and get the sequences, writing to output file along the way
         let path = Path::new(bed_file_path);
-        let pathbuf = PathBuf::from(bed_file_path);
-        let file_info = get_file_info(&pathbuf);
+        let file_info = get_file_info(&path.to_path_buf());
         let is_gzipped = file_info.is_gzipped;
-        let opened_bed_file = File::open(path).unwrap();
+
+        let opened_bed_file = File::open(path)?;
 
         let reader: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(opened_bed_file)),
+            true => Box::new(GzDecoder::new(BufReader::new(opened_bed_file))),
             false => Box::new(opened_bed_file),
         };
         let reader = BufReader::new(reader);
 
-        let mut parsed_chr: String = String::new();
         let mut previous_parsed_chr: String = String::new();
-
-        // let mut seq_record: &SequenceRecord = SequenceRecord::new();
-
         let mut current_seq_digest: String = String::new();
         let mut current_header: String = String::new();
         let mut previous_header: String = String::new();
 
-        for line in reader.lines() {
-            //println!("Here is line{:?}", line);
+        for (line_num, line_result) in reader.lines().enumerate() {
+            let line_string = match line_result {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!(
+                        "Warning: Skipping line {} due to I/O error while reading: {}",
+                        line_num + 1,
+                        e
+                    );
+                    continue;
+                }
+            };
 
-            // Must use a 2nd let statement to appease the borrow-checker
-            let line_string = line.unwrap();
-            let s = line_string.as_str();
+            // Try to parse the BED-like line
+            let (parsed_chr, parsed_start, parsed_end) =
+                match parse_bedlike_file(&line_string) {
+                    Some(coords) => coords,
+                    None => {
+                        eprintln!(
+                            "Warning: Skipping line {} because it could not be parsed as a BED-like entry: '{}'",
+                            line_num + 1,
+                            line_string
+                        );
+                        continue;
+                    }
+                };
 
-            let (parsed_chr, parsed_start, parsed_end) = parse_bedlike_file(s).unwrap();
+            // Handle the -1 return for parsing errors in parse_bedlike_file
 
-            if previous_parsed_chr != parsed_chr{
+            if parsed_start == -1 || parsed_end == -1 {
+                eprintln!(
+                    "Warning: Skipping line {} due to invalid start or end coordinates: '{}'",
+                    line_num + 1,
+                    line_string
+                );
+                continue;
+            }
 
 
+            if previous_parsed_chr != parsed_chr {
                 previous_parsed_chr = parsed_chr.clone();
 
-                let result = self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr).unwrap();
-                current_seq_digest = result.metadata.sha512t24u.clone();
-                current_header = format!(">{} {} {} {} {}", result.metadata.name, result.metadata.length, result.metadata.alphabet, result.metadata.sha512t24u, result.metadata.md5);
+                let result = match self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr) {
+                    Some(seq_record) => seq_record,
+                    None => {
+                        eprintln!(
+                            "Warning: Skipping line {} because sequence '{}' not found in collection '{}'.",
+                            line_num + 1,
+                            parsed_chr,
+                            String::from_utf8_lossy(collection_digest.as_ref())
+                        );
+                        continue;
+                    }
+                };
 
+                current_seq_digest = result.metadata.sha512t24u.clone();
+                current_header = format!(
+                    ">{} {} {} {} {}",
+                    result.metadata.name,
+                    result.metadata.length,
+                    result.metadata.alphabet,
+                    result.metadata.sha512t24u,
+                    result.metadata.md5
+                );
             }
 
-
-            if previous_header != current_header{
-
+            if previous_header != current_header {
                 previous_header = current_header.clone();
 
-                // WRITE NEW HEADER
                 let mut header_to_be_written = current_header.clone();
                 header_to_be_written.push('\n');
-                output_file.write_all(header_to_be_written.as_ref()).unwrap();
-
+                output_file.write_all(header_to_be_written.as_ref())?;
             }
 
-            // NOW WRITE SUBSTRING IF IT IS FOUND
-            let retrieved_substring = self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize).unwrap();
+            let retrieved_substring = match self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize) {
+                Some(substring) => substring,
+                None => {
+                    eprintln!(
+                        "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
+                        line_num + 1,
+                        current_seq_digest, parsed_start, parsed_end
+                    );
+                    continue;
+                }
+            };
 
-            output_file.write_all(retrieved_substring.as_ref()).unwrap();
-
-            //println!("{}", retrieved_substring);
-
+            output_file.write_all(retrieved_substring.as_ref())?;
         }
 
-
         Ok(())
-
-
-
     }
 
     /// Retrieve a SequenceRecord from the store by its MD5 digest
