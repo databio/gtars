@@ -250,6 +250,22 @@ impl GlobalRefgetStore {
         None
     }
 
+
+    /// Given a Sequence Collection digest and a bed file path
+    /// retrieve sequences and write to a file
+    pub fn get_seqs_bed_file<K: AsRef<[u8]>>(        &self,
+                                                     collection_digest: K,
+                                                     bed_file_path: &str,
+                                                     output_file_path: &str){
+
+        // Read each line of bed file
+        // for each line in befd file retrieve sequences
+        // write them to fasta file
+
+
+
+    }
+
     /// Retrieve a SequenceRecord from the store by its MD5 digest
     pub fn get_sequence_by_md5<K: AsRef<[u8]>>(&self, seq_md5: K) -> Option<&SequenceRecord> {
         // Look up the SHA512t24u digest using the MD5 lookup
@@ -301,6 +317,8 @@ impl GlobalRefgetStore {
             }
         }
     }
+
+
 
     /// Helper function to get the relative path for a sequence based on its SHA512t24u digest string
     fn get_sequence_path(digest_str: &str, template: &str) -> PathBuf {
@@ -618,6 +636,31 @@ mod tests {
         }
     }
 
+
+    #[test]
+    fn test_refget_store_retrieve_seq(){
+
+        println!("All tests passing.");
+
+        let query_bed_str ="/home/drc/Downloads/test_adding_fastas/INPUT_FILE/testbed.bed";
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta("/home/drc/Downloads/test_adding_fastas/INPUT_FILE/100linesGRCH38.fa").unwrap();
+
+        let known_seq_col_digest = "VRAhrMWmnghggvNFd4qNoRg-J3AqugDh";
+        let know_name = "1";
+
+        let result = store.get_sequence_by_collection_and_name(known_seq_col_digest, know_name).unwrap();
+
+        let seq_digest = result.metadata.sha512t24u.clone();
+        println!("{}", seq_digest);
+
+        let retrieved_substring = store.get_substring(seq_digest, 100, 105).unwrap();
+
+        println!("{}", retrieved_substring);
+        println!("ok");
+
+    }
+
     #[test]
     fn test_global_refget_store() {
         let sequence = b"ACGT";
@@ -834,6 +877,7 @@ mod tests {
                     substring.is_some(),
                     "Should be able to retrieve substring from loaded sequence"
                 );
+                println!("Do we ever get here?");
             }
         }
 
