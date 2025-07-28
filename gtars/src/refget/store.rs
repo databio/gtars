@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
+use std::fs::{self, create_dir_all, File, OpenOptions};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str;
 use flate2::read::GzDecoder;
@@ -265,6 +265,19 @@ impl GlobalRefgetStore {
         // for each line in bed file retrieve sequences
         // write them to fasta file
 
+
+        // Set up the output path and the directories along the way
+        let output_path = std::path::Path::new(&output_file_path).parent().unwrap();
+        let _ = create_dir_all(output_path);
+
+        // Open file for writing to
+        let mut output_file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(output_file_path)
+            .unwrap();
+
+        // Read in Bed file and get the sequences, writing to output file along the way
         let path = Path::new(bed_file_path);
         let pathbuf = PathBuf::from(bed_file_path);
         let file_info = get_file_info(&pathbuf);
@@ -278,11 +291,13 @@ impl GlobalRefgetStore {
         let reader = BufReader::new(reader);
 
         let mut parsed_chr: String = String::new();
-        let mut last_parsed_chr: String = String::new();
+        let mut previous_parsed_chr: String = String::new();
 
         // let mut seq_record: &SequenceRecord = SequenceRecord::new();
 
         let mut current_seq_digest: String = String::new();
+        let mut current_header: String = String::new();
+        let mut previous_header: String = String::new();
 
         for line in reader.lines() {
             //println!("Here is line{:?}", line);
@@ -293,20 +308,35 @@ impl GlobalRefgetStore {
 
             let (parsed_chr, parsed_start, parsed_end) = parse_bedlike_file(s).unwrap();
 
-            if last_parsed_chr != parsed_chr{
+            if previous_parsed_chr != parsed_chr{
 
 
-
-                last_parsed_chr = parsed_chr.clone();
+                previous_parsed_chr = parsed_chr.clone();
 
                 let result = self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr).unwrap();
                 current_seq_digest = result.metadata.sha512t24u.clone();
+                current_header = format!(">{} {} {} {} {}", result.metadata.name, result.metadata.length, result.metadata.alphabet, result.metadata.sha512t24u, result.metadata.md5);
 
             }
 
+
+            if previous_header != current_header{
+
+                previous_header = current_header.clone();
+
+                // WRITE NEW HEADER
+                let mut header_to_be_written = current_header.clone();
+                header_to_be_written.push('\n');
+                output_file.write_all(header_to_be_written.as_ref()).unwrap();
+
+            }
+
+            // NOW WRITE SUBSTRING IF IT IS FOUND
             let retrieved_substring = self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize).unwrap();
 
-            println!("{}", retrieved_substring);
+            output_file.write_all(retrieved_substring.as_ref()).unwrap();
+
+            //println!("{}", retrieved_substring);
 
         }
 
