@@ -37,7 +37,7 @@ pub enum StorageMode {
 }
 
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetrievedSequence {
     pub sequence: String,
     pub chrom_name: String,
@@ -368,13 +368,7 @@ impl GlobalRefgetStore {
                 );
             }
 
-            if previous_header != current_header {
-                previous_header = current_header.clone();
 
-                let mut header_to_be_written = current_header.clone();
-                header_to_be_written.push('\n');
-                output_file.write_all(header_to_be_written.as_ref())?;
-            }
 
             let retrieved_substring = match self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize) {
                 Some(substring) => substring,
@@ -387,6 +381,15 @@ impl GlobalRefgetStore {
                     continue;
                 }
             };
+            if previous_header != current_header {
+                let prefix = if previous_header.is_empty() { "" } else { "\n" };
+
+                previous_header = current_header.clone();
+
+                // Combine the prefix, current_header, and a trailing newline
+                let header_to_be_written = format!("{}{}\n", prefix, current_header);
+                output_file.write_all(header_to_be_written.as_bytes())?;
+            }
 
             output_file.write_all(retrieved_substring.as_ref())?;
         }
@@ -877,38 +880,104 @@ mod tests {
     }
 
 
-    #[test]
-    fn test_refget_store_retrieve_seq(){
-
-        // TODO dont hardcode this!
-
-        let query_bed_str ="/home/drc/Downloads/test_adding_fastas/INPUT_FILE/testbed.bed";
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta("/home/drc/Downloads/test_adding_fastas/INPUT_FILE/100linesGRCH38.fa").unwrap();
-
-        let known_seq_col_digest = "VRAhrMWmnghggvNFd4qNoRg-J3AqugDh";
-
-        let output_file = "/home/drc/Downloads/test_adding_fastas/OUTPUT_FILES/mytest.fa";
-
-        let result  = store.get_seqs_bed_file(known_seq_col_digest,query_bed_str,output_file).unwrap();
-
-
-        let vec_result = store.get_seqs_bed_file_to_vec(known_seq_col_digest,query_bed_str).unwrap();
-
-        println!("{:?}", vec_result);
-        // let know_name = "1";
-        //
-        // let result = store.get_sequence_by_collection_and_name(known_seq_col_digest, know_name).unwrap();
-        //
-        // let seq_digest = result.metadata.sha512t24u.clone();
-        // println!("{}", seq_digest);
-        //
-        // let retrieved_substring = store.get_substring(seq_digest, 100, 105).unwrap();
-        //
-        // println!("{}", retrieved_substring);
-        println!("ok");
-
+    // Helper function to calculate actual digests for testing
+    fn calculate_test_digests(sequence: &[u8]) -> (String, String) {
+        (sha512t24u(sequence), md5(sequence))
     }
+
+    #[test]
+    fn test_refget_store_retrieve_seq_and_vec() {
+        // Create temporary directory for all test files
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // --- 1. Prepare Test FASTA Data ---
+        let fasta_content = "\
+>chr1
+ATGCATGCATGC
+>chr2
+GGGGAAAA
+";
+        let temp_fasta_path = temp_path.join("test.fa");
+
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // --- 2. Initialize GlobalRefgetStore and import FASTA ---
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta(&temp_fasta_path).unwrap();
+
+        let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
+
+        let sha512_key1 = sequence_keys[0]; //ww1QMyfFm1f4qa3fRLqqJGafIeEuZR1V
+        let sha512_key2 = sequence_keys[1]; //OyXJErGtjgcIVSdobGkHE3sBdQ5faDTf
+         let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
+
+        // Calculate expected SHA512t24u and MD5 for test sequences
+        let (chr1_sha, chr1_md5) = calculate_test_digests(b"ATGCATGCATGC");
+        let (chr2_sha, chr2_md5) = calculate_test_digests(b"GGGGAAAA");
+        println!("chr1 values: {}  {}",chr1_sha,chr1_md5);
+        println!("chr2 values: {}  {}",chr2_sha,chr2_md5);
+
+        // --- 3. Prepare Test BED Data ---
+        let bed_content = "\
+chr1\t0\t5
+chr1\t8\t12
+chr2\t0\t4
+chr_nonexistent\t10\t20
+chr1\t-5\t100
+";
+        let temp_bed_path = temp_path.join("test.bed");
+
+        fs::write(&temp_bed_path, bed_content).expect("Failed to write test BED file");
+
+        let temp_output_fa_path = temp_path.join("output.fa");
+
+        store.get_seqs_bed_file(collection_digest_ref, &temp_bed_path.to_str().unwrap().clone(), temp_output_fa_path.to_str().unwrap().clone())
+            .expect("get_seqs_bed_file failed");
+
+        // Read the output FASTA file and verify its content
+        let output_fa_content = fs::read_to_string(&temp_output_fa_path)
+            .expect("Failed to read output FASTA file");
+
+         // Expected output content (headers and sequences should match the logic of the function)
+        let expected_fa_content = format!(
+            ">chr1 12 dna2bit {} {}\nATGCAATGC\n>chr2 8 dna2bit {} {}\nGGGG\n",
+            chr1_sha, chr1_md5, chr2_sha, chr2_md5
+        );
+        assert_eq!(output_fa_content.trim(), expected_fa_content.trim(), "Output FASTA file content mismatch");
+        println!("✓ get_seqs_bed_file test passed.");
+
+        // --- Test get_seqs_bed_file_to_vec (returns Vec<RetrievedSequence>) ---
+        let vec_result = store.get_seqs_bed_file_to_vec(collection_digest_ref, &temp_bed_path.to_str().unwrap())
+            .expect("get_seqs_bed_file_to_vec failed");
+
+        // Define the expected vector of RetrievedSequence structs
+        let expected_vec = vec![
+            RetrievedSequence {
+                sequence: "ATGCA".to_string(),
+                chrom_name: "chr1".to_string(),
+                start: 0,
+                end: 5,
+            },
+            RetrievedSequence {
+                sequence: "ATGC".to_string(),
+                chrom_name: "chr1".to_string(),
+                start: 8,
+                end: 12,
+            },
+            RetrievedSequence {
+                sequence: "GGGG".to_string(),
+                chrom_name: "chr2".to_string(),
+                start: 0,
+                end: 4,
+            },
+        ];
+
+        // Assert that the returned vector matches the expected vector
+        assert_eq!(vec_result, expected_vec, "Retrieved sequence vector mismatch");
+        println!("✓ get_seqs_bed_file_to_vec test passed.");
+    }
+
 
     #[test]
     fn test_global_refget_store() {
