@@ -5,8 +5,8 @@ import pytest
 
 from gtars.models import RegionSet
 
-class TestRegionSet:
 
+class TestRegionSet:
     @pytest.mark.parametrize(
         "bed_file",
         [
@@ -14,11 +14,9 @@ class TestRegionSet:
         ],
     )
     def test_mean_region_width(self, bed_file):
-
         rs = RegionSet(bed_file)
 
         assert rs.mean_region_width() == 4.22
-
 
     @pytest
     def test_from_regions(self):
@@ -29,8 +27,6 @@ class TestRegionSet:
             Region(chrom="chr19", start=19, end=810),
         ]
         rs = RegionSet.from_regions(regions)
-        
+
         assert isinstance(rs, RegionSet)
         assert len(rs) == 2
-
-        

@@ -6,6 +6,7 @@ class AlphabetType(Enum):
     """
     Represents the type of alphabet for a sequence.
     """
+
     Dna2bit: int
     Dna3bit: int
     DnaIupac: int
@@ -19,6 +20,7 @@ class SequenceMetadata:
     """
     Metadata for a biological sequence.
     """
+
     name: str
     length: int
     sha512t24u: str
@@ -32,8 +34,9 @@ class SequenceRecord:
     """
     A record representing a biological sequence, including its metadata and optional data.
     """
+
     metadata: SequenceMetadata
-    data: Optional[bytes] # Vec<u8> maps to bytes in Python
+    data: Optional[bytes]  # Vec<u8> maps to bytes in Python
 
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
@@ -42,6 +45,7 @@ class SeqColDigestLvl1:
     """
     Level 1 digests for a sequence collection.
     """
+
     sequences_digest: str
     names_digest: str
     lengths_digest: str
@@ -53,6 +57,7 @@ class SequenceCollection:
     """
     A collection of biological sequences.
     """
+
     sequences: List[SequenceRecord]
     digest: str
     lvl1: SeqColDigestLvl1
@@ -62,10 +67,28 @@ class SequenceCollection:
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
+class RetrievedSequence:
+    """
+    Represents a retrieved sequence segment with its metadata.
+    Exposed from the Rust `PyRetrievedSequence` struct.
+    """
+
+    sequence: str
+    chrom_name: str
+    start: int
+    end: int
+
+    def __init__(
+        self, sequence: str, chrom_name: str, start: int, end: int
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
 class StorageMode(Enum):
     """
     Defines how sequence data is stored in the Refget store.
     """
+
     Raw: int
     Encoded: int
 
@@ -73,6 +96,7 @@ class GlobalRefgetStore:
     """
     A global store for refget sequences, allowing import, retrieval, and storage operations.
     """
+
     def __init__(self, mode: StorageMode) -> None: ...
     def import_fasta(self, file_path: Union[str, PathLike]) -> None:
         """
@@ -84,7 +108,9 @@ class GlobalRefgetStore:
         Retrieves a sequence record by its SHA512t24u or MD5 digest.
         """
         ...
-    def get_sequence_by_collection_and_name(self, collection_digest: str, sequence_name: str) -> Optional[SequenceRecord]:
+    def get_sequence_by_collection_and_name(
+        self, collection_digest: str, sequence_name: str
+    ) -> Optional[SequenceRecord]:
         """
         Retrieve a SequenceRecord from the store by its collection digest and name
         """
@@ -102,21 +128,22 @@ class GlobalRefgetStore:
 
         """
         ...
-
-    def write_store_to_directory(self, root_path: Union[str, PathLike], seqdata_path_template: str) -> None:
+    def write_store_to_directory(
+        self, root_path: Union[str, PathLike], seqdata_path_template: str
+    ) -> None:
         """
         Write a GlobalRefgetStore object to a directory
         """
         ...
-
     @classmethod
-    def load_from_directory(cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]) -> "GlobalRefgetStore":
+    def load_from_directory(
+        cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]
+    ) -> "GlobalRefgetStore":
         """
         Load a GlobalRefgetStore from a directory path
         """
 
         ...
-
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
