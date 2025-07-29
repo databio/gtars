@@ -83,6 +83,106 @@ struct StoreMetadata {
     created_at: String,
 }
 
+pub struct GetSeqsBedFileIter<'a, K> 
+where K: AsRef<[u8]>
+{
+    store: &'a GlobalRefgetStore,
+    reader: BufReader<Box<dyn Read>>,
+    collection_digest: K,
+    previous_parsed_chr: String,
+    current_seq_digest: String,
+    line_num: usize
+}
+
+impl<K> Iterator for GetSeqsBedFileIter<'_, K> 
+where K: AsRef<[u8]>
+{
+    type Item = Result<RetrievedSequence, Box<dyn std::error::Error>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+
+        let mut line_string = String::new();
+
+        let num_bytes = self.reader.read_line(&mut line_string);
+        let line_string = match num_bytes {
+            Ok(bytes) => {
+                if bytes == 0 {
+                    return None
+                }
+                bytes.to_string()
+            },
+            Err(err) => return Some(Err(err.into())) 
+        };
+
+        self.line_num += 1;
+
+
+        let (parsed_chr, parsed_start, parsed_end) =
+            match parse_bedlike_file(&line_string) {
+                Some(coords) => coords,
+                None => {
+                    let err_str = format!(
+                        "Error reading line {} because it could not be parsed as a BED-like entry: '{}'",
+                        self.line_num + 1,
+                        line_string
+                    );
+                    return Some(Err(err_str.into()))
+                }
+            };
+
+
+        if parsed_start == -1 || parsed_end == -1 {
+            let err_str = format!(
+                "Error reading line {} due to invalid start or end coordinates: '{}'",
+                self.line_num + 1,
+                line_string
+            );
+            return Some(Err(err_str.into()))
+        }
+
+
+        if self.previous_parsed_chr != parsed_chr {
+
+            self.previous_parsed_chr = parsed_chr.clone();
+
+            let result = match self.store.get_sequence_by_collection_and_name(&self.collection_digest, &*parsed_chr) {
+                Some(seq_record) => seq_record,
+                None => {
+                    let err_str = format!(
+                        "Warning: Skipping line {} because sequence '{}' not found in collection '{}'.",
+                        self.line_num + 1,
+                        parsed_chr,
+                        String::from_utf8_lossy(self.collection_digest.as_ref())
+                    );
+                    return Some(Err(err_str.into()))
+                }
+            };
+
+            self.current_seq_digest = result.metadata.sha512t24u.clone();
+
+        }
+
+        let retrieved_substring = match self.store.get_substring(&self.current_seq_digest, parsed_start as usize, parsed_end as usize) {
+            Some(substring) => substring,
+            None => {
+                let err_str = format!(
+                    "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
+                    self.line_num + 1,
+                    self.current_seq_digest, parsed_start, parsed_end
+                );
+                return Some(Err(err_str.into()))
+            }
+        };
+
+        Some(Ok(RetrievedSequence {
+            sequence: retrieved_substring,
+            chrom_name: parsed_chr,
+            start: parsed_start as u32, // Convert i32 to u32
+            end: parsed_end as u32,     // Convert i32 to u32
+        }))
+    }
+}
+
 impl GlobalRefgetStore {
     /// Generic constructor. Creates a new, empty `GlobalRefgetStore`.
     pub fn new(mode: StorageMode) -> Self {
@@ -262,6 +362,32 @@ impl GlobalRefgetStore {
         None
     }
 
+    pub fn get_seqs_in_bed_file_iter<'a, K: AsRef<[u8]>>(
+        &'a self,
+        collection_digest: K,
+        bed_file_path: &str
+    ) -> Result<GetSeqsBedFileIter<'a, K>, Box<dyn std::error::Error>> {
+        let path = Path::new(bed_file_path);
+        let file_info = get_file_info(&path.to_path_buf());
+        let is_gzipped = file_info.is_gzipped;
+
+        let opened_bed_file = File::open(path)?;
+
+        let reader: Box<dyn Read> = match is_gzipped {
+            true => Box::new(GzDecoder::new(BufReader::new(opened_bed_file))),
+            false => Box::new(opened_bed_file),
+        };
+        let reader = BufReader::new(reader);
+
+        Ok(GetSeqsBedFileIter { 
+            store: self,
+            reader,
+            collection_digest,
+            previous_parsed_chr: String::new(),
+            current_seq_digest: String::new(),
+            line_num: 0
+        })
+    }
 
     /// Given a Sequence Collection digest and a bed file path
     /// retrieve sequences and write to a file
@@ -284,103 +410,37 @@ impl GlobalRefgetStore {
             .append(true)
             .open(output_file_path)?;
 
-        // Read in Bed file and get the sequences, writing to output file along the way
-        let path = Path::new(bed_file_path);
-        let file_info = get_file_info(&path.to_path_buf());
-        let is_gzipped = file_info.is_gzipped;
+        let seq_iter = self.get_seqs_in_bed_file_iter(&collection_digest, bed_file_path)?;
 
-        let opened_bed_file = File::open(path)?;
-
-        let reader: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(BufReader::new(opened_bed_file))),
-            false => Box::new(opened_bed_file),
-        };
-        let reader = BufReader::new(reader);
-
-        let mut previous_parsed_chr: String = String::new();
-        let mut current_seq_digest: String = String::new();
+        let mut previous_parsed_chr = String::new();
         let mut current_header: String = String::new();
         let mut previous_header: String = String::new();
 
-        for (line_num, line_result) in reader.lines().enumerate() {
-            let line_string = match line_result {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Skipping line {} due to I/O error while reading: {}",
-                        line_num + 1,
-                        e
-                    );
-                    continue;
-                }
-            };
+        for rs in seq_iter.into_iter() {
 
-            // Try to parse the BED-like line
-            let (parsed_chr, parsed_start, parsed_end) =
-                match parse_bedlike_file(&line_string) {
-                    Some(coords) => coords,
-                    None => {
-                        eprintln!(
-                            "Warning: Skipping line {} because it could not be parsed as a BED-like entry: '{}'",
-                            line_num + 1,
-                            line_string
-                        );
-                        continue;
-                    }
-                };
-
-            // Handle the -1 return for parsing errors in parse_bedlike_file
-
-            if parsed_start == -1 || parsed_end == -1 {
-                eprintln!(
-                    "Warning: Skipping line {} due to invalid start or end coordinates: '{}'",
-                    line_num + 1,
-                    line_string
-                );
-                continue;
+            if let Err(err) = rs {
+                eprintln!("{err}");
+                continue
             }
+            let rs = rs.unwrap();
 
+            if previous_parsed_chr != rs.chrom_name {
+                previous_parsed_chr = rs.chrom_name.clone();
 
-            if previous_parsed_chr != parsed_chr {
-                previous_parsed_chr = parsed_chr.clone();
-
-                let result = match self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr) {
-                    Some(seq_record) => seq_record,
-                    None => {
-                        eprintln!(
-                            "Warning: Skipping line {} because sequence '{}' not found in collection '{}'.",
-                            line_num + 1,
-                            parsed_chr,
-                            String::from_utf8_lossy(collection_digest.as_ref())
-                        );
-                        continue;
-                    }
-                };
-
-                current_seq_digest = result.metadata.sha512t24u.clone();
+                // If we get this far, the metadata **must** exist, so we will unwrap the present
+                let seq_info = self.get_sequence_by_collection_and_name(&collection_digest, &rs.chrom_name).unwrap();
                 current_header = format!(
                     ">{} {} {} {} {}",
-                    result.metadata.name,
-                    result.metadata.length,
-                    result.metadata.alphabet,
-                    result.metadata.sha512t24u,
-                    result.metadata.md5
+                    seq_info.metadata.name,
+                    seq_info.metadata.length,
+                    seq_info.metadata.alphabet,
+                    seq_info.metadata.sha512t24u,
+                    seq_info.metadata.md5
                 );
             }
 
+            let retrieved_substring = rs.sequence;
 
-
-            let retrieved_substring = match self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize) {
-                Some(substring) => substring,
-                None => {
-                    eprintln!(
-                        "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
-                        line_num + 1,
-                        current_seq_digest, parsed_start, parsed_end
-                    );
-                    continue;
-                }
-            };
             if previous_header != current_header {
                 let prefix = if previous_header.is_empty() { "" } else { "\n" };
 
@@ -406,105 +466,21 @@ impl GlobalRefgetStore {
         bed_file_path: &str,
     ) -> Result<Vec<RetrievedSequence>, Box<dyn std::error::Error>> {
 
-        let mut retrieved_sequences: Vec<RetrievedSequence> = Vec::new();
 
+        let seq_iter = self.get_seqs_in_bed_file_iter(collection_digest, bed_file_path)?;
 
-        let path = Path::new(bed_file_path);
-        let file_info = get_file_info(&path.to_path_buf());
-        let is_gzipped = file_info.is_gzipped;
-
-        let opened_bed_file = File::open(path)?;
-
-        let reader: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(BufReader::new(opened_bed_file))),
-            false => Box::new(opened_bed_file),
-        };
-        let reader = BufReader::new(reader);
-
-        let mut previous_parsed_chr: String = String::new();
-        let mut current_seq_digest: String = String::new();
-
-        for (line_num, line_result) in reader.lines().enumerate() {
-
-            let line_string = match line_result {
-                Ok(s) => s,
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Skipping line {} due to I/O error while reading: {}",
-                        line_num + 1,
-                        e
-                    );
-                    continue;
+        let retrieved_sequences = seq_iter
+            .into_iter()
+            .filter_map(|rs| {
+                match rs {
+                    Ok(rs) => Some(rs),
+                    Err(err) => {
+                        eprintln!("{err}");
+                        None
+                    },
                 }
-            };
-
-
-            let (parsed_chr, parsed_start, parsed_end) =
-                match parse_bedlike_file(&line_string) {
-                    Some(coords) => coords,
-                    None => {
-                        eprintln!(
-                            "Warning: Skipping line {} because it could not be parsed as a BED-like entry: '{}'",
-                            line_num + 1,
-                            line_string
-                        );
-                        continue;
-                    }
-                };
-
-
-            if parsed_start == -1 || parsed_end == -1 {
-                eprintln!(
-                    "Warning: Skipping line {} due to invalid start or end coordinates: '{}'",
-                    line_num + 1,
-                    line_string
-                );
-                continue;
-            }
-
-
-            if previous_parsed_chr != parsed_chr {
-                previous_parsed_chr = parsed_chr.clone();
-
-
-                let result = match self.get_sequence_by_collection_and_name(&collection_digest, &*parsed_chr) {
-                    Some(seq_record) => seq_record,
-                    None => {
-                        eprintln!(
-                            "Warning: Skipping line {} because sequence '{}' not found in collection '{}'.",
-                            line_num + 1,
-                            parsed_chr,
-                            String::from_utf8_lossy(collection_digest.as_ref())
-                        );
-                        continue;
-                    }
-                };
-
-                current_seq_digest = result.metadata.sha512t24u.clone();
-
-            }
-
-
-            let retrieved_substring = match self.get_substring(&current_seq_digest, parsed_start as usize, parsed_end as usize) {
-                Some(substring) => substring,
-                None => {
-                    eprintln!(
-                        "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
-                        line_num + 1,
-                        current_seq_digest, parsed_start, parsed_end
-                    );
-                    continue;
-                }
-            };
-
-
-            retrieved_sequences.push(RetrievedSequence {
-                sequence: retrieved_substring,
-                chrom_name: parsed_chr,
-                start: parsed_start as u32, // Convert i32 to u32
-                end: parsed_end as u32,     // Convert i32 to u32
-            });
-        }
+            })
+            .collect::<Vec<RetrievedSequence>>();
 
         Ok(retrieved_sequences)
     }
