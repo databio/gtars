@@ -80,6 +80,7 @@ pub struct PySequenceMetadata {
 }
 
 #[pyclass(name = "SequenceRecord")]
+#[derive(Clone)]
 pub struct PySequenceRecord {
     #[pyo3(get, set)]
     pub metadata: PySequenceMetadata,
@@ -98,8 +99,8 @@ pub struct PySeqColDigestLvl1 {
     pub lengths_digest: String,
 }
 
-#[pyclass(name = "SequenceCollection")]
 #[derive(Clone)]
+#[pyclass(name = "SequenceCollection")]
 pub struct PySequenceCollection {
     #[pyo3(get, set)]
     pub sequences: Vec<PySequenceRecord>,
