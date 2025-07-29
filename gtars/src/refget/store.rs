@@ -104,21 +104,19 @@ where K: AsRef<[u8]>
         let mut line_string = String::new();
 
         let num_bytes = self.reader.read_line(&mut line_string);
-        let line_string = match num_bytes {
+        match num_bytes {
             Ok(bytes) => {
                 if bytes == 0 {
                     return None
                 }
-                bytes.to_string()
             },
             Err(err) => return Some(Err(err.into())) 
         };
 
         self.line_num += 1;
 
-
         let (parsed_chr, parsed_start, parsed_end) =
-            match parse_bedlike_file(&line_string) {
+            match parse_bedlike_file(line_string.trim()) {
                 Some(coords) => coords,
                 None => {
                     let err_str = format!(
