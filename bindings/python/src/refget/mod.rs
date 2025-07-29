@@ -12,6 +12,7 @@ use gtars::refget::store::StorageMode;
 use gtars::refget::digest::{md5, sha512t24u};
 use gtars::refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
 use gtars::refget::alphabet::AlphabetType;
+use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 
 #[pyfunction]
@@ -52,9 +53,8 @@ pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> 
     }
 }
 
-#[pyclass]
+#[pyclass(name = "AlphabetType")]
 #[derive(Clone)]
-#[pyo3(name = "AlphabetType")]
 pub enum PyAlphabetType {
     Dna2bit,
     Dna3bit,
@@ -64,9 +64,8 @@ pub enum PyAlphabetType {
     Unknown,
 }
 
-#[pyclass]
+#[pyclass(name = "SequenceMetadata")]
 #[derive(Clone)]
-#[pyo3(name = "SequenceMetadata")]
 pub struct PySequenceMetadata {
     #[pyo3(get, set)]
     pub name: String,
@@ -80,9 +79,8 @@ pub struct PySequenceMetadata {
     pub alphabet: PyAlphabetType,
 }
 
-#[pyclass]
+#[pyclass(name = "SequenceRecord")]
 #[derive(Clone)]
-#[pyo3(name = "SequenceRecord")]
 pub struct PySequenceRecord {
     #[pyo3(get, set)]
     pub metadata: PySequenceMetadata,
@@ -90,9 +88,8 @@ pub struct PySequenceRecord {
     pub data: Option<Vec<u8>>,
 }
 
-#[pyclass]
+#[pyclass(name = "SeqColDigestLvl1")]
 #[derive(Clone)]
-#[pyo3(name = "SeqColDigestLvl1")]
 pub struct PySeqColDigestLvl1 {
     #[pyo3(get, set)]
     pub sequences_digest: String,
@@ -102,9 +99,8 @@ pub struct PySeqColDigestLvl1 {
     pub lengths_digest: String,
 }
 
-#[pyclass]
 #[derive(Clone)]
-#[pyo3(name = "SequenceCollection")]
+#[pyclass(name = "SequenceCollection")]
 pub struct PySequenceCollection {
     #[pyo3(get, set)]
     pub sequences: Vec<PySequenceRecord>,
@@ -117,6 +113,61 @@ pub struct PySequenceCollection {
     #[pyo3(get, set)]
     pub has_data: bool,
 }
+
+
+#[pyclass(name = "RetrievedSequence")]
+#[derive(Debug, Clone, PartialEq)]
+pub struct PyRetrievedSequence {
+    #[pyo3(get, set)]
+    pub sequence: String,
+    #[pyo3(get, set)]
+    pub chrom_name: String,
+    #[pyo3(get, set)]
+    pub start: u32,
+    #[pyo3(get, set)]
+    pub end: u32,
+}
+
+// This `From` implementation converts the Rust-native `RetrievedSequence`
+// into the Python-exposed `PyRetrievedSequence`.
+impl From<gtars::refget::store::RetrievedSequence> for PyRetrievedSequence {
+    fn from(value: gtars::refget::store::RetrievedSequence) -> Self {
+        PyRetrievedSequence {
+            sequence: value.sequence,
+            chrom_name: value.chrom_name,
+            start: value.start,
+            end: value.end,
+        }
+    }
+}
+
+#[pymethods]
+impl PyRetrievedSequence {
+    #[new]
+    fn new(sequence: String, chrom_name: String, start: u32, end: u32) -> Self {
+        PyRetrievedSequence {
+            sequence,
+            chrom_name,
+            start,
+            end,
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "RetrievedSequence(chrom_name='{}', start={}, end={}, sequence='{}')",
+            self.chrom_name, self.start, self.end, self.sequence
+        )
+    }
+
+    fn __str__(&self) -> String {
+        format!(
+            "{}|{}-{}: {}",
+            self.chrom_name, self.start, self.end, self.sequence
+        )
+    }
+}
+
 
 #[pymethods]
 impl PyAlphabetType {
@@ -266,9 +317,8 @@ impl From<SequenceCollection> for PySequenceCollection {
     }
 }
 
-#[pyclass]
+#[pyclass(name = "StorageMode")]
 #[derive(Clone)]
-#[pyo3(name = "StorageMode")]
 pub enum PyStorageMode {
     Raw,
     Encoded,
@@ -292,8 +342,7 @@ impl From<PyStorageMode> for StorageMode {
     }
 }
 
-#[pyclass]
-#[pyo3(name = "GlobalRefgetStore")]
+#[pyclass(name = "GlobalRefgetStore")]
 pub struct PyGlobalRefgetStore {
     inner: GlobalRefgetStore,
 }
@@ -317,7 +366,7 @@ impl PyGlobalRefgetStore {
         // Try as SHA512t24u first (32 bytes)
         let result = self.inner.get_sequence_by_id(digest.as_bytes())
             .map(|record| PySequenceRecord::from(record.clone()));
-        
+
         // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
         if result.is_none() && digest.len() == 32 {
             return Ok(self.inner.get_sequence_by_md5(digest.as_bytes())
@@ -348,6 +397,32 @@ impl PyGlobalRefgetStore {
         Ok(Self { inner: store })
     }
 
+    fn get_seqs_bed_file(
+        &self,
+        collection_digest: &str,
+        bed_file_path: &str,
+        output_file_path: &str,
+    ) -> PyResult<()> {
+        // Rust function expects K: AsRef<[u8]>, &str works directly
+        self.inner.get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error retrieving sequences and writing to file: {}", e)))
+    }
+
+    fn get_seqs_bed_file_to_vec(
+        &self,
+        collection_digest: &str,
+        bed_file_path: &str,
+    ) -> PyResult<Vec<PyRetrievedSequence>> {
+        // Corrected: use `let ... = ...?;` to bind the result
+        let rust_results = self.inner.get_seqs_bed_file_to_vec(collection_digest, bed_file_path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error retrieving sequences to list: {}", e)))?;
+
+        // Now `rust_results` is available
+        let py_results: Vec<PyRetrievedSequence> = rust_results.into_iter().map(PyRetrievedSequence::from).collect();
+
+        Ok(py_results)
+    }
+
     fn __str__(&self) -> String {
         format!("{}", self.inner)
     }
@@ -370,5 +445,6 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyGlobalRefgetStore>()?;
+    m.add_class::<PyRetrievedSequence>()?;
     Ok(())
 }
