@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0]
+- move digests functionality to refget
+- add RefgetStore to refget and its associated python bindings
+- integrate support for `bits` + backend types for tokenizers (AIList or BITS)
+- reworked the tokenization CLI to support the new `bits` and `backend` options
+
 ## [0.2.8]
 - added a `from_pretrained` API to the `Tokenizer` struct to load tokenizers from the HuggingFace Hub.
 
