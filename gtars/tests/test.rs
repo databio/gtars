@@ -1279,7 +1279,7 @@ mod tests {
         let npyfileheader_path = format!("{}/npyfinal/", path.display());
         let npyfileheader = npyfileheader_path.as_str();
 
-        uniwig_main(
+        let _ = uniwig_main(
             vec_count_type.clone(),
             smoothsize,
             combinedbedpath,
@@ -1300,7 +1300,7 @@ mod tests {
         let wigfileheader_path = format!("{}/wigfinal/", path.display());
         let wigfileheader = wigfileheader_path.as_str();
 
-        uniwig_main(
+        let _ = uniwig_main(
             vec_count_type.clone(),
             smoothsize,
             combinedbedpath,
@@ -1323,15 +1323,15 @@ mod tests {
 
         let npy_header_path = Path::new(npyfileheader);
         let gen_wig_header_path = Path::new(genwigfileheader);
-        npy_to_wig(npy_header_path, gen_wig_header_path);
+        let _ = npy_to_wig(npy_header_path, gen_wig_header_path);
 
         // Compare output directories
         let ref_wig_header_path = Path::new(wigfileheader);
 
-        let mut files1: Vec<_> = read_dir(&ref_wig_header_path)?
+        let mut files1: Vec<_> = read_dir(ref_wig_header_path)?
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
-        let mut files2: Vec<_> = read_dir(&gen_wig_header_path)?
+        let mut files2: Vec<_> = read_dir(gen_wig_header_path)?
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect();
 
@@ -1415,7 +1415,6 @@ mod tests {
         Ok(())
     }
 
-    #[cfg(feature = "bedbase")]
     #[rstest]
     fn test_bbcache_bedbase(
         _path_to_bed_gz_from_bb: &str,

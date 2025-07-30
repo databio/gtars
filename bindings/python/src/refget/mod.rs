@@ -12,7 +12,7 @@ use gtars::refget::store::StorageMode;
 use gtars::refget::digest::{md5, sha512t24u};
 use gtars::refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
 use gtars::refget::alphabet::AlphabetType;
-use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
+// use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 
 #[pyfunction]

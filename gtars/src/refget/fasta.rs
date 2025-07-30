@@ -164,6 +164,7 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
         results.push(record);
     }
     // If the digests were not found in the file, compute them
+    #[allow(clippy::needless_late_init)]
     let lvl1: SeqColDigestLvl1;
     if (sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty())
         && !results.is_empty()
