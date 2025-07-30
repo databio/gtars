@@ -29,6 +29,7 @@ pub enum TokenSize {
 impl TokenSize {
     /// Determine the smallest size that can be used for the set.
     #[inline]
+    #[allow(dead_code)]
     fn determine_size(tokens: &[u32]) -> Self {
         let is_small = tokens.iter().all(|&x| x <= u16::MAX as u32);
         if is_small {
@@ -38,6 +39,7 @@ impl TokenSize {
         }
     }
 
+    #[allow(dead_code)]
     /// Convert to a flag for writing.
     fn as_flag(&self) -> u8 {
         match self {
@@ -53,9 +55,11 @@ pub struct GTokWriter<W: Write> {
     /// The inner writer.
     inner: W,
     /// The expected size for all tokens this will be writing.
+    #[allow(dead_code)]
     token_size: TokenSize,
 }
 
+#[allow(dead_code)]
 impl<W: Write> GTokWriter<W> {
     /// Create a new [`GTokWriter`].
     ///

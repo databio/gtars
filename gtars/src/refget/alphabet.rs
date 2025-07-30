@@ -22,6 +22,7 @@ pub struct AlphabetGuesser {
 
 impl AlphabetGuesser {
     /// Creates a new AlphabetGuesser with the initial alphabet type set to Dna2bit.
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         AlphabetGuesser {
             alphabet_type: AlphabetType::Dna2bit,

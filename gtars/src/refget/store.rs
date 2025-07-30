@@ -143,7 +143,7 @@ where K: AsRef<[u8]>
 
             self.previous_parsed_chr = parsed_chr.clone();
 
-            let result = match self.store.get_sequence_by_collection_and_name(&self.collection_digest, &*parsed_chr) {
+            let result = match self.store.get_sequence_by_collection_and_name(&self.collection_digest, &parsed_chr) {
                 Some(seq_record) => seq_record,
                 None => {
                     let err_str = format!(
@@ -309,7 +309,7 @@ impl GlobalRefgetStore {
                     // Create a SequenceEncoder to handle the encoding of the sequence.
                     let mut encoder = SequenceEncoder::new(dr.alphabet, dr.length);
                     for seq_line in record.seq_lines() {
-                        encoder.update(&seq_line);
+                        encoder.update(seq_line);
                     }
                     // let encoded_sequence = BitVec::<u8, Msb0>::from_vec(encoder.finalize());
                     let encoded_sequence = encoder.finalize();
@@ -366,7 +366,7 @@ impl GlobalRefgetStore {
         bed_file_path: &str
     ) -> Result<GetSeqsBedFileIter<'a, K>, Box<dyn std::error::Error>> {
         let path = Path::new(bed_file_path);
-        let file_info = get_file_info(&path.to_path_buf());
+        let file_info = get_file_info(path);
         let is_gzipped = file_info.is_gzipped;
 
         let opened_bed_file = File::open(path)?;
@@ -524,7 +524,7 @@ impl GlobalRefgetStore {
         match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&record.metadata.alphabet);
-                let decoded_sequence = decode_substring_from_bytes(&sequence, start, end, alphabet);
+                let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
                 Some(String::from_utf8(decoded_sequence).expect("Invalid UTF-8"))
             }
             StorageMode::Raw => {
@@ -670,7 +670,7 @@ impl GlobalRefgetStore {
         writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
 
         // Write sequence data
-        for (_digest, result_sr) in &self.sequence_store {
+        for result_sr in self.sequence_store.values() {
             let result = result_sr.metadata.clone();
             writeln!(
                 file,
@@ -706,7 +706,7 @@ impl GlobalRefgetStore {
         fs::create_dir_all(&collections_dir)?;
 
         // Write each sequence to its own file
-        for (_digest, record) in &self.sequence_store {
+        for record in self.sequence_store.values() {
             if record.data.is_some() {
                 // Get the path for this sequence using the template and base64url-encoded digest
                 let rel_path =
@@ -724,7 +724,7 @@ impl GlobalRefgetStore {
         }
 
         // Write each collection to its own .farg file
-        for (_digest, collection) in &self.collections {
+        for collection in self.collections.values() {
             let collection_file_path =
                 root_path.join(format!("collections/{}.farg", collection.digest));
             collection.to_farg_path(&collection_file_path)?;
@@ -882,8 +882,8 @@ GGGGAAAA
 
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
 
-        let sha512_key1 = sequence_keys[0]; //ww1QMyfFm1f4qa3fRLqqJGafIeEuZR1V
-        let sha512_key2 = sequence_keys[1]; //OyXJErGtjgcIVSdobGkHE3sBdQ5faDTf
+        let _ = sequence_keys[0]; //ww1QMyfFm1f4qa3fRLqqJGafIeEuZR1V
+        let _ = sequence_keys[1]; //OyXJErGtjgcIVSdobGkHE3sBdQ5faDTf
          let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
 
         // Calculate expected SHA512t24u and MD5 for test sequences
@@ -906,7 +906,7 @@ chr1\t-5\t100
 
         let temp_output_fa_path = temp_path.join("output.fa");
 
-        store.get_seqs_bed_file(collection_digest_ref, &temp_bed_path.to_str().unwrap().clone(), temp_output_fa_path.to_str().unwrap().clone())
+        store.get_seqs_bed_file(collection_digest_ref, temp_bed_path.to_str().unwrap(), temp_output_fa_path.to_str().unwrap())
             .expect("get_seqs_bed_file failed");
 
         // Read the output FASTA file and verify its content
@@ -922,7 +922,7 @@ chr1\t-5\t100
         println!("✓ get_seqs_bed_file test passed.");
 
         // --- Test get_seqs_bed_file_to_vec (returns Vec<RetrievedSequence>) ---
-        let vec_result = store.get_seqs_bed_file_to_vec(collection_digest_ref, &temp_bed_path.to_str().unwrap())
+        let vec_result = store.get_seqs_bed_file_to_vec(collection_digest_ref, temp_bed_path.to_str().unwrap())
             .expect("get_seqs_bed_file_to_vec failed");
 
         // Define the expected vector of RetrievedSequence structs

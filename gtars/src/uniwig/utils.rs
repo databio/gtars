@@ -14,7 +14,7 @@ pub struct FileInfo {
     pub is_gzipped: bool,
 }
 
-pub fn get_file_info(path: &PathBuf) -> FileInfo {
+pub fn get_file_info(path: &Path) -> FileInfo {
     let mut file_type = FileType::UNKNOWN;
     let mut is_gzipped = false;
 
@@ -104,7 +104,9 @@ pub fn get_final_chromosomes(
     chrom_sizes: &std::collections::HashMap<String, u32>,
     score: bool,
 ) -> Vec<Chromosome> {
-    let mut chromosomes: Vec<Chromosome> = Vec::new();
+
+    #[allow(unused_assignments)] // why is this throwing a warning?
+    let mut chromosomes = Vec::new();
 
     let path = PathBuf::from(filepath);
 

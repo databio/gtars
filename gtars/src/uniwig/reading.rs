@@ -1,6 +1,5 @@
 use crate::uniwig::utils::get_file_info;
 use crate::uniwig::Chromosome;
-use clap::builder::OsStr;
 use flate2::read::GzDecoder;
 use noodles::bam;
 use std::error::Error;
