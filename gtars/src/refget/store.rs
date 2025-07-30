@@ -213,7 +213,7 @@ impl GlobalRefgetStore {
             .unwrap_or(DEFAULT_COLLECTION_ID.to_key());
         self.collections
             .get(&collection_digest)
-            .ok_or_else(|| anyhow::anyhow!("Collection not found"))?;
+            .ok_or_else(|| anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest))?;
 
         // Add to name lookup for the collection
         self.name_lookup
@@ -530,7 +530,13 @@ impl GlobalRefgetStore {
             StorageMode::Raw => {
                 let raw_slice: &[u8] = &sequence[start..end];
                 println!("Raw sequence slice: {:?}", raw_slice);
-                Some(String::from_utf8(raw_slice.to_vec()).expect("Invalid UTF-8"))
+                match String::from_utf8(raw_slice.to_vec()) {
+                    Ok(raw_string) => Some(raw_string),
+                    Err(e) => {
+                        eprintln!("Failed to decode UTF-8 sequence: {}", e);
+                        None
+                    }
+                }
             }
         }
     }

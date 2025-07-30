@@ -18,7 +18,14 @@ pub fn write_to_npy_file(
     stepsize: i32,
     metafilename: String,
 ) {
-    let path = std::path::Path::new(&metafilename).parent().unwrap();
+
+    let path = match std::path::Path::new(&metafilename).parent() {
+        Some(parent) => parent,
+        None => {
+            eprintln!("Error: The provided metafilename '{}' does not have a parent directory.", metafilename);
+            return;
+        }
+    };
     let _ = create_dir_all(path);
     // For future reference `&Vec<u32>` is a SLICE and thus we must use the `to_vec` function below when creating an array
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9

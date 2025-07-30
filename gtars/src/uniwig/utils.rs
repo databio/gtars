@@ -119,7 +119,15 @@ pub fn get_final_chromosomes(
 
             if single_file_path.is_file() {
                 let file_info = get_file_info(&single_file_path);
-                let single_file_path = single_file_path.to_str().unwrap();
+
+                let single_file_path = match single_file_path.to_str() {
+                    Some(path_str) => path_str,
+                    None => {
+                        println!("WARNING: Skipping file with invalid Unicode in its path: {:?}", single_file_path);
+                        continue;
+                    }
+                };
+
                 match file_info.file_type {
                     FileType::BED | FileType::NARROWPEAK => {
                         println!("Processing file: {}", single_file_path);
