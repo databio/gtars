@@ -6,10 +6,13 @@ use crate::common::utils::get_dynamic_reader;
 
 use super::super::{Tokenizer, TokenizerError};
 
-pub fn tokenize_fragment_file<P: AsRef<Path>>(
+pub fn tokenize_fragment_file<P>(
     file: P,
     tokenizer: &Tokenizer,
-) -> Result<HashMap<String, Vec<u32>>, TokenizerError> {
+) -> Result<HashMap<String, Vec<u32>>, TokenizerError> 
+where
+    P: AsRef<Path>
+{
     let reader = get_dynamic_reader(file.as_ref())?;
     let mut res = HashMap::new();
 
@@ -59,7 +62,10 @@ mod tests {
     #[rstest]
     fn test_tokenize_frament() {
         let tokenizer = Tokenizer::from_bed("tests/data/consensus/consensus1.bed").unwrap();
-        let result = tokenize_fragment_file("tests/data/fragments/region_scoring/fragments1.bed.gz", &tokenizer);
+        let result = tokenize_fragment_file(
+            "tests/data/fragments/region_scoring/fragments1.bed.gz",
+            &tokenizer,
+        );
         assert_eq!(result.is_ok(), true);
 
         let result = result.unwrap();

@@ -24,13 +24,20 @@
 //!
 pub mod config;
 pub mod encoding;
-pub mod tokenizer_impl;
+pub mod error;
+pub mod tokenizer;
 pub mod universe;
 pub mod utils;
+pub mod cli;
 
 // re-export things
 pub use encoding::*;
-pub use tokenizer_impl::bits_tree::*;
-pub use tokenizer_impl::*;
+pub use error::*;
+pub use tokenizer::*;
 pub use universe::*;
 pub use utils::*;
+
+// contants
+pub mod consts {
+    pub const TOKENIZERS_CMD: &str = "tokenize";
+}

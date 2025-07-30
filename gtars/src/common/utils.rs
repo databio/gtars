@@ -22,7 +22,6 @@ use crate::common::models::region::Region;
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
     let is_gzipped = path.extension() == Some(OsStr::new("gz"));
     let file = File::open(path).with_context(|| format!("Failed to open file: {:?}", path))?;
-
     let file: Box<dyn Read> = match is_gzipped {
         true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
@@ -237,4 +236,16 @@ pub fn generate_ordering_map_for_universe_regions<T: AsRef<Path>>(
     }
 
     Ok(map)
+}
+
+pub fn read_bedset_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>> {
+    let file = File::open(file_path)?;
+    let reader = BufReader::new(file);
+
+    let bed_identifiers = reader
+        .lines()
+        .map(|line| line.map(|s| s.trim().to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(bed_identifiers)
 }

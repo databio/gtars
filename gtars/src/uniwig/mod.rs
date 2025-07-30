@@ -38,27 +38,21 @@ use tokio::runtime;
 pub mod cli;
 pub mod counting;
 pub mod reading;
-mod utils;
+pub mod utils;
 pub mod writing;
 
 pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[allow(clippy::upper_case_acronyms)]
-enum FileType {
+pub enum FileType {
     BED,
     BAM,
     NARROWPEAK,
+    UNKNOWN, // Add an UNKNOWN variant for unhandled types
 }
-
-// #[derive(Debug)]
-// enum OutSelection {
-//     STARTS,
-//     ENDS,
-//     CORE,
-// }
 
 impl FromStr for FileType {
     type Err = String;
@@ -68,7 +62,8 @@ impl FromStr for FileType {
             "bed" => Ok(FileType::BED),
             "bam" => Ok(FileType::BAM),
             "narrowpeak" => Ok(FileType::NARROWPEAK),
-            _ => Err(format!("Invalid file type: {}", s)),
+            _ => Ok(FileType::UNKNOWN), // Return UNKNOWN for unhandled types
+                                        //_ => Err(format!("Invalid file type: {}", s)),
         }
     }
 }
@@ -105,7 +100,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
     let chromsizerefpath = matches
         .get_one::<String>("chromref")
         .cloned()
-        .unwrap_or_else(|| filepath.clone());
+        .expect("chrom sizes is required!");
 
     let bwfileheader = matches
         .get_one::<String>("fileheader")
@@ -667,10 +662,6 @@ pub fn uniwig_main(
         }
         //BAM REQUIRES DIFFERENT WORKFLOW
         Ok(FileType::BAM) => {
-            if chromsizerefpath == filepath {
-                panic!("Must provide a valid chrom.sizes file for processing bam files. Provided file: {}", chromsizerefpath);
-            }
-
             let _ = process_bam(
                 vec_count_type,
                 filepath,

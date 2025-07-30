@@ -50,8 +50,29 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            false => get_dynamic_reader_from_url(path)
-                .expect("!Can't get file neither from path or url!"),
+            false => {
+                match get_dynamic_reader_from_url(path) {
+                    Ok(reader) => reader,
+                    Err(_) => {
+                        // Extract bbid from the path (e.g., the file stem)
+                        let bbid = path.to_str().ok_or_else(|| {
+                            anyhow::anyhow!("BEDbase identifier is not valid UTF-8: {:?}", path)
+                        })?;
+
+                        let fallback_url = format!(
+                            "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+                            &bbid[0..1],
+                            &bbid[1..2],
+                            bbid
+                        );
+
+                        let fallback_path = PathBuf::from(fallback_url);
+
+                        get_dynamic_reader_from_url(&fallback_path)
+                            .expect("!Can't get file from path, url, or BEDbase identifier")
+                    }
+                }
+            }
         };
 
         let mut header: String = String::new();
@@ -153,6 +174,7 @@ impl TryFrom<String> for RegionSet {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self> {
+        println!("Converting String to Path: {}", value);
         RegionSet::try_from(Path::new(&value))
     }
 }
@@ -245,6 +267,10 @@ impl RegionSet {
             println!("Bed file already exists. Overwriting existing file")
         }
 
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+
         let mut file = File::create(path).unwrap();
 
         for region in &self.regions {
@@ -262,6 +288,10 @@ impl RegionSet {
         let path = path.as_ref();
         if path.exists() {
             println!("Bed file already exists. Overwriting existing file")
+        }
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
         }
 
         let file = File::create(path)?;
@@ -352,6 +382,14 @@ impl RegionSet {
     ///
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
+
+        if out_path.exists() {
+            println!("Bed file already exists. Overwriting existing file")
+        }
+
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
         let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
 
         let mut warnings_count: i32 = 0;
@@ -457,6 +495,9 @@ impl Display for RegionSet {
 mod tests {
     use super::*;
 
+    use rstest::*;
+    use pretty_assertions::assert_eq;
+
     fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
         let file_path: PathBuf = std::env::current_dir()
             .unwrap()
@@ -465,31 +506,42 @@ mod tests {
         Ok(file_path)
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_path() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.as_path()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_string() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_open_from_url() {
         let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
-    #[test]
+    #[rstest]
+    fn test_open_from_bedbase() {
+        let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
+        let region_set = RegionSet::try_from(bbid);
+        assert_eq!(region_set.is_ok(), true);
+        assert_eq!(
+            region_set.unwrap().identifier(),
+            "6b2e163a1d4319d99bd465c6c78a9741"
+        );
+    }
+
+    #[rstest]
     fn test_open_bed_gz() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_calculate_identifier() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -497,7 +549,7 @@ mod tests {
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bed_gz() {
         let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -514,7 +566,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -531,7 +583,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
-    #[test]
+    #[rstest]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -549,7 +601,7 @@ mod tests {
             .is_ok());
     }
 
-    #[test]
+    #[rstest]
     fn test_read_headers() {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -558,7 +610,7 @@ mod tests {
         assert_eq!(region_set.path.unwrap(), file_path);
     }
 
-    #[test]
+    #[rstest]
     fn test_is_empty() {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -566,7 +618,7 @@ mod tests {
         assert!(!region_set.is_empty());
     }
 
-    #[test]
+    #[rstest]
     fn test_file_digest() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
@@ -575,14 +627,14 @@ mod tests {
         assert_eq!(region_set.identifier(), "f0b2cf73383b53bd97ff525a0380f200")
     }
 
-    #[test]
+    #[rstest]
     fn test_mean_region_width() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.mean_region_width(), 4.22)
     }
-    #[test]
+    #[rstest]
     fn test_open_file_with_incorrect_headers() {
         let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
         let _region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
