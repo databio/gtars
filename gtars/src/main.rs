@@ -1,8 +1,9 @@
 use anyhow::Result;
 use clap::Command;
+
 // go through the library crate to get the interfaces
 use gtars::overlap;
-// use gtars::bbcache;
+use gtars::bbcache;
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
@@ -27,7 +28,7 @@ fn build_parser() -> Command {
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
         .subcommand(scoring::cli::make_fscoring_cli())
-        // .subcommand(bbcache::cli::create_bbcache_cli())
+        .subcommand(bbcache::cli::create_bbcache_cli())
         .subcommand(tokenizers::cli::create_tokenizer_cli())
 }
 
@@ -60,11 +61,11 @@ fn main() -> Result<()> {
         //
         // BBCACHE
         //
-        // Some((bbcache::consts::BBCACHE_CMD, sub_m)) => {
-        //     if let Some((subcmd, sub_matches)) = sub_m.subcommand() {
-        //         bbcache::run_bbcache(subcmd, sub_matches);
-        //     }
-        // }
+        Some((bbcache::consts::BBCACHE_CMD, sub_m)) => {
+            if let Some((subcmd, sub_matches)) = sub_m.subcommand() {
+                bbcache::run_bbcache(subcmd, sub_matches);
+            }
+        }
 
         //
         // IGD
