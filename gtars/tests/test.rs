@@ -111,10 +111,10 @@ mod tests {
     use gtars::uniwig::utils::npy_to_wig;
     use gtars::uniwig::writing::write_bw_files;
 
-    // use gtars::bbcache::client::BBClient;
+    use gtars::bbcache::client::BBClient;
 
     use byteorder::{LittleEndian, ReadBytesExt};
-    // use flate2::read::GzDecoder;
+    use flate2::read::GzDecoder;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::fs;
@@ -1365,99 +1365,99 @@ mod tests {
         Ok(())
     }
 
-    // #[rstest]
-    // fn test_bbcache_local(
-    //     _path_to_bed_gz_from_bb: &str,
-    //     _bbid: &str,
-    //     _path_to_bedset: &str,
-    // ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    //     fn cleaned_subfolders(subfolder: PathBuf) {
-    //         let subdirs: Vec<_> = read_dir(&subfolder)
-    //             .unwrap_or_else(|e| {
-    //                 panic!("Failed to read directory {}: {}", subfolder.display(), e)
-    //             })
-    //             .filter_map(Result::ok)
-    //             .filter(|entry| entry.path().is_dir())
-    //             .collect();
+    #[rstest]
+    fn test_bbcache_local(
+        _path_to_bed_gz_from_bb: &str,
+        _bbid: &str,
+        _path_to_bedset: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        fn cleaned_subfolders(subfolder: PathBuf) {
+            let subdirs: Vec<_> = read_dir(&subfolder)
+                .unwrap_or_else(|e| {
+                    panic!("Failed to read directory {}: {}", subfolder.display(), e)
+                })
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .collect();
 
-    //         // Assert no subdirectories exist
-    //         assert!(
-    //             subdirs.is_empty(),
-    //             "Subfolders found in {}: {:?}",
-    //             subfolder.display(),
-    //             subdirs.iter().map(|e| e.path()).collect::<Vec<_>>()
-    //         );
-    //     }
-    //     let tempdir = tempfile::tempdir()?;
-    //     let cache_folder = PathBuf::from(tempdir.path());
+            // Assert no subdirectories exist
+            assert!(
+                subdirs.is_empty(),
+                "Subfolders found in {}: {:?}",
+                subfolder.display(),
+                subdirs.iter().map(|e| e.path()).collect::<Vec<_>>()
+            );
+        }
+        let tempdir = tempfile::tempdir()?;
+        let cache_folder = PathBuf::from(tempdir.path());
 
-    //     let mut bbc =
-    //         BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+        let mut bbc =
+            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
 
-    //     let bed_id = bbc
-    //         .add_local_bed_to_cache(PathBuf::from(_path_to_bed_gz_from_bb), Some(false))
-    //         .unwrap();
-    //     assert_eq!(&bed_id, _bbid);
+        let bed_id = bbc
+            .add_local_bed_to_cache(PathBuf::from(_path_to_bed_gz_from_bb), Some(false))
+            .unwrap();
+        assert_eq!(&bed_id, _bbid);
 
-    //     let bedset_id = bbc
-    //         .add_local_folder_as_bedset(PathBuf::from(_path_to_bedset))
-    //         .unwrap();
-    //     assert!(bbc.seek(&bedset_id).is_ok());
+        let bedset_id = bbc
+            .add_local_folder_as_bedset(PathBuf::from(_path_to_bedset))
+            .unwrap();
+        assert!(bbc.seek(&bedset_id).is_ok());
 
-    //     bbc.remove(&bedset_id)
-    //         .expect("Failed to remove bedset file and its bed files");
-    //     let bedset_subfolder = cache_folder.join("bedsets");
-    //     cleaned_subfolders(bedset_subfolder);
+        bbc.remove(&bedset_id)
+            .expect("Failed to remove bedset file and its bed files");
+        let bedset_subfolder = cache_folder.join("bedsets");
+        cleaned_subfolders(bedset_subfolder);
 
-    //     bbc.remove(_bbid).expect("Failed to remove cached bed file");
-    //     let bedfile_subfolder = cache_folder.join("bedfiles");
-    //     cleaned_subfolders(bedfile_subfolder);
-    //     Ok(())
-    // }
+        bbc.remove(_bbid).expect("Failed to remove cached bed file");
+        let bedfile_subfolder = cache_folder.join("bedfiles");
+        cleaned_subfolders(bedfile_subfolder);
+        Ok(())
+    }
 
-    // #[rstest]
-    // fn test_bbcache_bedbase(
-    //     _path_to_bed_gz_from_bb: &str,
-    //     _bbid: &str,
-    //     _bsid: &str,
-    // ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-    //     fn read_gzip_file(path: impl AsRef<std::path::Path>) -> Vec<u8> {
-    //         let file = File::open(path).expect("Failed to open file");
-    //         let mut decoder = GzDecoder::new(BufReader::new(file));
-    //         let mut contents = Vec::new();
-    //         decoder
-    //             .read_to_end(&mut contents)
-    //             .expect("Failed to read decompressed contents");
-    //         contents
-    //     }
+    #[rstest]
+    fn test_bbcache_bedbase(
+        _path_to_bed_gz_from_bb: &str,
+        _bbid: &str,
+        _bsid: &str,
+    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+        fn read_gzip_file(path: impl AsRef<std::path::Path>) -> Vec<u8> {
+            let file = File::open(path).expect("Failed to open file");
+            let mut decoder = GzDecoder::new(BufReader::new(file));
+            let mut contents = Vec::new();
+            decoder
+                .read_to_end(&mut contents)
+                .expect("Failed to read decompressed contents");
+            contents
+        }
 
-    //     let tempdir = tempfile::tempdir()?;
-    //     let cache_folder = PathBuf::from(tempdir.path());
+        let tempdir = tempfile::tempdir()?;
+        let cache_folder = PathBuf::from(tempdir.path());
 
-    //     let mut bbc =
-    //         BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+        let mut bbc =
+            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
 
-    //     let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
+        let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
 
-    //     assert!(bbc.seek(_bbid).is_ok());
+        assert!(bbc.seek(_bbid).is_ok());
 
-    //     let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
-    //     let cached_content = read_gzip_file(&cached_bed_path);
-    //     let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
-    //     assert_eq!(
-    //         cached_content, comparison_content,
-    //         "Cached content does not match the original content"
-    //     );
+        let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
+        let cached_content = read_gzip_file(&cached_bed_path);
+        let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
+        assert_eq!(
+            cached_content, comparison_content,
+            "Cached content does not match the original content"
+        );
 
-    //     let bedset = bbc.load_bedset(_bsid).unwrap();
-    //     assert!(bbc.seek(_bsid).is_ok());
-    //     for rs in bedset.region_sets {
-    //         let bed_id = rs.identifier();
-    //         assert!(bbc.seek(&bed_id.clone()).is_ok());
-    //         let bed_in_set = bbc.load_bed(&bed_id).unwrap();
-    //         assert_eq!(bed_id, bed_in_set.identifier());
-    //     }
+        let bedset = bbc.load_bedset(_bsid).unwrap();
+        assert!(bbc.seek(_bsid).is_ok());
+        for rs in bedset.region_sets {
+            let bed_id = rs.identifier();
+            assert!(bbc.seek(&bed_id.clone()).is_ok());
+            let bed_in_set = bbc.load_bed(&bed_id).unwrap();
+            assert_eq!(bed_id, bed_in_set.identifier());
+        }
 
-    //     Ok(())
-    // }
+        Ok(())
+    }
 }
