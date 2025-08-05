@@ -93,6 +93,7 @@ fn path_to_bedset() -> &'static str {
 
 mod tests {
     use super::*;
+    use gtars::common::utils::parse_bedlike_file;
     use gtars::igd::create::{
         create_igd_f, gdata_t, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed,
     };
@@ -104,7 +105,7 @@ mod tests {
 
     use gtars::uniwig::counting::{core_counts, start_end_counts};
     use gtars::uniwig::reading::{
-        create_chrom_vec_default_score, create_chrom_vec_scores, parse_bedlike_file,
+        create_chrom_vec_default_score, create_chrom_vec_scores,
         read_bam_header, read_chromosome_sizes,
     };
 

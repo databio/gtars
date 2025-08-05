@@ -1,4 +1,4 @@
-use crate::uniwig::utils::get_file_info;
+use crate::common::utils::{get_file_info, parse_bedlike_file};
 use crate::uniwig::Chromosome;
 use flate2::read::GzDecoder;
 use noodles::bam;
@@ -217,28 +217,6 @@ pub fn parse_bedlike_file_with_scores(line: &str) -> Option<(String, i32, i32, i
     // in any way
 
     Some((ctg.parse().unwrap(), st, en, narrow_peak_score))
-}
-
-/// Parses each line of given bed like file into a contig (chromosome), starts and ends
-/// This ignores any other columns beyond start and ends.
-pub fn parse_bedlike_file(line: &str) -> Option<(String, i32, i32)> {
-    let mut fields = line.split('\t');
-    // Get the first field which should be chromosome.
-    let ctg = fields.next()?;
-    // Parse 2nd and 3rd string as integers or return -1 if failure
-    let st = fields
-        .next()
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(-1);
-    let en = fields
-        .next()
-        .and_then(|s| s.parse::<i32>().ok())
-        .unwrap_or(-1);
-
-    // Original code had a remainder of the line, r, but it does not appear to have been used
-    // in any way
-
-    Some((ctg.parse().unwrap(), st, en))
 }
 
 /// Reads chromosome size file from path and returns chromosome sizes hash map

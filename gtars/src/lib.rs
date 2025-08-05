@@ -18,4 +18,6 @@ pub mod refget;
 pub mod scoring;
 pub mod overlap;
 pub mod tokenizers;
+
+#[cfg(feature="bigtools")]
 pub mod uniwig;

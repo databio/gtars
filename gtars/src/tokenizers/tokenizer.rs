@@ -13,6 +13,7 @@ use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
 
+#[cfg(feature="hf-hub")]
 use hf_hub::api::sync::Api;
 
 pub const DEFAULT_UNIVERSE_FILENAME: &str = "universe.bed.gz";
@@ -102,6 +103,7 @@ impl Tokenizer {
     ///
     /// Create a new tokenizer from a pre-trained model
     ///
+    #[cfg(feature="hf-hub")]
     pub fn from_pretrained<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {
         // if local
         let universe_file_path: PathBuf = if path.as_ref().exists() {

@@ -18,8 +18,7 @@ use super::encoder::SequenceEncoder;
 use crate::common::utils::get_dynamic_reader;
 use crate::refget::fasta::read_fasta_refget_file;
 use crate::refget::hashkeyable::HashKeyable;
-use crate::uniwig::reading::parse_bedlike_file;
-use crate::uniwig::utils::get_file_info;
+use crate::common::utils::{get_file_info, parse_bedlike_file};
 // Import the HashKeyable trait for converting types to a 32-byte key
 
 // Import collection types

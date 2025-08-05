@@ -22,7 +22,7 @@ byteorder = "1.5.0"
 noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
 rayon = "1.10.0"
 indicatif = "0.17.8"
-bigtools = "0.5.5"
+bigtools = { version = "0.5.5", optional=true }
 tokio = "1.40.0"
 os_pipe = "1.2.1"
 glob = "0.3.1"
@@ -32,8 +32,8 @@ md-5 = "0.10.5"
 seq_io = "0.3.2"
 serde_json = "1.0.135"
 thiserror = "2.0.12"
-reqwest = { version = "0.12.15", features = ["blocking"] }
-hf-hub = "0.4.3"
+reqwest = { version = "0.12.15", features = ["blocking"]}
+hf-hub = { version = "0.4.3", optional = true}
 num-traits = "0.2.19"
 shellexpand = "3"
 dirs = "6.0.0"
@@ -50,4 +50,6 @@ tempfile = "3.8.1"
 pretty_assertions = "1.4.0"
 
 [features]
+bigtools = ["dep:bigtools"]
+hf-hub = ["dep:hf-hub"]
 bbcache = ["dep:biocrs"]

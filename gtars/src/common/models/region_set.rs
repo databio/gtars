@@ -13,7 +13,9 @@ use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, ErrorKind, Write};
 use tokio::runtime;
 
+#[cfg(feature="bigtools")]
 use bigtools::beddata::BedParserStreamingIterator;
+#[cfg(feature="bigtools")]
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
@@ -380,6 +382,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
+    #[cfg(feature="bigtools")]
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
 
