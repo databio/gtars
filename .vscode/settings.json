@@ -2,6 +2,7 @@
     "rust-analyzer.cargo.features": "all",
     "rust-analyzer.linkedProjects": [
         "./gtars/Cargo.toml",
+        "./bindings/wasm/Cargo.toml",
         "./bindings/python/Cargo.toml",
         "./bindings/r/src/rust/Cargo.toml",
     ],
