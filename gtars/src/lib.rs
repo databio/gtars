@@ -19,5 +19,5 @@ pub mod scoring;
 pub mod overlap;
 pub mod tokenizers;
 
-#[cfg(feature="bigtools")]
+#[cfg(feature="uniwig")]
 pub mod uniwig;

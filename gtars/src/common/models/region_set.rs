@@ -13,13 +13,15 @@ use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, ErrorKind, Write};
 use tokio::runtime;
 
-#[cfg(feature="bigtools")]
+#[cfg(feature="uniwig")]
 use bigtools::beddata::BedParserStreamingIterator;
-#[cfg(feature="bigtools")]
+#[cfg(feature="uniwig")]
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::common::models::Region;
-use crate::common::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
+use crate::common::utils::{get_chrom_sizes, get_dynamic_reader};
+#[cfg(feature="http")]
+use crate::common::utils::get_dynamic_reader_from_url;
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -53,26 +55,36 @@ impl TryFrom<&Path> for RegionSet {
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
             false => {
-                match get_dynamic_reader_from_url(path) {
-                    Ok(reader) => reader,
-                    Err(_) => {
-                        // Extract bbid from the path (e.g., the file stem)
-                        let bbid = path.to_str().ok_or_else(|| {
-                            anyhow::anyhow!("BEDbase identifier is not valid UTF-8: {:?}", path)
-                        })?;
+                #[cfg(feature = "http")]
+                {
+                    match get_dynamic_reader_from_url(path) {
+                        Ok(reader) => reader,
+                        Err(_) => {
+                            // Extract bbid from the path (e.g., the file stem)
+                            let bbid = path.to_str().ok_or_else(|| {
+                                anyhow::anyhow!("BEDbase identifier is not valid UTF-8: {:?}", path)
+                            })?;
 
-                        let fallback_url = format!(
-                            "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
-                            &bbid[0..1],
-                            &bbid[1..2],
-                            bbid
-                        );
+                            let fallback_url = format!(
+                                "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+                                &bbid[0..1],
+                                &bbid[1..2],
+                                bbid
+                            );
 
-                        let fallback_path = PathBuf::from(fallback_url);
+                            let fallback_path = PathBuf::from(fallback_url);
 
-                        get_dynamic_reader_from_url(&fallback_path)
-                            .expect("!Can't get file from path, url, or BEDbase identifier")
+                            get_dynamic_reader_from_url(&fallback_path)
+                                .expect("!Can't get file from path, url, or BEDbase identifier")
+                        }
                     }
+                }
+                #[cfg(not(feature = "http"))]
+                {
+                    return Err(anyhow::anyhow!(
+                        "Network features disabled. Cannot fetch remote files or BEDbase identifiers: {:?}", 
+                        path
+                    ));
                 }
             }
         };
@@ -382,7 +394,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    #[cfg(feature="bigtools")]
+    #[cfg(feature="uniwig")]
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
 

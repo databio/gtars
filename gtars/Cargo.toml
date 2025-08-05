@@ -24,7 +24,7 @@ rayon = "1.10.0"
 indicatif = "0.17.8"
 bigtools = { version = "0.5.5", optional=true }
 tokio = "1.40.0"
-os_pipe = "1.2.1"
+os_pipe = {version = "1.2.1", optional=true }
 glob = "0.3.1"
 base64-url = "2.0.0"
 sha2 = "0.10.7"
@@ -32,7 +32,7 @@ md-5 = "0.10.5"
 seq_io = "0.3.2"
 serde_json = "1.0.135"
 thiserror = "2.0.12"
-reqwest = { version = "0.12.15", features = ["blocking"]}
+reqwest = { version = "0.12.15", features = ["blocking"], optional=true}
 hf-hub = { version = "0.4.3", optional = true}
 num-traits = "0.2.19"
 shellexpand = "3"
@@ -50,6 +50,8 @@ tempfile = "3.8.1"
 pretty_assertions = "1.4.0"
 
 [features]
-bigtools = ["dep:bigtools"]
+default = []
+http = ["dep:reqwest"]
+uniwig = ["dep:bigtools", "dep:os_pipe"]
 hf-hub = ["dep:hf-hub"]
 bbcache = ["dep:biocrs"]
