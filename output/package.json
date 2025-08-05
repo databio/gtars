@@ -1,0 +1,18 @@
+{
+  "name": "gtars-js",
+  "type": "module",
+  "collaborators": [
+    "Nathan LeRoy <NLeRoy917@gmail.com>"
+  ],
+  "version": "0.1.0",
+  "files": [
+    "gtars_js_bg.wasm",
+    "gtars_js.js",
+    "gtars_js.d.ts"
+  ],
+  "main": "gtars_js.js",
+  "types": "gtars_js.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

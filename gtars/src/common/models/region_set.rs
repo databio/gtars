@@ -11,6 +11,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, ErrorKind, Write};
+
+#[cfg(feature="http")]
 use tokio::runtime;
 
 #[cfg(feature="uniwig")]
@@ -394,7 +396,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    #[cfg(feature="uniwig")]
+    #[cfg(all(feature="uniwig", feature="http"))]
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
 

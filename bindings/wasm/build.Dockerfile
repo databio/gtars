@@ -9,6 +9,7 @@ ENV RUSTFLAGS="--Z wasm_c_abi=spec"
 
 # # required for building the WASM module
 RUN curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+RUN cargo install -f wasm-bindgen-cli
 
 # # compile and build the web-assembly project
 WORKDIR /usr/src/gtars/bindings/wasm
@@ -17,4 +18,8 @@ COPY gtars/ /usr/src/gtars/gtars/
 
 RUN wasm-pack build --target web --release
 
-# CMD ["sleep", "infinity"]
+FROM alpine:3.20 as output
+# copy the output from the build stage
+COPY --from=wasmbuild /usr/src/gtars/bindings/wasm/pkg /output
+
+CMD ["sh", "-c", "cp -r /output/* /host/"]
