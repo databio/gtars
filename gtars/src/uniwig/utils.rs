@@ -1,3 +1,4 @@
+use crate::common::utils::get_file_info;
 use crate::uniwig::reading::{create_chrom_vec_default_score, create_chrom_vec_scores};
 use crate::uniwig::{Chromosome, FileType};
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -7,50 +8,6 @@ use std::io::Read;
 use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
-use std::str::FromStr;
-
-pub struct FileInfo {
-    pub file_type: FileType,
-    pub is_gzipped: bool,
-}
-
-pub fn get_file_info(path: &Path) -> FileInfo {
-    let mut file_type = FileType::UNKNOWN;
-    let mut is_gzipped = false;
-
-    if let Some(os_str_filename) = path.file_name() {
-        if let Some(filename) = os_str_filename.to_str() {
-            // Check for .gz first
-            if filename.ends_with(".gz") {
-                is_gzipped = true;
-                if let Some(base_filename) = filename.strip_suffix(".gz") {
-                    // Try to get the extension before .gz
-                    if let Some(ext) = PathBuf::from(base_filename)
-                        .extension()
-                        .and_then(|e| e.to_str())
-                    {
-                        file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
-                    } else {
-                        // If there's no extension before .gz (e.g., "my_data.gz"),
-                        // you might want to handle this specifically or leave as UNKNOWN.
-                        // For now, we'll try to parse the whole base_filename as a type
-                        file_type = FileType::from_str(base_filename).unwrap_or(FileType::UNKNOWN);
-                    }
-                }
-            } else {
-                // Not gzipped, just get the direct extension
-                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                    file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
-                }
-            }
-        }
-    }
-
-    FileInfo {
-        file_type,
-        is_gzipped,
-    }
-}
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(

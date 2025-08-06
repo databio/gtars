@@ -1,5 +1,6 @@
 use clap::ArgMatches;
 use std::collections::HashMap;
+use std::str::FromStr;
 
 use indicatif::ProgressBar;
 
@@ -8,6 +9,7 @@ use std::error::Error;
 use std::fs::{remove_file, File};
 use std::io::{BufRead, BufReader, Write};
 
+use crate::common::utils::FileType;
 use crate::uniwig::counting::{
     bam_to_bed_no_counts, core_counts, start_end_counts, variable_core_counts_bam_to_bw,
     variable_shifted_bam_to_bw, variable_start_end_counts_bam_to_bw, BAMRecordError,
@@ -30,7 +32,6 @@ use noodles::bgzf::Reader;
 use os_pipe::PipeWriter;
 use rayon::ThreadPool;
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use tokio::runtime;
@@ -45,28 +46,6 @@ pub mod consts {
     pub const UNIWIG_CMD: &str = "uniwig";
 }
 
-#[derive(Debug, Clone)]
-#[allow(clippy::upper_case_acronyms)]
-pub enum FileType {
-    BED,
-    BAM,
-    NARROWPEAK,
-    UNKNOWN, // Add an UNKNOWN variant for unhandled types
-}
-
-impl FromStr for FileType {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "bed" => Ok(FileType::BED),
-            "bam" => Ok(FileType::BAM),
-            "narrowpeak" => Ok(FileType::NARROWPEAK),
-            _ => Ok(FileType::UNKNOWN), // Return UNKNOWN for unhandled types
-                                        //_ => Err(format!("Invalid file type: {}", s)),
-        }
-    }
-}
 
 // Chromosome representation for Bed File Inputs
 #[derive(Debug)]
