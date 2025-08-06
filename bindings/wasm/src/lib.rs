@@ -1,3 +1,4 @@
+mod digests;
 mod tokenizers;
 mod utils;
 
@@ -22,7 +23,7 @@ pub fn greet(name: &str) {
     alert(&format!("Hello from gtars-js, {}", name));
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(js_name="tokenizeBedfileIntoUniverse")]
 pub fn tokenize_bed_file_into_universe(
     universe: &JsValue,
     to_tokenize: &JsValue,
