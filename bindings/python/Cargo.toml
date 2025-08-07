@@ -15,5 +15,6 @@ gtars = { path = "../../gtars" }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
 numpy = "0.21"
 rayon = "1.10.0"
+rusqlite = { version = "0.37.0", features = ["bundled"] }
 # pyo3-tch = { git = "https://github.com/LaurentMazare/tch-rs" }
 # torch-sys = { git = "https://github.com/LaurentMazare/tch-rs" }
