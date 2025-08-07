@@ -7,7 +7,7 @@
 //! There are several modules in this crate. The most comprehensive is the [tokenizers] modules which houses genomic region tokenizers
 //! for use as pre-processors to machine learning pipelines.
 //!
-// pub mod bbcache;
+pub mod bbcache;
 pub mod common;
 pub mod fragsplit;
 pub mod igd;
