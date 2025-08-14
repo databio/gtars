@@ -208,11 +208,14 @@ pub fn parse_bedlike_file_with_scores(line: &str) -> Option<(String, i32, i32, i
 
     let _ = fields.next();
 
-    let narrow_peak_score = fields
+    let mut narrow_peak_score = fields
         .next()
         .and_then(|s| s.parse::<i32>().ok())
         .unwrap_or(-1);
 
+    if narrow_peak_score == 0 {
+        narrow_peak_score = 1; // Must do this otherwise regions will be completely ignored during counting
+    }
     // Original code had a remainder of the line, r, but it does not appear to have been used
     // in any way
 
