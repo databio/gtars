@@ -327,6 +327,7 @@ pub struct ScatrsConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
+#[serde(rename_all = "lowercase")] 
 pub enum FragmentDistribution {
     Uniform { 
         count: u32 
