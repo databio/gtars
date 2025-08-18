@@ -8,6 +8,7 @@ use gtars::igd;
 use gtars::scoring;
 use gtars::uniwig;
 use gtars::tokenizers;
+use gtars::scatrs;
 
 pub mod consts {
     pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -29,6 +30,7 @@ fn build_parser() -> Command {
         .subcommand(scoring::cli::make_fscoring_cli())
         .subcommand(bbcache::cli::create_bbcache_cli())
         .subcommand(tokenizers::cli::create_tokenizer_cli())
+        .subcommand(scatrs::cli::create_scatrs_cli())
 }
 
 fn main() -> Result<()> {
@@ -91,6 +93,13 @@ fn main() -> Result<()> {
         //
         Some((tokenizers::consts::TOKENIZERS_CMD, matches)) => {
             tokenizers::cli::handlers::tokenize_query_into_universe(matches)?;
+        }
+
+        //
+        // SCATRS - Single-cell ATAC-seq simulation
+        //
+        Some((scatrs::consts::SCATRS_CMD, matches)) => {
+            scatrs::cli::handle_scatrs_command(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

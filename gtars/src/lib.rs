@@ -17,3 +17,4 @@ pub mod scoring;
 pub mod overlap;
 pub mod tokenizers;
 pub mod uniwig;
+pub mod scatrs;
