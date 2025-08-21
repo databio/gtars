@@ -1,0 +1,3 @@
+[workspace]
+resolver = "3"
+members = [ "gtars-cli","gtars-core", "uniwig"]

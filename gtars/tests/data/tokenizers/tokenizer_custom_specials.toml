@@ -1,4 +1,0 @@
-universe = "peaks.bed.gz"
-special_tokens = [
-    {name="unk", token="<UNKNOWN>"},
-]
