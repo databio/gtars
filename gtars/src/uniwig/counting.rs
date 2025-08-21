@@ -120,7 +120,7 @@ pub fn start_end_counts(
         prev_coordinate_value = adjusted_start_site.0;
     }
 
-    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    //count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
                 // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
     while coordinate_position < chrom_size {
@@ -241,7 +241,7 @@ pub fn core_counts(
         prev_coordinate_value = current_start_site.0;
     }
 
-    count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
+    //count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
