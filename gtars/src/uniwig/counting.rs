@@ -49,7 +49,7 @@ pub fn start_end_counts(
     let mut current_end_site: (i32, i32);
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
-
+    let mut collected_counts: Vec<i32> = Vec::new();
     adjusted_start_site = starts_vector[0]; // get first coordinate position
 
     adjusted_start_site.0 -= smoothsize;
@@ -72,10 +72,10 @@ pub fn start_end_counts(
 
         adjusted_start_site = coordinate_value;
         adjusted_start_site.0 = coordinate_value.0 - smoothsize;
-
         let current_score = adjusted_start_site.1;
 
         count += current_score;
+        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
 
         if adjusted_start_site.0 < 1 {
             adjusted_start_site.0 = 1;
@@ -91,9 +91,11 @@ pub fn start_end_counts(
             continue;
         }
 
+
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count -= current_end_site.1;
+                let most_recent_score = collected_counts.remove(0);
+                count -= most_recent_score; // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
 
                 if count < 0 {
                     count = 0;
@@ -176,6 +178,7 @@ pub fn core_counts(
     let mut current_end_site: (i32, i32);
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
+    let mut collected_counts: Vec<i32> = Vec::new();
 
     current_start_site = starts_vector[0]; // get first coordinate position
     current_end_site = ends_vector[0];
@@ -197,6 +200,7 @@ pub fn core_counts(
 
         let current_score = current_start_site.1;
         count += current_score;
+        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
 
         if current_start_site.0 < 1 {
             current_start_site.0 = 1;
@@ -212,7 +216,8 @@ pub fn core_counts(
 
         while coordinate_position < current_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                count -= current_end_site.1;
+                let most_recent_score = collected_counts.remove(0);
+                count -= most_recent_score; // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
                 if count < 0 {
                     count = 0;
                 }
