@@ -1,0 +1,18 @@
+[package]
+name = "gtars-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.99"
+bigtools = "0.5.6"
+flate2 = "1.1.2"
+md-5 = "0.10.6"
+num-traits = "0.2.19"
+reqwest = { version = "0.12.23", features = ["blocking"] }
+tokio = "1.47.1"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"
