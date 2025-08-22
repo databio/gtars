@@ -3,7 +3,8 @@ use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::{BufRead, BufReader, Cursor};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use flate2::read::{GzDecoder, MultiGzDecoder};
@@ -11,6 +12,94 @@ use reqwest::blocking::Client;
 use std::error::Error;
 
 use crate::models::region::Region;
+
+#[derive(Debug, Clone)]
+#[allow(clippy::upper_case_acronyms)]
+pub enum FileType {
+    BED,
+    BAM,
+    NARROWPEAK,
+    UNKNOWN, // Add an UNKNOWN variant for unhandled types
+}
+
+impl FromStr for FileType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "bed" => Ok(FileType::BED),
+            "bam" => Ok(FileType::BAM),
+            "narrowpeak" => Ok(FileType::NARROWPEAK),
+            _ => Ok(FileType::UNKNOWN), // Return UNKNOWN for unhandled types
+                                        //_ => Err(format!("Invalid file type: {}", s)),
+        }
+    }
+}
+
+pub struct FileInfo {
+    pub file_type: FileType,
+    pub is_gzipped: bool,
+}
+
+pub fn get_file_info(path: &Path) -> FileInfo {
+    let mut file_type = FileType::UNKNOWN;
+    let mut is_gzipped = false;
+
+    if let Some(os_str_filename) = path.file_name() {
+        if let Some(filename) = os_str_filename.to_str() {
+            // Check for .gz first
+            if filename.ends_with(".gz") {
+                is_gzipped = true;
+                if let Some(base_filename) = filename.strip_suffix(".gz") {
+                    // Try to get the extension before .gz
+                    if let Some(ext) = PathBuf::from(base_filename)
+                        .extension()
+                        .and_then(|e| e.to_str())
+                    {
+                        file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                    } else {
+                        // If there's no extension before .gz (e.g., "my_data.gz"),
+                        // you might want to handle this specifically or leave as UNKNOWN.
+                        // For now, we'll try to parse the whole base_filename as a type
+                        file_type = FileType::from_str(base_filename).unwrap_or(FileType::UNKNOWN);
+                    }
+                }
+            } else {
+                // Not gzipped, just get the direct extension
+                if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                    file_type = FileType::from_str(ext).unwrap_or(FileType::UNKNOWN);
+                }
+            }
+        }
+    }
+
+    FileInfo {
+        file_type,
+        is_gzipped,
+    }
+}
+
+/// Parses each line of given bed like file into a contig (chromosome), starts and ends
+/// This ignores any other columns beyond start and ends.
+pub fn parse_bedlike_file(line: &str) -> Option<(String, i32, i32)> {
+    let mut fields = line.split('\t');
+    // Get the first field which should be chromosome.
+    let ctg = fields.next()?;
+    // Parse 2nd and 3rd string as integers or return -1 if failure
+    let st = fields
+        .next()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(-1);
+    let en = fields
+        .next()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or(-1);
+
+    // Original code had a remainder of the line, r, but it does not appear to have been used
+    // in any way
+
+    Some((ctg.parse().unwrap(), st, en))
+}
 
 ///
 /// Get a reader for either a gzip'd or non-gzip'd file.
