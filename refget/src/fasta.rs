@@ -126,14 +126,14 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
         if line.starts_with("##") {
             if let Some(stripped) = line.strip_prefix("##") {
                 if let Some((key, value)) = stripped.split_once('=') {
-                    match key {
-                        "seqcol_digest" => seqcol_digest = value.to_string(),
-                        "names_digest" => names_digest = value.to_string(),
-                        "sequences_digest" => sequences_digest = value.to_string(),
-                        "lengths_digest" => lengths_digest = value.to_string(),
-                        _ => {} // Ignore unknown metadata keys
-                    }
-                }
+                                match key {
+                                    "seqcol_digest" => seqcol_digest = value.to_string(),
+                                    "names_digest" => names_digest = value.to_string(),
+                                    "sequences_digest" => sequences_digest = value.to_string(),
+                                    "lengths_digest" => lengths_digest = value.to_string(),
+                                    _ => {} // Ignore unknown metadata keys
+                                }
+                            }
             }
             continue;
         }

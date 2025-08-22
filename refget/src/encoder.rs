@@ -34,7 +34,7 @@ impl SequenceEncoder {
     pub fn new(alphabet_type: alphabet::AlphabetType, length: usize) -> Self {
         let alphabet = alphabet::lookup_alphabet(&alphabet_type);
         let bits_per_symbol = alphabet.bits_per_symbol;
-        let estimated_bytes = (length * bits_per_symbol + 7) / 8;
+        let estimated_bytes = (length * bits_per_symbol).div_ceil(8);
 
         SequenceEncoder {
             alphabet,
@@ -92,7 +92,7 @@ impl SequenceEncoder {
 pub fn encode_sequence<T: AsRef<[u8]>>(sequence: T, alphabet: &Alphabet) -> Vec<u8> {
     let sequence = sequence.as_ref();
     let total_bits = sequence.len() * alphabet.bits_per_symbol;
-    let mut bytes = vec![0u8; (total_bits + 7) / 8];
+    let mut bytes = vec![0u8; total_bits.div_ceil(8)];
 
     let mut bit_index = 0;
     for &byte in sequence {
@@ -234,7 +234,7 @@ mod tests {
         // Don't want to re-implement bit-packing here for 5-bit symbols, so just check the length.
         assert_eq!(
             encoded.len(),
-            (sequence.len() * alphabet.bits_per_symbol + 7) / 8
+            (sequence.len() * alphabet.bits_per_symbol).div_ceil(8)
         );
         let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
