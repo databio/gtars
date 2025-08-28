@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 class Region:
     chr: str
@@ -90,6 +90,8 @@ class RegionSet:
         """
         Mean width of the regions
         """
+        ...
+    def get_max_end_per_chr(self) -> Dict[str, int]:
         ...
     def __len__(self) -> int:
         """

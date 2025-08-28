@@ -483,6 +483,34 @@ impl RegionSet {
     pub fn len(&self) -> usize {
         self.regions.len()
     }
+
+
+    ///
+    /// Get the furthest region location for each region
+    ///
+    pub fn get_max_end_per_chr(&self) -> HashMap<String, u32> {
+        let mut result: HashMap<String, u32> = HashMap::new();
+
+        let mut current_chr: &String = &self.regions[0].chr;
+        let mut max_end: u32 = self.regions[0].end;
+
+        for r in &self.regions[1..] {
+            if &r.chr == current_chr {
+                // Same chromosome → update max end
+                max_end = max_end.max(r.end);
+            } else {
+                // Chromosome changed → store previous one
+                result.insert(current_chr.clone(), max_end);
+                current_chr = &r.chr;
+                max_end = r.end;
+            }
+        }
+
+        // Store the last chromosome
+        result.insert(current_chr.clone(), max_end);
+
+        result
+    }
 }
 
 impl Display for RegionSet {
