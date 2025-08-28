@@ -54,12 +54,18 @@ pub fn start_end_counts(
 
     adjusted_start_site.0 -= smoothsize;
 
-    current_end_site = adjusted_start_site;
-    current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
-
     if adjusted_start_site.0 < 1 {
         adjusted_start_site.0 = 1;
     }
+
+    //Initial count for inital adjusted site
+    let current_score = adjusted_start_site.1;
+    collected_counts.insert(0,current_score);
+    count+=current_score;
+
+    current_end_site = adjusted_start_site;
+    current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+
 
     while coordinate_position < adjusted_start_site.0 {
         // Just skip until we reach the initial adjusted start position
@@ -67,36 +73,29 @@ pub fn start_end_counts(
         coordinate_position += stepsize;
     }
 
-    for coord in starts_vector.iter() {
+    for coord in starts_vector.iter().skip(1) { // Skip the first item because we are already accounting for it above.
         coordinate_value = *coord;
-
         adjusted_start_site = coordinate_value;
         adjusted_start_site.0 = coordinate_value.0 - smoothsize;
-        let current_score = adjusted_start_site.1;
-
-        count += current_score;
-        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
 
         if adjusted_start_site.0 < 1 {
             adjusted_start_site.0 = 1;
         }
-
-        //let current_index = index;
-
         let mut new_end_site = adjusted_start_site;
         new_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site.0 == prev_coordinate_value {
+            let current_score = adjusted_start_site.1;
+            collected_counts.insert(0,current_score); // needed to later decrement in the correct order
+            count += current_score;
             continue;
         }
-
 
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
                 let most_recent_score = collected_counts.remove(0);
                 count -= most_recent_score; // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
-
                 if count < 0 {
                     count = 0;
                 }
@@ -117,6 +116,9 @@ pub fn start_end_counts(
             coordinate_position += 1;
         }
 
+        let current_score = adjusted_start_site.1;
+        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
+        count += current_score;
         prev_coordinate_value = adjusted_start_site.0;
     }
 
@@ -127,7 +129,8 @@ pub fn start_end_counts(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
-            count -= current_end_site.1;
+            let most_recent_score = collected_counts.remove(0);
+            count -= most_recent_score; // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
             if count < 0 {
                 count = 0;
             }
@@ -187,6 +190,11 @@ pub fn core_counts(
         current_start_site.0 = 1;
     }
 
+    //Initial count for inital adjusted site
+    let current_score = current_start_site.1;
+    collected_counts.insert(0,current_score);
+    count+=current_score;
+
     while coordinate_position < current_start_site.0 {
         // Just skip until we reach the initial adjusted start position
         // Note that this function will not return 0s at locations before the initial start site
@@ -194,13 +202,11 @@ pub fn core_counts(
     }
 
     for (index, coord) in starts_vector.iter().enumerate() {
+        if index == 0{
+            continue // allows us to skip the first start and end (since they are already accounted for, don't use skip(1) above without fixing index )
+        }
         coordinate_value = *coord;
-
         current_start_site = coordinate_value;
-
-        let current_score = current_start_site.1;
-        count += current_score;
-        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
 
         if current_start_site.0 < 1 {
             current_start_site.0 = 1;
@@ -211,6 +217,9 @@ pub fn core_counts(
         collected_end_sites.push(ends_vector[current_index]);
 
         if current_start_site.0 == prev_coordinate_value {
+            let current_score = current_start_site.1;
+            collected_counts.insert(0,current_score); // needed to later decrement in the correct order
+            count += current_score;
             continue;
         }
 
@@ -221,7 +230,6 @@ pub fn core_counts(
                 if count < 0 {
                     count = 0;
                 }
-
                 if collected_end_sites.last().is_none() {
                     current_end_site.0 = 0;
                 } else {
@@ -238,6 +246,10 @@ pub fn core_counts(
             coordinate_position += 1;
         }
 
+        let current_score = current_start_site.1;
+        count += current_score;
+        collected_counts.insert(0,current_score); // needed to later decrement in the correct order
+
         prev_coordinate_value = current_start_site.0;
     }
 
@@ -245,7 +257,8 @@ pub fn core_counts(
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
-            count -= current_end_site.1;
+            let most_recent_score = collected_counts.remove(0);
+            count -= most_recent_score;
             if count < 0 {
                 count = 0;
             }
