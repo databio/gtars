@@ -3,8 +3,8 @@ use crate::uniwig::{Chromosome, FileType};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::collections::HashMap;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read};
 use std::io::Write;
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -104,7 +104,6 @@ pub fn get_final_chromosomes(
     chrom_sizes: &std::collections::HashMap<String, u32>,
     score: bool,
 ) -> Vec<Chromosome> {
-
     #[allow(unused_assignments)] // why is this throwing a warning?
     let mut chromosomes = Vec::new();
 
@@ -123,7 +122,10 @@ pub fn get_final_chromosomes(
                 let single_file_path = match single_file_path.to_str() {
                     Some(path_str) => path_str,
                     None => {
-                        println!("WARNING: Skipping file with invalid Unicode in its path: {:?}", single_file_path);
+                        println!(
+                            "WARNING: Skipping file with invalid Unicode in its path: {:?}",
+                            single_file_path
+                        );
                         continue;
                     }
                 };
@@ -178,9 +180,7 @@ pub fn get_final_chromosomes(
         final_chromosomes.sort_unstable_by(|a, b| a.chrom.cmp(&b.chrom));
 
         chromosomes = final_chromosomes;
-    }
-    else if path.extension().and_then(|s| s.to_str()) == Some("txt") {
-
+    } else if path.extension().and_then(|s| s.to_str()) == Some("txt") {
         println!("Input is a text file. Reading files listed inside...");
 
         let mut combined_chromosome_map: HashMap<String, Chromosome> = HashMap::new();
@@ -227,12 +227,16 @@ pub fn get_final_chromosomes(
                     println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
                 }
                 FileType::UNKNOWN => {
-                    println!("WARNING: Skipping file with unknown extension: {}", single_file_path);
+                    println!(
+                        "WARNING: Skipping file with unknown extension: {}",
+                        single_file_path
+                    );
                 }
             }
         }
 
-        let mut final_chromosomes: Vec<Chromosome> = combined_chromosome_map.into_values().collect();
+        let mut final_chromosomes: Vec<Chromosome> =
+            combined_chromosome_map.into_values().collect();
 
         for chromosome in &mut final_chromosomes {
             chromosome.starts.sort_unstable_by_key(|&(pos, _)| pos);
@@ -240,17 +244,16 @@ pub fn get_final_chromosomes(
         }
         final_chromosomes.sort_unstable_by(|a, b| a.chrom.cmp(&b.chrom));
         chromosomes = final_chromosomes;
-
-    }
-    else {
+    } else {
         chromosomes = match ft {
-            Ok(FileType::BED) |  Ok(FileType::NARROWPEAK)=> {
+            Ok(FileType::BED) | Ok(FileType::NARROWPEAK) => {
                 if score {
-                println!("Score = True...Counting based on Score");
-                create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
-            } else {
-                create_chrom_vec_default_score(filepath)
-            }},
+                    println!("Score = True...Counting based on Score");
+                    create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+                } else {
+                    create_chrom_vec_default_score(filepath)
+                }
+            }
 
             _ => create_chrom_vec_default_score(filepath),
         };
