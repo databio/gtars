@@ -6,6 +6,7 @@ pub mod tokenized_region;
 pub mod tokenized_regionset;
 pub mod universe;
 pub mod interval;
+mod comparison;
 
 // re-export for cleaner imports
 pub use self::fragments::Fragment;
