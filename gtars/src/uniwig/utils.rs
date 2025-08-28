@@ -244,15 +244,14 @@ pub fn get_final_chromosomes(
     }
     else {
         chromosomes = match ft {
-            Ok(FileType::BED) => create_chrom_vec_default_score(filepath),
-            Ok(FileType::NARROWPEAK) => {
+            Ok(FileType::BED) |  Ok(FileType::NARROWPEAK)=> {
                 if score {
-                    println!("FileType is NarrowPeak and Score = True...Counting based on Score");
-                    create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
-                } else {
-                    create_chrom_vec_default_score(filepath)
-                }
-            }
+                println!("Score = True...Counting based on Score");
+                create_chrom_vec_scores(filepath) // if score flag enabled, this will attempt to read narrowpeak scores
+            } else {
+                create_chrom_vec_default_score(filepath)
+            }},
+
             _ => create_chrom_vec_default_score(filepath),
         };
     }
