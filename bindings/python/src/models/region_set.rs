@@ -190,4 +190,8 @@ impl PyRegionSet {
     fn get_max_end_per_chr(&self) -> HashMap<String, u32> {
         self.regionset.get_max_end_per_chr()
     }
+
+    fn get_nucleotide_length(&self) -> u32 {
+        self.regionset.nucleotides_length()
+    }
 }

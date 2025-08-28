@@ -92,6 +92,14 @@ class RegionSet:
         """
         ...
     def get_max_end_per_chr(self) -> Dict[str, int]:
+        """
+        Get Max end coordinate of nucleotide for each chromosome
+        """
+        ...
+    def get_nucleotide_length(self) -> int:
+        """
+        Get total number of nucleotides in RegionSet
+        """
         ...
     def __len__(self) -> int:
         """

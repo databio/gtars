@@ -484,7 +484,6 @@ impl RegionSet {
         self.regions.len()
     }
 
-
     ///
     /// Get the furthest region location for each region
     ///
@@ -511,6 +510,17 @@ impl RegionSet {
 
         result
     }
+
+    ///
+    /// Get total nucleotide count
+    ///
+    pub fn nucleotides_length(&self) -> u32 {
+        let mut total_count: u32 = 0;
+        for r in &self.regions {
+            total_count += r.width();
+        }
+        total_count
+    }
 }
 
 impl Display for RegionSet {
@@ -523,8 +533,8 @@ impl Display for RegionSet {
 mod tests {
     use super::*;
 
-    use rstest::*;
     use pretty_assertions::assert_eq;
+    use rstest::*;
 
     fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
         let file_path: PathBuf = std::env::current_dir()
@@ -666,5 +676,21 @@ mod tests {
     fn test_open_file_with_incorrect_headers() {
         let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
         let _region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+    }
+
+    #[rstest]
+    fn test_chr_length() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        assert_eq!(*region_set.get_max_end_per_chr().get("chr1").unwrap(), 36);
+        assert_eq!(region_set.get_max_end_per_chr().len(), 1)
+    }
+
+    #[rstest]
+    fn test_total_nucleotides_function() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.nucleotides_length(), 38)
     }
 }
