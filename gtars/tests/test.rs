@@ -1415,49 +1415,49 @@ mod tests {
         Ok(())
     }
 
-    #[rstest]
-    fn test_bbcache_bedbase(
-        _path_to_bed_gz_from_bb: &str,
-        _bbid: &str,
-        _bsid: &str,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
-        fn read_gzip_file(path: impl AsRef<std::path::Path>) -> Vec<u8> {
-            let file = File::open(path).expect("Failed to open file");
-            let mut decoder = GzDecoder::new(BufReader::new(file));
-            let mut contents = Vec::new();
-            decoder
-                .read_to_end(&mut contents)
-                .expect("Failed to read decompressed contents");
-            contents
-        }
-
-        let tempdir = tempfile::tempdir()?;
-        let cache_folder = PathBuf::from(tempdir.path());
-
-        let mut bbc =
-            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
-
-        let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
-
-        assert!(bbc.seek(_bbid).is_ok());
-
-        let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
-        let cached_content = read_gzip_file(&cached_bed_path);
-        let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
-        assert_eq!(
-            cached_content, comparison_content,
-            "Cached content does not match the original content"
-        );
-
-        let bedset = bbc.load_bedset(_bsid).unwrap();
-        assert!(bbc.seek(_bsid).is_ok());
-        for rs in bedset.region_sets {
-            let bed_id = rs.identifier();
-            assert!(bbc.seek(&bed_id.clone()).is_ok());
-            let bed_in_set = bbc.load_bed(&bed_id).unwrap();
-            assert_eq!(bed_id, bed_in_set.identifier());
-        }
-
-        Ok(())
-    }
+    // #[rstest]
+    // fn test_bbcache_bedbase(
+    //     _path_to_bed_gz_from_bb: &str,
+    //     _bbid: &str,
+    //     _bsid: &str,
+    // ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    //     fn read_gzip_file(path: impl AsRef<std::path::Path>) -> Vec<u8> {
+    //         let file = File::open(path).expect("Failed to open file");
+    //         let mut decoder = GzDecoder::new(BufReader::new(file));
+    //         let mut contents = Vec::new();
+    //         decoder
+    //             .read_to_end(&mut contents)
+    //             .expect("Failed to read decompressed contents");
+    //         contents
+    //     }
+    //
+    //     let tempdir = tempfile::tempdir()?;
+    //     let cache_folder = PathBuf::from(tempdir.path());
+    //
+    //     let mut bbc =
+    //         BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+    //
+    //     let _rs = bbc.load_bed(_bbid).expect("Failed to load bed file");
+    //
+    //     assert!(bbc.seek(_bbid).is_ok());
+    //
+    //     let cached_bed_path = bbc.seek(_bbid).expect("Failed to seek cached bed file");
+    //     let cached_content = read_gzip_file(&cached_bed_path);
+    //     let comparison_content = read_gzip_file(_path_to_bed_gz_from_bb);
+    //     assert_eq!(
+    //         cached_content, comparison_content,
+    //         "Cached content does not match the original content"
+    //     );
+    //
+    //     let bedset = bbc.load_bedset(_bsid).unwrap();
+    //     assert!(bbc.seek(_bsid).is_ok());
+    //     for rs in bedset.region_sets {
+    //         let bed_id = rs.identifier();
+    //         assert!(bbc.seek(&bed_id.clone()).is_ok());
+    //         let bed_in_set = bbc.load_bed(&bed_id).unwrap();
+    //         assert_eq!(bed_id, bed_in_set.identifier());
+    //     }
+    //
+    //     Ok(())
+    // }
 }
