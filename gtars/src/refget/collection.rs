@@ -145,6 +145,17 @@ impl SequenceCollection {
         Self::from_path_with_cache(file_path, true, true)
     }
 
+
+    pub fn from_fasta_reader<R: std::io::BufRead>(reader: R) -> Result<Self> {
+        // Use seq_io::fasta::Reader as you do in from_fasta
+        let mut fasta_reader = seq_io::fasta::Reader::new(reader);
+        // ...parse records and build SequenceCollection...
+        // (Copy logic from from_fasta, but use fasta_reader instead of opening a file)
+        todo!()
+        let seqcol: SequenceCollection = digest_fasta(file_path.as_ref())?;
+
+    }
+
     pub fn from_farg<P: AsRef<Path>>(file_path: P) -> Result<Self> {
         let farg_file_path = file_path.as_ref().replace_exts_with("farg");
         println!("From_farg - Reading from file: {:?}", file_path.as_ref());

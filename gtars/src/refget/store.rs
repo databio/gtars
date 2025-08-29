@@ -332,6 +332,15 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
+    // Needed for fasta import in browser?
+    pub fn import_fasta_bytes(&mut self, fasta_bytes: &[u8]) -> Result<(), anyhow::Error> {
+        // Use a BufReader or Cursor to read from bytes
+        let reader = std::io::BufReader::new(std::io::Cursor::new(fasta_bytes));
+        // ...parse FASTA from reader...
+        // (Call your existing logic that works with a reader)
+        Ok(())
+    }
+
     /// Returns a list of all sequence names in the store
     pub fn list_sequence_digests(&self) -> Vec<[u8; 32]> {
         self.sequence_store.keys().cloned().collect()

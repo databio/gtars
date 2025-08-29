@@ -2,6 +2,8 @@ mod digests;
 mod tokenizers;
 mod utils;
 
+use std::str::EncodeUtf16;
+
 use gtars::{
     common::models::Region,
     tokenizers::{
@@ -9,6 +11,9 @@ use gtars::{
         Tokenizer,
     },
 };
+
+use gtars::refget::store;
+
 use wasm_bindgen::prelude::*;
 
 use crate::{tokenizers::BedEntry, utils::prepare_universe_from_bed_entries};
@@ -69,4 +74,30 @@ pub fn tokenize_bed_file_into_universe(
 
     serde_wasm_bindgen::to_value(&tokens)
         .map_err(|e| JsValue::from_str(&format!("Error serializing tokens: {}", e)))
+}
+
+
+//////// GLOBALREFGETSTORE ADDITIONS
+
+#[wasm_bindgen]
+pub struct WasmRefgetStore {
+    inner: store::GlobalRefgetStore,
+}
+
+#[wasm_bindgen]
+impl WasmRefgetStore {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> WasmRefgetStore {
+        WasmRefgetStore {
+            inner: store::GlobalRefgetStore::new(store::StorageMode::Raw),
+        }
+    }
+    
+    #[wasm_bindgen]
+    pub fn add_fasta(&mut self, fasta_bytes: &[u8]) -> Result<(), JsValue> {
+        self.inner
+            .import_fasta_bytes(fasta_bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to add FASTA: {}", e)))
+    }
+
 }
