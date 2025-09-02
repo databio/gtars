@@ -10,5 +10,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1.0.82"
-refget = { path = "../refget" }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
+
+# our code
+gtars-core = { path = "../gtars-core" }
+refget = { path = "../refget" }
+tokenizers = { path = "../tokenizers", features = ["huggingface"]}

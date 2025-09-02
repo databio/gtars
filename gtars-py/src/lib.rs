@@ -1,15 +1,19 @@
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+mod utils;
 mod refget;
+mod tokenizers;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[pymodule]
 fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let refget_module = pyo3::wrap_pymodule!(refget::refget);
+    let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
 
     m.add_wrapped(refget_module)?;
+    m.add_wrapped(tokenize_module)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let binding = sys.getattr("modules")?;
@@ -17,6 +21,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
 
     // set names of submodules
     sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
+    sys_modules.set_item("gtars.tokenizers", m.getattr("tokenizers")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;

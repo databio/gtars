@@ -1,5 +1,5 @@
 use std::collections::{HashMap as StdHashMap};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fxhash::{FxHashMap as HashMap};
 
