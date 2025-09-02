@@ -53,7 +53,7 @@
                     const uint8Array = new Uint8Array(arrayBuffer);
 
                     // Use the correct WASM method name
-                    const seqCollection = SequenceCollection.from_fasta_bytes_wasm(uint8Array);
+                    const seqCollection = SequenceCollectionWasm.from_fasta_bytes(uint8Array);
 
                     document.getElementById('loading').style.display = 'none';
                     displayResults(seqCollection, file.name);
