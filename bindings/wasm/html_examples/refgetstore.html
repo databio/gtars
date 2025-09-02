@@ -192,7 +192,7 @@
             // Use the WASM getter methods
             const digest = seqCollection.digest;
             const sequences = seqCollection.sequences || [];
-            const lvl1 = seqCollection.lvl1 || {};
+            //const lvl1 = seqCollection.lvl1 || {};
             const sequenceCount = seqCollection.sequence_count;
 
             // Calculate statistics
@@ -227,12 +227,6 @@
                 <div class="digest-info">
                     <h4>🔐 RefGet Collection Digest</h4>
                     <p><strong>Collection Digest:</strong> <code>${digest}</code></p>
-                    <details>
-                        <summary>Level 1 Digests</summary>
-                        <p><strong>Names Digest:</strong> <code>${lvl1.names_digest || 'N/A'}</code></p>
-                        <p><strong>Sequences Digest:</strong> <code>${lvl1.sequences_digest || 'N/A'}</code></p>
-                        <p><strong>Lengths Digest:</strong> <code>${lvl1.lengths_digest || 'N/A'}</code></p>
-                    </details>
                 </div>
             `;
 
@@ -271,7 +265,6 @@
                 digest: digest,
                 sequence_count: sequenceCount,
                 total_length: totalLength,
-                lvl1_digests: lvl1,
                 sequences: sequences.map(seq => ({
                     name: seq.metadata?.name,
                     length: seq.metadata?.length,

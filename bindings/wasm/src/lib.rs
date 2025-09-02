@@ -143,4 +143,15 @@ impl SequenceCollectionWasm {
         serde_wasm_bindgen::to_value(&sequences).unwrap_or(JsValue::NULL)
     }
 
+    #[wasm_bindgen(getter)]
+    pub fn digest(&self) -> String {
+        self.inner.digest.to_string()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn sequence_count(&self) -> usize {
+        self.inner.sequences.len()
+    }
+
+
 }
