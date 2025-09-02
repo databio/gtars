@@ -3,11 +3,16 @@ use clap::Command;
 
 // go through the library crate to get the interfaces
 use gtars::overlap;
+
+#[cfg(feature = "bbcache")]
 use gtars::bbcache;
+
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
+#[cfg(feature = "uniwig")]
 use gtars::uniwig;
+
 use gtars::tokenizers;
 
 pub mod consts {
@@ -17,7 +22,7 @@ pub mod consts {
 }
 
 fn build_parser() -> Command {
-    Command::new(consts::BIN_NAME)
+    let mut cmd = Command::new(consts::BIN_NAME)
         .bin_name(consts::BIN_NAME)
         .version(consts::VERSION)
         .author("Databio")
@@ -25,11 +30,22 @@ fn build_parser() -> Command {
         .subcommand_required(true)
         .subcommand(overlap::cli::create_overlap_cli())
         .subcommand(fragsplit::cli::make_fragsplit_cli())
-        .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
         .subcommand(scoring::cli::make_fscoring_cli())
-        .subcommand(bbcache::cli::create_bbcache_cli())
-        .subcommand(tokenizers::cli::create_tokenizer_cli())
+        .subcommand(tokenizers::cli::create_tokenizer_cli());
+
+
+    #[cfg(feature = "uniwig")]
+    {
+        cmd = cmd.subcommand(uniwig::cli::create_uniwig_cli());
+    }
+
+    #[cfg(feature = "bbcache")]
+    {
+        cmd = cmd.subcommand(bbcache::cli::create_bbcache_cli());
+    }
+
+    cmd
 }
 
 fn main() -> Result<()> {
@@ -54,6 +70,7 @@ fn main() -> Result<()> {
         //
         // UNIWIG
         //
+        #[cfg(feature = "uniwig")]
         Some((uniwig::consts::UNIWIG_CMD, matches)) => {
             uniwig::run_uniwig(matches);
         }
@@ -61,6 +78,7 @@ fn main() -> Result<()> {
         //
         // BBCACHE
         //
+        #[cfg(feature = "bbcache")]
         Some((bbcache::consts::BBCACHE_CMD, sub_m)) => {
             if let Some((subcmd, sub_matches)) = sub_m.subcommand() {
                 bbcache::run_bbcache(subcmd, sub_matches);
