@@ -1,11 +1,13 @@
 use crate::refget::alphabet::AlphabetType;
 use crate::refget::digest::{canonicalize_json, sha512t24u};
-use crate::refget::fasta::{digest_fasta, read_fasta_refget_file};
+use crate::refget::fasta::{digest_fasta, digest_fasta_bytes, read_fasta_refget_file};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use seq_io::fasta::{Reader, Record};
+use std::io::{BufReader, Cursor};
 
 use crate::refget::utils::PathExtension;
 
@@ -146,13 +148,13 @@ impl SequenceCollection {
     }
 
 
-    pub fn from_fasta_reader<R: std::io::BufRead>(reader: R) -> Result<Self> {
-        // Use seq_io::fasta::Reader as you do in from_fasta
-        let mut fasta_reader = seq_io::fasta::Reader::new(reader);
-        // ...parse records and build SequenceCollection...
-        // (Copy logic from from_fasta, but use fasta_reader instead of opening a file)
-        todo!()
-        let seqcol: SequenceCollection = digest_fasta(file_path.as_ref())?;
+    pub fn from_fasta_bytes(fasta_bytes: &[u8]) -> Result<Self> {
+        
+        let seqcol = digest_fasta_bytes(fasta_bytes)?;
+        
+        // TODO add some better error messaging here.
+
+        Ok(seqcol)
 
     }
 

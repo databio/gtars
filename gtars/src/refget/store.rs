@@ -10,7 +10,7 @@ use chrono::Utc;
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, create_dir_all, File, OpenOptions};
-use std::io::{BufRead, BufReader, Read, Write};
+use std::io::{BufRead, BufReader, Cursor, Read, Write};
 use std::{io, str};
 use flate2::read::GzDecoder;
 use super::encoder::decode_substring_from_bytes;
@@ -333,11 +333,83 @@ impl GlobalRefgetStore {
     }
 
     // Needed for fasta import in browser?
-    pub fn import_fasta_bytes(&mut self, fasta_bytes: &[u8]) -> Result<(), anyhow::Error> {
-        // Use a BufReader or Cursor to read from bytes
-        let reader = std::io::BufReader::new(std::io::Cursor::new(fasta_bytes));
-        // ...parse FASTA from reader...
-        // (Call your existing logic that works with a reader)
+    pub fn import_fasta_bytes(&mut self, fasta_bytes: &[u8]) -> Result<()> {
+
+        //TODO try to integrate this with import_fasta to reduce code dupe
+        
+        // Pass this to the sequece collection method
+        let seqcol = SequenceCollection::from_fasta_bytes(&fasta_bytes)?;
+
+        // Register the collection
+        self.add_sequence_collection(seqcol.clone())?;
+
+        // Local hashmap to store SequenceMetadata (digests)
+        let mut seqmeta_hashmap: HashMap<String, SequenceMetadata> = HashMap::new();
+        let seqcol_sequences = seqcol.sequences.clone(); // Clone to avoid partial move
+        for record in seqcol_sequences {
+            let seqmeta = record.metadata;
+            seqmeta_hashmap.insert(seqmeta.name.clone(), seqmeta);
+        }
+
+
+        let reader = BufReader::new(Cursor::new(fasta_bytes));
+        let mut fasta_reader = Reader::new(reader);
+
+        println!("Preparing to load sequences into refget SeqColStore...");
+
+        while let Some(record) = fasta_reader.next() {
+            let record = record?;
+            let id = record.id()?;
+            let dr = seqmeta_hashmap[id].clone();
+            println!("Digest result: {:?}", dr);
+
+            match self.mode {
+                StorageMode::Raw => {
+                    let mut raw_sequence = Vec::with_capacity(dr.length);
+                    // For raw, just extend with the line content.
+                    for seq_line in record.seq_lines() {
+                        raw_sequence.extend(seq_line);
+                    }
+                    println!(
+                        "Storing raw sequence. Name: {}; Alphabet: {}; Digest: {}",
+                        id, dr.alphabet, dr.sha512t24u
+                    );
+
+                    self.add_sequence(
+                        SequenceRecord {
+                            metadata: dr,
+                            data: Some(raw_sequence),
+                        },
+                        seqcol.digest.to_key(),
+                    )?;
+                }
+                StorageMode::Encoded => {
+                    // Create a SequenceEncoder to handle the encoding of the sequence.
+                    let mut encoder = SequenceEncoder::new(dr.alphabet, dr.length);
+                    for seq_line in record.seq_lines() {
+                        encoder.update(seq_line);
+                    }
+                    // let encoded_sequence = BitVec::<u8, Msb0>::from_vec(encoder.finalize());
+                    let encoded_sequence = encoder.finalize();
+
+                    println!(
+                        "Storing encoded sequence. Name: {}; Alphabet: {}; Digest: {}",
+                        id, dr.alphabet, dr.sha512t24u
+                    );
+                    self.add_sequence(
+                        SequenceRecord {
+                            metadata: dr,
+                            data: Some(encoded_sequence),
+                        },
+                        seqcol.digest.to_key(),
+                    )?;
+                }
+            }
+        }
+
+        println!("Finished loading sequences into refget SeqColStore.");
+        
+        
         Ok(())
     }
 

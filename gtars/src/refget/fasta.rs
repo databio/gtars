@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use std::io::BufRead;
+use std::io::{BufRead, BufReader, Cursor};
 use std::path::Path;
 
 use super::alphabet::{AlphabetGuesser, AlphabetType};
@@ -36,6 +36,7 @@ use sha2::{Digest, Sha512};
 /// # Examples
 ///
 ///
+
 pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
     let file_reader = get_dynamic_reader(file_path.as_ref())?;
     let mut fasta_reader = Reader::new(file_reader);
@@ -102,6 +103,77 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
         has_data: true,
     })
 }
+
+pub fn digest_fasta_bytes(fasta_bytes: &[u8]) -> Result<SequenceCollection> {
+
+    //TODO try to integrate this with digest_fasta to reduce code dupe
+
+    let reader = BufReader::new(Cursor::new(fasta_bytes));
+    let mut fasta_reader = Reader::new(reader);
+    let mut results = Vec::new();
+
+    while let Some(record) = fasta_reader.next() {
+        // returns a RefRecord object
+        let record = record.with_context(|| {
+            format!(
+                "Failed to read FASTA record from file:",
+            )
+        })?;
+        let id = record.id().with_context(|| {
+            format!(
+                "FASTA record #{} is missing a sequence ID",
+                results.len() + 1
+            )
+        })?;
+        let mut sha512_hasher = Sha512::new();
+        let mut md5_hasher = Md5::new();
+        let mut length = 0;
+        let mut sequence = Vec::new();
+        let mut alphabet_guesser = AlphabetGuesser::new();
+        for seq_line in record.seq_lines() {
+            let seq_line = seq_line.to_ascii_uppercase();
+            sha512_hasher.update(&seq_line);
+            md5_hasher.update(&seq_line);
+            length += seq_line.len();
+            sequence.extend_from_slice(&seq_line);
+            alphabet_guesser.update(&seq_line);
+        }
+        let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
+        let md5 = format!("{:x}", md5_hasher.finalize_reset());
+        let alphabet = alphabet_guesser.guess();
+
+        // Create SequenceRecord
+        let metadata = SequenceMetadata {
+            name: id.to_string(),
+            length,
+            sha512t24u: sha512,
+            md5,
+            alphabet,
+        };
+
+        results.push(SequenceRecord {
+            metadata,
+            data: None,
+        });
+    }
+
+    // Compute lvl1 digests from the sequence records
+    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
+    let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
+
+    // Compute collection digest from lvl1 digests
+    let collection_digest = lvl1.to_digest();
+
+    Ok(SequenceCollection {
+        sequences: results,
+        digest: collection_digest,
+        lvl1,
+        file_path: None,
+        has_data: true,
+    })
+
+}
+
 
 /// Read a FARG file and return a SequenceCollection struct with all metadata.
 ///
