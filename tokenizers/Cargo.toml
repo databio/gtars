@@ -1,0 +1,24 @@
+[package]
+name = "tokenizers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+fxhash = "0.2.1"
+serde = {version = "1.0.203", features=["derive"]}
+thiserror = "2.0.12"
+anyhow = "1.0.82"
+hf-hub = { version = "0.4.3", optional = true}
+toml = "0.8.14"
+
+# our code
+gtars-core = { path = "../gtars-core" }
+overlaprs = { path = "../overlaprs" }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+
+[features]
+default = []
+huggingface = ["dep:hf-hub"]
