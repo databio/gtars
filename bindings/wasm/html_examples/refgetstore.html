@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>GTARS FASTA Processor</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .file-input { margin: 20px 0; padding: 20px; border: 2px dashed #ccc; }
+        .results { margin: 20px 0; padding: 20px; background: #f5f5f5; }
+        button { padding: 10px 20px; margin: 10px 0; }
+        pre { background: #fff; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>GTARS FASTA Processor</h1>
+
+    <div class="file-input">
+        <input type="file" id="fastaFile" accept=".fasta,.fa,.fas,.fna" />
+        <p>Select a FASTA file to process</p>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+        🔄 Processing FASTA file and computing digests...
+    </div>
+
+    <div id="results" class="results" style="display: none;">
+        <h3>📊 Results:</h3>
+        <div id="output"></div>
+    </div>
+</div>
+
+<script type="module">
+    import init, { SequenceCollectionWasm } from '../pkg/gtars_js.js';
+
+    async function run() {
+        try {
+            await init();
+            console.log("✅ WASM module loaded successfully");
+
+            document.getElementById('fastaFile').addEventListener('change', async (event) => {
+                const file = event.target.files[0];
+                if (!file) return;
+
+                console.log("THERE IS A FILE PRESENT!");
+
+                document.getElementById('loading').style.display = 'block';
+                document.getElementById('results').style.display = 'none';
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const uint8Array = new Uint8Array(arrayBuffer);
+
+                    // Use the correct WASM method name
+                    const seqCollection = SequenceCollection.from_fasta_bytes_wasm(uint8Array);
+
+                    document.getElementById('loading').style.display = 'none';
+                    displayResults(seqCollection, file.name);
+
+                } catch (error) {
+                    console.error('❌ Error processing FASTA file:', error);
+                    // ... error handling
+                }
+            });
+
+        } catch (error) {
+            console.error('❌ Failed to initialize WASM module:', error);
+        }
+    }
+
+    function displayResults(seqCollection, fileName) {
+        // Use the WASM getter methods
+        const digest = seqCollection.digest_wasm;
+        const sequences = seqCollection.sequences_wasm || [];
+        const lvl1 = seqCollection.lvl1_wasm || {};
+
+        // ... rest of your display logic
+    }
+
+    run().catch(console.error);
+</script>
+</body>
+</html>

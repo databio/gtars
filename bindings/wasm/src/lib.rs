@@ -15,8 +15,9 @@ use gtars::{
 use gtars::refget::store;
 
 use wasm_bindgen::prelude::*;
-
+use serde_wasm_bindgen;
 use crate::{tokenizers::BedEntry, utils::prepare_universe_from_bed_entries};
+use gtars::refget::collection::SequenceCollection;
 
 #[wasm_bindgen]
 extern "C" {
@@ -98,6 +99,48 @@ impl WasmRefgetStore {
         self.inner
             .import_fasta_bytes(fasta_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to add FASTA: {}", e)))
+    }
+
+}
+
+#[wasm_bindgen]
+pub struct SequenceCollectionWasm {
+    inner: SequenceCollection,
+}
+
+#[wasm_bindgen]
+impl SequenceCollectionWasm {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        Self {
+            inner: SequenceCollection::from_records(vec![]),
+        }
+    }
+
+    #[wasm_bindgen]
+    pub fn from_fasta_bytes(fasta_bytes: &[u8]) -> Result<SequenceCollectionWasm, JsValue> {
+        let collection = SequenceCollection::from_fasta_bytes(fasta_bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse FASTA: {}", e)))?;
+
+        Ok(SequenceCollectionWasm { inner: collection })
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn sequences(&self) -> JsValue {
+        // Convert sequences to JS-compatible format
+        let sequences: Vec<_> = self.inner.sequences.iter().map(|seq| {
+            serde_json::json!({
+            "metadata": {
+                "name": seq.metadata.name,
+                "length": seq.metadata.length,
+                "sha512t24u": seq.metadata.sha512t24u,
+                "md5": seq.metadata.md5,
+                "alphabet": seq.metadata.alphabet
+            }
+        })
+        }).collect();
+
+        serde_wasm_bindgen::to_value(&sequences).unwrap_or(JsValue::NULL)
     }
 
 }
