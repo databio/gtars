@@ -10,7 +10,6 @@ use std::path::PathBuf;
 
 use gtars_core::utils::{FileType, get_file_info};
 
-
 // Chromosome representation for Bed File Inputs
 #[derive(Debug)]
 pub struct Chromosome {
@@ -36,7 +35,6 @@ pub fn clamped_start_position(start: i32, smoothsize: i32, wig_shift: i32) -> i3
 pub fn clamped_start_position_zero_pos(start: i32, smoothsize: i32) -> i32 {
     std::cmp::max(0, start - smoothsize)
 }
-
 
 /// Attempt to compress counts before writing to bedGraph
 pub fn compress_counts(

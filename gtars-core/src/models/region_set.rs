@@ -116,30 +116,30 @@ impl TryFrom<&Path> for RegionSet {
                 start: match parts[1].parse() {
                     Ok(start) => start,
                     Err(_err) => {
-                        return Err(Error::other(
-                            format!("Error in parsing start position: {:?}", parts),
-                        )
+                        return Err(Error::other(format!(
+                            "Error in parsing start position: {:?}",
+                            parts
+                        ))
                         .into())
                     }
                 },
                 end: match parts[2].parse() {
-                    Ok(end) => end, 
+                    Ok(end) => end,
                     Err(_err) => {
-                        return Err(anyhow::Error::from(Error::other(
-                            format!("Error in parsing end position: {:?}", parts),
-                        )))
+                        return Err(anyhow::Error::from(Error::other(format!(
+                            "Error in parsing end position: {:?}",
+                            parts
+                        ))))
                     }
                 },
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
         if new_regions.is_empty() {
-            let new_error = Error::other(
-                format!(
-                    "Corrupted file. 0 regions found in the file: {}",
-                    path.display()
-                ),
-            );
+            let new_error = Error::other(format!(
+                "Corrupted file. 0 regions found in the file: {}",
+                path.display()
+            ));
             return Err(new_error.into());
         }
 

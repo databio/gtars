@@ -1,6 +1,6 @@
 use crate::utils::Chromosome;
-use gtars_core::utils::get_file_info;
 use flate2::read::GzDecoder;
+use gtars_core::utils::get_file_info;
 use noodles::bam;
 use std::error::Error;
 use std::fs::File;

@@ -2,18 +2,18 @@
 // It will allow computing ga4gh digests, creating sequence store objects,
 // and sequence collection objects from Python.
 
+use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString, PyType};
-use pyo3::exceptions::{PyTypeError, PyIndexError};
 
-
+use ::refget::alphabet::AlphabetType;
+use ::refget::collection::{
+    SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
+};
+use ::refget::digest::{md5, sha512t24u};
 use ::refget::store::GlobalRefgetStore;
 use ::refget::store::StorageMode;
-use ::refget::digest::{md5, sha512t24u};
-use ::refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
-use ::refget::alphabet::AlphabetType;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
-
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
@@ -43,9 +43,7 @@ pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
     let fasta = fasta.to_string();
     match ::refget::fasta::digest_fasta(&fasta) {
-        Ok(sequence_collection) => {
-            Ok(PySequenceCollection::from(sequence_collection))
-        }
+        Ok(sequence_collection) => Ok(PySequenceCollection::from(sequence_collection)),
         Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
             "Error processing FASTA file: {}",
             e
@@ -114,7 +112,6 @@ pub struct PySequenceCollection {
     pub has_data: bool,
 }
 
-
 #[pyclass(name = "RetrievedSequence")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyRetrievedSequence {
@@ -167,7 +164,6 @@ impl PyRetrievedSequence {
         )
     }
 }
-
 
 #[pymethods]
 impl PyAlphabetType {
@@ -225,13 +221,17 @@ impl PySeqColDigestLvl1 {
 #[pymethods]
 impl PySequenceCollection {
     fn __repr__(&self) -> String {
-        format!("<SequenceCollection with {} sequences>", self.sequences.len())
+        format!(
+            "<SequenceCollection with {} sequences>",
+            self.sequences.len()
+        )
     }
 
     fn __str__(&self) -> String {
         format!(
             "SequenceCollection with {} sequences, digest: {}",
-            self.sequences.len(), self.digest
+            self.sequences.len(),
+            self.digest
         )
     }
     fn __len__(&self) -> PyResult<usize> {
@@ -241,17 +241,15 @@ impl PySequenceCollection {
         let len = self.sequences.len() as isize;
 
         // Handle negative indexing like Python lists do
-        let index = if idx < 0 {
-            len + idx
-        } else {
-            idx
-        };
+        let index = if idx < 0 { len + idx } else { idx };
 
         if index >= 0 && (index as usize) < self.sequences.len() {
             // Convert the PySequenceRecord to a PyObject before returning
             Ok(self.sequences[index as usize].clone().into_py(py))
         } else {
-            Err(PyIndexError::new_err("SequenceCollection index out of range"))
+            Err(PyIndexError::new_err(
+                "SequenceCollection index out of range",
+            ))
         }
     }
 }
@@ -308,7 +306,11 @@ impl From<SeqColDigestLvl1> for PySeqColDigestLvl1 {
 impl From<SequenceCollection> for PySequenceCollection {
     fn from(value: SequenceCollection) -> Self {
         PySequenceCollection {
-            sequences: value.sequences.into_iter().map(PySequenceRecord::from).collect(),
+            sequences: value
+                .sequences
+                .into_iter()
+                .map(PySequenceRecord::from)
+                .collect(),
             digest: value.digest,
             lvl1: PySeqColDigestLvl1::from(value.lvl1),
             file_path: value.file_path.map(|p| p.to_string_lossy().to_string()),
@@ -357,27 +359,36 @@ impl PyGlobalRefgetStore {
     }
 
     fn import_fasta(&mut self, file_path: &str) -> PyResult<()> {
-        self.inner.import_fasta(file_path)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e)))
+        self.inner.import_fasta(file_path).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
+        })
     }
-
 
     fn get_sequence_by_id(&self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
         // Try as SHA512t24u first (32 bytes)
-        let result = self.inner.get_sequence_by_id(digest.as_bytes())
+        let result = self
+            .inner
+            .get_sequence_by_id(digest.as_bytes())
             .map(|record| PySequenceRecord::from(record.clone()));
 
         // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
         if result.is_none() && digest.len() == 32 {
-            return Ok(self.inner.get_sequence_by_md5(digest.as_bytes())
+            return Ok(self
+                .inner
+                .get_sequence_by_md5(digest.as_bytes())
                 .map(|record| PySequenceRecord::from(record.clone())));
         }
 
         Ok(result)
     }
 
-    fn get_sequence_by_collection_and_name(&self, collection_digest: &str, sequence_name: &str) -> Option<PySequenceRecord> {
-        self.inner.get_sequence_by_collection_and_name(collection_digest, sequence_name)
+    fn get_sequence_by_collection_and_name(
+        &self,
+        collection_digest: &str,
+        sequence_name: &str,
+    ) -> Option<PySequenceRecord> {
+        self.inner
+            .get_sequence_by_collection_and_name(collection_digest, sequence_name)
             .map(|record| PySequenceRecord::from(record.clone()))
     }
 
@@ -385,15 +396,23 @@ impl PyGlobalRefgetStore {
         self.inner.get_substring(seq_digest, start, end)
     }
 
-    fn write_store_to_directory(&self, root_path: &str, seqdata_path_template: &str) -> PyResult<()> {
-        self.inner.write_store_to_directory(root_path, seqdata_path_template)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error writing store: {}", e)))
+    fn write_store_to_directory(
+        &self,
+        root_path: &str,
+        seqdata_path_template: &str,
+    ) -> PyResult<()> {
+        self.inner
+            .write_store_to_directory(root_path, seqdata_path_template)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error writing store: {}", e))
+            })
     }
 
     #[classmethod]
     fn load_from_directory(_cls: &Bound<'_, PyType>, root_path: &str) -> PyResult<Self> {
-        let store = GlobalRefgetStore::load_from_directory(root_path)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading store: {}", e)))?;
+        let store = GlobalRefgetStore::load_from_directory(root_path).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading store: {}", e))
+        })?;
         Ok(Self { inner: store })
     }
 
@@ -404,8 +423,14 @@ impl PyGlobalRefgetStore {
         output_file_path: &str,
     ) -> PyResult<()> {
         // Rust function expects K: AsRef<[u8]>, &str works directly
-        self.inner.get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error retrieving sequences and writing to file: {}", e)))
+        self.inner
+            .get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error retrieving sequences and writing to file: {}",
+                    e
+                ))
+            })
     }
 
     fn get_seqs_bed_file_to_vec(
@@ -414,11 +439,21 @@ impl PyGlobalRefgetStore {
         bed_file_path: &str,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
         // Corrected: use `let ... = ...?;` to bind the result
-        let rust_results = self.inner.get_seqs_bed_file_to_vec(collection_digest, bed_file_path)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error retrieving sequences to list: {}", e)))?;
+        let rust_results = self
+            .inner
+            .get_seqs_bed_file_to_vec(collection_digest, bed_file_path)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error retrieving sequences to list: {}",
+                    e
+                ))
+            })?;
 
         // Now `rust_results` is available
-        let py_results: Vec<PyRetrievedSequence> = rust_results.into_iter().map(PyRetrievedSequence::from).collect();
+        let py_results: Vec<PyRetrievedSequence> = rust_results
+            .into_iter()
+            .map(PyRetrievedSequence::from)
+            .collect();
 
         Ok(py_results)
     }
@@ -428,7 +463,10 @@ impl PyGlobalRefgetStore {
     }
 
     fn __repr__(&self) -> String {
-        format!("<GlobalRefgetStore with {} sequences>", self.inner.list_sequence_digests().len())
+        format!(
+            "<GlobalRefgetStore with {} sequences>",
+            self.inner.list_sequence_digests().len()
+        )
     }
 }
 

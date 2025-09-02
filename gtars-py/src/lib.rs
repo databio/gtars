@@ -7,7 +7,6 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[pymodule]
 fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-
     let refget_module = pyo3::wrap_pymodule!(refget::refget);
 
     m.add_wrapped(refget_module)?;

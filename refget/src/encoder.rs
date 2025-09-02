@@ -212,7 +212,9 @@ mod tests {
         let sequence = b"ACGTRYMK";
         let alphabet = &alphabet::DNA_IUPAC_ALPHABET;
         let encoded = encode_sequence(sequence, alphabet);
-        let ans = [0b0001, 0b0010, 0b0100, 0b1000, 0b0101, 0b1010, 0b0011, 0b0111];
+        let ans = [
+            0b0001, 0b0010, 0b0100, 0b1000, 0b0101, 0b1010, 0b0011, 0b0111,
+        ];
         let packed: Vec<u8> = ans
             .chunks(8 / alphabet.bits_per_symbol) // Number of symbols that fit in a byte
             .map(|chunk| {

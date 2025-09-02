@@ -1,23 +1,23 @@
-use super::alphabet::{lookup_alphabet, AlphabetType};
+use super::alphabet::{AlphabetType, lookup_alphabet};
 use seq_io::fasta::{Reader, Record};
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
+use super::encoder::SequenceEncoder;
+use super::encoder::decode_substring_from_bytes;
+use crate::fasta::read_fasta_refget_file;
+use crate::hashkeyable::HashKeyable;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
 use chrono::Utc;
+use flate2::read::GzDecoder;
+use gtars_core::utils::{get_dynamic_reader, get_file_info, parse_bedlike_file};
 use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, create_dir_all, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, create_dir_all};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::{io, str};
-use flate2::read::GzDecoder;
-use super::encoder::decode_substring_from_bytes;
-use super::encoder::SequenceEncoder;
-use gtars_core::utils::{get_dynamic_reader, parse_bedlike_file, get_file_info};
-use crate::fasta::read_fasta_refget_file;
-use crate::hashkeyable::HashKeyable;
 // Import the HashKeyable trait for converting types to a 32-byte key
 
 // Import collection types
@@ -33,7 +33,6 @@ pub enum StorageMode {
     Raw,
     Encoded,
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetrievedSequence {
@@ -81,51 +80,50 @@ struct StoreMetadata {
     created_at: String,
 }
 
-pub struct GetSeqsBedFileIter<'a, K> 
-where K: AsRef<[u8]>
+pub struct GetSeqsBedFileIter<'a, K>
+where
+    K: AsRef<[u8]>,
 {
     store: &'a GlobalRefgetStore,
     reader: BufReader<Box<dyn Read>>,
     collection_digest: K,
     previous_parsed_chr: String,
     current_seq_digest: String,
-    line_num: usize
+    line_num: usize,
 }
 
-impl<K> Iterator for GetSeqsBedFileIter<'_, K> 
-where K: AsRef<[u8]>
+impl<K> Iterator for GetSeqsBedFileIter<'_, K>
+where
+    K: AsRef<[u8]>,
 {
     type Item = Result<RetrievedSequence, Box<dyn std::error::Error>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-
         let mut line_string = String::new();
 
         let num_bytes = self.reader.read_line(&mut line_string);
         match num_bytes {
             Ok(bytes) => {
                 if bytes == 0 {
-                    return None
+                    return None;
                 }
-            },
-            Err(err) => return Some(Err(err.into())) 
+            }
+            Err(err) => return Some(Err(err.into())),
         };
 
         self.line_num += 1;
 
-        let (parsed_chr, parsed_start, parsed_end) =
-            match parse_bedlike_file(line_string.trim()) {
-                Some(coords) => coords,
-                None => {
-                    let err_str = format!(
-                        "Error reading line {} because it could not be parsed as a BED-like entry: '{}'",
-                        self.line_num + 1,
-                        line_string
-                    );
-                    return Some(Err(err_str.into()))
-                }
-            };
-
+        let (parsed_chr, parsed_start, parsed_end) = match parse_bedlike_file(line_string.trim()) {
+            Some(coords) => coords,
+            None => {
+                let err_str = format!(
+                    "Error reading line {} because it could not be parsed as a BED-like entry: '{}'",
+                    self.line_num + 1,
+                    line_string
+                );
+                return Some(Err(err_str.into()));
+            }
+        };
 
         if parsed_start == -1 || parsed_end == -1 {
             let err_str = format!(
@@ -133,15 +131,16 @@ where K: AsRef<[u8]>
                 self.line_num + 1,
                 line_string
             );
-            return Some(Err(err_str.into()))
+            return Some(Err(err_str.into()));
         }
 
-
         if self.previous_parsed_chr != parsed_chr {
-
             self.previous_parsed_chr = parsed_chr.clone();
 
-            let result = match self.store.get_sequence_by_collection_and_name(&self.collection_digest, &parsed_chr) {
+            let result = match self
+                .store
+                .get_sequence_by_collection_and_name(&self.collection_digest, &parsed_chr)
+            {
                 Some(seq_record) => seq_record,
                 None => {
                     let err_str = format!(
@@ -150,23 +149,28 @@ where K: AsRef<[u8]>
                         parsed_chr,
                         String::from_utf8_lossy(self.collection_digest.as_ref())
                     );
-                    return Some(Err(err_str.into()))
+                    return Some(Err(err_str.into()));
                 }
             };
 
             self.current_seq_digest = result.metadata.sha512t24u.clone();
-
         }
 
-        let retrieved_substring = match self.store.get_substring(&self.current_seq_digest, parsed_start as usize, parsed_end as usize) {
+        let retrieved_substring = match self.store.get_substring(
+            &self.current_seq_digest,
+            parsed_start as usize,
+            parsed_end as usize,
+        ) {
             Some(substring) => substring,
             None => {
                 let err_str = format!(
                     "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
                     self.line_num + 1,
-                    self.current_seq_digest, parsed_start, parsed_end
+                    self.current_seq_digest,
+                    parsed_start,
+                    parsed_end
                 );
-                return Some(Err(err_str.into()))
+                return Some(Err(err_str.into()));
             }
         };
 
@@ -209,9 +213,9 @@ impl GlobalRefgetStore {
         let collection_digest = collection_digest
             .into()
             .unwrap_or(DEFAULT_COLLECTION_ID.to_key());
-        self.collections
-            .get(&collection_digest)
-            .ok_or_else(|| anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest))?;
+        self.collections.get(&collection_digest).ok_or_else(|| {
+            anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest)
+        })?;
 
         // Add to name lookup for the collection
         self.name_lookup
@@ -361,7 +365,7 @@ impl GlobalRefgetStore {
     pub fn get_seqs_in_bed_file_iter<'a, K: AsRef<[u8]>>(
         &'a self,
         collection_digest: K,
-        bed_file_path: &str
+        bed_file_path: &str,
     ) -> Result<GetSeqsBedFileIter<'a, K>, Box<dyn std::error::Error>> {
         let path = Path::new(bed_file_path);
         let file_info = get_file_info(path);
@@ -375,13 +379,13 @@ impl GlobalRefgetStore {
         };
         let reader = BufReader::new(reader);
 
-        Ok(GetSeqsBedFileIter { 
+        Ok(GetSeqsBedFileIter {
             store: self,
             reader,
             collection_digest,
             previous_parsed_chr: String::new(),
             current_seq_digest: String::new(),
-            line_num: 0
+            line_num: 0,
         })
     }
 
@@ -394,9 +398,12 @@ impl GlobalRefgetStore {
         output_file_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Set up the output path and create directories if they don't exist
-        let output_path = Path::new(output_file_path)
-            .parent()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid output file path: parent directory not found"))?;
+        let output_path = Path::new(output_file_path).parent().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Invalid output file path: parent directory not found",
+            )
+        })?;
 
         create_dir_all(output_path)?;
 
@@ -413,10 +420,9 @@ impl GlobalRefgetStore {
         let mut previous_header: String = String::new();
 
         for rs in seq_iter.into_iter() {
-
             if let Err(err) = rs {
                 eprintln!("{err}");
-                continue
+                continue;
             }
             let rs = rs.unwrap();
 
@@ -424,7 +430,9 @@ impl GlobalRefgetStore {
                 previous_parsed_chr = rs.chrom_name.clone();
 
                 // If we get this far, the metadata **must** exist, so we will unwrap the present
-                let seq_info = self.get_sequence_by_collection_and_name(&collection_digest, &rs.chrom_name).unwrap();
+                let seq_info = self
+                    .get_sequence_by_collection_and_name(&collection_digest, &rs.chrom_name)
+                    .unwrap();
                 current_header = format!(
                     ">{} {} {} {} {}",
                     seq_info.metadata.name,
@@ -461,19 +469,15 @@ impl GlobalRefgetStore {
         collection_digest: K,
         bed_file_path: &str,
     ) -> Result<Vec<RetrievedSequence>, Box<dyn std::error::Error>> {
-
-
         let seq_iter = self.get_seqs_in_bed_file_iter(collection_digest, bed_file_path)?;
 
         let retrieved_sequences = seq_iter
             .into_iter()
-            .filter_map(|rs| {
-                match rs {
-                    Ok(rs) => Some(rs),
-                    Err(err) => {
-                        eprintln!("{err}");
-                        None
-                    },
+            .filter_map(|rs| match rs {
+                Ok(rs) => Some(rs),
+                Err(err) => {
+                    eprintln!("{err}");
+                    None
                 }
             })
             .collect::<Vec<RetrievedSequence>>();
@@ -538,8 +542,6 @@ impl GlobalRefgetStore {
             }
         }
     }
-
-
 
     /// Helper function to get the relative path for a sequence based on its SHA512t24u digest string
     fn get_sequence_path(digest_str: &str, template: &str) -> PathBuf {
@@ -857,7 +859,6 @@ mod tests {
         }
     }
 
-
     // Helper function to calculate actual digests for testing
     fn calculate_test_digests(sequence: &[u8]) -> (String, String) {
         (sha512t24u(sequence), md5(sequence))
@@ -888,13 +889,13 @@ GGGGAAAA
 
         let _ = sequence_keys[0]; //ww1QMyfFm1f4qa3fRLqqJGafIeEuZR1V
         let _ = sequence_keys[1]; //OyXJErGtjgcIVSdobGkHE3sBdQ5faDTf
-         let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
+        let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
 
         // Calculate expected SHA512t24u and MD5 for test sequences
         let (chr1_sha, chr1_md5) = calculate_test_digests(b"ATGCATGCATGC");
         let (chr2_sha, chr2_md5) = calculate_test_digests(b"GGGGAAAA");
-        println!("chr1 values: {}  {}",chr1_sha,chr1_md5);
-        println!("chr2 values: {}  {}",chr2_sha,chr2_md5);
+        println!("chr1 values: {}  {}", chr1_sha, chr1_md5);
+        println!("chr2 values: {}  {}", chr2_sha, chr2_md5);
 
         // --- 3. Prepare Test BED Data ---
         let bed_content = "\
@@ -910,23 +911,33 @@ chr1\t-5\t100
 
         let temp_output_fa_path = temp_path.join("output.fa");
 
-        store.get_seqs_bed_file(collection_digest_ref, temp_bed_path.to_str().unwrap(), temp_output_fa_path.to_str().unwrap())
+        store
+            .get_seqs_bed_file(
+                collection_digest_ref,
+                temp_bed_path.to_str().unwrap(),
+                temp_output_fa_path.to_str().unwrap(),
+            )
             .expect("get_seqs_bed_file failed");
 
         // Read the output FASTA file and verify its content
-        let output_fa_content = fs::read_to_string(&temp_output_fa_path)
-            .expect("Failed to read output FASTA file");
+        let output_fa_content =
+            fs::read_to_string(&temp_output_fa_path).expect("Failed to read output FASTA file");
 
-         // Expected output content (headers and sequences should match the logic of the function)
+        // Expected output content (headers and sequences should match the logic of the function)
         let expected_fa_content = format!(
             ">chr1 12 dna2bit {} {}\nATGCAATGC\n>chr2 8 dna2bit {} {}\nGGGG\n",
             chr1_sha, chr1_md5, chr2_sha, chr2_md5
         );
-        assert_eq!(output_fa_content.trim(), expected_fa_content.trim(), "Output FASTA file content mismatch");
+        assert_eq!(
+            output_fa_content.trim(),
+            expected_fa_content.trim(),
+            "Output FASTA file content mismatch"
+        );
         println!("✓ get_seqs_bed_file test passed.");
 
         // --- Test get_seqs_bed_file_to_vec (returns Vec<RetrievedSequence>) ---
-        let vec_result = store.get_seqs_bed_file_to_vec(collection_digest_ref, temp_bed_path.to_str().unwrap())
+        let vec_result = store
+            .get_seqs_bed_file_to_vec(collection_digest_ref, temp_bed_path.to_str().unwrap())
             .expect("get_seqs_bed_file_to_vec failed");
 
         // Define the expected vector of RetrievedSequence structs
@@ -952,10 +963,12 @@ chr1\t-5\t100
         ];
 
         // Assert that the returned vector matches the expected vector
-        assert_eq!(vec_result, expected_vec, "Retrieved sequence vector mismatch");
+        assert_eq!(
+            vec_result, expected_vec,
+            "Retrieved sequence vector mismatch"
+        );
         println!("✓ get_seqs_bed_file_to_vec test passed.");
     }
-
 
     #[test]
     fn test_global_refget_store() {

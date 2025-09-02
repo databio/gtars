@@ -258,7 +258,9 @@ impl SequenceCollection {
             let farg_file_path = file_path.replace_exts_with("farg");
             self.to_farg_path(farg_file_path)
         } else {
-            Err(anyhow::anyhow!("No file path specified for FARG output. Use `to_farg_path` to specify a file path."))
+            Err(anyhow::anyhow!(
+                "No file path specified for FARG output. Use `to_farg_path` to specify a file path."
+            ))
         }
     }
 }

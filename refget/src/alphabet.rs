@@ -135,7 +135,7 @@ const DNA_2BIT_DECODING_ARRAY: [u8; 256] = {
 /// characters as X.
 const DNA_3BIT_ENCODING_ARRAY: [u8; 256] = {
     let mut arr = [0b111; 256]; // Default to 'X' (0b111)
-                                // Define the 8 possible values in 3-bit encoding
+    // Define the 8 possible values in 3-bit encoding
     arr[b'A' as usize] = 0b000;
     arr[b'a' as usize] = 0b000; // A
     arr[b'C' as usize] = 0b001;
@@ -150,7 +150,7 @@ const DNA_3BIT_ENCODING_ARRAY: [u8; 256] = {
     arr[b'r' as usize] = 0b101; // R
     arr[b'Y' as usize] = 0b110;
     arr[b'y' as usize] = 0b110; // Y
-                                // All other characters will be encoded as 'X' (0b111)
+    // All other characters will be encoded as 'X' (0b111)
     arr
 };
 
@@ -187,7 +187,7 @@ const DNA_IUPAC_ENCODING_ARRAY: [u8; 256] = {
     arr[b'H' as usize] = 0b1110; // A or C or T
     arr[b'V' as usize] = 0b1111; // A or C or G
     arr[b'N' as usize] = 0b0000; // Any base
-                                 // Add lowercase variants
+    // Add lowercase variants
     arr[b'a' as usize] = 0b0001;
     arr[b'c' as usize] = 0b0010;
     arr[b'g' as usize] = 0b0100;
@@ -307,7 +307,7 @@ const PROTEIN_DECODING_ARRAY: [u8; 256] = {
     arr[0b10101] = b'X'; // Unknown
     arr[0b10110] = b'-'; // Gap
     arr[0b10111] = b'.'; // Gap
-                         // All other values default to 'X'
+    // All other values default to 'X'
     arr
 };
 
@@ -506,7 +506,7 @@ fn is_more_general_alphabet(a: AlphabetType, b: AlphabetType) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{guess_alphabet, guess_alphabet_fast, AlphabetGuesser, AlphabetType};
+    use super::{AlphabetGuesser, AlphabetType, guess_alphabet, guess_alphabet_fast};
 
     #[test]
     fn test_guess_alphabet() {

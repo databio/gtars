@@ -5,40 +5,42 @@ pub mod writing;
 
 use indicatif::ProgressBar;
 use rayon::prelude::*;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{File, remove_file};
 use std::io::{BufRead, BufReader, Write};
-use std::collections::HashMap;
 
-use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::utils::cli::BBIWriteArgs;
-use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
-use bigtools::utils::cli::bigwigmerge::{ChromGroupReadImpl, get_merged_vals};
-use bigtools::utils::reopen::ReopenableFile;
-use bigtools::{BigWigRead, BigWigWrite, InputSortType};
-use noodles::bam;
-use noodles::bam::io::reader::Query;
-use noodles::bgzf::Reader;
-use os_pipe::PipeWriter;
-use rayon::ThreadPool;
-use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
-use std::thread;
-use std::str::FromStr;
-use tokio::runtime;
-use gtars_core::utils::FileType;
 use self::counting::{
     BAMRecordError, bam_to_bed_no_counts, core_counts, start_end_counts,
     variable_core_counts_bam_to_bw, variable_shifted_bam_to_bw,
     variable_start_end_counts_bam_to_bw,
 };
 use self::reading::read_chromosome_sizes;
-use self::utils::{Chromosome, compress_counts, get_final_chromosomes, clamped_start_position, clamped_start_position_zero_pos};
+use self::utils::{
+    Chromosome, clamped_start_position, clamped_start_position_zero_pos, compress_counts,
+    get_final_chromosomes,
+};
 use self::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
     write_to_wig_file,
 };
-
+use bigtools::beddata::BedParserStreamingIterator;
+use bigtools::utils::cli::BBIWriteArgs;
+use bigtools::utils::cli::bedgraphtobigwig::BedGraphToBigWigArgs;
+use bigtools::utils::cli::bigwigmerge::{ChromGroupReadImpl, get_merged_vals};
+use bigtools::utils::reopen::ReopenableFile;
+use bigtools::{BigWigRead, BigWigWrite, InputSortType};
+use gtars_core::utils::FileType;
+use noodles::bam;
+use noodles::bam::io::reader::Query;
+use noodles::bgzf::Reader;
+use os_pipe::PipeWriter;
+use rayon::ThreadPool;
+use std::path::PathBuf;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use tokio::runtime;
 
 /// Main function
 #[allow(clippy::too_many_arguments)]
