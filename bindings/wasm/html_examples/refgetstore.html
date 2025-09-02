@@ -153,6 +153,9 @@
                     const uint8Array = new Uint8Array(arrayBuffer);
 
                     const seqCollection = SequenceCollectionWasm.from_fasta_bytes(uint8Array);
+                    console.log("✅ SequenceCollectionWasm object loaded successfully:", seqCollection);
+                    console.log("📈 Sequence Count:", seqCollection.sequence_count);
+                    console.log("🔐 Collection Digest:", seqCollection.digest);
 
                     document.getElementById('loading').style.display = 'none';
                     displayResults(seqCollection, file.name);
