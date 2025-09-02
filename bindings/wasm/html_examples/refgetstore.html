@@ -4,21 +4,121 @@
     <meta charset="utf-8">
     <title>GTARS FASTA Processor</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        .file-input { margin: 20px 0; padding: 20px; border: 2px dashed #ccc; }
-        .results { margin: 20px 0; padding: 20px; background: #f5f5f5; }
-        button { padding: 10px 20px; margin: 10px 0; }
-        pre { background: #fff; padding: 10px; overflow-x: auto; }
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f8f9fa;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .file-input {
+            margin: 20px 0;
+            padding: 20px;
+            border: 2px dashed #007bff;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .loading {
+            color: #856404;
+            background: #fff3cd;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #ffeaa7;
+            margin: 20px 0;
+        }
+        .results {
+            margin: 20px 0;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        .digest-info {
+            background: #e8f5e8;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #fff;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            font-size: 12px;
+            color: #666;
+            text-transform: uppercase;
+        }
+        .sequence-list {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 15px 0;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .sequence-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .sequence-item:last-child {
+            border-bottom: none;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 10px 0;
+            background: #007bff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        pre {
+            background: #fff;
+            padding: 15px;
+            overflow-x: auto;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 4px;
+            border: 1px solid #f5c6cb;
+        }
     </style>
 </head>
 <body>
 <div class="container">
-    <h1>GTARS FASTA Processor</h1>
+    <h1>🧬 GTARS FASTA Processor</h1>
 
     <div class="file-input">
         <input type="file" id="fastaFile" accept=".fasta,.fa,.fas,.fna" />
-        <p>Select a FASTA file to process</p>
+        <p>📁 Select a FASTA file to process</p>
     </div>
 
     <div id="loading" class="loading" style="display: none;">
@@ -52,7 +152,6 @@
                     const arrayBuffer = await file.arrayBuffer();
                     const uint8Array = new Uint8Array(arrayBuffer);
 
-                    // Use the correct WASM method name
                     const seqCollection = SequenceCollectionWasm.from_fasta_bytes(uint8Array);
 
                     document.getElementById('loading').style.display = 'none';
@@ -60,23 +159,173 @@
 
                 } catch (error) {
                     console.error('❌ Error processing FASTA file:', error);
-                    // ... error handling
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('results').style.display = 'block';
+                    document.getElementById('output').innerHTML = `
+                        <div class="error">
+                            <h4>Error Processing File</h4>
+                            <p><strong>Error:</strong> ${error.message}</p>
+                            <p><strong>File:</strong> ${file.name}</p>
+                        </div>
+                    `;
                 }
             });
 
         } catch (error) {
             console.error('❌ Failed to initialize WASM module:', error);
+            document.body.innerHTML = `
+                <div class="container">
+                    <div class="error">
+                        <h2>Failed to Load WASM Module</h2>
+                        <p>Error: ${error.message}</p>
+                        <p>Please ensure the WASM files are built and available.</p>
+                    </div>
+                </div>
+            `;
         }
     }
 
     function displayResults(seqCollection, fileName) {
-        // Use the WASM getter methods
-        const digest = seqCollection.digest_wasm;
-        const sequences = seqCollection.sequences_wasm || [];
-        const lvl1 = seqCollection.lvl1_wasm || {};
+        document.getElementById('results').style.display = 'block';
 
-        // ... rest of your display logic
+        try {
+            // Use the WASM getter methods
+            const digest = seqCollection.digest;
+            const sequences = seqCollection.sequences || [];
+            const lvl1 = seqCollection.lvl1 || {};
+            const sequenceCount = seqCollection.sequence_count;
+
+            // Calculate statistics
+            const totalLength = sequences.reduce((sum, seq) => {
+                return sum + (seq.metadata?.length || 0);
+            }, 0);
+
+            // Create statistics display
+            const statsHtml = `
+                <div class="stats">
+                    <div class="stat-card">
+                        <div class="stat-value">${sequenceCount}</div>
+                        <div class="stat-label">Sequences</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${totalLength.toLocaleString()}</div>
+                        <div class="stat-label">Total Base Pairs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${(totalLength / 1000000).toFixed(1)}M</div>
+                        <div class="stat-label">Megabases</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">${(new File([new ArrayBuffer(0)], fileName).size || 0)}</div>
+                        <div class="stat-label">File Size (bytes)</div>
+                    </div>
+                </div>
+            `;
+
+            // Create digest information
+            const digestHtml = `
+                <div class="digest-info">
+                    <h4>🔐 RefGet Collection Digest</h4>
+                    <p><strong>Collection Digest:</strong> <code>${digest}</code></p>
+                    <details>
+                        <summary>Level 1 Digests</summary>
+                        <p><strong>Names Digest:</strong> <code>${lvl1.names_digest || 'N/A'}</code></p>
+                        <p><strong>Sequences Digest:</strong> <code>${lvl1.sequences_digest || 'N/A'}</code></p>
+                        <p><strong>Lengths Digest:</strong> <code>${lvl1.lengths_digest || 'N/A'}</code></p>
+                    </details>
+                </div>
+            `;
+
+            // Create sequence list (show first 10)
+            const maxShow = 10;
+            const sequencesToShow = sequences.slice(0, maxShow);
+            const sequencesHtml = `
+                <div class="sequence-list">
+                    <h4>📋 Sequences ${sequences.length > maxShow ? `(showing first ${maxShow} of ${sequences.length})` : ''}</h4>
+                    ${sequencesToShow.map((seq, index) => `
+                        <div class="sequence-item">
+                            <strong>${seq.metadata?.name || `Sequence ${index + 1}`}</strong><br>
+                            <small>
+                                Length: ${(seq.metadata?.length || 0).toLocaleString()} bp |
+                                Alphabet: ${seq.metadata?.alphabet || 'unknown'} |
+                                SHA512t24u: <code>${(seq.metadata?.sha512t24u || 'N/A').substring(0, 20)}...</code>
+                            </small>
+                        </div>
+                    `).join('')}
+                    ${sequences.length > maxShow ? `
+                        <div style="text-align: center; padding: 10px;">
+                            <button onclick="showAllSequences()" id="showAllBtn">
+                                Show All ${sequences.length} Sequences
+                            </button>
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            // Raw data section
+            const rawDataHtml = `
+                <details>
+                    <summary>🔍 Raw Data (JSON)</summary>
+                    <pre>${JSON.stringify({
+                file_name: fileName,
+                digest: digest,
+                sequence_count: sequenceCount,
+                total_length: totalLength,
+                lvl1_digests: lvl1,
+                sequences: sequences.map(seq => ({
+                    name: seq.metadata?.name,
+                    length: seq.metadata?.length,
+                    alphabet: seq.metadata?.alphabet,
+                    sha512t24u: seq.metadata?.sha512t24u,
+                    md5: seq.metadata?.md5
+                }))
+            }, null, 2)}</pre>
+                </details>
+            `;
+
+            // Display everything
+            document.getElementById('output').innerHTML = `
+                <h4>📁 File: ${fileName}</h4>
+                ${statsHtml}
+                ${digestHtml}
+                ${sequencesHtml}
+                ${rawDataHtml}
+            `;
+
+            // Store sequences globally for the "show all" function
+            window.allSequences = sequences;
+
+        } catch (error) {
+            console.error('Error displaying results:', error);
+            document.getElementById('output').innerHTML = `
+                <div class="error">
+                    <h4>Error Displaying Results</h4>
+                    <p><strong>Error:</strong> ${error.message}</p>
+                    <pre>${error.stack}</pre>
+                </div>
+            `;
+        }
     }
+
+    // Function to show all sequences
+    window.showAllSequences = function() {
+        const sequences = window.allSequences || [];
+        const sequenceListDiv = document.querySelector('.sequence-list');
+
+        sequenceListDiv.innerHTML = `
+            <h4>📋 All Sequences (${sequences.length})</h4>
+            ${sequences.map((seq, index) => `
+                <div class="sequence-item">
+                    <strong>${seq.metadata?.name || `Sequence ${index + 1}`}</strong><br>
+                    <small>
+                        Length: ${(seq.metadata?.length || 0).toLocaleString()} bp |
+                        Alphabet: ${seq.metadata?.alphabet || 'unknown'} |
+                        SHA512t24u: <code>${seq.metadata?.sha512t24u || 'N/A'}</code>
+                    </small>
+                </div>
+            `).join('')}
+        `;
+    };
 
     run().catch(console.error);
 </script>
