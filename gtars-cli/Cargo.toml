@@ -8,9 +8,12 @@ edition = "2024"
 clap = { version = "4.4.7", features = ["derive"] }
 indicatif = "0.18.0"
 anyhow = "1.0.82"
+fxhash = "0.2.1"
 
 # our code
 uniwig = { path = "../uniwig" }
+overlaprs = { path = "../overlaprs" }
+gtars-core = { path = "../gtars-core" }
 
 [[bin]]
 name = "gtars"

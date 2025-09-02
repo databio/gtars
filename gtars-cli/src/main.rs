@@ -1,3 +1,4 @@
+mod overlaprs;
 mod uniwig;
 
 use anyhow::Result;
@@ -17,6 +18,7 @@ fn build_parser() -> Command {
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true)
         .subcommand(uniwig::cli::create_uniwig_cli())
+        .subcommand(overlaprs::cli::create_overlap_cli())
 }
 
 fn main() -> Result<()> {
@@ -29,6 +31,13 @@ fn main() -> Result<()> {
         //
         Some((uniwig::cli::UNIWIG_CMD, matches)) => {
             uniwig::handlers::run_uniwig(matches);
+        }
+
+        //
+        // OVERLAPPES
+        //
+        Some((overlaprs::cli::OVERLAP_CMD, matches)) => {
+            let _ = overlaprs::handlers::overlap_query_with_universe(matches);
         }
 
         _ => unreachable!("Subcommand not found"),
