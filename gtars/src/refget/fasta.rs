@@ -268,6 +268,7 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use super::*;
 
     #[test]
@@ -359,5 +360,23 @@ mod tests {
             seqcol.lvl1.lengths_digest,
             "cGRMZIb3AVgkcAfNv39RN7hnT5Chk7RX"
         );
+    }
+
+    #[test]
+    fn test_digest_fasta_bytes_with_file() {
+
+        let file_path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/data/fasta/base.fa");
+
+        let fasta_bytes = fs::read(&file_path)
+            .with_context(|| format!("Failed to read file at {:?}", file_path)).unwrap();
+
+        let sequence_collection = digest_fasta_bytes(&fasta_bytes).unwrap();
+
+        println!("ok");
+
+        let record = &sequence_collection.sequences[0];
+        assert_eq!(record.metadata.name, "chrX");
+
+
     }
 }
