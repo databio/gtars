@@ -7,6 +7,8 @@ edition = "2024"
 thiserror = "2.0.12"
 hf-hub = { version = "0.4.3", optional = true}
 toml = "0.8.14"
+
+# share workspace dependencies
 anyhow = { workspace = true }
 fxhash = { workspace = true }
 serde = { workspace = true }

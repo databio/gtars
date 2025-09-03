@@ -6,6 +6,8 @@ edition = "2024"
 [dependencies]
 # generic cli stuff
 clap = { version = "4.4.7", features = ["derive"] }
+
+# shared workspace dependencies
 indicatif = { workspace = true }
 fxhash = { workspace = true }
 anyhow = { workspace = true }
