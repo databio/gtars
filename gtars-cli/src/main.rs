@@ -1,3 +1,4 @@
+mod igd;
 mod overlaprs;
 mod uniwig;
 mod bbcache;
@@ -48,6 +49,19 @@ fn main() -> Result<()> {
         Some((bbcache::cli::BBCACHE_CMD, matches)) => {
             bbcache::handlers::run_bbcache(matches);
         }
+
+        //
+        // IGD
+        //
+        Some((igd::cli::IGD_CMD, matches)) => match matches.subcommand() {
+            Some((igd::cli::IGD_CREATE, matches)) => {
+                igd::handlers::igd_get_create_matches(matches);
+            }
+            Some((igd::cli::IGD_SEARCH, matches)) => {
+                igd::handlers::igd_get_search_matches(matches);
+            }
+            _ => unreachable!("IGD Subcommand not found"),
+        },
 
         _ => unreachable!("Subcommand not found"),
     };
