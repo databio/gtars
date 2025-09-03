@@ -3,6 +3,7 @@ mod overlaprs;
 mod uniwig;
 mod bbcache;
 mod fragsplit;
+mod scoring;
 
 use anyhow::Result;
 use clap::Command;
@@ -23,6 +24,9 @@ fn build_parser() -> Command {
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(overlaprs::cli::create_overlap_cli())
         .subcommand(bbcache::cli::create_bbcache_cli())
+        .subcommand(igd::cli::create_igd_cli())
+        .subcommand(fragsplit::cli::create_fragsplit_cli())
+        .subcommand(scoring::cli::create_scoring_cli())
 }
 
 fn main() -> Result<()> {
@@ -68,7 +72,7 @@ fn main() -> Result<()> {
         // FRAGMENT SPLITTING UTIL
         //
         Some((fragsplit::cli::FRAGSPLIT_CMD, matches)) => {
-            fragsplit::handlers::split_fragment_files(matches)?;
+            fragsplit::handlers::run_fragsplit(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

@@ -10,8 +10,8 @@ use flate2::Compression;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use gtars_core::utils::get_dynamic_reader;
+use gtars_core::utils::remove_all_extensions;
 
-use super::utils::remove_all_extensions;
 use super::map::{ClusterLookup, BarcodeToClusterMap};
 
 ///

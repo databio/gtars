@@ -6,7 +6,7 @@ use clap::ArgMatches;
 use fragsplit::consts::*;
 use fragsplit::{BarcodeToClusterMap, pseudobulk_fragment_files};
 
-pub fn split_fragment_files(matches: &ArgMatches) -> Result<()> {
+pub fn run_fragsplit(matches: &ArgMatches) -> Result<()> {
     let fragments = matches
         .get_one::<String>("fragments")
         .expect("A path to fragment files is required.");

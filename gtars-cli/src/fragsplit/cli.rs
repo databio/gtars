@@ -2,7 +2,7 @@ use clap::{arg, Arg, Command};
 
 pub use fragsplit::consts::*;
 
-pub fn make_fragsplit_cli() -> Command {
+pub fn create_fragsplit_cli() -> Command {
     Command::new(FRAGSPLIT_CMD)
         .author("Nathan LeRoy")
         .about("Split fragment files into pseudobulks based on cluster labels.")
