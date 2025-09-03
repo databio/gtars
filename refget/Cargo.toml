@@ -8,8 +8,10 @@ seq_io = "0.3.2"
 sha2 = "0.10.7"
 md-5 = "0.10.5"
 base64-url = "2.0.0"
-memmap2 = "0.5"  # For memory-mapped file I/O
+memmap2 = "0.5"  # for memory-mapped file I/O
 chrono = { version = "0.4", features = ["serde"] }  # For timestamps
+
+# shared workspace dependencies
 anyhow = { workspace = true }
 serde = { workspace = true }
 flate2 = { workspace = true }
