@@ -75,6 +75,14 @@ fn main() -> Result<()> {
             fragsplit::handlers::run_fragsplit(matches)?;
         }
 
+        //
+        // REGION SCORING MATRIX
+        //
+        Some((scoring::cli::FSCORING_CMD, matches)) => {
+            scoring::handlers::run_scoring(matches)?;
+        }
+
+
         _ => unreachable!("Subcommand not found"),
     };
 

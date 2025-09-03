@@ -74,7 +74,7 @@ impl<T> CountMatrix<T>
 where
     T: Copy + Default,
 {
-    pub fn iter_rows(&self) -> RowIterator<T> {
+    pub fn iter_rows(&self) -> RowIterator<'_, T> {
         RowIterator {
             matrix: self,
             current_row: 0,

@@ -158,17 +158,17 @@ mod tests {
 
     #[fixture]
     fn barcode_cluster_map_file() -> &'static str {
-        "tests/data/barcode_cluster_map.tsv"
+        "../tests/data/barcode_cluster_map.tsv"
     }
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments/fragsplit"
+        "../tests/data/fragments/fragsplit"
     }
 
     #[fixture]
     fn path_to_output() -> &'static str {
-        "tests/data/out"
+        "../tests/data/out"
     }
 
     #[fixture]
