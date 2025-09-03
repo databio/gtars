@@ -39,7 +39,7 @@ fn main() -> Result<()> {
         // OVERLAPPES
         //
         Some((overlaprs::cli::OVERLAP_CMD, matches)) => {
-            let _ = overlaprs::handlers::overlap_query_with_universe(matches);
+            let _ = overlaprs::handlers::run_overlaprs(matches);
         }
 
         //

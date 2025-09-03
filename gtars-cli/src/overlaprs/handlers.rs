@@ -19,7 +19,7 @@ enum BackendType {
 
 type OverlapperMap = HashMap<String, Box<dyn Overlapper<u32, Option<u8>>>>;
 
-pub fn overlap_query_with_universe(matches: &ArgMatches) -> Result<()> {
+pub fn run_overlaprs(matches: &ArgMatches) -> Result<()> {
     let query_file = matches
         .get_one::<String>("query")
         .expect("A path to a query file is required.");
