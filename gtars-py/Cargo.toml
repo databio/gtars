@@ -9,7 +9,7 @@ name = "gtars"
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = "1.0.82"
+anyhow = { workspace = true }
 pyo3 = { version = "0.21", features=["anyhow", "extension-module"] }
 
 # our code
