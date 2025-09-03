@@ -13,6 +13,7 @@ anyhow = { workspace = true }
 # our code
 uniwig = { path = "../uniwig" }
 overlaprs = { path = "../overlaprs" }
+bbcache = { path = "../bbcache" }
 gtars-core = { path = "../gtars-core" }
 
 [[bin]]

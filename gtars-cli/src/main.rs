@@ -1,5 +1,6 @@
 mod overlaprs;
 mod uniwig;
+mod bbcache;
 
 use anyhow::Result;
 use clap::Command;
@@ -19,6 +20,7 @@ fn build_parser() -> Command {
         .subcommand_required(true)
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(overlaprs::cli::create_overlap_cli())
+        .subcommand(bbcache::cli::create_bbcache_cli())
 }
 
 fn main() -> Result<()> {
