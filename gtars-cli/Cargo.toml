@@ -11,6 +11,7 @@ fxhash = { workspace = true }
 anyhow = { workspace = true }
 
 # our code
+fragsplit = { path = "../fragsplit" }
 igd = { path = "../igd" }
 uniwig = { path = "../uniwig" }
 overlaprs = { path = "../overlaprs" }

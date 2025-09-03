@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = [ "gtars-cli", "gtars-py", "gtars-core", "refget", "uniwig", "overlaprs", "tokenizers", "io", "bbcache", "igd"]
+members = [ "gtars-cli", "gtars-py", "gtars-core", "refget", "uniwig", "overlaprs", "tokenizers", "io", "bbcache", "igd", "fragsplit"]
 
 [workspace.dependencies]
 anyhow = "1.0.82"

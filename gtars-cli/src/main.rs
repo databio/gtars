@@ -2,6 +2,7 @@ mod igd;
 mod overlaprs;
 mod uniwig;
 mod bbcache;
+mod fragsplit;
 
 use anyhow::Result;
 use clap::Command;
@@ -62,6 +63,13 @@ fn main() -> Result<()> {
             }
             _ => unreachable!("IGD Subcommand not found"),
         },
+
+        //
+        // FRAGMENT SPLITTING UTIL
+        //
+        Some((fragsplit::cli::FRAGSPLIT_CMD, matches)) => {
+            fragsplit::handlers::split_fragment_files(matches)?;
+        }
 
         _ => unreachable!("Subcommand not found"),
     };
