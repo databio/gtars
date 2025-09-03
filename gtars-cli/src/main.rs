@@ -42,6 +42,13 @@ fn main() -> Result<()> {
             let _ = overlaprs::handlers::overlap_query_with_universe(matches);
         }
 
+        //
+        // BBCACHE
+        //
+        Some((bbcache::cli::BBCACHE_CMD, matches)) => {
+            bbcache::handlers::run_bbcache(matches);
+        }
+
         _ => unreachable!("Subcommand not found"),
     };
 

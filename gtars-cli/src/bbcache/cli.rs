@@ -1,4 +1,4 @@
-use bbcache::consts::BBCACHE_CMD;
+pub use bbcache::consts::BBCACHE_CMD;
 use clap::{Arg, Command};
 
 pub fn create_bbcache_cli() -> Command {

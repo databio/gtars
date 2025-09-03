@@ -9,7 +9,8 @@ use bbcache::utils::{get_default_cache_folder, print_resources};
 /// # Arguments
 /// - subcmd: the subcommand under bbcache
 /// - matches: matched items from CLAP args
-pub fn run_bbcache(subcmd: &str, matches: &ArgMatches) {
+pub fn run_bbcache(matches: &ArgMatches) {
+    let subcmd = matches.subcommand_name().expect("A subcommand is required");
     let cache_folder = matches
         .get_one::<String>("cache-folder")
         .map(PathBuf::from)
