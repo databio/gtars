@@ -121,6 +121,30 @@
         <p>📁 Select a FASTA file to process</p>
     </div>
 
+    <div class="storage-controls">
+        <h3>💾 Storage Management</h3>
+        <div class="storage-buttons">
+            <button onclick="saveStoreToBrowser()" id="saveBtn" disabled>
+                💾 Save to Browser Storage
+            </button>
+            <button onclick="loadStoreFromBrowser()">
+                📂 Load from Browser Storage
+            </button>
+            <button onclick="downloadStore()" id="downloadBtn" disabled>
+                ⬇️ Download as File
+            </button>
+            <button onclick="loadStoreFromFile()">
+                ⬆️ Upload Store File
+            </button>
+            <button onclick="clearBrowserStorage()">
+                🗑️ Clear Stored Data
+            </button>
+        </div>
+        <div id="storeInfo" class="store-info">
+            <p>No RefGet store loaded</p>
+        </div>
+    </div>
+
     <div id="loading" class="loading" style="display: none;">
         🔄 Processing FASTA file and computing digests...
     </div>
@@ -132,12 +156,13 @@
 </div>
 
 <script type="module">
-    import init, { SequenceCollectionWasm } from '../pkg/gtars_js.js';
-
+    import init, { SequenceCollectionWasm,WasmRefgetStore } from '../pkg/gtars_js.js';
+    let globalRefgetStore = null;
     async function run() {
         try {
             await init();
             console.log("✅ WASM module loaded successfully");
+            globalRefgetStore = new WasmRefgetStore();
 
             document.getElementById('fastaFile').addEventListener('change', async (event) => {
                 const file = event.target.files[0];
@@ -159,6 +184,9 @@
 
                     document.getElementById('loading').style.display = 'none';
                     displayResults(seqCollection, file.name);
+
+                    globalRefgetStore.add_fasta(uint8Array);
+                    console.log("✅ FASTA data added to global store.");
 
                 } catch (error) {
                     console.error('❌ Error processing FASTA file:', error);
@@ -187,6 +215,21 @@
             `;
         }
     }
+    // Storage management functions
+    window.saveStoreToBrowser = async function() {
+        try {
+
+            if (globalRefgetStore.get_sequence_count() === 0) {
+                alert('❌ No data to save!');
+                return;
+            }
+            await globalRefgetStore.save_to_browser_storage('gtars_refget_store');
+            alert('✅ RefGet store saved to browser storage!');
+        } catch (error) {
+            alert('❌ Failed to save: ' + error);
+        }
+    };
+
 
     function displayResults(seqCollection, fileName) {
         document.getElementById('results').style.display = 'block';

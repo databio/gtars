@@ -49,7 +49,7 @@ pub struct RetrievedSequence {
 /// sequences are deduplicated.
 /// This allows lookup by sequence digest directly (bypassing collection information).
 /// The GlobalRefgetStore also holds a collections hashmap, to provide lookup by collection+name
-#[derive(Debug)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GlobalRefgetStore {
     /// SHA512t24u digest -> SequenceRecord (metadata + optional data)
     sequence_store: HashMap<[u8; 32], SequenceRecord>,
@@ -336,7 +336,7 @@ impl GlobalRefgetStore {
     pub fn import_fasta_bytes(&mut self, fasta_bytes: &[u8]) -> Result<()> {
 
         //TODO try to integrate this with import_fasta to reduce code dupe
-        
+
         // Pass this to the sequece collection method
         let seqcol = SequenceCollection::from_fasta_bytes(&fasta_bytes)?;
 
@@ -408,8 +408,8 @@ impl GlobalRefgetStore {
         }
 
         println!("Finished loading sequences into refget SeqColStore.");
-        
-        
+
+
         Ok(())
     }
 

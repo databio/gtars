@@ -12,7 +12,7 @@ use std::io::{BufReader, Cursor};
 use crate::refget::utils::PathExtension;
 
 /// A single Sequence Collection, which may or may not hold data.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Serialize, Deserialize)]
 pub struct SequenceCollection {
     /// Vector of SequenceRecords, which contain metadata (name, length, digests, alphabet)
     /// and optionally the actual sequence data.
@@ -108,7 +108,7 @@ impl SeqColDigestLvl1 {
 
 /// A representation of a single sequence that includes metadata and optionally data.
 /// Combines sequence metadata with optional raw/encoded data
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug,Serialize, Deserialize)]
 pub struct SequenceRecord {
     pub metadata: SequenceMetadata,
     pub data: Option<Vec<u8>>,

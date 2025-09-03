@@ -101,6 +101,41 @@ impl WasmRefgetStore {
             .map_err(|e| JsValue::from_str(&format!("Failed to add FASTA: {}", e)))
     }
 
+    #[wasm_bindgen]
+    pub fn save_to_browser_storage(&self, key: &str) -> Result<(), JsValue> {
+        let serialized = serde_json::to_string(&self.inner)
+            .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))?;
+
+        let window = web_sys::window().ok_or("No window")?;
+        let storage = window.local_storage()
+            .map_err(|_| "localStorage unavailable")?
+            .ok_or("localStorage not supported")?;
+
+        storage.set_item(key, &serialized)
+            .map_err(|_| "Failed to save")?;
+
+        Ok(())
+    }
+
+    #[wasm_bindgen]
+    pub fn load_from_browser_storage(key: &str) -> Result<WasmRefgetStore, JsValue> {
+        let window = web_sys::window().ok_or("No window")?;
+        let storage = window.local_storage()
+            .map_err(|_| "localStorage unavailable")?
+            .ok_or("localStorage not supported")?;
+
+        let data = storage.get_item(key)
+            .map_err(|_| "Failed to read")?
+            .ok_or("Key not found")?;
+
+        let inner: store::GlobalRefgetStore = serde_json::from_str(&data)
+            .map_err(|e| JsValue::from_str(&format!("Deserialization failed: {}", e)))?;
+
+        Ok(WasmRefgetStore { inner })
+    }
+
+
+
 }
 
 #[wasm_bindgen]
