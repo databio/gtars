@@ -11,9 +11,11 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let refget_module = pyo3::wrap_pymodule!(refget::refget);
     let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
+    let utils_module = pyo3::wrap_pymodule!(utils::utils);
 
     m.add_wrapped(refget_module)?;
     m.add_wrapped(tokenize_module)?;
+    m.add_wrapped(utils_module)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let binding = sys.getattr("modules")?;
@@ -22,6 +24,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     // set names of submodules
     sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
     sys_modules.set_item("gtars.tokenizers", m.getattr("tokenizers")?)?;
+    sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;

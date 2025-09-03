@@ -58,29 +58,29 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
     Ok(RegionSet::from(regions))
 }
 
-// #[pyfunction]
-// pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
-//     gtars::io::write_tokens_to_gtok(filename, &tokens)?;
-//     Ok(())
-// }
+#[pyfunction]
+pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
+    io::write_tokens_to_gtok(filename, &tokens)?;
+    Ok(())
+}
 
-// #[pyfunction]
-// pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
-//     let tokens = gtars::io::read_tokens_from_gtok(filename)?;
-//     Ok(tokens)
-// }
+#[pyfunction]
+pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
+    let tokens = io::read_tokens_from_gtok(filename)?;
+    Ok(tokens)
+}
 
-// #[pyfunction]
-// pub fn read_tokens_from_gtok_as_strings(filename: &str) -> PyResult<Vec<String>> {
-//     let tokens = gtars::io::read_tokens_from_gtok(filename)?;
-//     let tokens = tokens.iter().map(|t| t.to_string()).collect();
-//     Ok(tokens)
-// }
+#[pyfunction]
+pub fn read_tokens_from_gtok_as_strings(filename: &str) -> PyResult<Vec<String>> {
+    let tokens = io::read_tokens_from_gtok(filename)?;
+    let tokens = tokens.iter().map(|t| t.to_string()).collect();
+    Ok(tokens)
+}
 
-// #[pymodule]
-// pub fn utils(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-//     m.add_wrapped(wrap_pyfunction!(write_tokens_to_gtok))?;
-//     m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok))?;
-//     m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok_as_strings))?;
-//     Ok(())
-// }
+#[pymodule]
+pub fn utils(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_wrapped(wrap_pyfunction!(write_tokens_to_gtok))?;
+    m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok))?;
+    m.add_wrapped(wrap_pyfunction!(read_tokens_from_gtok_as_strings))?;
+    Ok(())
+}
