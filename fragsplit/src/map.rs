@@ -85,7 +85,7 @@ mod tests {
 
     #[fixture]
     fn barcode_cluster_map_file() -> &'static str {
-        "tests/data/barcode_cluster_map.tsv"
+        "../tests/data/barcode_cluster_map.tsv"
     }
 
     // #[rstest]

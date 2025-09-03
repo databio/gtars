@@ -497,7 +497,7 @@ mod tests {
     fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
         let file_path: PathBuf = std::env::current_dir()
             .unwrap()
-            .join("tests/data/regionset")
+            .join("../tests/data/regionset")
             .join(file_name);
         Ok(file_path)
     }
@@ -586,7 +586,7 @@ mod tests {
 
         let chrom_sizes_path: PathBuf = std::env::current_dir()
             .unwrap()
-            .join("tests/data/regionset/dummy_chrom_sizes");
+            .join("../tests/data/regionset/dummy_chrom_sizes");
 
         let tempdir = tempfile::tempdir().unwrap();
         let mut new_file_path = tempdir.keep();

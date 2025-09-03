@@ -287,12 +287,12 @@ mod tokenizer_tests {
 
     #[fixture]
     fn anndata_path() -> String {
-        "tests/data/tokenizers/pbmc_hg38.h5ad".to_string()
+        "../tests/data/tokenizers/pbmc_hg38.h5ad".to_string()
     }
 
     #[rstest]
     fn test_tokenizer_creation_from_config() {
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
@@ -300,7 +300,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenizer_creation_from_bed() {
-        let bed_path = "tests/data/tokenizers/peaks.bed";
+        let bed_path = "../tests/data/tokenizers/peaks.bed";
         let tokenizer =
             Tokenizer::from_bed(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
@@ -308,7 +308,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenizer_creation_from_bed_gz() {
-        let bed_path = "tests/data/tokenizers/peaks.bed.gz";
+        let bed_path = "../tests/data/tokenizers/peaks.bed.gz";
         let tokenizer =
             Tokenizer::from_bed(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
@@ -316,17 +316,17 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenizer_creation_auto_all() {
-        let bed_path = "tests/data/tokenizers/peaks.bed";
+        let bed_path = "../tests/data/tokenizers/peaks.bed";
         let tokenizer =
             Tokenizer::from_auto(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_auto(cfg_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
 
-        let bed_path = "tests/data/tokenizers/peaks.bed.gz";
+        let bed_path = "../tests/data/tokenizers/peaks.bed.gz";
         let tokenizer =
             Tokenizer::from_auto(bed_path).expect("Failed to create tokenizer from config.");
         assert_eq!(tokenizer.get_vocab_size(), 32); // 25 regions + 7 special tokens
@@ -334,14 +334,14 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenizer_bad_tokenizer_type() {
-        let cfg_path = "tests/data/tokenizers/tokenizer_bad_ttype.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer_bad_ttype.toml";
         let tokenizer = Tokenizer::from_config(cfg_path);
         assert_eq!(tokenizer.is_err(), true);
     }
 
     #[rstest]
     fn test_tokenizer_custom_special_tokens() {
-        let cfg_path = "tests/data/tokenizers/tokenizer_custom_specials.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer_custom_specials.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
@@ -356,7 +356,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenize_single_region_not_overlapping() {
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
@@ -376,7 +376,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenize_unk_chrom() {
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
@@ -396,7 +396,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenize_on_two_crhoms() {
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
@@ -432,7 +432,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenize_on_two_chroms_ailist() {
-        let cfg_path = "tests/data/tokenizers/tokenizer_ailist.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer_ailist.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 
@@ -468,7 +468,7 @@ mod tokenizer_tests {
 
     #[rstest]
     fn test_tokenize_with_multi_overlap() {
-        let cfg_path = "tests/data/tokenizers/tokenizer.toml";
+        let cfg_path = "../tests/data/tokenizers/tokenizer.toml";
         let tokenizer =
             Tokenizer::from_config(cfg_path).expect("Failed to create tokenizer from config.");
 

@@ -113,7 +113,7 @@ mod tests {
 
     #[rstest]
     fn test_try_from_toml() {
-        let path = PathBuf::from("tests/data/tokenizers/tokenizer.toml");
+        let path = PathBuf::from("../tests/data/tokenizers/tokenizer.toml");
         let result = TokenizerConfig::try_from(path.as_path());
         assert_eq!(result.is_ok(), true);
     }
@@ -134,7 +134,7 @@ mod tests {
 
     #[rstest]
     fn test_get_universe_name() {
-        let path = PathBuf::from("tests/data/tokenizers/tokenizer.toml");
+        let path = PathBuf::from("../tests/data/tokenizers/tokenizer.toml");
         let result = TokenizerConfig::try_from(path.as_path()).unwrap();
 
         assert_eq!(result.universe, "peaks.bed.gz");
@@ -142,7 +142,7 @@ mod tests {
 
     #[rstest]
     fn test_get_special_tokens() {
-        let path = PathBuf::from("tests/data/tokenizers/tokenizer_custom_specials.toml");
+        let path = PathBuf::from("../tests/data/tokenizers/tokenizer_custom_specials.toml");
         let result = TokenizerConfig::try_from(path.as_path()).unwrap();
         let special_tokens = result.special_tokens;
 

@@ -34,8 +34,8 @@ where
     /// Create a new instance of Bits by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, end: x + 10, val: true})
@@ -73,8 +73,8 @@ where
 
     /// Find all intervals that overlap start .. stop
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, end: x+2 , val: true})
@@ -128,8 +128,8 @@ where
     /// SIDE EFFECTS: This clears cov() and overlaps_merged
     /// meaning that those will have to be recomputed after a insert
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let data : Vec<Interval<usize, usize>>= vec!{
     ///     Interval{start:0,  end:5,  val:1},
@@ -163,8 +163,8 @@ where
 
     /// Get the number over intervals in Bits
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let data = (0..20).step_by(5)
     ///                   .map(|x| Interval{start: x, end: x + 10, val: true})
@@ -180,8 +180,8 @@ where
 
     /// Check if BITS is empty
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let data: Vec<Interval<usize, bool>> = vec![];
     /// let bits = Bits::build(data);
@@ -255,8 +255,8 @@ where
     /// find all the excluded elements, and then deduces the intersection from there. See
     /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, end: x+2 , val: true})
@@ -279,8 +279,8 @@ where
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the Bits object mutable, and thus use the same Bits accross threads.
     /// ```
-    /// use gtars::overlap::{Bits, Overlapper};
-    /// use gtars::common::models::Interval;
+    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
     ///                                 .map(|x| Interval{start: x, end: x+2 , val: true})

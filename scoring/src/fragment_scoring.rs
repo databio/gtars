@@ -125,17 +125,17 @@ mod tests {
 
     #[fixture]
     fn path_to_fragment_files() -> &'static str {
-        "tests/data/fragments/region_scoring/*.bed.gz"
+        "../tests/data/fragments/region_scoring/*.bed.gz"
     }
 
     #[fixture]
     fn consensus_set() -> &'static str {
-        "tests/data/consensus/consensus1.bed"
+        "../tests/data/consensus/consensus1.bed"
     }
 
     #[fixture]
     fn output_file() -> &'static str {
-        "tests/data/out/region_scoring_count.csv.gz"
+        "../tests/data/out/region_scoring_count.csv.gz"
     }
 
     #[rstest]

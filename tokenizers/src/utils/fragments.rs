@@ -61,9 +61,9 @@ mod tests {
 
     #[rstest]
     fn test_tokenize_frament() {
-        let tokenizer = Tokenizer::from_bed("tests/data/consensus/consensus1.bed").unwrap();
+        let tokenizer = Tokenizer::from_bed("../tests/data/consensus/consensus1.bed").unwrap();
         let result = tokenize_fragment_file(
-            "tests/data/fragments/region_scoring/fragments1.bed.gz",
+            "../tests/data/fragments/region_scoring/fragments1.bed.gz",
             &tokenizer,
         );
         assert_eq!(result.is_ok(), true);

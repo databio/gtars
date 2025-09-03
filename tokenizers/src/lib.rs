@@ -8,10 +8,10 @@
 //! ```rust
 //! use std::path::Path;
 //!
-//! use gtars::tokenizers::Tokenizer;
-//! use gtars::common::models::Region;
+//! use tokenizers::Tokenizer;
+//! use gtars_core::models::Region;
 //!
-//! let tokenizer = Tokenizer::from_bed(Path::new("tests/data/tokenizers/peaks.bed")).unwrap();
+//! let tokenizer = Tokenizer::from_bed(Path::new("../tests/data/tokenizers/peaks.bed")).unwrap();
 //!
 //! let regions = vec![Region {
 //!     chr: "chr1".to_string(),

@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn digests_digest_fasta() {
-        let seqcol = digest_fasta("tests/data/fasta/base.fa").expect("Can't open test fasta file");
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa").expect("Can't open test fasta file");
         let results = seqcol.sequences;
         println!("{:?}", results);
         assert_eq!(results.len(), 3);
@@ -230,7 +230,7 @@ mod tests {
     #[test]
     fn digests_digest_gzipped_fasta() {
         let seqcol =
-            digest_fasta("tests/data/fasta/base.fa.gz").expect("Can't open test fasta file");
+            digest_fasta("../tests/data/fasta/base.fa.gz").expect("Can't open test fasta file");
         let results = seqcol.sequences;
         println!("{:?}", results);
         assert_eq!(results[0].metadata.length, 8);
@@ -244,17 +244,17 @@ mod tests {
 
     #[test]
     fn digests_bogus_fasta_file() {
-        let result = digest_fasta("tests/data/bogus.fa");
+        let result = digest_fasta("../tests/data/bogus.fa");
         assert!(result.is_err(), "Expected an error for a bogus fasta file");
     }
 
     #[test]
     fn digests_fa_to_farg() {
-        let seqcol = SequenceCollection::from_path_no_cache("tests/data/fasta/base.fa")
+        let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
             .expect("Failed to create SequenceCollection from FASTA file");
         seqcol.to_farg().expect("Failed to write farg file");
 
-        let loaded_seqcol = read_fasta_refget_file("tests/data/fasta/base.farg")
+        let loaded_seqcol = read_fasta_refget_file("../tests/data/fasta/base.farg")
             .expect("Failed to read refget file");
         println!("Original SequenceCollection: {}", seqcol);
         println!("Loaded SequenceCollection: {}", loaded_seqcol);
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn digests_seqcol_from_fasta() {
-        let seqcol = SequenceCollection::from_fasta("tests/data/fasta/base.fa")
+        let seqcol = SequenceCollection::from_fasta("../tests/data/fasta/base.fa")
             .expect("Failed to create SequenceCollection from FASTA file");
         println!("SeqCol digest: {:?}", seqcol.digest);
         println!(

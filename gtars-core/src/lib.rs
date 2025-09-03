@@ -7,9 +7,9 @@
 //! ### Create region set
 //! ```rust
 //! use std::path::Path;
-//! use gtars::common::models::RegionSet;
+//! use gtars_core::models::RegionSet;
 //!
-//! let path_to_tokenize_bed_file = "tests/data/to_tokenize.bed";
+//! let path_to_tokenize_bed_file = "../tests/data/to_tokenize.bed";
 //! let rs = RegionSet::try_from(Path::new(path_to_tokenize_bed_file)).unwrap();
 //!
 //! println!("{:?}", rs.regions);
@@ -32,22 +32,22 @@ mod tests {
 
     #[fixture]
     fn path_to_data() -> &'static str {
-        "tests/data"
+        "../tests/data"
     }
 
     #[fixture]
     fn path_to_bed_file() -> &'static str {
-        "tests/data/tokenizers/peaks.bed"
+        "../tests/data/tokenizers/peaks.bed"
     }
 
     #[fixture]
     fn path_to_bed_file_gzipped() -> &'static str {
-        "tests/data/tokenizers/peaks.bed.gz"
+        "../tests/data/tokenizers/peaks.bed.gz"
     }
 
     #[fixture]
     fn path_to_anndata_file() -> &'static str {
-        "tests/data/pbmc_hg38.h5ad"
+        "../tests/data/pbmc_hg38.h5ad"
     }
 
     #[fixture]
@@ -62,7 +62,7 @@ mod tests {
 
     #[fixture]
     fn path_to_gtok_file() -> &'static str {
-        "tests/data/out/tokens.gtok"
+        "../tests/data/out/tokens.gtok"
     }
 
     #[rstest]

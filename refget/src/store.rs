@@ -833,7 +833,7 @@ mod tests {
         let temp_path = temp_dir.path();
 
         // Copy test FASTA file to temp directory
-        let test_fa = "tests/data/fasta/base.fa";
+        let test_fa = "../tests/data/fasta/base.fa";
         let temp_fa = temp_path.join("base.fa");
         let temp_farg = temp_path.join("base.farg");
 
@@ -1063,7 +1063,7 @@ chr1\t-5\t100
         let temp_path = temp_dir.path();
 
         // Copy test FASTA file to temp directory
-        let test_fa = "tests/data/fasta/base.fa";
+        let test_fa = "../tests/data/fasta/base.fa";
         let temp_fa = temp_path.join("base.fa");
 
         std::fs::copy(test_fa, &temp_fa).expect("Failed to copy test FASTA file");
@@ -1090,14 +1090,14 @@ chr1\t-5\t100
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
         let temp_fasta = temp_path.join("base.fa.gz");
-        std::fs::copy("tests/data/fasta/base.fa.gz", &temp_fasta)
+        std::fs::copy("../tests/data/fasta/base.fa.gz", &temp_fasta)
             .expect("Failed to copy base.fa.gz to tempdir");
 
         // Create a new sequence store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
 
         // Import a FASTA file into the store
-        // store.import_fasta("tests/data/subset.fa.gz").unwrap();
+        // store.import_fasta("../tests/data/subset.fa.gz").unwrap();
         store.import_fasta(&temp_fasta).unwrap();
 
         // Get the sequence keys for verification (assuming we know the test file contains 3 sequences)

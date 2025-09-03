@@ -204,12 +204,12 @@ mod tests {
 
     #[fixture]
     fn vanilla_peaks_path() -> String {
-        "tests/data/tokenizers/peaks.bed".to_string()
+        "../tests/data/tokenizers/peaks.bed".to_string()
     }
 
     #[fixture]
     fn ordered_peaks_path() -> String {
-        "tests/data/tokenizers/peaks.scored.bed".to_string()
+        "../tests/data/tokenizers/peaks.scored.bed".to_string()
     }
 
     #[rstest]

@@ -200,7 +200,7 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn get_test_bed_dir() -> Result<PathBuf, Error> {
-        let folder_path = std::env::current_dir().unwrap().join("tests/data/bedset");
+        let folder_path = std::env::current_dir().unwrap().join("../tests/data/bedset");
 
         Ok(folder_path)
     }

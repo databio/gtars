@@ -87,8 +87,8 @@ mod tests {
         // let fasta_path = "GRCh38_full_analysis_set_plus_decoy_hla.fa";
         let fasta_path =
             std::env::var("FASTA_PATH").expect("FASTA_PATH environment variable not set");
-        // let fasta_path = "tests/data/subset.fa.gz";
-        // let fasta_path = "tests/data/fasta/base.fa.gz";
+        // let fasta_path = "../tests/data/subset.fa.gz";
+        // let fasta_path = "../tests/data/fasta/base.fa.gz";
         println!("Loading large FASTA file: {}", &fasta_path);
 
         // Create a new sequence store, and dd sequences to the store
@@ -148,8 +148,8 @@ mod tests {
         let temp_path = temp_dir.path();
         // Create a new sequence store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        // let fasta_path = "tests/data/subset.fa.gz";
-        let fasta_path = "tests/data/fasta/base.fa.gz";
+        // let fasta_path = "../tests/data/subset.fa.gz";
+        let fasta_path = "../tests/data/fasta/base.fa.gz";
         let temp_fasta = temp_path.join("base.fa.gz");
         std::fs::copy(fasta_path, &temp_fasta).expect("Failed to copy base.fa.gz to tempdir");
 
