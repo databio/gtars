@@ -1,11 +1,11 @@
 use crate::common::models::{RegionSet};
 use std::path::{Path, PathBuf};
 use std::collections::{HashMap, HashSet};
-use anyhow::Result;
+
 use crate::common::utils::get_dynamic_reader;
 use std::io::BufRead;
+use std::fs;
 
-// first lets create struct that will contain genome information
 
 #[derive(Clone, Debug)]
 pub struct ReferenceGenomeMetadata {
@@ -35,14 +35,14 @@ impl ReferenceGenomeMetadata {
             chrom_sizes.insert(parts[0].to_string(), parts[1].parse::<u32>()?);
 
         }
-        let mut ref_genome = ReferenceGenomeMetadata {
+        let ref_genome = ReferenceGenomeMetadata {
             genome: name.to_string(),
             digest: name.to_string(),
             description: name.to_string(),
             collection: chrom_sizes
         };
 
-        return Ok(ref_genome)
+        Ok(ref_genome)
 
     }
 }
@@ -87,6 +87,17 @@ pub struct CompatibilityStats {
     chrom_sequence_fit_stats: SequenceFitStats,
     compatibility: RatingModel,
 }
+
+#[derive(Debug, Default)]
+pub struct CompatibilityConcise {
+    xs: f64,
+    oobr: Option<f64>,
+    sequence_fit: Option<f64>,
+    assigned_points: i32,
+    tier_ranking: i32,
+}
+
+
 
 fn calculate_rating(xs: f64, oobr: Option<f64>, sequence_fit: Option<f64>) -> RatingModel {
     let mut points_rating: i32 = 0;
@@ -239,14 +250,12 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet
          sequence_fit = Some(bed_sum / ref_genome_sum);
     }
 
-    let mut oobr_option: Option<f64> = match &chrom_length_stats {
+    let oobr_option: Option<f64> = match &chrom_length_stats {
         Some(chrom_length_stats) => {
             Some(chrom_length_stats.oobr)
         }
         _ => None,
     };
-
-
 
     let tier_obj = calculate_rating(
         chrom_stats.xs,
@@ -262,6 +271,68 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet
         compatibility: tier_obj,
 }
 
+}
+
+pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityConcise{
+    let chrom_stats:CompatibilityStats = caclulate_chrom_stats(genome_info, rs);
+
+    let oobr_option: Option<f64> = match &chrom_stats.chrom_length_stats {
+        Some(chrom_length_stats) => {
+            Some(chrom_length_stats.oobr)
+        }
+        _ => None,
+    };
+
+    CompatibilityConcise{
+        xs: chrom_stats.chrom_name_stats.xs,
+        oobr: oobr_option,
+        sequence_fit: chrom_stats.chrom_sequence_fit_stats.sequence_fit,
+        assigned_points: chrom_stats.compatibility.tier_ranking,
+        tier_ranking: chrom_stats.compatibility.tier_ranking,
+    }
+}
+
+
+fn _list_chrom_files(folder_path: &Path) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = Vec::new();
+
+    if let Ok(entries) = fs::read_dir(folder_path) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() {
+                files.push(path);
+            }
+        }
+    }
+    files
+}
+
+
+pub fn default_ref_genomes(folder_path: &Path) -> Vec<ReferenceGenomeMetadata> {
+    let chrom_file_list = _list_chrom_files(folder_path);
+
+    let mut genomes_vector: Vec<ReferenceGenomeMetadata> = Vec::new();
+
+    for file in chrom_file_list{
+
+        genomes_vector.push(ReferenceGenomeMetadata::try_from(&file, &file.file_name().unwrap().to_str().unwrap()).unwrap());
+    };
+
+    genomes_vector
+
+}
+
+pub fn determin_compatibility(genome_list: Vec<ReferenceGenomeMetadata>, rs: RegionSet) -> HashMap<String, CompatibilityConcise> {
+    if genome_list.is_empty(){
+        return HashMap::new();
+    };
+
+    let mut compatibility_map: HashMap<String, CompatibilityConcise> = HashMap::new();
+
+    for genome in genome_list{
+        compatibility_map.insert(genome.digest.clone(), get_concise_stats(genome.clone(), rs.clone()));
+    };
+    compatibility_map
 }
 
 
@@ -303,15 +374,22 @@ mod tests {
 
     #[rstest]
     fn run_calculations(){
-        let bed_path = Path::new("/home/bnt4me/virginia/repos/bedboss/test/data/bed/hg38/GSM6732293_Con_liver-IP2.bed");
-        //let bed_path = Path::new("/home/bnt4me/Downloads/003c91fed233b4def93aa1fcb743a317.bed.gz");
+        //let bed_path = Path::new("/home/bnt4me/virginia/repos/bedboss/test/data/bed/hg38/GSM6732293_Con_liver-IP2.bed");
+        let bed_path = Path::new("/home/bnt4me/Downloads/003c91fed233b4def93aa1fcb743a317.bed.gz");
         let ref_path = Path::new("/home/bnt4me/virginia/repos/bedboss/bedboss/refgenome_validator/chrom_sizes/ucsc_hg38.chrom.sizes");
         let name: String = String::from("ensembl_hg38.chrom.sizes");
 
         let ref_obj: ReferenceGenomeMetadata = ReferenceGenomeMetadata::try_from(ref_path, &name).unwrap();
         let bed_file: RegionSet = RegionSet::try_from(bed_path).unwrap();
 
-        let kj = caclulate_chrom_stats(ref_obj, bed_file);
+        // let kj = caclulate_chrom_stats(ref_obj, bed_file);
+        // let kj = get_concise_stats(ref_obj, bed_file);
+
+
+        let folder_path = Path::new("/home/bnt4me/virginia/repos/bedboss/bedboss/refgenome_validator/chrom_sizes");
+        let default_genomes = default_ref_genomes(folder_path);
+
+        let kj = determin_compatibility(default_genomes, bed_file);
         println!("{:?}", kj)
 
 
