@@ -5,6 +5,7 @@ mod models;
 mod refget;
 mod tokenizers;
 mod utils;
+// mod bed_genome_validator;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -14,11 +15,13 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let utils_module = pyo3::wrap_pymodule!(utils::utils);
     let models_module = pyo3::wrap_pymodule!(models::models);
     let refget_module = pyo3::wrap_pymodule!(refget::refget);
+    // let bed_genome_validator = pyo3::wrap_pymodule!(bed_genome_validator::bed_genome_validator);
 
     m.add_wrapped(tokenize_module)?;
     m.add_wrapped(utils_module)?;
     m.add_wrapped(models_module)?;
     m.add_wrapped(refget_module)?;
+    // m.add_wrapped(bed_genome_validator)?;
 
     let sys = PyModule::import_bound(py, "sys")?;
     let binding = sys.getattr("modules")?;
@@ -29,6 +32,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
     sys_modules.set_item("gtars.models", m.getattr("models")?)?;
     sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
+    // sys_modules.set_item("gtars.bed_genome_validator", m.getattr("bed_genome_validator")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;

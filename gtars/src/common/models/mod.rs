@@ -13,3 +13,4 @@ pub use self::fragments::Fragment;
 pub use self::region::Region;
 pub use self::region_set::RegionSet;
 pub use self::interval::Interval;
+pub use self::bed_ref_comparison::{ReferenceValidator, ReferenceGenomeMetadata, CompatibilityConcise};

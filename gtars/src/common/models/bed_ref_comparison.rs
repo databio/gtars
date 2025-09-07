@@ -19,7 +19,7 @@ impl ReferenceGenomeMetadata {
     pub fn new(genome: String, digest: String, description: String, collection: HashMap<String, u32>) -> Self {
         ReferenceGenomeMetadata { genome, digest, description, collection }
     }
-    fn try_from(value: &Path, name: &str) -> anyhow::Result<Self> {
+    pub fn try_from(value: &Path, name: &str) -> anyhow::Result<Self> {
         // chrom sizes file
         let path = value;
 
@@ -90,11 +90,67 @@ pub struct CompatibilityStats {
 
 #[derive(Debug, Default)]
 pub struct CompatibilityConcise {
-    xs: f64,
-    oobr: Option<f64>,
-    sequence_fit: Option<f64>,
-    assigned_points: i32,
-    tier_ranking: i32,
+    pub xs: f64,
+    pub oobr: Option<f64>,
+    pub sequence_fit: Option<f64>,
+    pub assigned_points: i32,
+    pub tier_ranking: i32,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct ReferenceValidator {
+    pub reference_genomes: Vec<ReferenceGenomeMetadata>,
+}
+
+
+fn _list_chrom_files(folder_path: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = Vec::new();
+
+        if let Ok(entries) = fs::read_dir(folder_path) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.is_file() {
+                    files.push(path);
+                }
+            }
+        }
+        files
+}
+
+impl ReferenceValidator {
+    pub fn new(reference_genomes: Vec<ReferenceGenomeMetadata>) -> Self {
+        Self { reference_genomes }
+    }
+
+    pub fn determine_compatibility(&self, rs: RegionSet) -> HashMap<String, CompatibilityConcise> {
+        if self.reference_genomes.is_empty(){
+            return HashMap::new();
+        };
+
+        let mut compatibility_map: HashMap<String, CompatibilityConcise> = HashMap::new();
+        let bed_info: HashMap<String, u32> = rs.get_max_end_per_chr();
+        println!("Determining compatibility");
+
+        for genome in self.reference_genomes.iter(){
+            compatibility_map.insert(genome.digest.clone(), get_concise_stats(genome.clone(), &bed_info));
+            // println!("Determining chrom length stats for {}", genome.digest);
+        };
+
+        compatibility_map
+    }
+
+    pub fn try_from(folder_path: &Path) -> Self {
+        let chrom_file_list = _list_chrom_files(folder_path);
+
+        let mut genomes_vector: Vec<ReferenceGenomeMetadata> = Vec::new();
+
+        for file in chrom_file_list{
+
+            genomes_vector.push(ReferenceGenomeMetadata::try_from(&file, &file.file_name().unwrap().to_str().unwrap()).unwrap());
+        };
+
+        ReferenceValidator::new(genomes_vector)
+    }
 }
 
 
@@ -165,9 +221,10 @@ fn calculate_rating(xs: f64, oobr: Option<f64>, sequence_fit: Option<f64>) -> Ra
 }
 
 
-pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityStats {
+// pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityStats {
+pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityStats {
 
-    let mut bed_info: HashMap<String, u32> = rs.get_max_end_per_chr();
+    // let bed_info: HashMap<String, u32> = rs.get_max_end_per_chr();
 
     let mut passed_chrom_names: bool = true;
 
@@ -208,9 +265,12 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet
         let mut num_of_chrom_beyond: i32 = 0;
         let mut num_chrom_within_bounds: i32 = 0;
 
-        for key in  &bed_chrom_set {
-            if genome_chrom_set.contains(key) {
-                if bed_info.get(key.clone()).unwrap() > genome_info.collection.get(key.clone()).unwrap() {
+        for key in  bed_chrom_set.iter() {
+            let key_string = key.to_owned();
+            if genome_chrom_set.contains(key_string) {
+
+                if bed_info.get(key_string).unwrap() > genome_info.collection.get(key_string).unwrap() {
+
                     num_of_chrom_beyond += 1;
                     chroms_beyond_range = true;
                 } else {
@@ -241,7 +301,7 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet
         let mut ref_genome_sum:f64 = 0.0;
 
         for key in chrom_intersection {
-            bed_sum += genome_info.collection.get(key.clone()).unwrap().clone() as f64;
+            bed_sum += genome_info.collection.get(key.to_owned()).unwrap().clone() as f64;
         }
         for key in genome_info.collection.keys() {
             ref_genome_sum += genome_info.collection.get(key).unwrap().clone() as f64;
@@ -273,8 +333,9 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet
 
 }
 
-pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityConcise{
-    let chrom_stats:CompatibilityStats = caclulate_chrom_stats(genome_info, rs);
+// pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityConcise{
+pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityConcise{
+    let chrom_stats:CompatibilityStats = caclulate_chrom_stats(genome_info, bed_info);
 
     let oobr_option: Option<f64> = match &chrom_stats.chrom_length_stats {
         Some(chrom_length_stats) => {
@@ -292,48 +353,6 @@ pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) ->
     }
 }
 
-
-fn _list_chrom_files(folder_path: &Path) -> Vec<PathBuf> {
-    let mut files: Vec<PathBuf> = Vec::new();
-
-    if let Ok(entries) = fs::read_dir(folder_path) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file() {
-                files.push(path);
-            }
-        }
-    }
-    files
-}
-
-
-pub fn default_ref_genomes(folder_path: &Path) -> Vec<ReferenceGenomeMetadata> {
-    let chrom_file_list = _list_chrom_files(folder_path);
-
-    let mut genomes_vector: Vec<ReferenceGenomeMetadata> = Vec::new();
-
-    for file in chrom_file_list{
-
-        genomes_vector.push(ReferenceGenomeMetadata::try_from(&file, &file.file_name().unwrap().to_str().unwrap()).unwrap());
-    };
-
-    genomes_vector
-
-}
-
-pub fn determin_compatibility(genome_list: Vec<ReferenceGenomeMetadata>, rs: RegionSet) -> HashMap<String, CompatibilityConcise> {
-    if genome_list.is_empty(){
-        return HashMap::new();
-    };
-
-    let mut compatibility_map: HashMap<String, CompatibilityConcise> = HashMap::new();
-
-    for genome in genome_list{
-        compatibility_map.insert(genome.digest.clone(), get_concise_stats(genome.clone(), rs.clone()));
-    };
-    compatibility_map
-}
 
 
 
@@ -374,24 +393,29 @@ mod tests {
 
     #[rstest]
     fn run_calculations(){
-        //let bed_path = Path::new("/home/bnt4me/virginia/repos/bedboss/test/data/bed/hg38/GSM6732293_Con_liver-IP2.bed");
+        let bed_path2 = Path::new("/home/bnt4me/virginia/repos/bedboss/test/data/bed/hg38/GSM6732293_Con_liver-IP2.bed");
         let bed_path = Path::new("/home/bnt4me/Downloads/003c91fed233b4def93aa1fcb743a317.bed.gz");
         let ref_path = Path::new("/home/bnt4me/virginia/repos/bedboss/bedboss/refgenome_validator/chrom_sizes/ucsc_hg38.chrom.sizes");
         let name: String = String::from("ensembl_hg38.chrom.sizes");
 
         let ref_obj: ReferenceGenomeMetadata = ReferenceGenomeMetadata::try_from(ref_path, &name).unwrap();
         let bed_file: RegionSet = RegionSet::try_from(bed_path).unwrap();
+        let bed_file2: RegionSet = RegionSet::try_from(bed_path2).unwrap();
 
         // let kj = caclulate_chrom_stats(ref_obj, bed_file);
         // let kj = get_concise_stats(ref_obj, bed_file);
 
 
         let folder_path = Path::new("/home/bnt4me/virginia/repos/bedboss/bedboss/refgenome_validator/chrom_sizes");
-        let default_genomes = default_ref_genomes(folder_path);
 
-        let kj = determin_compatibility(default_genomes, bed_file);
-        println!("{:?}", kj)
+        let refVal = ReferenceValidator::try_from(folder_path);
 
+        let kj = refVal.determine_compatibility( bed_file);
+
+        println!("{:?}", kj);
+
+        let kj2 = refVal.determine_compatibility( bed_file2);
+        println!("{:?}", kj2);
 
     }
 }
