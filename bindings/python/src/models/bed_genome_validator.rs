@@ -128,7 +128,7 @@ impl PyReferenceValidator {
     pub fn determine_compatibility(&self, rs: PyRegionSet) -> PyResult<HashMap<String,PyCompatibilityConcise>> {
 
         let start_time1 = std::time::Instant::now();
-        let results: HashMap<String, CompatibilityConcise> = self.reference_genomes.determine_compatibility(rs.regionset);
+        let results: HashMap<String, CompatibilityConcise> = self.reference_genomes.determine_compatibility(&rs.regionset);
 
         let duration = start_time1.elapsed().as_secs_f64();
         println!("Rust Time taken for compatibility determination: {:?}", duration);

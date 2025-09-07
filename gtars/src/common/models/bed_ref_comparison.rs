@@ -122,7 +122,7 @@ impl ReferenceValidator {
         Self { reference_genomes }
     }
 
-    pub fn determine_compatibility(&self, rs: RegionSet) -> HashMap<String, CompatibilityConcise> {
+    pub fn determine_compatibility(&self, rs: &RegionSet) -> HashMap<String, CompatibilityConcise> {
         if self.reference_genomes.is_empty(){
             return HashMap::new();
         };
@@ -132,7 +132,7 @@ impl ReferenceValidator {
         println!("Determining compatibility");
 
         for genome in self.reference_genomes.iter(){
-            compatibility_map.insert(genome.digest.clone(), get_concise_stats(genome.clone(), &bed_info));
+            compatibility_map.insert(genome.digest.clone(), get_concise_stats(genome, &bed_info));
             // println!("Determining chrom length stats for {}", genome.digest);
         };
 
@@ -222,7 +222,7 @@ fn calculate_rating(xs: f64, oobr: Option<f64>, sequence_fit: Option<f64>) -> Ra
 
 
 // pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityStats {
-pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityStats {
+pub fn caclulate_chrom_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityStats {
 
     // let bed_info: HashMap<String, u32> = rs.get_max_end_per_chr();
 
@@ -334,7 +334,7 @@ pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, bed_info: &Ha
 }
 
 // pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityConcise{
-pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityConcise{
+pub fn get_concise_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityConcise{
     let chrom_stats:CompatibilityStats = caclulate_chrom_stats(genome_info, bed_info);
 
     let oobr_option: Option<f64> = match &chrom_stats.chrom_length_stats {
