@@ -7,6 +7,7 @@ use crate::models::PyRegion;
 use gtars::common::models::{ReferenceValidator, CompatibilityConcise, ReferenceGenomeMetadata};
 use std::path::{Path, PathBuf};
 use crate::models::PyRegionSet;
+use std::mem::size_of;
 
 #[pyclass(name = "ReferenceGenomeMetadata", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -125,7 +126,7 @@ impl PyReferenceValidator {
         Ok(Self{reference_genomes: ReferenceValidator::try_from(folder_path)})
     }
 
-    pub fn determine_compatibility(&self, rs: PyRegionSet) -> PyResult<HashMap<String,PyCompatibilityConcise>> {
+    pub fn determine_compatibility(&self, rs: &PyRegionSet) -> PyResult<HashMap<String,PyCompatibilityConcise>> {
 
         let start_time1 = std::time::Instant::now();
         let results: HashMap<String, CompatibilityConcise> = self.reference_genomes.determine_compatibility(&rs.regionset);

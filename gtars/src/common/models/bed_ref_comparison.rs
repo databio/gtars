@@ -222,7 +222,7 @@ fn calculate_rating(xs: f64, oobr: Option<f64>, sequence_fit: Option<f64>) -> Ra
 
 
 // pub fn caclulate_chrom_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityStats {
-pub fn caclulate_chrom_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityStats {
+pub fn caclulate_chrom_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> Option<CompatibilityStats> {
 
     // let bed_info: HashMap<String, u32> = rs.get_max_end_per_chr();
 
@@ -235,6 +235,9 @@ pub fn caclulate_chrom_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &H
     let chrom_union: HashSet<_> = genome_chrom_set.union(&bed_chrom_set).clone().collect();
 
     let q_and_m = chrom_intersection.len() as f64;
+    if q_and_m == 0.0 {
+        return None;
+    }
     let q_and_not_m = bed_info.len() as f64 - chrom_intersection.len() as f64;
     // Symmetric difference (keys that are in one but not both)
     let not_q_and_m = genome_chrom_set.symmetric_difference(&bed_chrom_set).count() as f64;
@@ -324,18 +327,29 @@ pub fn caclulate_chrom_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &H
     );
 
 
-    CompatibilityStats {
+    Some(CompatibilityStats {
         chrom_name_stats: chrom_stats,
         chrom_length_stats: chrom_length_stats,
         chrom_sequence_fit_stats: SequenceFitStats{sequence_fit: sequence_fit},
         compatibility: tier_obj,
-}
+})
 
 }
 
 // pub fn get_concise_stats(genome_info: ReferenceGenomeMetadata, rs: RegionSet) -> CompatibilityConcise{
 pub fn get_concise_stats(genome_info: &ReferenceGenomeMetadata, bed_info: &HashMap<String, u32>) -> CompatibilityConcise{
-    let chrom_stats:CompatibilityStats = caclulate_chrom_stats(genome_info, bed_info);
+    let chrom_stats: CompatibilityStats = match caclulate_chrom_stats(genome_info, bed_info) {
+        Some(x) => x,
+        None => {
+            return CompatibilityConcise{
+                xs: 0.0,
+                oobr: None,
+                sequence_fit: None,
+                assigned_points: 0,
+                tier_ranking: 4,
+            }
+        }
+    };
 
     let oobr_option: Option<f64> = match &chrom_stats.chrom_length_stats {
         Some(chrom_length_stats) => {
@@ -410,11 +424,11 @@ mod tests {
 
         let refVal = ReferenceValidator::try_from(folder_path);
 
-        let kj = refVal.determine_compatibility( bed_file);
+        let kj = refVal.determine_compatibility( &bed_file);
 
         println!("{:?}", kj);
 
-        let kj2 = refVal.determine_compatibility( bed_file2);
+        let kj2 = refVal.determine_compatibility( &bed_file2);
         println!("{:?}", kj2);
 
     }

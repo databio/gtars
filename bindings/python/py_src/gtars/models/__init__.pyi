@@ -218,7 +218,7 @@ class ReferenceValidator:
     def from_path() -> "ReferenceValidator":
         ...
 
-    def determine_compatibility(self, rs: RegionSet) -> CompatibilityConcise:
+    def determine_compatibility(self, rs: RegionSet) -> Dict[str,CompatibilityConcise]:
         """
         Determine compatibility of the bed file
 
