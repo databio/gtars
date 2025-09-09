@@ -2,6 +2,7 @@
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
+use gtars::bbcache::client::BBClient;
 
 use rstest::*;
 
