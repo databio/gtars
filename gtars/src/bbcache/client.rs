@@ -55,7 +55,7 @@ impl BBClient {
     /// 
     fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
         let resource_to_add =
-            NewResource::new(cache_id, cache_path, Some(cache_path), None, None, None);
+            NewResource::new(cache_id, cache_path).set_fpath(cache_path);
         if bedfile {
             self.bedfile_cache.add(&resource_to_add);
         } else {
