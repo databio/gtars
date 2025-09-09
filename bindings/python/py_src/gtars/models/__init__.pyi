@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Dict
 
 class Region:
     chr: str
@@ -89,6 +89,16 @@ class RegionSet:
     def mean_region_width(self) -> int:
         """
         Mean width of the regions
+        """
+        ...
+    def get_max_end_per_chr(self) -> Dict[str, int]:
+        """
+        Get Max end coordinate of nucleotide for each chromosome
+        """
+        ...
+    def get_nucleotide_length(self) -> int:
+        """
+        Get total number of nucleotides in RegionSet
         """
         ...
     def __len__(self) -> int:

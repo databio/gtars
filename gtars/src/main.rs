@@ -27,7 +27,7 @@ fn build_parser() -> Command {
         .subcommand(uniwig::cli::create_uniwig_cli())
         .subcommand(igd::cli::create_igd_cli())
         .subcommand(scoring::cli::make_fscoring_cli())
-        .subcommand(bbcache::cli::create_bbcache_cli())
+        // .subcommand(bbcache::cli::create_bbcache_cli())
         .subcommand(tokenizers::cli::create_tokenizer_cli())
 }
 

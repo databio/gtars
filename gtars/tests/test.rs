@@ -1,4 +1,5 @@
 #![allow(non_snake_case)]
+use gtars::bbcache::client::BBClient;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -111,10 +112,10 @@ mod tests {
     use gtars::uniwig::utils::npy_to_wig;
     use gtars::uniwig::writing::write_bw_files;
 
-    use gtars::bbcache::client::BBClient;
+    // use gtars::bbcache::client::BBClient;
 
     use byteorder::{LittleEndian, ReadBytesExt};
-    use flate2::read::GzDecoder;
+    // use flate2::read::GzDecoder;
     use std::collections::HashMap;
     use std::collections::HashSet;
     use std::fs;
@@ -1167,7 +1168,8 @@ mod tests {
         path_to_dummy_narrowpeak: &str,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
+        let chromsizerefpath: String =
+            format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = path_to_dummy_narrowpeak;
 
@@ -1214,7 +1216,8 @@ mod tests {
         _path_to_dummy_bed_file: &str,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let chromsizerefpath: String = format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
+        let chromsizerefpath: String =
+            format!("{}{}", path_to_crate, "/tests/data/dummy.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
         let combinedbedpath = _path_to_dummy_bed_file;
 
@@ -1415,6 +1418,7 @@ mod tests {
         Ok(())
     }
 
+    // This test should be mocked and not use bedbase. Commented for now.
     // #[rstest]
     // fn test_bbcache_bedbase(
     //     _path_to_bed_gz_from_bb: &str,
@@ -1448,7 +1452,7 @@ mod tests {
     //         cached_content, comparison_content,
     //         "Cached content does not match the original content"
     //     );
-    //
+
     //     let bedset = bbc.load_bedset(_bsid).unwrap();
     //     assert!(bbc.seek(_bsid).is_ok());
     //     for rs in bedset.region_sets {
@@ -1457,7 +1461,6 @@ mod tests {
     //         let bed_in_set = bbc.load_bed(&bed_id).unwrap();
     //         assert_eq!(bed_id, bed_in_set.identifier());
     //     }
-    //
     //     Ok(())
     // }
 }
