@@ -52,10 +52,9 @@ impl BBClient {
     /// - cache_id: id of bed file or bed set
     /// - cache_path: path to the cached bed file or bed set
     /// - bedfile: if the the id and file is a bed file
-    /// 
+    ///
     fn add_resource_to_cache(&mut self, cache_id: &str, cache_path: &str, bedfile: bool) {
-        let resource_to_add =
-            NewResource::new(cache_id, cache_path, Some(cache_path), None, None, None);
+        let resource_to_add = NewResource::new(cache_id, cache_path).set_fpath(cache_path);
         if bedfile {
             self.bedfile_cache.add(&resource_to_add);
         } else {
