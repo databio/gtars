@@ -1,0 +1,21 @@
+[package]
+name = "scoring"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+glob = "0.3.1"
+
+# shared workspace dependencies
+anyhow = { workspace = true}
+indicatif = { workspace = true }
+flate2 = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core" }
+overlaprs = { path = "../overlaprs" }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"

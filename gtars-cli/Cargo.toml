@@ -1,0 +1,35 @@
+[package]
+name = "gtars-cli"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# generic cli stuff
+clap = { version = "4.4.7", features = ["derive"] }
+
+# shared workspace dependencies
+indicatif = { workspace = true }
+fxhash = { workspace = true }
+anyhow = { workspace = true }
+
+# our code
+scoring = { path = "../scoring", optional=true }
+fragsplit = { path = "../fragsplit", optional=true }
+igd = { path = "../igd", optional=true }
+uniwig = { path = "../uniwig", optional=true }
+overlaprs = { path = "../overlaprs", optional = true }
+bbcache = { path = "../bbcache", optional=true }
+gtars-core = { path = "../gtars-core" }
+
+[[bin]]
+name = "gtars"
+path = "src/main.rs"
+
+[features]
+default = []
+scoring = ["dep:scoring"]
+uniwig = ["dep:uniwig"]
+bbcache = ["dep:bbcache"]
+igd = ["dep:igd"]
+fragsplit = ["dep:fragsplit"]
+overlaprs = ["dep:overlaprs"]

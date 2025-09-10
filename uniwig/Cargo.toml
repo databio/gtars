@@ -1,0 +1,22 @@
+[package]
+name = "uniwig"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bigtools = "0.5.6"
+noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
+os_pipe = "1.2.2"
+rayon = "1.11.0"
+tokio = "1.47.1"
+ndarray = "0.15.6"
+ndarray-npy = "0.8.1"
+
+# shared workspace dependencies
+byteorder = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+indicatif = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core" }
