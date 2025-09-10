@@ -13,14 +13,23 @@ fxhash = { workspace = true }
 anyhow = { workspace = true }
 
 # our code
-scoring = { path = "../scoring" }
-fragsplit = { path = "../fragsplit" }
-igd = { path = "../igd" }
-uniwig = { path = "../uniwig" }
-overlaprs = { path = "../overlaprs" }
-bbcache = { path = "../bbcache" }
+scoring = { path = "../scoring", optional=true }
+fragsplit = { path = "../fragsplit", optional=true }
+igd = { path = "../igd", optional=true }
+uniwig = { path = "../uniwig", optional=true }
+overlaprs = { path = "../overlaprs", optional = true }
+bbcache = { path = "../bbcache", optional=true }
 gtars-core = { path = "../gtars-core" }
 
 [[bin]]
 name = "gtars"
 path = "src/main.rs"
+
+[features]
+default = []
+scoring = ["dep:scoring"]
+uniwig = ["dep:uniwig"]
+bbcache = ["dep:bbcache"]
+igd = ["dep:igd"]
+fragsplit = ["dep:fragsplit"]
+overlaprs = ["dep:overlaprs"]
