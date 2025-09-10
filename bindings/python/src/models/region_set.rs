@@ -1,5 +1,7 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
+use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars::common::models::{Region, RegionSet};
@@ -58,11 +60,7 @@ impl PyRegionSet {
     ///     RegionSet object
     #[staticmethod]
     fn from_regions(regions: Vec<PyRegion>) -> PyResult<Self> {
-        let rust_regions: Vec<Region> = regions
-            .into_iter()
-            .map(PyRegion::into_region)
-            .collect();
-
+        let rust_regions: Vec<Region> = regions.into_iter().map(PyRegion::into_region).collect();
 
         Ok(Self {
             regionset: RegionSet::from(rust_regions),
@@ -187,5 +185,13 @@ impl PyRegionSet {
 
     fn mean_region_width(&self) -> f64 {
         self.regionset.mean_region_width()
+    }
+
+    fn get_max_end_per_chr(&self) -> HashMap<String, u32> {
+        self.regionset.get_max_end_per_chr()
+    }
+
+    fn get_nucleotide_length(&self) -> u32 {
+        self.regionset.nucleotides_length()
     }
 }

@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Command;
 // go through the library crate to get the interfaces
 use gtars::overlap;
-// use gtars::bbcache;
+use gtars::bbcache;
 use gtars::fragsplit;
 use gtars::igd;
 use gtars::scoring;
@@ -60,11 +60,11 @@ fn main() -> Result<()> {
         //
         // BBCACHE
         //
-        // Some((bbcache::consts::BBCACHE_CMD, sub_m)) => {
-        //     if let Some((subcmd, sub_matches)) = sub_m.subcommand() {
-        //         bbcache::run_bbcache(subcmd, sub_matches);
-        //     }
-        // }
+        Some((bbcache::consts::BBCACHE_CMD, sub_m)) => {
+            if let Some((subcmd, sub_matches)) = sub_m.subcommand() {
+                bbcache::run_bbcache(subcmd, sub_matches);
+            }
+        }
 
         //
         // IGD

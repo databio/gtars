@@ -18,11 +18,13 @@ pub fn write_to_npy_file(
     stepsize: i32,
     metafilename: String,
 ) {
-
     let path = match std::path::Path::new(&metafilename).parent() {
         Some(parent) => parent,
         None => {
-            eprintln!("Error: The provided metafilename '{}' does not have a parent directory.", metafilename);
+            eprintln!(
+                "Error: The provided metafilename '{}' does not have a parent directory.",
+                metafilename
+            );
             return;
         }
     };
