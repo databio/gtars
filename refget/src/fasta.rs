@@ -124,8 +124,8 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
 
         // Parse header metadata lines
         if line.starts_with("##") {
-            if let Some(stripped) = line.strip_prefix("##") {
-                if let Some((key, value)) = stripped.split_once('=') {
+            if let Some(stripped) = line.strip_prefix("##")
+                && let Some((key, value)) = stripped.split_once('=') {
                     match key {
                         "seqcol_digest" => seqcol_digest = value.to_string(),
                         "names_digest" => names_digest = value.to_string(),
@@ -134,7 +134,6 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
                         _ => {} // Ignore unknown metadata keys
                     }
                 }
-            }
             continue;
         }
 

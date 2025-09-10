@@ -106,10 +106,8 @@ impl ConsensusSet {
 impl FindOverlaps for ConsensusSet {
     fn find_overlaps(&self, region: &Region) -> Option<Vec<OverlapResult>> {
         let tree = self.overlap_trees.get(&region.chr);
-        if tree.is_none() {
-            None
-        } else {
-            let olaps = tree.unwrap().find(region.start, region.end);
+        if let Some(tree) = tree {
+            let olaps = tree.find(region.start, region.end);
             let olaps = olaps
                 .into_iter()
                 .map(|olap| {
@@ -126,6 +124,8 @@ impl FindOverlaps for ConsensusSet {
                 .collect();
 
             Some(olaps)
+        } else {
+            None
         }
     }
 }

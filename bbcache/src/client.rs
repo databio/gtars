@@ -409,16 +409,14 @@ impl BBClient {
         remove_file(&file_path)?;
 
         // Attempt to remove empty subfolders
-        if let Some(sub2) = sub_folder_2 {
-            if read_dir(&sub2)?.next().is_none() {
+        if let Some(sub2) = sub_folder_2
+            && read_dir(&sub2)?.next().is_none() {
                 remove_dir(&sub2)?;
-                if let Some(sub1) = sub_folder_1 {
-                    if read_dir(&sub1)?.next().is_none() {
+                if let Some(sub1) = sub_folder_1
+                    && read_dir(&sub1)?.next().is_none() {
                         remove_dir(&sub1)?;
                     }
-                }
             }
-        }
 
         Ok(())
     }
