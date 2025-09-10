@@ -116,6 +116,4 @@ fn main() -> Result<()> {
 
         _ => unreachable!("Subcommand not found"),
     };
-
-    Ok(())
 }

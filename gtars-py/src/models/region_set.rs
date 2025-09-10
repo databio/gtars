@@ -1,6 +1,5 @@
 use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
