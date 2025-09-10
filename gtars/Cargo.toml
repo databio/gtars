@@ -37,7 +37,7 @@ hf-hub = "0.4.3"
 num-traits = "0.2.19"
 shellexpand = "3"
 dirs = "6.0.0"
-biocrs = {git = "https://github.com/khoroshevskyi/biocfilecachers.git", tag="v0.1.0", version="*"}
+biocrs = "0.1.0"
 tabled = "0.20.0"
 #bio = "1.3"     # For FASTA parsing
 memmap2 = "0.5"  # For memory-mapped file I/O
