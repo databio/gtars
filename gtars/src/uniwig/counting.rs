@@ -1,4 +1,5 @@
 use noodles::bam::io::reader::Query;
+use std::collections::VecDeque;
 
 use noodles::sam::alignment::Record;
 use os_pipe::PipeWriter;
@@ -49,7 +50,7 @@ pub fn start_end_counts(
     let mut current_end_site: (i32, i32);
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
-    let mut collected_counts: Vec<i32> = Vec::new();
+    let mut collected_counts: VecDeque<i32> = VecDeque::new();
     adjusted_start_site = starts_vector[0]; // get first coordinate position
 
     adjusted_start_site.0 -= smoothsize;
@@ -60,7 +61,7 @@ pub fn start_end_counts(
 
     //Initial count for inital adjusted site
     let current_score = adjusted_start_site.1;
-    collected_counts.insert(0, current_score);
+    collected_counts.push_front(current_score);
     count += current_score;
 
     current_end_site = adjusted_start_site;
@@ -87,15 +88,15 @@ pub fn start_end_counts(
 
         if adjusted_start_site.0 == prev_coordinate_value {
             let current_score = adjusted_start_site.1;
-            collected_counts.insert(0, current_score); // needed to later decrement in the correct order
+            collected_counts.push_front(current_score); // needed to later decrement in the correct order
             count += current_score;
             continue;
         }
 
         while coordinate_position < adjusted_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                let most_recent_score = collected_counts.remove(0);
-                count -= most_recent_score; // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
+                let most_recent_score = collected_counts.pop_front();
+                count -= most_recent_score.unwrap(); // need to decrement the most recent additon, else we will have some remainder trailing until the next endsite.
                 if count < 0 {
                     count = 0;
                 }
@@ -117,7 +118,7 @@ pub fn start_end_counts(
         }
 
         let current_score = adjusted_start_site.1;
-        collected_counts.insert(0, current_score); // needed to later decrement in the correct order
+        collected_counts.push_front(current_score); // needed to later decrement in the correct order
         count += current_score;
         prev_coordinate_value = adjusted_start_site.0;
     }
@@ -126,8 +127,8 @@ pub fn start_end_counts(
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
-            let most_recent_score = collected_counts.remove(0);
-            count -= most_recent_score; // need to decrement the most recent addition, else we will have some remainder trailing until the next endsite.
+            let most_recent_score = collected_counts.pop_front();
+            count -= most_recent_score.unwrap(); // need to decrement the most recent addition, else we will have some remainder trailing until the next endsite.
             if count < 0 {
                 count = 0;
             }
@@ -178,7 +179,7 @@ pub fn core_counts(
     let mut current_end_site: (i32, i32);
 
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
-    let mut collected_counts: Vec<i32> = Vec::new();
+    let mut collected_counts: VecDeque<i32> = VecDeque::new();
 
     current_start_site = starts_vector[0]; // get first coordinate position
     current_end_site = ends_vector[0];
@@ -189,7 +190,7 @@ pub fn core_counts(
 
     //Initial count for initial adjusted site
     let current_score = current_start_site.1;
-    collected_counts.insert(0, current_score);
+    collected_counts.push_front(current_score);
     count += current_score;
 
     while coordinate_position < current_start_site.0 {
@@ -215,15 +216,15 @@ pub fn core_counts(
 
         if current_start_site.0 == prev_coordinate_value {
             let current_score = current_start_site.1;
-            collected_counts.insert(0, current_score); // needed to later decrement in the correct order
+            collected_counts.push_front(current_score); // needed to later decrement in the correct order
             count += current_score;
             continue;
         }
 
         while coordinate_position < current_start_site.0 {
             while current_end_site.0 == coordinate_position {
-                let most_recent_score = collected_counts.remove(0);
-                count -= most_recent_score; // need to decrement the most recent addition, else we will have some remainder trailing until the next endsite.
+                let most_recent_score = collected_counts.pop_front();
+                count -= most_recent_score.unwrap(); // need to decrement the most recent addition, else we will have some remainder trailing until the next endsite.
                 if count < 0 {
                     count = 0;
                 }
@@ -245,15 +246,15 @@ pub fn core_counts(
 
         let current_score = current_start_site.1;
         count += current_score;
-        collected_counts.insert(0, current_score); // needed to later decrement in the correct order
+        collected_counts.push_front(current_score); // needed to later decrement in the correct order
 
         prev_coordinate_value = current_start_site.0;
     }
 
     while coordinate_position < chrom_size {
         while current_end_site.0 == coordinate_position {
-            let most_recent_score = collected_counts.remove(0);
-            count -= most_recent_score;
+            let most_recent_score = collected_counts.pop_front();
+            count -= most_recent_score.unwrap();
             if count < 0 {
                 count = 0;
             }
