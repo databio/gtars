@@ -1,6 +1,6 @@
 [package]
 name = "gtars-wasm"
-version = "0.1.0"
+version = "0.5.0"
 authors = ["Nathan LeRoy <NLeRoy917@gmail.com>"]
 edition = "2018"
 
