@@ -34,5 +34,11 @@ rextendr_igd_create <- function(output_path, filelist, db_name) .Call(wrap__rext
 #' @param query_path A string representing the path to the query bed file.
 rextendr_igd_search <- function(database_path, query_path) .Call(wrap__rextendr_igd_search, database_path, query_path)
 
+sha512t24u_digest <- function(readable) .Call(wrap__sha512t24u_digest, readable)
+
+md5_digest <- function(readable) .Call(wrap__md5_digest, readable)
+
+digest_fasta_raw <- function(fasta) .Call(wrap__digest_fasta_raw, fasta)
+
 
 # nolint end

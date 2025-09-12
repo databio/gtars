@@ -2,6 +2,8 @@
 
 export(r_igd_create)
 export(r_igd_search)
+export(r_md5_digest)
+export(r_sha512t24u_digest)
 export(read_tokens_from_gtok)
 export(write_tokens_to_gtok)
 useDynLib(gtars, .registration = TRUE)
