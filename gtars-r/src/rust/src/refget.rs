@@ -3,16 +3,24 @@ use refget::digest::{md5, sha512t24u};
 use refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
 use refget::alphabet::AlphabetType;
 
+/// Create sha512t24u digest
+/// @export
+/// @param readable A readable string representing a sequence.
 #[extendr]
 pub fn sha512t24u_digest(readable: &str) -> String {
     sha512t24u(readable.as_bytes())
 }
 
+/// Create md5 digest
+/// @export
+/// @param readable A readable string representing a sequence.
 #[extendr]
 pub fn md5_digest(readable: &str) -> String {
     md5(readable.as_bytes())
 }
 
+/// Digest fasta file
+/// @param fasta A filepath string to a fasta file.
 #[extendr]
 pub fn digest_fasta_raw(fasta: &str) -> extendr_api::Result<List> {
     match refget::fasta::digest_fasta(fasta) {
@@ -23,7 +31,6 @@ pub fn digest_fasta_raw(fasta: &str) -> extendr_api::Result<List> {
     }
 }
 
-// Helper functions instead of From implementations
 fn alphabet_to_string(alphabet: AlphabetType) -> &'static str {
     match alphabet {
         AlphabetType::Dna2bit => "dna2bit",     // 2-bit DNA encoding

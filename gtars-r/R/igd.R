@@ -18,11 +18,11 @@ NULL
 #' @examples
 #' \dontrun{
 #' # Create database with default name
-#' r_igd_create("path/to/output", "path/to/bed/files")
+#' igd_create("path/to/output", "path/to/bed/files")
 #' }
 #' 
 #' @export
-r_igd_create <- function(output_path, filelist, db_name = "igd_database") {
+igd_create <- function(output_path, filelist, db_name = "igd_database") {
   # Input validation
   if (!is.character(output_path) || length(output_path) != 1) {
     stop("output_path must be a single character string")
@@ -32,7 +32,7 @@ r_igd_create <- function(output_path, filelist, db_name = "igd_database") {
   }
 
   # Call Rust function
-  .Call(wrap__rextendr_igd_create, output_path, filelist, db_name)
+  .Call(wrap__igd_create, output_path, filelist, db_name)
 
   invisible(NULL)
 }
@@ -50,11 +50,11 @@ r_igd_create <- function(output_path, filelist, db_name = "igd_database") {
 #' @examples
 #' \dontrun{
 #' # Search database with default name
-#' r_igd_search("path/to/database", "path/to/query/file")
+#' igd_search("path/to/database", "path/to/query/file")
 #' }
 #' 
 #' @export
-r_igd_search <- function(database_path, query_path) {
+igd_search <- function(database_path, query_path) {
   
   # Input validation
   if (!is.character(database_path) || length(database_path) != 1) {
@@ -65,7 +65,7 @@ r_igd_search <- function(database_path, query_path) {
   }
   
   # Call Rust function
-  chr_vector <- .Call(wrap__rextendr_igd_search, database_path, query_path)
+  chr_vector <- .Call(wrap__igd_search, database_path, query_path)
   
   split_result <- strsplit(chr_vector, split = '\t')
   df <- data.frame(matrix(unlist(split_result[-1]), nrow = length(chr_vector)-1, byrow = TRUE))
