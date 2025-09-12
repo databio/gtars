@@ -1,7 +1,23 @@
 [workspace]
 resolver = "3"
 edition = "2024"
-members = [ "gtars-cli", "gtars-py", "gtars-wasm", "gtars-core", "refget", "uniwig", "overlaprs", "tokenizers", "io", "bbcache", "igd", "fragsplit", "scoring", "gtars"]
+members = [ 
+    "gtars-cli", 
+    "gtars-py", 
+    "gtars-wasm", 
+    "gtars-r/src/rust", 
+    "gtars-core", 
+    "refget", 
+    "uniwig", 
+    "overlaprs", 
+    "tokenizers", 
+    "io", 
+    "bbcache", 
+    "igd", 
+    "fragsplit", 
+    "scoring", 
+    "gtars"
+]
 
 [workspace.dependencies]
 anyhow = "1.0.82"
