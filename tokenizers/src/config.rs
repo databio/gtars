@@ -30,7 +30,7 @@ pub enum TokenizerType {
     #[serde(rename = "bits")]
     Bits,
     #[serde(rename = "ailist")]
-    AiList
+    AiList,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
@@ -49,7 +49,9 @@ pub enum TokenizerInputFileType {
 
 #[derive(Error, Debug)]
 pub enum TokenizerConfigError {
-    #[error("Missing or invalid file extension in tokenizer config file. It must be `toml`, `bed` or `bed.gz`")]
+    #[error(
+        "Missing or invalid file extension in tokenizer config file. It must be `toml`, `bed` or `bed.gz`"
+    )]
     InvalidFileType,
     #[error("Invalid tokenizer type in config file")]
     InvalidTokenizerType,

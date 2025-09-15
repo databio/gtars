@@ -1,5 +1,5 @@
-mod utils;
 mod digests;
+mod utils;
 
 use wasm_bindgen::prelude::*;
 

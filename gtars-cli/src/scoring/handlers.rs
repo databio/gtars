@@ -5,7 +5,7 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use scoring::consts;
-use scoring::{ScoringMode, FragmentFileGlob, ConsensusSet, region_scoring_from_fragments};
+use scoring::{ConsensusSet, FragmentFileGlob, ScoringMode, region_scoring_from_fragments};
 
 pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
     // get arguments from CLI

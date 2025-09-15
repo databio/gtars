@@ -1,5 +1,5 @@
+use clap::{Command, arg};
 pub use igd::consts::*;
-use clap::{arg, Command};
 
 pub fn create_igd_cli() -> Command {
     Command::new(IGD_CMD)

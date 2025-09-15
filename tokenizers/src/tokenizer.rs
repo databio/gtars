@@ -1,7 +1,7 @@
-use std::collections::{HashMap as StdHashMap};
+use std::collections::HashMap as StdHashMap;
 use std::path::{Path, PathBuf};
 
-use fxhash::{FxHashMap as HashMap};
+use fxhash::FxHashMap as HashMap;
 
 use gtars_core::models::Region;
 use overlaprs::Overlapper;
@@ -14,7 +14,7 @@ use super::universe::Universe;
 use super::utils::prepare_universe_and_special_tokens;
 use super::utils::special_tokens::SpecialTokens;
 
-#[cfg(feature="huggingface")]
+#[cfg(feature = "huggingface")]
 use hf_hub::api::sync::Api;
 
 pub const DEFAULT_UNIVERSE_FILENAME: &str = "universe.bed.gz";
@@ -34,14 +34,13 @@ impl Token {
 pub struct Tokenizer {
     core: HashMap<String, Box<dyn Overlapper<u32, u32>>>,
     universe: Universe,
-    special_tokens: SpecialTokens, 
+    special_tokens: SpecialTokens,
 }
 
 impl Tokenizer {
-
     ///
     /// Create a new tokenizer
-    /// 
+    ///
     pub fn new(
         core: HashMap<String, Box<dyn Overlapper<u32, u32>>>,
         universe: Universe,
@@ -72,13 +71,13 @@ impl Tokenizer {
 
         let core = create_tokenize_core_from_universe(
             &universe,
-            config.tokenizer_type.unwrap_or(TokenizerType::Bits)
+            config.tokenizer_type.unwrap_or(TokenizerType::Bits),
         );
 
         Ok(Tokenizer {
             core,
             special_tokens,
-            universe
+            universe,
         })
     }
 
@@ -89,22 +88,19 @@ impl Tokenizer {
         let special_tokens = SpecialTokens::default();
         let (universe, special_tokens) =
             prepare_universe_and_special_tokens(bed_path.as_ref(), special_tokens)?;
-        let core = create_tokenize_core_from_universe(
-            &universe,
-            TokenizerType::Bits
-        );
+        let core = create_tokenize_core_from_universe(&universe, TokenizerType::Bits);
 
         Ok(Tokenizer {
             core,
             special_tokens,
-            universe
+            universe,
         })
     }
 
     ///
     /// Create a new tokenizer from a pre-trained model
     ///
-    #[cfg(feature="huggingface")]
+    #[cfg(feature = "huggingface")]
     pub fn from_pretrained<P: AsRef<Path>>(path: P) -> Result<Self, TokenizerError> {
         // if local
         let universe_file_path: PathBuf = if path.as_ref().exists() {
@@ -156,7 +152,7 @@ impl Tokenizer {
                 id,
             })
             .collect::<Vec<Token>>();
-            
+
         if tokens.is_empty() {
             return Ok(vec![self.special_tokens.unk.clone()]);
         }
@@ -166,7 +162,10 @@ impl Tokenizer {
 
     pub fn encode(&self, regions: &[Region]) -> Result<Vec<u32>, TokenizerError> {
         let tokenized = self.tokenize(regions)?;
-        Ok(tokenized.into_iter().map(|t| self.convert_token_to_id(&t).unwrap()).collect())
+        Ok(tokenized
+            .into_iter()
+            .map(|t| self.convert_token_to_id(&t).unwrap())
+            .collect())
     }
 
     pub fn decode(&self, ids: &[u32]) -> Result<Vec<String>, TokenizerError> {
@@ -493,5 +492,4 @@ mod tokenizer_tests {
         assert_eq!(tokenized[1], "chr2:203871387-203871588");
         assert_eq!(tokenizer.convert_token_to_id(&tokenized[1]), Some(8));
     }
-
 }

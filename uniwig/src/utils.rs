@@ -211,7 +211,10 @@ pub fn get_final_chromosomes(
                     }
                 }
                 FileType::BAM => {
-                    println!("WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.", single_file_path);
+                    println!(
+                        "WARNING: Skipping BAM file ({}). Not supported at this time for direct parsing.",
+                        single_file_path
+                    );
                 }
                 FileType::UNKNOWN => {
                     println!(

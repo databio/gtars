@@ -9,9 +9,9 @@ use super::super::{Tokenizer, TokenizerError};
 pub fn tokenize_fragment_file<P>(
     file: P,
     tokenizer: &Tokenizer,
-) -> Result<HashMap<String, Vec<u32>>, TokenizerError> 
+) -> Result<HashMap<String, Vec<u32>>, TokenizerError>
 where
-    P: AsRef<Path>
+    P: AsRef<Path>,
 {
     let reader = get_dynamic_reader(file.as_ref())?;
     let mut res = HashMap::new();

@@ -1,6 +1,6 @@
+use super::create::{gdata_t, gdata0_t, parse_bed};
 use gtars_core::consts::{BED_FILE_EXTENSION, IGD_FILE_EXTENSION};
 use gtars_core::utils::get_dynamic_reader;
-use super::create::{gdata0_t, gdata_t, parse_bed};
 
 use byteorder::{LittleEndian, ReadBytesExt};
 
@@ -344,7 +344,7 @@ fn get_overlaps(
 
             while tL < tR - 1 {
                 tM = (tL + tR) / 2; //result: tR=tL+1, tL.s<qe
-                                    //println!("What is tM? {}", tM);
+                //println!("What is tM? {}", tM);
                 if gData[tM as usize].start < query_end {
                     tL = tM; //right side
                 } else {

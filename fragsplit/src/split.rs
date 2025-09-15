@@ -5,14 +5,14 @@ use std::time::Instant;
 use std::{collections::HashMap, fs};
 
 use anyhow::{Context, Result};
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 use indicatif::{ProgressBar, ProgressStyle};
 
 use gtars_core::utils::get_dynamic_reader;
 use gtars_core::utils::remove_all_extensions;
 
-use super::map::{ClusterLookup, BarcodeToClusterMap};
+use super::map::{BarcodeToClusterMap, ClusterLookup};
 
 ///
 /// Psuedobulks fragment files accoring to a specified mapping.

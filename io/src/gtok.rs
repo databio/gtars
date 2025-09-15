@@ -32,11 +32,7 @@ impl TokenSize {
     #[allow(dead_code)]
     fn determine_size(tokens: &[u32]) -> Self {
         let is_small = tokens.iter().all(|&x| x <= u16::MAX as u32);
-        if is_small {
-            Self::U16
-        } else {
-            Self::U32
-        }
+        if is_small { Self::U16 } else { Self::U32 }
     }
 
     #[allow(dead_code)]

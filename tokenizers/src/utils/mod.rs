@@ -4,16 +4,16 @@
 //!
 use std::path::Path;
 
-use fxhash::{FxHashMap as HashMap};
+use fxhash::FxHashMap as HashMap;
 
 use special_tokens::SpecialTokens;
 
-use overlaprs::{Overlapper, Bits, AiList};
 use gtars_core::models::Interval;
+use overlaprs::{AiList, Bits, Overlapper};
 
 use super::TokenizerError;
-use super::universe::Universe;
 use super::config::TokenizerType;
+use super::universe::Universe;
 
 pub mod fragments;
 pub mod special_tokens;
@@ -45,9 +45,8 @@ pub fn prepare_universe_and_special_tokens<P: AsRef<Path>>(
 /// - universe: the universe to create the interval tree for.
 pub fn create_tokenize_core_from_universe(
     universe: &Universe,
-    overlapper_type: TokenizerType
+    overlapper_type: TokenizerType,
 ) -> HashMap<String, Box<dyn Overlapper<u32, u32>>> {
-    
     // instantiate the tree and list of intervals
     let mut core: HashMap<String, Box<dyn Overlapper<u32, u32>>> = HashMap::default();
     let mut intervals: HashMap<String, Vec<Interval<u32, u32>>> = HashMap::default();
@@ -55,9 +54,10 @@ pub fn create_tokenize_core_from_universe(
     for region in universe.regions.iter() {
         // skip any special tokens that snuck into the regions
         if let Some(special_tokens) = &universe.special_tokens
-            && special_tokens.contains(&region.to_string()) {
-                continue;
-            }
+            && special_tokens.contains(&region.to_string())
+        {
+            continue;
+        }
 
         let parts = region.split(":").collect::<Vec<&str>>();
 
