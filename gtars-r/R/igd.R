@@ -32,7 +32,7 @@ igd_create <- function(output_path, filelist, db_name = "igd_database") {
   }
 
   # Call Rust function
-  .Call(wrap__igd_create, output_path, filelist, db_name)
+  .Call(wrap__r_igd_create, output_path, filelist, db_name)
 
   invisible(NULL)
 }
@@ -65,7 +65,7 @@ igd_search <- function(database_path, query_path) {
   }
   
   # Call Rust function
-  chr_vector <- .Call(wrap__igd_search, database_path, query_path)
+  chr_vector <- .Call(wrap__r_igd_search, database_path, query_path)
   
   split_result <- strsplit(chr_vector, split = '\t')
   df <- data.frame(matrix(unlist(split_result[-1]), nrow = length(chr_vector)-1, byrow = TRUE))

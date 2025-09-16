@@ -27,18 +27,77 @@ write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write
 #' @param output_path String path where the IGD database will be saved
 #' @param filelist String path to either a text file containing paths to bed files, or a directory containing bed files
 #' @param db_name String name for the database (will be used in output filenames)
-rextendr_igd_create <- function(output_path, filelist, db_name) .Call(wrap__rextendr_igd_create, output_path, filelist, db_name)
+r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_create, output_path, filelist, db_name)
 
 #' Search igd with a bed file
 #' @param database_path A string representing the path to the database igd file.
 #' @param query_path A string representing the path to the query bed file.
-rextendr_igd_search <- function(database_path, query_path) .Call(wrap__rextendr_igd_search, database_path, query_path)
+r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
 
+#' Create sha512t24u digest
+#' @export
+#' @param readable A readable string representing a sequence.
 sha512t24u_digest <- function(readable) .Call(wrap__sha512t24u_digest, readable)
 
+#' Create md5 digest
+#' @export
+#' @param readable A readable string representing a sequence.
 md5_digest <- function(readable) .Call(wrap__md5_digest, readable)
 
+#' Digest fasta file
+#' @param fasta A filepath string to a fasta file.
 digest_fasta_raw <- function(fasta) .Call(wrap__digest_fasta_raw, fasta)
+
+#' Create a GlobalRefgetStore
+#' @param mode Storage mode: "raw" or "encoded"
+global_refget_store_raw <- function(mode) .Call(wrap__global_refget_store_raw, mode)
+
+#' Import FASTA file into store
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param file_path Path to FASTA file
+import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_store, store_ptr, file_path)
+
+#' Get sequence by ID from store
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param digest Sequence digest
+get_sequence_by_id_store <- function(store_ptr, digest) .Call(wrap__get_sequence_by_id_store, store_ptr, digest)
+
+#' Get sequence by collection and name
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param collection_digest Sequence collection digest
+#' @param sequence_name Sequence name
+get_sequence_by_collection_and_name_store <- function(store_ptr, collection_digest, sequence_name) .Call(wrap__get_sequence_by_collection_and_name_store, store_ptr, collection_digest, sequence_name)
+
+#' Get substring from sequence
+#' @param store_ptr External pointer to GlobalRefgetStore  
+#' @param seq_digest Sequence digest
+#' @param start Start position
+#' @param end End position
+get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
+
+#' Write store to directory
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param root_path Path to write store
+#' @param seqdata_path_template Path template name
+write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_template) .Call(wrap__write_store_to_directory_store, store_ptr, root_path, seqdata_path_template)
+
+#' Load store from directory
+#' @export  
+#' @param root_path Path to read store from
+load_from_directory_store <- function(root_path) .Call(wrap__load_from_directory_store, root_path)
+
+#' Extract sequences from store using BED file as FASTA
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param collection_digest Sequence collection digest
+#' @param bed_file_path Path to BED file
+#' @param output_file_path Path to output FASTA file
+get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path, output_file_path) .Call(wrap__get_seqs_bed_file_store, store_ptr, collection_digest, bed_file_path, output_file_path)
+
+#' Extract sequences from store using BED file into memory
+#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param collection_digest Sequence collection digest
+#' @param bed_file_path Path to BED file
+get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_vec_store, store_ptr, collection_digest, bed_file_path)
 
 
 # nolint end

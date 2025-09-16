@@ -7,7 +7,7 @@ use igd::search::igd_search;
 /// @param filelist String path to either a text file containing paths to bed files, or a directory containing bed files
 /// @param db_name String name for the database (will be used in output filenames)
 #[extendr]
-fn igd_create(
+fn r_igd_create(
     output_path: &str,
     filelist: &str,
     db_name: &str,
@@ -25,7 +25,7 @@ fn igd_create(
 /// @param database_path A string representing the path to the database igd file.
 /// @param query_path A string representing the path to the query bed file.
 #[extendr]
-pub fn igd_search(
+pub fn r_igd_search(
     database_path: &str,
     query_path: &str,
 ) -> std::result::Result<Vec<String>, extendr_api::Error> {
@@ -42,6 +42,6 @@ pub fn igd_search(
 
 extendr_module! {
     mod igd;
-    fn igd_create;
-    fn igd_search;
+    fn r_igd_create;
+    fn r_igd_search;
 }
