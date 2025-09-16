@@ -3,8 +3,8 @@ use std::path::Path;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use fragsplit::consts::*;
-use fragsplit::{BarcodeToClusterMap, pseudobulk_fragment_files};
+use gtars_fragsplit::consts::*;
+use gtars_fragsplit::{BarcodeToClusterMap, pseudobulk_fragment_files};
 
 pub fn run_fragsplit(matches: &ArgMatches) -> Result<()> {
     let fragments = matches

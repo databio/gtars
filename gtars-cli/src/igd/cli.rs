@@ -1,5 +1,6 @@
 use clap::{Command, arg};
-pub use igd::consts::*;
+
+pub use gtars_igd::consts::*;
 
 pub fn create_igd_cli() -> Command {
     Command::new(IGD_CMD)

@@ -4,8 +4,8 @@ use std::str::FromStr;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use scoring::consts;
-use scoring::{ConsensusSet, FragmentFileGlob, ScoringMode, region_scoring_from_fragments};
+use gtars_scoring::consts;
+use gtars_scoring::{ConsensusSet, FragmentFileGlob, ScoringMode, region_scoring_from_fragments};
 
 pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
     // get arguments from CLI

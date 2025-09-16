@@ -1,7 +1,7 @@
 use clap::ArgMatches;
 
-use igd::create::create_igd_f;
-use igd::search::igd_search;
+use gtars_igd::create::create_igd_f;
+use gtars_igd::search::igd_search;
 
 pub fn igd_get_create_matches(matches: &ArgMatches) {
     //println!("HELLO FROM IGD CREATE SUBMODULE!");

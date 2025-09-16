@@ -1,6 +1,6 @@
 use clap::ArgMatches;
 
-use uniwig::uniwig_main;
+use gtars_uniwig::uniwig_main;
 
 /// Matches items from CLAP args before running uniwig_main
 pub fn run_uniwig(matches: &ArgMatches) {

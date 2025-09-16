@@ -1,6 +1,6 @@
 use clap::{Arg, Command, arg};
 
-pub use fragsplit::consts::*;
+pub use gtars_fragsplit::consts::*;
 
 pub fn create_fragsplit_cli() -> Command {
     Command::new(FRAGSPLIT_CMD)
