@@ -1,5 +1,5 @@
 [package]
-name = "fragsplit"
+name = "gtars-fragsplit"
 version = "0.5.0"
 edition = "2024"
 description = "Small utility that wil split fragments files according to pseudobulk assignments"

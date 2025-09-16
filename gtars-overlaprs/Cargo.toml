@@ -1,5 +1,5 @@
 [package]
-name = "overlaprs"
+name = "gtars-overlaprs"
 version = "0.5.0"
 edition = "2024"
 description = "Genomic interval overlap operations in Rust"

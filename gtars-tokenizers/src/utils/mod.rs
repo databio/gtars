@@ -9,7 +9,7 @@ use fxhash::FxHashMap as HashMap;
 use special_tokens::SpecialTokens;
 
 use gtars_core::models::Interval;
-use overlaprs::{AiList, Bits, Overlapper};
+use gtars_overlaprs::{AiList, Bits, Overlapper};
 
 use super::TokenizerError;
 use super::config::TokenizerType;

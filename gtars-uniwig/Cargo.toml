@@ -1,5 +1,5 @@
 [package]
-name = "uniwig"
+name = "gtars-uniwig"
 version = "0.5.0"
 edition = "2024"
 description = "Rust implementation of uniwig: a tool for computing coverage from BED files over genomic intervals"

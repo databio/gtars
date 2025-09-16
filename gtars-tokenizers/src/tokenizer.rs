@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use fxhash::FxHashMap as HashMap;
 
 use gtars_core::models::Region;
-use overlaprs::Overlapper;
+use gtars_overlaprs::Overlapper;
 
 use crate::utils::create_tokenize_core_from_universe;
 
