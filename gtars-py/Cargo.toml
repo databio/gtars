@@ -15,5 +15,5 @@ pyo3 = { version = "0.21.1", features=["anyhow", "extension-module"] }
 # our code
 gtars-core = { path = "../gtars-core" }
 gtars-refget = { path = "../gtars-refget" }
-gtars-gtokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
+gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
 gtars-io = { path = "../gtars-io" }

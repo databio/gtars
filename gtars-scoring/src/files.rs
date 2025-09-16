@@ -7,7 +7,7 @@ use glob::glob;
 use gtars_core::models::region_set::RegionSet;
 use gtars_core::models::{Interval, Region};
 use gtars_core::utils::generate_region_to_id_map;
-use overlaprs::{Bits, Overlapper};
+use gtars_overlaprs::{Bits, Overlapper};
 
 #[allow(unused)]
 pub struct OverlapResult(Region, pub(crate) u32);

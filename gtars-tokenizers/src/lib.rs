@@ -8,7 +8,7 @@
 //! ```rust
 //! use std::path::Path;
 //!
-//! use gtokenizers::Tokenizer;
+//! use gtars_tokenizers::Tokenizer;
 //! use gtars_core::models::Region;
 //!
 //! let tokenizer = Tokenizer::from_bed(Path::new("../tests/data/tokenizers/peaks.bed")).unwrap();

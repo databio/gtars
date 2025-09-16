@@ -7,7 +7,7 @@ use pyo3::types::{PyDict, PyType};
 use anyhow::Result;
 
 use crate::utils::extract_regions_from_py_any;
-use gtokenizers::Tokenizer;
+use gtars_tokenizers::Tokenizer;
 
 use super::encoding::{PyBatchEncoding, PyEncoding};
 

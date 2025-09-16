@@ -6,13 +6,13 @@ use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString, PyType};
 
-use ::refget::alphabet::AlphabetType;
-use ::refget::collection::{
+use gtars_refget::alphabet::AlphabetType;
+use gtars_refget::collection::{
     SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
-use ::refget::digest::{md5, sha512t24u};
-use ::refget::store::GlobalRefgetStore;
-use ::refget::store::StorageMode;
+use gtars_refget::digest::{md5, sha512t24u};
+use gtars_refget::store::GlobalRefgetStore;
+use gtars_refget::store::StorageMode;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 #[pyfunction]
@@ -42,7 +42,7 @@ pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 #[pyfunction]
 pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
     let fasta = fasta.to_string();
-    match ::refget::fasta::digest_fasta(&fasta) {
+    match gtars_refget::fasta::digest_fasta(&fasta) {
         Ok(sequence_collection) => Ok(PySequenceCollection::from(sequence_collection)),
         Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
             "Error processing FASTA file: {}",
@@ -127,8 +127,8 @@ pub struct PyRetrievedSequence {
 
 // This `From` implementation converts the Rust-native `RetrievedSequence`
 // into the Python-exposed `PyRetrievedSequence`.
-impl From<::refget::store::RetrievedSequence> for PyRetrievedSequence {
-    fn from(value: ::refget::store::RetrievedSequence) -> Self {
+impl From<gtars_refget::store::RetrievedSequence> for PyRetrievedSequence {
+    fn from(value: gtars_refget::store::RetrievedSequence) -> Self {
         PyRetrievedSequence {
             sequence: value.sequence,
             chrom_name: value.chrom_name,

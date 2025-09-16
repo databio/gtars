@@ -1,6 +1,6 @@
 use wasm_bindgen::prelude::*;
 
-use refget::digest::{md5, sha512t24u};
+use gtars_refget::digest::{md5, sha512t24u};
 
 #[wasm_bindgen(js_name = "digestFasta")]
 pub fn digest_fasta_from_string(fasta: &JsValue, algorithm: &JsValue) -> Result<JsValue, JsValue> {
