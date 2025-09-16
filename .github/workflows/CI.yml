@@ -30,7 +30,7 @@ jobs:
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
-          working-directory: ./gtars-py
+          working-directory: ./gtars-python
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
@@ -43,7 +43,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheels-linux-${{ matrix.target }}
-          path: ./gtars-py/dist
+          path: ./gtars-python/dist
 
   windows:
     runs-on: windows-latest
@@ -62,12 +62,12 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
-          working-directory: ./gtars-py
+          working-directory: ./gtars-python
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-windows-${{ matrix.target }}
-          path: ./gtars-py/dist
+          path: ./gtars-python/dist
 
   macos:
     runs-on: macos-latest
@@ -85,12 +85,12 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --find-interpreter
           sccache: 'true'
-          working-directory: ./gtars-py
+          working-directory: ./gtars-python
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
           name: wheels-macos-${{ matrix.target }}
-          path: ./gtars-py/dist
+          path: ./gtars-python/dist
 
   sdist:
     runs-on: ubuntu-latest
@@ -101,12 +101,12 @@ jobs:
         with:
           command: sdist
           args: --out dist
-          working-directory: ./gtars-py
+          working-directory: ./gtars-python
       - name: Upload sdist
         uses: actions/upload-artifact@v4
         with:
           name: wheels-sdist
-          path: ./gtars-py/dist
+          path: ./gtars-python/dist
 
   release:
     name: Release
@@ -119,13 +119,13 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: ./gtars-py/dist
+          path: ./gtars-python/dist
       - name: List contents
         run: |
           echo "Contents of dist/"
-          ls -l ./gtars-py/dist/
+          ls -l ./gtars-python/dist/
       - name: Publish to PyPI
         uses: PyO3/maturin-action@v1
         with:
           command: upload
-          args: --non-interactive --skip-existing ./gtars-py/dist/wheels-*/*
+          args: --non-interactive --skip-existing ./gtars-python/dist/wheels-*/*
