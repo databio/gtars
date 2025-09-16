@@ -13,7 +13,7 @@ flate2 = { workspace = true }
 
 # our code
 gtars-core = { path = "../gtars-core" }
-overlaprs = { path = "../overlaprs" }
+gtars-overlaprs = { path = "../gtars-overlaprs" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
