@@ -54,6 +54,7 @@ fn build_parser() -> Command {
     cmd
 }
 
+#[allow(unreachable_code)]
 fn main() -> Result<()> {
     let app = build_parser();
     let matches = app.get_matches();
