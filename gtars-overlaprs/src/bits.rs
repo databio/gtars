@@ -34,7 +34,7 @@ where
     /// Create a new instance of Bits by passing in a vector of Intervals. This vector will
     /// immediately be sorted by start order.
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let data = (0..20).step_by(5)
@@ -73,7 +73,7 @@ where
 
     /// Find all intervals that overlap start .. stop
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
@@ -128,7 +128,7 @@ where
     /// SIDE EFFECTS: This clears cov() and overlaps_merged
     /// meaning that those will have to be recomputed after a insert
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let data : Vec<Interval<usize, usize>>= vec!{
@@ -163,7 +163,7 @@ where
 
     /// Get the number over intervals in Bits
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let data = (0..20).step_by(5)
@@ -180,7 +180,7 @@ where
 
     /// Check if BITS is empty
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let data: Vec<Interval<usize, bool>> = vec![];
@@ -255,7 +255,7 @@ where
     /// find all the excluded elements, and then deduces the intersection from there. See
     /// [BITS](https://arxiv.org/pdf/1208.3407.pdf) for more details.
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
@@ -279,7 +279,7 @@ where
     /// be modified and should be reused in the next query. This allows seek to not need to make
     /// the Bits object mutable, and thus use the same Bits accross threads.
     /// ```
-    /// use overlaprs::{Bits, Overlapper};
+    /// use gtars_overlaprs::{Bits, Overlapper};
     /// use gtars_core::models::Interval;
     ///
     /// let bits = Bits::build((0..100).step_by(5)
