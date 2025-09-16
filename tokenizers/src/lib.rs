@@ -22,13 +22,13 @@
 //! let tokens = tokenizer.tokenize(&regions);
 //! ```
 //!
+pub mod cli;
 pub mod config;
 pub mod encoding;
 pub mod error;
 pub mod tokenizer;
 pub mod universe;
 pub mod utils;
-pub mod cli;
 
 // re-export things
 pub use encoding::*;

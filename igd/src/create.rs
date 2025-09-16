@@ -1,10 +1,10 @@
-use gtars_core::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
-use gtars_core::utils::get_dynamic_reader;
 use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
+use gtars_core::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
+use gtars_core::utils::get_dynamic_reader;
 use std::collections::HashMap;
 use std::fs;
-use std::fs::{create_dir_all, File, OpenOptions};
+use std::fs::{File, OpenOptions, create_dir_all};
 use std::io::{BufRead, BufReader, Error, Read, Write};
 use std::path::{Path, PathBuf};
 
@@ -822,8 +822,8 @@ pub fn parse_bed(line: &str, start: &mut i32, end: &mut i32, score: &mut i32) ->
     let mut fields = line.split('\t');
     // Get the first field which should be chromosome.
     let ctg = fields.next()?; // Why is ctg used as variable name in og code?
-                              //println!("GOT CHR: {}", ctg);
-                              // Parse 2nd and 3rd string as integers or return -1 if failure
+    //println!("GOT CHR: {}", ctg);
+    // Parse 2nd and 3rd string as integers or return -1 if failure
     let st = fields
         .next()
         .and_then(|s| s.parse::<i32>().ok())

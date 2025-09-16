@@ -122,6 +122,11 @@ pub fn start_end_counts(
         prev_coordinate_value = adjusted_start_site.0;
     }
 
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
@@ -248,6 +253,10 @@ pub fn core_counts(
         collected_counts.insert(0, current_score); // needed to later decrement in the correct order
 
         prev_coordinate_value = current_start_site.0;
+    }
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
     }
 
     while coordinate_position < chrom_size {
@@ -425,6 +434,10 @@ pub fn fixed_start_end_counts_bam(
     count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
@@ -583,6 +596,10 @@ pub fn fixed_core_counts_bam_to_bw(
     }
     count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -775,6 +792,11 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
     count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -972,6 +994,10 @@ pub fn variable_start_end_counts_bam_to_bw(
     count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
 
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
@@ -1121,6 +1147,11 @@ pub fn variable_core_counts_bam_to_bw(
     }
     count += 1; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
@@ -1401,6 +1432,11 @@ pub fn variable_shifted_bam_to_bw(
 
     count += 1.0; // We must add 1 extra value here so that our calculation during the tail as we close out the end sites does not go negative.
     // this is because the code above subtracts twice during the INITIAL end site closure. So we are missing one count and need to make it up else we go negative.
+
+    if coordinate_position > chrom_size{
+        eprintln!("Chromosome extends beyond defined chromosome in chrom.sizes file {} vs {}", coordinate_position, chrom_size);
+    }
+
 
     while coordinate_position < chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.

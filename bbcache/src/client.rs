@@ -1,9 +1,9 @@
-use anyhow::{anyhow, Context, Ok, Result};
+use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
 use reqwest::blocking::get;
-use std::fs::{create_dir_all, read_dir, remove_dir, remove_file, File};
+use std::fs::{File, create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
 
@@ -409,13 +409,15 @@ impl BBClient {
 
         // Attempt to remove empty subfolders
         if let Some(sub2) = sub_folder_2
-            && read_dir(&sub2)?.next().is_none() {
-                remove_dir(&sub2)?;
-                if let Some(sub1) = sub_folder_1
-                    && read_dir(&sub1)?.next().is_none() {
-                        remove_dir(&sub1)?;
-                    }
+            && read_dir(&sub2)?.next().is_none()
+        {
+            remove_dir(&sub2)?;
+            if let Some(sub1) = sub_folder_1
+                && read_dir(&sub1)?.next().is_none()
+            {
+                remove_dir(&sub1)?;
             }
+        }
 
         Ok(())
     }

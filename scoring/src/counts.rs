@@ -3,8 +3,8 @@ use std::io::{BufWriter, Write};
 use std::ops::{Add, AddAssign};
 
 use anyhow::Result;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 
 pub struct CountMatrix<T> {
     data: Vec<T>,

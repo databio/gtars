@@ -1,19 +1,19 @@
-#[cfg(feature="igd")]
+#[cfg(feature = "igd")]
 mod igd;
 
-#[cfg(feature="overlaprs")]
+#[cfg(feature = "overlaprs")]
 mod overlaprs;
 
-#[cfg(feature="uniwig")]
+#[cfg(feature = "uniwig")]
 mod uniwig;
 
-#[cfg(feature="bbcache")]
+#[cfg(feature = "bbcache")]
 mod bbcache;
 
-#[cfg(feature="fragsplit")]
+#[cfg(feature = "fragsplit")]
 mod fragsplit;
 
-#[cfg(feature="scoring")]
+#[cfg(feature = "scoring")]
 mod scoring;
 
 use anyhow::Result;
@@ -33,24 +33,24 @@ fn build_parser() -> Command {
         .about("Performance critical tools for working with genomic interval data with an emphasis on preprocessing for machine learning pipelines.")
         .subcommand_required(true);
 
-    #[cfg(feature="igd")]
+    #[cfg(feature = "igd")]
     let cmd = cmd.subcommand(igd::cli::create_igd_cli());
 
-    #[cfg(feature="overlaprs")]
+    #[cfg(feature = "overlaprs")]
     let cmd = cmd.subcommand(overlaprs::cli::create_overlap_cli());
 
-    #[cfg(feature="uniwig")]
+    #[cfg(feature = "uniwig")]
     let cmd = cmd.subcommand(uniwig::cli::create_uniwig_cli());
 
-    #[cfg(feature="bbcache")]
+    #[cfg(feature = "bbcache")]
     let cmd = cmd.subcommand(bbcache::cli::create_bbcache_cli());
 
-    #[cfg(feature="fragsplit")]
+    #[cfg(feature = "fragsplit")]
     let cmd = cmd.subcommand(fragsplit::cli::create_fragsplit_cli());
 
-    #[cfg(feature="scoring")]
-    let cmd = cmd.subcommand(scoring::cli::create_scoring_cli());    
-        
+    #[cfg(feature = "scoring")]
+    let cmd = cmd.subcommand(scoring::cli::create_scoring_cli());
+
     cmd
 }
 
@@ -63,7 +63,7 @@ fn main() -> Result<()> {
         //
         // UNIWIG
         //
-        #[cfg(feature="uniwig")]
+        #[cfg(feature = "uniwig")]
         Some((uniwig::cli::UNIWIG_CMD, matches)) => {
             uniwig::handlers::run_uniwig(matches);
         }
@@ -71,7 +71,7 @@ fn main() -> Result<()> {
         //
         // OVERLAPPES
         //
-        #[cfg(feature="overlaprs")]
+        #[cfg(feature = "overlaprs")]
         Some((overlaprs::cli::OVERLAP_CMD, matches)) => {
             let _ = overlaprs::handlers::run_overlaprs(matches);
         }
@@ -79,7 +79,7 @@ fn main() -> Result<()> {
         //
         // BBCACHE
         //
-        #[cfg(feature="bbcache")]
+        #[cfg(feature = "bbcache")]
         Some((bbcache::cli::BBCACHE_CMD, matches)) => {
             bbcache::handlers::run_bbcache(matches);
         }
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
         //
         // IGD
         //
-        #[cfg(feature="igd")]
+        #[cfg(feature = "igd")]
         Some((igd::cli::IGD_CMD, matches)) => match matches.subcommand() {
             Some((igd::cli::IGD_CREATE, matches)) => {
                 igd::handlers::igd_get_create_matches(matches);
@@ -101,7 +101,7 @@ fn main() -> Result<()> {
         //
         // FRAGMENT SPLITTING UTIL
         //
-        #[cfg(feature="fragsplit")]
+        #[cfg(feature = "fragsplit")]
         Some((fragsplit::cli::FRAGSPLIT_CMD, matches)) => {
             fragsplit::handlers::run_fragsplit(matches)?;
         }
@@ -109,11 +109,10 @@ fn main() -> Result<()> {
         //
         // REGION SCORING MATRIX
         //
-        #[cfg(feature="scoring")]
+        #[cfg(feature = "scoring")]
         Some((scoring::cli::FSCORING_CMD, matches)) => {
             scoring::handlers::run_scoring(matches)?;
         }
-
 
         _ => unreachable!("Subcommand not found"),
     };

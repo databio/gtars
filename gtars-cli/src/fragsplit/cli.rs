@@ -1,4 +1,4 @@
-use clap::{arg, Arg, Command};
+use clap::{Arg, Command, arg};
 
 pub use fragsplit::consts::*;
 

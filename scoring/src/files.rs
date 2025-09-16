@@ -5,7 +5,7 @@ use anyhow::Result;
 use glob::glob;
 
 use gtars_core::models::region_set::RegionSet;
-use gtars_core::models::{Region, Interval};
+use gtars_core::models::{Interval, Region};
 use gtars_core::utils::generate_region_to_id_map;
 use overlaprs::{Bits, Overlapper};
 

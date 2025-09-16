@@ -42,7 +42,6 @@
 //         let default_backend = "bits".to_string();
 //         let backend_str = matches.get_one::<String>("backend")
 //             .unwrap_or(&default_backend);
-            
 
 //         let backend_type = match backend_str.as_str() {
 //             "bits" => TokenizerType::Bits,
