@@ -11,38 +11,38 @@
 #[doc(inline)]
 pub use gtars_core as core;
 
-#[cfg(feature = "gtokenizers")]
+#[cfg(feature = "tokenizers")]
 #[doc(inline)]
-pub use gtokenizers;
+pub use gtars_tokenizers as tokenizers;
 
 #[cfg(feature = "io")]
 #[doc(inline)]
-pub use io;
+pub use gtars_io as io;
 
 #[cfg(feature = "refget")]
 #[doc(inline)]
-pub use refget;
+pub use gtars_refget as refget;
 
 #[cfg(feature = "overlaprs")]
 #[doc(inline)]
-pub use overlaprs;
+pub use gtars_overlaprs as overlaprs;
 
 #[cfg(feature = "uniwig")]
 #[doc(inline)]
-pub use uniwig;
+pub use gtars_uniwig as uniwig;
 
 #[cfg(feature = "igd")]
 #[doc(inline)]
-pub use igd;
+pub use gtars_igd as igd;
 
 #[cfg(feature = "bbcache")]
 #[doc(inline)]
-pub use bbcache;
+pub use gtars_bbcache as bbcache;
 
 #[cfg(feature = "scoring")]
 #[doc(inline)]
-pub use scoring;
+pub use gtars_scoring as scoring;
 
 #[cfg(feature = "fragsplit")]
 #[doc(inline)]
-pub use fragsplit;
+pub use gtars_fragsplit as fragsplit;

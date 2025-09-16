@@ -12,22 +12,22 @@ categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
 [dependencies]
 gtars-core = { path = "../gtars-core", optional = true }
-gtokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true }
-io = { path = "../gtars-io", optional = true }
-refget = { path = "../gtars-refget", optional = true }
-overlaprs = { path = "../gtars-overlaprs", optional = true }
-uniwig = { path = "../gtars-uniwig", optional = true }
-igd = { path = "../gtars-igd", optional = true }
-bbcache = { path = "../gtars-bbcache", optional = true }
-scoring = { path = "../gtars-scoring", optional = true }
-fragsplit = { path = "../gtars-fragsplit", optional = true }
+gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true }
+gtars-io = { path = "../gtars-io", optional = true }
+gtars-refget = { path = "../gtars-refget", optional = true }
+gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
+gtars-uniwig = { path = "../gtars-uniwig", optional = true }
+gtars-igd = { path = "../gtars-igd", optional = true }
+gtars-bbcache = { path = "../gtars-bbcache", optional = true }
+gtars-scoring = { path = "../gtars-scoring", optional = true }
+gtars-fragsplit = { path = "../gtars-fragsplit", optional = true }
 
 
 [features]
 default = []
 
 core = ["dep:gtars-core"]
-gtokenizers = ["dep:gtars-tokenizers"]
+tokenizers = ["dep:gtars-tokenizers"]
 io = ["dep:gtars-io"]
 refget = ["dep:gtars-refget"]
 overlaprs = ["dep:gtars-overlaprs"]
