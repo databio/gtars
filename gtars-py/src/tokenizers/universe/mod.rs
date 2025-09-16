@@ -1,6 +1,6 @@
 use pyo3::prelude::*;
 
-use tokenizers::universe::Universe;
+use gtokenizers::universe::Universe;
 
 #[pyclass(name = "Universe", module = "gtars.tokenizers")]
 #[derive(Clone, Debug)]

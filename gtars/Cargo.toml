@@ -12,7 +12,7 @@ categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
 [dependencies]
 gtars-core = { path = "../gtars-core", optional = true }
-tokenizers = { path = "../tokenizers", features = ["huggingface"], optional = true }
+gtokenizers = { path = "../gtokenizers", features = ["huggingface"], optional = true }
 io = { path = "../io", optional = true }
 refget = { path = "../refget", optional = true }
 overlaprs = { path = "../overlaprs", optional = true }
@@ -27,7 +27,7 @@ fragsplit = { path = "../fragsplit", optional = true }
 default = []
 
 core = ["dep:gtars-core"]
-tokenizers = ["dep:tokenizers"]
+gtokenizers = ["dep:gtokenizers"]
 io = ["dep:io"]
 refget = ["dep:refget"]
 overlaprs = ["dep:overlaprs"]

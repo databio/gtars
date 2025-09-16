@@ -1,5 +1,5 @@
 [package]
-name = "tokenizers"
+name = "gtokenizers"
 version = "0.5.0"
 edition = "2024"
 
@@ -14,8 +14,8 @@ fxhash = { workspace = true }
 serde = { workspace = true }
 
 # our code
-gtars-core = { path = "../gtars-core" }
-overlaprs = { path = "../overlaprs" }
+gtars-core = { path = "../gtars-core", version="0.5.0" }
+overlaprs = { path = "../overlaprs", version="0.5.0" }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"

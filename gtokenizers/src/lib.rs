@@ -8,7 +8,7 @@
 //! ```rust
 //! use std::path::Path;
 //!
-//! use tokenizers::Tokenizer;
+//! use gtokenizers::Tokenizer;
 //! use gtars_core::models::Region;
 //!
 //! let tokenizer = Tokenizer::from_bed(Path::new("../tests/data/tokenizers/peaks.bed")).unwrap();
@@ -22,7 +22,6 @@
 //! let tokens = tokenizer.tokenize(&regions);
 //! ```
 //!
-pub mod cli;
 pub mod config;
 pub mod encoding;
 pub mod error;

@@ -3,7 +3,7 @@ use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyDict};
 
 use super::PyTokenizer;
-use tokenizers::utils::fragments::tokenize_fragment_file;
+use gtokenizers::utils::fragments::tokenize_fragment_file;
 
 #[pyfunction(name = "tokenize_fragment_file")]
 pub fn py_tokenize_fragment_file(file: String, tokenizer: &PyTokenizer) -> PyResult<Py<PyDict>> {
