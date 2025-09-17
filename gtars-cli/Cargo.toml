@@ -2,6 +2,12 @@
 name = "gtars-cli"
 version = "0.5.0"
 edition = "2024"
+description = "Performance critical tools for genomic interval analysis. This is the CLI"
+homepage = "https://github.com/databio/gtars"
+repository = "https://github.com/databio/gtars"
+readme = "../README.md"
+license = "MIT"
+categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
 [dependencies]
 # generic cli stuff
@@ -13,13 +19,13 @@ fxhash = { workspace = true }
 anyhow = { workspace = true }
 
 # our code
-gtars-scoring = { path = "../gtars-scoring", optional=true }
-gtars-fragsplit = { path = "../gtars-fragsplit", optional=true }
-gtars-igd = { path = "../gtars-igd", optional=true }
-gtars-uniwig = { path = "../gtars-uniwig", optional=true }
-gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
-gtars-bbcache = { path = "../gtars-bbcache", optional=true }
-gtars-core = { path = "../gtars-core" }
+gtars-scoring = { path = "../gtars-scoring", optional=true, version="0.5.0" }
+gtars-fragsplit = { path = "../gtars-fragsplit", optional=true, version="0.5.0" }
+gtars-igd = { path = "../gtars-igd", optional=true, version="0.5.0" }
+gtars-uniwig = { path = "../gtars-uniwig", optional=true, version="0.5.0" }
+gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.0" }
+gtars-bbcache = { path = "../gtars-bbcache", optional=true, version="0.5.0" }
+gtars-core = { path = "../gtars-core", version="0.5.0" }
 
 [[bin]]
 name = "gtars"
