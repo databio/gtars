@@ -1,6 +1,6 @@
-use clap::{arg, Arg, Command};
+use clap::{Arg, Command, arg};
 
-pub use scoring::consts::*;
+pub use gtars_scoring::consts::*;
 
 pub fn create_scoring_cli() -> Command {
     Command::new(FSCORING_CMD)

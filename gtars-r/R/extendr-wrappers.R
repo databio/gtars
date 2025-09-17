@@ -86,14 +86,14 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 #' @param root_path Path to read store from
 load_from_directory_store <- function(root_path) .Call(wrap__load_from_directory_store, root_path)
 
-#' Extract sequences from store using BED file as FASTA
+#' Extract BED file sequences from store as FASTA
 #' @param store_ptr External pointer to GlobalRefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 #' @param output_file_path Path to output FASTA file
 get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path, output_file_path) .Call(wrap__get_seqs_bed_file_store, store_ptr, collection_digest, bed_file_path, output_file_path)
 
-#' Extract sequences from store using BED file into memory
+#' Extract BED file sequences from store into memory
 #' @param store_ptr External pointer to GlobalRefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file

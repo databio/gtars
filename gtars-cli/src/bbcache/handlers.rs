@@ -2,8 +2,8 @@ use std::fs::read_dir;
 use std::path::PathBuf;
 
 use clap::ArgMatches;
-use bbcache::client::BBClient;
-use bbcache::utils::{get_default_cache_folder, print_resources};
+use gtars_bbcache::client::BBClient;
+use gtars_bbcache::utils::{get_default_cache_folder, print_resources};
 
 /// Excute the input commands from CLI
 /// # Arguments
@@ -18,19 +18,19 @@ pub fn run_bbcache(matches: &ArgMatches) {
     let mut bbc = BBClient::new(Some(cache_folder), None).expect("Failed to create BBClient");
 
     match subcmd {
-        bbcache::consts::BBCACHE_INSPECTBED => {
+        gtars_bbcache::consts::BBCACHE_INSPECTBED => {
             let bed_resources = bbc.list_beds().unwrap();
             let n = bed_resources.len();
             print_resources(bed_resources);
             println!("Number of BED files: {}", n);
         }
-        bbcache::consts::BBCACHE_INSPECTBEDSET => {
+        gtars_bbcache::consts::BBCACHE_INSPECTBEDSET => {
             let bedset_resources = bbc.list_bedsets().unwrap();
             let n = bedset_resources.len();
             print_resources(bedset_resources);
             println!("Number of BED sets: {}", n);
         }
-        bbcache::consts::BBCACHE_SEEK => {
+        gtars_bbcache::consts::BBCACHE_SEEK => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -38,7 +38,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
             let path = bbc.seek(bed_id).expect("Failed to seek BED file in cache");
             println!("{}", path.display());
         }
-        bbcache::consts::BBCACHE_CACHEBED => {
+        gtars_bbcache::consts::BBCACHE_CACHEBED => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -76,7 +76,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
                     .expect("Failed to load BED file from BEDbase");
             }
         }
-        bbcache::consts::BBCACHE_CACHEBEDSET => {
+        gtars_bbcache::consts::BBCACHE_CACHEBEDSET => {
             let bedset_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -102,7 +102,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
                     .expect("Failed to load BED file from BEDbase");
             }
         }
-        bbcache::consts::BBCACHE_REMOVE => {
+        gtars_bbcache::consts::BBCACHE_REMOVE => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");

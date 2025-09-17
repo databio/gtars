@@ -1,0 +1,16 @@
+[package]
+name = "gtars-overlaprs"
+version = "0.5.0"
+edition = "2024"
+description = "Genomic interval overlap operations in Rust"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+# our code
+gtars-core = { path = "../gtars-core", version = "0.5.0" }
+num-traits = "0.2.19"
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"

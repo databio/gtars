@@ -1,0 +1,27 @@
+[package]
+name = "gtars-refget"
+version = "0.5.0"
+edition = "2024"
+description = "Rust implementation of the refget standard for accessing reference sequences"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+seq_io = "0.3.2"
+sha2 = "0.10.7"
+md-5 = "0.10.5"
+base64-url = "2.0.0"
+memmap2 = "0.5"  # for memory-mapped file I/O
+chrono = { version = "0.4", features = ["serde"] }  # For timestamps
+
+# shared workspace dependencies
+anyhow = { workspace = true }
+serde = { workspace = true }
+flate2 = { workspace = true }
+serde_json = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core", version="0.5.0" }
+
+[dev-dependencies]
+tempfile = "3.8.1"

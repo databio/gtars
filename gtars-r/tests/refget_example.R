@@ -1,8 +1,8 @@
 library(rextendr)
 
 ### either use rextendr or build/instsall the package
-setwd('../')
-# setwd('/Users/sam/Documents/Work/gtars/gtars-r')
+# setwd('../')
+setwd('/Users/sam/Documents/Work/gtars/gtars-r')
 rextendr::clean()
 rextendr::document()
 

@@ -1,6 +1,6 @@
 use extendr_api::prelude::*;
-use igd::create::create_igd_f;
-use igd::search::igd_search;
+use gtars_igd::create::create_igd_f;
+use gtars_igd::search::igd_search;
 
 /// Create an IGD database from a directory of bed files
 /// @param output_path String path where the IGD database will be saved

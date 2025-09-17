@@ -1,6 +1,6 @@
 use extendr_api::prelude::*;
 
-use io::{read_tokens_from_gtok, write_tokens_to_gtok};
+use gtars_io::{read_tokens_from_gtok, write_tokens_to_gtok};
 
 /// Write tokens to a gtok file
 /// @export

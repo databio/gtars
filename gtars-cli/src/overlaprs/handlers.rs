@@ -6,8 +6,8 @@ use anyhow::Result;
 use clap::ArgMatches;
 use fxhash::FxHashMap as HashMap;
 
-use overlaprs::Overlapper;
-use overlaprs::{AiList, Bits};
+use gtars_overlaprs::Overlapper;
+use gtars_overlaprs::{AiList, Bits};
 
 use gtars_core::models::Interval;
 use gtars_core::utils::get_dynamic_reader;

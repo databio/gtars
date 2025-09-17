@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{get_seqs_bed_file_store}
 \alias{get_seqs_bed_file_store}
-\title{Extract sequences from store using BED file as FASTA}
+\title{Extract BED file sequences from store as FASTA}
 \usage{
 get_seqs_bed_file_store(
   store_ptr,
@@ -21,5 +21,5 @@ get_seqs_bed_file_store(
 \item{output_file_path}{Path to output FASTA file}
 }
 \description{
-Extract sequences from store using BED file as FASTA
+Extract BED file sequences from store as FASTA
 }

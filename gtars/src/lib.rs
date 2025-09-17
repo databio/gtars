@@ -13,36 +13,36 @@ pub use gtars_core as core;
 
 #[cfg(feature = "tokenizers")]
 #[doc(inline)]
-pub use tokenizers as tokenizers;
+pub use gtars_tokenizers as tokenizers;
 
 #[cfg(feature = "io")]
 #[doc(inline)]
-pub use io as io;
+pub use gtars_io as io;
 
 #[cfg(feature = "refget")]
 #[doc(inline)]
-pub use refget as refget;
+pub use gtars_refget as refget;
 
 #[cfg(feature = "overlaprs")]
 #[doc(inline)]
-pub use overlaprs as overlaprs;
+pub use gtars_overlaprs as overlaprs;
 
 #[cfg(feature = "uniwig")]
 #[doc(inline)]
-pub use uniwig as uniwig;
+pub use gtars_uniwig as uniwig;
 
 #[cfg(feature = "igd")]
 #[doc(inline)]
-pub use igd as igd;
+pub use gtars_igd as igd;
 
 #[cfg(feature = "bbcache")]
 #[doc(inline)]
-pub use bbcache as bbcache;
+pub use gtars_bbcache as bbcache;
 
 #[cfg(feature = "scoring")]
 #[doc(inline)]
-pub use scoring as scoring;
+pub use gtars_scoring as scoring;
 
 #[cfg(feature = "fragsplit")]
 #[doc(inline)]
-pub use fragsplit as fragsplit;
+pub use gtars_fragsplit as fragsplit;

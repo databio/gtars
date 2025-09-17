@@ -27,9 +27,28 @@ This repository is a work in progress, and still in early development. This repo
 
 ## Installation
 
-To install `gtars`, you must have the rust toolchain installed. You can install it by [following the instructions](https://www.rust-lang.org/tools/install).
+To install any component of `gtars`, you must have the rust toolchain installed. You can install it by [following the instructions](https://www.rust-lang.org/tools/install).
 
+### Command-line interface
 You may build the cli binary locally by navigating to `gtars-cli` and using `cargo build --release`. This will create a binary in `target/release/gtars` at the top level of the workspace. You can then add this to your path, or run it directly.
+
+Alternatively, you can run `cargo install --path gtars-cli` from the top level of the workspace. This will install the binary to your cargo bin directory (usually `~/.cargo/bin`).
+
+Finally, you can download precompiled binaries from the [releases page](https://github.com/databio/gtars/releases).
+
+### Python bindings
+You can install the Python bindings via pip. First, ensure you have a recent version of pip installed. Then run:
+
+```bash
+pip install gtars
+```
+
+Then, you can use it in Python like so:
+
+```python
+from gtars import __version__
+print(__version__)
+```
 
 ## Usage
 
@@ -49,99 +68,17 @@ You can link `gtars` as a library in your rust project. To do so, add the follow
 
 ```toml
 [dependencies]
-gtars = { git = "https://github.com/databio/gtars" }
+gtars = { git = "https://github.com/databio/gtars/gtars" }
 ```
 
-## Testing
-
-To run the tests, run `cargo test --workspace`.
-
-### Refget tests
-
-The default tests for this module are designed to run quickly on tiny fasta files.
-To run the test on a full-scale fasta file, you can look at `test_loading_large_fasta_file`.
-This is large test, which is ignored by default, so it doesn't run in the typical `cargo test`. 
-To run just this large test on a fasta file, try something like this:
-
-```
-FASTA_PATH=tests/data/subset.fa.gz cargo test tests::test_loading_large_fasta_file -- --nocapture --ignored
-FASTA_PATH=`refgenie seek test/fasta` cargo test tests::test_loading_large_fasta_file -- --nocapture --ignored
-```
-
-## Contributing
-
-### New internal library crate tools
-
-If you'd like to add a new tool, you can do so by creating a new crate at the `gtars` workspace root. This can be done via `cargo new --lib <tool_name>`.
-
-### New public library crate tools
-
-If you want this to be available to users of `gtars`, you can add it to the `gtars` library crate as well. To do so, add your new crate as a dependency in `Cargo.toml`:
-
+we wall-off crates using features, so you will need to enable the features you want. For example, to use the `gtars` crate the overlap tool, you would do:
 ```toml
 [dependencies]
-<tool_name> = { path = "../<tool_name>", optional = true }
+gtars = { git = "https://github.com/databio/gtars/gtars", features = ["overlaprs"] }
 ```
 
-Then create a new feature to `Cargo.toml`:
-
-```toml
-[features]
-<tool_name> = ["dep:<tool_name>"]
-```
-
-And finally, re-export this tool in `gtars/src/lib.rs`:
+Then, in your rust code, you can use it like so:
 
 ```rust
-#[cfg(feature = "<tool_name>")]
-#[doc(inline)]
-pub use <tool_name> as <tool_name>;
-
+use gtars::overlaprs::{ ... };
 ```
-
-### New binary crate tools
-
-Finally, if you want to have command-line functionality, you can add it to the `gtars-cli` binary crate. This requires ____ steps:
-
-1. Create a new module inside `gtars-cli/src/main.rs`:
-
-```rust
-mod new_tool;
-```
-
-2. Use `clap` to define your command-line interface inside `gtars-cli/src/new_tool/cli.rs`:
-
-```rust
-use clap::{App, Arg};
-
-pub fn make_new_tool_cli() -> App<'static> {
-    App::new("new_tool")
-        .about("Does something new")
-        .arg(
-            Arg::new("input")
-                .about("Input file")
-                .required(true)
-                .index(1),
-        )
-}
-```
-
-3. Write your logic in a wrapper function. This will live inside the `handlers` module of `gtars-cli/src/new_tool`:
-
-```rust
-// top of file:
-use tool_name::{ ... }
-
-// inside the module:
-pub fn new_tool_wrapper() -> Result<(), Box<dyn Error>> {
-    // your logic here
-}
-```
-
-4. Bring this into the `gtars-cli/src/main.rs` file:
-
-```rust
-mod new_tool;
-```
-
-Please make sure you update the changelog and bump the version number in `Cargo.toml` when you add a new tool.

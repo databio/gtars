@@ -17,7 +17,8 @@ load refget store from directory
 }
 \examples{
 \dontrun{
-r_md5_digest('ATCG')
+temp_dir <- tempdir()
+write_store_to_directory(store, temp_dir, 'sequences/\%s2/\%s.seq')
 }
 
 }

@@ -1,8 +1,8 @@
 use extendr_api::prelude::*;
-use refget::digest::{md5, sha512t24u};
-use refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
-use refget::alphabet::AlphabetType;
-use refget::store::{StorageMode, GlobalRefgetStore, RetrievedSequence};
+use gtars_refget::digest::{md5, sha512t24u};
+use gtars_refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
+use gtars_refget::alphabet::AlphabetType;
+use gtars_refget::store::{StorageMode, GlobalRefgetStore, RetrievedSequence};
 
 
 /// Create sha512t24u digest
@@ -25,7 +25,7 @@ pub fn md5_digest(readable: &str) -> String {
 /// @param fasta A filepath string to a fasta file.
 #[extendr]
 pub fn digest_fasta_raw(fasta: &str) -> extendr_api::Result<List> {
-    match refget::fasta::digest_fasta(fasta) {
+    match gtars_refget::fasta::digest_fasta(fasta) {
         Ok(sequence_collection) => {
             Ok(sequence_collection_to_list(sequence_collection))
         }

@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{get_seqs_bed_file_to_vec_store}
 \alias{get_seqs_bed_file_to_vec_store}
-\title{Extract sequences from store using BED file into memory}
+\title{Extract BED file sequences from store into memory}
 \usage{
 get_seqs_bed_file_to_vec_store(store_ptr, collection_digest, bed_file_path)
 }
@@ -14,5 +14,5 @@ get_seqs_bed_file_to_vec_store(store_ptr, collection_digest, bed_file_path)
 \item{bed_file_path}{Path to BED file}
 }
 \description{
-Extract sequences from store using BED file into memory
+Extract BED file sequences from store into memory
 }

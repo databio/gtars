@@ -17,7 +17,10 @@ create a pointer to a new global refget store rust object
 }
 \examples{
 \dontrun{
-r_md5_digest('ATCG')
+store <- global_refget_store('raw')
+fasta_path <- '../../gtars/tests/data/fasta/base.fa'
+import_fasta(store, fasta_path)
+seq <- get_sequence_by_id(store, 'iYtREV555dUFKg2_agSJW6suquUyPpMw')
 }
 
 }

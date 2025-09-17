@@ -17,7 +17,8 @@ digest a fasta file given a filepath
 }
 \examples{
 \dontrun{
-r_md5_digest('ATCG')
+fasta_path <- '../../gtars/tests/data/fasta/base.fa'
+result <- gtars::digest_fasta(fasta_path)
 }
 
 }
