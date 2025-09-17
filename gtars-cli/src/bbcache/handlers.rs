@@ -1,9 +1,9 @@
 use std::fs::read_dir;
 use std::path::PathBuf;
 
+use clap::ArgMatches;
 use gtars_bbcache::client::BBClient;
 use gtars_bbcache::utils::{get_default_cache_folder, print_resources};
-use clap::ArgMatches;
 
 /// Excute the input commands from CLI
 /// # Arguments
