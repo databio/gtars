@@ -78,7 +78,8 @@ setMethod('length', 'SequenceCollection', function(x) {
 #' 
 #' @examples
 #' \dontrun{
-#' r_md5_digest('ATCG')
+#' fasta_path <- '../../gtars/tests/data/fasta/base.fa'
+#' result <- gtars::digest_fasta(fasta_path)
 #' }
 #' 
 #' @export
@@ -193,7 +194,6 @@ convert_to_retrieved_sequence <- function(raw_result) {
   )
 }
 
-# Write store to directory
 setGeneric('write_store_to_directory', function(store, root_path, seqdata_path_template) standardGeneric('write_store_to_directory'))
 setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_path, seqdata_path_template) {
   .Call(wrap__write_store_to_directory_store, 
@@ -201,7 +201,6 @@ setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_
   invisible(store)  # Return for chaining
 })
 
-# Get sequences from BED file (writes to file)
 setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path) standardGeneric('get_seqs_bed_file'))
 setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
   .Call(wrap__get_seqs_bed_file_store, 
@@ -209,7 +208,6 @@ setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_d
   invisible(store)  # Return for chaining
 })
 
-# Get sequences from BED file (returns vector)
 setGeneric('get_seqs_bed_file_to_vec', function(store, collection_digest, bed_file_path) standardGeneric('get_seqs_bed_file_to_vec'))
 setMethod('get_seqs_bed_file_to_vec', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path) {
   result <- .Call(wrap__get_seqs_bed_file_to_vec_store, 
@@ -255,7 +253,10 @@ setMethod('show', 'GlobalRefgetStore', function(object) {
 #' 
 #' @examples
 #' \dontrun{
-#' r_md5_digest('ATCG')
+#' store <- global_refget_store('raw')
+#' fasta_path <- '../../gtars/tests/data/fasta/base.fa'
+#' import_fasta(store, fasta_path)
+#' seq <- get_sequence_by_id(store, 'iYtREV555dUFKg2_agSJW6suquUyPpMw')
 #' }
 #' 
 #' @export
@@ -275,7 +276,8 @@ global_refget_store <- function(mode) {
 #' 
 #' @examples
 #' \dontrun{
-#' r_md5_digest('ATCG')
+#' temp_dir <- tempdir()
+#' write_store_to_directory(store, temp_dir, 'sequences/%s2/%s.seq')
 #' }
 #' 
 #' @export

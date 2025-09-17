@@ -182,7 +182,7 @@ pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
     }
 }
 
-/// Extract sequences from store using BED file as FASTA
+/// Extract BED file sequences from store as FASTA
 /// @param store_ptr External pointer to GlobalRefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param bed_file_path Path to BED file
@@ -205,7 +205,7 @@ pub fn get_seqs_bed_file_store(
         .map_err(|e| format!("Error writing sequences to file: {}", e).into())
 }
 
-/// Extract sequences from store using BED file into memory
+/// Extract BED file sequences from store into memory
 /// @param store_ptr External pointer to GlobalRefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param bed_file_path Path to BED file
