@@ -1,0 +1,21 @@
+[package]
+name = "gtars-bbcache"
+version = "0.5.0"
+edition = "2024"
+description = "Rust implementation of bbcache: a caching system for BED files on bedbase.org"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+biocrs = "0.1.0"
+reqwest = { version = "0.12.15", features = ["blocking"] }
+shellexpand = "3"
+tabled = "0.20.0"
+dirs = "6.0.0"
+
+# shared workspace dependencies
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core", version="0.5.0" }

@@ -1,50 +1,42 @@
 [package]
 name = "gtars"
-version = "0.4.0"
-description = "Performance-critical tools to manipulate, analyze, and process genomic interval data. Primarily focused on building tools for geniml - our genomic machine learning python package."
-license = "MIT"
+version = "0.5.0"
+edition = "2024"
+description = "Performance critical tools for genomic interval analysis."
+homepage = "https://github.com/databio/gtars"
+repository = "https://github.com/databio/gtars"
+documentation = "https://docs.rs/gtars"
 readme = "../README.md"
-edition = "2021"
+license = "MIT"
+categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.82"
-clap = { version = "4.4.7", features = ["derive"] }
-flate2 = "1.0.28"
-rust-lapper = "1.1.0"
-serde = {version = "1.0.203", features=["derive"]}
-toml = "0.8.14"
-ndarray-npy = "0.8.1"
-ndarray = "0.15.6"
-tempfile = "3.10.1"
-byteorder = "1.5.0"
-noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
-rayon = "1.10.0"
-indicatif = "0.17.8"
-bigtools = "0.5.5"
-tokio = "1.40.0"
-os_pipe = "1.2.1"
-glob = "0.3.1"
-base64-url = "2.0.0"
-sha2 = "0.10.7"
-md-5 = "0.10.5"
-seq_io = "0.3.2"
-serde_json = "1.0.135"
-thiserror = "2.0.12"
-reqwest = { version = "0.12.15", features = ["blocking"] }
-hf-hub = "0.4.3"
-num-traits = "0.2.19"
-shellexpand = "3"
-dirs = "6.0.0"
-biocrs = "0.1.0"
-tabled = "0.20.0"
-#bio = "1.3"     # For FASTA parsing
-memmap2 = "0.5"  # For memory-mapped file I/O
-chrono = { version = "0.4", features = ["serde"] }  # For timestamps
-fxhash = "0.2.1"
+gtars-core = { path = "../gtars-core", optional = true, version="0.5.0" }
+gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true, version="0.5.0" }
+gtars-io = { path = "../gtars-io", optional = true, version="0.5.0" }
+gtars-refget = { path = "../gtars-refget", optional = true, version="0.5.0" }
+gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.0" }
+gtars-uniwig = { path = "../gtars-uniwig", optional = true, version="0.5.0" }
+gtars-igd = { path = "../gtars-igd", optional = true, version="0.5.0" }
+gtars-bbcache = { path = "../gtars-bbcache", optional = true, version="0.5.0" }
+gtars-scoring = { path = "../gtars-scoring", optional = true, version="0.5.0" }
+gtars-fragsplit = { path = "../gtars-fragsplit", optional = true, version="0.5.0" }
 
-[dev-dependencies]
-rstest = "0.25.0"
-tempfile = "3.8.1"
-pretty_assertions = "1.4.0"
+
+[features]
+default = []
+
+core = ["dep:gtars-core"]
+tokenizers = ["dep:gtars-tokenizers"]
+io = ["dep:gtars-io"]
+refget = ["dep:gtars-refget"]
+overlaprs = ["dep:gtars-overlaprs"]
+uniwig = ["dep:gtars-uniwig"]
+igd = ["dep:gtars-igd"]
+bbcache = ["dep:gtars-bbcache"]
+scoring = ["dep:gtars-scoring"]
+fragsplit = ["dep:gtars-fragsplit"]
+
+[package.metadata.docs.rs]
+all-features = true

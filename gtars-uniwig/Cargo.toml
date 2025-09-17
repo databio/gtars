@@ -1,0 +1,25 @@
+[package]
+name = "gtars-uniwig"
+version = "0.5.0"
+edition = "2024"
+description = "Rust implementation of uniwig: a tool for computing coverage from BED files over genomic intervals"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+bigtools = "0.5.6"
+noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
+os_pipe = "1.2.2"
+rayon = "1.11.0"
+tokio = "1.47.1"
+ndarray = "0.15.6"
+ndarray-npy = "0.8.1"
+
+# shared workspace dependencies
+byteorder = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+indicatif = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core", version="0.5.0" }

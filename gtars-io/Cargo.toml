@@ -1,0 +1,10 @@
+[package]
+name = "gtars-io"
+version = "0.5.0"
+edition = "2024"
+description = "Small, io focused crate for gtars"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+anyhow = { workspace = true }
