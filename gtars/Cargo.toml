@@ -7,6 +7,7 @@ homepage = "https://github.com/databio/gtars"
 repository = "https://github.com/databio/gtars"
 documentation = "https://docs.rs/gtars"
 readme = "../README.md"
+license = "MIT"
 categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
 
