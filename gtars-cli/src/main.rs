@@ -16,6 +16,9 @@ mod fragsplit;
 #[cfg(feature = "scoring")]
 mod scoring;
 
+#[cfg(feature = "scatrs")]
+mod scatrs;
+
 use anyhow::Result;
 use clap::Command;
 
@@ -50,6 +53,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "scoring")]
     let cmd = cmd.subcommand(scoring::cli::create_scoring_cli());
+
+    #[cfg(feature = "scatrs")]
+    let cmd = cmd.subcommand(scatrs::cli::create_scatrs_cli());
 
     cmd
 }
@@ -112,6 +118,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "scoring")]
         Some((scoring::cli::FSCORING_CMD, matches)) => {
             scoring::handlers::run_scoring(matches)?;
+        }
+
+        //
+        // SCATRS
+        //
+        #[cfg(feature = "scatrs")]
+        Some((scatrs::SCATRS_CMD, matches)) => {
+            scatrs::handlers::run_scatrs(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

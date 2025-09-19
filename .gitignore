@@ -26,3 +26,5 @@ bin/
 .DS_Store
 .Rhistory
 /gtars/tests/data/out/region_scoring_count.csv.gz
+
+scatrs-test/
