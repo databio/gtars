@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, Write};
+#[cfg(feature="bigbed")]
 use tokio::runtime;
 
 #[cfg(feature="bigbed")]
@@ -19,7 +20,9 @@ use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::models::Region;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader, get_dynamic_reader_from_url};
+use crate::utils::{get_chrom_sizes, get_dynamic_reader};
+#[cfg(feature="http")]
+use crate::utils::get_dynamic_reader_from_url;
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -52,6 +55,7 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
+            #[cfg(feature="http")]
             false => {
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
@@ -74,6 +78,10 @@ impl TryFrom<&Path> for RegionSet {
                             .expect("!Can't get file from path, url, or BEDbase identifier")
                     }
                 }
+            }
+            #[cfg(not(feature="http"))]
+            false => {
+                return Err(anyhow::anyhow!("File not found and HTTP feature not enabled: {}", path.display()));
             }
         };
 
