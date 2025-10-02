@@ -563,22 +563,24 @@ mod tests {
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    // #[rstest]
-    // fn test_open_from_url() {
-    //     let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
-    //     assert!(RegionSet::try_from(file_path).is_ok());
-    // }
+    #[rstest]
+    #[ignore = "Failing but low priority for now"]
+    fn test_open_from_url() {
+        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        assert!(RegionSet::try_from(file_path).is_ok());
+    }
 
-    // #[rstest]
-    // fn test_open_from_bedbase() {
-    //     let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
-    //     let region_set = RegionSet::try_from(bbid);
-    //     assert_eq!(region_set.is_ok(), true);
-    //     assert_eq!(
-    //         region_set.unwrap().identifier(),
-    //         "6b2e163a1d4319d99bd465c6c78a9741"
-    //     );
-    // }
+    #[rstest]
+    #[ignore = "Failing but low priority"]
+    fn test_open_from_bedbase() {
+        let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
+        let region_set = RegionSet::try_from(bbid);
+        assert_eq!(region_set.is_ok(), true);
+        assert_eq!(
+            region_set.unwrap().identifier(),
+            "6b2e163a1d4319d99bd465c6c78a9741"
+        );
+    }
 
     #[rstest]
     fn test_open_bed_gz() {
