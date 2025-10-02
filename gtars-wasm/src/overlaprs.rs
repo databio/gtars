@@ -15,7 +15,7 @@ pub struct JsOverlapper {
     backend: String,
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(js_class = "Overlapper")]
 impl JsOverlapper {
     #[wasm_bindgen(constructor)]
     pub fn new(universe: &JsValue, backend: String) -> Result<JsOverlapper, JsValue> {
