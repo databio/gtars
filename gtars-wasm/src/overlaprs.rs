@@ -61,29 +61,28 @@ impl JsOverlapper {
         self.backend.to_string()
     }
 
-    pub fn intersect(&self, regions: &JsValue) -> Result<BedEntries, JsValue> {
+    pub fn intersect(&self, regions: &JsValue) -> Result<JsValue, JsValue> {
         let regions: BedEntries = serde_wasm_bindgen::from_value(regions.to_owned())?;
         let tokens = regions
             .0
             .into_iter()
-            .map(|e| {
+            .filter_map(|e| {
                 let chrom = e.0;
                 let start = e.1;
                 let end = e.2;
 
                 let olapper = &self.internal.get(&chrom);
-                match olapper {
-                    Some(olapper) => Some(
-                        olapper
-                            .find_iter(start, end)
-                            .map(|iv| (chrom.to_string(), iv.start, iv.end))
-                            .collect::<Vec<(String, u32, u32)>>(),
-                    ),
-                    None => None,
-                }
+                olapper.as_ref().map(|olapper| {
+                    olapper
+                        .find_iter(start, end)
+                        .map(|iv| (chrom.to_string(), iv.start, iv.end))
+                        .collect::<Vec<(String, u32, u32)>>()
+                })
             })
-            .filter_map(|x| x)
             .flatten()
             .collect::<Vec<(String, u32, u32)>>();
+
+        serde_wasm_bindgen::to_value(&tokens)
+            .map_err(|e| JsValue::from_str(&format!("Error serializing tokens: {}", e)))
     }
 }
