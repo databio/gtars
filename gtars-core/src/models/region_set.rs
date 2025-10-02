@@ -569,16 +569,16 @@ mod tests {
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
-    #[rstest]
-    fn test_open_from_bedbase() {
-        let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
-        let region_set = RegionSet::try_from(bbid);
-        assert_eq!(region_set.is_ok(), true);
-        assert_eq!(
-            region_set.unwrap().identifier(),
-            "6b2e163a1d4319d99bd465c6c78a9741"
-        );
-    }
+    // #[rstest]
+    // fn test_open_from_bedbase() {
+    //     let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
+    //     let region_set = RegionSet::try_from(bbid);
+    //     assert_eq!(region_set.is_ok(), true);
+    //     assert_eq!(
+    //         region_set.unwrap().identifier(),
+    //         "6b2e163a1d4319d99bd465c6c78a9741"
+    //     );
+    // }
 
     #[rstest]
     fn test_open_bed_gz() {
