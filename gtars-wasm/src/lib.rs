@@ -1,5 +1,5 @@
-mod utils;
 mod overlaprs;
+mod utils;
 
 use wasm_bindgen::prelude::*;
 
