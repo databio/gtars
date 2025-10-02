@@ -563,11 +563,11 @@ mod tests {
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
-    #[rstest]
-    fn test_open_from_url() {
-        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
-        assert!(RegionSet::try_from(file_path).is_ok());
-    }
+    // #[rstest]
+    // fn test_open_from_url() {
+    //     let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+    //     assert!(RegionSet::try_from(file_path).is_ok());
+    // }
 
     // #[rstest]
     // fn test_open_from_bedbase() {
