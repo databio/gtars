@@ -1,0 +1,33 @@
+name: Build and publish wheels and sdist to PyPI
+
+on:
+  release:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - name: Install
+              run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+            - name: Build
+              run: |
+                cd gtars-wasm
+                wasm-pack build --release --target web --out-dir
+            
+            - uses: actions/setup-node@v4
+              with:
+                node-version: '20.x'
+                registry-url: 'https://registry.npmjs.org'
+            - name: Publish
+              run: |
+                cd gtars-wasm/pkg
+                npm publish --access public
+            
+            
