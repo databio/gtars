@@ -61,7 +61,7 @@ impl JsOverlapper {
         self.backend.to_string()
     }
 
-    pub fn intersect(&self, regions: &JsValue) -> Result<JsValue, JsValue> {
+    pub fn find(&self, regions: &JsValue) -> Result<JsValue, JsValue> {
         let regions: BedEntries = serde_wasm_bindgen::from_value(regions.to_owned())?;
         let tokens = regions
             .0
