@@ -1,7 +1,7 @@
 mod models;
-mod utils;
 mod overlaprs;
 mod tokenizers;
+mod utils;
 
 use wasm_bindgen::prelude::*;
 
