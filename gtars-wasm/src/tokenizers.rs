@@ -55,7 +55,8 @@ impl JsTokenizer {
     }
 
     pub fn decode(&self, ids: &JsValue) -> Result<JsValue, JsValue> {
-        let decoded = self.internal.decode(ids);
+        let ids: Vec<u32> = serde_wasm_bindgen::from_value(ids.clone())?;
+        let decoded = self.internal.decode(&ids).map_err(|e| JsValue::from_str(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&decoded).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
