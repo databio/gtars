@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 use gtars_core::models::Interval;
 use gtars_overlaprs::{AiList, Bits, Overlapper};
 
-#[derive(Serialize, Deserialize)]
-pub struct BedEntries(pub Vec<(String, u32, u32)>);
+use crate::models::BedEntries;
 
 #[wasm_bindgen(js_name = "Overlapper")]
 pub struct JsOverlapper {
