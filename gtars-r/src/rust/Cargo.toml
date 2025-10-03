@@ -19,8 +19,8 @@ anyhow = { workspace = true }
 #gtars-tokenizers = { path = "../../../gtars-tokenizers", features = ["huggingface"] }
 
 ### use these to build the r package with R CMD build AFTER pushing changes to appropriate github branch
-gtars-core = { git = "https://github.com/databio/gtars", branch = "r-workspace" }
-gtars-io = { git = "https://github.com/databio/gtars", branch = "r-workspace" }
-gtars-igd = { git = "https://github.com/databio/gtars", branch = "r-workspace" }
-gtars-refget = { git = "https://github.com/databio/gtars", branch = "r-workspace" }
-gtars-tokenizers = { git = "https://github.com/databio/gtars", branch = "r-workspace", features = ["huggingface"] }
+gtars-core = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-io = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-igd = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-refget = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-tokenizers = { git = "https://github.com/databio/gtars", branch = "dev", features = ["huggingface"] }
