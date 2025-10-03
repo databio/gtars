@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use gtars_core::models::Region;
 use wasm_bindgen::prelude::*;
 
 use gtars_tokenizers::config::TokenizerType;
@@ -45,12 +48,39 @@ impl JsTokenizer {
 
     pub fn tokenize(&self, regions: &JsValue) -> Result<JsValue, JsValue> {
         let regions: BedEntries = serde_wasm_bindgen::from_value(regions.clone())?;
-        let tokens = self.internal.tokenize(&regions);
+        let regions = regions
+            .0
+            .into_iter()
+            .map(|be| Region {
+                chr: be.0,
+                start: be.1,
+                end: be.2,
+                rest: None,
+            })
+            .collect::<Vec<Region>>();
+        let tokens = self
+            .internal
+            .tokenize(&regions)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&tokens).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     pub fn encode(&self, tokens: &JsValue) -> Result<JsValue, JsValue> {
-        let encoded = self.internal.encode(tokens);
+        let tokens: BedEntries = serde_wasm_bindgen::from_value(tokens.clone())?;
+        let tokens = tokens
+            .0
+            .into_iter()
+            .map(|be| Region {
+                chr: be.0,
+                start: be.1,
+                end: be.2,
+                rest: None,
+            })
+            .collect::<Vec<Region>>();
+        let encoded = self
+            .internal
+            .encode(&tokens)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&encoded).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
@@ -61,18 +91,6 @@ impl JsTokenizer {
             .decode(&ids)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
         serde_wasm_bindgen::to_value(&decoded).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    #[wasm_bindgen(js_name = "convertIdsToTokens")]
-    pub fn convert_ids_to_tokens(&self, ids: &JsValue) -> Result<JsValue, JsValue> {
-        let tokens = self.internal.convert_ids_to_tokens(ids);
-        serde_wasm_bindgen::to_value(&tokens).map_err(|e| JsValue::from_str(&e.to_string()))
-    }
-
-    #[wasm_bindgen(js_name = "convertTokensToIds")]
-    pub fn convert_tokens_to_ids(&self, tokens: &JsValue) -> Result<JsValue, JsValue> {
-        let ids = self.internal.convert_tokens_to_ids(tokens);
-        serde_wasm_bindgen::to_value(&ids).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
     #[wasm_bindgen(getter, js_name = "unkToken")]
@@ -152,7 +170,7 @@ impl JsTokenizer {
 
     #[wasm_bindgen(js_name = "specialTokensMap")]
     pub fn special_tokens_map(&self) -> Result<JsValue, JsValue> {
-        let map = self.internal.get_special_tokens();
+        let map: HashMap<String, String> = self.internal.get_special_tokens().into();
         serde_wasm_bindgen::to_value(&map).map_err(|e| JsValue::from_str(&e.to_string()))
     }
 
