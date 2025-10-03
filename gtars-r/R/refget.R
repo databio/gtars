@@ -158,24 +158,28 @@ convert_to_sequence_record <- function(raw_result) {
   )
 }
 
+#' @export
 setGeneric('import_fasta', function(store, file_path) standardGeneric('import_fasta'))
 setMethod('import_fasta', 'GlobalRefgetStore', function(store, file_path) {
   .Call(wrap__import_fasta_store, store@ptr, file_path)
   invisible(store)
 })
 
+#' @export
 setGeneric('get_sequence_by_id', function(store, digest) standardGeneric('get_sequence_by_id'))
 setMethod('get_sequence_by_id', 'GlobalRefgetStore', function(store, digest) {
   result <- .Call(wrap__get_sequence_by_id_store, store@ptr, digest)
   convert_to_sequence_record(result)
 })
 
+#' @export
 setGeneric('get_sequence_by_collection_and_name', function(store, collection_digest, sequence_name) standardGeneric('get_sequence_by_collection_and_name'))
 setMethod('get_sequence_by_collection_and_name', 'GlobalRefgetStore', function(store, collection_digest, sequence_name) {
   result <- .Call(wrap__get_sequence_by_collection_and_name_store, store@ptr, collection_digest, sequence_name)
   convert_to_sequence_record(result)
 })
 
+#' @export
 setGeneric('get_substring', function(store, seq_digest, start, end) standardGeneric('get_substring'))
 setMethod('get_substring', 'GlobalRefgetStore', function(store, seq_digest, start, end) {
   result <- .Call(wrap__get_substring_store, store@ptr, seq_digest, as.integer(start), as.integer(end))
@@ -194,6 +198,7 @@ convert_to_retrieved_sequence <- function(raw_result) {
   )
 }
 
+#' @export
 setGeneric('write_store_to_directory', function(store, root_path, seqdata_path_template) standardGeneric('write_store_to_directory'))
 setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_path, seqdata_path_template) {
   .Call(wrap__write_store_to_directory_store, 
@@ -201,6 +206,7 @@ setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_
   invisible(store)  # Return for chaining
 })
 
+#' @export
 setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path) standardGeneric('get_seqs_bed_file'))
 setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
   .Call(wrap__get_seqs_bed_file_store, 
@@ -208,6 +214,7 @@ setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_d
   invisible(store)  # Return for chaining
 })
 
+#' @export
 setGeneric('get_seqs_bed_file_to_vec', function(store, collection_digest, bed_file_path) standardGeneric('get_seqs_bed_file_to_vec'))
 setMethod('get_seqs_bed_file_to_vec', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path) {
   result <- .Call(wrap__get_seqs_bed_file_to_vec_store, 

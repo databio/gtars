@@ -1,8 +1,5 @@
 library(testthat)
 library(gtars)
-# setwd('/Users/sam/Documents/Work/gtars/gtars-r')
-# rextendr::clean()
-# rextendr::document()
 
 test_that("digest functions work correctly", {
   readable <- 'ATCG'
@@ -32,7 +29,7 @@ test_that("fasta file digestion works", {
 
 test_that("refget store initialization works", {
   store <- global_refget_store('raw')
-  expect_s4_class(store, "RefgetStore")
+  expect_s4_class(store, "GlobalRefgetStore")
 })
 
 test_that("fasta import and sequence retrieval works", {
