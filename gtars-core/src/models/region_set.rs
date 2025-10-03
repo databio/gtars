@@ -11,18 +11,18 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, Write};
-#[cfg(feature="bigbed")]
+#[cfg(feature = "bigbed")]
 use tokio::runtime;
 
-#[cfg(feature="bigbed")]
+#[cfg(feature = "bigbed")]
 use bigtools::beddata::BedParserStreamingIterator;
-#[cfg(feature="bigbed")]
+#[cfg(feature = "bigbed")]
 use bigtools::{BedEntry, BigBedWrite};
 
 use crate::models::Region;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader};
-#[cfg(feature="http")]
+#[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
+use crate::utils::{get_chrom_sizes, get_dynamic_reader};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -55,7 +55,7 @@ impl TryFrom<&Path> for RegionSet {
 
         let reader = match path.is_file() {
             true => get_dynamic_reader(path).expect("!Can't read file"),
-            #[cfg(feature="http")]
+            #[cfg(feature = "http")]
             false => {
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
@@ -79,9 +79,12 @@ impl TryFrom<&Path> for RegionSet {
                     }
                 }
             }
-            #[cfg(not(feature="http"))]
+            #[cfg(not(feature = "http"))]
             false => {
-                return Err(anyhow::anyhow!("File not found and HTTP feature not enabled: {}", path.display()));
+                return Err(anyhow::anyhow!(
+                    "File not found and HTTP feature not enabled: {}",
+                    path.display()
+                ));
             }
         };
 
@@ -386,7 +389,7 @@ impl RegionSet {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    #[cfg(feature="bigbed")]
+    #[cfg(feature = "bigbed")]
     pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
         let out_path = out_path.as_ref();
 

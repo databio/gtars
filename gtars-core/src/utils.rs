@@ -8,7 +8,7 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use flate2::read::{GzDecoder, MultiGzDecoder};
-#[cfg(feature="http")]
+#[cfg(feature = "http")]
 use reqwest::blocking::Client;
 use std::error::Error;
 
@@ -129,7 +129,7 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
 ///
 /// - path: path to the file to read
 ///
-#[cfg(feature="http")]
+#[cfg(feature = "http")]
 pub fn get_dynamic_reader_from_url(
     url: &Path,
 ) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
