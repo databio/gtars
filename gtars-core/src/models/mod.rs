@@ -3,8 +3,6 @@ pub mod fragments;
 pub mod interval;
 pub mod region;
 pub mod region_set;
-pub mod tokenized_region;
-pub mod tokenized_regionset;
 pub mod universe;
 
 // re-export for cleaner imports
