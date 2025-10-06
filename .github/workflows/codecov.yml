@@ -16,12 +16,21 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
+      
+      - name: Install R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
+      
       - name: Install Rust
         run: rustup update stable
+      
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
+      
       - name: Generate code coverage
         run: cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
+      
       - name: Upload coverage to Codecov
         if: always() 
         uses: codecov/codecov-action@v3
