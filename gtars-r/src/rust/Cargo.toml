@@ -9,7 +9,7 @@ crate-type = ["cdylib"]
 
 [dependencies]
 extendr-api = "0.8"
-anyhow = { workspace = true }
+anyhow = "1.0.82"
 
 ### use these when developing with rextendr::clean() and rextender::document()
 #gtars-core = { path = "../../../gtars-core" }
