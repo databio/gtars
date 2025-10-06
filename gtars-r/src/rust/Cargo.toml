@@ -8,7 +8,7 @@ name = "gtars"
 crate-type = ["cdylib"]
 
 [dependencies]
-extendr-api = "0.8.0"
+extendr-api = "=0.8.0"
 anyhow = "1.0.82"
 
 ### use these when developing with rextendr::clean() and rextender::document()
