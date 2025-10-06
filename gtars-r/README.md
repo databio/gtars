@@ -4,7 +4,14 @@ This is an R package that wraps the `gtars` Rust crate so you can call gtars cod
 
 ## Brief instructions
 
-To install the development version, you'll have to build it locally. First, make sure src/rust/Cargo.toml includes the following dependencies:
+To install the development version, use the `remotes` package:
+
+``` R
+install.packages("remotes")
+remotes::install_github("databio/gtars", ref = "dev", subdir = "gtars-r")
+```
+
+You can also build it locally. First, make sure src/rust/Cargo.toml includes the following dependencies:
 
 ``` 
 gtars-core = { git = "https://github.com/databio/gtars", branch = "dev" }
