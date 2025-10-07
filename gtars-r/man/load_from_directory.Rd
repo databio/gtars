@@ -19,6 +19,7 @@ load refget store from directory
 \dontrun{
 temp_dir <- tempdir()
 write_store_to_directory(store, temp_dir, 'sequences/\%s2/\%s.seq')
+load_from_directory(temp_dir)
 }
 
 }
