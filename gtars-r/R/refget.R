@@ -203,7 +203,7 @@ setGeneric('write_store_to_directory', function(store, root_path, seqdata_path_t
 setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_path, seqdata_path_template) {
   .Call(wrap__write_store_to_directory_store, 
         store@ptr, root_path, seqdata_path_template)
-  invisible(store)  # Return for chaining
+  invisible(store)
 })
 
 #' @export
@@ -211,7 +211,7 @@ setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path
 setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
   .Call(wrap__get_seqs_bed_file_store, 
         store@ptr, collection_digest, bed_file_path, output_file_path)
-  invisible(store)  # Return for chaining
+  invisible(store)
 })
 
 #' @export
@@ -220,7 +220,6 @@ setMethod('get_seqs_bed_file_to_vec', 'GlobalRefgetStore', function(store, colle
   result <- .Call(wrap__get_seqs_bed_file_to_vec_store, 
                   store@ptr, collection_digest, bed_file_path)
   if (!is.null(result) && length(result) > 0) {
-    # Convert each element to RetrievedSequence S4 object
     lapply(result, convert_to_retrieved_sequence)
   } else {
     list()
@@ -285,6 +284,7 @@ global_refget_store <- function(mode) {
 #' \dontrun{
 #' temp_dir <- tempdir()
 #' write_store_to_directory(store, temp_dir, 'sequences/%s2/%s.seq')
+#' load_from_directory(temp_dir)
 #' }
 #' 
 #' @export
@@ -293,6 +293,3 @@ load_from_directory <- function(root_path) {
   
   invisible(new('GlobalRefgetStore', ptr = result))
 }
-
-
-

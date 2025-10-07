@@ -34,6 +34,3 @@ If you are updating these gtars dependencies and would like to test them with R 
 ```console
 R CMD INSTALL gtars-r
 ```
-
-Some demo code is located at tests/refget_example.R.
-
