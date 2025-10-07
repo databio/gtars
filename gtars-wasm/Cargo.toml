@@ -1,6 +1,6 @@
 [package]
 name = "gtars-js"
-version = "0.5.0"
+version = "0.5.1"
 authors = ["Nathan LeRoy <NLeRoy917@gmail.com>"]
 edition = "2018"
 
@@ -17,9 +17,9 @@ serde-wasm-bindgen = "0.4"
 getrandom = { version = "0.2.16", features = ["js"] }
 
 # our code
-gtars-core = { path = "../gtars-core", version="0.5.0" }
-gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.0" }
-gtars-tokenizers = { path = "../gtars-tokenizers", version="0.5.0" }
+gtars-core = { path = "../gtars-core" }
+gtars-overlaprs = { path = "../gtars-overlaprs"}
+gtars-tokenizers = { path = "../gtars-tokenizers"}
 
 # The `console_error_panic_hook` crate provides better debugging of panics by
 # logging them with `console.error`. This is great for development, but requires
