@@ -11,7 +11,7 @@ install.packages("remotes")
 remotes::install_github("databio/gtars", ref = "dev", subdir = "gtars-r")
 ```
 
-You can also build it locally:
+You can install the R package locally from the repo directory:
 
 ``` console
 R CMD INSTALL gtars-r

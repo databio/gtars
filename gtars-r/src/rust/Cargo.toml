@@ -5,7 +5,7 @@ edition = "2024"
 
 [lib]
 name = "gtars"
-crate-type = ["cdylib"]
+crate-type = ["staticlib"]
 
 [dependencies]
 extendr-api = { git = "https://github.com/extendr/extendr", branch = "master" }
