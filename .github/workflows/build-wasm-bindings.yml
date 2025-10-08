@@ -23,8 +23,8 @@ jobs:
             - name: Build bindings and prepare for publish (rename package)
               run: |
                 wasm-pack build --release --target web gtars-wasm
-                sed -i ".bak" -e "s/gtars-js/gtars/" pkg/package.json
-                rm pkg/package.json.bak
+                sed -i ".bak" -e "s/gtars-js/gtars/" gtars-wasm/pkg/package.json
+                rm gtars-wasm/pkg/package.json.bak
             - name: Publish to NPM
               run: |
                 npm publish --access public gtars-wasm/pkg
