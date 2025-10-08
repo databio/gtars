@@ -25,7 +25,6 @@ gtars-igd = { path = "../gtars-igd", optional=true, version="0.5.0" }
 gtars-uniwig = { path = "../gtars-uniwig", optional=true, version="0.5.0" }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.0" }
 gtars-bbcache = { path = "../gtars-bbcache", optional=true, version="0.5.0" }
-gtars-core = { path = "../gtars-core", version="0.5.0" }
 
 [[bin]]
 name = "gtars"
