@@ -137,20 +137,6 @@ setClass(
   )
 )
 
-setMethod('show', 'GlobalRefgetStore', function(object) {
-  ptr_address <- sub('<pointer: (.*)>', '\\1', capture.output(object@ptr))
-  cat('GlobalRefgetStore: \n')
-  cat(sprintf('  ptr: %s\n', ptr_address))
-})
-
-setMethod('show', 'RetrievedSequence', function(object) {
-  cat('RetrievedSequence: \n')
-  cat(sprintf('  sequence: %s\n', object@sequence))
-  cat(sprintf('  chrom_name: %s\n', object@chrom_name))
-  cat(sprintf('  start: %s\n', object@start))
-  cat(sprintf('  end: %s\n', object@end))
-})
-
 convert_to_sequence_record <- function(raw_result) {
   if (is.null(raw_result)) return(NULL)
   
@@ -256,10 +242,15 @@ setMethod('[', c('SequenceCollection', 'numeric', 'missing'),
           })
 
 setMethod('show', 'GlobalRefgetStore', function(object) {
-  cat('GlobalRefgetStore object\n')
-  cat('  Use methods: import_fasta(), get_sequence_by_id(), get_substring(), etc.\n')
+  ptr_address <- sub('<pointer: (.*)>', '\\1', capture.output(object@ptr))
+  cat('GlobalRefgetStore: \n')
+  cat(sprintf('  ptr: %s\n', ptr_address))
 })
 
+setMethod('as.character', 'GlobalRefgetStore', function(x) {
+  ptr_address <- sub('<pointer: (.*)>', '\\1', capture.output(x@ptr))
+  sprintf('GlobalRefgetStore (ptr = %s)', ptr_address)
+})
 
 #' @title global refget store
 #' 
