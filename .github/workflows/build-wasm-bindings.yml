@@ -23,7 +23,7 @@ jobs:
             - name: Build bindings and prepare for publish (rename package)
               run: |
                 wasm-pack build --release --target web gtars-wasm
-                jq '.name = "gtars"' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
+                jq '.name = "@databio/gtars"' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
             - name: Publish to NPM
               run: |
                 npm publish --provenance --access public gtars-wasm/pkg/
