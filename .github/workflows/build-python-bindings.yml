@@ -6,12 +6,11 @@
 name: Build and publish wheels and sdist to PyPI
 
 on:
-  release:
-    types: [created]
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 env:
   PYO3_USE_ABI3_FORWARD_COMPATIBILITY: 1

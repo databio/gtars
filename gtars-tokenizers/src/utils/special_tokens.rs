@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::config::{SpecialToken, SpecialTokenAssignment};
 
 #[derive(Clone, Debug)]
@@ -65,5 +67,33 @@ impl From<&SpecialTokens> for Vec<String> {
             val.bos.clone(),
             val.sep.clone(),
         ]
+    }
+}
+
+impl From<SpecialTokens> for HashMap<String, String> {
+    fn from(val: SpecialTokens) -> Self {
+        let mut map = HashMap::new();
+        map.insert("unk".to_string(), val.unk);
+        map.insert("pad".to_string(), val.pad);
+        map.insert("mask".to_string(), val.mask);
+        map.insert("cls".to_string(), val.cls);
+        map.insert("eos".to_string(), val.eos);
+        map.insert("bos".to_string(), val.bos);
+        map.insert("sep".to_string(), val.sep);
+        map
+    }
+}
+
+impl From<&SpecialTokens> for HashMap<String, String> {
+    fn from(val: &SpecialTokens) -> Self {
+        let mut map = HashMap::new();
+        map.insert("unk".to_string(), val.unk.clone());
+        map.insert("pad".to_string(), val.pad.clone());
+        map.insert("mask".to_string(), val.mask.clone());
+        map.insert("cls".to_string(), val.cls.clone());
+        map.insert("eos".to_string(), val.eos.clone());
+        map.insert("bos".to_string(), val.bos.clone());
+        map.insert("sep".to_string(), val.sep.clone());
+        map
     }
 }

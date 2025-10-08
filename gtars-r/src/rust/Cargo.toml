@@ -1,0 +1,17 @@
+[package]
+name = "gtars-r"
+version = "0.5.1"
+edition = "2024"
+
+[lib]
+name = "gtars"
+crate-type = ["staticlib"]
+
+[dependencies]
+extendr-api = { git = "https://github.com/extendr/extendr", branch = "master" }
+anyhow = "1.0.82"
+gtars-core = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-io = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-igd = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-refget = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-tokenizers = { git = "https://github.com/databio/gtars", branch = "dev", features = ["huggingface"] }
