@@ -1,9 +1,10 @@
 use extendr_api::prelude::*;
-use gtars_refget::digest::{md5, sha512t24u};
-use gtars_refget::collection::{SequenceCollection, SequenceMetadata, SequenceRecord, SeqColDigestLvl1};
 use gtars_refget::alphabet::AlphabetType;
-use gtars_refget::store::{StorageMode, GlobalRefgetStore, RetrievedSequence};
-
+use gtars_refget::collection::{
+    SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
+};
+use gtars_refget::digest::{md5, sha512t24u};
+use gtars_refget::store::{GlobalRefgetStore, RetrievedSequence, StorageMode};
 
 /// Create sha512t24u digest
 /// @export
@@ -26,10 +27,8 @@ pub fn md5_digest(readable: &str) -> String {
 #[extendr]
 pub fn digest_fasta_raw(fasta: &str) -> extendr_api::Result<List> {
     match gtars_refget::fasta::digest_fasta(fasta) {
-        Ok(sequence_collection) => {
-            Ok(sequence_collection_to_list(sequence_collection))
-        }
-        Err(e) => Err(format!("Error processing FASTA file: {}", e).into())
+        Ok(sequence_collection) => Ok(sequence_collection_to_list(sequence_collection)),
+        Err(e) => Err(format!("Error processing FASTA file: {}", e).into()),
     }
 }
 
@@ -42,10 +41,10 @@ pub fn global_refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
         "encoded" => StorageMode::Encoded,
         _ => return Err(format!("Invalid mode: {}", mode).into()),
     };
-    
+
     let store = Box::new(GlobalRefgetStore::new(storage_mode));
     let ptr = unsafe { Robj::make_external_ptr(Box::into_raw(store), Robj::from(())) };
-    
+
     Ok(ptr)
 }
 
@@ -58,10 +57,11 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &mut *store_raw_ptr };
-    
-    store.import_fasta(file_path)
+
+    store
+        .import_fasta(file_path)
         .map_err(|e| format!("Error importing FASTA: {}", e).into())
 }
 
@@ -74,12 +74,12 @@ pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::R
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
     // Try as SHA512t24u first
     let result = store.get_sequence_by_id(digest.as_bytes());
-    
+
     if let Some(record) = result {
         Ok(record_to_list(record.clone()).into())
     } else if digest.len() == 32 {
@@ -87,10 +87,10 @@ pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::R
         if let Some(record) = store.get_sequence_by_md5(digest.as_bytes()) {
             Ok(record_to_list(record.clone()).into())
         } else {
-            Ok(Robj::from(()))  // NULL
+            Ok(Robj::from(())) // NULL
         }
     } else {
-        Ok(Robj::from(()))  // NULL
+        Ok(Robj::from(())) // NULL
     }
 }
 
@@ -100,15 +100,15 @@ pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::R
 /// @param sequence_name Sequence name
 #[extendr]
 pub fn get_sequence_by_collection_and_name_store(
-    store_ptr: Robj, 
-    collection_digest: &str, 
-    sequence_name: &str
+    store_ptr: Robj,
+    collection_digest: &str,
+    sequence_name: &str,
 ) -> extendr_api::Result<Robj> {
     let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
     let result = store.get_sequence_by_collection_and_name(collection_digest, sequence_name);
@@ -116,7 +116,7 @@ pub fn get_sequence_by_collection_and_name_store(
     if let Some(record) = result {
         Ok(record_to_list(record.clone()).into())
     } else {
-        Ok(Robj::from(()))  // NULL
+        Ok(Robj::from(())) // NULL
     }
 }
 
@@ -127,22 +127,22 @@ pub fn get_sequence_by_collection_and_name_store(
 /// @param end End position
 #[extendr]
 pub fn get_substring_store(
-    store_ptr: Robj, 
-    seq_digest: &str, 
-    start: i32, 
-    end: i32
+    store_ptr: Robj,
+    seq_digest: &str,
+    start: i32,
+    end: i32,
 ) -> extendr_api::Result<Robj> {
     let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
     if let Some(substr) = store.get_substring(seq_digest, start as usize, end as usize) {
         Ok(Robj::from(substr))
     } else {
-        Ok(Robj::from(()))  // NULL
+        Ok(Robj::from(())) // NULL
     }
 }
 
@@ -152,18 +152,19 @@ pub fn get_substring_store(
 /// @param seqdata_path_template Path template name
 #[extendr]
 pub fn write_store_to_directory_store(
-    store_ptr: Robj, 
-    root_path: &str, 
-    seqdata_path_template: &str
+    store_ptr: Robj,
+    root_path: &str,
+    seqdata_path_template: &str,
 ) -> extendr_api::Result<()> {
     let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
-    store.write_store_to_directory(root_path, seqdata_path_template)
+    store
+        .write_store_to_directory(root_path, seqdata_path_template)
         .map_err(|e| format!("Error writing store to directory: {}", e).into())
 }
 
@@ -175,10 +176,11 @@ pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
     match GlobalRefgetStore::load_from_directory(root_path) {
         Ok(store) => {
             let boxed_store = Box::new(store);
-            let ptr = unsafe { Robj::make_external_ptr(Box::into_raw(boxed_store), Robj::from(())) };
+            let ptr =
+                unsafe { Robj::make_external_ptr(Box::into_raw(boxed_store), Robj::from(())) };
             Ok(ptr)
         }
-        Err(e) => Err(format!("Error loading store from directory: {}", e).into())
+        Err(e) => Err(format!("Error loading store from directory: {}", e).into()),
     }
 }
 
@@ -189,7 +191,7 @@ pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
 /// @param output_file_path Path to output FASTA file
 #[extendr]
 pub fn get_seqs_bed_file_store(
-    store_ptr: Robj, 
+    store_ptr: Robj,
     collection_digest: &str,
     bed_file_path: &str,
     output_file_path: &str,
@@ -198,10 +200,11 @@ pub fn get_seqs_bed_file_store(
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
-    store.get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
+    store
+        .get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
         .map_err(|e| format!("Error writing sequences to file: {}", e).into())
 }
 
@@ -211,7 +214,7 @@ pub fn get_seqs_bed_file_store(
 /// @param bed_file_path Path to BED file
 #[extendr]
 pub fn get_seqs_bed_file_to_vec_store(
-    store_ptr: Robj, 
+    store_ptr: Robj,
     collection_digest: &str,
     bed_file_path: &str,
 ) -> extendr_api::Result<Robj> {
@@ -219,7 +222,7 @@ pub fn get_seqs_bed_file_to_vec_store(
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
-    
+
     let store = unsafe { &*store_raw_ptr };
 
     match store.get_seqs_bed_file_to_vec(collection_digest, bed_file_path) {
@@ -230,18 +233,18 @@ pub fn get_seqs_bed_file_to_vec_store(
                 .collect();
             Ok(r_results.into())
         }
-        Err(e) => Err(format!("Error retrieving sequences from BED file: {}", e).into())
+        Err(e) => Err(format!("Error retrieving sequences from BED file: {}", e).into()),
     }
 }
 
 fn alphabet_to_string(alphabet: AlphabetType) -> &'static str {
     match alphabet {
-        AlphabetType::Dna2bit => "dna2bit",     // 2-bit DNA encoding
-        AlphabetType::Dna3bit => "dna3bit",     // 3-bit DNA encoding  
-        AlphabetType::DnaIupac => "dnaio",      // IUPAC DNA (includes ambiguous bases)
-        AlphabetType::Protein => "protein",     // Amino acid sequences
-        AlphabetType::Ascii => "ASCII",         // Plain ASCII text
-        AlphabetType::Unknown => "Unknown",     // Unrecognized format
+        AlphabetType::Dna2bit => "dna2bit", // 2-bit DNA encoding
+        AlphabetType::Dna3bit => "dna3bit", // 3-bit DNA encoding
+        AlphabetType::DnaIupac => "dnaio",  // IUPAC DNA (includes ambiguous bases)
+        AlphabetType::Protein => "protein", // Amino acid sequences
+        AlphabetType::Ascii => "ASCII",     // Plain ASCII text
+        AlphabetType::Unknown => "Unknown", // Unrecognized format
     }
 }
 
@@ -251,7 +254,7 @@ fn metadata_to_list(metadata: SequenceMetadata) -> List {
         length = metadata.length as i32,
         sha512t24u = metadata.sha512t24u,
         md5 = metadata.md5,
-        alphabet = alphabet_to_string(metadata.alphabet)  // Convert enum to string
+        alphabet = alphabet_to_string(metadata.alphabet) // Convert enum to string
     )
 }
 
@@ -271,7 +274,8 @@ fn lvl1_to_list(lvl1: SeqColDigestLvl1) -> List {
 }
 
 fn sequence_collection_to_list(collection: SequenceCollection) -> List {
-    let sequences: Vec<Robj> = collection.sequences
+    let sequences: Vec<Robj> = collection
+        .sequences
         .into_iter()
         .map(|seq_record| record_to_list(seq_record).into())
         .collect();
@@ -280,7 +284,8 @@ fn sequence_collection_to_list(collection: SequenceCollection) -> List {
         sequences = sequences,
         digest = collection.digest,
         lvl1 = lvl1_to_list(collection.lvl1),
-        file_path = collection.file_path
+        file_path = collection
+            .file_path
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| String::new()),
         has_data = collection.has_data
