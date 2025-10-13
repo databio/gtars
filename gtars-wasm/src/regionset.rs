@@ -33,7 +33,7 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(getter, js_name = "get_region")]
-    pub fn get_region(self) -> String {
+    pub fn get_region(&self) -> String {
         // alert(&format!("Number of regions:, {}!", self.region_set.len()));
         println!("{}", self.region_set.len());
         format!("{}", self.region_set.len())
@@ -42,5 +42,9 @@ impl JsRegionSet {
     #[wasm_bindgen(getter, js_name = "get_phi")]
     pub fn get_phi(&mut self) -> String {
         String::from("phi-neaaas")
+    }
+    #[wasm_bindgen(getter, js_name = "mean_region_width")]
+    pub fn get_mean_region_width(&self) -> String {
+        format!("{}", self.region_set.mean_region_width())
     }
 }
