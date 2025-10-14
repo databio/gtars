@@ -552,9 +552,9 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
         }
     }
     //clean up the temp folder if it exits
-    let temp_folder = format!("{}{}",output_path, "data0/");
+    let temp_folder = format!("{}{}", output_path, "data0/");
     let path = Path::new(&temp_folder);
-    let _ = fs::remove_dir_all(path);            
+    let _ = fs::remove_dir_all(path);
 
     //file.write_all(&buffer).unwrap();
 }
