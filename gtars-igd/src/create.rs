@@ -913,7 +913,7 @@ mod tests{
         let db_output_path = db_path_unwrapped;
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
 
         let demo_name = String::from("demo");
 
@@ -953,7 +953,7 @@ mod tests{
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
 
         let demo_name = String::from("demo");
 
@@ -1086,7 +1086,7 @@ mod tests{
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/tests/data/igd_file_list_01/");
+        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
 
         let demo_name = String::from("demo");
 
@@ -1103,8 +1103,8 @@ mod tests{
 
     #[rstest]
     #[case(
-        "/tests/data/igd_file_list_01/",
-        "/tests/data/igd_query_files/query1.bed",
+        "/../tests/data/igd_file_list_01/",
+        "/../tests/data/igd_query_files/query1.bed",
         8,
         8
     )]
