@@ -33,7 +33,7 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(getter, js_name = "get_region")]
-    pub fn get_region(self) -> String {
+    pub fn get_region(&self) -> String {
         // alert(&format!("Number of regions:, {}!", self.region_set.len()));
         println!("{}", self.region_set.len());
         format!("{}", self.region_set.len())
