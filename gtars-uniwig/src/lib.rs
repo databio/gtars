@@ -1277,74 +1277,74 @@ mod tests{
 
     //FIXTURES
     #[fixture]
-fn path_to_data() -> &'static str {
-    "/../tests/data"
+fn path_to_data() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data")
 }
 
 #[fixture]
-fn path_to_bed_file() -> &'static str {
-    "/../tests/data/tokenizers/peaks.bed"
+fn path_to_bed_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/tokenizers/peaks.bed")
 }
 
 #[fixture]
-fn path_to_sorted_small_bed_file() -> &'static str {
-    "/../tests/data/test_sorted_small.bed"
+fn path_to_sorted_small_bed_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/test_sorted_small.bed")
 }
 
 #[fixture]
-fn path_to_small_bam_file() -> &'static str {
-    "/../tests/data/test_chr22_small.bam"
+fn path_to_small_bam_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/test_chr22_small.bam")
     //"/home/drc/Downloads/bam files for rust test/test1_sort_dedup.bam"
 }
 
 #[fixture]
-fn path_to_chrom_sizes_file() -> &'static str {
-    "/../tests/hg38.chrom.sizes"
+fn path_to_chrom_sizes_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/hg38.chrom.sizes")
 }
 
 #[fixture]
-fn path_to_bed_file_gzipped() -> &'static str {
-    "/../tests/data/tokenizers/peaks.bed.gz"
+fn path_to_bed_file_gzipped() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/tokenizers/peaks.bed.gz")
 }
 
 #[fixture]
-fn path_to_dummy_bed_file() -> &'static str {
-    "/../tests/data/dummy.bed"
+fn path_to_dummy_bed_file() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/dummy.bed")
 }
 
 #[fixture]
-fn path_to_dummy_chromsizes() -> &'static str {
-    "/../tests/data/dummy.chrom.sizes"
+fn path_to_dummy_chromsizes() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/dummy.chrom.sizes")
 }
 
 #[fixture]
-fn path_to_dummy_narrowpeak() -> &'static str {
-    "/../tests/data/dummy.narrowPeak"
+fn path_to_dummy_narrowpeak() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/dummy.narrowPeak")
 }
 
 #[fixture]
-fn path_to_start_wig_output() -> &'static str {
-    "/../tests/data/out/_start.wig"
+fn path_to_start_wig_output() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/out/_start.wig")
 }
 
 #[fixture]
-fn path_to_core_wig_output() -> &'static str {
-    "/../tests/data/out/_core.wig"
+fn path_to_core_wig_output() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/out/_core.wig")
 }
 
 #[fixture]
-fn path_to_start_bedgraph_output() -> &'static str {
-    "/../tests/data/out/_start.bedGraph"
+fn path_to_start_bedgraph_output() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/out/_start.bedGraph")
 }
 
 #[fixture]
-fn path_to_core_bedgraph_output() -> &'static str {
-    "/../tests/data/out/_core.bedGraph"
+fn path_to_core_bedgraph_output() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/out/_core.bedGraph")
 }
 
 #[fixture]
-fn path_to_bed_gz_from_bb() -> &'static str {
-    "/../tests/data/6b2e163a1d4319d99bd465c6c78a9741.bed.gz"
+fn path_to_bed_gz_from_bb() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/6b2e163a1d4319d99bd465c6c78a9741.bed.gz")
 }
 
 #[fixture]
@@ -1358,15 +1358,15 @@ fn bsid() -> &'static str {
 }
 
 #[fixture]
-fn path_to_bedset() -> &'static str {
-    "../tests/data/bedset"
+fn path_to_bedset() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/bedset")
 }
     
 
     // UNIWIG TESTS
     #[rstest]
-    fn test_uniwig_parsed_bed_file(path_to_bed_file: &str) {
-        let path = Path::new(path_to_bed_file);
+    fn test_uniwig_parsed_bed_file(path_to_bed_file: PathBuf) {
+        let path = &path_to_bed_file;
         let file = File::open(path).unwrap();
 
         let mut reader = BufReader::new(file);
@@ -1386,35 +1386,35 @@ fn path_to_bedset() -> &'static str {
     }
 
     #[rstest]
-    fn test_create_chrom_vec_default_score(path_to_bed_file: &str, path_to_bed_file_gzipped: &str) {
-        let result1 = create_chrom_vec_default_score(path_to_bed_file);
+    fn test_create_chrom_vec_default_score(path_to_bed_file: PathBuf, path_to_bed_file_gzipped: PathBuf) {
+        let result1 = create_chrom_vec_default_score(&path_to_bed_file.to_string_lossy());
         assert_eq!(result1.len(), 20);
 
-        let result2 = create_chrom_vec_default_score(path_to_bed_file_gzipped);
+        let result2 = create_chrom_vec_default_score(&path_to_bed_file_gzipped.to_string_lossy());
         assert_eq!(result2.len(), 20);
     }
 
     #[rstest]
     fn test_create_chrom_vec_scores() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let path_to_narrow_peak = format!("{}{}", path_to_crate, "../tests/data/dummy.narrowPeak");
-        let result1 = create_chrom_vec_scores(&path_to_narrow_peak);
+        let path_to_narrow_peak = PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.narrowPeak");
+        let result1 = create_chrom_vec_scores(&path_to_narrow_peak.to_string_lossy());
         assert_eq!(result1.len(), 1);
 
         let path_to_narrow_peak_gzipped =
-            format!("{}{}", path_to_crate, "/tests/data/dummy.narrowPeak.gz");
+            PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.narrowPeak.gz");
 
-        let result2 = create_chrom_vec_scores(&path_to_narrow_peak_gzipped);
+        let result2 = create_chrom_vec_scores(&path_to_narrow_peak_gzipped.to_string_lossy());
         assert_eq!(result2.len(), 1);
     }
 
     #[rstest]
     fn test_read_scored_core_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let path_to_narrow_peak = format!("{}{}", path_to_crate, "../tests/data/dummy.narrowPeak");
-        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let path_to_narrow_peak = PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(&path_to_narrow_peak.to_string_lossy()).unwrap();
         let narrow_peak_vec: Vec<Chromosome> =
-            create_chrom_vec_scores(path_to_narrow_peak.as_str());
+            create_chrom_vec_scores(&path_to_narrow_peak.to_string_lossy());
         let stepsize = 1;
 
         for chromosome in narrow_peak_vec.iter() {
@@ -1431,10 +1431,10 @@ fn path_to_bedset() -> &'static str {
     #[rstest]
     fn test_read_scored_starts_counts() {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let path_to_narrow_peak = format!("{}{}", path_to_crate, "../tests/data/dummy.narrowPeak");
-        let chrom_sizes = read_chromosome_sizes(path_to_narrow_peak.as_str()).unwrap();
+        let path_to_narrow_peak = PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.narrowPeak");
+        let chrom_sizes = read_chromosome_sizes(&path_to_narrow_peak.to_string_lossy()).unwrap();
         let narrow_peak_vec: Vec<Chromosome> =
-            create_chrom_vec_scores(path_to_narrow_peak.as_str());
+            create_chrom_vec_scores(&path_to_narrow_peak.to_string_lossy());
         let stepsize = 1;
         let smooth_size = 1;
 
@@ -1450,17 +1450,17 @@ fn path_to_bedset() -> &'static str {
     }
 
     #[rstest]
-    fn test_read_bed_vec_length(path_to_sorted_small_bed_file: &str) {
+    fn test_read_bed_vec_length(path_to_sorted_small_bed_file: PathBuf) {
         let chromosomes: Vec<Chromosome> =
-            create_chrom_vec_default_score(path_to_sorted_small_bed_file);
+            create_chrom_vec_default_score(&path_to_sorted_small_bed_file.to_string_lossy());
         let num_chromosomes = chromosomes.len();
 
         assert_eq!(num_chromosomes, 5);
     }
 
     #[rstest]
-    fn test_read_bam_header(path_to_small_bam_file: &str) {
-        let chromosomes: Vec<Chromosome> = read_bam_header(path_to_small_bam_file);
+    fn test_read_bam_header(path_to_small_bam_file: PathBuf) {
+        let chromosomes: Vec<Chromosome> = read_bam_header(&path_to_small_bam_file.to_string_lossy());
         let num_chromosomes = chromosomes.len();
         println!("Number of chroms: {}", num_chromosomes);
         assert_eq!(num_chromosomes, 1);
@@ -1468,12 +1468,12 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_process_bam(
-        path_to_small_bam_file: &str,
+        path_to_small_bam_file: PathBuf,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/../tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
-        let combinedbedpath = path_to_small_bam_file;
+        let combinedbedpath = &path_to_small_bam_file.to_string_lossy();
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -1515,12 +1515,12 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_process_bam_to_bed(
-        path_to_small_bam_file: &str,
+        path_to_small_bam_file: PathBuf,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/../tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
-        let combinedbedpath = path_to_small_bam_file;
+        let combinedbedpath = &path_to_small_bam_file.to_string_lossy();
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -1658,16 +1658,13 @@ fn path_to_bedset() -> &'static str {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
-        let tempbedpath = format!("{}{}", path_to_crate, "/../tests/data/dir_of_files/dir_beds/");
-        let combinedbedpath = tempbedpath.as_str();
+        let tempbedpath = PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dir_of_files/dir_beds/");
+        let combinedbedpath = tempbedpath.to_string_lossy();
 
         //let chromsizerefpath = combinedbedpath;
 
-        let chromsizerefpath = format!(
-            "{}{}",
-            path_to_crate, "../tests/data/dir_of_files/dummy.chrom.sizes"
-        );
-        let chromsizerefpath = chromsizerefpath.as_str();
+        let chromsizerefpath = PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dir_of_files/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.to_string_lossy();
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
 
@@ -1689,8 +1686,8 @@ fn path_to_bedset() -> &'static str {
         uniwig_main(
             vec_count_type,
             smoothsize,
-            combinedbedpath,
-            chromsizerefpath,
+            &combinedbedpath,
+            &chromsizerefpath,
             bwfileheader,
             output_type,
             filetype,
@@ -1784,7 +1781,7 @@ fn path_to_bedset() -> &'static str {
     }
 
     #[rstest]
-    fn test_uniwig_mismatched_chrom_sizes(_path_to_bed_file: &str) {
+    fn test_uniwig_mismatched_chrom_sizes(_path_to_bed_file: PathBuf) {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
         // Read from sizes file
@@ -1830,7 +1827,7 @@ fn path_to_bedset() -> &'static str {
     }
 
     #[rstest]
-    fn test_uniwig_write_bw(_path_to_bed_file: &str) {
+    fn test_uniwig_write_bw(_path_to_bed_file: PathBuf) {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
         let original_bedgraph_path = format!("{}/../tests/data/test1.bedGraph", path_to_crate);
@@ -1855,14 +1852,14 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_uniwig_wiggle_output(
-        _path_to_dummy_bed_file: &str,
-        _path_to_dummy_chromsizes: &str,
-        _path_to_start_wig_output: &str,
-        _path_to_core_wig_output: &str,
+        _path_to_dummy_bed_file: PathBuf,
+        _path_to_dummy_chromsizes: PathBuf,
+        _path_to_start_wig_output: PathBuf,
+        _path_to_core_wig_output: PathBuf,
     ) {
-        let chromsizerefpath = _path_to_dummy_chromsizes;
-        let combinedbedpath = _path_to_dummy_bed_file;
-        let test_output_path = _path_to_start_wig_output;
+        let chromsizerefpath = &_path_to_dummy_chromsizes.to_string_lossy();
+        let combinedbedpath = &_path_to_dummy_bed_file.to_string_lossy();
+        let test_output_path = _path_to_start_wig_output.as_path();
         let core_test_output_path = _path_to_core_wig_output;
 
         let tempdir = tempfile::tempdir().unwrap();
@@ -1969,15 +1966,15 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_uniwig_bedgraph_output(
-        _path_to_dummy_bed_file: &str,
-        _path_to_dummy_chromsizes: &str,
-        _path_to_start_bedgraph_output: &str,
-        _path_to_core_bedgraph_output: &str,
+        _path_to_dummy_bed_file: PathBuf,
+        _path_to_dummy_chromsizes: PathBuf,
+        _path_to_start_bedgraph_output: PathBuf,
+        _path_to_core_bedgraph_output: PathBuf,
     ) {
-        let chromsizerefpath = _path_to_dummy_chromsizes;
-        let combinedbedpath = _path_to_dummy_bed_file;
-        let test_output_path = _path_to_start_bedgraph_output;
-        let core_test_output_path = _path_to_core_bedgraph_output;
+        let chromsizerefpath = &_path_to_dummy_chromsizes.to_string_lossy();
+        let combinedbedpath = &_path_to_dummy_bed_file.to_string_lossy();
+        let test_output_path = _path_to_start_bedgraph_output.as_path();
+        let core_test_output_path = _path_to_core_bedgraph_output.as_path();
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -2083,13 +2080,13 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_process_narrowpeak(
-        path_to_dummy_narrowpeak: &str,
+        path_to_dummy_narrowpeak: PathBuf,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let chromsizerefpath: String =
-            format!("{}{}", path_to_crate, "/../tests/data/dummy.chrom.sizes");
-        let chromsizerefpath = chromsizerefpath.as_str();
-        let combinedbedpath = path_to_dummy_narrowpeak;
+        let chromsizerefpath =
+            PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.to_string_lossy();
+        let combinedbedpath = &path_to_dummy_narrowpeak.to_string_lossy();
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -2112,7 +2109,7 @@ fn path_to_bedset() -> &'static str {
             vec_count_type,
             smoothsize,
             combinedbedpath,
-            chromsizerefpath,
+            &chromsizerefpath,
             bwfileheader,
             output_type,
             filetype,
@@ -2131,13 +2128,13 @@ fn path_to_bedset() -> &'static str {
 
     #[rstest]
     fn test_process_bed_to_bw(
-        _path_to_dummy_bed_file: &str,
+        _path_to_dummy_bed_file: PathBuf,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let chromsizerefpath: String =
-            format!("{}{}", path_to_crate, "/../tests/data/dummy.chrom.sizes");
-        let chromsizerefpath = chromsizerefpath.as_str();
-        let combinedbedpath = _path_to_dummy_bed_file;
+        let chromsizerefpath =
+            PathBuf::from(path_to_crate).parent().unwrap().join("tests/data/dummy.chrom.sizes");
+        let chromsizerefpath = chromsizerefpath.to_string_lossy();
+        let combinedbedpath = &_path_to_dummy_bed_file.to_string_lossy();
 
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
@@ -2159,7 +2156,7 @@ fn path_to_bedset() -> &'static str {
             vec_count_type,
             smoothsize,
             combinedbedpath,
-            chromsizerefpath,
+            &chromsizerefpath,
             bwfileheader,
             output_type,
             filetype,
