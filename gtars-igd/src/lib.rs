@@ -9,28 +9,27 @@ pub mod consts {
     pub const IGD_SEARCH: &str = "search";
 }
 
-
 #[cfg(test)]
-mod tests{
+mod tests {
 
     use rstest::rstest;
 
-    use crate::create::{
-        create_igd_f, gdata_t, igd_add, igd_saveT, igd_save_db, igd_t, parse_bed, 
-    };
+    use crate::create::{create_igd_f, gdata_t, igd_add, igd_save_db, igd_saveT, igd_t, parse_bed};
     // Import get_igd_info if it is defined in another module
-    use crate::search::{get_igd_info, get_file_info_tsv,get_tsv_path, igd_t_from_disk, igd_search};
+    use crate::search::{
+        get_file_info_tsv, get_igd_info, get_tsv_path, igd_search, igd_t_from_disk,
+    };
 
-    use tempfile::NamedTempFile;
-    use std::path::{Path, PathBuf};
     use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use tempfile::NamedTempFile;
 
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashSet;
-    use std::fs::{OpenOptions};
-    use std::io::{Seek, SeekFrom,BufReader, Read};
+    use std::fs::OpenOptions;
+    use std::io::{BufReader, Read, Seek, SeekFrom};
 
-// IGD TESTS
+    // IGD TESTS
     #[rstest]
     fn test_igd_parse_bed_file() {
         // Given some random line from a  bed file...
@@ -226,7 +225,6 @@ mod tests{
         }
     }
 
-
     #[rstest]
     fn test_igd_create_removes_temp_dir() {
         let tempdir = tempfile::tempdir().unwrap();
@@ -242,13 +240,11 @@ mod tests{
 
         let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
 
-        let temp_folder = format!("{}{}",db_output_path, "data0/");
+        let temp_folder = format!("{}{}", db_output_path, "data0/");
         let path = Path::new(&temp_folder);
 
         // Assert path does not exist
         assert!(!path.exists());
-
-        
     }
 
     #[rstest]
@@ -378,6 +374,4 @@ mod tests{
 
         igd_save_db(&mut igd, db_output_path, &String::from("randomname"));
     }
-
-
 }

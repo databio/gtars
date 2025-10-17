@@ -2,42 +2,44 @@ pub mod client;
 pub mod consts;
 pub mod utils;
 
-
 #[cfg(test)]
 mod tests {
-    use rstest::{rstest, fixture};
-    use tempfile::NamedTempFile;
-    use std::path::{Path, PathBuf};
     use super::*;
-    use std::fs::File;
-    use std::io::{BufRead, BufReader, Read};
+    use rstest::{fixture, rstest};
     use std::fs;
-    use std::fs::{read_dir, OpenOptions};
+    use std::fs::File;
+    use std::fs::{OpenOptions, read_dir};
+    use std::io::{BufRead, BufReader, Read};
+    use std::path::{Path, PathBuf};
+    use tempfile::NamedTempFile;
 
+    #[fixture]
+    fn path_to_bed_gz_from_bb() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tests/data/6b2e163a1d4319d99bd465c6c78a9741.bed.gz")
+    }
 
+    #[fixture]
+    fn bbid() -> PathBuf {
+        "6b2e163a1d4319d99bd465c6c78a9741".into()
+    }
 
-#[fixture]
-fn path_to_bed_gz_from_bb() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/6b2e163a1d4319d99bd465c6c78a9741.bed.gz")
-}
+    #[fixture]
+    fn path_to_bedset() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tests/data/bedset")
+    }
 
-#[fixture]
-fn bbid() -> PathBuf {
-    "6b2e163a1d4319d99bd465c6c78a9741".into()
-}
-
-#[fixture]
-fn path_to_bedset() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).parent().unwrap().join("tests/data/bedset")
-}
-
-
-use super::client::BBClient;
+    use super::client::BBClient;
     #[rstest]
     fn test_bbcache_local(
-        path_to_bed_gz_from_bb:  PathBuf,
-        bbid:  PathBuf,
-        path_to_bedset:  PathBuf,
+        path_to_bed_gz_from_bb: PathBuf,
+        bbid: PathBuf,
+        path_to_bedset: PathBuf,
     ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
         fn cleaned_subfolders(subfolder: PathBuf) {
             let subdirs: Vec<_> = read_dir(&subfolder)
@@ -67,9 +69,7 @@ use super::client::BBClient;
             .unwrap();
         assert_eq!(&bed_id, &bbid.to_string_lossy());
 
-        let bedset_id = bbc
-            .add_local_folder_as_bedset(path_to_bedset)
-            .unwrap();
+        let bedset_id = bbc.add_local_folder_as_bedset(path_to_bedset).unwrap();
         assert!(bbc.seek(&bedset_id).is_ok());
 
         bbc.remove(&bedset_id)
@@ -77,10 +77,10 @@ use super::client::BBClient;
         let bedset_subfolder = cache_folder.join("bedsets");
         cleaned_subfolders(bedset_subfolder);
 
-        bbc.remove(&bbid.to_string_lossy()).expect("Failed to remove cached bed file");
+        bbc.remove(&bbid.to_string_lossy())
+            .expect("Failed to remove cached bed file");
         let bedfile_subfolder = cache_folder.join("bedfiles");
         cleaned_subfolders(bedfile_subfolder);
         Ok(())
     }
-
 }
