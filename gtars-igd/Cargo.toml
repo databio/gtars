@@ -18,4 +18,3 @@ tempfile = "3.23.0"
 
 # shared workspace dependencies
 anyhow = { workspace = true }
-byteorder = { workspace = true }

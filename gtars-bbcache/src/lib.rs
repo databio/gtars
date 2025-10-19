@@ -4,6 +4,7 @@ pub mod utils;
 
 #[cfg(test)]
 mod tests {
+    use super::client::BBClient;
     use super::*;
     use rstest::{fixture, rstest};
     use std::fs;
@@ -34,7 +35,6 @@ mod tests {
             .join("tests/data/bedset")
     }
 
-    use super::client::BBClient;
     #[rstest]
     fn test_bbcache_local(
         path_to_bed_gz_from_bb: PathBuf,
