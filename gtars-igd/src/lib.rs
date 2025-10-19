@@ -62,7 +62,12 @@ mod tests {
         let db_output_path = db_path_unwrapped;
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
+        let testfilelists = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests/data/igd_file_list_01/")
+            .to_string_lossy()
+            .to_string();
 
         let demo_name = String::from("demo");
 
@@ -102,7 +107,12 @@ mod tests {
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
+        let testfilelists = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests/data/igd_file_list_01/")
+            .to_string_lossy()
+            .to_string();
 
         let demo_name = String::from("demo");
 
@@ -234,11 +244,16 @@ mod tests {
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, "/../tests/data/igd_file_list_01/");
+        let testfilelists = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests/data/igd_file_list_01/")
+            .to_string_lossy()
+            .to_string();
 
         let demo_name = String::from("demo");
 
-        let igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
+        let _igd_saved = create_igd_f(&db_output_path, &testfilelists, &demo_name);
 
         let temp_folder = format!("{}{}", db_output_path, "data0/");
         let path = Path::new(&temp_folder);
@@ -273,7 +288,13 @@ mod tests {
         let db_output_path = db_path_unwrapped.clone();
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
-        let testfilelists = format!("{}{}", path_to_crate, input);
+        let testfilelists = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join(input.trim_start_matches('/'))
+            .to_string_lossy()
+            .to_string();
 
         let demo_name = String::from("demo");
 
@@ -283,7 +304,13 @@ mod tests {
 
         db_path_unwrapped.push_str("/demo.igd");
 
-        let queryfile = format!("{}{}", path_to_crate, query_file);
+        let queryfile = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests")
+            .join(query_file.trim_start_matches('/'))
+            .to_string_lossy()
+            .to_string();
         let res = igd_search(&db_path_unwrapped, &queryfile).expect("Error during testing:");
         let mut res_iter = res[1].split('\t');
 
