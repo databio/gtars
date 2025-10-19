@@ -10,9 +10,62 @@ use std::path::{Path, PathBuf};
 use super::consts::{
     DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
 };
-use super::utils::{get_abs_path, get_bedbase_api};
+use super::utils::{get_default_bedbase_api, get_default_cache_folder};
 use gtars_core::models::bed_set::BedSet;
 use gtars_core::models::region_set::RegionSet;
+
+#[derive(Default)]
+pub struct BBClientBuilder {
+    cache_folder: Option<PathBuf>,
+    bedbase_api: Option<String>
+}
+
+impl BBClientBuilder {
+    /// Creates a new, empty BBClientBuilder.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Sets the cache folder for the BBClient.
+    pub fn with_cache_folder(mut self, path: PathBuf) -> Self {
+        self.cache_folder = Some(path);
+        self
+    }
+
+    /// Sets the BEDbase API URL for the BBClient.
+    pub fn with_bedbase_api(mut self, api: String) -> Self {
+        self.bedbase_api = Some(api);
+        self
+    }
+
+    /// Consumes the builder and creates a BBClient.
+    pub fn finish(self) -> Result<BBClient> {
+        
+        // handle the cache dir
+        let raw_path_to_cache_folder = self.cache_folder.unwrap_or_else(get_default_cache_folder);
+        let raw_str_to_cache_folder = raw_path_to_cache_folder.to_string_lossy().into_owned();
+        let expanded_str = shellexpand::env(&raw_str_to_cache_folder)
+            .unwrap_or_else(|_| raw_str_to_cache_folder.clone().into())
+            .into_owned();
+        let abs_path_to_cache_folder = PathBuf::from(expanded_str);
+        create_dir_all(&abs_path_to_cache_folder)?;
+
+        // handle the bedbase api
+        let bedbase_api = self.bedbase_api.unwrap_or_else(get_default_bedbase_api);
+        let bedbase_api = bedbase_api.to_owned();
+
+        // create sub folders
+        let bedfile_subfolder = &abs_path_to_cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
+        create_dir_all(bedfile_subfolder)?;
+        let bedfile_cache = BioCache::new(bedfile_subfolder);
+
+        let bedset_subfolder = &abs_path_to_cache_folder.join(DEFAULT_BEDSET_SUBFOLDER);
+        create_dir_all(bedset_subfolder)?;
+        let bedset_cache = BioCache::new(bedset_subfolder);
+
+        Ok(BBClient { cache_folder: abs_path_to_cache_folder, bedbase_api, bedfile_cache, bedset_cache })
+    }
+}
 
 pub struct BBClient {
     pub cache_folder: PathBuf,
@@ -27,24 +80,8 @@ impl BBClient {
     /// - cache_folder: path to local folder as cache of files from bedbase,
     ///   if not given it will be the environment variable `BBCLIENT_CACHE`
     /// - bedbase_api: url to bedbase
-    pub fn new(cache_folder: Option<PathBuf>, bedbase_api: Option<String>) -> Result<Self> {
-        let cache_folder = get_abs_path(cache_folder, Some(true));
-        let bedbase_api = bedbase_api.unwrap_or_else(get_bedbase_api);
-
-        let bedfile_subfolder = &cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
-        create_dir_all(bedfile_subfolder)?;
-        let bedfile_cache = BioCache::new(bedfile_subfolder);
-
-        let bedset_subfolder = &cache_folder.join(DEFAULT_BEDSET_SUBFOLDER);
-        create_dir_all(bedset_subfolder)?;
-        let bedset_cache = BioCache::new(bedset_subfolder);
-
-        Ok(BBClient {
-            cache_folder,
-            bedbase_api,
-            bedfile_cache,
-            bedset_cache,
-        })
+    pub fn builder() -> BBClientBuilder {
+        BBClientBuilder::default()
     }
 
     /// Add id and path of cached bed file or bed set into file cacher (SQLite).

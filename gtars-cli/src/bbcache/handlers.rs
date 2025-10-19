@@ -15,7 +15,11 @@ pub fn run_bbcache(matches: &ArgMatches) {
         .get_one::<String>("cache-folder")
         .map(PathBuf::from)
         .unwrap_or_else(get_default_cache_folder);
-    let mut bbc = BBClient::new(Some(cache_folder), None).expect("Failed to create BBClient");
+    
+    let mut bbc = BBClient::builder()
+        .with_cache_folder(cache_folder)
+        .finish()
+        .expect("Failed to create the bedbase client");
 
     match subcmd {
         gtars_bbcache::consts::BBCACHE_INSPECTBED => {
