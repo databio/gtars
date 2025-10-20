@@ -7,19 +7,27 @@
 //! # Example
 //! ```rust
 //! use std::path::Path;
+//! use std::error::Error; // Required for Box<dyn Error> in the example
 //!
-//! use gtars_tokenizers::Tokenizer;
+//! use gtars_tokenizers::{Tokenizer, TokenizerError}; // TokenizerError will be available via re-export
 //! use gtars_core::models::Region;
 //!
-//! let tokenizer = Tokenizer::from_bed(Path::new("../tests/data/tokenizers/peaks.bed")).unwrap();
+//! // The example has been updated to use Result propagation (`?` operator)
+//! // instead of `unwrap()`, demonstrating the new error handling approach.
+//! fn main() -> Result<(), Box<dyn Error>> {
+//!     let tokenizer = Tokenizer::from_bed(Path::new("../tests/data/tokenizers/peaks.bed"))?;
 //!
-//! let regions = vec![Region {
-//!     chr: "chr1".to_string(),
-//!     start: 100,  
-//!     end: 200,
-//!     rest: None,
-//! }];
-//! let tokens = tokenizer.tokenize(&regions);
+//!     let regions = vec![Region {
+//!         chr: "chr1".to_string(),
+//!         start: 100,  
+//!         end: 200,
+//!         rest: None,
+//!     }];
+//!     let tokens = tokenizer.tokenize(&regions);
+//!
+//!     // Example must return Ok(()) to compile as a doctest
+//!     Ok(())
+//! }
 //! ```
 //!
 pub mod config;
