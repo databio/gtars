@@ -86,10 +86,6 @@ impl JsRegionSet {
         self.region_set.len() as i32
     }
 
-    #[wasm_bindgen(getter, js_name = "get_phi")]
-    pub fn get_phi(&mut self) -> String {
-        String::from("phi-neaaas")
-    }
     #[wasm_bindgen(getter, js_name = "mean_region_width")]
     pub fn get_mean_region_width(&self) -> f64 {
         self.region_set.mean_region_width()

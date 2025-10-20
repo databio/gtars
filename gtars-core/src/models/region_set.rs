@@ -575,7 +575,7 @@ impl RegionSet {
                     minimum,
                     maximum,
                     mean,
-                    median: median,
+                    median,
                 },
             );
         }
@@ -758,7 +758,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_statics() {
+    fn test_statistics() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         let count = region_set.calculate_statistics().get("chr1").unwrap().count;
