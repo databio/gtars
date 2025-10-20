@@ -3,8 +3,7 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
-use gtars_core::models::{Region, RegionSet, ChromosomeStats};
-
+use gtars_core::models::{ChromosomeStats, Region, RegionSet};
 
 #[pyclass(name = "ChromosomeStats", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -18,7 +17,6 @@ pub struct PyChromosomeStats {
     pub mean: f64,
     pub median: f64,
 }
-
 
 #[pyclass(name = "RegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -46,7 +44,6 @@ impl From<Vec<PyRegion>> for PyRegionSet {
         }
     }
 }
-
 
 #[pymethods]
 impl PyRegionSet {
@@ -226,7 +223,8 @@ impl PyRegionSet {
                     median: value.median,
                     start: value.start,
                     end: value.end,
-                });
+                },
+            );
         }
 
         result

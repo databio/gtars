@@ -1,7 +1,7 @@
-use wasm_bindgen::prelude::*;
-use gtars_core::models::{Region, RegionSet};
 use crate::models::BedEntries;
+use gtars_core::models::{Region, RegionSet};
 use std::collections::HashMap;
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen(js_name = "ChromosomeStats")]
 #[derive(serde::Serialize)]
@@ -49,10 +49,9 @@ impl JsChromosomeStats {
     }
 }
 
-
 #[wasm_bindgen(js_name = "RegionSet")]
 pub struct JsRegionSet {
-   region_set: RegionSet,
+    region_set: RegionSet,
 }
 
 #[wasm_bindgen(js_class = "RegionSet")]
@@ -82,11 +81,9 @@ impl JsRegionSet {
         Ok(JsRegionSet { region_set })
     }
 
-
     #[wasm_bindgen(getter, js_name = "number_of_regions")]
     pub fn get_region(&self) -> i32 {
         self.region_set.len() as i32
-
     }
 
     #[wasm_bindgen(getter, js_name = "get_phi")]

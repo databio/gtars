@@ -42,7 +42,6 @@ impl Display for Region {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ChromosomeStats {
     pub chromosome: String,

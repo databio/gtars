@@ -6,8 +6,8 @@ mod region_set;
 
 pub use self::interval::PyInterval;
 pub use self::region::PyRegion;
-pub use self::region_set::PyRegionSet;
 pub use self::region_set::PyChromosomeStats;
+pub use self::region_set::PyRegionSet;
 
 #[pymodule]
 pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {

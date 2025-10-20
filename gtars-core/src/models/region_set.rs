@@ -19,8 +19,8 @@ use bigtools::beddata::BedParserStreamingIterator;
 #[cfg(feature = "bigbed")]
 use bigtools::{BedEntry, BigBedWrite};
 
-use crate::models::Region;
 use crate::models::ChromosomeStats;
+use crate::models::Region;
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
 use crate::utils::{get_chrom_sizes, get_dynamic_reader};
@@ -536,7 +536,7 @@ impl RegionSet {
     ///
     /// Calculate statistics
     ///
-    pub fn calculate_statistics(&self) -> HashMap<String,ChromosomeStats> {
+    pub fn calculate_statistics(&self) -> HashMap<String, ChromosomeStats> {
         let mut stats: HashMap<String, ChromosomeStats> = HashMap::new();
 
         let mut regions_by_chr: HashMap<&String, Vec<&Region>> = HashMap::new();
@@ -558,21 +558,26 @@ impl RegionSet {
             let mut sorted_widths = widths.clone();
             sorted_widths.sort_unstable();
             let median = if count % 2 == 0 {
-                (sorted_widths[(count / 2 - 1) as usize] + sorted_widths[(count / 2) as usize]) as f64 / 2.0
+                (sorted_widths[(count / 2 - 1) as usize] + sorted_widths[(count / 2) as usize])
+                    as f64
+                    / 2.0
             } else {
                 sorted_widths[(count / 2) as usize] as f64
             };
 
-            stats.insert(chr.clone(),ChromosomeStats {
-                chromosome: chr.clone(),
-                count,
-                start: earliest_position,
-                end: end_position,
-                minimum,
-                maximum,
-                mean,
-                median: median,
-            });
+            stats.insert(
+                chr.clone(),
+                ChromosomeStats {
+                    chromosome: chr.clone(),
+                    count,
+                    start: earliest_position,
+                    end: end_position,
+                    minimum,
+                    maximum,
+                    mean,
+                    median: median,
+                },
+            );
         }
 
         stats
