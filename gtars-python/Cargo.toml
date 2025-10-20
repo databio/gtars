@@ -1,0 +1,20 @@
+[package]
+name = "gtars-py"
+version = "0.5.1"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "gtars"
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = { workspace = true }
+pyo3 = { version = "0.21.1", features=["anyhow", "extension-module"] }
+openssl = { version = "0.10", features = ["vendored"] }
+
+# our code
+gtars-core = { path = "../gtars-core", features=["bigbed", "http"] }
+gtars-refget = { path = "../gtars-refget" }
+gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
+gtars-io = { path = "../gtars-io" }

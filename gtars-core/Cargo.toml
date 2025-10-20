@@ -1,0 +1,27 @@
+[package]
+name = "gtars-core"
+version = "0.5.1"
+edition = "2021"
+description = "Core library for gtars: tools for high performance genomic interval analysis"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+md-5 = "0.10.6"
+num-traits = "0.2.19"
+reqwest = { version = "0.12.23", features = ["blocking"], optional=true }
+tokio = "1.47.1"
+bigtools = { version = "0.5.6", optional = true }
+
+anyhow = { workspace = true }
+flate2 = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"
+
+[features]
+default = []
+bigbed = ["dep:bigtools"]
+http = ["dep:reqwest"]

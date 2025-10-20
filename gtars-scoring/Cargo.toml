@@ -1,0 +1,24 @@
+[package]
+name = "gtars-scoring"
+version = "0.5.0"
+edition = "2024"
+description = "Small, rust utility to compute read overlaps of fragments files over a universe."
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+glob = "0.3.1"
+
+# shared workspace dependencies
+anyhow = { workspace = true}
+indicatif = { workspace = true }
+flate2 = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core", version="0.5.0" }
+gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.0" }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"

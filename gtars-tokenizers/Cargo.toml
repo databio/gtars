@@ -1,0 +1,29 @@
+[package]
+name = "gtars-tokenizers"
+version = "0.5.1"
+edition = "2024"
+description = "Genomic region tokenizers for machine learning in Rust"
+license = "MIT"
+repository="https://github.com/databio/gtars"
+
+[dependencies]
+thiserror = "2.0.12"
+hf-hub = { version = "0.4.3", optional = true}
+toml = "0.8.14"
+
+# share workspace dependencies
+anyhow = { workspace = true }
+fxhash = { workspace = true }
+serde = { workspace = true }
+
+# our code
+gtars-core = { path = "../gtars-core", version="0.5.1" }
+gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.0" }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+
+[features]
+default = []
+huggingface = ["dep:hf-hub"]

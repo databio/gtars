@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "seqdata_path_template": "sequences/%s2/%s.seq",
+  "collections_path_template": "collections/%s.farg",
+  "sequence_index": "sequences.farg",
+  "mode": "Encoded",
+  "created_at": "2025-10-02T23:07:06.857195+00:00"
+}
