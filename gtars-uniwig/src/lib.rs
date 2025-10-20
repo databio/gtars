@@ -195,7 +195,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "start", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &count_result.0,
+                                                    count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position_zero_pos(
@@ -213,7 +213,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "start", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &count_result.0,
+                                                    count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position_zero_pos(
@@ -287,7 +287,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "end", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &count_result.0,
+                                                    count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position(
@@ -306,7 +306,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "end", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &count_result.0,
+                                                    count_result.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position(
@@ -375,7 +375,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "core", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &core_results.0,
+                                                    core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position_zero_pos(
@@ -393,7 +393,7 @@ pub fn uniwig_main(
                                                     bwfileheader, chrom_name, "core", output_type
                                                 );
                                                 write_to_npy_file(
-                                                    &core_results.0,
+                                                    core_results.0,
                                                     file_name.clone(),
                                                     chrom_name.clone(),
                                                     clamped_start_position_zero_pos(
