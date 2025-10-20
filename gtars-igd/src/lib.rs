@@ -3,6 +3,9 @@
 pub mod create;
 pub mod search;
 
+#[cfg(feature = "bloom")]
+pub mod igdbloom; // Bloom filter work is only available as library functions NOT CLI
+
 pub mod consts {
     pub const IGD_CMD: &str = "igd";
     pub const IGD_CREATE: &str = "create";
