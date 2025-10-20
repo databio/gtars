@@ -1,4 +1,3 @@
-use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
 use gtars_core::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
 use gtars_core::utils::get_dynamic_reader;
