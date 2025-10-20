@@ -11,7 +11,7 @@ use std::{fs, io};
 
 /// Write output to npy files
 pub fn write_to_npy_file(
-    counts: &[u32],
+    counts: Vec<u32>,
     filename: String,
     chromname: String,
     start_position: i32,
@@ -33,7 +33,7 @@ pub fn write_to_npy_file(
     // https://users.rust-lang.org/t/why-does-std-to-vec-exist/45893/9
 
     // Write the NumPy Files
-    let arr = Array::from_vec(counts.to_vec());
+    let arr = Array::from_vec(counts);
     let _ = write_npy(filename, &arr);
 
     // Write to the metadata file.
