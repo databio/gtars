@@ -41,3 +41,23 @@ impl Display for Region {
         write!(f, "{}", self.as_string())
     }
 }
+
+
+#[derive(Debug, Clone)]
+pub struct ChromosomeStats {
+    pub chromosome: String,
+    pub count: u32, // number of regions
+    pub start: u32,
+    pub end: u32,
+    pub minimum: u32,
+    pub maximum: u32,
+    pub mean: f64,
+    pub median: f64,
+}
+
+// TODO:
+// impl Display for ChromosomeStats {
+//     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//
+//     }
+// }

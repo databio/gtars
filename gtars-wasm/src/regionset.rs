@@ -1,6 +1,54 @@
 use wasm_bindgen::prelude::*;
 use gtars_core::models::{Region, RegionSet};
 use crate::models::BedEntries;
+use std::collections::HashMap;
+
+#[wasm_bindgen(js_name = "ChromosomeStats")]
+#[derive(serde::Serialize)]
+pub struct JsChromosomeStats {
+    chromosome: String,
+    count: u32,
+    minimum: u32,
+    maximum: u32,
+    mean: f64,
+    median: f64,
+    start: u32,
+    end: u32,
+}
+
+#[wasm_bindgen(js_class = "ChromosomeStats")]
+impl JsChromosomeStats {
+    #[wasm_bindgen(getter)]
+    pub fn chromosome(&self) -> String {
+        self.chromosome.clone()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn count(&self) -> u32 {
+        self.count
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn minimum(&self) -> u32 {
+        self.minimum
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn maximum(&self) -> u32 {
+        self.maximum
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn mean(&self) -> f64 {
+        self.mean
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn median(&self) -> f64 {
+        self.median
+    }
+}
+
 
 #[wasm_bindgen(js_name = "RegionSet")]
 pub struct JsRegionSet {
@@ -29,7 +77,9 @@ impl JsRegionSet {
                 rest: None,
             })
             .collect::<Vec<Region>>();
-        Ok(JsRegionSet { region_set: RegionSet::from(regions) })
+        let mut region_set: RegionSet = RegionSet::from(regions);
+        region_set.sort();
+        Ok(JsRegionSet { region_set })
     }
 
 
@@ -51,5 +101,34 @@ impl JsRegionSet {
     #[wasm_bindgen(getter, js_name = "total_nucleotides")]
     pub fn get_total_nucleotides(&self) -> i32 {
         self.region_set.nucleotides_length() as i32
+    }
+
+    #[wasm_bindgen(getter, js_name = "digest")]
+    pub fn get_digest(&self) -> String {
+        self.region_set.identifier()
+    }
+
+    #[wasm_bindgen(js_name = "calculate_statistics")]
+    pub fn calculate_statistics(&self) -> Result<JsValue, JsValue> {
+        let stats = self.region_set.calculate_statistics();
+        let mut result: HashMap<String, JsChromosomeStats> = HashMap::new();
+
+        for (key, value) in stats {
+            result.insert(
+                key.clone(),
+                JsChromosomeStats {
+                    chromosome: value.chromosome.clone(),
+                    count: value.count,
+                    minimum: value.minimum,
+                    maximum: value.maximum,
+                    mean: value.mean,
+                    median: value.median,
+                    start: value.start,
+                    end: value.end,
+                },
+            );
+        }
+
+        serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
     }
 }
