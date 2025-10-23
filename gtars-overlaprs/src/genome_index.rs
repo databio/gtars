@@ -114,9 +114,13 @@ impl IntoGenomeIndex<u32, Option<String>> for RegionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rstest::*;
+    use pretty_assertions::assert_eq;
 
-    #[test]
-    fn test_basic() {
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_basic_overlaps(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
             Region {
                 chr: "chr1".to_string(),
@@ -138,9 +142,8 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(OverlapperType::AiList);
+        let gi = rs.into_genome_index(overlapper_type);
 
-        
         let query = RegionSet::from(vec![
             Region {
                 chr: "chr1".to_string(),
@@ -148,18 +151,293 @@ mod tests {
                 end: 210,
                 rest: None,
             },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].chr, "chr1");
+        assert_eq!(hits[0].start, 100);
+        assert_eq!(hits[0].end, 200);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_multiple_overlaps_single_query(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
             Region {
                 chr: "chr1".to_string(),
-                start: 120,
-                end: 220,
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 150,
+                end: 250,
+                rest: None,
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 180,
+                end: 300,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 160,
+                end: 190,
                 rest: None,
             },
         ]);
-        let hits = gi.find_overlaps(&query);
-        println!("{:?}", hits.unwrap());
-        // assert_eq!(hits.is_ok(), true);
-        // assert_eq!(hits.unwrap().len(), 2);
-        // let hits = hits.unwrap();
-        // println!("{:?}", hits.clone());
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 3);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_no_overlaps(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 300,
+                end: 400,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 500,
+                end: 600,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 0);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_multiple_chromosomes(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 300,
+                end: 400,
+                rest: None,
+            },
+            Region {
+                chr: "chr3".to_string(),
+                start: 500,
+                end: 600,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 150,
+                end: 250,
+                rest: None,
+            },
+            Region {
+                chr: "chr2".to_string(),
+                start: 350,
+                end: 450,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 2);
+
+        let chr1_hits: Vec<_> = hits.iter().filter(|h| h.chr == "chr1").collect();
+        let chr2_hits: Vec<_> = hits.iter().filter(|h| h.chr == "chr2").collect();
+
+        assert_eq!(chr1_hits.len(), 1);
+        assert_eq!(chr2_hits.len(), 1);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_exact_boundary_overlaps(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        // Query starts exactly at region end
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 200,
+                end: 300,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        // Typically intervals are half-open [start, end), so start=200 shouldn't overlap with end=200
+        assert_eq!(hits.len(), 0);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_empty_query(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![]);
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 0);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_query_nonexistent_chromosome(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr99".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 0);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_with_metadata(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: Some("gene_a".to_string()),
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 300,
+                end: 400,
+                rest: Some("gene_b".to_string()),
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 150,
+                end: 250,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert!(hits[0].rest.is_some());
+        assert!(hits[0].rest.as_ref().unwrap().contains("gene_a"));
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::Bits)]
+    fn test_overlapping_query_regions(#[case] overlapper_type: OverlapperType) {
+        let regions = vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 100,
+                end: 200,
+                rest: None,
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 300,
+                end: 400,
+                rest: None,
+            },
+        ];
+        let rs = RegionSet::from(regions);
+        let gi = rs.into_genome_index(overlapper_type);
+
+        // Two query regions that each hit different index regions
+        let query = RegionSet::from(vec![
+            Region {
+                chr: "chr1".to_string(),
+                start: 150,
+                end: 250,
+                rest: None,
+            },
+            Region {
+                chr: "chr1".to_string(),
+                start: 350,
+                end: 450,
+                rest: None,
+            },
+        ]);
+
+        let hits = gi.find_overlaps(&query).unwrap();
+        assert_eq!(hits.len(), 2);
     }
 }
