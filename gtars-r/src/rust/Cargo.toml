@@ -1,24 +1,15 @@
 [package]
 name = "gtars-r"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 
 [lib]
-name = "gtars_r"
-crate-type = ["cdylib"]
+name = "gtars"
+crate-type = ["staticlib"]
 
 [dependencies]
 extendr-api = { git = "https://github.com/extendr/extendr", branch = "master" }
 anyhow = "1.0.82"
-
-### use these when developing with rextendr::clean() and rextender::document()
-#gtars-core = { path = "../../../gtars-core" }
-#gtars-io = { path = "../../../gtars-io" }
-#gtars-igd = { path = "../../../gtars-igd" }
-#gtars-refget = { path = "../../../gtars-refget" }
-#gtars-tokenizers = { path = "../../../gtars-tokenizers", features = ["huggingface"] }
-
-### use these to build the r package with R CMD build AFTER pushing changes to appropriate github branch
 gtars-core = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-io = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-igd = { git = "https://github.com/databio/gtars", branch = "dev" }

@@ -261,7 +261,7 @@ fn metadata_to_list(metadata: SequenceMetadata) -> List {
 fn record_to_list(record: SequenceRecord) -> List {
     list!(
         metadata = metadata_to_list(record.metadata),
-        data = record.data.unwrap_or(Vec::new())
+        data = record.data.unwrap_or_default()
     )
 }
 
@@ -287,7 +287,7 @@ fn sequence_collection_to_list(collection: SequenceCollection) -> List {
         file_path = collection
             .file_path
             .map(|p| p.to_string_lossy().to_string())
-            .unwrap_or_else(|| String::new()),
+            .unwrap_or_default(),
         has_data = collection.has_data
     )
 }

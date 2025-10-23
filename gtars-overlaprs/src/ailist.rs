@@ -5,7 +5,37 @@ use num_traits::{PrimInt, Unsigned};
 use super::Overlapper;
 use gtars_core::models::Interval;
 
-/// The Augmented Interval List (AiList), enumerates intersections between a query interval q and an interval set R.
+/// An Augmented Interval List for efficient genomic interval overlap queries.
+///
+/// From the following article: <https://academic.oup.com/bioinformatics/article/35/23/4907/5509521>
+///
+/// The Augmented Interval List (AIList) is a data structure optimized for finding overlaps
+/// between a query interval and a large collection of genomic intervals. It is particularly
+/// efficient for datasets with high-coverage regions, which are common in genomic data such
+/// as ChIP-seq peaks, gene annotations, or aligned reads.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{AiList, Overlapper, Interval};
+///
+/// // Create intervals for genomic features
+/// let genes = vec![
+///     Interval { start: 1000u32, end: 2000, val: "GENE1" },
+///     Interval { start: 1500, end: 2500, val: "GENE2" },
+///     Interval { start: 5000, end: 6000, val: "GENE3" },
+/// ];
+///
+/// let ailist = AiList::build(genes);
+///
+/// // Query for genes overlapping position 1800-2200
+/// let overlaps = ailist.find(1800, 2200);
+/// assert_eq!(overlaps.len(), 2); // GENE1 and GENE2
+///
+/// // Check if the list is empty
+/// assert!(!ailist.is_empty());
+/// assert_eq!(ailist.len(), 3);
+/// ```
 #[derive(Debug, Clone)]
 pub struct AiList<I, T>
 where
@@ -242,7 +272,31 @@ where
     }
 }
 
-/// Find Iterator
+/// An iterator over intervals in an [`AiList`] that overlap with a query range.
+///
+/// This struct is created by the [`find_iter`](Overlapper::find_iter) method on [`AiList`].
+/// It lazily yields references to intervals that overlap with the specified query range.
+///
+/// The iterator maintains state to traverse the decomposed sublists within the `AiList`
+/// efficiently, yielding overlapping intervals one at a time without allocating a vector.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{AiList, Overlapper, Interval};
+///
+/// let intervals = vec![
+///     Interval { start: 10u32, end: 20, val: "a" },
+///     Interval { start: 15, end: 25, val: "b" },
+/// ];
+///
+/// let ailist = AiList::build(intervals);
+///
+/// // The iterator is created by find_iter
+/// for interval in ailist.find_iter(12, 18) {
+///     println!("Found: {}", interval.val);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct IterFind<'a, I, T>
 where
