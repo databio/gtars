@@ -69,13 +69,18 @@
 //! ```
 pub mod ailist;
 pub mod bits;
+pub mod genome_index;
 pub mod traits;
 
 // re-exports
 pub use self::ailist::AiList;
 pub use self::bits::Bits;
 pub use self::traits::{Interval, Overlapper};
-// pub use self::iitree::IITree;
+
+pub enum OverlapperType {
+    AiList,
+    Bits,
+}
 
 pub mod consts {
     pub const OVERLAP_CMD: &str = "overlap";

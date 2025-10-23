@@ -4,6 +4,7 @@ members = ["gtars-cli", "gtars-python", "gtars-wasm", "gtars-r/src/rust", "gtars
 
 [workspace.dependencies]
 anyhow = "1.0.82"
+thiserror = "2.0.12"
 fxhash = "0.2.1"
 serde = { version = "1.0.203", features=["derive"] }
 flate2 = "1.1.2"
