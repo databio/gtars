@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Debug};
 
-use gtars_core::models::{Interval, RegionSet, Region};
+use gtars_core::models::{Interval, RegionSet};
 use thiserror::Error;
 use num_traits::{PrimInt, Unsigned};
 
@@ -16,6 +16,7 @@ pub enum GenomeIndexError {
 
 pub struct GenomeIndex<I, T> {
     index_maps: HashMap<String, Box<dyn Overlapper<I, T>>>,
+    #[allow(dead_code)]
     overlapper_type: OverlapperType,
 }
 
@@ -41,6 +42,7 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             // first, try to get next item from current iterator
+            #[allow(clippy::collapsible_if)]
             if let Some(ref mut iter) = self.current_iter {
                 if let Some(interval) = iter.next() {
                     return Some((self.current_chr.as_ref().unwrap().clone(), interval));
@@ -157,6 +159,7 @@ impl IntoGenomeIndex<u32, Option<String>> for RegionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtars_core::models::Region;
     use rstest::*;
     use pretty_assertions::assert_eq;
 
