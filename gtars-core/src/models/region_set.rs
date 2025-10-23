@@ -19,6 +19,11 @@ use bigtools::beddata::BedParserStreamingIterator;
 #[cfg(feature = "bigbed")]
 use bigtools::{BedEntry, BigBedWrite};
 
+#[cfg(feature = "dataframe")]
+use polars::prelude::*;
+#[cfg(feature = "dataframe")]
+use std::io::Cursor;
+
 use crate::models::ChromosomeStats;
 use crate::models::Region;
 #[cfg(feature = "http")]
@@ -582,6 +587,46 @@ impl RegionSet {
 
         stats
     }
+
+    ///
+    /// Create Polars DataFrame
+    ///
+    #[cfg(feature = "dataframe")]
+    pub fn to_polars(&self) -> PolarsResult<(DataFrame)> {
+        // let mut rest_columns: [&String] = Vec::new();
+        // for region in &self.regions {
+        //     rest_columns.push(&region.rest);
+        // }
+        let data: String = self
+            .regions
+            .iter()
+            .filter_map(|region| {
+                region.rest.as_deref().map(|rest| {
+                    format!(
+                        "{}\t{}\t{}\t{}",
+                        region.chr,   // Example column 3
+                        region.start, // Example column 1
+                        region.end,   // Example column 2
+                        rest,
+                    )
+                })
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let cursor = Cursor::new(data);
+
+        let df = CsvReadOptions::default()
+            .with_has_header(false)
+            .map_parse_options(|parse_options| parse_options.with_separator(b'\t'))
+            .with_infer_schema_length(Some(10000))
+            .into_reader_with_file_handle(cursor)
+            .finish()
+            .unwrap();
+        println!("{:?}", df);
+
+        Ok(df)
+    }
 }
 
 impl Display for RegionSet {
@@ -763,5 +808,16 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         let count = region_set.calculate_statistics().get("chr1").unwrap().count;
         assert_eq!(count, 9)
+    }
+
+    #[rstest]
+    fn test_polars() {
+        let region_set =
+            RegionSet::try_from("/home/bnt4me/Downloads/9f04c2ce6c0e800a3cef1fc5a2235c44.bed.gz")
+                .unwrap();
+        let count = region_set.to_polars();
+        println!("{:?}", count);
+        let b = region_set.classify_bed;
+        println!("{:?}", b);
     }
 }
