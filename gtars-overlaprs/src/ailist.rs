@@ -263,10 +263,38 @@ where
         results_list
     }
 
+    /// Returns the number of intervals in the AiList.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gtars_overlaprs::{AiList, Overlapper, Interval};
+    ///
+    /// let intervals = vec![
+    ///     Interval { start: 10u32, end: 20, val: "a" },
+    ///     Interval { start: 30, end: 40, val: "b" },
+    /// ];
+    /// let ailist = AiList::build(intervals);
+    /// assert_eq!(ailist.len(), 2);
+    /// ```
     pub fn len(&self) -> usize {
         self.starts.len()
     }
 
+    /// Returns `true` if the AiList contains no intervals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gtars_overlaprs::{AiList, Overlapper, Interval};
+    ///
+    /// let ailist: AiList<u32, &str> = AiList::build(vec![]);
+    /// assert!(ailist.is_empty());
+    ///
+    /// let intervals = vec![Interval { start: 10u32, end: 20, val: "a" }];
+    /// let ailist = AiList::build(intervals);
+    /// assert!(!ailist.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }

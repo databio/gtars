@@ -302,6 +302,19 @@ where
         low
     }
 
+    /// Binary search for the insertion position of a key in a sorted slice.
+    ///
+    /// Returns the index where `key` should be inserted to maintain sort order.
+    /// This is a convenience wrapper around [`bsearch_seq_ref`](Self::bsearch_seq_ref).
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The value to search for
+    /// * `elems` - A sorted slice to search in
+    ///
+    /// # Returns
+    ///
+    /// The index where `key` should be inserted.
     #[inline]
     pub fn bsearch_seq<K>(key: K, elems: &[K]) -> usize
     where
@@ -310,6 +323,22 @@ where
         Self::bsearch_seq_ref(&key, elems)
     }
 
+    /// Binary search for the insertion position of a key reference in a sorted slice.
+    ///
+    /// Returns the index where `key` should be inserted to maintain sort order.
+    /// Uses an efficient binary search algorithm optimized for branch prediction.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - A reference to the value to search for
+    /// * `elems` - A sorted slice to search in
+    ///
+    /// # Returns
+    ///
+    /// The index where `key` should be inserted to maintain sort order:
+    /// - `0` if the key should be inserted at the beginning
+    /// - `elems.len()` if the key should be inserted at the end
+    /// - Otherwise, the first index where `elems[index] >= key`
     #[inline]
     pub fn bsearch_seq_ref<K>(key: &K, elems: &[K]) -> usize
     where

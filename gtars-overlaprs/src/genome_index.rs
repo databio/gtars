@@ -1,3 +1,65 @@
+//! Genome-wide interval indexing for efficient multi-chromosome overlap queries.
+//!
+//! This module provides [`GenomeIndex`](crate::genome_index::GenomeIndex), a data structure that extends single-chromosome
+//! overlap data structures (like [`AiList`](crate::AiList) or [`Bits`](crate::Bits)) to handle genome-wide queries
+//! across multiple chromosomes efficiently.
+//!
+//! # Overview
+//!
+//! While [`AiList`](crate::AiList) and [`Bits`](crate::Bits) are designed for queries on a single chromosome,
+//! [`GenomeIndex`](crate::genome_index::GenomeIndex) manages a collection of these structures - one per chromosome - enabling
+//! efficient queries across the entire genome.
+//!
+//! # Examples
+//!
+//! ## Basic Usage
+//!
+//! ```
+//! use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+//! use gtars_core::models::{Region, RegionSet};
+//!
+//! // Create a genome-wide set of intervals (e.g., gene annotations)
+//! let genes = vec![
+//!     Region { chr: "chr1".to_string(), start: 1000, end: 2000, rest: Some("BRCA1".to_string()) },
+//!     Region { chr: "chr1".to_string(), start: 5000, end: 6000, rest: Some("TP53".to_string()) },
+//!     Region { chr: "chr2".to_string(), start: 1000, end: 3000, rest: Some("EGFR".to_string()) },
+//! ];
+//!
+//! let gene_set = RegionSet::from(genes);
+//! let genome_index = gene_set.into_genome_index(OverlapperType::AiList);
+//!
+//! // Query multiple regions across different chromosomes
+//! let query_regions = RegionSet::from(vec![
+//!     Region { chr: "chr1".to_string(), start: 1500, end: 2500, rest: None },
+//!     Region { chr: "chr2".to_string(), start: 2000, end: 4000, rest: None },
+//! ]);
+//!
+//! let overlaps = genome_index.find_overlaps(&query_regions);
+//! println!("Found {} overlapping features", overlaps.len());
+//! ```
+//!
+//! ## Iterator-Based Query
+//!
+//! For memory-efficient processing of large result sets:
+//!
+//! ```
+//! use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+//! use gtars_core::models::{Region, RegionSet};
+//!
+//! # let genes = vec![
+//! #     Region { chr: "chr1".to_string(), start: 1000, end: 2000, rest: Some("BRCA1".to_string()) },
+//! # ];
+//! # let gene_set = RegionSet::from(genes);
+//! # let genome_index = gene_set.into_genome_index(OverlapperType::AiList);
+//! # let query_regions = RegionSet::from(vec![
+//! #     Region { chr: "chr1".to_string(), start: 1500, end: 2500, rest: None },
+//! # ]);
+//! // Process overlaps one at a time without allocating a vector
+//! for (chr, interval) in genome_index.find_overlaps_iter(&query_regions) {
+//!     println!("Chromosome {}: {:?}", chr, interval);
+//! }
+//! ```
+
 use std::{collections::HashMap, fmt::Debug};
 
 use gtars_core::models::{Interval, RegionSet};
@@ -6,20 +68,70 @@ use thiserror::Error;
 
 use crate::{AiList, Bits, Overlapper, OverlapperType};
 
+/// Errors that can occur when working with [`GenomeIndex`].
 #[derive(Debug, Error)]
 pub enum GenomeIndexError {
+    /// Error parsing a genomic region string.
     #[error("Error parsing region: {0}")]
     RegionParsingError(String),
+    /// Error converting interval coordinates to the required integer type.
     #[error("Error converting interval coordinates to u32: start={0}, end={1}")]
     CoordinateConversionError(String, String),
 }
 
+/// A genome-wide index for efficient overlap queries across multiple chromosomes.
+///
+/// `GenomeIndex` maintains a separate overlap data structure (either [`AiList`] or [`Bits`])
+/// for each chromosome, enabling efficient queries across the entire genome. This is particularly
+/// useful for genome-wide analyses where you need to find overlaps between genomic features on
+/// different chromosomes.
+///
+/// # Type Parameters
+///
+/// * `I` - The integer type for interval coordinates (typically `u32` for genomic coordinates)
+/// * `T` - The type of value associated with each interval (e.g., gene name, score)
+///
+/// # Thread Safety
+///
+/// `GenomeIndex` is thread-safe and can be shared across threads via `Arc` or similar constructs.
+///
+/// # Examples
+///
+/// See the [module-level documentation](self) for usage examples.
 pub struct GenomeIndex<I, T> {
     index_maps: HashMap<String, Box<dyn Overlapper<I, T>>>,
     #[allow(dead_code)]
     overlapper_type: OverlapperType,
 }
 
+/// An iterator over intervals that overlap with query regions across multiple chromosomes.
+///
+/// This iterator is created by [`GenomeIndex::find_overlaps_iter`]. It yields tuples of
+/// `(chromosome, interval)` for all intervals that overlap with any of the query regions.
+///
+/// The iterator processes query regions in order and yields overlapping intervals as they
+/// are found, without allocating a vector for all results.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+/// use gtars_core::models::{Region, RegionSet};
+///
+/// let genes = RegionSet::from(vec![
+///     Region { chr: "chr1".to_string(), start: 100, end: 200, rest: None },
+/// ]);
+/// let index = genes.into_genome_index(OverlapperType::AiList);
+///
+/// let queries = RegionSet::from(vec![
+///     Region { chr: "chr1".to_string(), start: 150, end: 250, rest: None },
+/// ]);
+///
+/// // The iterator is used implicitly in a for loop
+/// for (chr, interval) in index.find_overlaps_iter(&queries) {
+///     println!("Found overlap on {}: {:?}", chr, interval);
+/// }
+/// ```
 pub struct IterFindOverlaps<'a, 'b, I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
@@ -119,11 +231,47 @@ where
     }
 }
 
+/// A trait for converting region-based data into a [`GenomeIndex`].
+///
+/// This trait provides a convenient way to build a genome-wide index from a collection
+/// of genomic regions. It handles the organization of regions by chromosome and the
+/// construction of the underlying overlap data structures.
+///
+/// # Type Parameters
+///
+/// * `I` - The integer type for interval coordinates
+/// * `T` - The type of value associated with each interval
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+/// use gtars_core::models::{Region, RegionSet};
+///
+/// let regions = vec![
+///     Region { chr: "chr1".to_string(), start: 100, end: 200, rest: Some("peak1".to_string()) },
+///     Region { chr: "chr2".to_string(), start: 300, end: 400, rest: Some("peak2".to_string()) },
+/// ];
+///
+/// let region_set = RegionSet::from(regions);
+///
+/// // Convert into a GenomeIndex using AiList
+/// let index = region_set.into_genome_index(OverlapperType::AiList);
+/// ```
 pub trait IntoGenomeIndex<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
+    /// Consumes the input and builds a [`GenomeIndex`] with the specified overlapper type.
+    ///
+    /// # Arguments
+    ///
+    /// * `overlapper_type` - The type of overlap data structure to use ([`AiList`] or [`Bits`])
+    ///
+    /// # Returns
+    ///
+    /// A new [`GenomeIndex`] containing all regions organized by chromosome.
     fn into_genome_index(self, overlapper_type: OverlapperType) -> GenomeIndex<I, T>;
 }
 

@@ -67,9 +67,25 @@
 //!
 //! println!("Genes in region: {:?}", overlapping_genes);
 //! ```
+
+/// Augmented Interval List implementation.
+///
+/// See [`AiList`] for details.
 pub mod ailist;
+
+/// Binary Interval Search implementation.
+///
+/// See [`Bits`] for details.
 pub mod bits;
+
+/// Genome-wide interval indexing.
+///
+/// See the [`genome_index`] module for details.
 pub mod genome_index;
+
+/// Core traits for overlap operations.
+///
+/// See [`Overlapper`] for the main trait.
 pub mod traits;
 
 // re-exports
@@ -77,11 +93,27 @@ pub use self::ailist::AiList;
 pub use self::bits::Bits;
 pub use self::traits::{Interval, Overlapper};
 
+/// The type of overlap data structure to use.
+///
+/// This enum allows you to choose between different overlap query implementations,
+/// each with different performance characteristics.
+///
+/// # Variants
+///
+/// * `AiList` - Use the Augmented Interval List implementation. Best for genomic data
+///   with high-coverage regions (e.g., ChIP-seq peaks, dense annotations).
+/// * `Bits` - Use the Binary Interval Search implementation. Best for general-purpose
+///   overlap queries and sorted sequential queries.
+///
 pub enum OverlapperType {
+    /// Use the Augmented Interval List implementation.
     AiList,
+    /// Use the Binary Interval Search implementation.
     Bits,
 }
 
+/// Constants used throughout the crate.
 pub mod consts {
+    /// The command name for overlap operations.
     pub const OVERLAP_CMD: &str = "overlap";
 }
