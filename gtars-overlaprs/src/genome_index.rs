@@ -207,7 +207,6 @@ where
     /// Returns an iterator over all overlapping intervals for the query regions.
     ///
     /// Each item is a tuple of (chromosome, interval reference).
-    /// Invalid regions (coordinates that can't convert to type I) are silently skipped.
     pub fn find_overlaps_iter<'a, 'b>(
         &'a self,
         rs: &'b RegionSet,
