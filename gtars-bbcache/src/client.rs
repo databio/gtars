@@ -52,7 +52,6 @@ impl BBClientBuilder {
 
         // handle the bedbase api
         let bedbase_api = self.bedbase_api.unwrap_or_else(get_default_bedbase_api);
-        let bedbase_api = bedbase_api.to_owned();
 
         // create sub folders
         let bedfile_subfolder = &abs_path_to_cache_folder.join(DEFAULT_BEDFILE_SUBFOLDER);
