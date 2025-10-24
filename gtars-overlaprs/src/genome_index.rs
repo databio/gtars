@@ -62,7 +62,7 @@
 
 use std::{collections::HashMap, fmt::Debug};
 
-use gtars_core::models::{Interval, RegionSet};
+use gtars_core::models::{Interval, Region, RegionSet};
 use num_traits::{PrimInt, Unsigned};
 use thiserror::Error;
 
@@ -134,8 +134,8 @@ pub struct GenomeIndex<I, T> {
 /// ```
 pub struct IterFindOverlaps<'a, 'b, I, T>
 where
-    I: PrimInt + Unsigned + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync + Debug,
+    T: Eq + Clone + Send + Sync + Debug,
 {
     inner: &'a HashMap<String, Box<dyn Overlapper<I, T>>>,
     rs: &'b RegionSet,
@@ -146,8 +146,8 @@ where
 
 impl<'a, 'b, I, T> Iterator for IterFindOverlaps<'a, 'b, I, T>
 where
-    I: PrimInt + Unsigned + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync + Debug,
+    T: Eq + Clone + Send + Sync + Debug,
 {
     type Item = (String, &'a Interval<I, T>);
 
@@ -201,8 +201,8 @@ where
 
 impl<I, T> GenomeIndex<I, T>
 where
-    I: PrimInt + Unsigned + Send + Sync,
-    T: Eq + Clone + Send + Sync,
+    I: PrimInt + Unsigned + Send + Sync + Debug,
+    T: Eq + Clone + Send + Sync + Debug,
 {
     /// Returns an iterator over all overlapping intervals for the query regions.
     ///
@@ -227,6 +227,53 @@ where
         self.find_overlaps_iter(rs)
             .map(|(chr, interval)| (chr, interval.clone()))
             .collect()
+    }
+
+    /// Collect all overlaps into a Vec of Regions
+    ///
+    /// This is a helper method finds overlaps in 2 RegionSet and return Vector of Regions
+    pub fn find_overlaps_to_rs(&self, rs: &RegionSet) -> Result<Vec<Region>, GenomeIndexError> {
+        // TODO: change it to find_overlaps iter.
+
+        let mut final_hits = Vec::new();
+        for r in rs {
+            let lapper = self.index_maps.get(&r.chr);
+            match lapper {
+                Some(lapper) => {
+                    let start = I::from(r.start);
+                    let end = I::from(r.end);
+                    if let (Some(start), Some(end)) = (start, end) {
+                        for iv in lapper.find_iter(start, end) {
+                            let start_u32 = iv.start.to_u32().ok_or_else(|| {
+                                GenomeIndexError::CoordinateConversionError(
+                                    format!("{:?}", iv.start),
+                                    format!("{:?}", iv.end),
+                                )
+                            })?;
+                            let end_u32 = iv.end.to_u32().ok_or_else(|| {
+                                GenomeIndexError::CoordinateConversionError(
+                                    format!("{:?}", iv.start),
+                                    format!("{:?}", iv.end),
+                                )
+                            })?;
+                            let rest = format!("{:?}", iv.val);
+                            final_hits.push(Region {
+                                chr: r.chr.clone(),
+                                start: start_u32,
+                                end: end_u32,
+                                rest: Some(rest),
+                            });
+                        }
+                    } else {
+                        return Err(GenomeIndexError::RegionParsingError(format!(
+                            "Could not parse region start and end: {r}"
+                        )));
+                    }
+                }
+                None => continue,
+            }
+        }
+        Ok(final_hits)
     }
 }
 
