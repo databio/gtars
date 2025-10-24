@@ -10,7 +10,7 @@ pub trait Statistics {
     fn calculate_chr_statistics(&self) -> HashMap<String, ChromosomeStats>;
 
     /// Generate chrom distribution data based on regions used in the RegionSet
-    fn generate_chrom_distribution(&self) -> HashMap<String, RegionBin>;
+    fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin>;
 }
 
 impl Statistics for RegionSet {
@@ -61,8 +61,8 @@ impl Statistics for RegionSet {
         stats
     }
 
-    fn generate_chrom_distribution(&self) -> HashMap<String, RegionBin> {
-        let universe: RegionSet = create_bin_regionset(self.get_max_end_per_chr());
+    fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin> {
+        let universe: RegionSet = create_bin_regionset(self.get_max_end_per_chr(), n_bins);
 
         let universe_overlap = universe.into_genome_index(OverlapperType::Bits);
 
@@ -106,7 +106,7 @@ mod tests {
         .unwrap();
 
         // let k = create_bin_regionset(region_set.get_max_end_per_chr());
-        let k = region_set.generate_chrom_distribution();
+        let k = region_set.generate_region_distribution();
         println!("{:?}", k);
     }
 }

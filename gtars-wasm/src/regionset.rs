@@ -1,5 +1,6 @@
 use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
+use gtars_gd::models::RegionBin;
 use gtars_gd::statistics::Statistics;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -22,6 +23,14 @@ impl JsChromosomeStats {
     #[wasm_bindgen(getter)]
     pub fn chromosome(&self) -> String {
         self.chromosome.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn start(&self) -> u32 {
+        self.start
+    }
+    #[wasm_bindgen(getter)]
+    pub fn end(&self) -> u32 {
+        self.end
     }
 
     #[wasm_bindgen(getter)]
@@ -48,6 +57,16 @@ impl JsChromosomeStats {
     pub fn median(&self) -> f64 {
         self.median
     }
+}
+
+#[wasm_bindgen(js_name = "RegionDistribution")]
+#[derive(serde::Serialize)]
+pub struct JsRegionDistribution {
+    chr: String,
+    start: u32,
+    end: u32,
+    n: u32,
+    rid: u32,
 }
 
 #[wasm_bindgen(js_name = "RegionSet")]
@@ -124,5 +143,24 @@ impl JsRegionSet {
         }
 
         serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = "calculate_region_distribution")]
+    pub fn calculate_region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
+        let distribution: HashMap<String, RegionBin> =
+            self.region_set.generate_region_distribution(n_bins);
+
+        let mut result_vector: Vec<JsRegionDistribution> = vec![];
+
+        for value in distribution.values() {
+            result_vector.push(JsRegionDistribution {
+                chr: value.chr.clone(),
+                start: value.start,
+                end: value.end,
+                n: value.n,
+                rid: value.rid,
+            })
+        }
+        serde_wasm_bindgen::to_value(&result_vector).map_err(|e| e.into())
     }
 }
