@@ -1,4 +1,3 @@
-use anyhow::Result;
 use byteorder::{LittleEndian, ReadBytesExt};
 use gtars_core::consts::{BED_FILE_EXTENSION, GZ_FILE_EXTENSION};
 use gtars_core::utils::get_dynamic_reader;
@@ -551,6 +550,10 @@ pub fn igd_save_db(igd: &mut igd_t, output_path: &String, db_output_name: &Strin
             //q.nCnts = 0;
         }
     }
+    //clean up the temp folder if it exits
+    let temp_folder = format!("{}{}", output_path, "data0/");
+    let path = Path::new(&temp_folder);
+    let _ = fs::remove_dir_all(path);
 
     //file.write_all(&buffer).unwrap();
 }
