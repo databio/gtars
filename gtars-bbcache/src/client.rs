@@ -1,3 +1,8 @@
+//! BEDbase caching client implementation.
+//!
+//! This module provides the core [`BBClient`] type and its builder for managing
+//! cached BED files and BED sets from the BEDbase API.
+
 use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
@@ -14,6 +19,25 @@ use super::utils::{get_default_bedbase_api, get_default_cache_folder};
 use gtars_core::models::bed_set::BedSet;
 use gtars_core::models::region_set::RegionSet;
 
+/// Builder for constructing a [`BBClient`] with custom configuration.
+///
+/// Use this builder to configure cache location and BEDbase API endpoint
+/// before creating a client instance.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use gtars_bbcache::client::BBClient;
+/// use std::path::PathBuf;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// let client = BBClient::builder()
+///     .with_cache_folder(PathBuf::from("/custom/cache"))
+///     .with_bedbase_api("https://api.bedbase.org".to_string())
+///     .finish()?;
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Default)]
 pub struct BBClientBuilder {
     cache_folder: Option<PathBuf>,
@@ -70,19 +94,74 @@ impl BBClientBuilder {
     }
 }
 
+/// Client for managing BED file and BED set caching from BEDbase.
+///
+/// `BBClient` provides a high-level interface for:
+/// - Downloading and caching BED files from the BEDbase API
+/// - Managing local BED file collections
+/// - Organizing BED sets (collections of related BED files)
+/// - Querying and removing cached resources
+///
+/// The client maintains two separate caches:
+/// - **bedfile_cache**: Individual BED files (stored as `.bed.gz`)
+/// - **bedset_cache**: BED set metadata files (stored as `.txt` with lists of BED IDs)
+///
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use gtars_bbcache::client::BBClient;
+///
+/// # fn main() -> anyhow::Result<()> {
+/// // Create a client with default settings
+/// let mut client = BBClient::builder().finish()?;
+///
+/// // Download and cache a BED file from BEDbase
+/// let region_set = client.load_bed("6b2e163a1d4319d99bd465c6c78a9741")?;
+///
+/// // Check if file exists in cache
+/// let path = client.seek("6b2e163a1d4319d99bd465c6c78a9741")?;
+/// println!("Cached at: {:?}", path);
+///
+/// // List all cached BED files
+/// let beds = client.list_beds()?;
+/// println!("Found {} cached BED files", beds.len());
+///
+/// // Remove from cache
+/// client.remove("6b2e163a1d4319d99bd465c6c78a9741")?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct BBClient {
+    /// Path to the root cache directory
     pub cache_folder: PathBuf,
+    /// BEDbase API endpoint URL
     pub bedbase_api: String,
+    /// Internal cache manager for BED files
     bedfile_cache: BioCache,
+    /// Internal cache manager for BED sets
     bedset_cache: BioCache,
 }
 
 impl BBClient {
-    /// BBClient to deal with download files from bedbase and caching them.
-    /// # Arguments
-    /// - cache_folder: path to local folder as cache of files from bedbase,
-    ///   if not given it will be the environment variable `BBCLIENT_CACHE`
-    /// - bedbase_api: url to bedbase
+    /// Creates a new builder for constructing a [`BBClient`].
+    ///
+    /// The builder pattern allows you to configure the cache folder and API endpoint
+    /// before creating the client instance.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use gtars_bbcache::client::BBClient;
+    /// use std::path::PathBuf;
+    ///
+    /// # fn main() -> anyhow::Result<()> {
+    /// let client = BBClient::builder()
+    ///     .with_cache_folder(PathBuf::from("/tmp/bbcache"))
+    ///     .finish()?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn builder() -> BBClientBuilder {
         BBClientBuilder::default()
     }
