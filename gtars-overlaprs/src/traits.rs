@@ -72,6 +72,8 @@ where
     ///
     /// For large result sets, consider using [`find_iter`](Self::find_iter) to avoid
     /// allocating and cloning all results at once.
+    /// TODO: this should be a default implementation that we collect
+    /// the below find_iter()
     fn find(&self, start: I, end: I) -> Vec<Interval<I, T>>;
 
     /// Returns an iterator over all intervals that overlap with the query range `[start, end)`.
