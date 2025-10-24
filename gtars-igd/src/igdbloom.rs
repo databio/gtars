@@ -688,9 +688,31 @@ fn file_exists(path: &str) -> bool {
 mod tests{
     use super::*;
     use rstest::rstest;
+    use std::path::PathBuf;
 
     #[rstest]
     fn test_manual(){
+
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        let tempbedpath = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests/data/dir_of_files/dir_beds/dummy2.bed");
+        let bed_path = tempbedpath.to_string_lossy();
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
+        let child_directory = path.into_os_string().into_string().unwrap();
+        let num_of_items = 5;
+        let false_positive_rate = 10.0;
+
+        let tokenizer =
+            Tokenizer::from_auto(bed_path.as_ref()).expect("Failed to create tokenizer from config.");
+
+        tokenize_then_create_bloom(&tokenizer, &bed_path, &child_directory, num_of_items, false_positive_rate);
         //
         // let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
         //
@@ -714,7 +736,7 @@ mod tests{
         // //let bed_directory = "/home/drc/Downloads/bloom_testing/test1/all_bed_files_real/";
         // let bedfilesuniverse = "/home/drc/Downloads/bloom_testing/test1/two_real_bed_files/";
         //
-        // create_bloom_filters(parent_directory.clone(), bedfilesuniverse, universe_tree_tokenizer, numitems, falsepositive);
+         //create_bloom_filters(parent_directory.clone(), bedfilesuniverse, universe_tree_tokenizer, numitems, falsepositive);
         //
         // search_bloom_filter(parent_directory.as_str(), universe, querybed);
 
