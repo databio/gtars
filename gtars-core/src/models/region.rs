@@ -1,3 +1,4 @@
+use md5::{Digest, Md5};
 use std::fmt::{self, Display};
 
 ///
@@ -33,6 +34,18 @@ impl Region {
                 .as_deref()
                 .map_or(String::new(), |s| format!("\t{}", s)),
         )
+    }
+
+    ///
+    /// Calculate digest for the Region
+    ///
+    pub fn digest(&self) -> String {
+        let digest_string = format!("{},{},{}", self.chr, self.start, self.end);
+
+        let mut hasher = Md5::new();
+        hasher.update(digest_string);
+        let chrom_hash = hasher.finalize();
+        format!("{:x}", chrom_hash)
     }
 }
 
