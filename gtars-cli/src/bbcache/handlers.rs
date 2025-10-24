@@ -15,7 +15,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
         .get_one::<String>("cache-folder")
         .map(PathBuf::from)
         .unwrap_or_else(get_default_cache_folder);
-    
+
     let mut bbc = BBClient::builder()
         .with_cache_folder(cache_folder)
         .finish()

@@ -17,7 +17,7 @@ use gtars_core::models::region_set::RegionSet;
 #[derive(Default)]
 pub struct BBClientBuilder {
     cache_folder: Option<PathBuf>,
-    bedbase_api: Option<String>
+    bedbase_api: Option<String>,
 }
 
 impl BBClientBuilder {
@@ -40,7 +40,6 @@ impl BBClientBuilder {
 
     /// Consumes the builder and creates a BBClient.
     pub fn finish(self) -> Result<BBClient> {
-        
         // handle the cache dir
         let raw_path_to_cache_folder = self.cache_folder.unwrap_or_else(get_default_cache_folder);
         let raw_str_to_cache_folder = raw_path_to_cache_folder.to_string_lossy().into_owned();
@@ -62,7 +61,12 @@ impl BBClientBuilder {
         create_dir_all(bedset_subfolder)?;
         let bedset_cache = BioCache::new(bedset_subfolder);
 
-        Ok(BBClient { cache_folder: abs_path_to_cache_folder, bedbase_api, bedfile_cache, bedset_cache })
+        Ok(BBClient {
+            cache_folder: abs_path_to_cache_folder,
+            bedbase_api,
+            bedfile_cache,
+            bedset_cache,
+        })
     }
 }
 

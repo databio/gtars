@@ -5,14 +5,9 @@ pub mod utils;
 #[cfg(test)]
 mod tests {
     use super::client::BBClient;
-    use super::*;
     use rstest::{fixture, rstest};
-    use std::fs;
-    use std::fs::File;
-    use std::fs::{OpenOptions, read_dir};
-    use std::io::{BufRead, BufReader, Read};
-    use std::path::{Path, PathBuf};
-    use tempfile::NamedTempFile;
+    use std::fs::read_dir;
+    use std::path::PathBuf;
 
     #[fixture]
     fn path_to_bed_gz_from_bb() -> PathBuf {
@@ -61,8 +56,9 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
 
-        let mut bbc =
-            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+        let mut bbc = BBClient::builder()
+            .with_cache_folder(cache_folder.clone())
+            .finish()?;
 
         let bed_id = bbc
             .add_local_bed_to_cache(path_to_bed_gz_from_bb, Some(false))
