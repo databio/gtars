@@ -1,5 +1,6 @@
 use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
+use gtars_gd::statistics::Statistics;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
@@ -103,7 +104,7 @@ impl JsRegionSet {
 
     #[wasm_bindgen(js_name = "calculate_statistics")]
     pub fn calculate_statistics(&self) -> Result<JsValue, JsValue> {
-        let stats = self.region_set.calculate_statistics();
+        let stats = self.region_set.calculate_chr_statistics();
         let mut result: HashMap<String, JsChromosomeStats> = HashMap::new();
 
         for (key, value) in stats {

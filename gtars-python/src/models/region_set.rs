@@ -3,7 +3,8 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
-use gtars_core::models::{ChromosomeStats, Region, RegionSet};
+use gtars_core::models::{Region, RegionSet};
+use gtars_gd::{models::ChromosomeStats, statistics::Statistics};
 
 #[pyclass(name = "ChromosomeStats", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -209,7 +210,7 @@ impl PyRegionSet {
 
     fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStats> {
         let mut result: HashMap<String, PyChromosomeStats> = HashMap::new();
-        let stats: HashMap<String, ChromosomeStats> = self.regionset.calculate_statistics();
+        let stats: HashMap<String, ChromosomeStats> = self.regionset.calculate_chr_statistics();
 
         for (key, value) in &stats {
             result.insert(
