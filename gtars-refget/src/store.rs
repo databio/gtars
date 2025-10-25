@@ -1080,7 +1080,7 @@ chr1\t-5\t100
         let seq_template = "sequences/%s2/%s.seq";
         // let col_template = "collections/%s.farg";
         store
-            .write_store_to_directory("tests/store_test", seq_template)
+            .write_store_to_directory(temp_path.to_str().unwrap(), seq_template)
             .unwrap();
     }
 
