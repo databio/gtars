@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::io::BufRead;
+use std::path::Path;
 use std::str::FromStr;
 
 use gtars_core::models::{Fragment, Region};
@@ -115,6 +117,41 @@ pub fn region_scoring_from_fragments(
     }
 
     Ok(count_mat)
+}
+
+/// Score fragments by barcode for single-cell analysis
+///
+/// Returns sparse HashMap: barcode → (peak_index → count)
+pub fn barcode_scoring_from_fragments<P: AsRef<Path>>(
+    fragment_file: P,
+    consensus: &ConsensusSet,
+) -> Result<HashMap<String, HashMap<usize, u32>>> {
+    let reader = get_dynamic_reader(fragment_file.as_ref())?;
+    let mut barcode_counts: HashMap<String, HashMap<usize, u32>> = HashMap::new();
+
+    for line in reader.lines() {
+        let line = line?;
+
+        if line.starts_with('#') {
+            continue;
+        }
+
+        let fragment = Fragment::from_str(&line)?;
+        let barcode = fragment.barcode.clone();
+
+        // Convert fragment to region and find overlaps
+        let region: Region = fragment.into();
+
+        if let Some(overlaps) = consensus.find_overlaps(&region) {
+            let counts = barcode_counts.entry(barcode).or_insert_with(HashMap::new);
+
+            for overlap in overlaps {
+                *counts.entry(overlap.1 as usize).or_insert(0) += 1;
+            }
+        }
+    }
+
+    Ok(barcode_counts)
 }
 
 #[cfg(test)]
