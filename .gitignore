@@ -28,3 +28,5 @@ bin/
 /gtars/tests/data/out/region_scoring_count.csv.gz
 
 scatrs-test/
+/gtars-refget/tests/store_test/index.json
+/gtars-refget/tests/store_test/sequences.farg

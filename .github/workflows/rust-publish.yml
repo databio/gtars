@@ -1,0 +1,40 @@
+name: Publish Rust Crates
+on:
+  workflow_dispatch:
+    inputs:
+      crate:
+        description: 'Crate to publish (gtars-uniwig, gtars-core, gtars, etc.)'
+        required: true
+        type: choice
+        options:
+            - gtars
+            - gtars-bbcache
+            - gtars-cli
+            - gtars-core
+            - gtars-fragsplit
+            - gtars-igd
+            - gtars-io
+            - gtars-overlaprs
+            - gtars-python
+            - gtars-refget
+            - gtars-scoring
+            - gtars-tokenizers
+            - gtars-uniwig
+            - gtars-wasm
+
+permissions:
+    contents: read
+    id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish to crates.io
+        run: |
+            cargo publish -p ${{ github.event.inputs.crate }} --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

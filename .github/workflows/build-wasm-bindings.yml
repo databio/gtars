@@ -1,0 +1,31 @@
+name: Build and publish WASM bindings to NPM
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v4
+            - uses: actions/setup-node@v4
+              with:
+                node-version: '20.x'
+                registry-url: 'https://registry.npmjs.org'
+            - name: Update npm
+              run: npm install -g npm@latest
+            - name: Install wasm-pack
+              run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+            - name: Build bindings and prepare for publish (rename package)
+              run: |
+                wasm-pack build --release --target web gtars-wasm
+                jq '.name = "@databio/gtars"' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
+            - name: Publish to NPM
+              run: |
+                npm publish --provenance --access public gtars-wasm/pkg/
+            
+            

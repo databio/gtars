@@ -1,6 +1,6 @@
 [package]
 name = "gtars-tokenizers"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "Genomic region tokenizers for machine learning in Rust"
 license = "MIT"
@@ -17,7 +17,7 @@ fxhash = { workspace = true }
 serde = { workspace = true }
 
 # our code
-gtars-core = { path = "../gtars-core", version="0.5.0" }
+gtars-core = { path = "../gtars-core", version="0.5.1" }
 gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.0" }
 
 [dev-dependencies]
