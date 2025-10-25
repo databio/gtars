@@ -18,6 +18,9 @@ use super::universe::Universe;
 pub mod fragments;
 pub mod special_tokens;
 
+// Re-export fragment functions
+pub use fragments::{count_fragments_by_barcode, tokenize_fragment_file};
+
 ///
 /// Prepare the universe and special tokens. This function will build
 /// the universe struct and prepare the special tokens if they are provided.
@@ -53,10 +56,10 @@ pub fn create_tokenize_core_from_universe(
 
     for region in universe.regions.iter() {
         // skip any special tokens that snuck into the regions
-        if let Some(special_tokens) = &universe.special_tokens
-            && special_tokens.contains(&region.to_string())
-        {
-            continue;
+        if let Some(special_tokens) = &universe.special_tokens {
+            if special_tokens.contains(&region.to_string()) {
+                continue;
+            }
         }
 
         let parts = region.split(":").collect::<Vec<&str>>();

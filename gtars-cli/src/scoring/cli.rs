@@ -10,4 +10,9 @@ pub fn create_scoring_cli() -> Command {
         .arg(Arg::new("consensus"))
         .arg(arg!(--mode <mode>))
         .arg(arg!(--output <output>))
+        .arg(
+            arg!(--barcode)
+                .help("Enable barcode-based scoring for single-cell data (outputs sparse Matrix Market format)")
+                .action(clap::ArgAction::SetTrue)
+        )
 }
