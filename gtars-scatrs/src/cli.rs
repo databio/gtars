@@ -601,21 +601,22 @@ pub mod handlers {
                             let peak_counts = StagedDataReader::load_counts(
                                 &sample_dir.join("peak_counts.bin")
                             )?;
-                            
-                            // DO NOT apply sample weight to counts - weights are only for cell proportions!
-                            // The counts already represent the biological signal
+
+                            // Convert counts to weights for cell-type-specific region sampling
+                            // Higher counts = higher probability of sampling from that region
+                            // This ensures cell-type-specific chromatin accessibility patterns
                             let weighted_peaks: Vec<f64> = peak_counts.iter()
                                 .map(|&count| count as f64)
                                 .collect();
                             sample_peak_weights.insert(sample_name.clone(), weighted_peaks);
                         }
-                        
+
                         if sample_dir.join("bg_counts.bin").exists() {
                             let bg_counts = StagedDataReader::load_counts(
                                 &sample_dir.join("bg_counts.bin")
                             )?;
-                            
-                            // DO NOT apply sample weight to counts - weights are only for cell proportions!
+
+                            // Convert counts to weights for cell-type-specific background sampling
                             let weighted_bg: Vec<f64> = bg_counts.iter()
                                 .map(|&count| count as f64)
                                 .collect();
