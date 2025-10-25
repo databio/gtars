@@ -4,6 +4,20 @@ use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
+use gtars_gd::{models::ChromosomeStats, statistics::Statistics};
+
+#[pyclass(name = "ChromosomeStats", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PyChromosomeStats {
+    pub chromosome: String,
+    pub count: u32, // number of regions
+    pub start: u32,
+    pub end: u32,
+    pub minimum: u32,
+    pub maximum: u32,
+    pub mean: f64,
+    pub median: f64,
+}
 
 #[pyclass(name = "RegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -192,5 +206,71 @@ impl PyRegionSet {
 
     fn get_nucleotide_length(&self) -> u32 {
         self.regionset.nucleotides_length()
+    }
+
+    fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStats> {
+        let mut result: HashMap<String, PyChromosomeStats> = HashMap::new();
+        let stats: HashMap<String, ChromosomeStats> = self.regionset.calculate_chr_statistics();
+
+        for (key, value) in &stats {
+            result.insert(
+                key.clone(),
+                PyChromosomeStats {
+                    chromosome: value.chromosome.clone(),
+                    count: value.count,
+                    minimum: value.minimum,
+                    maximum: value.maximum,
+                    mean: value.mean,
+                    median: value.median,
+                    start: value.start,
+                    end: value.end,
+                },
+            );
+        }
+
+        result
+    }
+}
+
+#[pymethods]
+impl PyChromosomeStats {
+    #[getter]
+    fn get_chromosome(&self) -> &str {
+        &self.chromosome
+    }
+
+    #[getter]
+    fn get_count(&self) -> u32 {
+        self.count
+    }
+
+    #[getter]
+    fn get_minimum(&self) -> u32 {
+        self.minimum
+    }
+
+    #[getter]
+    fn get_maximum(&self) -> u32 {
+        self.maximum
+    }
+
+    #[getter]
+    fn get_mean(&self) -> f64 {
+        self.mean
+    }
+
+    #[getter]
+    fn get_median(&self) -> f64 {
+        self.median
+    }
+
+    #[getter]
+    fn get_start(&self) -> u32 {
+        self.start
+    }
+
+    #[getter]
+    fn get_end(&self) -> u32 {
+        self.end
     }
 }

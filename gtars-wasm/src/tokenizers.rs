@@ -55,7 +55,7 @@ impl JsTokenizer {
                 chr: be.0,
                 start: be.1,
                 end: be.2,
-                rest: None,
+                rest: Some(be.3),
             })
             .collect::<Vec<Region>>();
         let tokens = self
@@ -74,7 +74,7 @@ impl JsTokenizer {
                 chr: be.0,
                 start: be.1,
                 end: be.2,
-                rest: None,
+                rest: Some(be.3),
             })
             .collect::<Vec<Region>>();
         let encoded = self
