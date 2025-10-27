@@ -85,7 +85,7 @@ use gtars_core::models::Interval;
 /// # See Also
 ///
 /// - [`Overlapper`] - The trait that `Bits` implements
-/// - [`crate::AiList`] - An alternative implementation optimized for high-coverage regions
+/// - [`crate::AIList`] - An alternative implementation optimized for high-coverage regions
 #[derive(Debug, Clone)]
 pub struct Bits<I, T>
 where

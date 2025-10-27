@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 
 use gtars_core::models::Interval;
-use gtars_overlaprs::{AiList, Bits, Overlapper};
+use gtars_overlaprs::{AIList, Bits, Overlapper};
 
 use crate::models::BedEntries;
 
@@ -32,7 +32,7 @@ impl JsOverlapper {
         match backend.as_str() {
             "ailist" => {
                 for (chr, iv_list) in chr_to_region_store {
-                    core.insert(chr, Box::new(AiList::build(iv_list)));
+                    core.insert(chr, Box::new(AIList::build(iv_list)));
                 }
                 Ok(JsOverlapper {
                     internal: core,

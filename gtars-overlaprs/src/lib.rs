@@ -15,7 +15,7 @@
 //! ## Quick Start
 //!
 //! ```rust
-//! use gtars_overlaprs::{AiList, Overlapper, Interval};
+//! use gtars_overlaprs::{AIList, Overlapper, Interval};
 //!
 //! // create some genomic intervals (e.g., ChIP-seq peaks)
 //! let intervals = vec![
@@ -25,7 +25,7 @@
 //! ];
 //!
 //! // build the AIList data structure
-//! let ailist = AiList::build(intervals);
+//! let ailist = AIList::build(intervals);
 //!
 //! // query for overlapping intervals
 //! let overlaps = ailist.find(180, 250);
@@ -39,7 +39,7 @@
 //!
 //! ## Performance
 //!
-//! The [`AiList`] data structure is optimized for queries on genomic-scale datasets and provides
+//! The [`AIList`] data structure is optimized for queries on genomic-scale datasets and provides
 //! excellent performance for typical genomic interval overlap operations. It uses a decomposition
 //! strategy to handle intervals efficiently, particularly when dealing with high-coverage regions
 //! common in genomic data.
@@ -49,7 +49,7 @@
 //! ### Finding all genes that overlap a query region
 //!
 //! ```rust
-//! use gtars_overlaprs::{AiList, Overlapper, Interval};
+//! use gtars_overlaprs::{AIList, Overlapper, Interval};
 //!
 //! let genes = vec![
 //!     Interval { start: 1000u32, end: 2000, val: "BRCA1" },
@@ -57,7 +57,7 @@
 //!     Interval { start: 5000, end: 6000, val: "EGFR" },
 //! ];
 //!
-//! let gene_index = AiList::build(genes);
+//! let gene_index = AIList::build(genes);
 //!
 //! // query a specific region (e.g., chr17:1500-3500)
 //! let overlapping_genes: Vec<&str> = gene_index
@@ -70,7 +70,7 @@
 
 /// Augmented Interval List implementation.
 ///
-/// See [`AiList`] for details.
+/// See [`AIList`] for details.
 pub mod ailist;
 
 /// Binary Interval Search implementation.
@@ -81,7 +81,7 @@ pub mod bits;
 /// Genome-wide interval indexing.
 ///
 /// See the [`genome_index`] module for details.
-pub mod genome_index;
+pub mod multi_chrom_overlapper;
 
 /// Core traits for overlap operations.
 ///
@@ -89,7 +89,7 @@ pub mod genome_index;
 pub mod traits;
 
 // re-exports
-pub use self::ailist::AiList;
+pub use self::ailist::AIList;
 pub use self::bits::Bits;
 pub use self::traits::{Interval, Overlapper};
 
@@ -100,14 +100,14 @@ pub use self::traits::{Interval, Overlapper};
 ///
 /// # Variants
 ///
-/// * `AiList` - Use the Augmented Interval List implementation. Best for genomic data
+/// * `AIList` - Use the Augmented Interval List implementation. Best for genomic data
 ///   with high-coverage regions (e.g., ChIP-seq peaks, dense annotations).
 /// * `Bits` - Use the Binary Interval Search implementation. Best for general-purpose
 ///   overlap queries and sorted sequential queries.
 ///
 pub enum OverlapperType {
     /// Use the Augmented Interval List implementation.
-    AiList,
+    AIList,
     /// Use the Binary Interval Search implementation.
     Bits,
 }

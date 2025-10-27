@@ -1,7 +1,7 @@
 use crate::models::{ChromosomeStats, RegionBin};
 use crate::utils::create_bin_regionset;
 use gtars_core::models::{Region, RegionSet};
-use gtars_overlaprs::genome_index::IntoGenomeIndex;
+use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
 use gtars_overlaprs::OverlapperType;
 use std::collections::HashMap;
 
@@ -64,7 +64,7 @@ impl Statistics for RegionSet {
     fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin> {
         let universe = create_bin_regionset(self.get_max_end_per_chr(), n_bins);
 
-        let universe_overlap = universe.into_genome_index(OverlapperType::Bits);
+        let universe_overlap = universe.into_multi_chrom_overlapper(OverlapperType::Bits);
 
         let region_hits = universe_overlap.find_overlaps_iter(self)
             .map(|(chr, iv)| Region {

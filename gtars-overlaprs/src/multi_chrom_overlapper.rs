@@ -1,7 +1,7 @@
 //! Genome-wide interval indexing for efficient multi-chromosome overlap queries.
 //!
-//! This module provides [`GenomeIndex`](crate::genome_index::GenomeIndex), a data structure that extends single-chromosome
-//! overlap data structures (like [`AiList`](crate::AiList) or [`Bits`](crate::Bits)) to handle genome-wide queries
+//! This module provides [`MultiChromOverlapper`](crate::multi_chrom_overlapper::MultiChromOverlapper), a data structure that extends single-chromosome
+//! overlap data structures (like [`AIList`](crate::AIList) or [`Bits`](crate::Bits)) to handle genome-wide queries
 //! across multiple chromosomes efficiently.
 //!
 //!
@@ -10,7 +10,7 @@
 //! ## Basic Usage
 //!
 //! ```
-//! use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+//! use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
 //! use gtars_core::models::{Region, RegionSet};
 //!
 //! // Create a genome-wide set of intervals (e.g., gene annotations)
@@ -21,7 +21,7 @@
 //! ];
 //!
 //! let gene_set = RegionSet::from(genes);
-//! let genome_index = gene_set.into_genome_index(OverlapperType::AiList);
+//! let multi_chrom_overlapper = gene_set.into_multi_chrom_overlapper(OverlapperType::AIList);
 //!
 //! // Query multiple regions across different chromosomes
 //! let query_regions = RegionSet::from(vec![
@@ -29,21 +29,21 @@
 //!     Region { chr: "chr2".to_string(), start: 2000, end: 4000, rest: None },
 //! ]);
 //!
-//! let overlaps = genome_index.find_overlaps(&query_regions);
+//! let overlaps = multi_chrom_overlapper.find_overlaps(&query_regions);
 //! println!("Found {} overlapping features", overlaps.len());
 //! ```
 
 use std::{collections::HashMap, fmt::Debug};
 
-use gtars_core::models::{Interval, Region, RegionSet};
+use gtars_core::models::{Interval, RegionSet};
 use num_traits::{PrimInt, Unsigned};
 use thiserror::Error;
 
-use crate::{AiList, Bits, Overlapper, OverlapperType};
+use crate::{AIList, Bits, Overlapper, OverlapperType};
 
-/// Errors that can occur when working with [`GenomeIndex`].
+/// Errors that can occur when working with [`MultiChromOverlapper`].
 #[derive(Debug, Error)]
-pub enum GenomeIndexError {
+pub enum MultiChromOverlapperError {
     /// Error parsing a genomic region string.
     #[error("Error parsing region: {0}")]
     RegionParsingError(String),
@@ -54,14 +54,14 @@ pub enum GenomeIndexError {
 
 /// A genome-wide index for efficient overlap queries across multiple chromosomes.
 ///
-/// `GenomeIndex` maintains a separate overlap data structure (either [`AiList`] or [`Bits`])
+/// `MultiChromOverlapper` maintains a separate overlap data structure (either [`AIList`] or [`Bits`])
 /// for each chromosome, enabling efficient queries across the entire genome.
 ///
 ///
 /// # Examples
 ///
 /// See the [module-level documentation](self) for usage examples.
-pub struct GenomeIndex<I, T> {
+pub struct MultiChromOverlapper<I, T> {
     index_maps: HashMap<String, Box<dyn Overlapper<I, T>>>,
     #[allow(dead_code)]
     overlapper_type: OverlapperType,
@@ -69,7 +69,7 @@ pub struct GenomeIndex<I, T> {
 
 /// An iterator over intervals that overlap with query regions across multiple chromosomes.
 ///
-/// This iterator is created by [`GenomeIndex::find_overlaps_iter`]. It yields tuples of
+/// This iterator is created by [`MultiChromOverlapper::find_overlaps_iter`]. It yields tuples of
 /// `(chromosome, interval)` for all intervals that overlap with any of the query regions.
 ///
 /// The iterator processes query regions in order and yields overlapping intervals as they
@@ -78,13 +78,13 @@ pub struct GenomeIndex<I, T> {
 /// # Examples
 ///
 /// ```
-/// use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+/// use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
 /// use gtars_core::models::{Region, RegionSet};
 ///
 /// let genes = RegionSet::from(vec![
 ///     Region { chr: "chr1".to_string(), start: 100, end: 200, rest: None },
 /// ]);
-/// let index = genes.into_genome_index(OverlapperType::AiList);
+/// let index = genes.into_multi_chrom_overlapper(OverlapperType::AIList);
 ///
 /// let queries = RegionSet::from(vec![
 ///     Region { chr: "chr1".to_string(), start: 150, end: 250, rest: None },
@@ -142,9 +142,9 @@ where
                     self.current_iter = Some(lapper.find_iter(start, end));
                     // continue loop to get first item from new iterator
                 } else {
-                    // This is a programming error: the GenomeIndex type I cannot represent
+                    // This is a programming error: the MultiChromOverlapper type I cannot represent
                     // the Region's u32 coordinates. This should never happen in practice since
-                    // genomic coordinates are u32 and the index should be GenomeIndex<u32, T>.
+                    // genomic coordinates are u32 and the index should be MultiChromOverlapper<u32, T>.
                     panic!(
                         "Type conversion error: cannot convert Region coordinates to index type. \
                          Region: {}:{}-{}, expected type: {}",
@@ -162,7 +162,7 @@ where
     }
 }
 
-impl<I, T> GenomeIndex<I, T>
+impl<I, T> MultiChromOverlapper<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync + Debug,
     T: Eq + Clone + Send + Sync + Debug,
@@ -194,7 +194,7 @@ where
     }
 }
 
-/// A trait for converting region-based data into a [`GenomeIndex`].
+/// A trait for converting region-based data into a [`MultiChromOverlapper`].
 ///
 /// This trait provides a convenient way to build a genome-wide index from a collection
 /// of genomic regions. It handles the organization of regions by chromosome and the
@@ -204,7 +204,7 @@ where
 /// # Examples
 ///
 /// ```
-/// use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
+/// use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
 /// use gtars_core::models::{Region, RegionSet};
 ///
 /// let regions = vec![
@@ -214,31 +214,31 @@ where
 ///
 /// let region_set = RegionSet::from(regions);
 ///
-/// // Convert into a GenomeIndex using AiList
-/// let index = region_set.into_genome_index(OverlapperType::AiList);
+/// // Convert into a MultiChromOverlapper using AIList
+/// let index = region_set.into_multi_chrom_overlapper(OverlapperType::AIList);
 /// ```
-pub trait IntoGenomeIndex<I, T>
+pub trait IntoMultiChromOverlapper<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
 {
-    /// Consumes the input and builds a [`GenomeIndex`] with the specified overlapper type.
+    /// Consumes the input and builds a [`MultiChromOverlapper`] with the specified overlapper type.
     ///
     /// # Arguments
     ///
-    /// * `overlapper_type` - The type of overlap data structure to use ([`AiList`] or [`Bits`])
+    /// * `overlapper_type` - The type of overlap data structure to use ([`AIList`] or [`Bits`])
     ///
     /// # Returns
     ///
-    /// A new [`GenomeIndex`] containing all regions organized by chromosome.
-    fn into_genome_index(self, overlapper_type: OverlapperType) -> GenomeIndex<I, T>;
+    /// A new [`MultiChromOverlapper`] containing all regions organized by chromosome.
+    fn into_multi_chrom_overlapper(self, overlapper_type: OverlapperType) -> MultiChromOverlapper<I, T>;
 }
 
-impl IntoGenomeIndex<u32, Option<String>> for RegionSet {
-    fn into_genome_index(
+impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
+    fn into_multi_chrom_overlapper(
         self,
         overlapper_type: OverlapperType,
-    ) -> GenomeIndex<u32, Option<String>> {
+    ) -> MultiChromOverlapper<u32, Option<String>> {
         // instantiate the tree and list of intervals
         let mut core: HashMap<String, Box<dyn Overlapper<u32, Option<String>>>> =
             HashMap::default();
@@ -264,12 +264,12 @@ impl IntoGenomeIndex<u32, Option<String>> for RegionSet {
         for (chr, chr_intervals) in intervals.into_iter() {
             let lapper: Box<dyn Overlapper<u32, Option<String>>> = match overlapper_type {
                 OverlapperType::Bits => Box::new(Bits::build(chr_intervals)),
-                OverlapperType::AiList => Box::new(AiList::build(chr_intervals)),
+                OverlapperType::AIList => Box::new(AIList::build(chr_intervals)),
             };
             core.insert(chr.to_string(), lapper);
         }
 
-        GenomeIndex {
+        MultiChromOverlapper {
             index_maps: core,
             overlapper_type,
         }
@@ -284,7 +284,7 @@ mod tests {
     use rstest::*;
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_basic_overlaps(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -308,7 +308,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![Region {
             chr: "chr1".to_string(),
@@ -325,7 +325,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_multiple_overlaps_single_query(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -349,7 +349,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![Region {
             chr: "chr1".to_string(),
@@ -363,7 +363,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_no_overlaps(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -381,7 +381,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![Region {
             chr: "chr1".to_string(),
@@ -395,7 +395,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_multiple_chromosomes(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -419,7 +419,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![
             Region {
@@ -447,7 +447,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_exact_boundary_overlaps(#[case] overlapper_type: OverlapperType) {
         let regions = vec![Region {
@@ -457,7 +457,7 @@ mod tests {
             rest: None,
         }];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         // Query starts exactly at region end
         let query = RegionSet::from(vec![Region {
@@ -473,7 +473,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_empty_query(#[case] overlapper_type: OverlapperType) {
         let regions = vec![Region {
@@ -483,7 +483,7 @@ mod tests {
             rest: None,
         }];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![]);
         let hits = gi.find_overlaps(&query);
@@ -491,7 +491,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_query_nonexistent_chromosome(#[case] overlapper_type: OverlapperType) {
         let regions = vec![Region {
@@ -501,7 +501,7 @@ mod tests {
             rest: None,
         }];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![Region {
             chr: "chr99".to_string(),
@@ -515,7 +515,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_with_metadata(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -533,7 +533,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         let query = RegionSet::from(vec![Region {
             chr: "chr1".to_string(),
@@ -549,7 +549,7 @@ mod tests {
     }
 
     #[rstest]
-    #[case(OverlapperType::AiList)]
+    #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
     fn test_overlapping_query_regions(#[case] overlapper_type: OverlapperType) {
         let regions = vec![
@@ -567,7 +567,7 @@ mod tests {
             },
         ];
         let rs = RegionSet::from(regions);
-        let gi = rs.into_genome_index(overlapper_type);
+        let gi = rs.into_multi_chrom_overlapper(overlapper_type);
 
         // Two query regions that each hit different index regions
         let query = RegionSet::from(vec![

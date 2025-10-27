@@ -23,7 +23,7 @@ pub use gtars_core::models::Interval;
 ///
 /// The crate provides two main implementations:
 ///
-/// * [`AiList`](crate::AiList) - Augmented Interval List, optimized for genomic data with
+/// * [`AIList`](crate::AIList) - Augmented Interval List, optimized for genomic data with
 ///   high-coverage regions. Uses a decomposition strategy for efficient queries.
 /// * [`Bits`](crate::Bits) - Binary Interval Search, uses binary search for fast overlap
 ///   detection. Particularly efficient for sorted sequential queries.

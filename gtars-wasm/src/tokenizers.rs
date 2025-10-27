@@ -23,7 +23,7 @@ impl JsTokenizer {
     pub fn new(universe: &JsValue, backend: &str) -> Result<JsTokenizer, JsValue> {
         let universe_regions: BedEntries = serde_wasm_bindgen::from_value(universe.to_owned())?;
         let tokenizer_type = match backend {
-            "ailist" => TokenizerType::AiList,
+            "ailist" => TokenizerType::AIList,
             "bits" => TokenizerType::Bits,
             _ => {
                 return Err(JsValue::from_str(&format!(
