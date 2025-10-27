@@ -62,15 +62,15 @@ impl Statistics for RegionSet {
     }
 
     fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin> {
-        let universe: RegionSet = create_bin_regionset(self.get_max_end_per_chr(), n_bins);
+        let universe = create_bin_regionset(self.get_max_end_per_chr(), n_bins);
 
         let universe_overlap = universe.into_genome_index(OverlapperType::Bits);
 
-        let regions = universe_overlap.find_overlaps_to_rs(&self).unwrap();
+        let regions = universe_overlap.find_overlaps_to_rs(self).unwrap();
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
 
-        let region_length: u32 = regions.get(0).unwrap().end - regions.get(0).unwrap().start;
+        let region_length: u32 = regions.first().unwrap().end - regions.first().unwrap().start;
         for k in &regions {
             if let Some(region_bin) = plot_results.get_mut(&k.digest()) {
                 region_bin.n += 1;

@@ -4,11 +4,6 @@
 //! overlap data structures (like [`AiList`](crate::AiList) or [`Bits`](crate::Bits)) to handle genome-wide queries
 //! across multiple chromosomes efficiently.
 //!
-//! # Overview
-//!
-//! While [`AiList`](crate::AiList) and [`Bits`](crate::Bits) are designed for queries on a single chromosome,
-//! [`GenomeIndex`](crate::genome_index::GenomeIndex) manages a collection of these structures - one per chromosome - enabling
-//! efficient queries across the entire genome.
 //!
 //! # Examples
 //!
@@ -37,28 +32,6 @@
 //! let overlaps = genome_index.find_overlaps(&query_regions);
 //! println!("Found {} overlapping features", overlaps.len());
 //! ```
-//!
-//! ## Iterator-Based Query
-//!
-//! For memory-efficient processing of large result sets:
-//!
-//! ```
-//! use gtars_overlaprs::{OverlapperType, genome_index::IntoGenomeIndex};
-//! use gtars_core::models::{Region, RegionSet};
-//!
-//! # let genes = vec![
-//! #     Region { chr: "chr1".to_string(), start: 1000, end: 2000, rest: Some("BRCA1".to_string()) },
-//! # ];
-//! # let gene_set = RegionSet::from(genes);
-//! # let genome_index = gene_set.into_genome_index(OverlapperType::AiList);
-//! # let query_regions = RegionSet::from(vec![
-//! #     Region { chr: "chr1".to_string(), start: 1500, end: 2500, rest: None },
-//! # ]);
-//! // Process overlaps one at a time without allocating a vector
-//! for (chr, interval) in genome_index.find_overlaps_iter(&query_regions) {
-//!     println!("Chromosome {}: {:?}", chr, interval);
-//! }
-//! ```
 
 use std::{collections::HashMap, fmt::Debug};
 
@@ -82,18 +55,8 @@ pub enum GenomeIndexError {
 /// A genome-wide index for efficient overlap queries across multiple chromosomes.
 ///
 /// `GenomeIndex` maintains a separate overlap data structure (either [`AiList`] or [`Bits`])
-/// for each chromosome, enabling efficient queries across the entire genome. This is particularly
-/// useful for genome-wide analyses where you need to find overlaps between genomic features on
-/// different chromosomes.
+/// for each chromosome, enabling efficient queries across the entire genome.
 ///
-/// # Type Parameters
-///
-/// * `I` - The integer type for interval coordinates (typically `u32` for genomic coordinates)
-/// * `T` - The type of value associated with each interval (e.g., gene name, score)
-///
-/// # Thread Safety
-///
-/// `GenomeIndex` is thread-safe and can be shared across threads via `Arc` or similar constructs.
 ///
 /// # Examples
 ///
@@ -220,60 +183,14 @@ where
         }
     }
 
-    /// Collect all overlaps into a Vec for convenience.
+    /// Collect all overlaps into a Vec for convenience. You're almost always
+    /// better off using the iterator form of this function `find_overlaps_iter`.
     ///
     /// This is a helper method that collects the iterator results.
     pub fn find_overlaps(&self, rs: &RegionSet) -> Vec<(String, Interval<I, T>)> {
         self.find_overlaps_iter(rs)
             .map(|(chr, interval)| (chr, interval.clone()))
             .collect()
-    }
-
-    /// Collect all overlaps into a Vec of Regions
-    ///
-    /// This is a helper method finds overlaps in 2 RegionSet and return Vector of Regions
-    pub fn find_overlaps_to_rs(&self, rs: &RegionSet) -> Result<Vec<Region>, GenomeIndexError> {
-        // TODO: change it to find_overlaps iter.
-
-        let mut final_hits = Vec::new();
-        for r in rs {
-            let lapper = self.index_maps.get(&r.chr);
-            match lapper {
-                Some(lapper) => {
-                    let start = I::from(r.start);
-                    let end = I::from(r.end);
-                    if let (Some(start), Some(end)) = (start, end) {
-                        for iv in lapper.find_iter(start, end) {
-                            let start_u32 = iv.start.to_u32().ok_or_else(|| {
-                                GenomeIndexError::CoordinateConversionError(
-                                    format!("{:?}", iv.start),
-                                    format!("{:?}", iv.end),
-                                )
-                            })?;
-                            let end_u32 = iv.end.to_u32().ok_or_else(|| {
-                                GenomeIndexError::CoordinateConversionError(
-                                    format!("{:?}", iv.start),
-                                    format!("{:?}", iv.end),
-                                )
-                            })?;
-                            let rest = format!("{:?}", iv.val);
-                            final_hits.push(Region {
-                                chr: r.chr.clone(),
-                                start: start_u32,
-                                end: end_u32,
-                                rest: Some(rest),
-                            });
-                        }
-                    } else {
-                        return Err(GenomeIndexError::RegionParsingError(format!(
-                            "Could not parse region start and end: {r}"
-                        )));
-                    }
-                }
-                None => continue,
-            }
-        }
-        Ok(final_hits)
     }
 }
 
@@ -283,10 +200,6 @@ where
 /// of genomic regions. It handles the organization of regions by chromosome and the
 /// construction of the underlying overlap data structures.
 ///
-/// # Type Parameters
-///
-/// * `I` - The integer type for interval coordinates
-/// * `T` - The type of value associated with each interval
 ///
 /// # Examples
 ///
