@@ -17,9 +17,9 @@ use gtars_refget::store::StorageMode;
 
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
-    if let Ok(s) = readable.downcast::<PyString>() {
+    if let Ok(s) = readable.cast::<PyString>() {
         Ok(sha512t24u(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
-    } else if let Ok(b) = readable.downcast::<PyBytes>() {
+    } else if let Ok(b) = readable.cast::<PyBytes>() {
         Ok(sha512t24u(b.as_bytes())) // Borrowed, no copying
     } else {
         Err(PyTypeError::new_err("Expected str or bytes"))
@@ -28,9 +28,9 @@ pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 
 #[pyfunction]
 pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
-    if let Ok(s) = readable.downcast::<PyString>() {
+    if let Ok(s) = readable.cast::<PyString>() {
         Ok(md5(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
-    } else if let Ok(b) = readable.downcast::<PyBytes>() {
+    } else if let Ok(b) = readable.cast::<PyBytes>() {
         Ok(md5(b.as_bytes())) // Borrowed, no copying
     } else {
         Err(PyTypeError::new_err("Expected str or bytes"))
@@ -237,7 +237,7 @@ impl PySequenceCollection {
     fn __len__(&self) -> PyResult<usize> {
         Ok(self.sequences.len())
     }
-    fn __getitem__(&self, idx: isize, py: Python) -> PyResult<PyObject> {
+    fn __getitem__(&self, idx: isize) -> PyResult<PySequenceRecord> {
         let len = self.sequences.len() as isize;
 
         // Handle negative indexing like Python lists do
@@ -245,7 +245,8 @@ impl PySequenceCollection {
 
         if index >= 0 && (index as usize) < self.sequences.len() {
             // Convert the PySequenceRecord to a PyObject before returning
-            Ok(self.sequences[index as usize].clone().into_py(py))
+            let record = self.sequences[index as usize].clone();
+            Ok(record)
         } else {
             Err(PyIndexError::new_err(
                 "SequenceCollection index out of range",
