@@ -66,12 +66,19 @@ impl Statistics for RegionSet {
 
         let universe_overlap = universe.into_genome_index(OverlapperType::Bits);
 
-        let regions = universe_overlap.find_overlaps_to_rs(self).unwrap();
+        let region_hits = universe_overlap.find_overlaps_iter(self)
+            .map(|(chr, iv)| Region {
+                chr,
+                start: iv.start,
+                end: iv.end,
+                rest: None
+            })
+            .collect::<Vec<Region>>();
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
 
-        let region_length: u32 = regions.first().unwrap().end - regions.first().unwrap().start;
-        for k in &regions {
+        let region_length = region_hits.first().unwrap().end - region_hits.first().unwrap().start;
+        for k in &region_hits {
             if let Some(region_bin) = plot_results.get_mut(&k.digest()) {
                 region_bin.n += 1;
             } else {
