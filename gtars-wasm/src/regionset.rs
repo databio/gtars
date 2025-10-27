@@ -9,13 +9,13 @@ use wasm_bindgen::prelude::*;
 #[derive(serde::Serialize)]
 pub struct JsChromosomeStats {
     chromosome: String,
-    count: u32,
-    minimum: u32,
-    maximum: u32,
-    mean: f64,
-    median: f64,
-    start: u32,
-    end: u32,
+    number_of_regions: u32,
+    minimum_region_length: u32,
+    maximum_region_length: u32,
+    mean_region_length: f64,
+    median_region_length: f64,
+    start_nucleotide_position: u32,
+    end_nucleotide_position: u32,
 }
 
 #[wasm_bindgen(js_class = "ChromosomeStats")]
@@ -25,37 +25,37 @@ impl JsChromosomeStats {
         self.chromosome.clone()
     }
     #[wasm_bindgen(getter)]
-    pub fn start(&self) -> u32 {
-        self.start
+    pub fn start_nucleotide_position(&self) -> u32 {
+        self.start_nucleotide_position
     }
     #[wasm_bindgen(getter)]
-    pub fn end(&self) -> u32 {
-        self.end
-    }
-
-    #[wasm_bindgen(getter)]
-    pub fn count(&self) -> u32 {
-        self.count
+    pub fn end_nucleotide_position(&self) -> u32 {
+        self.end_nucleotide_position
     }
 
     #[wasm_bindgen(getter)]
-    pub fn minimum(&self) -> u32 {
-        self.minimum
+    pub fn number_of_regions(&self) -> u32 {
+        self.number_of_regions
     }
 
     #[wasm_bindgen(getter)]
-    pub fn maximum(&self) -> u32 {
-        self.maximum
+    pub fn minimum_region_length(&self) -> u32 {
+        self.minimum_region_length
     }
 
     #[wasm_bindgen(getter)]
-    pub fn mean(&self) -> f64 {
-        self.mean
+    pub fn maximum_region_length(&self) -> u32 {
+        self.maximum_region_length
     }
 
     #[wasm_bindgen(getter)]
-    pub fn median(&self) -> f64 {
-        self.median
+    pub fn mean_region_length(&self) -> f64 {
+        self.mean_region_length
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn median_region_length(&self) -> f64 {
+        self.median_region_length
     }
 }
 
@@ -76,13 +76,6 @@ pub struct JsRegionSet {
 
 #[wasm_bindgen(js_class = "RegionSet")]
 impl JsRegionSet {
-    // #[wasm_bindgen(constructor)]
-    // pub fn new(word: &str) -> Result<JsRegionSet, JsValue> {
-    //     println!("Phineas is ready");
-    //     Ok(JsRegionSet {
-    //         internal: String::from(word),
-    //     })
-    // }
     #[wasm_bindgen(constructor)]
     pub fn new(regions: &JsValue) -> Result<JsRegionSet, JsValue> {
         let regions: BedEntries = serde_wasm_bindgen::from_value(regions.clone())?;
@@ -131,13 +124,13 @@ impl JsRegionSet {
                 key.clone(),
                 JsChromosomeStats {
                     chromosome: value.chromosome.clone(),
-                    count: value.count,
-                    minimum: value.minimum,
-                    maximum: value.maximum,
-                    mean: value.mean,
-                    median: value.median,
-                    start: value.start,
-                    end: value.end,
+                    number_of_regions: value.number_of_regions,
+                    minimum_region_length: value.minimum_region_length,
+                    maximum_region_length: value.maximum_region_length,
+                    mean_region_length: value.mean_region_length,
+                    median_region_length: value.median_region_length,
+                    start_nucleotide_position: value.start_nucleotide_position,
+                    end_nucleotide_position: value.end_nucleotide_position,
                 },
             );
         }

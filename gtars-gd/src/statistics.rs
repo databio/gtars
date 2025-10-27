@@ -47,13 +47,13 @@ impl Statistics for RegionSet {
                 chr.clone(),
                 ChromosomeStats {
                     chromosome: chr.clone(),
-                    count,
-                    start: earliest_position,
-                    end: end_position,
-                    minimum,
-                    maximum,
-                    mean,
-                    median,
+                    number_of_regions: count,
+                    start_nucleotide_position: earliest_position,
+                    end_nucleotide_position: end_position,
+                    minimum_region_length: minimum,
+                    maximum_region_length: maximum,
+                    mean_region_length: mean,
+                    median_region_length: median,
                 },
             );
         }
