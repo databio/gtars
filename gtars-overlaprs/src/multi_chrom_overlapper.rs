@@ -231,7 +231,10 @@ where
     /// # Returns
     ///
     /// A new [`MultiChromOverlapper`] containing all regions organized by chromosome.
-    fn into_multi_chrom_overlapper(self, overlapper_type: OverlapperType) -> MultiChromOverlapper<I, T>;
+    fn into_multi_chrom_overlapper(
+        self,
+        overlapper_type: OverlapperType,
+    ) -> MultiChromOverlapper<I, T>;
 }
 
 impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
