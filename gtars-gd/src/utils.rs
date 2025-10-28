@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use gtars_core::models::region::Region;
 use gtars_core::models::RegionSet;
 
-
 /// Partitions a genome into bins of a fixed size.
 ///
 /// The bin size is determined by dividing the length of the longest chromosome by `n_bins`.

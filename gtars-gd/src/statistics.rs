@@ -7,15 +7,25 @@ use gtars_overlaprs::OverlapperType;
 use crate::models::{ChromosomeStatistics, RegionBin};
 use crate::utils::partition_genome_into_bins;
 
+/// Trait for computing statistics and distributions of genomic intervals.
 pub trait GenomicIntervalSetStatistics {
-    /// Calculate basic statistic for each region in the chromosome
+    /// Calculate basic statistics for regions on each chromosome.
+    ///
+    /// Returns a map from chromosome name to statistics including:
+    /// - Region counts
+    /// - Chromosome bounds (min start, max end)
+    /// - Region length statistics (min, max, mean, median)
     fn chromosome_statistics(&self) -> HashMap<String, ChromosomeStatistics>;
 
-     /// Compute the distribution of regions in a RegionSet across chromosome bins  
+    /// Compute the distribution of regions across chromosome bins.
+    ///
+    /// The genome is partitioned into `n_bins` fixed-size windows, where bin size
+    /// is determined by the longest chromosome. Returns bins with overlap counts.
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin>;
 
-    /// Compute the distribution of regions in a RegionSet across chromosome bins
-    /// with a pre-set number of bins.
+    /// Compute region distribution using 10 bins (default).
+    ///
+    /// Convenience method that calls `region_distribution_with_bins(10)`.
     fn region_distribution(&self) -> HashMap<String, RegionBin> {
         self.region_distribution_with_bins(10)
     }
@@ -31,7 +41,8 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let width = region.width();
             widths_by_chr.entry(&region.chr).or_default().push(width);
 
-            bounds_by_chr.entry(&region.chr)
+            bounds_by_chr
+                .entry(&region.chr)
                 .and_modify(|(min_start, max_end)| {
                     *min_start = (*min_start).min(region.start);
                     *max_end = (*max_end).max(region.end);
@@ -40,7 +51,8 @@ impl GenomicIntervalSetStatistics for RegionSet {
         }
 
         // compute statistics from sorted widths
-        widths_by_chr.into_iter()
+        widths_by_chr
+            .into_iter()
             .map(|(chr, mut widths)| {
                 let count = widths.len() as u32;
                 widths.sort_unstable();
@@ -58,30 +70,35 @@ impl GenomicIntervalSetStatistics for RegionSet {
 
                 let (start, end) = bounds_by_chr[&chr];
 
-                (chr.clone(), ChromosomeStatistics {
-                    chromosome: chr.clone(),
-                    number_of_regions: count,
-                    start_nucleotide_position: start,
-                    end_nucleotide_position: end,
-                    minimum_region_length: minimum,
-                    maximum_region_length: maximum,
-                    mean_region_length: mean,
-                    median_region_length: median,
-                })
+                (
+                    chr.clone(),
+                    ChromosomeStatistics {
+                        chromosome: chr.clone(),
+                        number_of_regions: count,
+                        start_nucleotide_position: start,
+                        end_nucleotide_position: end,
+                        minimum_region_length: minimum,
+                        maximum_region_length: maximum,
+                        mean_region_length: mean,
+                        median_region_length: median,
+                    },
+                )
             })
             .collect()
     }
 
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin> {
         let binned_genome = partition_genome_into_bins(&self.get_max_end_per_chr(), n_bins);
-        let binned_genome_overlapper = binned_genome.into_multi_chrom_overlapper(OverlapperType::AIList);
+        let binned_genome_overlapper =
+            binned_genome.into_multi_chrom_overlapper(OverlapperType::AIList);
 
-        let region_hits = binned_genome_overlapper.find_overlaps_iter(self)
+        let region_hits = binned_genome_overlapper
+            .find_overlaps_iter(self)
             .map(|(chr, iv)| Region {
                 chr,
                 start: iv.start,
                 end: iv.end,
-                rest: None
+                rest: None,
             })
             .collect::<Vec<Region>>();
 
@@ -112,9 +129,9 @@ impl GenomicIntervalSetStatistics for RegionSet {
 mod tests {
     use super::*;
 
-    use std::path::PathBuf;
     use pretty_assertions::assert_eq;
     use rstest::*;
+    use std::path::PathBuf;
 
     fn get_test_path(file_name: &str) -> Result<PathBuf, std::io::Error> {
         let file_path: PathBuf = std::env::current_dir()
