@@ -16,12 +16,12 @@ pub trait BigBedWriteT {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<()>;
+    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<(), std::io::Error>;
 }
 
 
 impl BigBedWriteT for RegionSet {
-    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<()> {
+    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<(), std::io::Error> {
         let out_path = out_path.as_ref();
         if out_path.exists() {
             println!("Bed file already exists. Overwriting existing file")
@@ -47,7 +47,7 @@ impl BigBedWriteT for RegionSet {
                 warnings_count += 1;
                 return None;
             }
-            Some(Ok::<_, Error>((
+            Some(Ok::<_, std::io::Error>((
                 i.chr.clone(),
                 BedEntry {
                     start: i.start,
@@ -79,7 +79,9 @@ impl BigBedWriteT for RegionSet {
         bb_out.options.max_zooms = 8;
 
         let data = BedParserStreamingIterator::wrap_iter(region_vector.into_iter(), true);
-        bb_out.write(data, runtime)?;
+        bb_out
+            .write(data, runtime)
+            .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(())
     }
 }
