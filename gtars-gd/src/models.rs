@@ -1,7 +1,7 @@
 /// Models for used in calculation statistics for regionset
 ///
 #[derive(Debug, Clone)]
-pub struct ChromosomeStats {
+pub struct ChromosomeStatistics {
     pub chromosome: String,
     pub number_of_regions: u32,
     pub start_nucleotide_position: u32,

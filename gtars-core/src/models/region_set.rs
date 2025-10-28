@@ -705,12 +705,4 @@ mod tests {
 
         assert_eq!(region_set.nucleotides_length(), 38)
     }
-
-    #[rstest]
-    fn test_statistics() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
-        let count = region_set.calculate_statistics().get("chr1").unwrap().count;
-        assert_eq!(count, 9)
-    }
 }

@@ -4,19 +4,20 @@ use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
-use gtars_gd::{models::ChromosomeStats, statistics::Statistics};
+use gtars_gd::models::ChromosomeStatistics;
+use gtars_gd::statistics::GenomicIntervalSetStatistics;
 
-#[pyclass(name = "ChromosomeStats", module = "gtars.models")]
+#[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
-pub struct PyChromosomeStats {
+pub struct PyChromosomeStatistics {
     pub chromosome: String,
-    pub count: u32, // number of regions
-    pub start: u32,
-    pub end: u32,
-    pub minimum: u32,
-    pub maximum: u32,
-    pub mean: f64,
-    pub median: f64,
+    pub number_of_regions: u32,
+    pub start_nucleotide_position: u32,
+    pub end_nucleotide_position: u32,
+    pub minimum_region_length: u32,
+    pub maximum_region_length: u32,
+    pub mean_region_length: f64,
+    pub median_region_length: f64,
 }
 
 #[pyclass(name = "RegionSet", module = "gtars.models")]
@@ -208,22 +209,22 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStats> {
-        let mut result: HashMap<String, PyChromosomeStats> = HashMap::new();
-        let stats: HashMap<String, ChromosomeStats> = self.regionset.calculate_chr_statistics();
+    fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
+        let mut result: HashMap<String, PyChromosomeStatistics> = HashMap::new();
+        let stats: HashMap<String, ChromosomeStatistics> = self.regionset.chromosome_statistics();
 
         for (key, value) in &stats {
             result.insert(
                 key.clone(),
-                PyChromosomeStats {
+                PyChromosomeStatistics {
                     chromosome: value.chromosome.clone(),
-                    count: value.count,
-                    minimum: value.minimum,
-                    maximum: value.maximum,
-                    mean: value.mean,
-                    median: value.median,
-                    start: value.start,
-                    end: value.end,
+                    number_of_regions: value.number_of_regions,
+                    minimum_region_length: value.minimum_region_length,
+                    maximum_region_length: value.maximum_region_length,
+                    mean_region_length: value.mean_region_length,
+                    median_region_length: value.median_region_length,
+                    start_nucleotide_position: value.start_nucleotide_position,
+                    end_nucleotide_position: value.end_nucleotide_position,
                 },
             );
         }
@@ -233,44 +234,44 @@ impl PyRegionSet {
 }
 
 #[pymethods]
-impl PyChromosomeStats {
+impl PyChromosomeStatistics {
     #[getter]
     fn get_chromosome(&self) -> &str {
         &self.chromosome
     }
 
     #[getter]
-    fn get_count(&self) -> u32 {
-        self.count
+    fn get_number_of_regions(&self) -> u32 {
+        self.number_of_regions
     }
 
     #[getter]
-    fn get_minimum(&self) -> u32 {
-        self.minimum
+    fn get_start_nucleotide_position(&self) -> u32 {
+        self.start_nucleotide_position
     }
 
     #[getter]
-    fn get_maximum(&self) -> u32 {
-        self.maximum
+    fn get_end_nucleotide_position(&self) -> u32 {
+        self.end_nucleotide_position
     }
 
     #[getter]
-    fn get_mean(&self) -> f64 {
-        self.mean
+    fn get_minimum_region_length(&self) -> u32 {
+        self.minimum_region_length
     }
 
     #[getter]
-    fn get_median(&self) -> f64 {
-        self.median
+    fn get_maximum_region_length(&self) -> u32 {
+        self.maximum_region_length
     }
 
     #[getter]
-    fn get_start(&self) -> u32 {
-        self.start
+    fn get_mean_region_length(&self) -> f64 {
+        self.mean_region_length
     }
 
     #[getter]
-    fn get_end(&self) -> u32 {
-        self.end
+    fn get_median_region_length(&self) -> f64 {
+        self.median_region_length
     }
 }

@@ -1,72 +1,82 @@
-use crate::models::{ChromosomeStats, RegionBin};
-use crate::utils::create_bin_regionset;
+use std::collections::HashMap;
+
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
 use gtars_overlaprs::OverlapperType;
-use std::collections::HashMap;
 
-pub trait Statistics {
+use crate::models::{ChromosomeStatistics, RegionBin};
+use crate::utils::partition_genome_into_bins;
+
+pub trait GenomicIntervalSetStatistics {
     /// Calculate basic statistic for each region in the chromosome
-    fn calculate_chr_statistics(&self) -> HashMap<String, ChromosomeStats>;
+    fn chromosome_statistics(&self) -> HashMap<String, ChromosomeStatistics>;
 
-    /// Generate chrom distribution data based on regions used in the RegionSet
-    fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin>;
+     /// Compute the distribution of regions in a RegionSet across chromosome bins  
+    fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin>;
+
+    /// Compute the distribution of regions in a RegionSet across chromosome bins
+    /// with a pre-set number of bins.
+    fn region_distribution(&self) -> HashMap<String, RegionBin> {
+        self.region_distribution_with_bins(10)
+    }
 }
 
-impl Statistics for RegionSet {
-    fn calculate_chr_statistics(&self) -> HashMap<String, ChromosomeStats> {
-        let mut stats: HashMap<String, ChromosomeStats> = HashMap::new();
+impl GenomicIntervalSetStatistics for RegionSet {
+    fn chromosome_statistics(&self) -> HashMap<String, ChromosomeStatistics> {
+        let mut widths_by_chr: HashMap<&String, Vec<u32>> = HashMap::new();
+        let mut bounds_by_chr: HashMap<&String, (u32, u32)> = HashMap::new();
 
-        let mut regions_by_chr: HashMap<&String, Vec<&Region>> = HashMap::new();
+        // single pass iterator: collect widths and track chromosome bounds
         for region in &self.regions {
-            regions_by_chr.entry(&region.chr).or_default().push(region);
+            let width = region.width();
+            widths_by_chr.entry(&region.chr).or_default().push(width);
+
+            bounds_by_chr.entry(&region.chr)
+                .and_modify(|(min_start, max_end)| {
+                    *min_start = (*min_start).min(region.start);
+                    *max_end = (*max_end).max(region.end);
+                })
+                .or_insert((region.start, region.end));
         }
 
-        for (chr, regions) in regions_by_chr {
-            let count = regions.len() as u32;
-            let widths: Vec<u32> = regions.iter().map(|r| r.width()).collect();
-            let minimum = *widths.iter().min().unwrap_or(&0);
-            let maximum = *widths.iter().max().unwrap_or(&0);
+        // compute statistics from sorted widths
+        widths_by_chr.into_iter()
+            .map(|(chr, mut widths)| {
+                let count = widths.len() as u32;
+                widths.sort_unstable();
 
-            let earliest_position = regions.iter().map(|r| r.start).min().unwrap_or(0);
-            let end_position = regions.iter().map(|r| r.end).max().unwrap_or(0);
+                let minimum = widths[0];
+                let maximum = widths[widths.len() - 1];
+                let sum: u32 = widths.iter().sum();
+                let mean = sum as f64 / count as f64;
 
-            let mean = widths.iter().sum::<u32>() as f64 / count as f64;
+                let median = if count % 2 == 0 {
+                    (widths[(count / 2 - 1) as usize] + widths[(count / 2) as usize]) as f64 / 2.0
+                } else {
+                    widths[(count / 2) as usize] as f64
+                };
 
-            let mut sorted_widths = widths.clone();
-            sorted_widths.sort_unstable();
-            let median = if count % 2 == 0 {
-                (sorted_widths[(count / 2 - 1) as usize] + sorted_widths[(count / 2) as usize])
-                    as f64
-                    / 2.0
-            } else {
-                sorted_widths[(count / 2) as usize] as f64
-            };
+                let (start, end) = bounds_by_chr[&chr];
 
-            stats.insert(
-                chr.clone(),
-                ChromosomeStats {
+                (chr.clone(), ChromosomeStatistics {
                     chromosome: chr.clone(),
                     number_of_regions: count,
-                    start_nucleotide_position: earliest_position,
-                    end_nucleotide_position: end_position,
+                    start_nucleotide_position: start,
+                    end_nucleotide_position: end,
                     minimum_region_length: minimum,
                     maximum_region_length: maximum,
                     mean_region_length: mean,
                     median_region_length: median,
-                },
-            );
-        }
-
-        stats
+                })
+            })
+            .collect()
     }
 
-    fn generate_region_distribution(&self, n_bins: u32) -> HashMap<String, RegionBin> {
-        let universe = create_bin_regionset(self.get_max_end_per_chr(), n_bins);
+    fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin> {
+        let binned_genome = partition_genome_into_bins(&self.get_max_end_per_chr(), n_bins);
+        let binned_genome_overlapper = binned_genome.into_multi_chrom_overlapper(OverlapperType::AIList);
 
-        let universe_overlap = universe.into_multi_chrom_overlapper(OverlapperType::Bits);
-
-        let region_hits = universe_overlap.find_overlaps_iter(self)
+        let region_hits = binned_genome_overlapper.find_overlaps_iter(self)
             .map(|(chr, iv)| Region {
                 chr,
                 start: iv.start,
@@ -102,8 +112,17 @@ impl Statistics for RegionSet {
 mod tests {
     use super::*;
 
+    use std::path::PathBuf;
     use pretty_assertions::assert_eq;
     use rstest::*;
+
+    fn get_test_path(file_name: &str) -> Result<PathBuf, std::io::Error> {
+        let file_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/regionset")
+            .join(file_name);
+        Ok(file_path)
+    }
 
     #[rstest]
     fn test_chrom_bins() {
@@ -112,8 +131,17 @@ mod tests {
         )
         .unwrap();
 
-        // let k = create_bin_regionset(region_set.get_max_end_per_chr());
-        let k = region_set.generate_region_distribution();
+        let k = region_set.region_distribution();
         println!("{:?}", k);
+    }
+
+    #[rstest]
+    fn test_statistics() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let stats = region_set.chromosome_statistics();
+        let chr1_stats = stats.get("chr1").unwrap();
+        assert_eq!(chr1_stats.number_of_regions, 9)
     }
 }

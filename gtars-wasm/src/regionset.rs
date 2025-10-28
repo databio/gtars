@@ -1,13 +1,15 @@
-use crate::models::BedEntries;
+use std::collections::HashMap;
+
 use gtars_core::models::{Region, RegionSet};
 use gtars_gd::models::RegionBin;
-use gtars_gd::statistics::Statistics;
-use std::collections::HashMap;
+use gtars_gd::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
 
-#[wasm_bindgen(js_name = "ChromosomeStats")]
+use crate::models::BedEntries;
+
+#[wasm_bindgen(js_name = "ChromosomeStatistics")]
 #[derive(serde::Serialize)]
-pub struct JsChromosomeStats {
+pub struct JsChromosomeStatistics {
     chromosome: String,
     number_of_regions: u32,
     minimum_region_length: u32,
@@ -18,8 +20,8 @@ pub struct JsChromosomeStats {
     end_nucleotide_position: u32,
 }
 
-#[wasm_bindgen(js_class = "ChromosomeStats")]
-impl JsChromosomeStats {
+#[wasm_bindgen(js_class = "ChromosomeStatistics")]
+impl JsChromosomeStatistics {
     #[wasm_bindgen(getter)]
     pub fn chromosome(&self) -> String {
         self.chromosome.clone()
@@ -94,17 +96,17 @@ impl JsRegionSet {
         Ok(JsRegionSet { region_set })
     }
 
-    #[wasm_bindgen(getter, js_name = "number_of_regions")]
+    #[wasm_bindgen(getter, js_name = "numberOfRegions")]
     pub fn get_region(&self) -> i32 {
         self.region_set.len() as i32
     }
 
-    #[wasm_bindgen(getter, js_name = "mean_region_width")]
+    #[wasm_bindgen(getter, js_name = "meanRegionWidth")]
     pub fn get_mean_region_width(&self) -> f64 {
         self.region_set.mean_region_width()
     }
 
-    #[wasm_bindgen(getter, js_name = "total_nucleotides")]
+    #[wasm_bindgen(getter, js_name = "totalNucleotides")]
     pub fn get_total_nucleotides(&self) -> i32 {
         self.region_set.nucleotides_length() as i32
     }
@@ -114,15 +116,15 @@ impl JsRegionSet {
         self.region_set.identifier()
     }
 
-    #[wasm_bindgen(js_name = "calculate_statistics")]
+    #[wasm_bindgen(js_name = "calculateStatistics")]
     pub fn calculate_statistics(&self) -> Result<JsValue, JsValue> {
-        let stats = self.region_set.calculate_chr_statistics();
-        let mut result: HashMap<String, JsChromosomeStats> = HashMap::new();
+        let stats = self.region_set.chromosome_statistics();
+        let mut result: HashMap<String, JsChromosomeStatistics> = HashMap::new();
 
         for (key, value) in stats {
             result.insert(
                 key.clone(),
-                JsChromosomeStats {
+                JsChromosomeStatistics {
                     chromosome: value.chromosome.clone(),
                     number_of_regions: value.number_of_regions,
                     minimum_region_length: value.minimum_region_length,
@@ -138,10 +140,10 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
     }
 
-    #[wasm_bindgen(js_name = "calculate_region_distribution")]
+    #[wasm_bindgen(js_name = "calculateRegionDistribution")]
     pub fn calculate_region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
         let distribution: HashMap<String, RegionBin> =
-            self.region_set.generate_region_distribution(n_bins);
+            self.region_set.region_distribution_with_bins(n_bins);
 
         let mut result_vector: Vec<JsRegionDistribution> = vec![];
 
