@@ -5,9 +5,39 @@ use num_traits::{PrimInt, Unsigned};
 use super::Overlapper;
 use gtars_core::models::Interval;
 
-/// The Augmented Interval List (AiList), enumerates intersections between a query interval q and an interval set R.
+/// An Augmented Interval List for efficient genomic interval overlap queries.
+///
+/// From the following article: <https://academic.oup.com/bioinformatics/article/35/23/4907/5509521>
+///
+/// The Augmented Interval List (AIList) is a data structure optimized for finding overlaps
+/// between a query interval and a large collection of genomic intervals. It is particularly
+/// efficient for datasets with high-coverage regions, which are common in genomic data such
+/// as ChIP-seq peaks, gene annotations, or aligned reads.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{AIList, Overlapper, Interval};
+///
+/// // Create intervals for genomic features
+/// let genes = vec![
+///     Interval { start: 1000u32, end: 2000, val: "GENE1" },
+///     Interval { start: 1500, end: 2500, val: "GENE2" },
+///     Interval { start: 5000, end: 6000, val: "GENE3" },
+/// ];
+///
+/// let ailist = AIList::build(genes);
+///
+/// // Query for genes overlapping position 1800-2200
+/// let overlaps = ailist.find(1800, 2200);
+/// assert_eq!(overlaps.len(), 2); // GENE1 and GENE2
+///
+/// // Check if the list is empty
+/// assert!(!ailist.is_empty());
+/// assert_eq!(ailist.len(), 3);
+/// ```
 #[derive(Debug, Clone)]
-pub struct AiList<I, T>
+pub struct AIList<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
@@ -19,7 +49,7 @@ where
     stored_intervals: Vec<Interval<I, T>>,
 }
 
-/// Storage for the intermediate results from [`AiList::decompose`].
+/// Storage for the intermediate results from [`AIList::decompose`].
 #[derive(Debug, Default)]
 struct DecomposeResult<I, T>
 where
@@ -64,7 +94,7 @@ where
     }
 }
 
-impl<I, T> Overlapper<I, T> for AiList<I, T>
+impl<I, T> Overlapper<I, T> for AIList<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
@@ -116,7 +146,7 @@ where
             }
         }
 
-        AiList {
+        AIList {
             starts,
             ends,
             max_ends,
@@ -138,7 +168,7 @@ where
                 &self.stored_intervals[self.header_list[i]..self.header_list[i + 1]],
             ));
         }
-        // now do the last decomposed AiList
+        // now do the last decomposed AIList
         let i = self.header_list.len() - 1;
         results_list.extend(Self::query_slice(
             start,
@@ -161,7 +191,7 @@ where
     }
 }
 
-impl<I, T> AiList<I, T>
+impl<I, T> AIList<I, T>
 where
     I: PrimInt + Unsigned + Send + Sync,
     T: Eq + Clone + Send + Sync,
@@ -233,23 +263,75 @@ where
         results_list
     }
 
+    /// Returns the number of intervals in the AIList.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gtars_overlaprs::{AIList, Overlapper, Interval};
+    ///
+    /// let intervals = vec![
+    ///     Interval { start: 10u32, end: 20, val: "a" },
+    ///     Interval { start: 30, end: 40, val: "b" },
+    /// ];
+    /// let ailist = AIList::build(intervals);
+    /// assert_eq!(ailist.len(), 2);
+    /// ```
     pub fn len(&self) -> usize {
         self.starts.len()
     }
 
+    /// Returns `true` if the AIList contains no intervals.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use gtars_overlaprs::{AIList, Overlapper, Interval};
+    ///
+    /// let ailist: AIList<u32, &str> = AIList::build(vec![]);
+    /// assert!(ailist.is_empty());
+    ///
+    /// let intervals = vec![Interval { start: 10u32, end: 20, val: "a" }];
+    /// let ailist = AIList::build(intervals);
+    /// assert!(!ailist.is_empty());
+    /// ```
     pub fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }
 }
 
-/// Find Iterator
+/// An iterator over intervals in an [`AIList`] that overlap with a query range.
+///
+/// This struct is created by the [`find_iter`](Overlapper::find_iter) method on [`AIList`].
+/// It lazily yields references to intervals that overlap with the specified query range.
+///
+/// The iterator maintains state to traverse the decomposed sublists within the `AIList`
+/// efficiently, yielding overlapping intervals one at a time without allocating a vector.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{AIList, Overlapper, Interval};
+///
+/// let intervals = vec![
+///     Interval { start: 10u32, end: 20, val: "a" },
+///     Interval { start: 15, end: 25, val: "b" },
+/// ];
+///
+/// let ailist = AIList::build(intervals);
+///
+/// // The iterator is created by find_iter
+/// for interval in ailist.find_iter(12, 18) {
+///     println!("Found: {}", interval.val);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct IterFind<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,
     I: PrimInt + Unsigned + Send + Sync,
 {
-    inner: &'a AiList<I, T>,
+    inner: &'a AIList<I, T>,
     header_list_idx: usize,
     list_idx: Option<usize>,
     start: I,
@@ -261,7 +343,7 @@ where
     I: PrimInt + Unsigned + Send + Sync + 'a,
     T: Eq + Clone + Send + Sync,
 {
-    fn new(ailist: &'a AiList<I, T>, start: I, stop: I) -> Self {
+    fn new(ailist: &'a AIList<I, T>, start: I, stop: I) -> Self {
         Self {
             inner: ailist,
             header_list_idx: 0,
@@ -354,14 +436,14 @@ mod tests {
 
     #[rstest]
     fn test_build_and_len(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals.clone());
+        let ailist = AIList::build(intervals.clone());
         assert_eq!(ailist.len(), intervals.len());
         assert_ne!(ailist.is_empty(), true);
     }
 
     #[rstest]
     fn test_find_overlapping_intervals(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Query that overlaps with "a" and "b"
         let results = ailist.find(2, 4);
@@ -380,7 +462,7 @@ mod tests {
 
     #[rstest]
     fn test_find_no_overlap(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Query outside all intervals
         let results = ailist.find(13, 15);
@@ -389,7 +471,7 @@ mod tests {
 
     #[rstest]
     fn test_empty_ailist() {
-        let ailist: AiList<u32, &str> = AiList::build(vec![]);
+        let ailist: AIList<u32, &str> = AIList::build(vec![]);
 
         assert_eq!(ailist.len(), 0);
         assert_eq!(ailist.is_empty(), true);
@@ -401,7 +483,7 @@ mod tests {
 
     #[rstest]
     fn test_find_iter_overlapping_intervals(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Query that overlaps with "a" and "b"
         let results: Vec<&Interval<u32, &str>> = ailist.find_iter(2, 4).collect();
@@ -422,7 +504,7 @@ mod tests {
 
     #[rstest]
     fn test_find_iter_no_overlap(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Query outside all intervals
         let results: Vec<&Interval<u32, &str>> = ailist.find_iter(13, 15).collect();
@@ -435,7 +517,7 @@ mod tests {
 
     #[rstest]
     fn test_find_iter_empty_ailist() {
-        let ailist: AiList<u32, &str> = AiList::build(vec![]);
+        let ailist: AIList<u32, &str> = AIList::build(vec![]);
 
         let results: Vec<&Interval<u32, &str>> = ailist.find_iter(1, 2).collect();
         assert_eq!(results.is_empty(), true);
@@ -443,7 +525,7 @@ mod tests {
 
     #[rstest]
     fn test_find_iter_matches_find(intervals: Vec<Interval<u32, &'static str>>) {
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Test multiple queries to ensure find_iter produces same results as find
         let test_queries = vec![(2, 4), (5, 8), (9, 11), (0, 15), (7, 9)];
@@ -479,7 +561,7 @@ mod tests {
             end: 10,
             val: "single",
         }];
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
 
         // Overlapping query
         let results: Vec<&Interval<u32, &str>> = ailist.find_iter(6, 8).collect();
@@ -529,7 +611,7 @@ mod tests {
             iv(70, 71),
         ];
 
-        let ailist = AiList::build(intervals);
+        let ailist = AIList::build(intervals);
         // Confirm we are at least iterating over header list values a bit.
         assert_eq!(ailist.header_list.len(), 2);
 

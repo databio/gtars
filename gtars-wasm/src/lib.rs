@@ -1,5 +1,6 @@
 mod models;
 mod overlaprs;
+mod regionset;
 mod tokenizers;
 mod utils;
 
