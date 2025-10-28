@@ -22,7 +22,6 @@ mod tests {
 
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
-    use tempfile::NamedTempFile;
 
     use byteorder::{LittleEndian, ReadBytesExt};
     use std::collections::HashSet;
