@@ -114,7 +114,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
                         chr: k.chr.clone(),
                         start: k.start,
                         end: k.end,
-                        n: 1
+                        n: 1,
                     },
                 );
             }
@@ -153,6 +153,4 @@ mod tests {
         assert_eq!(chr1_stats.start_nucleotide_position, 5);
         assert_eq!(chr1_stats.end_nucleotide_position, 36);
     }
-
-    
 }

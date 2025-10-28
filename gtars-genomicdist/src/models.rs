@@ -33,5 +33,5 @@ pub struct RegionBin {
     /// End position of the bin
     pub end: u32,
     /// Number of regions overlapping this bin
-    pub n: u32
+    pub n: u32,
 }
