@@ -1,13 +1,36 @@
-//! # Genomic data tokenizers and pre-processors to prepare interval data for machine learning pipelines.
+//! # gtars-tokenizers
 //!
-//! The tokenizers module is the most comprehensive module in `gtars`. It houses all tokenizers that implement
-//! tokenization of genomic data into a known vocabulary. This is especially useful for genomic data machine
-//! learning models that are based on NLP-models like tranformers.
+//! Wrapper around gtars-overlaprs for producing tokens for machine learning models.
 //!
-//! # Example
+//! ## Purpose
+//!
+//! This module wraps the core overlap infrastructure from gtars-overlaprs to convert
+//! genomic regions into vocabulary tokens for machine learning pipelines. It is
+//! specifically designed for ML applications that need to represent genomic intervals
+//! as discrete tokens.
+//!
+//! ## Design Philosophy
+//!
+//! All overlap computation is delegated to gtars-overlaprs. This module focuses on:
+//! - Token vocabulary management
+//! - Encoding/decoding strategies
+//! - Integration with ML frameworks (HuggingFace, etc.)
+//!
+//! ## Use Cases
+//!
+//! - **Transformer Models**: Convert genomic regions to token sequences
+//! - **Feature Extraction**: Represent intervals as discrete features for ML
+//! - **Language Model Input**: Prepare genomic data for NLP-based models
+//!
+//! ## Main Components
+//!
+//! - **`Tokenizer`**: Maps regions to vocabulary tokens using overlap detection
+//! - **`Universe`**: Vocabulary of genomic regions (peaks/intervals)
+//!
+//! ## Example
+//!
 //! ```rust
 //! use std::path::Path;
-//!
 //! use gtars_tokenizers::Tokenizer;
 //! use gtars_core::models::Region;
 //!
@@ -15,7 +38,7 @@
 //!
 //! let regions = vec![Region {
 //!     chr: "chr1".to_string(),
-//!     start: 100,  
+//!     start: 100,
 //!     end: 200,
 //!     rest: None,
 //! }];
