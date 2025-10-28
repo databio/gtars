@@ -140,23 +140,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_chrom_bins() {
-        let region_set = RegionSet::try_from(
-            "/home/bnt4me/Downloads/test_chrombins/test_chrombins/GSM6732293_Con_liver-IP2.bed",
-        )
-        .unwrap();
-
-        let k = region_set.region_distribution();
-        println!("{:?}", k);
-    }
-
-    #[rstest]
     fn test_statistics() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let stats = region_set.chromosome_statistics();
         let chr1_stats = stats.get("chr1").unwrap();
-        assert_eq!(chr1_stats.number_of_regions, 9)
+        assert_eq!(chr1_stats.number_of_regions, 9);
+        assert_eq!(chr1_stats.maximum_region_length, 9);
+        assert_eq!(chr1_stats.minimum_region_length, 2);
+        assert_eq!(chr1_stats.median_region_length, 3f64);
+        assert_eq!(chr1_stats.start_nucleotide_position, 5);
+        assert_eq!(chr1_stats.end_nucleotide_position, 36);
     }
+
+    
 }
