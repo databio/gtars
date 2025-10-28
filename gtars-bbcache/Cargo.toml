@@ -19,6 +19,7 @@ serde_json = { workspace = true }
 
 # our code
 gtars-core = { path = "../gtars-core", version="0.5.1" }
+gtars-io = { path = "../gtars-io", version="0.5.0" }
 
 [dev-dependencies]
 rstest = "0.26.1"

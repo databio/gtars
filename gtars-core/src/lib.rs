@@ -24,7 +24,6 @@ pub mod utils;
 mod tests {
     use pretty_assertions::assert_eq;
     use rstest::*;
-    use tempfile::NamedTempFile;
 
     use super::models::{Region, RegionSet};
     use std::io::Read;
@@ -116,24 +115,5 @@ mod tests {
         let rs2 = RegionSet::from(bytes.as_slice());
 
         assert_eq!(rs2.len(), rs.len());
-    }
-
-    #[rstest]
-    fn test_region_set_to_bed(path_to_bed_file: &str) {
-        let path = Path::new(path_to_bed_file);
-        let rs = RegionSet::try_from(path).unwrap();
-
-        // create a temporary file
-        let tmp_file = NamedTempFile::new().unwrap();
-        let tmp_path = tmp_file.into_temp_path();
-        let tmp_path = Path::new(tmp_path.to_str().unwrap());
-
-        // write the region set to the temporary file
-        rs.to_bed(tmp_path).unwrap();
-
-        // read the temporary file back in as a region set
-        let rs2 = RegionSet::try_from(tmp_path).unwrap();
-
-        assert_eq!(rs2.len(), 25);
     }
 }

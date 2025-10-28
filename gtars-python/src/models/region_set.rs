@@ -2,10 +2,12 @@ use pyo3::exceptions::PyIndexError;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
-use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
+use gtars_io::{BigBedWrite, BedWrite};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+
+use crate::models::PyRegion;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -178,17 +180,17 @@ impl PyRegionSet {
         chrom_size: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         self.regionset
-            .to_bigbed(out_path.to_string(), chrom_size.to_string())?;
+            .write_bigbed(out_path.to_string(), chrom_size.to_string())?;
         Ok(())
     }
 
     fn to_bed(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.regionset.to_bed(path.to_string())?;
+        self.regionset.write_bed(path.to_string())?;
         Ok(())
     }
 
     fn to_bed_gz(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.regionset.to_bed_gz(path.to_string())?;
+        self.regionset.write_bed_gz(path.to_string())?;
         Ok(())
     }
 

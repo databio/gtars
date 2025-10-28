@@ -20,3 +20,8 @@ gtars-core = { path = "../gtars-core", version = "0.5.1" }
 
 [features]
 bigbed = ["dep:bigtools", "dep:tokio"]
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"

@@ -5,10 +5,10 @@ use gtars_core::models::RegionSet;
 use gtars_core::utils::get_chrom_sizes;
 
 use bigtools::beddata::BedParserStreamingIterator;
-use bigtools::{BedEntry, BigBedWrite};
+use bigtools::{BedEntry, BigBedWrite as BigBedWriter};
 use tokio::runtime;
 
-pub trait BigBedWriteT {
+pub trait BigBedWrite {
     ///
     /// Write data as bigBed (binary version of bed file)
     ///
@@ -20,7 +20,7 @@ pub trait BigBedWriteT {
 }
 
 
-impl BigBedWriteT for RegionSet {
+impl BigBedWrite for RegionSet {
     fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<(), std::io::Error> {
         let out_path = out_path.as_ref();
         if out_path.exists() {
@@ -73,7 +73,7 @@ impl BigBedWriteT for RegionSet {
             .build()
             .expect("Unable to create thread pool.");
 
-        let mut bb_out = BigBedWrite::create_file(out_path, chrom_sizes.clone())
+        let mut bb_out = BigBedWriter::create_file(out_path, chrom_sizes.clone())
             .expect("Failed to create bigBed file.");
 
         bb_out.options.max_zooms = 8;
@@ -83,5 +83,40 @@ impl BigBedWriteT for RegionSet {
             .write(data, runtime)
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::path::PathBuf;
+
+    use rstest::*;
+
+    fn get_test_path(file_name: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let file_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/regionset")
+            .join(file_name);
+        Ok(file_path)
+    }
+
+    #[rstest]
+    fn test_save_bigbed() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let chrom_sizes_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/regionset/dummy_chrom_sizes");
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut new_file_path = tempdir.keep();
+        new_file_path.push("new.bigbed");
+
+        assert!(region_set
+            .write_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
+            .is_ok());
     }
 }

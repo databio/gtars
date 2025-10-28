@@ -2,6 +2,7 @@ use std::path::Path;
 
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyIterator};
+use pyo3::exceptions::PyIOError;
 
 use anyhow::Result;
 use gtars_core::models::{Region, RegionSet};
@@ -59,19 +60,21 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
 
 #[pyfunction]
 pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
-    gtars_io::write_tokens_to_gtok(filename, &tokens)?;
-    Ok(())
+    gtars_io::write_tokens_to_gtok(filename, &tokens)
+        .map_err(|e| PyIOError::new_err(e.to_string()))
 }
 
 #[pyfunction]
 pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
-    let tokens = gtars_io::read_tokens_from_gtok(filename)?;
+    let tokens = gtars_io::read_tokens_from_gtok(filename)
+        .map_err(|e| PyIOError::new_err(e.to_string()))?;
     Ok(tokens)
 }
 
 #[pyfunction]
 pub fn read_tokens_from_gtok_as_strings(filename: &str) -> PyResult<Vec<String>> {
-    let tokens = gtars_io::read_tokens_from_gtok(filename)?;
+    let tokens = gtars_io::read_tokens_from_gtok(filename)
+        .map_err(|e| PyIOError::new_err(e.to_string()))?;
     let tokens = tokens.iter().map(|t| t.to_string()).collect();
     Ok(tokens)
 }

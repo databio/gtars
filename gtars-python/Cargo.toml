@@ -18,4 +18,4 @@ gtars-core = { path = "../gtars-core", features=["http"] }
 gtars-genomicdist = {path = "../gtars-genomicdist" }
 gtars-refget = { path = "../gtars-refget" }
 gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
-gtars-io = { path = "../gtars-io" }
+gtars-io = { path = "../gtars-io", features = ["bigbed"] }

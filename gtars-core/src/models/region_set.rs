@@ -4,14 +4,13 @@ use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
-use flate2::write::GzEncoder;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::io::{BufWriter, Error, Write};
+use std::io::Error;
 
 use crate::models::Region;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::utils::get_dynamic_reader;
 
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
@@ -469,58 +468,6 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
-    }
-
-    #[rstest]
-    fn test_save_bed_gz() {
-        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
-
-        let tempdir = tempfile::tempdir().unwrap();
-
-        let mut new_file_path = tempdir.keep();
-        new_file_path.push("new_file.bed.gz");
-
-        assert!(region_set.to_bed_gz(new_file_path.as_path()).is_ok());
-
-        let new_region = RegionSet::try_from(new_file_path.as_path());
-        assert!(new_region.is_ok());
-        assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
-    }
-
-    #[rstest]
-    fn test_save_bed() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
-
-        let tempdir = tempfile::tempdir().unwrap();
-
-        let mut new_file_path = tempdir.keep();
-        new_file_path.push("new_bedfile.bed");
-
-        assert!(region_set.to_bed(new_file_path.as_path()).is_ok());
-
-        let new_region = RegionSet::try_from(new_file_path.as_path());
-        assert!(new_region.is_ok());
-        assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
-    }
-
-    #[rstest]
-    fn test_save_bigbed() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
-        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
-
-        let chrom_sizes_path: PathBuf = std::env::current_dir()
-            .unwrap()
-            .join("../tests/data/regionset/dummy_chrom_sizes");
-
-        let tempdir = tempfile::tempdir().unwrap();
-        let mut new_file_path = tempdir.keep();
-        new_file_path.push("new.bigbed");
-
-        assert!(region_set
-            .to_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
-            .is_ok());
     }
 
     #[rstest]

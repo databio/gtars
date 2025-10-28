@@ -7,6 +7,7 @@ use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
+use gtars_io::BedWrite;
 use reqwest::blocking::get;
 use std::fs::{File, create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
@@ -204,7 +205,7 @@ impl BBClient {
             true,
         );
 
-        region_set.to_bed_gz(bedfile_path.clone())?;
+        region_set.write_bed_gz(bedfile_path.clone())?;
         println!(
             "Downloaded BED file {} from BEDbase to path: {}",
             bed_id,
@@ -281,7 +282,7 @@ impl BBClient {
             return Ok(bedfile_id);
         }
 
-        regionset.to_bed_gz(cache_path.as_path())?;
+        regionset.write_bed_gz(cache_path.as_path())?;
         self.add_resource_to_cache(
             &bedfile_id,
             cache_path
