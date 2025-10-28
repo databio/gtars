@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```no_run
-//! use gtars_gd::GenomicIntervalSetStatistics;
+//! use gtars_genomicdist::GenomicIntervalSetStatistics;
 //! use gtars_core::models::RegionSet;
 //!
 //! let regions = RegionSet::try_from("input.bed").unwrap();

@@ -4,8 +4,8 @@ use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
-use gtars_gd::models::ChromosomeStatistics;
-use gtars_gd::statistics::GenomicIntervalSetStatistics;
+use gtars_genomicdist::models::ChromosomeStatistics;
+use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]

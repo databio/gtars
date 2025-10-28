@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
-use gtars_gd::models::RegionBin;
-use gtars_gd::statistics::GenomicIntervalSetStatistics;
+use gtars_genomicdist::models::RegionBin;
+use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
 
 use crate::models::BedEntries;
