@@ -256,8 +256,6 @@ impl<'a> IntoIterator for &'a RegionSet {
 }
 
 impl RegionSet {
- 
-
     ///
     /// Calculate identifier for RegionSet
     ///

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::{prelude::*, IntoPyObjectExt};
 use pyo3::types::{PyDict, PyType};
+use pyo3::{prelude::*, IntoPyObjectExt};
 
 use anyhow::Result;
 
@@ -58,8 +58,7 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id())]
-                    .into_py_any(py)?
-                )
+                .into_py_any(py)?)
             }
             // if a list of tokens is passed
             else if let Ok(tokens) = tokens.extract::<Vec<String>>() {

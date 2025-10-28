@@ -3,9 +3,9 @@ use pyo3::prelude::*;
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
-use gtars_io::{BigBedWrite, BedWrite};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+use gtars_io::{BedWrite, BigBedWrite};
 
 use crate::models::PyRegion;
 

@@ -267,9 +267,7 @@ pub fn append_tokens_to_gtok_file(filename: &str, tokens: &[u32]) -> Result<()> 
 
     // start appending to the open file
     // must reopen because `Bufreader` takes ownership of `file`.
-    let file = OpenOptions::new()
-        .append(true)
-        .open(filename)?;
+    let file = OpenOptions::new().append(true).open(filename)?;
     let mut writer = BufWriter::new(file);
 
     match size_flag {

@@ -1,12 +1,11 @@
-use std::path::Path;
 use std::fs::File;
+use std::path::Path;
 
-use std::io::{BufWriter, Write};
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
+use std::io::{BufWriter, Write};
 
 use gtars_core::models::RegionSet;
-
 
 pub trait BedWrite {
     ///
@@ -109,5 +108,4 @@ mod tests {
         assert!(new_region.is_ok());
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
-
 }

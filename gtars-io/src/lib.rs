@@ -5,17 +5,17 @@
 //! `.gtok` files to disk - special files that store pre-tokenized genomic data for use in machine
 //! learning pipelines.
 //!
-pub mod consts;
-pub mod error;
-pub mod gtok;
 pub mod bed;
 #[cfg(feature = "bigbed")]
 pub mod bigbed;
+pub mod consts;
+pub mod error;
+pub mod gtok;
 
 // re-expose core functions
-pub use consts::*;
-pub use error::*;
-pub use gtok::*;
 pub use bed::*;
 #[cfg(feature = "bigbed")]
 pub use bigbed::*;
+pub use consts::*;
+pub use error::*;
+pub use gtok::*;

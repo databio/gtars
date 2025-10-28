@@ -16,12 +16,19 @@ pub trait BigBedWrite {
     /// - out_path: the path to the bigbed file which should be created
     /// - chrom_size: the path to chrom sizes file
     ///
-    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<(), std::io::Error>;
+    fn write_bigbed<P: AsRef<Path>>(
+        &self,
+        out_path: P,
+        chrom_size: P,
+    ) -> Result<(), std::io::Error>;
 }
 
-
 impl BigBedWrite for RegionSet {
-    fn write_bigbed<P: AsRef<Path>>(&self, out_path: P, chrom_size: P) -> Result<(), std::io::Error> {
+    fn write_bigbed<P: AsRef<Path>>(
+        &self,
+        out_path: P,
+        chrom_size: P,
+    ) -> Result<(), std::io::Error> {
         let out_path = out_path.as_ref();
         if out_path.exists() {
             println!("Bed file already exists. Overwriting existing file")
@@ -115,8 +122,10 @@ mod tests {
         let mut new_file_path = tempdir.keep();
         new_file_path.push("new.bigbed");
 
-        assert!(region_set
-            .write_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
-            .is_ok());
+        assert!(
+            region_set
+                .write_bigbed(new_file_path.as_path(), chrom_sizes_path.as_path())
+                .is_ok()
+        );
     }
 }
