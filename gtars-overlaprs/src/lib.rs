@@ -1,6 +1,7 @@
 //! # gtars-overlaprs
 //!
-//! High-performance genomic interval overlap operations in Rust.
+
+//! Core infrastructure for high-performance genomic interval overlap operations in Rust.
 //!
 //! This crate provides efficient data structures and algorithms for finding overlapping intervals
 //! in genomic data. It is part of the [gtars](https://github.com/databio/gtars) project, which
@@ -12,6 +13,9 @@
 //! - **Iterator-based API**: Memory-efficient iteration over overlapping intervals
 //! - **Thread-safe**: All data structures implement `Send` and `Sync` for concurrent access
 //!
+//! All overlap computation logic should live here. Higher-level modules (scoring, tokenizers)
+//! wrap this functionality for their specific use cases but should not reimplement overlap
+//! algorithms.
 //! ## Quick Start
 //!
 //! ```rust
