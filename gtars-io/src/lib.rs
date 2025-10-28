@@ -6,12 +6,16 @@
 //! learning pipelines.
 //!
 pub mod consts;
+pub mod error;
 pub mod gtok;
 pub mod bed;
+#[cfg(feature = "bigbed")]
 pub mod bigbed;
 
 // re-expose core functions
 pub use consts::*;
+pub use error::*;
 pub use gtok::*;
 pub use bed::*;
+#[cfg(feature = "bigbed")]
 pub use bigbed::*;

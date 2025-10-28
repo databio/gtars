@@ -9,18 +9,12 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, Write};
-#[cfg(feature = "bigbed")]
-use tokio::runtime;
-
-#[cfg(feature = "bigbed")]
-use bigtools::beddata::BedParserStreamingIterator;
-#[cfg(feature = "bigbed")]
-use bigtools::{BedEntry, BigBedWrite};
 
 use crate::models::Region;
+use crate::utils::{get_chrom_sizes, get_dynamic_reader};
+
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader};
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
