@@ -7,7 +7,11 @@
 //!
 pub mod consts;
 pub mod gtok;
+pub mod bed;
+pub mod bigbed;
 
 // re-expose core functions
 pub use consts::*;
 pub use gtok::*;
+pub use bed::*;
+pub use bigbed::*;

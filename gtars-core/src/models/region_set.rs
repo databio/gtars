@@ -1,12 +1,10 @@
 use anyhow::Result;
-use std::fs::File;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
 
 use md5::{Digest, Md5};
 
 use flate2::write::GzEncoder;
-use flate2::Compression;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::{self, Display};
@@ -265,56 +263,7 @@ impl<'a> IntoIterator for &'a RegionSet {
 }
 
 impl RegionSet {
-    ///
-    /// Save a regionset to disk as bed file
-    ///
-    /// # Arguments
-    /// - path: the path to the file to dump to
-    pub fn to_bed<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
-        let path = path.as_ref();
-        if path.exists() {
-            println!("Bed file already exists. Overwriting existing file")
-        }
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let mut file = File::create(path).unwrap();
-
-        for region in &self.regions {
-            writeln!(file, "{}", region.as_string())?;
-        }
-        Ok(())
-    }
-
-    ///
-    /// Save a regionset to disk as bed.gz file
-    ///
-    /// # Arguments
-    /// - path: the path to the file to dump to
-    pub fn to_bed_gz<T: AsRef<Path>>(&self, path: T) -> std::io::Result<()> {
-        let path = path.as_ref();
-        if path.exists() {
-            println!("Bed file already exists. Overwriting existing file")
-        }
-
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        let file = File::create(path)?;
-        let mut buffer: String = String::new();
-
-        for region in &self.regions {
-            buffer.push_str(&format!("{}\n", region.as_string(),));
-        }
-
-        let mut encoder = GzEncoder::new(BufWriter::new(file), Compression::best());
-        encoder.write_all(buffer.as_bytes())?;
-
-        Ok(())
-    }
+ 
 
     ///
     /// Calculate identifier for RegionSet
@@ -380,77 +329,6 @@ impl RegionSet {
         let file_digest: String = format!("{:x}", hash);
 
         file_digest
-    }
-
-    ///
-    /// Save RegionSet as bigBed (binary version of bed file)
-    ///
-    /// # Arguments
-    /// - out_path: the path to the bigbed file which should be created
-    /// - chrom_size: the path to chrom sizes file
-    ///
-    #[cfg(feature = "bigbed")]
-    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
-        let out_path = out_path.as_ref();
-
-        if out_path.exists() {
-            println!("Bed file already exists. Overwriting existing file")
-        }
-
-        if let Some(parent) = out_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        let chrom_sizes: HashMap<String, u32> = get_chrom_sizes(chrom_size);
-
-        let mut warnings_count: i32 = 0;
-        let region_vector = self.regions.iter().map(|i| {
-            // This if it is removing regions that are not in chrom sizes file.
-            if !chrom_sizes.contains_key(&i.chr) {
-                eprintln!(
-                    "Warning:: Chromosome is not found in Chrom sizes file. Chr: '{}'",
-                    i.chr
-                );
-                if warnings_count > 40 {
-                    panic!("Incorrect chrom sizes provided. Unable to create bigBed file!");
-                }
-
-                warnings_count += 1;
-                return None;
-            }
-            Some(Ok::<_, Error>((
-                i.chr.clone(),
-                BedEntry {
-                    start: i.start,
-                    end: i.end,
-                    rest: i
-                        .rest
-                        .as_deref()
-                        .map_or(String::new(), |s| format!("\t{}", s)),
-                },
-            )))
-        });
-
-        #[allow(clippy::option_filter_map)]
-        // I like this because its more readable and clear whats going on
-        let region_vector = region_vector.filter(|e| e.is_some()).map(|e| e.unwrap());
-
-        let runtime = runtime::Builder::new_multi_thread()
-            .worker_threads(
-                std::thread::available_parallelism()
-                    .map(|c| c.into())
-                    .unwrap_or(1),
-            )
-            .build()
-            .expect("Unable to create thread pool.");
-
-        let mut bb_out = BigBedWrite::create_file(out_path, chrom_sizes.clone())
-            .expect("Failed to create bigBed file.");
-
-        bb_out.options.max_zooms = 8;
-
-        let data = BedParserStreamingIterator::wrap_iter(region_vector.into_iter(), true);
-        bb_out.write(data, runtime)?;
-        Ok(())
     }
 
     ///
