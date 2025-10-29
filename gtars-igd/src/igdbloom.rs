@@ -10,20 +10,20 @@ use std::path::Path;
 use gtars_core::models::{Region, RegionSet};
 use gtars_tokenizers::tokenizer::Tokenizer;
 
-#[cfg(feature = "bloom")]
-extern crate bloom;
+// #[cfg(feature = "bloom")]
+// extern crate bloom;
 
 #[cfg(feature = "bloom")]
-use bloom::{BloomFilter, ASMS};
+use bloomfilter::Bloom;
 
 /// struct that contains the file path that was used to create the bloom filter as well as the parent
 
-#[cfg(feature = "bloom")]
-pub struct bloom_filter_local {
-    pub parent_directory: String,
-    pub bloom_file_path: String,
-    pub bloom_filter: BloomFilter
-}
+// #[cfg(feature = "bloom")]
+// pub struct bloom_filter_local {
+//     pub parent_directory: String,
+//     pub bloom_file_path: String,
+//     pub bloom_filter: Bloom
+// }
 //
 // pub fn igd_get_bloom_matches(matches: &ArgMatches){
 //
@@ -170,8 +170,55 @@ fn make_child_directories(parent_directory: String, bed_directory: &str, meta_da
     }
 }
 
+// #[cfg(feature = "bloom")]
+// pub fn tokenize_then_create_bloom_for_each_chr(universe_tokenizer: &Tokenizer, bed_file: &str, child_directory: &str, num_of_items: usize, false_positive_rate: f64){
+//     // we must first tokenize against a universe and then create a bloom filter for each chromosome
+//     // from that tokenization
+//
+//     //TODO implement random generation of seed and create filters from this seed.
+//     let mut seed = [0u8; 32];
+//
+//     // First load regions from bed file
+//     let bed = Path::new(&bed_file);
+//     let regions = RegionSet::try_from(bed).unwrap();
+//
+//     // Group regions by chromosome
+//     let mut chrom_regions: std::collections::HashMap<String, Vec<Region>> = std::collections::HashMap::new();
+//     for region in &regions.regions {
+//         chrom_regions.entry(region.chr.clone()).or_insert(Vec::new()).push(region.clone());
+//     }
+//
+//     // Create bloom filter for each chromosome
+//     for (chr, chr_regions) in chrom_regions {
+//         let bloom_filter_path = format!("{}{}.bloom", child_directory, chr);
+//
+//         // Check if bloom filter already exists
+//         if file_exists(&bloom_filter_path) {
+//             println!("File already exists: {}", bloom_filter_path);
+//             continue;
+//         }
+//
+//         // Create new bloom filter
+//         let mut current_bloom_filter = BloomFilter::with_rate(false_positive_rate as f32, num_of_items as u32);
+//
+//         // Tokenize regions for this chromosome and add tokens to bloom filter
+//         let tokenized_regions = universe_tokenizer.tokenize(&chr_regions).unwrap();
+//         for token in tokenized_regions {
+//             current_bloom_filter.insert(&token);
+//         }
+//
+//         // Also add the region coordinates as backup
+//         for region in chr_regions {
+//             let line = format!("{}|{}|{}", region.chr, region.start, region.end);
+//             current_bloom_filter.insert(&line);
+//         }
+//
+//         write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
+//     }
+// }
+
 #[cfg(feature = "bloom")]
-pub fn tokenize_then_create_bloom(universe_tokenizer: &Tokenizer, bed_file: &str, child_directory: &str, num_of_items: usize, false_positive_rate: f64){
+pub fn tokenize_then_create_bloom_for_each_file(universe_tokenizer: &Tokenizer, bed_file: &str, child_directory: &str, num_of_items: usize, false_positive_rate: f64){
     // we must first tokenize against a universe and then create a bloom filter for each chromosome
     // from that tokenization
 
@@ -181,41 +228,40 @@ pub fn tokenize_then_create_bloom(universe_tokenizer: &Tokenizer, bed_file: &str
     // First load regions from bed file
     let bed = Path::new(&bed_file);
     let regions = RegionSet::try_from(bed).unwrap();
-    
-    // Group regions by chromosome
-    let mut chrom_regions: std::collections::HashMap<String, Vec<Region>> = std::collections::HashMap::new();
-    for region in &regions.regions {
-        chrom_regions.entry(region.chr.clone()).or_insert(Vec::new()).push(region.clone());
-    }
-    
+
+    let path = Path::new(bed_file);
+
+
+    let filename = path.file_name()
+
+        .and_then(|os_str| os_str.to_str()).unwrap();
+
     // Create bloom filter for each chromosome
-    for (chr, chr_regions) in chrom_regions {
-        let bloom_filter_path = format!("{}{}.bloom", child_directory, chr);
-        
-        // Check if bloom filter already exists
-        if file_exists(&bloom_filter_path) {
-            println!("File already exists: {}", bloom_filter_path);
-            continue;
-        }
-        
+
+    let bloom_filter_path = format!("{}/{}.bloom", child_directory, filename);
+
+    // Check if bloom filter already exists
+    if file_exists(&bloom_filter_path) {
+        println!("File already exists: {}", bloom_filter_path);
+
+    } else{
+
         // Create new bloom filter
-        let mut current_bloom_filter = BloomFilter::with_rate(false_positive_rate as f32, num_of_items as u32);
-        
+        let mut current_bloom_filter = Bloom::new_for_fp_rate( num_of_items as usize, false_positive_rate as f64).unwrap();
+
         // Tokenize regions for this chromosome and add tokens to bloom filter
-        let tokenized_regions = universe_tokenizer.tokenize(&chr_regions).unwrap();
+        let tokenized_regions = universe_tokenizer.tokenize(&regions.regions).unwrap();
         for token in tokenized_regions {
-            current_bloom_filter.insert(&token);
+            current_bloom_filter.set(&token);
         }
-        
-        // Also add the region coordinates as backup
-        for region in chr_regions {
-            let line = format!("{}|{}|{}", region.chr, region.start, region.end);
-            current_bloom_filter.insert(&line);
-        }
-        
+
         write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
+
     }
+
+
 }
+
 
 
 #[cfg(feature = "bloom")]
@@ -243,10 +289,32 @@ pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
 }
 
 #[cfg(feature = "bloom")]
-pub fn write_bloom_filter_to_disk(igd_bloom_filter: BloomFilter, save_path: String){
-    // TODO: Implement serialization for BloomFilter
-    // The bloom crate may not support direct serialization
-    println!("Would save bloom filter to: {}", save_path);
+pub fn write_bloom_filter_to_disk(igd_bloom_filter: Bloom<String>, save_path: String) -> Result<(), std::io::Error>{
+
+    let bytes = igd_bloom_filter.to_bytes();
+
+    match std::fs::write(&save_path, bytes) {
+        Ok(_) => {
+            println!("Successfully saved bloom filter to: {}", &save_path);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Failed to save bloom filter: {}", e);
+            Err(e)
+        }
+    }
+
+
+}
+
+#[cfg(feature = "bloom")]
+pub fn load_bloom_filter_from_disk(load_path: &str) -> Result<Bloom<String>, Box<dyn std::error::Error>> {
+    let bytes = std::fs::read(load_path)?;
+
+    let filter = Bloom::from_bytes(bytes).map_err(|e| format!("Bloom filter error: {}", e))?;
+
+    println!("Successfully loaded bloom filter from: {}", load_path);
+    Ok(filter)
 }
 
 // #[cfg(all(feature = "bloom", not(feature = "bloom-api-fixed")))]
@@ -691,7 +759,7 @@ mod tests{
     use std::path::PathBuf;
 
     #[rstest]
-    fn test_manual(){
+    fn test_bloom_filter(){
 
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -706,13 +774,13 @@ mod tests{
 
         // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
         let child_directory = path.into_os_string().into_string().unwrap();
-        let num_of_items = 5;
-        let false_positive_rate = 10.0;
+        let num_of_items = 1000;
+        let false_positive_rate = 0.5;
 
         let tokenizer =
             Tokenizer::from_auto(bed_path.as_ref()).expect("Failed to create tokenizer from config.");
 
-        tokenize_then_create_bloom(&tokenizer, &bed_path, &child_directory, num_of_items, false_positive_rate);
+        tokenize_then_create_bloom_for_each_file(&tokenizer, &bed_path, &child_directory, num_of_items, false_positive_rate);
         //
         // let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
         //
@@ -741,7 +809,7 @@ mod tests{
         // search_bloom_filter(parent_directory.as_str(), universe, querybed);
 
         //create_bloom_tree();
-        pretty_assertions::assert_eq!(true, true);
+        //pretty_assertions::assert_eq!(true, true);
 
     }
 
