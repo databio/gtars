@@ -258,6 +258,10 @@ impl PyTokenizer {
         })
     }
 
+    fn get_special_tokens_mask(&self, tokens: Vec<String>) -> Vec<bool> {
+        self.inner().get_special_tokens_mask(&tokens)
+    }
+
     fn get_vocab(&self) -> HashMap<String, u32> {
         self.tokenizer.get_vocab()
     }
