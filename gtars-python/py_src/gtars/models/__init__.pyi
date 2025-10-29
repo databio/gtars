@@ -111,12 +111,12 @@ class RegionSet:
     def __repr__(self): ...
     def __str__(self): ...
 
-class ChromosomeStats:
+class ChromosomeStatistics:
     chromosome: str
-    count: int
-    minimum: int
-    maximum: int
-    mean: float
-    median: float
-    start: int
-    end: int
+    number_of_regions: int
+    minimum_region_length: int
+    maximum_region_length: int
+    mean_region_length: float
+    median_region_length: float
+    start_nucleotide_position: int
+    end_nucleotide_position: int
