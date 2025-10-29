@@ -781,6 +781,21 @@ mod tests{
             Tokenizer::from_auto(bed_path.as_ref()).expect("Failed to create tokenizer from config.");
 
         tokenize_then_create_bloom_for_each_file(&tokenizer, &bed_path, &child_directory, num_of_items, false_positive_rate);
+
+        // Can we load the bloom filter?
+
+        let path = Path::new(bed_path.as_ref());
+        let filename = path.file_name()
+            .and_then(|os_str| os_str.to_str()).unwrap();
+        let bloom_filter_path = format!("{}/{}.bloom", child_directory, filename);
+
+        let loaded_filter = load_bloom_filter_from_disk(bloom_filter_path.as_str()).unwrap();
+
+        let result = loaded_filter.check(&"chr1:22-30".to_string());
+        pretty_assertions::assert_eq!(true, result);
+
+        let result = loaded_filter.check(&"chr1:23-31".to_string());
+        pretty_assertions::assert_eq!(false, result);
         //
         // let universe  ="/home/drc/Downloads/bloom_testing/real_data/data/universe.merged.pruned.filtered100k.bed";
         //
