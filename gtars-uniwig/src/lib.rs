@@ -1261,13 +1261,6 @@ mod tests {
 
     // use gtars::bbcache::client::BBClient;
 
-    // use byteorder::{LittleEndian, ReadBytesExt};
-    // use flate2::read::GzDecoder;
-    // use std::collections::HashMap;
-    //use std::collections::HashSet;
-    //use std::fs;
-    //use std::fs::{read_dir, OpenOptions};
-    //se std::io::{Seek, SeekFrom};
 
     //FIXTURES
     #[fixture]
