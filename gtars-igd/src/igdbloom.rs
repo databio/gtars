@@ -9,46 +9,6 @@ use std::path::Path;
 use bloomfilter::Bloom;
 
 #[cfg(feature = "bloom")]
-fn make_child_directories(
-    parent_directory: String,
-    bed_directory: &str,
-    meta_data: &mut HashMap<String, String>,
-) {
-    //let mut bed_files = Vec::new();
-    for entry in fs::read_dir(bed_directory).unwrap() {
-        let entry = entry.unwrap();
-        let path = entry.path();
-
-        if path.is_file() {
-            //println!("Found a file....");
-            if let Some(extension) = path.extension() {
-                if let Some(extension) = extension.to_str() {
-                    //println!("Found this extension: {}", extension);
-                    match extension {
-                        "bed" | "gz" => {
-                            let full_name = path.to_str().unwrap().to_string();
-                            //println!("Here is the full name: {}", full_name.clone());
-
-                            let name_without_extension =
-                                path.file_stem().unwrap().to_str().unwrap().to_string();
-                            //println!("Here is the name without extension: {}", name_without_extension.clone());
-
-                            let single_parent_directory =
-                                format!("{}{}/", parent_directory, name_without_extension);
-                            let _ = make_parent_directory(single_parent_directory.as_str());
-
-                            meta_data.insert(single_parent_directory, full_name.clone());
-                        }
-
-                        _ => {}
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[cfg(feature = "bloom")]
 pub fn tokenize_then_create_bloom_for_each_file(
     universe_tokenizer: &Tokenizer,
     bed_file: &str,
