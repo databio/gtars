@@ -9,7 +9,7 @@ use fxhash::FxHashMap as HashMap;
 use special_tokens::SpecialTokens;
 
 use gtars_core::models::Interval;
-use gtars_overlaprs::{AiList, Bits, Overlapper};
+use gtars_overlaprs::{AIList, Bits, Overlapper};
 
 use super::TokenizerError;
 use super::config::TokenizerType;
@@ -90,7 +90,7 @@ pub fn create_tokenize_core_from_universe(
     for (chr, chr_intervals) in intervals.into_iter() {
         let lapper: Box<dyn Overlapper<u32, u32>> = match overlapper_type {
             TokenizerType::Bits => Box::new(Bits::build(chr_intervals)),
-            TokenizerType::AiList => Box::new(AiList::build(chr_intervals)),
+            TokenizerType::AIList => Box::new(AIList::build(chr_intervals)),
         };
         core.insert(chr.to_string(), lapper);
     }

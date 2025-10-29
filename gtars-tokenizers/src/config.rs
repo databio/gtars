@@ -30,7 +30,7 @@ pub enum TokenizerType {
     #[serde(rename = "bits")]
     Bits,
     #[serde(rename = "ailist")]
-    AiList,
+    AIList,
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]

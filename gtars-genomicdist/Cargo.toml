@@ -1,0 +1,16 @@
+[package]
+name = "gtars-genomicdist"
+version = "0.5.1"
+edition = "2021"
+description = "Rust port of GenomicDistributions: tools for computing statistics for genomic interval sets"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+gtars-core = { path = "../gtars-core", version="0.5.0" }
+gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.0" }
+
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"

@@ -110,3 +110,13 @@ class RegionSet:
     def __getitem__(self, indx: int): ...
     def __repr__(self): ...
     def __str__(self): ...
+
+class ChromosomeStats:
+    chromosome: str
+    count: int
+    minimum: int
+    maximum: int
+    mean: float
+    median: float
+    start: int
+    end: int

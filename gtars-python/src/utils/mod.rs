@@ -27,11 +27,10 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
         }
     }
 
-    let regions = PyIterator::from_bound_object(regions)?;
+    let regions = PyIterator::from_object(regions)?;
 
     // attempt to map the list to a vector of regions
     let regions = regions
-        .iter()?
         .map(|x| {
             let x = match x {
                 Ok(x) => x,
