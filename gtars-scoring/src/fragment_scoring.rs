@@ -143,7 +143,7 @@ pub fn barcode_scoring_from_fragments<P: AsRef<Path>>(
         let region: Region = fragment.into();
 
         if let Some(overlaps) = consensus.find_overlaps(&region) {
-            let counts = barcode_counts.entry(barcode).or_insert_with(HashMap::new);
+            let counts = barcode_counts.entry(barcode).or_default();
 
             for overlap in overlaps {
                 *counts.entry(overlap.1 as usize).or_insert(0) += 1;
