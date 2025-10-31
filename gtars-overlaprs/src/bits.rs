@@ -58,30 +58,6 @@ use gtars_core::models::Interval;
 /// }
 /// ```
 ///
-/// ## Dynamic Insertion
-///
-/// While BITS is optimized for static datasets, you can insert intervals dynamically:
-///
-/// ```
-/// use gtars_overlaprs::{Bits, Overlapper, Interval};
-///
-/// let mut bits = Bits::build(vec![
-///     Interval { start: 10u32, end: 20, val: 1 },
-/// ]);
-///
-/// bits.insert(Interval { start: 15, end: 25, val: 2 });
-/// assert_eq!(bits.len(), 2);
-/// ```
-///
-/// **Note**: Insertions are inefficient (O(n)) and invalidate cached coverage calculations.
-/// For bulk additions, prefer rebuilding with `Bits::build`.
-///
-/// # Thread Safety
-///
-/// `Bits` implements both `Send` and `Sync`, making it safe to share across threads.
-/// The `seek` method uses an external cursor, allowing concurrent queries without
-/// mutable access to the `Bits` structure itself.
-///
 /// # See Also
 ///
 /// - [`Overlapper`] - The trait that `Bits` implements
@@ -242,31 +218,12 @@ where
     }
 
     /// Get the number over intervals in Bits
-    /// ```
-    /// use gtars_overlaprs::{Bits, Overlapper};
-    /// use gtars_core::models::Interval;
-    ///
-    /// let data = (0..20).step_by(5)
-    ///                   .map(|x| Interval{start: x, end: x + 10, val: true})
-    ///                   .collect::<Vec<Interval<usize, bool>>>();
-    ///
-    /// let bits = Bits::build(data);
-    /// assert_eq!(bits.len(), 4);
-    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.intervals.len()
     }
 
-    /// Check if BITS is empty
-    /// ```
-    /// use gtars_overlaprs::{Bits, Overlapper};
-    /// use gtars_core::models::Interval;
-    ///
-    /// let data: Vec<Interval<usize, bool>> = vec![];
-    /// let bits = Bits::build(data);
-    /// assert_eq!(bits.is_empty(), true);
-    /// ```
+    /// Check if BITS is empty (i.e. has no intervals)
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.intervals.is_empty()

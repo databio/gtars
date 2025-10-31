@@ -14,13 +14,7 @@ pub use gtars_core::models::Interval;
 /// * `T` - The type of value associated with each interval (e.g., gene name, peak score).
 ///   Must be cloneable, comparable, and thread-safe.
 ///
-/// # Thread Safety
-///
-/// All `Overlapper` implementations are required to be `Send + Sync`, making them safe to
-/// share across threads. This enables parallel processing of genomic data.
-///
 /// # Implementations
-///
 /// The crate provides two main implementations:
 ///
 /// * [`AIList`](crate::AIList) - Augmented Interval List, optimized for genomic data with

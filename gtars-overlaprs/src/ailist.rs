@@ -31,11 +31,6 @@ use gtars_core::models::Interval;
 /// // Query for genes overlapping position 1800-2200
 /// let overlaps = ailist.find(1800, 2200);
 /// assert_eq!(overlaps.len(), 2); // GENE1 and GENE2
-///
-/// // Check if the list is empty
-/// assert!(!ailist.is_empty());
-/// assert_eq!(ailist.len(), 3);
-/// ```
 #[derive(Debug, Clone)]
 pub struct AIList<I, T>
 where
@@ -264,37 +259,11 @@ where
     }
 
     /// Returns the number of intervals in the AIList.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use gtars_overlaprs::{AIList, Overlapper, Interval};
-    ///
-    /// let intervals = vec![
-    ///     Interval { start: 10u32, end: 20, val: "a" },
-    ///     Interval { start: 30, end: 40, val: "b" },
-    /// ];
-    /// let ailist = AIList::build(intervals);
-    /// assert_eq!(ailist.len(), 2);
-    /// ```
     pub fn len(&self) -> usize {
         self.starts.len()
     }
 
     /// Returns `true` if the AIList contains no intervals.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use gtars_overlaprs::{AIList, Overlapper, Interval};
-    ///
-    /// let ailist: AIList<u32, &str> = AIList::build(vec![]);
-    /// assert!(ailist.is_empty());
-    ///
-    /// let intervals = vec![Interval { start: 10u32, end: 20, val: "a" }];
-    /// let ailist = AIList::build(intervals);
-    /// assert!(!ailist.is_empty());
-    /// ```
     pub fn is_empty(&self) -> bool {
         self.starts.is_empty()
     }

@@ -1,6 +1,3 @@
-//! # gtars-overlaprs
-//!
-
 //! Core infrastructure for high-performance genomic interval overlap operations in Rust.
 //!
 //! This crate provides efficient data structures and algorithms for finding overlapping intervals
