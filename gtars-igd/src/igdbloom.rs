@@ -16,8 +16,8 @@ pub fn tokenize_then_create_bloom_for_each_file(
     num_of_items: usize,
     false_positive_rate: f64,
 ) {
-    // we must first tokenize against a universe and then create a bloom filter for each chromosome
-    // from that tokenization
+
+    //TODO this function does a couple of things, potentially better to disentangle them in the future
 
     //TODO implement random generation of seed and create filters from this seed.
     let mut seed = [0u8; 32];
@@ -30,19 +30,17 @@ pub fn tokenize_then_create_bloom_for_each_file(
 
     let filename = path.file_name().and_then(|os_str| os_str.to_str()).unwrap();
 
-    // Create bloom filter for each chromosome
+    // Create bloom filter for the current BED file
 
     let bloom_filter_path = format!("{}/{}.bloom", child_directory, filename);
 
-    // Check if bloom filter already exists
     if file_exists(&bloom_filter_path) {
         println!("File already exists: {}", bloom_filter_path);
     } else {
-        // Create new bloom filter
         let mut current_bloom_filter =
             Bloom::new_for_fp_rate(num_of_items as usize, false_positive_rate as f64).unwrap();
 
-        // Tokenize regions for this chromosome and add tokens to bloom filter
+        // Tokenize regions for this chromosome and add these regions to bloom filter
         let tokenized_regions = universe_tokenizer.tokenize(&regions.regions).unwrap();
         for token in tokenized_regions {
             current_bloom_filter.set(&token);
@@ -67,7 +65,7 @@ pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
             }
             Err(e) => {
                 eprintln!("Error creating parent directory: {}", e);
-                return Err(e); // Example: Returning the error
+                Err(e)
             }
         }
     } else {
@@ -83,7 +81,7 @@ pub fn write_bloom_filter_to_disk(
 ) -> Result<(), std::io::Error> {
     let bytes = igd_bloom_filter.to_bytes();
 
-    match std::fs::write(&save_path, bytes) {
+    match fs::write(&save_path, bytes) {
         Ok(_) => {
             println!("Successfully saved bloom filter to: {}", &save_path);
             Ok(())
@@ -99,7 +97,7 @@ pub fn write_bloom_filter_to_disk(
 pub fn load_bloom_filter_from_disk(
     load_path: &str,
 ) -> Result<Bloom<String>, Box<dyn std::error::Error>> {
-    let bytes = std::fs::read(load_path)?;
+    let bytes = fs::read(load_path)?;
 
     let filter = Bloom::from_bytes(bytes).map_err(|e| format!("Bloom filter error: {}", e))?;
 
@@ -130,7 +128,6 @@ mod tests {
         let tempdir = tempfile::tempdir().unwrap();
         let path = PathBuf::from(&tempdir.path());
 
-        // For some reason, you cannot chain .as_string() to .unwrap() and must create a new line.
         let child_directory = path.into_os_string().into_string().unwrap();
         let num_of_items = 1000;
         let false_positive_rate = 0.5;
@@ -138,6 +135,7 @@ mod tests {
         let tokenizer = Tokenizer::from_auto(bed_path.as_ref())
             .expect("Failed to create tokenizer from config.");
 
+        // Can we create the bloom filter and save to disk?
         tokenize_then_create_bloom_for_each_file(
             &tokenizer,
             &bed_path,
@@ -146,8 +144,7 @@ mod tests {
             false_positive_rate,
         );
 
-        // Can we load the bloom filter?
-
+        // Can we load the saved bloom filter and query?
         let path = Path::new(bed_path.as_ref());
         let filename = path.file_name().and_then(|os_str| os_str.to_str()).unwrap();
         let bloom_filter_path = format!("{}/{}.bloom", child_directory, filename);
