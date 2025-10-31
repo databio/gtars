@@ -1,6 +1,6 @@
 [package]
 name = "gtars-igd"
-version = "0.5.0"
+version = "0.5.1"
 edition = "2024"
 description = "Rust implementation of IGD: a high-performance genomic interval search tool"
 license = "MIT"
