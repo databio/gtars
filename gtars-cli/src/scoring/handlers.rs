@@ -4,8 +4,9 @@ use std::str::FromStr;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use gtars_scoring::consts;
 use gtars_scoring::{ConsensusSet, FragmentFileGlob, ScoringMode, region_scoring_from_fragments, barcode_scoring_from_fragments, write_sparse_counts_to_mtx};
+
+use super::cli::{DEFAULT_OUT, DEFAULT_SCORING_MODE};
 
 pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
     // Check if barcode mode is enabled
@@ -50,7 +51,7 @@ pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
             .get_one::<String>("consensus")
             .expect("A path to a mapping file is required.");
 
-        let default_out = consts::DEFAULT_OUT.to_string();
+        let default_out = DEFAULT_OUT.to_string();
         let output = matches.get_one::<String>("output").unwrap_or(&default_out);
         let mode = match matches.get_one::<String>("mode") {
             Some(mode) => {
@@ -60,7 +61,7 @@ pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
                     Err(_err) => anyhow::bail!("Unknown scoring mode supplied: {}", mode),
                 }
             }
-            None => consts::DEFAULT_SCORING_MODE,
+            None => DEFAULT_SCORING_MODE,
         };
 
         // coerce arguments to types

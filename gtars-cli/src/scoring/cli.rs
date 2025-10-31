@@ -1,6 +1,10 @@
 use clap::{Arg, Command, arg};
 
-pub use gtars_scoring::consts::*;
+use gtars_scoring::scoring_modes::ScoringMode;
+
+pub const FSCORING_CMD: &str = "fscoring";
+pub const DEFAULT_OUT: &str = "fscoring.csv.gz";
+pub const DEFAULT_SCORING_MODE: ScoringMode = ScoringMode::Atac;
 
 pub fn create_scoring_cli() -> Command {
     Command::new(FSCORING_CMD)
