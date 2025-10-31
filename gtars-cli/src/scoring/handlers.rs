@@ -4,7 +4,10 @@ use std::str::FromStr;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use gtars_scoring::{ConsensusSet, FragmentFileGlob, ScoringMode, region_scoring_from_fragments, barcode_scoring_from_fragments, write_sparse_counts_to_mtx};
+use gtars_scoring::{
+    ConsensusSet, FragmentFileGlob, ScoringMode, barcode_scoring_from_fragments,
+    region_scoring_from_fragments, write_sparse_counts_to_mtx,
+};
 
 use super::cli::{DEFAULT_OUT, DEFAULT_SCORING_MODE};
 
@@ -36,11 +39,15 @@ pub fn run_scoring(matches: &ArgMatches) -> Result<()> {
         // Write directly to Matrix Market format
         write_sparse_counts_to_mtx(&barcode_counts, consensus.len(), output_prefix)?;
 
-        println!("Created {} cells × {} peaks sparse matrix",
-                 barcode_counts.len(),
-                 consensus.len());
-        println!("Output files: {}_matrix.mtx.gz, {}_barcodes.tsv.gz, {}_features.tsv.gz",
-                 output_prefix, output_prefix, output_prefix);
+        println!(
+            "Created {} cells × {} peaks sparse matrix",
+            barcode_counts.len(),
+            consensus.len()
+        );
+        println!(
+            "Output files: {}_matrix.mtx.gz, {}_barcodes.tsv.gz, {}_features.tsv.gz",
+            output_prefix, output_prefix, output_prefix
+        );
     } else {
         // Original file-based scoring
         let fragments = matches

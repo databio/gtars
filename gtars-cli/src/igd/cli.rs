@@ -1,6 +1,5 @@
 use clap::{Command, arg};
 
-
 pub const IGD_CMD: &str = "igd";
 pub const IGD_CREATE: &str = "create";
 pub const IGD_SEARCH: &str = "search";

@@ -147,9 +147,9 @@ mod tests {
 
         // Verify counts are sparse HashMaps
         for (_barcode, peak_counts) in counts.iter() {
-            assert!(!peak_counts.is_empty());  // Each cell has some peaks
+            assert!(!peak_counts.is_empty()); // Each cell has some peaks
             for (&_peak_id, &count) in peak_counts.iter() {
-                assert!(count > 0);  // No zeros stored
+                assert!(count > 0); // No zeros stored
             }
         }
     }

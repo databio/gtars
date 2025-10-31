@@ -1261,7 +1261,6 @@ mod tests {
 
     // use gtars::bbcache::client::BBClient;
 
-
     //FIXTURES
     #[fixture]
     fn path_to_data() -> PathBuf {

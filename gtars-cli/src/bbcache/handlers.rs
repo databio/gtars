@@ -5,7 +5,6 @@ use clap::ArgMatches;
 use gtars_bbcache::client::BBClient;
 use gtars_bbcache::utils::{get_default_cache_folder, print_resources};
 
-
 /// Excute the input commands from CLI
 /// # Arguments
 /// - subcmd: the subcommand under bbcache

@@ -57,9 +57,10 @@ pub fn create_tokenize_core_from_universe(
     for region in universe.regions.iter() {
         // skip any special tokens that snuck into the regions
         if let Some(special_tokens) = &universe.special_tokens
-            && special_tokens.contains(&region.to_string()) {
-                continue;
-            }
+            && special_tokens.contains(&region.to_string())
+        {
+            continue;
+        }
 
         let parts = region.split(":").collect::<Vec<&str>>();
 
