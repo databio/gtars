@@ -108,6 +108,99 @@ fn file_exists(path: &str) -> bool {
     Path::new(path).exists() && Path::new(path).is_file()
 }
 
+#[cfg(feature = "bloom")]
+pub fn process_bed_directory(
+    universe_tokenizer: &Tokenizer,
+    input_directory: &str,
+    output_directory: &str,
+    num_of_items: usize,
+    false_positive_rate: f64,
+) -> Result<usize, Box<dyn std::error::Error>> {
+    // Create output directory if it doesn't exist
+    make_parent_directory(output_directory)?;
+
+    let input_path = Path::new(input_directory);
+    
+    if !input_path.exists() || !input_path.is_dir() {
+        return Err(format!("Input directory does not exist or is not a directory: {}", input_directory).into());
+    }
+
+    let mut processed_count = 0;
+
+    for entry in fs::read_dir(input_path)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Some(extension) = path.extension() {
+                if extension == "bed" {
+                    let bed_file = path.to_str().ok_or("Invalid path")?;
+                    println!("Processing BED file: {}", bed_file);
+                    
+                    tokenize_then_create_bloom_for_each_file(
+                        universe_tokenizer,
+                        bed_file,
+                        output_directory,
+                        num_of_items,
+                        false_positive_rate,
+                    );
+                    
+                    processed_count += 1;
+                }
+            }
+        }
+    }
+
+    println!("Processed {} BED files from directory: {}", processed_count, input_directory);
+    Ok(processed_count)
+}
+
+#[cfg(feature = "bloom")]
+pub fn load_bloom_directory(
+    bloom_directory: &str,
+) -> Result<HashMap<String, Bloom<String>>, Box<dyn std::error::Error>> {
+    let bloom_path = Path::new(bloom_directory);
+    
+    if !bloom_path.exists() || !bloom_path.is_dir() {
+        return Err(format!("Bloom directory does not exist or is not a directory: {}", bloom_directory).into());
+    }
+
+    let mut bloom_filters: HashMap<String, Bloom<String>> = HashMap::new();
+
+    for entry in fs::read_dir(bloom_path)? {
+        let entry = entry?;
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Some(extension) = path.extension() {
+                if extension == "bloom" {
+                    let bloom_file = path.to_str().ok_or("Invalid path")?;
+
+                    let filename = path.file_stem()
+                        .and_then(|os_str| os_str.to_str())
+                        .ok_or("Invalid filename")?
+                        .to_string();
+                    
+                    println!("Loading bloom filter: {}", bloom_file);
+                    
+                    match load_bloom_filter_from_disk(bloom_file) {
+                        Ok(filter) => {
+                            bloom_filters.insert(filename, filter);
+                        }
+                        Err(e) => {
+                            eprintln!("Failed to load bloom filter from {}: {}", bloom_file, e);
+                            // Continue loading other files even if one fails
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Loaded {} bloom filters from directory: {}", bloom_filters.len(), bloom_directory);
+    Ok(bloom_filters)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -156,4 +249,59 @@ mod tests {
         let result = loaded_filter.check(&"chr1:23-31".to_string());
         pretty_assertions::assert_eq!(false, result);
     }
+
+    #[rstest]
+    fn test_process_bed_directory() {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+
+        let input_dir = PathBuf::from(path_to_crate)
+            .parent()
+            .unwrap()
+            .join("tests/data/dir_of_files/dir_beds");
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let output_dir = tempdir.path();
+
+        let num_of_items = 1000;
+        let false_positive_rate = 0.5;
+
+
+        let sample_bed = input_dir.join("dummy2.bed");
+        let tokenizer = Tokenizer::from_auto(sample_bed.to_str().unwrap())
+            .expect("Failed to create tokenizer from config.");
+
+        let processed_count = process_bed_directory(
+            &tokenizer,
+            input_dir.to_str().unwrap(),
+            output_dir.to_str().unwrap(),
+            num_of_items,
+            false_positive_rate,
+        ).unwrap();
+
+        pretty_assertions::assert_ne!(processed_count, 0, "Should process at least one BED file");
+
+        // Verify bloom files were created
+        let bloom_files: Vec<_> = fs::read_dir(output_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path().extension().and_then(|s| s.to_str()) == Some("bloom")
+            })
+            .collect();
+
+        pretty_assertions::assert_eq!(bloom_files.len(), processed_count);
+
+        // Now load them back into memory
+        let loaded_filters = load_bloom_directory(output_dir.to_str().unwrap()).unwrap();
+
+        pretty_assertions::assert_eq!(loaded_filters.len(), processed_count);
+
+        // Test that we can query the loaded filters
+        for (filename, filter) in loaded_filters.iter() {
+            println!("Loaded filter for: {}", filename);
+            let _ = filter.check(&"chr1:22-30".to_string());
+        }
+
+    }
+
 }
