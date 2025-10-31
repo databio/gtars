@@ -62,22 +62,6 @@
 //! # Ok(())
 //! # }
 //! ```
-//!
-//! ## Cache Structure
-//!
-//! Cached files are organized hierarchically:
-//!
-//! ```text
-//! <cache_folder>/
-//! ├── bedfiles/
-//! │   └── <first_char>/
-//! │       └── <second_char>/
-//! │           └── <identifier>.bed.gz
-//! └── bedsets/
-//!     └── <first_char>/
-//!         └── <second_char>/
-//!             └── <identifier>.txt
-//! ```
 
 pub mod client;
 pub mod consts;
