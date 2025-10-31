@@ -155,4 +155,15 @@ mod tests {
         assert_eq!(chr1_stats.start_nucleotide_position, 5);
         assert_eq!(chr1_stats.end_nucleotide_position, 36);
     }
+
+
+    #[rstest]
+    fn test_distribution_plot() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let distribution = region_set.region_distribution_with_bins(5);
+        assert_eq!(distribution.len(), 5);
+        assert_eq!(distribution.values().next().unwrap().rid, 1);
+    }
 }
