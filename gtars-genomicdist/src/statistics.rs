@@ -27,7 +27,7 @@ pub trait GenomicIntervalSetStatistics {
     ///
     /// Convenience method that calls `region_distribution_with_bins(10)`.
     fn region_distribution(&self) -> HashMap<String, RegionBin> {
-        self.region_distribution_with_bins(10)
+        self.region_distribution_with_bins(250)
     }
 }
 
