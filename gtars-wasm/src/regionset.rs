@@ -102,22 +102,22 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(getter, js_name = "meanRegionWidth")]
-    pub fn get_mean_region_width(&self) -> f64 {
+    pub fn mean_region_width(&self) -> f64 {
         self.region_set.mean_region_width()
     }
 
-    #[wasm_bindgen(getter, js_name = "totalNucleotides")]
-    pub fn get_total_nucleotides(&self) -> i32 {
+    #[wasm_bindgen(getter, js_name = "nucleotidesLength")]
+    pub fn nucleotides_length(&self) -> i32 {
         self.region_set.nucleotides_length() as i32
     }
 
-    #[wasm_bindgen(getter, js_name = "digest")]
-    pub fn get_digest(&self) -> String {
+    #[wasm_bindgen(getter, js_name = "identifier")]
+    pub fn identifier(&self) -> String {
         self.region_set.identifier()
     }
 
-    #[wasm_bindgen(js_name = "calculateStatistics")]
-    pub fn calculate_statistics(&self) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = "chromosomeStatistics")]
+    pub fn chromosome_statistics(&self) -> Result<JsValue, JsValue> {
         let stats = self.region_set.chromosome_statistics();
         let mut result: HashMap<String, JsChromosomeStatistics> = HashMap::new();
 
@@ -140,8 +140,8 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
     }
 
-    #[wasm_bindgen(js_name = "calculateRegionDistribution")]
-    pub fn calculate_region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
+    #[wasm_bindgen(js_name = "regionDistribution")]
+    pub fn region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
         let distribution: HashMap<String, RegionBin> =
             self.region_set.region_distribution_with_bins(n_bins);
 

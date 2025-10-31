@@ -209,7 +209,7 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
+    fn chromosome_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
         let mut result: HashMap<String, PyChromosomeStatistics> = HashMap::new();
         let stats: HashMap<String, ChromosomeStatistics> = self.regionset.chromosome_statistics();
 
