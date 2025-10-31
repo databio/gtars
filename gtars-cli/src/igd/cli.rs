@@ -1,6 +1,9 @@
 use clap::{Command, arg};
 
-pub use gtars_igd::consts::*;
+
+pub const IGD_CMD: &str = "igd";
+pub const IGD_CREATE: &str = "create";
+pub const IGD_SEARCH: &str = "search";
 
 pub fn create_igd_cli() -> Command {
     Command::new(IGD_CMD)
@@ -9,7 +12,7 @@ pub fn create_igd_cli() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
-            Command::new("create")
+            Command::new(IGD_CREATE)
                 .about("Create igd database")
                 .arg(arg!(--output <VALUE> "Path to the output.").required(true))
                 .arg(
@@ -22,7 +25,7 @@ pub fn create_igd_cli() -> Command {
                 )
         )
         .subcommand(
-            Command::new("search")
+            Command::new(IGD_SEARCH)
                 .about("Search igd database")
                 .arg(arg!(--database <VALUE> "Path to the igd database.").required(true).short('d'))
                 .arg(

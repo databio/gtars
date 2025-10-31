@@ -1,6 +1,7 @@
 use clap::{Arg, Command, arg};
 
-pub use gtars_fragsplit::consts::*;
+pub const FRAGSPLIT_CMD: &str = "pb";
+pub const DEFAULT_OUT: &str = "out/";
 
 pub fn create_fragsplit_cli() -> Command {
     Command::new(FRAGSPLIT_CMD)
