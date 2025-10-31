@@ -34,4 +34,6 @@ pub struct RegionBin {
     pub end: u32,
     /// Number of regions overlapping this bin
     pub n: u32,
+    /// Rid: needed for plot to have correct order
+    pub rid: u32,
 }

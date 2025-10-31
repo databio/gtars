@@ -103,6 +103,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
             .collect::<Vec<Region>>();
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
+        let region_length = region_hits.first().unwrap().end - region_hits.first().unwrap().start;
 
         for k in &region_hits {
             if let Some(region_bin) = plot_results.get_mut(&k.digest()) {
@@ -115,6 +116,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
                         start: k.start,
                         end: k.end,
                         n: 1,
+                        rid: k.start / region_length,
                     },
                 );
             }

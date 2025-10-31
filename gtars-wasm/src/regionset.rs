@@ -68,6 +68,7 @@ pub struct JsRegionDistribution {
     start: u32,
     end: u32,
     n: u32,
+    rid: u32,
 }
 
 #[wasm_bindgen(js_name = "RegionSet")]
@@ -152,6 +153,7 @@ impl JsRegionSet {
                 start: value.start,
                 end: value.end,
                 n: value.n,
+                rid: value.rid,
             })
         }
         serde_wasm_bindgen::to_value(&result_vector).map_err(|e| e.into())
