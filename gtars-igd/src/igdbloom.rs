@@ -16,7 +16,6 @@ pub fn tokenize_then_create_bloom_for_each_file(
     num_of_items: usize,
     false_positive_rate: f64,
 ) {
-
     //TODO this function does a couple of things, potentially better to disentangle them in the future
 
     //TODO implement random generation of seed and create filters from this seed.
@@ -46,7 +45,7 @@ pub fn tokenize_then_create_bloom_for_each_file(
             current_bloom_filter.set(&token);
         }
 
-        write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
+        let _ = write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
     }
 }
 
