@@ -156,7 +156,6 @@ mod tests {
         assert_eq!(chr1_stats.end_nucleotide_position, 36);
     }
 
-
     #[rstest]
     fn test_distribution_plot() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
