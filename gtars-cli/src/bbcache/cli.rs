@@ -1,6 +1,12 @@
 use clap::{Arg, Command};
 
-pub use gtars_bbcache::consts::BBCACHE_CMD;
+pub const BBCACHE_CMD: &str = "bbcache";
+pub const BBCACHE_CACHEBED: &str = "cache-bed";
+pub const BBCACHE_CACHEBEDSET: &str = "cache-bedset";
+pub const BBCACHE_SEEK: &str = "seek";
+pub const BBCACHE_INSPECTBED: &str = "inspect-bedfiles";
+pub const BBCACHE_INSPECTBEDSET: &str = "inspect-bedsets";
+pub const BBCACHE_REMOVE: &str = "rm";
 
 pub fn create_bbcache_cli() -> Command {
     Command::new(BBCACHE_CMD)
@@ -9,7 +15,7 @@ pub fn create_bbcache_cli() -> Command {
         .subcommand_required(true)
         .arg_required_else_help(true)
         .subcommand(
-            Command::new("cache-bed")
+            Command::new(BBCACHE_CACHEBED)
                 .about("Cache a BED file from local file or BEDbase")
                 .arg(
                     Arg::new("identifier")
@@ -26,7 +32,7 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("cache-bedset")
+            Command::new(BBCACHE_CACHEBEDSET)
                 .about("Cache a BED set from local file or BEDbase")
                 .arg(
                     Arg::new("identifier")
@@ -43,7 +49,7 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("seek")
+            Command::new(BBCACHE_SEEK)
                 .about("Seek the BED file path by giving identifier")
                 .arg(
                     Arg::new("identifier")
@@ -60,7 +66,7 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("inspect-bedfiles")
+            Command::new(BBCACHE_INSPECTBED)
                 .about("Inspect the contents of bedfile cache folder")
                 .arg(
                     Arg::new("cache-folder")
@@ -70,7 +76,7 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("inspect-bedsets")
+            Command::new(BBCACHE_INSPECTBEDSET)
                 .about("Inspect the contents of bedsets cache folder")
                 .arg(
                     Arg::new("cache-folder")
@@ -80,7 +86,7 @@ pub fn create_bbcache_cli() -> Command {
                 ),
         )
         .subcommand(
-            Command::new("rm")
+            Command::new(BBCACHE_REMOVE)
                 .about("Remove the BED file or BED set from cache with given identifier")
                 .arg(
                     Arg::new("identifier")

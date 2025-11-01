@@ -1,3 +1,68 @@
+//! # gtars-bbcache
+//!
+//! A Rust implementation of bbcache: a caching system for BED files from [BEDbase.org](https://bedbase.org).
+//!
+//! ## Overview
+//!
+//! `gtars-bbcache` provides an efficient local caching layer for BED files and BED sets retrieved from
+//! the BEDbase API. It handles downloading, storage, and retrieval of genomic region data.
+//!
+//! ## Features
+//!
+//! - **Smart Caching**: Automatically downloads and caches BED files from BEDbase API on first access
+//! - **BEDset Support**: Manages collections of related BED files as coherent sets
+//! - **Local File Import**: Add local BED files to the cache for unified access
+//! - **Efficient Storage**: Organizes cached files in a hierarchical directory structure
+//! - **SQLite Tracking**: Uses biocache for fast lookups and resource management
+//! - **Configurable**: Customize cache location and API endpoints via environment variables
+//!
+//! ## Quick Start
+//!
+//! ```rust,no_run
+//! use gtars_bbcache::client::BBClient;
+//! use std::path::PathBuf;
+//!
+//! # fn main() -> anyhow::Result<()> {
+//! // Create a client with default settings
+//! let mut client = BBClient::builder().finish()?;
+//!
+//! // Load a BED file from BEDbase (downloads and caches if not present)
+//! let region_set = client.load_bed("6b2e163a1d4319d99bd465c6c78a9741")?;
+//!
+//! // Add a local BED file to the cache
+//! let bed_id = client.add_local_bed_to_cache(
+//!     PathBuf::from("path/to/file.bed.gz"),
+//!     None
+//! )?;
+//!
+//! // Check if a file exists in cache
+//! let cached_path = client.seek(&bed_id)?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! ## Configuration
+//!
+//! The cache behavior can be configured through environment variables:
+//!
+//! - `BBCLIENT_CACHE`: Custom cache directory (default: `~/.bbcache/`)
+//! - `BEDBASE_API`: Custom BEDbase API endpoint (default: `https://api.bedbase.org`)
+//!
+//! Or programmatically via the builder:
+//!
+//! ```rust,no_run
+//! use gtars_bbcache::client::BBClient;
+//! use std::path::PathBuf;
+//!
+//! # fn main() -> anyhow::Result<()> {
+//! let client = BBClient::builder()
+//!     .with_cache_folder(PathBuf::from("/custom/cache/path"))
+//!     .with_bedbase_api("https://api.bedbase.org".to_string())
+//!     .finish()?;
+//! # Ok(())
+//! # }
+//! ```
+
 pub mod client;
 pub mod consts;
 pub mod utils;
@@ -5,14 +70,9 @@ pub mod utils;
 #[cfg(test)]
 mod tests {
     use super::client::BBClient;
-    use super::*;
     use rstest::{fixture, rstest};
-    use std::fs;
-    use std::fs::File;
-    use std::fs::{OpenOptions, read_dir};
-    use std::io::{BufRead, BufReader, Read};
-    use std::path::{Path, PathBuf};
-    use tempfile::NamedTempFile;
+    use std::fs::read_dir;
+    use std::path::PathBuf;
 
     #[fixture]
     fn path_to_bed_gz_from_bb() -> PathBuf {
@@ -61,8 +121,9 @@ mod tests {
         let tempdir = tempfile::tempdir()?;
         let cache_folder = PathBuf::from(tempdir.path());
 
-        let mut bbc =
-            BBClient::new(Some(cache_folder.clone()), None).expect("Failed to create BBClient");
+        let mut bbc = BBClient::builder()
+            .with_cache_folder(cache_folder.clone())
+            .finish()?;
 
         let bed_id = bbc
             .add_local_bed_to_cache(path_to_bed_gz_from_bb, Some(false))

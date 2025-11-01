@@ -5,7 +5,6 @@ pub mod writing;
 
 use indicatif::ProgressBar;
 use rayon::prelude::*;
-use rstest::fixture;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{File, remove_file};
@@ -1239,14 +1238,12 @@ pub fn create_bw_writer(
 #[cfg(test)]
 mod tests {
 
-    use super::*;
     use rstest::{fixture, rstest};
     use std::fs;
     use std::fs::File;
-    use std::fs::{OpenOptions, read_dir};
+    use std::fs::read_dir;
     use std::io::{BufRead, BufReader, Read};
     use std::path::{Path, PathBuf};
-    use tempfile::NamedTempFile;
 
     use super::{Chromosome, uniwig_main};
     use gtars_core::utils::parse_bedlike_file;
@@ -1263,14 +1260,6 @@ mod tests {
     use super::writing::write_bw_files;
 
     // use gtars::bbcache::client::BBClient;
-
-    // use byteorder::{LittleEndian, ReadBytesExt};
-    // use flate2::read::GzDecoder;
-    // use std::collections::HashMap;
-    //use std::collections::HashSet;
-    //use std::fs;
-    //use std::fs::{read_dir, OpenOptions};
-    //se std::io::{Seek, SeekFrom};
 
     //FIXTURES
     #[fixture]

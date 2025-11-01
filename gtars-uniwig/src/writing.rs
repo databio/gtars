@@ -34,7 +34,8 @@ pub fn write_to_npy_file(
 
     // Write the NumPy Files
     let arr = Array::from_vec(counts);
-    let _ = write_npy(&filename, &arr).expect(&format!("Failed to write NumPy file: {}", filename));
+    write_npy(&filename, &arr)
+        .unwrap_or_else(|_| panic!("Failed to write NumPy file: {}", filename));
 
     // Write to the metadata file.
     // Note: there should be a single metadata file for starts, ends and core
@@ -43,10 +44,7 @@ pub fn write_to_npy_file(
         .create(true) // Create the file if it doesn't exist
         .append(true) // Append data to the existing file if it does exist
         .open(&metafilename)
-        .expect(&format!(
-            "Failed to open/create metadata file: {}",
-            metafilename
-        ));
+        .unwrap_or_else(|_| panic!("Failed to open/create metadata file: {}", metafilename));
 
     // The original wiggle file header. This can be anything we wish it to be. Currently space delimited.
     let mut wig_header = "fixedStep chrom=".to_string()
@@ -56,10 +54,8 @@ pub fn write_to_npy_file(
         + " step="
         + stepsize.to_string().as_str();
     wig_header.push('\n');
-    file.write_all(wig_header.as_ref()).expect(&format!(
-        "Failed to write header to metadata file: {}",
-        metafilename
-    ));
+    file.write_all(wig_header.as_ref())
+        .unwrap_or_else(|_| panic!("Failed to write header to metadata file: {}", metafilename));
 }
 
 /// Write either combined bedGraph, wiggle files, and bed files

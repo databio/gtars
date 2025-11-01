@@ -1,4 +1,3 @@
-pub mod consts;
 pub mod map;
 pub mod split;
 pub mod utils;

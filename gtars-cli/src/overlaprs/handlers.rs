@@ -7,14 +7,14 @@ use clap::ArgMatches;
 use fxhash::FxHashMap as HashMap;
 
 use gtars_overlaprs::Overlapper;
-use gtars_overlaprs::{AiList, Bits};
+use gtars_overlaprs::{AIList, Bits};
 
 use gtars_core::models::Interval;
 use gtars_core::utils::get_dynamic_reader;
 
 enum BackendType {
     Bits,
-    AiList,
+    AIList,
 }
 
 type OverlapperMap = HashMap<String, Box<dyn Overlapper<u32, Option<u8>>>>;
@@ -35,7 +35,7 @@ pub fn run_overlaprs(matches: &ArgMatches) -> Result<()> {
 
     let backend_type = match backend_str.as_str() {
         "bits" => BackendType::Bits,
-        "ailist" => BackendType::AiList,
+        "ailist" => BackendType::AIList,
         _ => {
             return Err(anyhow::anyhow!(
                 "Invalid backend type: {}. Valid options are 'bits' or 'ailist'",
@@ -104,7 +104,7 @@ fn build_overlap_structures(
 
         let overlapper: Box<dyn Overlapper<u32, Option<u8>>> = match backend_type {
             BackendType::Bits => Box::new(Bits::build(chr_intervals)),
-            BackendType::AiList => Box::new(AiList::build(chr_intervals)),
+            BackendType::AIList => Box::new(AIList::build(chr_intervals)),
         };
         core.insert(chr, overlapper);
     }
