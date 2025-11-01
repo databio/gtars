@@ -6,7 +6,6 @@ pub mod search;
 #[cfg(feature = "bloom")]
 pub mod igdbloom; // Bloom filter work is only available as library functions NOT CLI
 
-
 #[cfg(test)]
 mod tests {
 
