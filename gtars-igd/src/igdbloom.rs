@@ -1,3 +1,4 @@
+use bloomfilter::Bloom;
 use gtars_core::models::RegionSet;
 use gtars_tokenizers::tokenizer::Tokenizer;
 use std::collections::HashMap;
@@ -5,10 +6,6 @@ use std::fs;
 use std::io::{Error, Read, Write};
 use std::path::Path;
 
-#[cfg(feature = "bloom")]
-use bloomfilter::Bloom;
-
-#[cfg(feature = "bloom")]
 pub fn tokenize_then_create_bloom_for_each_file(
     universe_tokenizer: &Tokenizer,
     bed_file: &str,
@@ -49,7 +46,6 @@ pub fn tokenize_then_create_bloom_for_each_file(
     }
 }
 
-#[cfg(feature = "bloom")]
 pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
     let parent_path = Path::new(&parent_directory);
 
@@ -73,7 +69,6 @@ pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
     }
 }
 
-#[cfg(feature = "bloom")]
 pub fn write_bloom_filter_to_disk(
     igd_bloom_filter: Bloom<String>,
     save_path: String,
@@ -92,7 +87,6 @@ pub fn write_bloom_filter_to_disk(
     }
 }
 
-#[cfg(feature = "bloom")]
 pub fn load_bloom_filter_from_disk(
     load_path: &str,
 ) -> Result<Bloom<String>, Box<dyn std::error::Error>> {
@@ -108,7 +102,6 @@ fn file_exists(path: &str) -> bool {
     Path::new(path).exists() && Path::new(path).is_file()
 }
 
-#[cfg(feature = "bloom")]
 pub fn process_bed_directory(
     universe_tokenizer: &Tokenizer,
     input_directory: &str,
@@ -162,7 +155,6 @@ pub fn process_bed_directory(
     Ok(processed_count)
 }
 
-#[cfg(feature = "bloom")]
 pub fn load_bloom_directory(
     bloom_directory: &str,
 ) -> Result<HashMap<String, Bloom<String>>, Box<dyn std::error::Error>> {
