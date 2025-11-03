@@ -10,7 +10,7 @@ repository = "https://github.com/databio/gtars"
 byteorder.workspace = true
 # our code
 gtars-core = { path = "../gtars-core", version="0.5.2" }
-gtars-tokenizers = { path = "../gtars-tokenizers", version="0.5.2", optional = true }
+gtars-overlaprs ={ path = "../gtars-overlaprs", version="0.5.1", optional = true}
 bloomfilter = { version = "3.0.1", optional = true}
 
 [dev-dependencies]
@@ -23,4 +23,4 @@ anyhow = { workspace = true }
 
 [features]
 # Feature 'bloom' links to the dependency key 'bloom' (which is the correct crate name).
-bloom = ["dep:bloomfilter", "dep:gtars-tokenizers"]
+bloom = ["dep:bloomfilter", "dep:gtars-overlaprs"]

@@ -1,13 +1,13 @@
 use bloomfilter::Bloom;
 use gtars_core::models::RegionSet;
-use gtars_tokenizers::tokenizer::Tokenizer;
+use gtars_overlaprs::multi_chrom_overlapper::MultiChromOverlapper;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{Error, Read, Write};
+use std::io::Error;
 use std::path::Path;
 
 pub fn tokenize_then_create_bloom_for_each_file(
-    universe_tokenizer: &Tokenizer,
+    universe_tokenizer: &MultiChromOverlapper<u32, Option<String>>,
     bed_file: &str,
     child_directory: &str,
     num_of_items: usize,
@@ -34,23 +34,23 @@ pub fn tokenize_then_create_bloom_for_each_file(
         println!("File already exists: {}", bloom_filter_path);
     } else {
         let mut current_bloom_filter =
-            Bloom::new_for_fp_rate(num_of_items as usize, false_positive_rate as f64).unwrap();
+            Bloom::new_for_fp_rate(num_of_items, false_positive_rate).unwrap();
 
         // Tokenize regions for this chromosome and add these regions to bloom filter
-        let tokenized_regions = universe_tokenizer.tokenize(&regions.regions).unwrap();
-        for token in tokenized_regions {
-            current_bloom_filter.set(&token);
-        }
+        universe_tokenizer.find_overlaps_iter(&regions)
+            .for_each(|token| {
+                current_bloom_filter.set(&format!("{}:{}-{}", token.0, token.1.start, token.1.end));
+            });
 
         let _ = write_bloom_filter_to_disk(current_bloom_filter, bloom_filter_path);
     }
 }
 
 pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
-    let parent_path = Path::new(&parent_directory);
+    let parent_path = Path::new(parent_directory);
 
     if !parent_path.exists() {
-        match fs::create_dir_all(&parent_directory) {
+        match fs::create_dir_all(parent_directory) {
             Ok(_) => {
                 println!(
                     "Parent directory created successfully: {}",
@@ -103,7 +103,7 @@ fn file_exists(path: &str) -> bool {
 }
 
 pub fn process_bed_directory(
-    universe_tokenizer: &Tokenizer,
+    universe_tokenizer: &MultiChromOverlapper<u32, Option<String>>,
     input_directory: &str,
     output_directory: &str,
     num_of_items: usize,
@@ -212,6 +212,7 @@ pub fn load_bloom_directory(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
     use rstest::rstest;
     use std::path::PathBuf;
 
@@ -232,8 +233,8 @@ mod tests {
         let num_of_items = 1000;
         let false_positive_rate = 0.5;
 
-        let tokenizer = Tokenizer::from_auto(bed_path.as_ref())
-            .expect("Failed to create tokenizer from config.");
+        let universe = RegionSet::try_from(bed_path.as_ref()).unwrap();
+        let tokenizer = universe.into_multi_chrom_overlapper(OverlapperType::AIList);
 
         // Can we create the bloom filter and save to disk?
         tokenize_then_create_bloom_for_each_file(
@@ -274,8 +275,8 @@ mod tests {
         let false_positive_rate = 0.5;
 
         let sample_bed = input_dir.join("dummy2.bed");
-        let tokenizer = Tokenizer::from_auto(sample_bed.to_str().unwrap())
-            .expect("Failed to create tokenizer from config.");
+        let universe = RegionSet::try_from(sample_bed).unwrap();
+        let tokenizer = universe.into_multi_chrom_overlapper(OverlapperType::AIList);
 
         let processed_count = process_bed_directory(
             &tokenizer,
