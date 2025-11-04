@@ -6,6 +6,62 @@ use num_traits::{
 use super::Overlapper;
 use gtars_core::models::Interval;
 
+/// A Binary Interval Search data structure for fast genomic interval overlap queries.
+///
+/// From the journal article: <https://academic.oup.com/bioinformatics/article/29/1/1/273289>
+///
+/// BITS (Binary Interval Search) is an efficient data structure for finding overlapping
+/// intervals using binary search. It maintains sorted lists of interval start and end
+/// positions, enabling fast identification of intervals that overlap with a query range.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{Bits, Overlapper, Interval};
+///
+/// // Create intervals for read alignments
+/// let reads = vec![
+///     Interval { start: 100u32, end: 150, val: "read1" },
+///     Interval { start: 200, end: 250, val: "read2" },
+///     Interval { start: 225, end: 275, val: "read3" },
+/// ];
+///
+/// let bits = Bits::build(reads);
+///
+/// // Query for reads overlapping position 210-240
+/// let overlaps = bits.find(210, 240);
+/// assert_eq!(overlaps.len(), 2); // read2 and read3
+///
+/// // Count overlaps without allocating
+/// let count = bits.count(210, 240);
+/// assert_eq!(count, 2);
+/// ```
+///
+/// # Advanced Features
+///
+/// ## Sequential Queries with `seek`
+///
+/// For sorted queries, use `seek` with a cursor for better performance:
+///
+/// ```
+/// use gtars_overlaprs::{Bits, Overlapper, Interval};
+///
+/// let intervals = (0u32..100).step_by(5)
+///     .map(|x| Interval { start: x, end: x + 2, val: true })
+///     .collect::<Vec<_>>();
+/// let bits = Bits::build(intervals);
+///
+/// let mut cursor = 0;
+/// for i in 10u32..20 {
+///     let overlaps: Vec<_> = bits.seek(i, i + 5, &mut cursor).collect();
+///     // Process overlaps...
+/// }
+/// ```
+///
+/// # See Also
+///
+/// - [`Overlapper`] - The trait that `Bits` implements
+/// - [`crate::AIList`] - An alternative implementation optimized for high-coverage regions
 #[derive(Debug, Clone)]
 pub struct Bits<I, T>
 where
@@ -162,31 +218,12 @@ where
     }
 
     /// Get the number over intervals in Bits
-    /// ```
-    /// use gtars_overlaprs::{Bits, Overlapper};
-    /// use gtars_core::models::Interval;
-    ///
-    /// let data = (0..20).step_by(5)
-    ///                   .map(|x| Interval{start: x, end: x + 10, val: true})
-    ///                   .collect::<Vec<Interval<usize, bool>>>();
-    ///
-    /// let bits = Bits::build(data);
-    /// assert_eq!(bits.len(), 4);
-    /// ```
     #[inline]
     pub fn len(&self) -> usize {
         self.intervals.len()
     }
 
-    /// Check if BITS is empty
-    /// ```
-    /// use gtars_overlaprs::{Bits, Overlapper};
-    /// use gtars_core::models::Interval;
-    ///
-    /// let data: Vec<Interval<usize, bool>> = vec![];
-    /// let bits = Bits::build(data);
-    /// assert_eq!(bits.is_empty(), true);
-    /// ```
+    /// Check if BITS is empty (i.e. has no intervals)
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.intervals.is_empty()
@@ -222,6 +259,19 @@ where
         low
     }
 
+    /// Binary search for the insertion position of a key in a sorted slice.
+    ///
+    /// Returns the index where `key` should be inserted to maintain sort order.
+    /// This is a convenience wrapper around [`bsearch_seq_ref`](Self::bsearch_seq_ref).
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - The value to search for
+    /// * `elems` - A sorted slice to search in
+    ///
+    /// # Returns
+    ///
+    /// The index where `key` should be inserted.
     #[inline]
     pub fn bsearch_seq<K>(key: K, elems: &[K]) -> usize
     where
@@ -230,6 +280,22 @@ where
         Self::bsearch_seq_ref(&key, elems)
     }
 
+    /// Binary search for the insertion position of a key reference in a sorted slice.
+    ///
+    /// Returns the index where `key` should be inserted to maintain sort order.
+    /// Uses an efficient binary search algorithm optimized for branch prediction.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - A reference to the value to search for
+    /// * `elems` - A sorted slice to search in
+    ///
+    /// # Returns
+    ///
+    /// The index where `key` should be inserted to maintain sort order:
+    /// - `0` if the key should be inserted at the beginning
+    /// - `elems.len()` if the key should be inserted at the end
+    /// - Otherwise, the first index where `elems[index] >= key`
     #[inline]
     pub fn bsearch_seq_ref<K>(key: &K, elems: &[K]) -> usize
     where
@@ -316,7 +382,29 @@ where
     }
 }
 
-/// Find Iterator
+/// An iterator over intervals in a [`Bits`] structure that overlap with a query range.
+///
+/// This struct is created by the [`find_iter`](Overlapper::find_iter) method on [`Bits`],
+/// or by the [`seek`](Bits::seek) method for sequential queries. It yields references to
+/// intervals that overlap with the specified query range without allocating a vector.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{Bits, Overlapper, Interval};
+///
+/// let intervals = vec![
+///     Interval { start: 10u32, end: 20, val: "a" },
+///     Interval { start: 15, end: 25, val: "b" },
+/// ];
+///
+/// let bits = Bits::build(intervals);
+///
+/// // The iterator is created by find_iter
+/// for interval in bits.find_iter(12, 18) {
+///     println!("Found: {}", interval.val);
+/// }
+/// ```
 #[derive(Debug)]
 pub struct IterFind<'a, I, T>
 where
@@ -354,7 +442,29 @@ where
     }
 }
 
-/// Bits Iterator
+/// An iterator over all intervals in a [`Bits`] structure, in sorted order.
+///
+/// This struct is created by the [`iter`](Bits::iter) method. It yields references to all
+/// intervals in the `Bits` structure in sorted order by start position, regardless of overlap.
+///
+/// # Examples
+///
+/// ```
+/// use gtars_overlaprs::{Bits, Overlapper, Interval};
+///
+/// let intervals = vec![
+///     Interval { start: 10u32, end: 20, val: 1 },
+///     Interval { start: 15, end: 25, val: 2 },
+///     Interval { start: 30, end: 40, val: 3 },
+/// ];
+///
+/// let bits = Bits::build(intervals);
+///
+/// // Iterate over all intervals
+/// for interval in bits.iter() {
+///     println!("Interval: {}-{}", interval.start, interval.end);
+/// }
+/// ```
 pub struct IterBits<'a, I, T>
 where
     T: Eq + Clone + Send + Sync + 'a,

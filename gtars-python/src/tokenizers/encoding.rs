@@ -8,25 +8,24 @@ pub struct PyEncoding {
 }
 
 #[pyclass(name = "BatchEncoding", module = "gtars.tokenizers")]
-#[derive(Clone)]
 pub struct PyBatchEncoding {
-    pub input_ids: PyObject,
-    pub attention_mask: PyObject,
+    pub input_ids: Py<PyAny>,
+    pub attention_mask: Py<PyAny>,
     #[pyo3(get)]
     pub encodings: Vec<PyEncoding>,
 }
 
 #[pymethods]
 impl PyBatchEncoding {
-    fn __getitem__(&self, key: &str) -> PyResult<PyObject> {
-        match key {
-            "input_ids" => Ok(self.input_ids.clone()),
-            "attention_mask" => Ok(self.attention_mask.clone()),
+    fn __getitem__(&self, key: &str) -> PyResult<Py<PyAny>> {
+        Python::attach(|py| match key {
+            "input_ids" => Ok(self.input_ids.clone_ref(py)),
+            "attention_mask" => Ok(self.attention_mask.clone_ref(py)),
             _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
                 "Invalid key: {}",
                 key
             ))),
-        }
+        })
     }
 
     fn __len__(&self) -> PyResult<usize> {

@@ -4,6 +4,21 @@ use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
+use gtars_genomicdist::models::ChromosomeStatistics;
+use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+
+#[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PyChromosomeStatistics {
+    pub chromosome: String,
+    pub number_of_regions: u32,
+    pub start_nucleotide_position: u32,
+    pub end_nucleotide_position: u32,
+    pub minimum_region_length: u32,
+    pub maximum_region_length: u32,
+    pub mean_region_length: f64,
+    pub median_region_length: f64,
+}
 
 #[pyclass(name = "RegionSet", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -192,5 +207,71 @@ impl PyRegionSet {
 
     fn get_nucleotide_length(&self) -> u32 {
         self.regionset.nucleotides_length()
+    }
+
+    fn chromosome_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
+        let mut result: HashMap<String, PyChromosomeStatistics> = HashMap::new();
+        let stats: HashMap<String, ChromosomeStatistics> = self.regionset.chromosome_statistics();
+
+        for (key, value) in &stats {
+            result.insert(
+                key.clone(),
+                PyChromosomeStatistics {
+                    chromosome: value.chromosome.clone(),
+                    number_of_regions: value.number_of_regions,
+                    minimum_region_length: value.minimum_region_length,
+                    maximum_region_length: value.maximum_region_length,
+                    mean_region_length: value.mean_region_length,
+                    median_region_length: value.median_region_length,
+                    start_nucleotide_position: value.start_nucleotide_position,
+                    end_nucleotide_position: value.end_nucleotide_position,
+                },
+            );
+        }
+
+        result
+    }
+}
+
+#[pymethods]
+impl PyChromosomeStatistics {
+    #[getter]
+    fn get_chromosome(&self) -> &str {
+        &self.chromosome
+    }
+
+    #[getter]
+    fn get_number_of_regions(&self) -> u32 {
+        self.number_of_regions
+    }
+
+    #[getter]
+    fn get_start_nucleotide_position(&self) -> u32 {
+        self.start_nucleotide_position
+    }
+
+    #[getter]
+    fn get_end_nucleotide_position(&self) -> u32 {
+        self.end_nucleotide_position
+    }
+
+    #[getter]
+    fn get_minimum_region_length(&self) -> u32 {
+        self.minimum_region_length
+    }
+
+    #[getter]
+    fn get_maximum_region_length(&self) -> u32 {
+        self.maximum_region_length
+    }
+
+    #[getter]
+    fn get_mean_region_length(&self) -> f64 {
+        self.mean_region_length
+    }
+
+    #[getter]
+    fn get_median_region_length(&self) -> f64 {
+        self.median_region_length
     }
 }
