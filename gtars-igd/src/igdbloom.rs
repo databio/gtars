@@ -96,14 +96,17 @@ where
     }
 }
 
-pub fn load_bloom_filter_from_disk(
-    load_path: &str,
-) -> Result<Bloom<String>, Box<dyn std::error::Error>> {
-    let bytes = fs::read(load_path)?;
+pub fn load_bloom_filter_from_disk<P>(
+    load_path: P,
+) -> Result<Bloom<String>, Box<dyn std::error::Error>>
+where
+    P: AsRef<Path>,
+{
+    let bytes = fs::read(&load_path)?;
 
     let filter = Bloom::from_bytes(bytes).map_err(|e| format!("Bloom filter error: {}", e))?;
 
-    println!("Successfully loaded bloom filter from: {}", load_path);
+    println!("Successfully loaded bloom filter from: {}", load_path.as_ref().display());
     Ok(filter)
 }
 
@@ -164,15 +167,18 @@ pub fn process_bed_directory(
     Ok(processed_count)
 }
 
-pub fn load_bloom_directory(
-    bloom_directory: &str,
-) -> Result<HashMap<String, Bloom<String>>, Box<dyn std::error::Error>> {
-    let bloom_path = Path::new(bloom_directory);
+pub fn load_bloom_directory<P>(
+    bloom_directory: P,
+) -> Result<HashMap<String, Bloom<String>>, Box<dyn std::error::Error>>
+where
+    P: AsRef<Path>,
+{
+    let bloom_path = bloom_directory.as_ref();
 
     if !bloom_path.exists() || !bloom_path.is_dir() {
         return Err(format!(
             "Bloom directory does not exist or is not a directory: {}",
-            bloom_directory
+            bloom_directory.as_ref().display()
         )
         .into());
     }
@@ -213,7 +219,7 @@ pub fn load_bloom_directory(
     println!(
         "Loaded {} bloom filters from directory: {}",
         bloom_filters.len(),
-        bloom_directory
+        bloom_directory.as_ref().display()
     );
     Ok(bloom_filters)
 }
