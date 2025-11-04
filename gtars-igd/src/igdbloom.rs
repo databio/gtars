@@ -37,7 +37,8 @@ pub fn tokenize_then_create_bloom_for_each_file(
             Bloom::new_for_fp_rate(num_of_items, false_positive_rate).unwrap();
 
         // Tokenize regions for this chromosome and add these regions to bloom filter
-        universe_tokenizer.find_overlaps_iter(&regions)
+        universe_tokenizer
+            .find_overlaps_iter(&regions)
             .for_each(|token| {
                 current_bloom_filter.set(&format!("{}:{}-{}", token.0, token.1.start, token.1.end));
             });
@@ -67,10 +68,7 @@ where
             }
         }
     } else {
-        println!(
-            "Parent directory already exists: {}",
-            parent_path.display()
-        );
+        println!("Parent directory already exists: {}", parent_path.display());
         Ok(())
     }
 }
@@ -86,7 +84,10 @@ where
 
     match fs::write(&save_path, bytes) {
         Ok(_) => {
-            println!("Successfully saved bloom filter to: {}", save_path.as_ref().display());
+            println!(
+                "Successfully saved bloom filter to: {}",
+                save_path.as_ref().display()
+            );
             Ok(())
         }
         Err(e) => {
@@ -106,7 +107,10 @@ where
 
     let filter = Bloom::from_bytes(bytes).map_err(|e| format!("Bloom filter error: {}", e))?;
 
-    println!("Successfully loaded bloom filter from: {}", load_path.as_ref().display());
+    println!(
+        "Successfully loaded bloom filter from: {}",
+        load_path.as_ref().display()
+    );
     Ok(filter)
 }
 
