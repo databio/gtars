@@ -46,15 +46,18 @@ pub fn tokenize_then_create_bloom_for_each_file(
     }
 }
 
-pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
-    let parent_path = Path::new(parent_directory);
+pub fn make_parent_directory<P>(parent_directory: P) -> Result<(), Error>
+where
+    P: AsRef<Path>,
+{
+    let parent_path = parent_directory.as_ref();
 
     if !parent_path.exists() {
-        match fs::create_dir_all(parent_directory) {
+        match fs::create_dir_all(&parent_directory) {
             Ok(_) => {
                 println!(
                     "Parent directory created successfully: {}",
-                    parent_directory
+                    parent_path.display()
                 );
                 Ok(())
             }
@@ -64,20 +67,26 @@ pub fn make_parent_directory(parent_directory: &str) -> Result<(), Error> {
             }
         }
     } else {
-        println!("Parent directory already exists: {}", parent_directory);
+        println!(
+            "Parent directory already exists: {}",
+            parent_path.display()
+        );
         Ok(())
     }
 }
 
-pub fn write_bloom_filter_to_disk(
+pub fn write_bloom_filter_to_disk<P>(
     igd_bloom_filter: Bloom<String>,
-    save_path: String,
-) -> Result<(), std::io::Error> {
+    save_path: P,
+) -> Result<(), std::io::Error>
+where
+    P: AsRef<Path>,
+{
     let bytes = igd_bloom_filter.to_bytes();
 
     match fs::write(&save_path, bytes) {
         Ok(_) => {
-            println!("Successfully saved bloom filter to: {}", &save_path);
+            println!("Successfully saved bloom filter to: {}", save_path.as_ref().display());
             Ok(())
         }
         Err(e) => {
