@@ -1,0 +1,87 @@
+# Unified configuration for scATAC-seq simulation
+# This file is used by both 'stage' and 'simulate' commands
+
+# Path to CSV manifest with sample information
+sample_table: samples.csv
+
+# Chromosome sizes file (required for both staging and simulation)
+chrom_sizes: hg38.sizes
+
+# Optional blacklist file for regions to exclude (used by both staging and simulation)
+blacklist: blacklist.bed  # Comment out or set to null if not needed
+
+# Staging parameters - configures how BAM files are processed
+staging:
+  output_dir: staged/           # Directory to save staged data
+  extend_peaks: 250             # Extend peaks by N base pairs
+  bin_size: 5000               # Size of genomic bins for background regions
+  merge_distance: 20           # Merge peaks within N base pairs
+  skip_if_exists: false        # Skip staging if output already exists
+
+# This field is automatically added after staging completes
+# staging_config: staged/stage_config.yaml
+
+# Multiple simulation configurations
+simulations:
+  - name: sim1                 # Name to reference this simulation
+    weight_column: weight      # Which CSV column to use for cell type weights (null for equal)
+    output_dir: results/sim1/
+    cell_count: 1000           # Number of cells to simulate
+    signal_to_noise: 0.8       # Ratio of peak vs background fragments (0-1)
+    doublet_rate: 0.1          # Fraction of cells that are doublets (0-1)
+    ambient_contamination: 0.02 # Fraction of ambient DNA contamination (0-1)
+    fragment_distribution:
+      type: gaussian           # Distribution type: gaussian, uniform, negativebinomial, or fixed
+      mean_fragments_per_cell: 10000.0  # Average fragments per cell
+      sd: 2000.0               # Standard deviation
+      min: 1000                # Optional minimum (clamps distribution)
+      max: 50000               # Optional maximum (clamps distribution)
+    seed: 42                   # Random seed for reproducibility (null for random)
+    compress: false            # Whether to gzip output files
+
+  - name: sim2                 # Fixed distribution example
+    weight_column: weight2     # Can use different weight columns from CSV
+    output_dir: results/sim2/
+    cell_count: 500
+    signal_to_noise: 0.9
+    doublet_rate: 0.05
+    ambient_contamination: 0.01
+    fragment_distribution:
+      type: fixed              # Every cell gets exactly the same number
+      fragments_per_cell: 5000 # Exact fragments per cell
+    seed: 123
+    compress: true
+
+  - name: sim3                 # Uniform distribution example
+    output_dir: results/sim3/
+    cell_count: 500
+    signal_to_noise: 0.8
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: uniform            # Random value uniformly sampled from range
+      min: 8000                # Minimum fragments per cell
+      max: 12000               # Maximum fragments per cell
+    seed: 456
+    compress: false
+
+  - name: sim4                 # Negative binomial distribution example (most realistic)
+    output_dir: results/sim4/
+    cell_count: 1000
+    signal_to_noise: 0.8
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: negativebinomial   # Models overdispersion common in real scATAC-seq
+      mean: 10000.0            # Mean fragments per cell
+      sd: 4000.0               # Standard deviation (sd² must be > mean for overdispersion)
+      min: 1000                # Optional minimum (clamps distribution)
+      max: 50000               # Optional maximum (clamps distribution)
+    seed: 789
+    compress: false
+
+# Usage:
+# 1. Edit this file and samples.csv with your data
+# 2. Stage: gtars scatrs stage --config scatrs_config.yaml
+# 3. Simulate: gtars scatrs simulate --config scatrs_config.yaml sim1
+#             gtars scatrs simulate --config scatrs_config.yaml sim2

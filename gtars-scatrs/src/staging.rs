@@ -1,9 +1,7 @@
 use crate::models::{ScatrsFragment, ScatrsRegion, Peak};
 use crate::consts::VALID_CHROMOSOMES;
-use crate::fragment_writer::{FragmentWriterManager};
-use crate::fragment_reader::{FragmentReader};
-use crate::chromosome_fragment_writer::{ChromosomeWriterManager};
-use crate::chromosome_fragment_reader::{ChromosomeReaderManager};
+use crate::chr_frag_writer::{ChromosomeWriterManager};
+use crate::chr_frag_reader::{ChromosomeReaderManager};
 use noodles::bam;
 use noodles::bgzf;
 use noodles::sam::alignment::record::Flags;
@@ -469,7 +467,7 @@ impl BamProcessor {
         });
         
         // Show concise initial message
-        let cache_msg = if cache_dir.is_some() { " and caching fragments (chromosome-based)" } else { "" };
+        let cache_msg = if cache_dir.is_some() { " and caching fragments by chrom" } else { "" };
         println!("  Counting fragments in {} peaks and {} background regions{}...", 
             peaks.len(), background.len(), cache_msg);
         
@@ -603,173 +601,6 @@ impl BamProcessor {
         Ok((peak_counts, bg_counts))
     }
     
-    /// Stream through BAM file and count fragments in regions without loading all into memory
-    /// Also optionally caches fragments to binary files for fast retrieval during simulation
-    pub fn count_fragments_streaming_with_cache(
-        bam_path: &Path,
-        peaks: &[ScatrsRegion],
-        background: &[ScatrsRegion],
-        cache_dir: Option<&Path>,
-    ) -> Result<(Vec<u32>, Vec<u32>)> {
-        use std::time::Instant;
-        
-        let mut peak_counts = vec![0u32; peaks.len()];
-        let mut bg_counts = vec![0u32; background.len()];
-        
-        // Initialize fragment writers if caching is enabled
-        let mut peak_writer_manager = cache_dir.map(|dir| FragmentWriterManager::new(dir, true));
-        let mut bg_writer_manager = cache_dir.map(|dir| FragmentWriterManager::new(dir, false));
-        
-        // Show concise initial message
-        let cache_msg = if cache_dir.is_some() { " and caching fragments" } else { "" };
-        println!("  Counting fragments in {} peaks and {} background regions{}...", 
-            peaks.len(), background.len(), cache_msg);
-        
-        let start_time = Instant::now();
-        let mut streamer = BamStreamer::new(bam_path)?;
-        let mut fragment_count = 0u64;
-        let mut last_report_time = Instant::now();
-        let mut regions_with_fragments = std::collections::HashSet::new();
-        
-        // Create chromosome-indexed maps for efficient lookup (silently)
-        let mut peaks_by_chrom: HashMap<String, Vec<(usize, &ScatrsRegion)>> = HashMap::new();
-        for (i, peak) in peaks.iter().enumerate() {
-            peaks_by_chrom.entry(peak.chrom.clone())
-                .or_insert_with(Vec::new)
-                .push((i, peak));
-        }
-        
-        let mut bg_by_chrom: HashMap<String, Vec<(usize, &ScatrsRegion)>> = HashMap::new();
-        for (i, bg) in background.iter().enumerate() {
-            bg_by_chrom.entry(bg.chrom.clone())
-                .or_insert_with(Vec::new)
-                .push((i, bg));
-        }
-        
-        // Sort regions within each chromosome for efficient search
-        for regions in peaks_by_chrom.values_mut() {
-            regions.sort_by_key(|(_, r)| r.start);
-        }
-        for regions in bg_by_chrom.values_mut() {
-            regions.sort_by_key(|(_, r)| r.start);
-        }
-        
-        // Process ONE fragment at a time
-        while let Some(fragment) = streamer.next_fragment()? {
-            fragment_count += 1;
-            
-            // Count this fragment in peaks using binary search optimization
-            if let Some(chrom_peaks) = peaks_by_chrom.get(&fragment.chrom) {
-                // Use binary search to find starting point
-                let start_idx = match chrom_peaks.binary_search_by_key(&fragment.start, |(_, r)| r.start) {
-                    Ok(i) => i,
-                    Err(i) => i.saturating_sub(1),
-                };
-                
-                // Only check regions that could possibly overlap
-                for idx in start_idx..chrom_peaks.len() {
-                    let (i, peak) = &chrom_peaks[idx];
-                    if fragment.start >= peak.end {
-                        continue;  // Skip this one
-                    }
-                    if peak.start >= fragment.end {
-                        break;  // No more overlaps possible
-                    }
-                    if fragment.end > peak.start && fragment.start < peak.end {
-                        peak_counts[*i] += 1;
-                        regions_with_fragments.insert(format!("peak_{}", i));
-                        // Cache fragment if writer is enabled
-                        if let Some(ref mut writer) = peak_writer_manager {
-                            writer.add_fragment(*i as u32, &fragment)?;
-                        }
-                    }
-                }
-            }
-            
-            // Count this fragment in background regions using binary search
-            if let Some(chrom_bg) = bg_by_chrom.get(&fragment.chrom) {
-                let start_idx = match chrom_bg.binary_search_by_key(&fragment.start, |(_, r)| r.start) {
-                    Ok(i) => i,
-                    Err(i) => i.saturating_sub(1),
-                };
-                
-                for idx in start_idx..chrom_bg.len() {
-                    let (i, bg) = &chrom_bg[idx];
-                    if fragment.start >= bg.end {
-                        continue;
-                    }
-                    if bg.start >= fragment.end {
-                        break;
-                    }
-                    if fragment.end > bg.start && fragment.start < bg.end {
-                        bg_counts[*i] += 1;
-                        regions_with_fragments.insert(format!("bg_{}", i));
-                        // Cache fragment if writer is enabled
-                        if let Some(ref mut writer) = bg_writer_manager {
-                            writer.add_fragment(*i as u32, &fragment)?;
-                        }
-                    }
-                }
-            }
-            
-            // Progress updates every 10M fragments or every 15 seconds
-            if fragment_count % 10000000 == 0 {
-                let elapsed = start_time.elapsed();
-                let rate = fragment_count as f64 / elapsed.as_secs_f64();
-                let regions_count = regions_with_fragments.len();
-                println!("    {} fragments processed | {} regions with fragments | {:.0} fragments/sec", 
-                    fragment_count, regions_count, rate);
-                last_report_time = Instant::now();
-            } else if last_report_time.elapsed().as_secs() >= 15 {
-                // Report every 15 seconds if no fragment milestone
-                let elapsed = start_time.elapsed();
-                let rate = fragment_count as f64 / elapsed.as_secs_f64();
-                let regions_count = regions_with_fragments.len();
-                println!("    {} fragments processed | {} regions with fragments | {:.0} fragments/sec", 
-                    fragment_count, regions_count, rate);
-                last_report_time = Instant::now();
-            }
-        }
-        
-        let (_total_reads, filtered_reads) = streamer.get_stats();
-        let total_elapsed = start_time.elapsed();
-        
-        // Finish and close fragment writers if caching is enabled
-        if peak_writer_manager.is_some() || bg_writer_manager.is_some() {
-            println!("    Writing cached fragments to disk (this may take a moment)...");
-            let cache_start = Instant::now();
-            
-            if let Some(writer) = peak_writer_manager {
-                writer.finish_all()?;
-            }
-            if let Some(writer) = bg_writer_manager {
-                writer.finish_all()?;
-            }
-            
-            let cache_elapsed = cache_start.elapsed();
-            println!("    Fragment cache written in {:.1}s", cache_elapsed.as_secs_f64());
-        }
-        
-        // Report summary statistics
-        let peaks_with_counts: usize = peak_counts.iter().filter(|&&c| c > 0).count();
-        let bg_with_counts: usize = bg_counts.iter().filter(|&&c| c > 0).count();
-        let cache_msg = if cache_dir.is_some() { " and cached fragments" } else { "" };
-        println!("    Counted {} fragments in {:.1}s ({} peaks, {} background regions with counts){}", 
-            filtered_reads, total_elapsed.as_secs_f64(), peaks_with_counts, bg_with_counts, cache_msg);
-        
-        Ok((peak_counts, bg_counts))
-    }
-    
-    /// Stream through BAM file and count fragments in regions without loading all into memory
-    /// Backward compatibility wrapper that doesn't cache fragments
-    pub fn count_fragments_streaming(
-        bam_path: &Path,
-        peaks: &[ScatrsRegion],
-        background: &[ScatrsRegion],
-    ) -> Result<(Vec<u32>, Vec<u32>)> {
-        Self::count_fragments_streaming_with_cache(bam_path, peaks, background, None)
-    }
-    
     /// Count total fragments in a BAM file without loading into memory
     pub fn count_total_fragments(bam_path: &Path) -> Result<u64> {
         let mut streamer = BamStreamer::new(bam_path)?;
@@ -854,60 +685,6 @@ impl BamProcessor {
         // Report summary of extracted fragments by region
         let regions_with_fragments = region_fragments.values().filter(|v| !v.is_empty()).count();
         println!("  {} of {} regions have extracted fragments", regions_with_fragments, regions.len());
-        
-        Ok(region_fragments)
-    }
-    
-    /// Extract fragments from cached binary files for specific regions
-    /// Returns a HashMap where keys are region indices and values are fragments
-    pub fn extract_fragments_from_cache(
-        cache_dir: &Path,
-        region_indices: &[u32],
-        is_peak: bool,
-    ) -> Result<HashMap<String, Vec<ScatrsFragment>>> {
-        use std::time::Instant;
-        
-        let mut region_fragments: HashMap<String, Vec<ScatrsFragment>> = HashMap::new();
-        let prefix = if is_peak { "peak_bin_" } else { "bg_bin_" };
-        
-        println!("Reading cached fragments for {} regions from {:?}...", 
-            region_indices.len(), cache_dir);
-        let start_time = Instant::now();
-        
-        let pb = ProgressBar::new(region_indices.len() as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("[{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} regions loaded")
-                .unwrap()
-        );
-        
-        for &bin_id in region_indices {
-            let cache_file = cache_dir.join(format!("{}{}.bin", prefix, bin_id));
-            
-            if !cache_file.exists() {
-                eprintln!("Warning: Cache file not found for bin {}: {:?}", bin_id, cache_file);
-                continue;
-            }
-            
-            let mut reader = FragmentReader::new(&cache_file)?;
-            let mut fragments = Vec::new();
-            
-            while let Some(fragment) = reader.next_fragment()? {
-                fragments.push(fragment);
-            }
-            
-            // Use bin_id as the key for simplicity
-            region_fragments.insert(bin_id.to_string(), fragments);
-            pb.inc(1);
-        }
-        
-        pb.finish_with_message("Fragment cache loading complete");
-        
-        let total_fragments: usize = region_fragments.values().map(|v| v.len()).sum();
-        let elapsed = start_time.elapsed();
-        println!("Loaded {} cached fragments in {:.1}s ({:.0} fragments/sec)", 
-            total_fragments, elapsed.as_secs_f64(), 
-            total_fragments as f64 / elapsed.as_secs_f64());
         
         Ok(region_fragments)
     }
@@ -1058,22 +835,6 @@ impl BamProcessor {
             for entry in entries.flatten() {
                 if let Some(name) = entry.file_name().to_str() {
                     if name.ends_with("_fragments.bin") && name != "fragments.bin" {
-                        return true;
-                    }
-                }
-            }
-        }
-        false
-    }
-    
-    /// Check if fragment cache exists for a sample
-    pub fn has_fragment_cache(sample_dir: &Path) -> bool {
-        // Check if any peak or background bin files exist
-        if let Ok(entries) = std::fs::read_dir(sample_dir) {
-            for entry in entries.flatten() {
-                if let Some(name) = entry.file_name().to_str() {
-                    if (name.starts_with("peak_bin_") || name.starts_with("bg_bin_")) 
-                        && name.ends_with(".bin") {
                         return true;
                     }
                 }
@@ -1340,21 +1101,26 @@ impl PeakMerger {
         }
         
         pb.finish_with_message("Peak merging complete");
-        
+
         // Filter for standard chromosomes
         let valid_chroms: Vec<String> = VALID_CHROMOSOMES
             .iter()
             .map(|&c| c.to_string())
             .collect();
-        
+
         let filtered: Vec<ScatrsRegion> = merged
             .into_iter()
             .filter(|r| valid_chroms.contains(&r.chrom))
             .collect();
-        
+
         println!("Merged peaks: {} (filtered to standard chromosomes)", filtered.len());
-        
-        Ok(filtered)
+
+        // Deduplicate merged peaks
+        println!("Deduplicating merged peaks...");
+        let deduplicated = Self::deduplicate_regions(filtered);
+        println!("After deduplication: {} unique peaks", deduplicated.len());
+
+        Ok(deduplicated)
     }
     
     pub fn extend_peaks(regions: &[ScatrsRegion], extend_bp: u32) -> Vec<ScatrsRegion> {
@@ -1362,9 +1128,34 @@ impl PeakMerger {
     }
     
     pub fn deduplicate_regions(mut regions: Vec<ScatrsRegion>) -> Vec<ScatrsRegion> {
+        use std::collections::HashSet;
+
+        // Sort for efficient comparison
         regions.sort();
-        regions.dedup();
-        regions
+
+        // Track seen regions by their genomic coordinates
+        let mut seen = HashSet::new();
+        let mut unique_regions = Vec::new();
+
+        for region in regions {
+            let key = format!("{}:{}-{}", region.chrom, region.start, region.end);
+            if seen.insert(key) {
+                unique_regions.push(region);
+            }
+        }
+
+        unique_regions
+    }
+
+    pub fn diagnose_peak_duplicates(peaks: &[ScatrsRegion]) -> (usize, usize) {
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        let total = peaks.len();
+        let unique = peaks.iter().filter(|p| {
+            let key = format!("{}:{}-{}", p.chrom, p.start, p.end);
+            seen.insert(key)
+        }).count();
+        (total, unique)
     }
 }
 
@@ -1375,6 +1166,26 @@ impl PeakMerger {
 pub struct BackgroundGenerator;
 
 impl BackgroundGenerator {
+    pub fn deduplicate_regions(mut regions: Vec<ScatrsRegion>) -> Vec<ScatrsRegion> {
+        use std::collections::HashSet;
+
+        // Sort for efficient comparison
+        regions.sort();
+
+        // Track seen regions by their genomic coordinates
+        let mut seen = HashSet::new();
+        let mut unique_regions = Vec::new();
+
+        for region in regions {
+            let key = format!("{}:{}-{}", region.chrom, region.start, region.end);
+            if seen.insert(key) {
+                unique_regions.push(region);
+            }
+        }
+
+        unique_regions
+    }
+
     pub fn generate_background(
         chrom_sizes: &HashMap<String, u64>,
         extended_peaks: &[ScatrsRegion],

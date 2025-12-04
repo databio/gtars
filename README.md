@@ -27,58 +27,128 @@ This repository is a work in progress, and still in early development. This repo
 
 ## Installation
 
-To install any component of `gtars`, you must have the rust toolchain installed. You can install it by [following the instructions](https://www.rust-lang.org/tools/install).
+`gtars` is available in multiple forms to support different environments. Choose the installation method that best fits your needs:
 
-### Command-line interface
-You may build the cli binary locally by navigating to `gtars-cli` and using `cargo build --release`. This will create a binary in `target/release/gtars` at the top level of the workspace. You can then add this to your path, or run it directly.
+### Quick Install
 
-Alternatively, you can run `cargo install --path gtars-cli` from the top level of the workspace. This will install the binary to your cargo bin directory (usually `~/.cargo/bin`).
+#### Python Package (Recommended for most users)
+```bash
+pip install gtars
+```
 
-Finally, you can download precompiled binaries from the [releases page](https://github.com/databio/gtars/releases).
+#### Command Line Interface (CLI)
+```bash
+cargo install gtars-cli --all-features
+```
 
-### Python bindings
-You can install the Python bindings via pip. First, ensure you have a recent version of pip installed. Then run:
+### Detailed Installation Options
+
+#### Prerequisites
+- For CLI installation: [Rust toolchain](https://www.rust-lang.org/tools/install)
+- For Python: pip (comes with Python)
+
+#### 1. Python Package
+The easiest way to use gtars is through the Python package:
 
 ```bash
 pip install gtars
 ```
 
-Then, you can use it in Python like so:
-
+Example usage:
 ```python
-from gtars import __version__
-print(__version__)
+from gtars.tokenizers import Tokenizer
+tokenizer = Tokenizer.from_pretrained("databio/atacformer-base-hg38")
 ```
+
+#### 2. Command Line Interface (CLI)
+Install the CLI tool using cargo:
+
+```bash
+# Basic installation
+cargo install gtars-cli
+
+# With specific features
+cargo install gtars-cli --features "uniwig tokenizers"
+
+# With all features
+cargo install gtars-cli --all-features
+```
+
+Verify installation:
+```bash
+gtars --help
+```
+
+#### 3. Rust Library
+Add to your `Cargo.toml`:
+
+```toml
+[dependencies]
+gtars = { version = "0.5.0", features = ["uniwig", "tokenizers"] }
+```
+
+#### 4. JavaScript/WebAssembly
+```bash
+npm install @databio/gtars-js
+```
+
+Example usage:
+```javascript
+import { Overlapper } from '@databio/gtars-js';
+const overlapper = new Overlapper(universe, 'ailist');
+```
+
+#### 5. Precompiled Binaries
+Download ready-to-use binaries from the [releases page](https://github.com/databio/gtars/releases).
 
 ## Usage
 
-`gtars` provides several useful tools. There are 3 ways to use `gtars`. 
+`gtars` provides several useful tools accessible through different interfaces:
 
-### 1. From Python
+### 1. Python Package
 
-Using bindings, you can call some `gtars` functions from within Python.
+After installation via pip, you can use gtars functions directly in Python:
 
-### 2. From the CLI
+```python
+from gtars import __version__
+from gtars.tokenizers import Tokenizer
 
-To see the available tools you can use from the CLI run `gtars --help`. To see the help for a specific tool, run `gtars <tool> --help`.
+print(__version__)
+tokenizer = Tokenizer.from_pretrained("databio/atacformer-base-hg38")
+```
 
-### 3. As a rust library
+### 2. Command Line Interface
 
-You can link `gtars` as a library in your rust project. To do so, add the following to your `Cargo.toml` file:
+Once installed, use the CLI to access various tools:
+
+```bash
+# View available tools
+gtars --help
+
+# Get help for a specific tool
+gtars <tool> --help
+```
+
+### 3. Rust Library
+
+Include gtars in your Rust project by adding to `Cargo.toml`:
 
 ```toml
 [dependencies]
-gtars = { git = "https://github.com/databio/gtars/gtars" }
+gtars = { version = "0.5.0", features = ["overlaprs"] }
 ```
 
-we wall-off crates using features, so you will need to enable the features you want. For example, to use the `gtars` crate the overlap tool, you would do:
-```toml
-[dependencies]
-gtars = { git = "https://github.com/databio/gtars/gtars", features = ["overlaprs"] }
-```
-
-Then, in your rust code, you can use it like so:
+Then use in your Rust code:
 
 ```rust
 use gtars::overlaprs::{ ... };
+```
+
+### 4. JavaScript/WebAssembly
+
+After npm installation, use in JavaScript/TypeScript:
+
+```javascript
+import { Overlapper } from '@databio/gtars-js';
+// Your code here
 ```

@@ -49,7 +49,7 @@
 //! // Sample cells from staged data
 //! let cell_regions = weighted.sample_regions_for_cells(
 //!     None, None, None, None, 0.8, 
-//!     &FragmentDistribution::Uniform { count: 10000 },
+//!     &FragmentDistribution::Fixed { fragments_per_cell: 10000 },
 //!     100 // number of cells
 //! )?;
 //! 
@@ -74,10 +74,8 @@ pub mod models;
 pub mod staging;
 pub mod sampling;
 pub mod io;
-pub mod fragment_writer;
-pub mod fragment_reader;
-pub mod chromosome_fragment_writer;
-pub mod chromosome_fragment_reader;
+pub mod chr_frag_writer;
+pub mod chr_frag_reader;
 
 #[cfg(test)]
 mod tests;

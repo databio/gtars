@@ -40,8 +40,9 @@ fn test_a_res_integration() {
         &background,
         &background_weights,
         0.8,  // signal-to-noise ratio
-        &FragmentDistribution::Uniform { fragments_per_cell: 10000 },
+        &FragmentDistribution::Fixed { fragments_per_cell: 10000.0 },
         &mut rng,
+        0.0,  // no ambient contamination for this test
     );
     
     assert!(result.is_ok());
@@ -106,8 +107,9 @@ fn test_a_res_performance_comparison() {
             &peaks,
             &weights,
             0.5,
-            &FragmentDistribution::Uniform { fragments_per_cell: 1000 },
+            &FragmentDistribution::Fixed { fragments_per_cell: 1000.0 },
             &mut local_rng,
+            0.0,
         );
     }
     let optimized_time = start.elapsed();
@@ -141,8 +143,9 @@ fn test_without_replacement_property() {
         &[],
         &[],
         1.0,  // all peaks, no background
-        &FragmentDistribution::Uniform { fragments_per_cell: 50 },
+        &FragmentDistribution::Fixed { fragments_per_cell: 50.0 },
         &mut rng,
+        0.0,  // no ambient contamination
     ).unwrap();
     
     // Check for duplicates

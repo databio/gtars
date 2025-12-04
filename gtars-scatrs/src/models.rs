@@ -14,8 +14,8 @@ use std::collections::HashMap;
 /// 
 /// # Example
 /// ```
-/// use gtars::scatrs::ScatrsFragment;
-/// 
+/// use gtars_scatrs::models::ScatrsFragment;
+///
 /// let fragment = ScatrsFragment::new("chr1".to_string(), 1000, 1200)
 ///     .with_cell_id("cell_001".to_string())
 ///     .with_quality(30);
@@ -347,7 +347,8 @@ impl Default for CellMetadata {
 pub struct ScatrsConfig {
     pub cell_types: Vec<String>,
     pub cell_count: u32,
-    pub signal_to_noise: f64,
+    #[serde(default = "default_signal_to_noise_distribution")]
+    pub signal_to_noise_distribution: SignalToNoiseDistribution,
     pub extend_peaks: u32,
     pub bin_size: u32,
     pub fragment_distribution: FragmentDistribution,
@@ -364,17 +365,107 @@ pub struct ScatrsConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "type")]
-#[serde(rename_all = "lowercase")] 
+#[serde(rename_all = "lowercase")]
 pub enum FragmentDistribution {
-    Uniform { 
-        fragments_per_cell: u32 
+    /// Fixed: Every cell gets exactly the same number of fragments
+    Fixed {
+        fragments_per_cell: f64
     },
-    Gaussian { 
-        mean_fragments_per_cell: f64, 
-        variance: f64, 
-        min: u32, 
-        max: u32 
+    /// Uniform: Fragments per cell uniformly sampled from [min, max] range
+    Uniform {
+        min: f64,
+        max: f64
     },
+    /// Gaussian: Fragments per cell sampled from normal distribution
+    Gaussian {
+        mean_fragments_per_cell: f64,
+        sd: f64,
+        #[serde(default)]
+        min: Option<f64>,
+        #[serde(default)]
+        max: Option<f64>
+    },
+    /// NegativeBinomial: Fragments per cell sampled from negative binomial distribution
+    /// (models overdispersion commonly seen in real scATAC-seq data)
+    NegativeBinomial {
+        mean: f64,           // Mean fragments per cell
+        sd: f64,             // Standard deviation (sd² must be > mean for overdispersion)
+        #[serde(default)]
+        min: Option<f64>,    // Optional minimum bound
+        #[serde(default)]
+        max: Option<f64>,    // Optional maximum bound
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "type")]
+#[serde(rename_all = "lowercase")]
+pub enum SignalToNoiseDistribution {
+    /// Fixed: Every cell gets exactly the same signal-to-noise ratio
+    Fixed {
+        signal_to_noise: f64
+    },
+    /// Beta: Signal-to-noise sampled from beta distribution
+    /// Beta distribution is ideal for values bounded between 0 and 1
+    Beta {
+        mean: f64,    // Mean signal-to-noise ratio (0-1)
+        sd: f64,      // Standard deviation
+    },
+    /// Gaussian: Signal-to-noise sampled from normal distribution
+    /// Will be clamped to [0, 1] range
+    Gaussian {
+        mean: f64,
+        sd: f64,
+        #[serde(default = "default_snr_min")]
+        min: Option<f64>,  // Default: 0.0
+        #[serde(default = "default_snr_max")]
+        max: Option<f64>,  // Default: 1.0
+    },
+}
+
+fn default_snr_min() -> Option<f64> { Some(0.0) }
+fn default_snr_max() -> Option<f64> { Some(1.0) }
+
+impl SignalToNoiseDistribution {
+    pub fn validate(&self) -> anyhow::Result<()> {
+        match self {
+            Self::Fixed { signal_to_noise } => {
+                if *signal_to_noise < 0.0 || *signal_to_noise > 1.0 {
+                    anyhow::bail!("signal_to_noise must be between 0 and 1, got {}", signal_to_noise);
+                }
+            },
+            Self::Beta { mean, sd } => {
+                if *mean <= 0.0 || *mean >= 1.0 {
+                    anyhow::bail!("Beta mean must be between 0 and 1 (exclusive), got {}", mean);
+                }
+                if *sd <= 0.0 {
+                    anyhow::bail!("Beta sd must be positive, got {}", sd);
+                }
+                let variance = sd * sd;
+                let max_variance = mean * (1.0 - mean);
+                if variance >= max_variance {
+                    anyhow::bail!(
+                        "Beta variance (sd²={:.4}) must be less than mean×(1-mean)={:.4} for mean={}",
+                        variance, max_variance, mean
+                    );
+                }
+            },
+            Self::Gaussian { mean, sd, min, max } => {
+                if *sd <= 0.0 {
+                    anyhow::bail!("Gaussian sd must be positive, got {}", sd);
+                }
+                let min_val = min.unwrap_or(0.0);
+                let max_val = max.unwrap_or(1.0);
+                if min_val >= max_val {
+                    anyhow::bail!("Gaussian min ({}) must be less than max ({})", min_val, max_val);
+                }
+                if *mean < min_val || *mean > max_val {
+                    anyhow::bail!("Gaussian mean ({}) must be within [min={}, max={}]", mean, min_val, max_val);
+                }
+            },
+        }
+        Ok(())
+    }
 }
 
 impl Default for ScatrsConfig {
@@ -382,14 +473,14 @@ impl Default for ScatrsConfig {
         Self {
             cell_types: vec!["default".to_string()],
             cell_count: 100,
-            signal_to_noise: 0.8,
+            signal_to_noise_distribution: SignalToNoiseDistribution::Fixed { signal_to_noise: 0.8 },
             extend_peaks: 250,
             bin_size: 5000,
             fragment_distribution: FragmentDistribution::Gaussian {
                 mean_fragments_per_cell: 10000.0,
-                variance: 2000.0,
-                min: 1000,
-                max: 50000,
+                sd: 2000.0,
+                min: Some(1000.0),
+                max: Some(50000.0),
             },
             output_dir: PathBuf::from("output"),
             peak_dir: None,
@@ -573,8 +664,8 @@ pub struct SimulationConfig {
     
     pub output_dir: PathBuf,
     pub cell_count: u32,
-    #[serde(default = "default_signal_to_noise")]
-    pub signal_to_noise: f64,
+    #[serde(default = "default_signal_to_noise_distribution")]
+    pub signal_to_noise_distribution: SignalToNoiseDistribution,
     #[serde(default)]
     pub doublet_rate: f64,
     #[serde(default)]
@@ -590,7 +681,9 @@ pub struct SimulationConfig {
 fn default_extend_peaks() -> u32 { 250 }
 fn default_bin_size() -> u32 { 5000 }
 fn default_merge_distance() -> u32 { 20 }
-fn default_signal_to_noise() -> f64 { 0.8 }
+fn default_signal_to_noise_distribution() -> SignalToNoiseDistribution {
+    SignalToNoiseDistribution::Fixed { signal_to_noise: 0.8 }
+}
 
 impl UnifiedConfig {
     /// Helper function to resolve a path relative to a base directory
@@ -612,7 +705,33 @@ impl UnifiedConfig {
         let content = std::fs::read_to_string(path)
             .map_err(|e| anyhow::anyhow!("Failed to read config file from {:?}: {}", path, e))?;
         let mut config: Self = serde_yaml::from_str(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse YAML config from {:?}: {}", path, e))?;
+            .map_err(|e| {
+                // Try to provide more context about distribution type errors
+                let error_str = e.to_string();
+                if error_str.contains("fragment_distribution") || error_str.contains("missing field") {
+                    // Parse as generic YAML to extract the distribution type
+                    if let Ok(yaml_value) = serde_yaml::from_str::<serde_yaml::Value>(&content) {
+                        if let Some(sims) = yaml_value.get("simulations").and_then(|s| s.as_sequence()) {
+                            for (idx, sim) in sims.iter().enumerate() {
+                                if let Some(frag_dist) = sim.get("fragment_distribution") {
+                                    if let Some(dist_type) = frag_dist.get("type").and_then(|t| t.as_str()) {
+                                        return anyhow::anyhow!(
+                                            "Failed to parse YAML config from {:?}: {}\n\n\
+                                            Hint: Distribution type '{}' in simulation #{} requires specific fields:\n\
+                                            - 'fixed': requires 'fragments_per_cell'\n\
+                                            - 'uniform': requires 'min' and 'max'\n\
+                                            - 'gaussian': requires 'mean_fragments_per_cell' and 'sd' (optional: 'min', 'max')\n\
+                                            - 'negativebinomial': requires 'mean' and 'sd' (optional: 'min', 'max')",
+                                            path, e, dist_type, idx + 1
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                anyhow::anyhow!("Failed to parse YAML config from {:?}: {}", path, e)
+            })?;
         
         // Get the parent directory of the config file
         let config_dir = path.parent()

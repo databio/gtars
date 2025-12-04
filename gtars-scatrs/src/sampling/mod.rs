@@ -1,7 +1,7 @@
-use crate::models::{ScatrsRegion, ScatrsFragment, SimulatedCell, FragmentDistribution, ScatrsConfig};
+use crate::models::{ScatrsRegion, ScatrsFragment, SimulatedCell, FragmentDistribution, SignalToNoiseDistribution, ScatrsConfig};
 use rand::prelude::*;
 use rand::distributions::{Distribution, Uniform};
-use rand_distr::{Normal, Beta};
+use rand_distr::{Normal, Beta, Gamma, Poisson};
 use anyhow::{Result, Context};
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle, MultiProgress};
@@ -37,7 +37,61 @@ impl WeightedSampler {
     pub fn new(_seed: Option<u64>) -> Self {
         Self {}
     }
-    
+
+    /// Sample fragment count from a distribution
+    fn sample_fragment_count(
+        fragment_dist: &FragmentDistribution,
+        rng: &mut StdRng,
+    ) -> Result<u32> {
+        match fragment_dist {
+            FragmentDistribution::Fixed { fragments_per_cell } => {
+                Ok(*fragments_per_cell as u32)
+            },
+            FragmentDistribution::Uniform { min, max } => {
+                let uniform_dist = Uniform::new_inclusive(*min, *max);
+                Ok(uniform_dist.sample(rng) as u32)
+            },
+            FragmentDistribution::Gaussian { mean_fragments_per_cell, sd, min, max } => {
+                let normal = Normal::new(*mean_fragments_per_cell, *sd)
+                    .context("Invalid Gaussian parameters")?;
+                let sampled = normal.sample(rng) as u32;
+                let min_val = min.map(|v| v as u32).unwrap_or(0);
+                match max {
+                    Some(max_val) => Ok(sampled.clamp(min_val, *max_val as u32)),
+                    None => Ok(sampled.max(min_val))
+                }
+            },
+            FragmentDistribution::NegativeBinomial { mean, sd, min, max } => {
+                let variance = sd * sd;
+                if variance <= *mean {
+                    return Err(anyhow::anyhow!(
+                        "Invalid NegativeBinomial parameters: variance (sd²={}) must be greater than mean ({}) for overdispersion",
+                        variance, mean
+                    ));
+                }
+
+                let r = (mean * mean) / (variance - mean);
+                let p = mean / variance;
+                let gamma_shape = r;
+                let gamma_scale = (1.0 - p) / p;
+
+                let gamma = Gamma::new(gamma_shape as f64, gamma_scale)
+                    .context("Invalid Gamma parameters for NegativeBinomial simulation")?;
+                let lambda = gamma.sample(rng);
+
+                let poisson = Poisson::new(lambda)
+                    .context("Invalid Poisson parameter")?;
+                let sampled = poisson.sample(rng) as u32;
+
+                let min_val = min.map(|v| v as u32).unwrap_or(0);
+                match max {
+                    Some(max_val) => Ok(sampled.clamp(min_val, *max_val as u32)),
+                    None => Ok(sampled.max(min_val))
+                }
+            }
+        }
+    }
+
     /// Sample genomic regions for multiple cells with cell-type-specific weights
     /// 
     /// Assigns regions to cells based on per-sample weights and signal-to-noise ratio.
@@ -57,7 +111,7 @@ impl WeightedSampler {
         sample_peak_weights: Option<&HashMap<String, Vec<f64>>>,
         background: Option<&[ScatrsRegion]>,
         sample_bg_weights: Option<&HashMap<String, Vec<f64>>>,
-        signal_to_noise: f64,
+        signal_to_noise_dist: &SignalToNoiseDistribution,
         fragment_dist: &FragmentDistribution,
         cell_type_assignments: &[String],
         ambient_contamination: f64,
@@ -126,14 +180,18 @@ impl WeightedSampler {
                 .into_par_iter()
                 .map(|cell_idx| {
                     let cell_type = &cell_type_assignments[cell_idx];
-                    
+
                     // Get weights for this cell's type
                     let peak_weights = normalized_peak_weights.get(cell_type)
                         .ok_or_else(|| anyhow::anyhow!("No peak weights for cell type: {}", cell_type))
                         .unwrap();
-                    
+
                     let mut local_rng = StdRng::from_entropy();
-                    
+
+                    // Sample signal-to-noise for this specific cell
+                    let cell_signal_to_noise = sample_signal_to_noise(signal_to_noise_dist, &mut local_rng)
+                        .unwrap_or(0.8);  // Fallback to default if sampling fails
+
                     if has_background {
                         let bg_weights = normalized_bg_weights.get(cell_type)
                             .ok_or_else(|| anyhow::anyhow!("No background weights for cell type: {}", cell_type))
@@ -143,7 +201,7 @@ impl WeightedSampler {
                             peak_weights,
                             background.unwrap(),
                             bg_weights,
-                            signal_to_noise,
+                            cell_signal_to_noise,
                             fragment_dist,
                             &mut local_rng,
                             ambient_contamination,
@@ -193,119 +251,132 @@ impl WeightedSampler {
         ambient_contamination: f64,
     ) -> Result<Vec<SampledRegion>> {
         // Determine total number of fragments for this cell
-        let total_fragments = match fragment_dist {
-            FragmentDistribution::Uniform { fragments_per_cell } => *fragments_per_cell,
-            FragmentDistribution::Gaussian { mean_fragments_per_cell, variance, min, max } => {
-                let normal = Normal::new(*mean_fragments_per_cell, variance.sqrt())
-                    .context("Invalid Gaussian parameters")?;
-                let sampled = normal.sample(rng) as u32;
-                sampled.clamp(*min, *max)
-            }
-        };
-        
+        let total_fragments = Self::sample_fragment_count(fragment_dist, rng)?;
+
         // Calculate source fragments (excluding ambient contamination)
         // This ensures the total fragment count stays as configured
         let source_fragments = ((total_fragments as f64) * (1.0 - ambient_contamination)) as u32;
         
         // Split source fragments between peaks and background based on signal-to-noise ratio
-        let peak_fragments = (source_fragments as f64 * signal_to_noise) as usize;
-        let background_fragments = (source_fragments - peak_fragments as u32) as usize;
+        let peak_fragments_uncapped = (source_fragments as f64 * signal_to_noise) as usize;
+        let background_fragments_uncapped = (source_fragments - peak_fragments_uncapped as u32) as usize;
+
+        // Cap at available regions (biological constraint: max 1 fragment per region per cell)
+        let peak_fragments = peak_fragments_uncapped.min(peaks.len());
+        let background_fragments = background_fragments_uncapped.min(background.len());
+
+        // Always show fragment/region statistics (useful for understanding simulation parameters)
+        if std::env::var("SCATRS_DEBUG").is_ok() {
+            eprintln!("Cell sampling stats: {} peak fragments requested, {} peaks available (ratio: {:.2}%)",
+                peak_fragments_uncapped, peaks.len(),
+                (peak_fragments_uncapped as f64 / peaks.len() as f64) * 100.0);
+            if !background.is_empty() {
+                eprintln!("                    {} background fragments requested, {} background regions available (ratio: {:.2}%)",
+                    background_fragments_uncapped, background.len(),
+                    (background_fragments_uncapped as f64 / background.len() as f64) * 100.0);
+            }
+        }
+
+        // Warn if we had to cap (this indicates unrealistic simulation parameters)
+        if peak_fragments < peak_fragments_uncapped {
+            eprintln!("WARNING: Requested {} peak fragments but only {} peaks available. Capped at {} fragments (ratio: {:.2}%).",
+                peak_fragments_uncapped, peaks.len(), peak_fragments,
+                (peak_fragments as f64 / peaks.len() as f64) * 100.0);
+            eprintln!("         This is biologically unrealistic (hitting same peak multiple times in one cell).");
+            eprintln!("         Consider reducing fragments_per_cell or increasing the peak set size.");
+        }
+        if background_fragments < background_fragments_uncapped {
+            eprintln!("WARNING: Requested {} background fragments but only {} background regions available. Capped at {} fragments (ratio: {:.2}%).",
+                background_fragments_uncapped, background.len(), background_fragments,
+                (background_fragments as f64 / background.len() as f64) * 100.0);
+            eprintln!("         This is biologically unrealistic (hitting same region multiple times in one cell).");
+            eprintln!("         Consider reducing fragments_per_cell or increasing the background region set size.");
+        }
         
         let mut sampled_regions = Vec::new();
         
         // Sample peaks using A-Res
         if peak_fragments > 0 && !peaks.is_empty() {
             let mut peak_sampler = VectorAResSampler::new(
-                peak_fragments.min(peaks.len()),
+                peak_fragments,  // Already capped at peaks.len() above
                 Some(rng.gen())
             );
-            
+
             let peak_iter = peaks.iter().zip(peak_weights.iter())
                 .map(|(region, &weight)| (region.clone(), weight));
-            
+
+            // Debug: Check input iterator for duplicates
+            if std::env::var("SCATRS_DEBUG").is_ok() {
+                let iter_copy = peaks.iter().zip(peak_weights.iter())
+                    .map(|(region, &weight)| (region.clone(), weight));
+                let regions_vec: Vec<_> = iter_copy.collect();
+                let mut region_set = std::collections::HashSet::new();
+                for (region, _) in &regions_vec {
+                    let key = format!("{}:{}-{}", region.chrom, region.start, region.end);
+                    if !region_set.insert(key.clone()) {
+                        eprintln!("WARNING: Duplicate region in A-Res input: {}", key);
+                    }
+                }
+            }
+
             let sampled_peaks = peak_sampler.sample_stream(
                 peak_iter,
                 |(_, weight)| *weight
             );
-            
-            // DIAGNOSTIC: Track chromosome distribution to detect sampling bias
-            // If all samples come from chr1, indicates jump calculation issues
+
+            // Debug diagnostics (if enabled)
             if std::env::var("SCATRS_DEBUG").is_ok() && !sampled_peaks.is_empty() {
                 let mut chr_counts = std::collections::HashMap::new();
+                let mut region_set = std::collections::HashSet::new();
                 for (region, _) in &sampled_peaks {
                     *chr_counts.entry(region.chrom.clone()).or_insert(0) += 1;
+                    let key = format!("{}:{}-{}", region.chrom, region.start, region.end);
+                    if !region_set.insert(key.clone()) {
+                        eprintln!("ERROR: A-Res returned duplicate region: {}", key);
+                    }
                 }
                 eprintln!("Sampled peaks by chromosome: {:?}", chr_counts);
             }
-            
-            // Convert to SampledRegion format and redistribute fragments
-            let num_sampled_peaks = sampled_peaks.len();
-            let mut remaining_peak_fragments = peak_fragments;
-            
-            for (i, (region, weight)) in sampled_peaks.into_iter().enumerate() {
-                // Distribute remaining fragments as evenly as possible
-                let regions_left = num_sampled_peaks - i;
-                let fragments_for_this_region = if regions_left > 0 {
-                    let fragments_per_remaining = remaining_peak_fragments / regions_left;
-                    let extra_fragment = if remaining_peak_fragments % regions_left > 0 { 1 } else { 0 };
-                    fragments_per_remaining + extra_fragment
-                } else {
-                    0
-                };
-                
-                if fragments_for_this_region > 0 {
-                    sampled_regions.push(SampledRegion {
-                        region,
-                        is_peak: true,
-                        weight,
-                        fragment_count: fragments_for_this_region as u32,
-                    });
-                    remaining_peak_fragments -= fragments_for_this_region;
-                }
-            }
+
+            // Each sampled region contributes exactly 1 fragment
+            let peak_regions: Vec<SampledRegion> = sampled_peaks
+                .into_iter()
+                .map(|(region, weight)| SampledRegion {
+                    region,
+                    is_peak: true,
+                    weight,
+                    fragment_count: 1,
+                })
+                .collect();
+            sampled_regions.extend(peak_regions);
         }
         
         // Sample background using A-Res
         if background_fragments > 0 && !background.is_empty() {
             let mut bg_sampler = VectorAResSampler::new(
-                background_fragments.min(background.len()),
+                background_fragments,  // Already capped at background.len() above
                 Some(rng.gen())
             );
-            
+
             let bg_iter = background.iter().zip(background_weights.iter())
                 .map(|(region, &weight)| (region.clone(), weight));
-            
+
             let sampled_bg = bg_sampler.sample_stream(
                 bg_iter,
                 |(_, weight)| *weight
             );
-            
-            // Convert to SampledRegion format and redistribute fragments
-            let sampled_bg_vec: Vec<_> = sampled_bg;
-            let num_sampled_bg = sampled_bg_vec.len();
-            let mut remaining_bg_fragments = background_fragments;
-            
-            for (i, (region, weight)) in sampled_bg_vec.into_iter().enumerate() {
-                // Distribute remaining fragments as evenly as possible
-                let regions_left = num_sampled_bg - i;
-                let fragments_for_this_region = if regions_left > 0 {
-                    let fragments_per_remaining = remaining_bg_fragments / regions_left;
-                    let extra_fragment = if remaining_bg_fragments % regions_left > 0 { 1 } else { 0 };
-                    fragments_per_remaining + extra_fragment
-                } else {
-                    0
-                };
-                
-                if fragments_for_this_region > 0 {
-                    sampled_regions.push(SampledRegion {
-                        region,
-                        is_peak: false,
-                        weight,
-                        fragment_count: fragments_for_this_region as u32,
-                    });
-                    remaining_bg_fragments -= fragments_for_this_region;
-                }
-            }
+
+            // Each sampled region contributes exactly 1 fragment
+            let bg_regions: Vec<SampledRegion> = sampled_bg
+                .into_iter()
+                .map(|(region, weight)| SampledRegion {
+                    region,
+                    is_peak: false,
+                    weight,
+                    fragment_count: 1,
+                })
+                .collect();
+            sampled_regions.extend(bg_regions);
         }
         
         Ok(sampled_regions)
@@ -324,16 +395,8 @@ impl WeightedSampler {
         ambient_contamination: f64,
     ) -> Result<Vec<SampledRegion>> {
         // Determine total number of fragments for this cell
-        let total_fragments = match fragment_dist {
-            FragmentDistribution::Uniform { fragments_per_cell } => *fragments_per_cell,
-            FragmentDistribution::Gaussian { mean_fragments_per_cell, variance, min, max } => {
-                let normal = Normal::new(*mean_fragments_per_cell, variance.sqrt())
-                    .context("Invalid Gaussian parameters")?;
-                let sampled = normal.sample(rng) as u32;
-                sampled.clamp(*min, *max)
-            }
-        };
-        
+        let total_fragments = Self::sample_fragment_count(fragment_dist, rng)?;
+
         // Calculate source fragments (excluding ambient contamination)
         // This ensures the total fragment count stays as configured
         let source_fragments = ((total_fragments as f64) * (1.0 - ambient_contamination)) as u32;
@@ -342,22 +405,23 @@ impl WeightedSampler {
         
         // All fragments come from peaks when no background is available
         if source_fragments > 0 && !peaks.is_empty() {
+            // Cap at available regions (biological constraint: max 1 fragment per region per cell)
             let fragments_to_sample = (source_fragments as usize).min(peaks.len());
+
             let mut peak_sampler = VectorAResSampler::new(
                 fragments_to_sample,
                 Some(rng.gen())
             );
-            
+
             let peak_iter = peaks.iter().zip(peak_weights.iter())
                 .map(|(region, &weight)| (region.clone(), weight));
-            
+
             let sampled_peaks = peak_sampler.sample_stream(
                 peak_iter,
                 |(_, weight)| *weight
             );
-            
-            // DIAGNOSTIC: Monitor chromosome distribution in peaks-only mode
-            // Expected: distribution should match input fragment density per chromosome
+
+            // Debug diagnostics (if enabled)
             if std::env::var("SCATRS_DEBUG").is_ok() && !sampled_peaks.is_empty() {
                 let mut chr_counts = std::collections::HashMap::new();
                 for (region, _) in &sampled_peaks {
@@ -365,38 +429,69 @@ impl WeightedSampler {
                 }
                 eprintln!("Sampled peaks by chromosome (peaks-only mode): {:?}", chr_counts);
             }
-            
-            // Convert to SampledRegion format and redistribute fragments
-            let num_sampled_peaks = sampled_peaks.len();
-            let mut remaining_fragments = source_fragments as usize;
-            
-            for (i, (region, weight)) in sampled_peaks.into_iter().enumerate() {
-                // Distribute remaining fragments as evenly as possible
-                let regions_left = num_sampled_peaks - i;
-                let fragments_for_this_region = if regions_left > 0 {
-                    let fragments_per_remaining = remaining_fragments / regions_left;
-                    let extra_fragment = if remaining_fragments % regions_left > 0 { 1 } else { 0 };
-                    fragments_per_remaining + extra_fragment
-                } else {
-                    0
-                };
-                
-                if fragments_for_this_region > 0 {
-                    sampled_regions.push(SampledRegion {
-                        region,
-                        is_peak: true,
-                        weight,
-                        fragment_count: fragments_for_this_region as u32,
-                    });
-                    remaining_fragments -= fragments_for_this_region;
-                }
-            }
+
+            // Each sampled region contributes exactly 1 fragment
+            sampled_regions = sampled_peaks
+                .into_iter()
+                .map(|(region, weight)| SampledRegion {
+                    region,
+                    is_peak: true,
+                    weight,
+                    fragment_count: 1,
+                })
+                .collect();
         }
         
         Ok(sampled_regions)
     }
-    
+
 }
+
+/// Sample a signal-to-noise value for a single cell
+fn sample_signal_to_noise(
+    distribution: &SignalToNoiseDistribution,
+    rng: &mut StdRng,
+) -> Result<f64> {
+    let value = match distribution {
+        SignalToNoiseDistribution::Fixed { signal_to_noise } => *signal_to_noise,
+        SignalToNoiseDistribution::Beta { mean, sd } => {
+            // Convert mean/sd to alpha/beta parameters for Beta distribution
+            // mean = alpha / (alpha + beta)
+            // variance = (alpha * beta) / ((alpha + beta)^2 * (alpha + beta + 1))
+            let variance = sd * sd;
+
+            // Solve for alpha and beta from mean and variance
+            // alpha = mean * ((mean * (1 - mean) / variance) - 1)
+            // beta = (1 - mean) * ((mean * (1 - mean) / variance) - 1)
+            let mean_variance_ratio = (mean * (1.0 - mean)) / variance;
+            if mean_variance_ratio <= 1.0 {
+                return Err(anyhow::anyhow!(
+                    "Invalid Beta parameters: variance too large for mean={}, sd={}. Max sd for this mean is {:.4}",
+                    mean, sd, (mean * (1.0 - mean)).sqrt() * 0.99
+                ));
+            }
+
+            let alpha = mean * (mean_variance_ratio - 1.0);
+            let beta_param = (1.0 - mean) * (mean_variance_ratio - 1.0);
+
+            let beta_dist = Beta::new(alpha, beta_param)
+                .context("Invalid Beta distribution parameters")?;
+            beta_dist.sample(rng)
+        },
+        SignalToNoiseDistribution::Gaussian { mean, sd, min, max } => {
+            let normal = Normal::new(*mean, *sd)
+                .context("Invalid Gaussian parameters")?;
+            let sampled = normal.sample(rng);
+            let min_val = min.unwrap_or(0.0);
+            let max_val = max.unwrap_or(1.0);
+            sampled.clamp(min_val, max_val)
+        },
+    };
+
+    // Ensure value is in valid range [0, 1]
+    Ok(value.clamp(0.0, 1.0))
+}
+
 
 // ============================================================================
 // Uniform Sampling
@@ -979,12 +1074,13 @@ pub fn normalize_weights(weights: &[f64]) -> Vec<f64> {
 /// ```no_run
 /// # use anyhow::Result;
 /// # fn main() -> Result<()> {
-/// use gtars::scatrs::{DoubletSimulator, ScatrsConfig};
-/// 
+/// use gtars_scatrs::sampling::DoubletSimulator;
+/// use gtars_scatrs::models::ScatrsConfig;
+///
 /// let simulator = DoubletSimulator::new(Some(42));
 /// let mut cells = vec![]; // your cells
 /// let config = ScatrsConfig::default();
-/// 
+///
 /// // Create 10% doublets
 /// let annotations = simulator.simulate_doublets(&mut cells, 0.1, &config)?;
 /// # Ok(())

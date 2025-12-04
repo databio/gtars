@@ -54,7 +54,12 @@ mod tests {
     fn test_config_creation() {
         let config = ScatrsConfig::default();
         assert_eq!(config.cell_count, 100);
-        assert_eq!(config.signal_to_noise, 0.8);
+        match &config.signal_to_noise_distribution {
+            SignalToNoiseDistribution::Fixed { signal_to_noise } => {
+                assert_eq!(*signal_to_noise, 0.8);
+            },
+            _ => panic!("Expected Fixed distribution"),
+        }
         assert_eq!(config.extend_peaks, 250);
         assert_eq!(config.bin_size, 5000);
     }

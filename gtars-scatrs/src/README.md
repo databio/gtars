@@ -58,17 +58,24 @@ gtars scatrs stage --config scatrs_config.yaml
 # Updates the config with staging_config path
 
 # Step 5: Simulate cells (can run multiple times)
-gtars scatrs simulate --config scatrs_config.yaml
-# Uses the same config file, now with staging_config filled in
+# Specify which simulation to run by name (from the simulations array in config)
+gtars scatrs simulate --config scatrs_config.yaml default
+# The positional argument "default" is the simulation name
 
 # To change simulation parameters without re-staging:
 # 1. Edit the simulation section in scatrs_config.yaml
 # 2. Or override with CLI args:
 gtars scatrs simulate \
     --config scatrs_config.yaml \
+    default \
     --cells 5000 \
     --doublet-rate 0.15 \
     --output results_v2/
+
+# You can define multiple simulations in the config and run them separately:
+# scatrs_config.yaml can contain multiple simulations with different parameters
+gtars scatrs simulate --config scatrs_config.yaml high_doublets
+gtars scatrs simulate --config scatrs_config.yaml low_contamination
 ```
 
 ### Legacy Modes (Backward Compatible)
@@ -115,19 +122,35 @@ staging:
 
 staging_config: null           # Filled automatically after staging
 
-simulation:
-  output_dir: results/
-  cell_count: 1000
-  fragments_per_cell: 10000
-  signal_to_noise: 0.8
-  doublet_rate: 0.1
-  ambient_contamination: 0.02
-  fragment_distribution:
-    type: gaussian
-    mean: 10000.0
-    variance: 4000000.0
-    min: 1000
-    max: 50000
+# Multiple simulation configurations can be defined
+simulations:
+  - name: default              # Name used to select this simulation
+    output_dir: results/
+    cell_count: 1000
+    signal_to_noise_distribution:
+      type: fixed
+      signal_to_noise: 0.8
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 10000.0
+      sd: 2000.0
+      min: 1000
+      max: 50000
+
+  - name: high_doublets        # Alternative simulation with different parameters
+    output_dir: results_high_doublets/
+    cell_count: 1000
+    signal_to_noise_distribution:
+      type: fixed
+      signal_to_noise: 0.8
+    doublet_rate: 0.3          # Higher doublet rate
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 10000.0
+      sd: 2000.0
 ```
 
 ### Stage Step
@@ -177,15 +200,114 @@ Legacy CLI options (when not using unified config):
 - `--blacklist`: Optional blacklist regions BED file
 
 ### Simulation (`simulate` command)
-When using unified config, parameters come from the `simulation` section:
+
+#### Specifying Which Simulation to Run
+When using unified config, you must specify which simulation to run by providing its name as a positional argument:
+```bash
+gtars scatrs simulate --config scatrs_config.yaml SIMULATION_NAME
+```
+
+The config file's `simulations` array can contain multiple simulation configurations, each with a unique `name` field. This allows you to:
+- Run different simulation scenarios from the same staged data
+- Compare different parameter combinations (e.g., varying doublet rates)
+- Test different fragment distributions without re-staging
+
+#### Simulation Parameters
+Each simulation in the `simulations` array supports these parameters:
+- `name`: Unique identifier for this simulation (required)
+- `output_dir`: Where to save simulation results
 - `cell_count`: Number of cells to simulate
-- `fragments_per_cell`: Average fragments per cell
-- `signal_to_noise`: Peak vs background ratio (0-1, only with peaks)
+- `signal_to_noise_distribution`: Peak vs background ratio distribution (see below)
 - `doublet_rate`: Fraction of doublets (0-1)
 - `ambient_contamination`: Fraction of ambient DNA (0-1)
-- `fragment_distribution`: Distribution type and parameters
+- `fragment_distribution`: Distribution type and parameters (see below)
 - `seed`: Random seed for reproducibility
 - `compress`: Gzip output files
+- `weight_column`: Which weight column to use from CSV (optional)
+
+#### Signal-to-Noise Distribution Types
+The `signal_to_noise_distribution` parameter controls the ratio of peak to background fragments for each cell:
+
+**Fixed** (constant for all cells):
+```yaml
+signal_to_noise_distribution:
+  type: fixed
+  signal_to_noise: 0.8  # All cells have 80% signal, 20% background
+```
+
+**Beta Distribution** (recommended for realistic variation):
+```yaml
+signal_to_noise_distribution:
+  type: beta
+  mean: 0.8    # Mean signal-to-noise across cells
+  sd: 0.1      # Standard deviation (controls spread)
+```
+- Ideal for values bounded between 0 and 1
+- Variance must satisfy: sd² < mean × (1 - mean)
+- Creates realistic heterogeneity in cell quality
+
+**Gaussian Distribution** (with bounds):
+```yaml
+signal_to_noise_distribution:
+  type: gaussian
+  mean: 0.8
+  sd: 0.1
+  min: 0.0     # Optional, defaults to 0.0
+  max: 1.0     # Optional, defaults to 1.0
+```
+- Values clamped to [0, 1] range
+- Use when you want normal variation with hard limits
+
+#### Fragment Distribution Types
+The `fragment_distribution` parameter controls how many fragments each cell receives:
+
+**Gaussian Distribution** (recommended for realistic data):
+```yaml
+fragment_distribution:
+  type: gaussian
+  mean_fragments_per_cell: 10000.0  # Mean of the distribution
+  sd: 2000.0                        # Standard deviation
+  min: 1000                         # Optional: minimum fragments per cell
+  max: 50000                        # Optional: maximum fragments per cell
+```
+- Fragments per cell vary naturally following a normal distribution
+- Most cells get values near the mean, with some variation
+- Use `min`/`max` to prevent extreme outliers
+
+**Negative Binomial Distribution** (most realistic for scATAC-seq):
+```yaml
+fragment_distribution:
+  type: negativebinomial
+  mean: 10000.0    # Mean fragments per cell
+  sd: 4000.0       # Standard deviation (sd² must be > mean for overdispersion)
+  min: 1000        # Optional: minimum fragments per cell
+  max: 50000       # Optional: maximum fragments per cell
+```
+- Models the overdispersion commonly seen in real scATAC-seq data
+- sd² > mean indicates overdispersion (more variability than Poisson)
+- Better captures the long tail of high-fragment cells
+- Use when simulating realistic biological variability
+
+**Uniform Distribution** (random values in a range):
+```yaml
+fragment_distribution:
+  type: uniform
+  min: 8000    # Minimum fragments per cell
+  max: 12000   # Maximum fragments per cell
+```
+- Each cell gets a random fragment count uniformly distributed between min and max
+- All values in the range are equally likely
+- Mean = (min + max) / 2, SD = (max - min) / √12
+
+**Fixed Distribution** (constant fragment count):
+```yaml
+fragment_distribution:
+  type: fixed
+  fragments_per_cell: 10000  # Exact count for every cell
+```
+- Every cell gets exactly the same number of fragments
+- Zero variation (SD = 0)
+- Useful for controlled testing where you want identical cells
 
 CLI overrides (work with unified config):
 - `--cells`: Override cell count
@@ -197,6 +319,98 @@ CLI overrides (work with unified config):
 ### Helper Commands
 - `config`: Generate a template unified YAML configuration file
 - `manifest`: Generate an example CSV manifest file
+
+## Multiple Simulations
+
+The unified config system allows you to define multiple simulation configurations in the same YAML file. This is useful for:
+- **Parameter sweeps**: Test different doublet rates, contamination levels, or fragment counts
+- **Distribution comparisons**: Compare Gaussian vs Uniform vs Fixed fragment distributions
+- **Cell count variations**: Generate datasets with different numbers of cells
+- **Reproducibility**: All simulation parameters in one file for easy sharing
+
+### Example: Multiple Simulations in Config
+
+```yaml
+simulations:
+  - name: baseline
+    output_dir: results_baseline/
+    cell_count: 1000
+    doublet_rate: 0.05
+    ambient_contamination: 0.01
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 10000.0
+      sd: 2000.0
+
+  - name: high_quality
+    output_dir: results_high_quality/
+    cell_count: 2000
+    doublet_rate: 0.02      # Lower doublet rate
+    ambient_contamination: 0.005
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 15000.0
+      sd: 2500.0
+
+  - name: low_quality
+    output_dir: results_low_quality/
+    cell_count: 1000
+    doublet_rate: 0.15      # Higher doublet rate
+    ambient_contamination: 0.05
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 5000.0
+      sd: 1500.0
+
+  - name: uniform_fragments
+    output_dir: results_uniform/
+    cell_count: 1000
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: uniform        # Random values in range
+      min: 8000
+      max: 12000
+
+  - name: fixed_fragments
+    output_dir: results_fixed/
+    cell_count: 1000
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: fixed          # Exact count for all cells
+      fragments_per_cell: 10000
+
+  - name: realistic_nb
+    output_dir: results_nb/
+    cell_count: 1000
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: negativebinomial  # Overdispersed like real data
+      mean: 10000.0
+      sd: 4000.0              # Variance > mean for overdispersion
+```
+
+### Running Multiple Simulations
+
+```bash
+# Stage once
+gtars scatrs stage --config scatrs_config.yaml
+
+# Run each simulation
+gtars scatrs simulate --config scatrs_config.yaml baseline
+gtars scatrs simulate --config scatrs_config.yaml high_quality
+gtars scatrs simulate --config scatrs_config.yaml low_quality
+gtars scatrs simulate --config scatrs_config.yaml uniform_fragments
+gtars scatrs simulate --config scatrs_config.yaml fixed_fragments
+gtars scatrs simulate --config scatrs_config.yaml realistic_nb
+
+# Or run them in parallel
+gtars scatrs simulate --config scatrs_config.yaml baseline &
+gtars scatrs simulate --config scatrs_config.yaml high_quality &
+wait
+```
 
 ## Cell Type Weights
 
@@ -273,21 +487,24 @@ staging:
 # This field is added automatically after staging
 staging_config: staged/stage_config.yaml
 
-simulation:
-  output_dir: results/
-  cell_count: 1000
-  fragments_per_cell: 10000
-  signal_to_noise: 0.8
-  doublet_rate: 0.1
-  ambient_contamination: 0.02
-  fragment_distribution:
-    type: gaussian
-    mean: 10000.0
-    variance: 4000000.0
-    min: 1000
-    max: 50000
-  seed: 42
-  compress: false
+# Define one or more simulation configurations
+simulations:
+  - name: default
+    output_dir: results/
+    cell_count: 1000
+    signal_to_noise_distribution:
+      type: fixed
+      signal_to_noise: 0.8
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: gaussian
+      mean_fragments_per_cell: 10000.0
+      sd: 2000.0
+      min: 1000
+      max: 50000
+    seed: 42
+    compress: false
 ```
 
 ### Stage Configuration (stage_config.yaml)

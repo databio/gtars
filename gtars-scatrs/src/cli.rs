@@ -316,13 +316,34 @@ pub mod handlers {
         
         // Save global regions
         if let Some(ref peaks) = merged_peaks {
+            // Validate peak uniqueness before saving
+            let (total, unique) = PeakMerger::diagnose_peak_duplicates(peaks);
+            if total != unique {
+                return Err(anyhow::anyhow!(
+                    "ERROR: Peak merging produced {} duplicate regions! \
+                    This is a bug in the staging process.",
+                    total - unique
+                ));
+            }
+            println!("✓ Verified {} unique consensus peaks", unique);
+
             StagedDataWriter::save_regions(
                 peaks,
                 &output_dir.join("merged_peaks.bin")
             )?;
             println!("Saved {} merged peaks", peaks.len());
+
+            // Also save as BED file for easy inspection
+            let bed_path = output_dir.join("consensus_peaks.bed");
+            let bed_file = std::fs::File::create(&bed_path)?;
+            let mut writer = std::io::BufWriter::new(bed_file);
+            use std::io::Write;
+            for peak in peaks {
+                writeln!(writer, "{}\t{}\t{}", peak.chrom, peak.start, peak.end)?;
+            }
+            println!("Saved consensus peaks to {:?}", bed_path);
         }
-        
+
         if let Some(ref bg) = background {
             StagedDataWriter::save_regions(
                 bg,
@@ -392,8 +413,6 @@ pub mod handlers {
             // Check if chromosome cache was created
             if BamProcessor::has_chromosome_cache(&sample_dir) {
                 cached_region_count += 1;
-            } else if BamProcessor::has_fragment_cache(&sample_dir) {
-                staging_warnings.push(format!("{}: Using old per-bin cache format (many files)", sample_name));
             } else {
                 staging_warnings.push(format!("{}: No fragment cache created", sample_name));
             }
@@ -542,7 +561,7 @@ pub mod handlers {
         
         // Use simulation parameters from the selected simulation config
         let num_cells = sim_config.cell_count as usize;
-        let signal_to_noise = sim_config.signal_to_noise;
+        let signal_to_noise_dist = &sim_config.signal_to_noise_distribution;
         let doublet_rate = sim_config.doublet_rate;
         let ambient_contamination = sim_config.ambient_contamination;
         let seed = sim_config.seed;
@@ -561,17 +580,34 @@ pub mod handlers {
                 
                 // Load global regions if available
                 let peaks = if staged_dir_path.join("merged_peaks.bin").exists() {
-                    let peaks = StagedDataReader::load_regions(&staged_dir_path.join("merged_peaks.bin"))?;
-                    println!("  ✓ Loaded {} peak regions", peaks.len());
+                    let mut peaks = StagedDataReader::load_regions(&staged_dir_path.join("merged_peaks.bin"))?;
+
+                    // Validate peak uniqueness after loading
+                    let (total, unique) = PeakMerger::diagnose_peak_duplicates(&peaks);
+                    if total != unique {
+                        // Deduplicate and warn
+                        println!("  ⚠ Removed {} duplicate peaks after loading", total - unique);
+                        peaks = PeakMerger::deduplicate_regions(peaks);
+                    }
+
+                    println!("  ✓ Loaded {} unique peak regions", peaks.len());
                     peaks
                 } else {
                     println!("  ℹ No peak regions found");
                     Vec::new()
                 };
-                
+
                 let background = if staged_dir_path.join("background_regions.bin").exists() {
-                    let bg = StagedDataReader::load_regions(&staged_dir_path.join("background_regions.bin"))?;
-                    println!("  ✓ Loaded {} background regions", bg.len());
+                    let mut bg = StagedDataReader::load_regions(&staged_dir_path.join("background_regions.bin"))?;
+
+                    // Validate background uniqueness after loading
+                    let original_count = bg.len();
+                    bg = BackgroundGenerator::deduplicate_regions(bg);
+                    if bg.len() < original_count {
+                        println!("  ⚠ Removed {} duplicate background regions", original_count - bg.len());
+                    }
+
+                    println!("  ✓ Loaded {} unique background regions", bg.len());
                     bg
                 } else {
                     println!("  ℹ No background regions found");
@@ -602,6 +638,23 @@ pub mod handlers {
                                 &sample_dir.join("peak_counts.bin")
                             )?;
 
+                            // Validate alignment with peaks array
+                            if peak_counts.len() != peaks.len() {
+                                return Err(anyhow::anyhow!(
+                                    "CRITICAL ERROR: Sample {} has {} peak counts but there are {} peaks!\n\
+                                    This indicates the staging data is corrupted or mismatched.\n\n\
+                                    To fix this, you MUST re-run staging:\n\
+                                    1. Delete the staged directory: {}\n\
+                                    2. Re-run: gtars scatrs stage --config {}\n\n\
+                                    This will regenerate clean, aligned count vectors.",
+                                    sample_name,
+                                    peak_counts.len(),
+                                    peaks.len(),
+                                    staged_dir_path.display(),
+                                    config_path.display()
+                                ));
+                            }
+
                             // Convert counts to weights for cell-type-specific region sampling
                             // Higher counts = higher probability of sampling from that region
                             // This ensures cell-type-specific chromatin accessibility patterns
@@ -616,6 +669,23 @@ pub mod handlers {
                                 &sample_dir.join("bg_counts.bin")
                             )?;
 
+                            // Validate alignment with background array
+                            if bg_counts.len() != background.len() {
+                                return Err(anyhow::anyhow!(
+                                    "CRITICAL ERROR: Sample {} has {} background counts but there are {} background regions!\n\
+                                    This indicates the staging data is corrupted or mismatched.\n\n\
+                                    To fix this, you MUST re-run staging:\n\
+                                    1. Delete the staged directory: {}\n\
+                                    2. Re-run: gtars scatrs stage --config {}\n\n\
+                                    This will regenerate clean, aligned count vectors.",
+                                    sample_name,
+                                    bg_counts.len(),
+                                    background.len(),
+                                    staged_dir_path.display(),
+                                    config_path.display()
+                                ));
+                            }
+
                             // Convert counts to weights for cell-type-specific background sampling
                             let weighted_bg: Vec<f64> = bg_counts.iter()
                                 .map(|&count| count as f64)
@@ -624,7 +694,29 @@ pub mod handlers {
                         }
                     }
                 }
-                
+
+                // Validate all sample weight vectors match region counts
+                for (sample_name, weights) in &sample_peak_weights {
+                    if weights.len() != peaks.len() {
+                        return Err(anyhow::anyhow!(
+                            "Sample {} has {} weights but there are {} peaks!",
+                            sample_name, weights.len(), peaks.len()
+                        ));
+                    }
+                }
+                for (sample_name, weights) in &sample_bg_weights {
+                    if weights.len() != background.len() {
+                        return Err(anyhow::anyhow!(
+                            "Sample {} has {} background weights but there are {} background regions!",
+                            sample_name, weights.len(), background.len()
+                        ));
+                    }
+                }
+                if !peaks.is_empty() {
+                    println!("  ✓ All sample weight vectors match region counts ({} peaks, {} background)",
+                        peaks.len(), background.len());
+                }
+
                 (peaks, background, sample_peak_weights, sample_bg_weights, bam_paths, stage_config.samples.clone())
             } else {
                 // Staging is mandatory - return error with clear instructions
@@ -681,8 +773,10 @@ pub mod handlers {
         // Display ambient contamination calculation if applicable
         if ambient_contamination > 0.0 {
             let target_fragments = match &sim_config.fragment_distribution {
-                crate::models::FragmentDistribution::Uniform { fragments_per_cell } => *fragments_per_cell,
+                crate::models::FragmentDistribution::Fixed { fragments_per_cell } => *fragments_per_cell as u32,
+                crate::models::FragmentDistribution::Uniform { min, max } => ((min + max) / 2.0) as u32,
                 crate::models::FragmentDistribution::Gaussian { mean_fragments_per_cell, .. } => *mean_fragments_per_cell as u32,
+                crate::models::FragmentDistribution::NegativeBinomial { mean, .. } => *mean as u32,
             };
             let source_fragments = ((target_fragments as f64) * (1.0 - ambient_contamination)) as u32;
             let ambient_fragments = ((target_fragments as f64) * ambient_contamination) as u32;
@@ -696,7 +790,7 @@ pub mod handlers {
             if sample_peak_weights.is_empty() { None } else { Some(&sample_peak_weights) },
             if background.is_empty() { None } else { Some(&background) },
             if sample_bg_weights.is_empty() { None } else { Some(&sample_bg_weights) },
-            signal_to_noise,
+            signal_to_noise_dist,
             &sim_config.fragment_distribution,
             &cell_type_assignments,
             ambient_contamination,
@@ -818,7 +912,7 @@ pub mod handlers {
             
             if BamProcessor::has_chromosome_cache(&sample_dir) {
                 println!("    Loading from chromosome cache for {}...", cell_type);
-                
+
                 let chr_fragments = BamProcessor::extract_fragments_from_chromosome_cache(
                     &sample_dir,
                     &peak_indices_vec,
@@ -826,61 +920,15 @@ pub mod handlers {
                     &peaks,
                     &background,
                 )?;
-                
+
                 // Store fragments for this type
                 for (region_key, frags) in chr_fragments {
                     type_fragments.entry(region_key)
                         .or_insert_with(Vec::new)
                         .extend(frags);
                 }
-            } else if BamProcessor::has_fragment_cache(&sample_dir) {
-                println!("    Loading from per-bin cache for {} (slower)...", cell_type);
-                
-                // Convert indices to u32 for old cache format
-                let peak_bin_vec: Vec<u32> = peak_indices_vec.iter().map(|&x| x as u32).collect();
-                let bg_bin_vec: Vec<u32> = bg_indices_vec.iter().map(|&x| x as u32).collect();
-                
-                // Load peak fragments
-                if !peak_bin_vec.is_empty() {
-                    let peak_fragments = BamProcessor::extract_fragments_from_cache(
-                        &sample_dir,
-                        &peak_bin_vec,
-                        true
-                    )?;
-                    
-                    for (bin_str, frags) in peak_fragments {
-                        let bin_idx: usize = bin_str.parse().unwrap();
-                        if bin_idx < peaks.len() {
-                            let region = &peaks[bin_idx];
-                            let region_key = format!("{}:{}-{}", region.chrom, region.start, region.end);
-                            type_fragments.entry(region_key)
-                                .or_insert_with(Vec::new)
-                                .extend(frags);
-                        }
-                    }
-                }
-                
-                // Load background fragments
-                if !bg_bin_vec.is_empty() {
-                    let bg_fragments = BamProcessor::extract_fragments_from_cache(
-                        &sample_dir,
-                        &bg_bin_vec,
-                        false
-                    )?;
-                    
-                    for (bin_str, frags) in bg_fragments {
-                        let bin_idx: usize = bin_str.parse().unwrap();
-                        if bin_idx < background.len() {
-                            let region = &background[bin_idx];
-                            let region_key = format!("{}:{}-{}", region.chrom, region.start, region.end);
-                            type_fragments.entry(region_key)
-                                .or_insert_with(Vec::new)
-                                .extend(frags);
-                        }
-                    }
-                }
             } else {
-                // This shouldn't happen with staged data
+                // No fragment cache found
                 return Err(anyhow::anyhow!("No fragment cache found for {}. Please re-run staging.", cell_type));
             }
             
@@ -918,7 +966,7 @@ pub mod handlers {
             let temp_config = ScatrsConfig {
                 cell_types: cell_types.clone(),
                 cell_count: num_cells as u32,
-                signal_to_noise,
+                signal_to_noise_distribution: signal_to_noise_dist.clone(),
                 extend_peaks: config.staging.extend_peaks,
                 bin_size: config.staging.bin_size,
                 fragment_distribution: sim_config.fragment_distribution.clone(),
@@ -954,8 +1002,10 @@ pub mod handlers {
                 
                 // Get the target fragments per cell from the configuration
                 let target_fragments = match &sim_config.fragment_distribution {
-                    crate::models::FragmentDistribution::Uniform { fragments_per_cell } => *fragments_per_cell,
+                    crate::models::FragmentDistribution::Fixed { fragments_per_cell } => *fragments_per_cell as u32,
+                    crate::models::FragmentDistribution::Uniform { min, max } => ((min + max) / 2.0) as u32,
                     crate::models::FragmentDistribution::Gaussian { mean_fragments_per_cell, .. } => *mean_fragments_per_cell as u32,
+                    crate::models::FragmentDistribution::NegativeBinomial { mean, .. } => *mean as u32,
                 };
                 
                 ambient_simulator.add_ambient_contamination(&mut cells, ambient_contamination, &all_fragments, target_fragments)?;
@@ -1055,30 +1105,70 @@ simulations:
     weight_column: weight      # Which CSV column to use for cell type weights (null for equal)
     output_dir: results/sim1/
     cell_count: 1000           # Number of cells to simulate
-    signal_to_noise: 0.8       # Ratio of peak vs background fragments (0-1)
+    signal_to_noise_distribution:  # Signal-to-noise ratio distribution
+      type: fixed              # Fixed value for all cells
+      signal_to_noise: 0.8     # All cells have 80% peak, 20% background
     doublet_rate: 0.1          # Fraction of cells that are doublets (0-1)
     ambient_contamination: 0.02 # Fraction of ambient DNA contamination (0-1)
     fragment_distribution:
-      type: gaussian           # Distribution type: gaussian or uniform
+      type: gaussian           # Distribution type: gaussian, uniform, negativebinomial, or fixed
       mean_fragments_per_cell: 10000.0  # Average fragments per cell
-      variance: 4000000.0
-      min: 1000
-      max: 50000
+      sd: 2000.0               # Standard deviation
+      min: 1000                # Optional minimum (clamps distribution)
+      max: 50000               # Optional maximum (clamps distribution)
     seed: 42                   # Random seed for reproducibility (null for random)
     compress: false            # Whether to gzip output files
 
-  - name: sim2                 # Second simulation with different parameters
+  - name: sim2                 # Beta distribution for signal-to-noise (realistic variation)
     weight_column: weight2     # Can use different weight columns from CSV
     output_dir: results/sim2/
     cell_count: 500
-    signal_to_noise: 0.9
+    signal_to_noise_distribution:
+      type: beta               # Beta distribution (ideal for 0-1 bounded values)
+      mean: 0.75               # Mean signal-to-noise across cells
+      sd: 0.1                  # Standard deviation (creates realistic heterogeneity)
     doublet_rate: 0.05
     ambient_contamination: 0.01
     fragment_distribution:
-      type: uniform
-      fragments_per_cell: 5000  # Exact fragments per cell for uniform distribution
+      type: fixed              # Every cell gets exactly the same number
+      fragments_per_cell: 5000 # Exact fragments per cell
     seed: 123
     compress: true
+
+  - name: sim3                 # Gaussian distribution for signal-to-noise
+    output_dir: results/sim3/
+    cell_count: 500
+    signal_to_noise_distribution:
+      type: gaussian           # Normal distribution (clamped to 0-1)
+      mean: 0.8
+      sd: 0.1
+      min: 0.0                 # Optional, defaults to 0.0
+      max: 1.0                 # Optional, defaults to 1.0
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: uniform            # Random value uniformly sampled from range
+      min: 8000                # Minimum fragments per cell
+      max: 12000               # Maximum fragments per cell
+    seed: 456
+    compress: false
+
+  - name: sim4                 # Negative binomial distribution example (most realistic)
+    output_dir: results/sim4/
+    cell_count: 1000
+    signal_to_noise_distribution:
+      type: fixed
+      signal_to_noise: 0.8
+    doublet_rate: 0.1
+    ambient_contamination: 0.02
+    fragment_distribution:
+      type: negativebinomial   # Models overdispersion common in real scATAC-seq
+      mean: 10000.0            # Mean fragments per cell
+      sd: 4000.0               # Standard deviation (sd² must be > mean for overdispersion)
+      min: 1000                # Optional minimum (clamps distribution)
+      max: 50000               # Optional maximum (clamps distribution)
+    seed: 789
+    compress: false
 
 # Usage:
 # 1. Edit this file and samples.csv with your data
