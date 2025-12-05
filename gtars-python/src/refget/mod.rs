@@ -8,9 +8,10 @@ use pyo3::types::{PyBytes, PyString, PyType};
 
 use gtars_refget::alphabet::AlphabetType;
 use gtars_refget::collection::{
-    SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u};
+use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::GlobalRefgetStore;
 use gtars_refget::store::StorageMode;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
@@ -51,6 +52,18 @@ pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> 
     }
 }
 
+#[pyfunction]
+pub fn compute_fai(fasta: &Bound<'_, PyAny>) -> PyResult<Vec<PyFaiRecord>> {
+    let fasta = fasta.to_string();
+    match gtars_refget::fasta::compute_fai(&fasta) {
+        Ok(fai_records) => Ok(fai_records.into_iter().map(PyFaiRecord::from).collect()),
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+            "Error computing FAI: {}",
+            e
+        ))),
+    }
+}
+
 #[pyclass(name = "AlphabetType")]
 #[derive(Clone)]
 pub enum PyAlphabetType {
@@ -77,11 +90,35 @@ pub struct PySequenceMetadata {
     pub alphabet: PyAlphabetType,
 }
 
+#[pyclass(name = "FaiMetadata")]
+#[derive(Clone)]
+pub struct PyFaiMetadata {
+    #[pyo3(get, set)]
+    pub offset: u64,
+    #[pyo3(get, set)]
+    pub line_bases: u32,
+    #[pyo3(get, set)]
+    pub line_bytes: u32,
+}
+
+#[pyclass(name = "FaiRecord")]
+#[derive(Clone)]
+pub struct PyFaiRecord {
+    #[pyo3(get, set)]
+    pub name: String,
+    #[pyo3(get, set)]
+    pub length: usize,
+    #[pyo3(get, set)]
+    pub fai: Option<PyFaiMetadata>,
+}
+
 #[pyclass(name = "SequenceRecord")]
 #[derive(Clone)]
 pub struct PySequenceRecord {
     #[pyo3(get, set)]
     pub metadata: PySequenceMetadata,
+    #[pyo3(get, set)]
+    pub fai: Option<PyFaiMetadata>,
     #[pyo3(get, set)]
     pub data: Option<Vec<u8>>,
 }
@@ -194,6 +231,39 @@ impl PySequenceMetadata {
 }
 
 #[pymethods]
+impl PyFaiMetadata {
+    fn __repr__(&self) -> String {
+        format!("<FaiMetadata offset={} line_bases={} line_bytes={}>",
+                self.offset, self.line_bases, self.line_bytes)
+    }
+
+    fn __str__(&self) -> String {
+        format!(
+            "FaiMetadata:\n  offset: {}\n  line_bases: {}\n  line_bytes: {}",
+            self.offset, self.line_bases, self.line_bytes
+        )
+    }
+}
+
+#[pymethods]
+impl PyFaiRecord {
+    fn __repr__(&self) -> String {
+        format!("<FaiRecord name='{}' length={}>", self.name, self.length)
+    }
+
+    fn __str__(&self) -> String {
+        let fai_str = if let Some(ref fai) = self.fai {
+            format!("\n  FAI offset: {}\n  FAI line_bases: {}\n  FAI line_bytes: {}",
+                    fai.offset, fai.line_bases, fai.line_bytes)
+        } else {
+            "\n  FAI: None (gzipped file)".to_string()
+        };
+        format!("FaiRecord:\n  name: {}\n  length: {}{}",
+                self.name, self.length, fai_str)
+    }
+}
+
+#[pymethods]
 impl PySequenceRecord {
     fn __repr__(&self) -> String {
         format!("<SequenceRecord for {}>", self.metadata.name)
@@ -269,6 +339,28 @@ impl From<AlphabetType> for PyAlphabetType {
     }
 }
 
+// Conversion from Rust FaiMetadata to Python PyFaiMetadata
+impl From<FaiMetadata> for PyFaiMetadata {
+    fn from(value: FaiMetadata) -> Self {
+        PyFaiMetadata {
+            offset: value.offset,
+            line_bases: value.line_bases,
+            line_bytes: value.line_bytes,
+        }
+    }
+}
+
+// Conversion from Rust FaiRecord to Python PyFaiRecord
+impl From<FaiRecord> for PyFaiRecord {
+    fn from(value: FaiRecord) -> Self {
+        PyFaiRecord {
+            name: value.name,
+            length: value.length,
+            fai: value.fai.map(PyFaiMetadata::from),
+        }
+    }
+}
+
 // Conversion from Rust SequenceMetadata to Python PySequenceMetadata
 impl From<SequenceMetadata> for PySequenceMetadata {
     fn from(value: SequenceMetadata) -> Self {
@@ -287,6 +379,7 @@ impl From<SequenceRecord> for PySequenceRecord {
     fn from(value: SequenceRecord) -> Self {
         PySequenceRecord {
             metadata: PySequenceMetadata::from(value.metadata),
+            fai: value.fai.map(PyFaiMetadata::from),
             data: value.data,
         }
     }
@@ -477,8 +570,11 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(sha512t24u_digest, m)?)?;
     m.add_function(wrap_pyfunction!(md5_digest, m)?)?;
     m.add_function(wrap_pyfunction!(digest_fasta, m)?)?;
+    m.add_function(wrap_pyfunction!(compute_fai, m)?)?;
     m.add_class::<PyAlphabetType>()?;
     m.add_class::<PySequenceMetadata>()?;
+    m.add_class::<PyFaiMetadata>()?;
+    m.add_class::<PyFaiRecord>()?;
     m.add_class::<PySequenceRecord>()?;
     m.add_class::<PySeqColDigestLvl1>()?;
     m.add_class::<PySequenceCollection>()?;

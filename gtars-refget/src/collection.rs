@@ -109,6 +109,7 @@ impl SeqColDigestLvl1 {
 #[derive(Clone, Debug)]
 pub struct SequenceRecord {
     pub metadata: SequenceMetadata,
+    pub fai: Option<FaiMetadata>,
     pub data: Option<Vec<u8>>,
 }
 
@@ -121,6 +122,15 @@ pub struct SequenceMetadata {
     pub sha512t24u: String,
     pub md5: String,
     pub alphabet: AlphabetType,
+}
+
+/// FASTA index (FAI) metadata for a sequence.
+/// This data is only present when a sequence was loaded from a FASTA file.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FaiMetadata {
+    pub offset: u64,       // byte offset to first base of sequence data
+    pub line_bases: u32,   // number of bases per line
+    pub line_bytes: u32,   // number of bytes per line (including newline chars)
 }
 
 impl SequenceRecord {

@@ -302,6 +302,7 @@ impl GlobalRefgetStore {
                     self.add_sequence(
                         SequenceRecord {
                             metadata: dr,
+                            fai: None,  // Store doesn't preserve FAI data
                             data: Some(raw_sequence),
                         },
                         seqcol.digest.to_key(),
@@ -323,6 +324,7 @@ impl GlobalRefgetStore {
                     self.add_sequence(
                         SequenceRecord {
                             metadata: dr,
+                            fai: None,  // Store doesn't preserve FAI data
                             data: Some(encoded_sequence),
                         },
                         seqcol.digest.to_key(),
@@ -620,6 +622,7 @@ impl GlobalRefgetStore {
                 // Create a SequenceRecord
                 let record = SequenceRecord {
                     metadata: seq_metadata.clone(),
+                    fai: None,  // Store doesn't preserve FAI data
                     data: Some(data),
                 };
 
@@ -1000,6 +1003,7 @@ chr1\t-5\t100
 
         let record = SequenceRecord {
             metadata: seq_metadata.clone(),
+            fai: None,  // Test data doesn't need FAI
             data: Some(sequence.to_vec()),
         };
 
