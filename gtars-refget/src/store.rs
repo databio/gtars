@@ -13,7 +13,6 @@ use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::read::GzDecoder;
 use gtars_core::utils::{get_dynamic_reader, get_file_info, parse_bedlike_file};
-use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, OpenOptions, create_dir_all};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -60,6 +59,12 @@ pub struct GlobalRefgetStore {
     collections: HashMap<[u8; 32], SequenceCollection>,
     /// Storage strategy for sequences
     mode: StorageMode,
+    /// Where the store lives on disk (local store or cache directory)
+    local_path: Option<PathBuf>,
+    /// Where to pull sequences from (if remote-backed)
+    remote_source: Option<String>,
+    /// Template for sequence file paths (e.g., "sequences/%s2/%s.seq")
+    seqdata_path_template: Option<String>,
 }
 
 /// Metadata for the entire store.
@@ -84,7 +89,7 @@ pub struct GetSeqsBedFileIter<'a, K>
 where
     K: AsRef<[u8]>,
 {
-    store: &'a GlobalRefgetStore,
+    store: &'a mut GlobalRefgetStore,
     reader: BufReader<Box<dyn Read>>,
     collection_digest: K,
     previous_parsed_chr: String,
@@ -196,6 +201,9 @@ impl GlobalRefgetStore {
             name_lookup,
             collections: HashMap::new(),
             mode,
+            local_path: None,
+            remote_source: None,
+            seqdata_path_template: None,
         }
     }
 
@@ -343,29 +351,44 @@ impl GlobalRefgetStore {
     }
 
     /// Retrieve a SequenceRecord from the store by its SHA512t24u digest
-    pub fn get_sequence_by_id<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&SequenceRecord> {
-        self.sequence_store.get(&seq_digest.to_key())
+    pub fn get_sequence_by_id<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Option<&SequenceRecord> {
+        let digest_key = seq_digest.to_key();
+
+        // Ensure the sequence data is loaded
+        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
+            eprintln!("Failed to load sequence: {}", e);
+            return None;
+        }
+
+        self.sequence_store.get(&digest_key)
     }
 
     /// Retrieve a SequenceRecord from the store by its collection digest and name
     pub fn get_sequence_by_collection_and_name<K: AsRef<[u8]>>(
-        &self,
+        &mut self,
         collection_digest: K,
         sequence_name: &str,
     ) -> Option<&SequenceRecord> {
         // Look up the collection by digest
-        if let Some(name_map) = self.name_lookup.get(&collection_digest.to_key()) {
+        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_digest.to_key()) {
             // Look up the sequence name in the collection's name map
-            if let Some(sha512t24u) = name_map.get(sequence_name) {
-                // Retrieve the sequence record from the store
-                return self.sequence_store.get(sha512t24u);
-            }
+            name_map.get(sequence_name).cloned()?
+        } else {
+            return None;
+        };
+
+        // Ensure the sequence data is loaded
+        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
+            eprintln!("Failed to load sequence: {}", e);
+            return None;
         }
-        None
+
+        // Retrieve the sequence record from the store
+        self.sequence_store.get(&digest_key)
     }
 
     pub fn get_seqs_in_bed_file_iter<'a, K: AsRef<[u8]>>(
-        &'a self,
+        &'a mut self,
         collection_digest: K,
         bed_file_path: &str,
     ) -> Result<GetSeqsBedFileIter<'a, K>, Box<dyn std::error::Error>> {
@@ -394,7 +417,7 @@ impl GlobalRefgetStore {
     /// Given a Sequence Collection digest and a bed file path
     /// retrieve sequences and write to a file
     pub fn get_seqs_bed_file<K: AsRef<[u8]>>(
-        &self,
+        &mut self,
         collection_digest: K,
         bed_file_path: &str,
         output_file_path: &str,
@@ -415,6 +438,32 @@ impl GlobalRefgetStore {
             .append(true)
             .open(output_file_path)?;
 
+        // Pre-fetch all sequence metadata from the collection to avoid borrowing issues
+        let collection_key = collection_digest.as_ref().to_key();
+        let name_to_metadata: HashMap<String, (String, usize, AlphabetType, String, String)> = self
+            .name_lookup
+            .get(&collection_key)
+            .map(|name_map| {
+                name_map
+                    .iter()
+                    .filter_map(|(name, seq_digest)| {
+                        self.sequence_store.get(seq_digest).map(|record| {
+                            (
+                                name.clone(),
+                                (
+                                    record.metadata.name.clone(),
+                                    record.metadata.length,
+                                    record.metadata.alphabet,
+                                    record.metadata.sha512t24u.clone(),
+                                    record.metadata.md5.clone(),
+                                ),
+                            )
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
         let seq_iter = self.get_seqs_in_bed_file_iter(&collection_digest, bed_file_path)?;
 
         let mut previous_parsed_chr = String::new();
@@ -431,18 +480,15 @@ impl GlobalRefgetStore {
             if previous_parsed_chr != rs.chrom_name {
                 previous_parsed_chr = rs.chrom_name.clone();
 
-                // If we get this far, the metadata **must** exist, so we will unwrap the present
-                let seq_info = self
-                    .get_sequence_by_collection_and_name(&collection_digest, &rs.chrom_name)
-                    .unwrap();
-                current_header = format!(
-                    ">{} {} {} {} {}",
-                    seq_info.metadata.name,
-                    seq_info.metadata.length,
-                    seq_info.metadata.alphabet,
-                    seq_info.metadata.sha512t24u,
-                    seq_info.metadata.md5
-                );
+                // Look up metadata from our pre-fetched map
+                if let Some((name, length, alphabet, sha512, md5)) =
+                    name_to_metadata.get(&rs.chrom_name)
+                {
+                    current_header = format!(
+                        ">{} {} {} {} {}",
+                        name, length, alphabet, sha512, md5
+                    );
+                }
             }
 
             let retrieved_substring = rs.sequence;
@@ -467,7 +513,7 @@ impl GlobalRefgetStore {
     /// retrieve sequences and return them as a Vec<RetrievedSequence>.
     /// Lines that cannot be parsed or sequences that cannot be retrieved will be skipped
     pub fn get_seqs_bed_file_to_vec<K: AsRef<[u8]>>(
-        &self,
+        &mut self,
         collection_digest: K,
         bed_file_path: &str,
     ) -> Result<Vec<RetrievedSequence>, Box<dyn std::error::Error>> {
@@ -488,13 +534,18 @@ impl GlobalRefgetStore {
     }
 
     /// Retrieve a SequenceRecord from the store by its MD5 digest
-    pub fn get_sequence_by_md5<K: AsRef<[u8]>>(&self, seq_md5: K) -> Option<&SequenceRecord> {
+    pub fn get_sequence_by_md5<K: AsRef<[u8]>>(&mut self, seq_md5: K) -> Option<&SequenceRecord> {
         // Look up the SHA512t24u digest using the MD5 lookup
-        if let Some(sha512_digest) = self.md5_lookup.get(&seq_md5.to_key()) {
-            // Retrieve the sequence record from the store
-            return self.sequence_store.get(sha512_digest);
+        let sha512_digest = self.md5_lookup.get(&seq_md5.to_key()).cloned()?;
+
+        // Ensure the sequence data is loaded
+        if let Err(e) = self.ensure_sequence_loaded(&sha512_digest) {
+            eprintln!("Failed to load sequence: {}", e);
+            return None;
         }
-        None
+
+        // Retrieve the sequence record from the store
+        self.sequence_store.get(&sha512_digest)
     }
 
     /// Retrieves a substring from an encoded sequence by its SHA512t24u digest.
@@ -509,12 +560,20 @@ impl GlobalRefgetStore {
     ///
     /// The substring if the sequence is found, or None if not found
     pub fn get_substring<K: AsRef<[u8]>>(
-        &self,
+        &mut self,
         sha512_digest: K,
         start: usize,
         end: usize,
     ) -> Option<String> {
-        let record = self.sequence_store.get(&sha512_digest.to_key())?;
+        let digest_key = sha512_digest.to_key();
+
+        // Ensure the sequence data is loaded
+        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
+            eprintln!("Failed to load sequence: {}", e);
+            return None;
+        }
+
+        let record = self.sequence_store.get(&digest_key)?;
         let sequence = record.data.as_ref()?;
 
         if start >= record.metadata.length || end > record.metadata.length || start >= end {
@@ -545,6 +604,171 @@ impl GlobalRefgetStore {
         }
     }
 
+    /// Export sequences from a collection to a FASTA file
+    ///
+    /// # Arguments
+    /// * `collection_digest` - The digest of the collection to export from
+    /// * `output_path` - Path to write the FASTA file
+    /// * `sequence_names` - Optional list of sequence names to export.
+    ///                      If None, exports all sequences in the collection.
+    /// * `line_width` - Optional line width for wrapping sequences (default: 80)
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
+        &mut self,
+        collection_digest: K,
+        output_path: P,
+        sequence_names: Option<Vec<&str>>,
+        line_width: Option<usize>,
+    ) -> Result<()> {
+        let line_width = line_width.unwrap_or(80);
+        let output_path = output_path.as_ref();
+        let collection_key = collection_digest.as_ref().to_key();
+
+        // Get the name map for this collection and build a map of name -> digest
+        let name_to_digest: HashMap<String, [u8; 32]> = self
+            .name_lookup
+            .get(&collection_key)
+            .ok_or_else(|| {
+                anyhow!("Collection not found: {:?}", String::from_utf8_lossy(collection_digest.as_ref()))
+            })?
+            .clone();
+
+        // Determine which sequences to export
+        let names_to_export: Vec<String> = if let Some(names) = sequence_names {
+            // Filter to only requested names
+            names.iter().map(|s| s.to_string()).collect()
+        } else {
+            // Export all sequences in the collection
+            name_to_digest.keys().cloned().collect()
+        };
+
+        // Create output file
+        let mut output_file = File::create(output_path)
+            .context(format!("Failed to create output file: {}", output_path.display()))?;
+
+        // Export each sequence
+        for seq_name in names_to_export {
+            // Get the sequence digest from the name map
+            let seq_digest = name_to_digest.get(&seq_name).ok_or_else(|| {
+                anyhow!("Sequence '{}' not found in collection", seq_name)
+            })?;
+
+            // Ensure sequence is loaded
+            self.ensure_sequence_loaded(seq_digest)?;
+
+            // Get the sequence record
+            let record = self.sequence_store.get(seq_digest).ok_or_else(|| {
+                anyhow!("Sequence record not found for digest: {:?}", seq_digest)
+            })?;
+
+            // Get the sequence data
+            let sequence_data = record.data.as_ref().ok_or_else(|| {
+                anyhow!("Sequence data not loaded for '{}'", seq_name)
+            })?;
+
+            // Decode the sequence based on storage mode
+            let decoded_sequence = match self.mode {
+                StorageMode::Encoded => {
+                    let alphabet = lookup_alphabet(&record.metadata.alphabet);
+                    let decoded = decode_substring_from_bytes(
+                        sequence_data,
+                        0,
+                        record.metadata.length,
+                        alphabet,
+                    );
+                    String::from_utf8(decoded).context("Failed to decode sequence as UTF-8")?
+                }
+                StorageMode::Raw => {
+                    String::from_utf8(sequence_data.clone())
+                        .context("Failed to decode raw sequence as UTF-8")?
+                }
+            };
+
+            // Write FASTA header
+            writeln!(output_file, ">{}", seq_name)?;
+
+            // Write sequence with line wrapping
+            for chunk in decoded_sequence.as_bytes().chunks(line_width) {
+                output_file.write_all(chunk)?;
+                output_file.write_all(b"\n")?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Export sequences by their digests to a FASTA file
+    ///
+    /// # Arguments
+    /// * `digests` - List of SHA512t24u digests to export
+    /// * `output_path` - Path to write the FASTA file
+    /// * `line_width` - Optional line width for wrapping sequences (default: 80)
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn export_fasta_by_digests<P: AsRef<Path>>(
+        &mut self,
+        digests: Vec<&str>,
+        output_path: P,
+        line_width: Option<usize>,
+    ) -> Result<()> {
+        let line_width = line_width.unwrap_or(80);
+        let output_path = output_path.as_ref();
+
+        // Create output file
+        let mut output_file = File::create(output_path)
+            .context(format!("Failed to create output file: {}", output_path.display()))?;
+
+        // Export each sequence
+        for digest_str in digests {
+            let digest_key = digest_str.as_bytes().to_key();
+
+            // Ensure sequence is loaded
+            self.ensure_sequence_loaded(&digest_key)?;
+
+            // Get the sequence record
+            let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
+                anyhow!("Sequence record not found for digest: {}", digest_str)
+            })?;
+
+            // Get the sequence data
+            let sequence_data = record.data.as_ref().ok_or_else(|| {
+                anyhow!("Sequence data not loaded for digest: {}", digest_str)
+            })?;
+
+            // Decode the sequence based on storage mode
+            let decoded_sequence = match self.mode {
+                StorageMode::Encoded => {
+                    let alphabet = lookup_alphabet(&record.metadata.alphabet);
+                    let decoded = decode_substring_from_bytes(
+                        sequence_data,
+                        0,
+                        record.metadata.length,
+                        alphabet,
+                    );
+                    String::from_utf8(decoded).context("Failed to decode sequence as UTF-8")?
+                }
+                StorageMode::Raw => {
+                    String::from_utf8(sequence_data.clone())
+                        .context("Failed to decode raw sequence as UTF-8")?
+                }
+            };
+
+            // Write FASTA header with sequence name
+            writeln!(output_file, ">{}", record.metadata.name)?;
+
+            // Write sequence with line wrapping
+            for chunk in decoded_sequence.as_bytes().chunks(line_width) {
+                output_file.write_all(chunk)?;
+                output_file.write_all(b"\n")?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// Helper function to get the relative path for a sequence based on its SHA512t24u digest string
     fn get_sequence_path(digest_str: &str, template: &str) -> PathBuf {
         let path_str = template
@@ -554,9 +778,61 @@ impl GlobalRefgetStore {
         PathBuf::from(path_str)
     }
 
-    /// Load a GlobalRefgetStore from a directory
-    pub fn load_from_directory<P: AsRef<Path>>(root_path: P) -> Result<Self> {
-        let root_path = root_path.as_ref();
+    /// Helper function to fetch a file from local path or remote source
+    /// Returns the file contents as Vec<u8>
+    fn fetch_file(
+        local_path: &Path,
+        remote_source: &Option<String>,
+        relative_path: &str,
+    ) -> Result<Vec<u8>> {
+        let full_local_path = local_path.join(relative_path);
+
+        // Check if file exists locally
+        if full_local_path.exists() {
+            return fs::read(&full_local_path)
+                .context(format!("Failed to read local file: {}", full_local_path.display()));
+        }
+
+        // If not local and we have a remote source, fetch from remote
+        if let Some(remote_url) = remote_source {
+            let full_remote_url = if remote_url.ends_with('/') {
+                format!("{}{}", remote_url, relative_path)
+            } else {
+                format!("{}/{}", remote_url, relative_path)
+            };
+
+            let response = ureq::get(&full_remote_url)
+                .call()
+                .map_err(|e| anyhow!("Failed to fetch from remote: {}", e))?;
+
+            let mut data = Vec::new();
+            response
+                .into_reader()
+                .read_to_end(&mut data)
+                .context("Failed to read response body")?;
+
+            // Create parent directory if needed
+            if let Some(parent) = full_local_path.parent() {
+                create_dir_all(parent)?;
+            }
+
+            // Save to local cache
+            fs::write(&full_local_path, &data)
+                .context(format!("Failed to cache file to: {}", full_local_path.display()))?;
+
+            Ok(data)
+        } else {
+            Err(anyhow!(
+                "File not found locally and no remote source configured: {}",
+                relative_path
+            ))
+        }
+    }
+
+    /// Load a local RefgetStore from a directory
+    /// This loads metadata only; sequence data is loaded on-demand
+    pub fn load_local<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
+        let root_path = cache_path.as_ref();
 
         // Read and parse index.json
         let index_path = root_path.join("index.json");
@@ -570,8 +846,10 @@ impl GlobalRefgetStore {
 
         // Create a new empty store with the correct mode
         let mut store = GlobalRefgetStore::new(metadata.mode);
+        store.local_path = Some(root_path.to_path_buf());
+        store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
 
-        // Load sequence metadata from the sequence index file
+        // Load sequence metadata from the sequence index file (metadata only, no data)
         let sequence_index_path = root_path.join(&metadata.sequence_index);
         if sequence_index_path.exists() {
             let file = std::fs::File::open(&sequence_index_path)?;
@@ -599,31 +877,11 @@ impl GlobalRefgetStore {
                     md5: parts[4].to_string(),
                 };
 
-                // Generate the path using the template
-                let path_str = metadata
-                    .seqdata_path_template
-                    .replace("%s2", &seq_metadata.sha512t24u[0..2])
-                    .replace("%s4", &seq_metadata.sha512t24u[0..4])
-                    .replace("%s", &seq_metadata.sha512t24u);
-                let seq_path = root_path.join(path_str);
-
-                // Open and memory-map the sequence file
-                let file = File::open(&seq_path).context(format!(
-                    "Failed to open sequence file: {}",
-                    seq_path.display()
-                ))?;
-
-                let mmap =
-                    unsafe { Mmap::map(&file) }.context("Failed to memory-map sequence file")?;
-
-                // Convert to Vec<u8> for storage
-                let data = mmap.to_vec();
-
-                // Create a SequenceRecord
+                // Create a SequenceRecord with no data (lazy loading)
                 let record = SequenceRecord {
                     metadata: seq_metadata.clone(),
-                    fai: None,  // Store doesn't preserve FAI data
-                    data: Some(data),
+                    fai: None,
+                    data: None,  // Data will be loaded on-demand
                 };
 
                 // Add to store
@@ -665,6 +923,161 @@ impl GlobalRefgetStore {
         }
 
         Ok(store)
+    }
+
+    /// Load a remote-backed RefgetStore
+    /// This loads metadata from remote and caches sequence data on-demand
+    pub fn load_remote<P: AsRef<Path>, S: AsRef<str>>(
+        cache_path: P,
+        remote_url: S,
+    ) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        let remote_url = remote_url.as_ref().to_string();
+
+        // Create cache directory if it doesn't exist
+        create_dir_all(cache_path)?;
+
+        // Fetch index.json from remote
+        let index_data = Self::fetch_file(cache_path, &Some(remote_url.clone()), "index.json")?;
+        let json = String::from_utf8(index_data)
+            .context("index.json contains invalid UTF-8")?;
+
+        let metadata: StoreMetadata =
+            serde_json::from_str(&json).context("Failed to parse index.json")?;
+
+        // Create a new empty store with the correct mode
+        let mut store = GlobalRefgetStore::new(metadata.mode);
+        store.local_path = Some(cache_path.to_path_buf());
+        store.remote_source = Some(remote_url.clone());
+        store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
+
+        // Fetch sequence index from remote
+        let sequence_index_data = Self::fetch_file(
+            cache_path,
+            &Some(remote_url.clone()),
+            &metadata.sequence_index,
+        )?;
+        let sequence_index_str = String::from_utf8(sequence_index_data)
+            .context("sequence index contains invalid UTF-8")?;
+
+        // Parse sequence metadata (metadata only, no data)
+        for line in sequence_index_str.lines() {
+            // Skip comment lines
+            if line.starts_with('#') {
+                continue;
+            }
+
+            // Parse sequence metadata lines
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() != 5 {
+                continue;
+            }
+
+            let seq_metadata = SequenceMetadata {
+                name: parts[0].to_string(),
+                length: parts[1].parse().unwrap_or(0),
+                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+                sha512t24u: parts[3].to_string(),
+                md5: parts[4].to_string(),
+            };
+
+            // Create a SequenceRecord with no data (lazy loading)
+            let record = SequenceRecord {
+                metadata: seq_metadata.clone(),
+                fai: None,
+                data: None,
+            };
+
+            // Add to store
+            let sha512_key = seq_metadata.sha512t24u.to_key();
+            store.sequence_store.insert(sha512_key, record);
+
+            // Add to MD5 lookup
+            let md5_key = seq_metadata.md5.to_key();
+            store.md5_lookup.insert(md5_key, sha512_key);
+        }
+
+        // Load collections from the collections directory
+        let collections_dir_path = "collections";
+        let local_collections_dir = cache_path.join(collections_dir_path);
+
+        // Try to read from local cache first, or create if doesn't exist
+        if !local_collections_dir.exists() {
+            create_dir_all(&local_collections_dir)?;
+        }
+
+        // Note: We'll try to fetch collection files on-demand when needed
+        // For now, just check if any exist locally
+        if local_collections_dir.exists() {
+            for entry in fs::read_dir(&local_collections_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+
+                if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("farg")) {
+                    // Load the collection from the .farg file
+                    let collection = read_fasta_refget_file(&path)?;
+                    let collection_digest = collection.digest.to_key();
+
+                    // Add collection to store
+                    store
+                        .collections
+                        .insert(collection_digest, collection.clone());
+
+                    // Build name lookup for this collection
+                    let mut name_map = HashMap::new();
+                    for sequence_record in &collection.sequences {
+                        let sha512_key = sequence_record.metadata.sha512t24u.to_key();
+                        name_map.insert(sequence_record.metadata.name.clone(), sha512_key);
+                    }
+                    store.name_lookup.insert(collection_digest, name_map);
+                }
+            }
+        }
+
+        Ok(store)
+    }
+
+    /// Ensure a sequence is loaded into memory
+    /// If the sequence data is not already loaded, fetch it from local or remote
+    fn ensure_sequence_loaded(&mut self, digest: &[u8; 32]) -> Result<()> {
+        // Check if sequence exists
+        let record = self
+            .sequence_store
+            .get(digest)
+            .ok_or_else(|| anyhow!("Sequence not found in store"))?;
+
+        // If data is already loaded, return early
+        if record.data.is_some() {
+            return Ok(());
+        }
+
+        // Get the necessary information before borrowing mutably
+        let digest_str = &record.metadata.sha512t24u;
+        let template = self
+            .seqdata_path_template
+            .as_ref()
+            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+
+        // Build the relative path using the template
+        let relative_path = template
+            .replace("%s2", &digest_str[0..2])
+            .replace("%s4", &digest_str[0..4])
+            .replace("%s", digest_str);
+
+        // Fetch the sequence data
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("No local path configured"))?;
+
+        let data = Self::fetch_file(local_path, &self.remote_source, &relative_path)?;
+
+        // Update the record with the loaded data
+        if let Some(record) = self.sequence_store.get_mut(digest) {
+            record.data = Some(data);
+        }
+
+        Ok(())
     }
 
     /// Write the sequence_store component to a FARG file (without collection headers).
@@ -1133,7 +1546,7 @@ chr1\t-5\t100
         assert!(temp_path.join("collections").exists());
 
         // Load the store from disk
-        let loaded_store = GlobalRefgetStore::load_from_directory(temp_path).unwrap();
+        let mut loaded_store = GlobalRefgetStore::load_local(temp_path).unwrap();
 
         // Verify that the loaded store has the same sequences
         assert_eq!(loaded_store.sequence_store.len(), 3);
@@ -1163,9 +1576,9 @@ chr1\t-5\t100
         );
         assert_eq!(original_seq2.metadata.md5, loaded_seq2.metadata.md5);
 
-        // Check data equality
-        assert_eq!(original_seq1.data, loaded_seq1.data);
-        assert_eq!(original_seq2.data, loaded_seq2.data);
+        // Check data is not loaded initially (lazy loading)
+        assert_eq!(loaded_seq1.data, None, "Data should not be loaded initially with lazy loading");
+        assert_eq!(loaded_seq2.data, None, "Data should not be loaded initially with lazy loading");
 
         // Verify MD5 lookup is preserved
         assert_eq!(loaded_store.md5_lookup.len(), 3);
@@ -1195,5 +1608,237 @@ chr1\t-5\t100
         }
 
         println!("✓ Disk persistence test passed - all data preserved correctly");
+    }
+
+    #[test]
+    fn test_export_fasta_all_sequences() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA
+        let fasta_content = "\
+>chr1
+ATGCATGCATGC
+>chr2
+GGGGAAAA
+>chr3
+TTTTCCCC
+";
+        let temp_fasta_path = temp_path.join("test.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import into store
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta(&temp_fasta_path).unwrap();
+
+        // Get the collection digest
+        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        assert_eq!(collections.len(), 1, "Should have exactly one collection");
+        let collection_digest = collections[0];
+
+        // Export all sequences
+        let output_path = temp_path.join("exported_all.fa");
+        store
+            .export_fasta(&collection_digest, &output_path, None, Some(80))
+            .expect("Failed to export FASTA");
+
+        // Read and verify the exported file
+        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
+
+        // Check that all sequences are present
+        assert!(exported_content.contains(">chr1"), "Should contain chr1");
+        assert!(exported_content.contains(">chr2"), "Should contain chr2");
+        assert!(exported_content.contains(">chr3"), "Should contain chr3");
+        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
+        assert!(exported_content.contains("GGGGAAAA"), "Should contain chr2 sequence");
+        assert!(exported_content.contains("TTTTCCCC"), "Should contain chr3 sequence");
+
+        println!("✓ Export all sequences test passed");
+    }
+
+    #[test]
+    fn test_export_fasta_subset_sequences() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA
+        let fasta_content = "\
+>chr1
+ATGCATGCATGC
+>chr2
+GGGGAAAA
+>chr3
+TTTTCCCC
+";
+        let temp_fasta_path = temp_path.join("test.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import into store
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta(&temp_fasta_path).unwrap();
+
+        // Get the collection digest
+        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        let collection_digest = collections[0];
+
+        // Export only chr1 and chr3
+        let output_path = temp_path.join("exported_subset.fa");
+        let subset_names = vec!["chr1", "chr3"];
+        store
+            .export_fasta(&collection_digest, &output_path, Some(subset_names), Some(80))
+            .expect("Failed to export subset FASTA");
+
+        // Read and verify the exported file
+        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
+
+        // Check that only selected sequences are present
+        assert!(exported_content.contains(">chr1"), "Should contain chr1");
+        assert!(!exported_content.contains(">chr2"), "Should NOT contain chr2");
+        assert!(exported_content.contains(">chr3"), "Should contain chr3");
+        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
+        assert!(!exported_content.contains("GGGGAAAA"), "Should NOT contain chr2 sequence");
+        assert!(exported_content.contains("TTTTCCCC"), "Should contain chr3 sequence");
+
+        println!("✓ Export subset sequences test passed");
+    }
+
+    #[test]
+    fn test_export_fasta_roundtrip() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA with longer sequences
+        let fasta_content = "\
+>seq1
+ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
+ATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGCATGC
+>seq2
+GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
+";
+        let temp_fasta_path = temp_path.join("original.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import into store
+        let mut store1 = GlobalRefgetStore::new(StorageMode::Encoded);
+        store1.import_fasta(&temp_fasta_path).unwrap();
+
+        // Get original digests
+        let original_digests: Vec<String> = store1
+            .sequence_store
+            .values()
+            .map(|r| r.metadata.sha512t24u.clone())
+            .collect();
+
+        // Export to new FASTA
+        let collections: Vec<_> = store1.collections.keys().cloned().collect();
+        let collection_digest = collections[0];
+        let exported_path = temp_path.join("exported.fa");
+        store1
+            .export_fasta(&collection_digest, &exported_path, None, Some(60))
+            .expect("Failed to export FASTA");
+
+        // Re-import the exported FASTA
+        let mut store2 = GlobalRefgetStore::new(StorageMode::Encoded);
+        store2.import_fasta(&exported_path).unwrap();
+
+        // Verify digests match (same sequences)
+        let new_digests: Vec<String> = store2
+            .sequence_store
+            .values()
+            .map(|r| r.metadata.sha512t24u.clone())
+            .collect();
+
+        assert_eq!(original_digests.len(), new_digests.len(), "Should have same number of sequences");
+        for digest in original_digests {
+            assert!(
+                new_digests.contains(&digest),
+                "Digest {} should be present after roundtrip",
+                digest
+            );
+        }
+
+        println!("✓ Export/import roundtrip test passed");
+    }
+
+    #[test]
+    fn test_export_fasta_by_digests() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA
+        let fasta_content = "\
+>chr1
+ATGCATGCATGC
+>chr2
+GGGGAAAA
+";
+        let temp_fasta_path = temp_path.join("test.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import into store
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta(&temp_fasta_path).unwrap();
+
+        // Get digests
+        let digests: Vec<String> = store
+            .sequence_store
+            .values()
+            .map(|r| r.metadata.sha512t24u.clone())
+            .collect();
+
+        // Export by digests
+        let output_path = temp_path.join("exported_by_digests.fa");
+        let digest_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
+        store
+            .export_fasta_by_digests(digest_refs, &output_path, Some(80))
+            .expect("Failed to export FASTA by digests");
+
+        // Read and verify the exported file
+        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
+
+        // Check that all sequences are present
+        assert!(exported_content.contains(">chr1"), "Should contain chr1");
+        assert!(exported_content.contains(">chr2"), "Should contain chr2");
+        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
+        assert!(exported_content.contains("GGGGAAAA"), "Should contain chr2 sequence");
+
+        println!("✓ Export by digests test passed");
+    }
+
+    #[test]
+    fn test_export_fasta_error_handling() {
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA
+        let fasta_content = "\
+>chr1
+ATGCATGCATGC
+";
+        let temp_fasta_path = temp_path.join("test.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import into store
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.import_fasta(&temp_fasta_path).unwrap();
+
+        // Test with non-existent collection
+        let output_path = temp_path.join("should_fail.fa");
+        let fake_collection = b"fake_collection_digest_12345678";
+        let result = store.export_fasta(fake_collection, &output_path, None, Some(80));
+        assert!(result.is_err(), "Should fail with non-existent collection");
+
+        // Test with non-existent sequence name
+        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        let collection_digest = collections[0];
+        let result = store.export_fasta(
+            &collection_digest,
+            &output_path,
+            Some(vec!["nonexistent_chr"]),
+            Some(80),
+        );
+        assert!(result.is_err(), "Should fail with non-existent sequence name");
+
+        println!("✓ Error handling test passed");
     }
 }

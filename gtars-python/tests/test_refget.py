@@ -125,7 +125,7 @@ class TestRefget:
             store.write_store_to_directory(tmpdir, "sequences/%s2/%s.seq")
 
             # Load store back
-            loaded_store = GlobalRefgetStore.load_from_directory(tmpdir)
+            loaded_store = GlobalRefgetStore.load_local(tmpdir)
 
             # Verify same sequences exist
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"

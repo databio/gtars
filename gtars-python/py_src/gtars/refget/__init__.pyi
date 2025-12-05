@@ -135,15 +135,6 @@ class GlobalRefgetStore:
         Write a GlobalRefgetStore object to a directory
         """
         ...
-    @classmethod
-    def load_from_directory(
-        cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]
-    ) -> "GlobalRefgetStore":
-        """
-        Load a GlobalRefgetStore from a directory path
-        """
-
-        ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 

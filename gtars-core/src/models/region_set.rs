@@ -22,7 +22,7 @@ use bigtools::{BedEntry, BigBedWrite};
 use crate::models::Region;
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::utils::get_dynamic_reader;
 
 ///
 /// RegionSet struct, the representation of the interval region set file,

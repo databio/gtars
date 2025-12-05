@@ -458,7 +458,7 @@ impl PyGlobalRefgetStore {
         })
     }
 
-    fn get_sequence_by_id(&self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
+    fn get_sequence_by_id(&mut self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
         // Try as SHA512t24u first (32 bytes)
         let result = self
             .inner
@@ -477,7 +477,7 @@ impl PyGlobalRefgetStore {
     }
 
     fn get_sequence_by_collection_and_name(
-        &self,
+        &mut self,
         collection_digest: &str,
         sequence_name: &str,
     ) -> Option<PySequenceRecord> {
@@ -486,7 +486,7 @@ impl PyGlobalRefgetStore {
             .map(|record| PySequenceRecord::from(record.clone()))
     }
 
-    fn get_substring(&self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
+    fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
         self.inner.get_substring(seq_digest, start, end)
     }
 
@@ -502,16 +502,35 @@ impl PyGlobalRefgetStore {
             })
     }
 
+    /// Load a local RefgetStore from a directory
+    /// This loads metadata only; sequence data is loaded on-demand
+    ///
+    /// Args:
+    ///     cache_path: Local directory containing the refget store
     #[classmethod]
-    fn load_from_directory(_cls: &Bound<'_, PyType>, root_path: &str) -> PyResult<Self> {
-        let store = GlobalRefgetStore::load_from_directory(root_path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading store: {}", e))
+    fn load_local(_cls: &Bound<'_, PyType>, cache_path: &str) -> PyResult<Self> {
+        let store = GlobalRefgetStore::load_local(cache_path).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading local store: {}", e))
+        })?;
+        Ok(Self { inner: store })
+    }
+
+    /// Load a remote-backed RefgetStore
+    /// This loads metadata from remote and caches sequence data on-demand
+    ///
+    /// Args:
+    ///     cache_path: Local directory to cache downloaded sequences
+    ///     remote_url: Base URL of the remote refget store
+    #[classmethod]
+    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &str, remote_url: &str) -> PyResult<Self> {
+        let store = GlobalRefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
         })?;
         Ok(Self { inner: store })
     }
 
     fn get_seqs_bed_file(
-        &self,
+        &mut self,
         collection_digest: &str,
         bed_file_path: &str,
         output_file_path: &str,
@@ -528,7 +547,7 @@ impl PyGlobalRefgetStore {
     }
 
     fn get_seqs_bed_file_to_vec(
-        &self,
+        &mut self,
         collection_digest: &str,
         bed_file_path: &str,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
@@ -550,6 +569,39 @@ impl PyGlobalRefgetStore {
             .collect();
 
         Ok(py_results)
+    }
+
+    fn export_fasta(
+        &mut self,
+        collection_digest: &str,
+        output_path: &str,
+        sequence_names: Option<Vec<&str>>,
+        line_width: Option<usize>,
+    ) -> PyResult<()> {
+        self.inner
+            .export_fasta(collection_digest, output_path, sequence_names, line_width)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error exporting FASTA: {}",
+                    e
+                ))
+            })
+    }
+
+    fn export_fasta_by_digests(
+        &mut self,
+        digests: Vec<&str>,
+        output_path: &str,
+        line_width: Option<usize>,
+    ) -> PyResult<()> {
+        self.inner
+            .export_fasta_by_digests(digests, output_path, line_width)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error exporting FASTA by digests: {}",
+                    e
+                ))
+            })
     }
 
     fn __str__(&self) -> String {
