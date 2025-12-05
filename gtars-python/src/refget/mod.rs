@@ -589,11 +589,14 @@ impl PyGlobalRefgetStore {
         &mut self,
         collection_digest: &str,
         output_path: &str,
-        sequence_names: Option<Vec<&str>>,
+        sequence_names: Option<Vec<String>>,
         line_width: Option<usize>,
     ) -> PyResult<()> {
+        let sequence_names_refs = sequence_names.as_ref().map(|names| {
+            names.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
+        });
         self.inner
-            .export_fasta(collection_digest, output_path, sequence_names, line_width)
+            .export_fasta(collection_digest, output_path, sequence_names_refs, line_width)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA: {}",
@@ -604,12 +607,13 @@ impl PyGlobalRefgetStore {
 
     fn export_fasta_by_digests(
         &mut self,
-        digests: Vec<&str>,
+        digests: Vec<String>,
         output_path: &str,
         line_width: Option<usize>,
     ) -> PyResult<()> {
+        let digests_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
         self.inner
-            .export_fasta_by_digests(digests, output_path, line_width)
+            .export_fasta_by_digests(digests_refs, output_path, line_width)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA by digests: {}",
