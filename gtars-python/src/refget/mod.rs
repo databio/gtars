@@ -219,7 +219,10 @@ impl PyAlphabetType {
 #[pymethods]
 impl PySequenceMetadata {
     fn __repr__(&self) -> String {
-        format!("<SequenceMetadata for {}>", self.name)
+        format!(
+            "SequenceMetadata(name='{}', length={}, sha512t24u='{}', md5='{}', alphabet={})",
+            self.name, self.length, self.sha512t24u, self.md5, self.alphabet.__str__()
+        )
     }
 
     fn __str__(&self) -> PyResult<String> {
@@ -266,7 +269,13 @@ impl PyFaiRecord {
 #[pymethods]
 impl PySequenceRecord {
     fn __repr__(&self) -> String {
-        format!("<SequenceRecord for {}>", self.metadata.name)
+        format!(
+            "SequenceRecord(name='{}', length={}, sha512t24u='{}', has_data={})",
+            self.metadata.name,
+            self.metadata.length,
+            self.metadata.sha512t24u,
+            self.data.is_some()
+        )
     }
 
     fn __str__(&self) -> String {
@@ -277,7 +286,10 @@ impl PySequenceRecord {
 #[pymethods]
 impl PySeqColDigestLvl1 {
     fn __repr__(&self) -> String {
-        "<SeqColDigestLvl1>".to_string()
+        format!(
+            "SeqColDigestLvl1(sequences='{}', names='{}', lengths='{}')",
+            self.sequences_digest, self.names_digest, self.lengths_digest
+        )
     }
 
     fn __str__(&self) -> String {
@@ -292,8 +304,10 @@ impl PySeqColDigestLvl1 {
 impl PySequenceCollection {
     fn __repr__(&self) -> String {
         format!(
-            "<SequenceCollection with {} sequences>",
-            self.sequences.len()
+            "SequenceCollection(n_sequences={}, digest='{}', has_data={})",
+            self.sequences.len(),
+            self.digest,
+            self.has_data
         )
     }
 

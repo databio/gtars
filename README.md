@@ -27,7 +27,7 @@ This repository is a work in progress, and still in early development. This repo
 
 ## Installation
 
-To install any component of `gtars`, you must have the rust toolchain installed. You can install it by [following the instructions](https://www.rust-lang.org/tools/install).
+To install `gtars`, you must first [install the rust toolchain](https://www.rust-lang.org/tools/install).
 
 ### Command-line interface
 You may build the cli binary locally by navigating to `gtars-cli` and using `cargo build --release`. This will create a binary in `target/release/gtars` at the top level of the workspace. You can then add this to your path, or run it directly.
