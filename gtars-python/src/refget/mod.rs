@@ -16,6 +16,10 @@ use gtars_refget::store::GlobalRefgetStore;
 use gtars_refget::store::StorageMode;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
+/// Compute the GA4GH SHA-512/24u digest for a sequence.
+///
+/// Accepts either a string or bytes and returns the truncated SHA-512 digest
+/// as a 32-character base64url string.
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.cast::<PyString>() {
@@ -27,6 +31,10 @@ pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     }
 }
 
+/// Compute the MD5 digest for a sequence.
+///
+/// Accepts either a string or bytes and returns the MD5 hash as a 32-character
+/// hexadecimal string. Supported for backward compatibility with legacy systems.
 #[pyfunction]
 pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.cast::<PyString>() {
@@ -38,8 +46,10 @@ pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     }
 }
 
-// This can take either a PosixPath or a string
-// The `&Bound<'_, PyAny>` references any Python object, bound to the Python runtime.
+/// Read a FASTA file and compute GA4GH digests for all sequences.
+///
+/// Returns a SequenceCollection with computed sequence-level and collection-level
+/// digests following the GA4GH refget specification.
 #[pyfunction]
 pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
     let fasta = fasta.to_string();
@@ -52,6 +62,10 @@ pub fn digest_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> 
     }
 }
 
+/// Compute FASTA index (FAI) metadata for all sequences in a FASTA file.
+///
+/// Returns a list of FAI records compatible with samtools faidx format.
+/// Only works with uncompressed FASTA files.
 #[pyfunction]
 pub fn compute_fai(fasta: &Bound<'_, PyAny>) -> PyResult<Vec<PyFaiRecord>> {
     let fasta = fasta.to_string();
@@ -59,6 +73,22 @@ pub fn compute_fai(fasta: &Bound<'_, PyAny>) -> PyResult<Vec<PyFaiRecord>> {
         Ok(fai_records) => Ok(fai_records.into_iter().map(PyFaiRecord::from).collect()),
         Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
             "Error computing FAI: {}",
+            e
+        ))),
+    }
+}
+
+/// Load a FASTA file with sequence data into a SequenceCollection.
+///
+/// Unlike digest_fasta(), this loads the actual sequence data into memory,
+/// not just metadata and digests.
+#[pyfunction]
+pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
+    let fasta = fasta.to_string();
+    match gtars_refget::fasta::load_fasta(&fasta) {
+        Ok(sequence_collection) => Ok(PySequenceCollection::from(sequence_collection)),
+        Err(e) => Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+            "Error loading FASTA file: {}",
             e
         ))),
     }
@@ -145,8 +175,6 @@ pub struct PySequenceCollection {
     pub lvl1: PySeqColDigestLvl1,
     #[pyo3(get, set)]
     pub file_path: Option<String>,
-    #[pyo3(get, set)]
-    pub has_data: bool,
 }
 
 #[pyclass(name = "RetrievedSequence")]
@@ -281,6 +309,49 @@ impl PySequenceRecord {
     fn __str__(&self) -> String {
         format!("SequenceRecord for {}", self.metadata.name)
     }
+
+    /// Decode the sequence data to a string.
+    ///
+    /// This method decodes the sequence data stored in this record. It handles
+    /// both raw (uncompressed UTF-8) and encoded (bit-packed) data automatically
+    /// based on the alphabet type.
+    ///
+    /// Returns:
+    ///     Optional[str]: The decoded sequence string if data is loaded, None otherwise.
+    ///
+    /// Example:
+    ///     >>> record = store.get_sequence_by_collection_and_name(digest, "chr1")
+    ///     >>> sequence = record.decode()
+    ///     >>> if sequence:
+    ///     ...     print(f"First 50 bases: {sequence[:50]}")
+    pub fn decode(&self) -> Option<String> {
+        // Convert PySequenceRecord to Rust SequenceRecord
+        let rust_record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: self.metadata.name.clone(),
+                length: self.metadata.length,
+                sha512t24u: self.metadata.sha512t24u.clone(),
+                md5: self.metadata.md5.clone(),
+                alphabet: match self.metadata.alphabet {
+                    PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
+                    PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
+                    PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
+                    PyAlphabetType::Protein => AlphabetType::Protein,
+                    PyAlphabetType::Ascii => AlphabetType::Ascii,
+                    PyAlphabetType::Unknown => AlphabetType::Unknown,
+                },
+            },
+            fai: self.fai.as_ref().map(|fai| FaiMetadata {
+                offset: fai.offset,
+                line_bases: fai.line_bases,
+                line_bytes: fai.line_bytes,
+            }),
+            data: self.data.clone(),
+        };
+
+        // Call the Rust decode method
+        rust_record.decode()
+    }
 }
 
 #[pymethods]
@@ -304,10 +375,9 @@ impl PySeqColDigestLvl1 {
 impl PySequenceCollection {
     fn __repr__(&self) -> String {
         format!(
-            "SequenceCollection(n_sequences={}, digest='{}', has_data={})",
+            "SequenceCollection(n_sequences={}, digest='{}')",
             self.sequences.len(),
-            self.digest,
-            self.has_data
+            self.digest
         )
     }
 
@@ -422,7 +492,6 @@ impl From<SequenceCollection> for PySequenceCollection {
             digest: value.digest,
             lvl1: PySeqColDigestLvl1::from(value.lvl1),
             file_path: value.file_path.map(|p| p.to_string_lossy().to_string()),
-            has_data: value.has_data,
         }
     }
 }
@@ -459,6 +528,18 @@ pub struct PyGlobalRefgetStore {
 
 #[pymethods]
 impl PyGlobalRefgetStore {
+    /// Create a new GlobalRefgetStore.
+    ///
+    /// Args:
+    ///     mode: Storage mode - either StorageMode.Raw (uncompressed) or
+    ///         StorageMode.Encoded (bit-packed, space-efficient).
+    ///
+    /// Returns:
+    ///     GlobalRefgetStore: A new empty refget store.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
+    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
     #[new]
     fn new(mode: PyStorageMode) -> Self {
         Self {
@@ -466,12 +547,41 @@ impl PyGlobalRefgetStore {
         }
     }
 
+    /// Import sequences from a FASTA file into the store.
+    ///
+    /// Reads all sequences from a FASTA file and adds them to the store.
+    /// Computes GA4GH digests and creates a sequence collection.
+    ///
+    /// Args:
+    ///     file_path: Path to the FASTA file.
+    ///
+    /// Raises:
+    ///     IOError: If the file cannot be read or parsed.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
+    ///     >>> store.import_fasta("genome.fa")
     fn import_fasta(&mut self, file_path: &str) -> PyResult<()> {
         self.inner.import_fasta(file_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
         })
     }
 
+    /// Retrieve a sequence record by its digest (SHA-512/24u or MD5).
+    ///
+    /// Searches for a sequence by its GA4GH SHA-512/24u digest. If not found
+    /// and the input looks like an MD5 digest (32 hex characters), tries MD5 lookup.
+    ///
+    /// Args:
+    ///     digest: Sequence digest (SHA-512/24u base64url or MD5 hex string).
+    ///
+    /// Returns:
+    ///     Optional[SequenceRecord]: The sequence record if found, None otherwise.
+    ///
+    /// Example:
+    ///     >>> record = store.get_sequence_by_id("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
+    ///     >>> if record:
+    ///     ...     print(f"Found: {record.metadata.name}")
     fn get_sequence_by_id(&mut self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
         // Try as SHA512t24u first (32 bytes)
         let result = self
@@ -490,6 +600,24 @@ impl PyGlobalRefgetStore {
         Ok(result)
     }
 
+    /// Retrieve a sequence by collection digest and sequence name.
+    ///
+    /// Looks up a sequence within a specific collection using its name
+    /// (e.g., "chr1", "chrM"). This is useful when you know the genome assembly
+    /// (collection) and chromosome name.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///     sequence_name: Name of the sequence within that collection.
+    ///
+    /// Returns:
+    ///     Optional[SequenceRecord]: The sequence record if found, None otherwise.
+    ///
+    /// Example:
+    ///     >>> record = store.get_sequence_by_collection_and_name(
+    ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
+    ///     ...     "chr1"
+    ///     ... )
     fn get_sequence_by_collection_and_name(
         &mut self,
         collection_digest: &str,
@@ -500,8 +628,52 @@ impl PyGlobalRefgetStore {
             .map(|record| PySequenceRecord::from(record.clone()))
     }
 
+    /// Extract a substring from a sequence.
+    ///
+    /// Retrieves a specific region from a sequence using 0-based, half-open
+    /// coordinates [start, end). Automatically loads sequence data if not
+    /// already cached (for lazy-loaded stores).
+    ///
+    /// Args:
+    ///     seq_digest: Sequence digest (SHA-512/24u).
+    ///     start: Start position (0-based, inclusive).
+    ///     end: End position (0-based, exclusive).
+    ///
+    /// Returns:
+    ///     Optional[str]: The substring sequence if found, None otherwise.
+    ///
+    /// Example:
+    ///     >>> # Get first 1000 bases of chr1
+    ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
+    ///     >>> print(f"First 50bp: {seq[:50]}")
     fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
         self.inner.get_substring(seq_digest, start, end)
+    }
+
+    #[getter]
+    fn cache_path(&self) -> Option<String> {
+        self.inner.local_path().map(|p| p.display().to_string())
+    }
+
+    #[getter]
+    fn remote_url(&self) -> Option<String> {
+        self.inner.remote_source().map(|s| s.to_string())
+    }
+
+    fn list_sequences(&self) -> Vec<PySequenceMetadata> {
+        self.inner
+            .list_sequences()
+            .into_iter()
+            .map(|meta| PySequenceMetadata::from(meta.clone()))
+            .collect()
+    }
+
+    fn list_collections(&self) -> Vec<PySequenceCollection> {
+        self.inner
+            .list_collections()
+            .into_iter()
+            .map(|col| PySequenceCollection::from(col.clone()))
+            .collect()
     }
 
     fn write_store_to_directory(
@@ -516,11 +688,26 @@ impl PyGlobalRefgetStore {
             })
     }
 
-    /// Load a local RefgetStore from a directory
-    /// This loads metadata only; sequence data is loaded on-demand
+    /// Load a local RefgetStore from a directory.
+    ///
+    /// Loads metadata from the local store immediately; sequence data is loaded
+    /// on-demand when first accessed. This is efficient for large genomes where
+    /// you may only need specific sequences.
     ///
     /// Args:
-    ///     cache_path: Local directory containing the refget store
+    ///     cache_path: Local directory containing the refget store (must have
+    ///         index.json and sequences.farg files).
+    ///
+    /// Returns:
+    ///         GlobalRefgetStore: Store with metadata loaded, sequences lazy-loaded.
+    ///
+    /// Raises:
+    ///     IOError: If the store directory or index files cannot be read.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> store = GlobalRefgetStore.load_local("/data/hg38_store")
+    ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     #[classmethod]
     fn load_local(_cls: &Bound<'_, PyType>, cache_path: &str) -> PyResult<Self> {
         let store = GlobalRefgetStore::load_local(cache_path).map_err(|e| {
@@ -529,12 +716,35 @@ impl PyGlobalRefgetStore {
         Ok(Self { inner: store })
     }
 
-    /// Load a remote-backed RefgetStore
-    /// This loads metadata from remote and caches sequence data on-demand
+    /// Load a remote RefgetStore with local caching.
+    ///
+    /// Fetches metadata (index.json, sequences.farg) from a remote URL immediately.
+    /// Sequence data (.seq files) are downloaded on-demand when first accessed and
+    /// cached locally. This is ideal for working with large remote genomes where
+    /// you only need specific sequences.
     ///
     /// Args:
-    ///     cache_path: Local directory to cache downloaded sequences
-    ///     remote_url: Base URL of the remote refget store
+    ///     cache_path: Local directory to cache downloaded metadata and sequences.
+    ///         Created if it doesn't exist.
+    ///     remote_url: Base URL of the remote refget store (e.g.,
+    ///         "https://example.com/hg38" or "s3://bucket/hg38").
+    ///
+    /// Returns:
+    ///     GlobalRefgetStore: Store with metadata loaded, sequences fetched on-demand.
+    ///
+    /// Raises:
+    ///     IOError: If remote metadata cannot be fetched or cache cannot be written.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> store = GlobalRefgetStore.load_remote(
+    ///     ...     "/data/cache/hg38",
+    ///     ...     "https://refget-server.com/hg38"
+    ///     ... )
+    ///     >>> # First access fetches from remote and caches
+    ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
+    ///     >>> # Second access uses cache
+    ///     >>> seq2 = store.get_substring("chr1_digest", 1000, 2000)
     #[classmethod]
     fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &str, remote_url: &str) -> PyResult<Self> {
         let store = GlobalRefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
@@ -627,9 +837,22 @@ impl PyGlobalRefgetStore {
     }
 
     fn __repr__(&self) -> String {
+        let n_sequences = self.inner.list_sequence_digests().len();
+
+        let location = if let Some(remote) = self.inner.remote_source() {
+            let cache = self.inner.local_path()
+                .map(|p| p.display().to_string())
+                .unwrap_or_else(|| "None".to_string());
+            format!("cache='{}', remote='{}'", cache, remote)
+        } else if let Some(path) = self.inner.local_path() {
+            format!("cache='{}'", path.display())
+        } else {
+            "memory-only".to_string()
+        };
+
         format!(
-            "<GlobalRefgetStore with {} sequences>",
-            self.inner.list_sequence_digests().len()
+            "GlobalRefgetStore(n_sequences={}, {})",
+            n_sequences, location
         )
     }
 }
@@ -641,6 +864,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(md5_digest, m)?)?;
     m.add_function(wrap_pyfunction!(digest_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(compute_fai, m)?)?;
+    m.add_function(wrap_pyfunction!(load_fasta, m)?)?;
     m.add_class::<PyAlphabetType>()?;
     m.add_class::<PySequenceMetadata>()?;
     m.add_class::<PyFaiMetadata>()?;

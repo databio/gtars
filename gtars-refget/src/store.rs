@@ -345,9 +345,34 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    /// Returns a list of all sequence names in the store
+    /// Returns a list of all sequence digests in the store
     pub fn list_sequence_digests(&self) -> Vec<[u8; 32]> {
         self.sequence_store.keys().cloned().collect()
+    }
+
+    /// Returns a list of all sequences with their metadata
+    pub fn list_sequences(&self) -> Vec<&SequenceMetadata> {
+        self.sequence_store.values().map(|rec| &rec.metadata).collect()
+    }
+
+    /// Returns a list of all collection digests
+    pub fn list_collection_digests(&self) -> Vec<[u8; 32]> {
+        self.collections.keys().cloned().collect()
+    }
+
+    /// Returns a list of all collections
+    pub fn list_collections(&self) -> Vec<&SequenceCollection> {
+        self.collections.values().collect()
+    }
+
+    /// Returns the local path where the store is located (if any)
+    pub fn local_path(&self) -> Option<&PathBuf> {
+        self.local_path.as_ref()
+    }
+
+    /// Returns the remote source URL (if any)
+    pub fn remote_source(&self) -> Option<&str> {
+        self.remote_source.as_deref()
     }
 
     /// Retrieve a SequenceRecord from the store by its SHA512t24u digest
@@ -369,8 +394,16 @@ impl GlobalRefgetStore {
         collection_digest: K,
         sequence_name: &str,
     ) -> Option<&SequenceRecord> {
+        let collection_key = collection_digest.to_key();
+
+        // Try to ensure collection is loaded (lazy-load from remote if needed)
+        if let Err(e) = self.ensure_collection_loaded(&collection_key) {
+            eprintln!("Failed to load collection: {}", e);
+            return None;
+        }
+
         // Look up the collection by digest
-        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_digest.to_key()) {
+        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_key) {
             // Look up the sequence name in the collection's name map
             name_map.get(sequence_name).cloned()?
         } else {
@@ -1037,6 +1070,60 @@ impl GlobalRefgetStore {
         Ok(store)
     }
 
+    /// Ensure a collection is loaded into the store
+    /// If the collection is not already loaded, try to fetch it from local or remote
+    fn ensure_collection_loaded(&mut self, collection_digest: &[u8; 32]) -> Result<()> {
+        // Check if collection is already loaded
+        if self.name_lookup.contains_key(collection_digest) {
+            return Ok(());
+        }
+
+        // Collection not found - try to fetch it if we have a remote source
+        // Convert the collection digest to a string for the path
+        let digest_str = String::from_utf8_lossy(collection_digest);
+
+        // Build the collection file path using the template
+        // Default template is "collections/%s.farg"
+        let relative_path = format!("collections/{}.farg", digest_str);
+
+        // Try to fetch the collection file
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("No local path configured"))?;
+
+        // Try to fetch (this will use cache if available)
+        // fetch_file will save the file to local_path/relative_path
+        let _collection_data = Self::fetch_file(local_path, &self.remote_source, &relative_path)?;
+
+        // Read the collection from the cached file
+        let collection_file_path = local_path.join(&relative_path);
+        let collection = read_fasta_refget_file(&collection_file_path)?;
+
+        // Verify the collection digest matches what we requested
+        let loaded_digest = collection.digest.to_key();
+        if loaded_digest != *collection_digest {
+            eprintln!(
+                "Warning: Collection digest mismatch. Expected {:?}, got {:?}",
+                String::from_utf8_lossy(collection_digest),
+                String::from_utf8_lossy(&loaded_digest)
+            );
+        }
+
+        // Add collection to store
+        self.collections.insert(*collection_digest, collection.clone());
+
+        // Build name lookup for this collection
+        let mut name_map = HashMap::new();
+        for sequence_record in &collection.sequences {
+            let sha512_key = sequence_record.metadata.sha512t24u.to_key();
+            name_map.insert(sequence_record.metadata.name.clone(), sha512_key);
+        }
+        self.name_lookup.insert(*collection_digest, name_map);
+
+        Ok(())
+    }
+
     /// Ensure a sequence is loaded into memory
     /// If the sequence data is not already loaded, fetch it from local or remote
     fn ensure_sequence_loaded(&mut self, digest: &[u8; 32]) -> Result<()> {
@@ -1402,7 +1489,6 @@ chr1\t-5\t100
                 lengths_digest: "test".to_string(),
             },
             file_path: None,
-            has_data: false,
         };
 
         // Create a sequence record

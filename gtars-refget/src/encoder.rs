@@ -80,11 +80,16 @@ impl SequenceEncoder {
 /// is specified by the `bits_per_symbol` parameter. The function returns
 /// a bit-packed vector of bytes containing the encoded sequence.
 ///
+/// **Bit Ordering: MSB-first (Most Significant Bit first)**
+///
+/// Example with 2-bit DNA encoding (A=00, C=01, G=10, T=11):
+/// - Sequence "ACGT" → byte 0x1B (00011011)
+/// - A (00) in bits 7-6, C (01) in bits 5-4, G (10) in bits 3-2, T (11) in bits 1-0
+///
 /// # Arguments
 ///
 /// * `sequence` - The sequence to encode
-/// * `encoding_array` - The encoding array to use
-/// * `bits_per_symbol` - The number of bits used to represent each symbol
+/// * `alphabet` - The alphabet defining the encoding
 ///
 /// # Returns
 ///

@@ -26,10 +26,6 @@ pub struct SequenceCollection {
     /// Optional path to the source file from which this collection was loaded.
     /// Used for caching and reference purposes.
     pub file_path: Option<PathBuf>,
-
-    /// Flag indicating whether sequence data is actually loaded in memory.
-    /// When false, only metadata is available.
-    pub has_data: bool,
 }
 
 /// A struct representing the first level of digests for a refget sequence collection.
@@ -147,6 +143,66 @@ impl SequenceRecord {
         }
         Ok(())
     }
+
+    /// Decodes the sequence data to a string.
+    ///
+    /// This method attempts to decode the sequence data stored in this record.
+    /// It handles both raw (uncompressed UTF-8) and encoded (bit-packed) data.
+    /// The decoding strategy depends on the alphabet type:
+    /// - For ASCII alphabet: data is already in raw form, just convert to string
+    /// - For other alphabets: attempt encoded decoding first, fall back to raw
+    ///
+    /// # Returns
+    ///
+    /// * `Some(String)` - The decoded sequence if data is loaded
+    /// * `None` - If no data is loaded in this record
+    ///
+    /// # Example
+    ///
+    /// ```rust,no_run
+    /// # use gtars_refget::collection::SequenceRecord;
+    /// # let record: SequenceRecord = todo!();
+    /// let sequence = record.decode();
+    /// if let Some(seq) = sequence {
+    ///     println!("Sequence: {}", seq);
+    /// }
+    /// ```
+    pub fn decode(&self) -> Option<String> {
+        use crate::alphabet::lookup_alphabet;
+        use crate::encoder::decode_substring_from_bytes;
+
+        let data = self.data.as_ref()?;
+
+        // For ASCII alphabet (8 bits per symbol), the data is always stored raw
+        if self.metadata.alphabet == crate::alphabet::AlphabetType::Ascii {
+            return String::from_utf8(data.clone()).ok();
+        }
+
+        // Try to detect if data is raw or encoded
+        // Heuristic: for encoded data, the size should be approximately length * bits_per_symbol / 8
+        // For raw data, the size should be approximately equal to length
+        let alphabet = lookup_alphabet(&self.metadata.alphabet);
+
+        // If data size matches the expected length (not the encoded size), it's probably raw
+        if data.len() == self.metadata.length {
+            // Try to decode as UTF-8
+            if let Ok(raw_string) = String::from_utf8(data.clone()) {
+                // Data appears to be raw UTF-8
+                return Some(raw_string);
+            }
+        }
+
+        // Data is probably encoded (size matches expected encoded size), try to decode it
+        let decoded_bytes = decode_substring_from_bytes(
+            data,
+            0,
+            self.metadata.length,
+            alphabet
+        );
+
+        // Convert to string
+        String::from_utf8(decoded_bytes).ok()
+    }
 }
 
 impl SequenceCollection {
@@ -185,7 +241,6 @@ impl SequenceCollection {
             digest: collection_digest,
             lvl1,
             file_path: None,
-            has_data: true,
         }
     }
 
@@ -303,5 +358,205 @@ impl Display for SequenceRecord {
             &self.metadata.md5
         )?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fasta::{digest_fasta, load_fasta};
+    use crate::encoder::encode_sequence;
+
+    #[test]
+    fn test_decode_returns_none_when_no_data() {
+        // Test that decode() returns None when data is None
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        for seq_record in &seqcol.sequences {
+            assert!(seq_record.data.is_none(), "digest_fasta should not load sequence data");
+            assert_eq!(seq_record.decode(), None, "decode() should return None when data is None");
+        }
+    }
+
+    #[test]
+    fn test_decode_with_loaded_data() {
+        // Test that decode() returns the correct sequence when data is loaded
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        // Expected sequences from base.fa
+        let expected_sequences = vec![
+            ("chrX", "TTGGGGAA"),
+            ("chr1", "GGAA"),
+            ("chr2", "GCGC"),
+        ];
+
+        for (seq_record, (expected_name, expected_seq)) in seqcol.sequences.iter().zip(expected_sequences.iter()) {
+            assert_eq!(seq_record.metadata.name, *expected_name);
+            assert!(seq_record.data.is_some(), "load_fasta should load sequence data");
+
+            let decoded = seq_record.decode().expect("decode() should return Some when data is present");
+            assert_eq!(decoded, *expected_seq,
+                "Decoded sequence for {} should match expected sequence", expected_name);
+        }
+    }
+
+    #[test]
+    fn test_decode_handles_encoded_data() {
+        // Test that decode() correctly handles bit-packed encoded data
+        use crate::alphabet::{lookup_alphabet, AlphabetType};
+
+        let sequence = b"ACGT";
+        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "test_seq".to_string(),
+                length: 4,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+            },
+            fai: None,
+            data: Some(encoded_data),
+        };
+
+        let decoded = record.decode().expect("Should decode encoded data");
+        assert_eq!(decoded, "ACGT", "Should correctly decode bit-packed DNA sequence");
+    }
+
+    #[test]
+    fn test_decode_handles_raw_utf8_data() {
+        // Test that decode() handles raw UTF-8 data (not encoded)
+        let raw_sequence = b"ACGTACGT".to_vec();
+
+        let record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "test_seq".to_string(),
+                length: 8,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Ascii,
+            },
+            fai: None,
+            data: Some(raw_sequence),
+        };
+
+        let decoded = record.decode().expect("Should decode raw UTF-8 data");
+        assert_eq!(decoded, "ACGTACGT", "Should correctly decode raw sequence data");
+    }
+
+    #[test]
+    fn test_decode_with_iupac_alphabet() {
+        // Test decode with IUPAC DNA alphabet (4-bit encoding)
+        use crate::alphabet::{lookup_alphabet, AlphabetType};
+
+        let sequence = b"ACGTRYMK";
+        let alphabet = lookup_alphabet(&AlphabetType::DnaIupac);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "iupac_test".to_string(),
+                length: 8,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::DnaIupac,
+            },
+            fai: None,
+            data: Some(encoded_data),
+        };
+
+        let decoded = record.decode().expect("Should decode IUPAC encoded data");
+        assert_eq!(decoded, "ACGTRYMK", "Should correctly decode IUPAC DNA sequence");
+    }
+
+    #[test]
+    fn test_decode_with_protein_alphabet() {
+        // Test decode with protein alphabet (5-bit encoding)
+        use crate::alphabet::{lookup_alphabet, AlphabetType};
+
+        let sequence = b"ACDEFGHIKLMNPQRSTVWY";
+        let alphabet = lookup_alphabet(&AlphabetType::Protein);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "protein_test".to_string(),
+                length: 20,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Protein,
+            },
+            fai: None,
+            data: Some(encoded_data),
+        };
+
+        let decoded = record.decode().expect("Should decode protein encoded data");
+        assert_eq!(decoded, "ACDEFGHIKLMNPQRSTVWY", "Should correctly decode protein sequence");
+    }
+
+    #[test]
+    fn test_decode_empty_sequence() {
+        // Test decode with empty data
+        let record = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "empty_seq".to_string(),
+                length: 0,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+            },
+            fai: None,
+            data: Some(Vec::new()),
+        };
+
+        let decoded = record.decode().expect("Should handle empty sequence");
+        assert_eq!(decoded, "", "Empty sequence should decode to empty string");
+    }
+
+    #[test]
+    fn test_decode_detects_raw_vs_encoded() {
+        // Test that decode() correctly distinguishes between raw and encoded data
+        use crate::alphabet::{lookup_alphabet, AlphabetType};
+
+        // Create raw UTF-8 data that matches the sequence length (heuristic for raw data)
+        let raw_sequence = b"GGGGGGGG";  // 8 bytes for 8-symbol sequence
+        let record_raw = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "raw_test".to_string(),
+                length: 8,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+            },
+            fai: None,
+            data: Some(raw_sequence.to_vec()),
+        };
+
+        let decoded_raw = record_raw.decode().expect("Should decode raw data");
+        assert_eq!(decoded_raw, "GGGGGGGG");
+
+        // Create encoded data (2 bits per symbol, so 8 symbols = 2 bytes)
+        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
+        let encoded_data = encode_sequence(b"GGGGGGGG", alphabet);
+        assert_eq!(encoded_data.len(), 2, "Encoded 2-bit DNA should be 2 bytes for 8 symbols");
+
+        let record_encoded = SequenceRecord {
+            metadata: SequenceMetadata {
+                name: "encoded_test".to_string(),
+                length: 8,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+            },
+            fai: None,
+            data: Some(encoded_data),
+        };
+
+        let decoded_encoded = record_encoded.decode().expect("Should decode encoded data");
+        assert_eq!(decoded_encoded, "GGGGGGGG");
     }
 }

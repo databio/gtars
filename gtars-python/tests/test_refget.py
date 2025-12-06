@@ -3,6 +3,7 @@ from gtars.refget import (
     GlobalRefgetStore,
     StorageMode,
     digest_fasta,
+    load_fasta,
     sha512t24u_digest,
     md5_digest,
     RetrievedSequence,
@@ -25,7 +26,6 @@ class TestRefget:
         assert hasattr(result, "digest")
         assert hasattr(result, "lvl1")
         assert hasattr(result, "file_path")
-        assert hasattr(result, "has_data")
 
         # Test that sequences is a list
         assert isinstance(result.sequences, list)
@@ -79,9 +79,11 @@ class TestRefget:
         store_encoded = GlobalRefgetStore(StorageMode.Encoded)
 
         # Test string representations
-        # print(store_raw.__repr__)
-        assert repr(store_raw).startswith("<GlobalRefgetStore")
-        assert repr(store_encoded).startswith("<GlobalRefgetStore")
+        # New repr format shows n_sequences and location
+        assert repr(store_raw).startswith("GlobalRefgetStore")
+        assert repr(store_encoded).startswith("GlobalRefgetStore")
+        assert "n_sequences=0" in repr(store_raw)  # Empty store
+        assert "memory-only" in repr(store_raw)  # No local path
 
     def test_store_import_and_retrieve(self):
         """Test importing FASTA and retrieving sequences"""
@@ -250,3 +252,102 @@ GGGG
                 assert vec_result[i].end == expected_vec[i].end
 
             print("✓ get_seqs_bed_file_to_vec binding test passed.")
+
+    def test_decode_with_no_data(self):
+        """Test that decode() returns None when sequence data is not loaded"""
+        fasta_path = "../../gtars/tests/data/fasta/base.fa"
+
+        # digest_fasta should not load sequence data
+        result = digest_fasta(fasta_path)
+
+        for seq_record in result.sequences:
+            assert seq_record.data is None, "digest_fasta should not load sequence data"
+            assert seq_record.decode() is None, "decode() should return None when data is None"
+
+    def test_decode_with_loaded_data(self):
+        """Test that decode() returns correct sequences when data is loaded"""
+        fasta_path = "../../gtars/tests/data/fasta/base.fa"
+
+        # load_fasta should load sequence data
+        result = load_fasta(fasta_path)
+
+        # Expected sequences from base.fa
+        expected_sequences = [
+            ("chrX", "TTGGGGAA"),
+            ("chr1", "GGAA"),
+            ("chr2", "GCGC"),
+        ]
+
+        assert len(result.sequences) == len(expected_sequences)
+
+        for seq_record, (expected_name, expected_seq) in zip(result.sequences, expected_sequences):
+            assert seq_record.metadata.name == expected_name
+            assert seq_record.data is not None, "load_fasta should load sequence data"
+
+            decoded = seq_record.decode()
+            assert decoded is not None, "decode() should return Some when data is present"
+            assert decoded == expected_seq, f"Decoded sequence for {expected_name} should match expected"
+
+    def test_decode_with_store_sequences(self):
+        """Test decode() with sequences retrieved from a store"""
+        store = GlobalRefgetStore(StorageMode.Encoded)
+        fasta_path = "../../gtars/tests/data/fasta/base.fa"
+        store.import_fasta(fasta_path)
+
+        # Get sequence by ID
+        sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+        seq = store.get_sequence_by_id(sha512)
+
+        assert seq is not None
+        assert seq.data is not None, "Store should have loaded sequence data"
+
+        decoded = seq.decode()
+        assert decoded is not None
+        assert decoded == "TTGGGGAA", "Should correctly decode sequence from encoded store"
+
+    def test_decode_raw_vs_encoded_storage(self):
+        """Test that decode() works with both Raw and Encoded storage modes"""
+        fasta_path = "../../gtars/tests/data/fasta/base.fa"
+
+        # Test with Raw storage mode
+        store_raw = GlobalRefgetStore(StorageMode.Raw)
+        store_raw.import_fasta(fasta_path)
+        sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+        seq_raw = store_raw.get_sequence_by_id(sha512)
+        decoded_raw = seq_raw.decode()
+
+        # Test with Encoded storage mode
+        store_encoded = GlobalRefgetStore(StorageMode.Encoded)
+        store_encoded.import_fasta(fasta_path)
+        seq_encoded = store_encoded.get_sequence_by_id(sha512)
+        decoded_encoded = seq_encoded.decode()
+
+        # Both should produce the same decoded sequence
+        assert decoded_raw == decoded_encoded
+        assert decoded_raw == "TTGGGGAA"
+
+    def test_load_fasta_function(self):
+        """Test the new load_fasta() function"""
+        fasta_path = "../../gtars/tests/data/fasta/base.fa"
+
+        # Test that load_fasta returns a SequenceCollection with data
+        result = load_fasta(fasta_path)
+
+        # Should have same structure as digest_fasta
+        assert hasattr(result, "sequences")
+        assert hasattr(result, "digest")
+        assert hasattr(result, "lvl1")
+        assert hasattr(result, "file_path")
+
+        # But sequences should have data loaded
+        assert len(result.sequences) == 3
+        for seq_record in result.sequences:
+            assert seq_record.data is not None, "load_fasta should load sequence data"
+            assert seq_record.decode() is not None, "Should be able to decode loaded data"
+
+        # Verify digests match digest_fasta
+        digest_result = digest_fasta(fasta_path)
+        assert result.digest == digest_result.digest
+        assert result.lvl1.sequences_digest == digest_result.lvl1.sequences_digest
+        assert result.lvl1.names_digest == digest_result.lvl1.names_digest
+        assert result.lvl1.lengths_digest == digest_result.lvl1.lengths_digest
