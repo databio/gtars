@@ -91,7 +91,7 @@ class TestRefget:
         fasta_path = "../../gtars/tests/data/fasta/base.fa"
         # fasta_path = os.path.abspath("../../gtars/tests/data/fasta/base.fa")
         # Import FASTA
-        store.import_fasta(fasta_path)
+        store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get known sequence by SHA512t24u digest
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -108,7 +108,7 @@ class TestRefget:
         """Test substring retrieval"""
         store = GlobalRefgetStore(StorageMode.Raw)
         fasta_path = "../../gtars/tests/data/fasta/base.fa"
-        store.import_fasta(fasta_path)
+        store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get a substring from a known sequence
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -120,11 +120,11 @@ class TestRefget:
         """Test saving and loading store"""
         store = GlobalRefgetStore(StorageMode.Raw)
         fasta_path = "../../gtars/tests/data/fasta/base.fa"
-        store.import_fasta(fasta_path)
+        store.add_sequence_collection_from_fasta(fasta_path)
 
         # Save store to temporary directory
         with tempfile.TemporaryDirectory() as tmpdir:
-            store.write_store_to_directory(tmpdir, "sequences/%s2/%s.seq")
+            store.write_store_to_dir(tmpdir, "sequences/%s2/%s.seq")
 
             # Load store back
             loaded_store = GlobalRefgetStore.load_local(tmpdir)
@@ -145,7 +145,7 @@ class TestRefget:
 
         # Test importing non-existent file
         with pytest.raises(Exception):
-            store.import_fasta("nonexistent.fa")
+            store.add_sequence_collection_from_fasta("nonexistent.fa")
 
         # Test getting non-existent sequence
         bogus_digest = "not_a_sequence"
@@ -153,7 +153,7 @@ class TestRefget:
 
         # Test invalid substring parameters
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-        store.import_fasta("../../gtars/tests/data/fasta/base.fa")
+        store.add_sequence_collection_from_fasta("../../gtars/tests/data/fasta/base.fa")
         assert store.get_substring(sha512, 10, 5) is None  # end < start
         assert store.get_substring(sha512, 0, 100) is None  # end > length
 
@@ -163,7 +163,7 @@ class TestRefget:
         fasta_path = "../../gtars/tests/data/fasta/base.fa"
 
         # Import sequences and get sequence by collection and name
-        store.import_fasta(fasta_path)
+        store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get sequence from default collection
         result = digest_fasta(fasta_path)
@@ -177,8 +177,8 @@ class TestRefget:
 
     def test_get_seqs_from_bed_file_bindings(self):
         """
-        Test both get_seqs_bed_file (writes to file)
-        and get_seqs_bed_file_to_vec (returns list) bindings.
+        Test both export_fasta_from_regions (writes to file)
+        and substrings_from_regions (returns list) bindings.
         """
 
         with tempfile.TemporaryDirectory() as temp_dir_str:
@@ -191,7 +191,7 @@ class TestRefget:
 
 
             store = GlobalRefgetStore(StorageMode.Encoded)
-            imported_collection = store.import_fasta(temp_fasta_path)
+            imported_collection = store.add_sequence_collection_from_fasta(temp_fasta_path)
             result = digest_fasta(temp_fasta_path)
 
             collection_digest = result.digest
@@ -214,7 +214,7 @@ class TestRefget:
                 f.write(bed_content)
 
             temp_output_fa_path = os.path.join(temp_dir, "output.fa")
-            store.get_seqs_bed_file(
+            store.export_fasta_from_regions(
                 collection_digest, temp_bed_path, temp_output_fa_path
             )
 
@@ -230,9 +230,9 @@ GGGG
             assert (
                 output_fa_content.strip() == expected_fa_content.strip()
             ), "Output FASTA file content mismatch"
-            print("✓ get_seqs_bed_file binding test passed.")
+            print("✓ export_fasta_from_regions binding test passed.")
 
-            vec_result = store.get_seqs_bed_file_to_vec(
+            vec_result = store.substrings_from_regions(
                 collection_digest, temp_bed_path
             )
 
@@ -251,7 +251,7 @@ GGGG
                 assert vec_result[i].start == expected_vec[i].start
                 assert vec_result[i].end == expected_vec[i].end
 
-            print("✓ get_seqs_bed_file_to_vec binding test passed.")
+            print("✓ substrings_from_regions binding test passed.")
 
     def test_decode_with_no_data(self):
         """Test that decode() returns None when sequence data is not loaded"""
@@ -292,7 +292,7 @@ GGGG
         """Test decode() with sequences retrieved from a store"""
         store = GlobalRefgetStore(StorageMode.Encoded)
         fasta_path = "../../gtars/tests/data/fasta/base.fa"
-        store.import_fasta(fasta_path)
+        store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get sequence by ID
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -311,14 +311,14 @@ GGGG
 
         # Test with Raw storage mode
         store_raw = GlobalRefgetStore(StorageMode.Raw)
-        store_raw.import_fasta(fasta_path)
+        store_raw.add_sequence_collection_from_fasta(fasta_path)
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         seq_raw = store_raw.get_sequence_by_id(sha512)
         decoded_raw = seq_raw.decode()
 
         # Test with Encoded storage mode
         store_encoded = GlobalRefgetStore(StorageMode.Encoded)
-        store_encoded.import_fasta(fasta_path)
+        store_encoded.add_sequence_collection_from_fasta(fasta_path)
         seq_encoded = store_encoded.get_sequence_by_id(sha512)
         decoded_encoded = seq_encoded.decode()
 

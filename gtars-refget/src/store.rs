@@ -85,7 +85,7 @@ struct StoreMetadata {
     created_at: String,
 }
 
-pub struct GetSeqsBedFileIter<'a, K>
+pub struct SubstringsFromRegions<'a, K>
 where
     K: AsRef<[u8]>,
 {
@@ -97,7 +97,7 @@ where
     line_num: usize,
 }
 
-impl<K> Iterator for GetSeqsBedFileIter<'_, K>
+impl<K> Iterator for SubstringsFromRegions<'_, K>
 where
     K: AsRef<[u8]>,
 {
@@ -265,11 +265,22 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    // Loading the sequence data requires 2 passes through the FASTA file, because we
-    // have to guess the alphabet before we can encode. So, the first pass is the digesting
-    // function, which digests and guesses the alphabet, and calculates length, to produce the
-    // SequenceDigest object. Then, using this object, we can go through the sequence a second time and encode it.
-    pub fn import_fasta<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+    /// Add a sequence collection from a FASTA file.
+    ///
+    /// Reads a FASTA file, digests the sequences, creates a SequenceCollection,
+    /// and adds it to the store along with all its sequences.
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the FASTA file
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Notes
+    /// Loading sequence data requires 2 passes through the FASTA file:
+    /// 1. First pass digests and guesses the alphabet to produce SequenceMetadata
+    /// 2. Second pass encodes the sequences based on the detected alphabet
+    pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
         println!("Loading farg index...");
         let seqcol = SequenceCollection::from_fasta(&file_path)?;
 
@@ -345,24 +356,55 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    /// Returns a list of all sequence digests in the store
-    pub fn list_sequence_digests(&self) -> Vec<[u8; 32]> {
-        self.sequence_store.keys().cloned().collect()
+    /// Returns an iterator over all sequence digests in the store
+    pub fn sequence_digests(&self) -> impl Iterator<Item = [u8; 32]> + '_ {
+        self.sequence_store.keys().cloned()
     }
 
-    /// Returns a list of all sequences with their metadata
-    pub fn list_sequences(&self) -> Vec<&SequenceMetadata> {
-        self.sequence_store.values().map(|rec| &rec.metadata).collect()
+    /// Returns an iterator over sequence metadata for all sequences in the store.
+    ///
+    /// This is a lightweight operation that returns only metadata (name, length, digests)
+    /// without loading sequence data.
+    ///
+    /// # Returns
+    /// An iterator over `SequenceMetadata` references.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for metadata in store.sequence_metadata() {
+    ///     println!("{}: {} bp", metadata.name, metadata.length);
+    /// }
+    /// ```
+    pub fn sequence_metadata(&self) -> impl Iterator<Item = &SequenceMetadata> + '_ {
+        self.sequence_store.values().map(|rec| &rec.metadata)
     }
 
-    /// Returns a list of all collection digests
-    pub fn list_collection_digests(&self) -> Vec<[u8; 32]> {
-        self.collections.keys().cloned().collect()
+    /// Returns an iterator over all complete sequence records in the store.
+    ///
+    /// This returns full `SequenceRecord` objects including both metadata and sequence data.
+    /// Use `sequence_metadata()` if you only need metadata.
+    ///
+    /// # Returns
+    /// An iterator over `SequenceRecord` references.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for record in store.sequence_records() {
+    ///     println!("{}: {:?}", record.metadata.name, record.data);
+    /// }
+    /// ```
+    pub fn sequence_records(&self) -> impl Iterator<Item = &SequenceRecord> + '_ {
+        self.sequence_store.values()
     }
 
-    /// Returns a list of all collections
-    pub fn list_collections(&self) -> Vec<&SequenceCollection> {
-        self.collections.values().collect()
+    /// Returns an iterator over all collection digests
+    pub fn collection_digests(&self) -> impl Iterator<Item = [u8; 32]> + '_ {
+        self.collections.keys().cloned()
+    }
+
+    /// Returns an iterator over all collections
+    pub fn collections(&self) -> impl Iterator<Item = &SequenceCollection> + '_ {
+        self.collections.values()
     }
 
     /// Returns the local path where the store is located (if any)
@@ -373,6 +415,11 @@ impl GlobalRefgetStore {
     /// Returns the remote source URL (if any)
     pub fn remote_source(&self) -> Option<&str> {
         self.remote_source.as_deref()
+    }
+
+    /// Returns the storage mode used by this store
+    pub fn storage_mode(&self) -> StorageMode {
+        self.mode
     }
 
     /// Retrieve a SequenceRecord from the store by its SHA512t24u digest
@@ -420,11 +467,31 @@ impl GlobalRefgetStore {
         self.sequence_store.get(&digest_key)
     }
 
-    pub fn get_seqs_in_bed_file_iter<'a, K: AsRef<[u8]>>(
+    /// Get an iterator over substrings defined by BED file regions.
+    ///
+    /// Reads a BED file line-by-line and yields substrings for each region.
+    /// This is memory-efficient for large BED files as it streams results.
+    ///
+    /// # Arguments
+    /// * `collection_digest` - The collection digest containing the sequences
+    /// * `bed_file_path` - Path to the BED file defining regions
+    ///
+    /// # Returns
+    /// Iterator yielding `Result<RetrievedSequence>` for each BED region
+    ///
+    /// # Example
+    /// ```ignore
+    /// let iter = store.substrings_from_regions(digest, "regions.bed")?;
+    /// for result in iter {
+    ///     let seq = result?;
+    ///     println!("{}:{}-{}: {}", seq.chrom_name, seq.start, seq.end, seq.sequence);
+    /// }
+    /// ```
+    pub fn substrings_from_regions<'a, K: AsRef<[u8]>>(
         &'a mut self,
         collection_digest: K,
         bed_file_path: &str,
-    ) -> Result<GetSeqsBedFileIter<'a, K>, Box<dyn std::error::Error>> {
+    ) -> Result<SubstringsFromRegions<'a, K>, Box<dyn std::error::Error>> {
         let path = Path::new(bed_file_path);
         let file_info = get_file_info(path);
         let is_gzipped = file_info.is_gzipped;
@@ -437,7 +504,7 @@ impl GlobalRefgetStore {
         };
         let reader = BufReader::new(reader);
 
-        Ok(GetSeqsBedFileIter {
+        Ok(SubstringsFromRegions {
             store: self,
             reader,
             collection_digest,
@@ -447,9 +514,29 @@ impl GlobalRefgetStore {
         })
     }
 
-    /// Given a Sequence Collection digest and a bed file path
-    /// retrieve sequences and write to a file
-    pub fn get_seqs_bed_file<K: AsRef<[u8]>>(
+    /// Export sequences from BED file regions to a FASTA file.
+    ///
+    /// Reads a BED file defining genomic regions and exports the sequences
+    /// for those regions to a FASTA file. This is useful for extracting
+    /// specific regions of interest from a genome.
+    ///
+    /// # Arguments
+    /// * `collection_digest` - The collection digest containing the sequences
+    /// * `bed_file_path` - Path to the BED file defining regions
+    /// * `output_file_path` - Path to write the output FASTA file
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Example
+    /// ```ignore
+    /// store.export_fasta_from_regions(
+    ///     digest,
+    ///     "regions.bed",
+    ///     "output.fa"
+    /// )?;
+    /// ```
+    pub fn export_fasta_from_regions<K: AsRef<[u8]>>(
         &mut self,
         collection_digest: K,
         bed_file_path: &str,
@@ -497,7 +584,7 @@ impl GlobalRefgetStore {
             })
             .unwrap_or_default();
 
-        let seq_iter = self.get_seqs_in_bed_file_iter(&collection_digest, bed_file_path)?;
+        let seq_iter = self.substrings_from_regions(&collection_digest, bed_file_path)?;
 
         let mut previous_parsed_chr = String::new();
         let mut current_header: String = String::new();
@@ -540,30 +627,6 @@ impl GlobalRefgetStore {
         }
 
         Ok(())
-    }
-
-    /// Given a Sequence Collection digest and a bed file path,
-    /// retrieve sequences and return them as a Vec<RetrievedSequence>.
-    /// Lines that cannot be parsed or sequences that cannot be retrieved will be skipped
-    pub fn get_seqs_bed_file_to_vec<K: AsRef<[u8]>>(
-        &mut self,
-        collection_digest: K,
-        bed_file_path: &str,
-    ) -> Result<Vec<RetrievedSequence>, Box<dyn std::error::Error>> {
-        let seq_iter = self.get_seqs_in_bed_file_iter(collection_digest, bed_file_path)?;
-
-        let retrieved_sequences = seq_iter
-            .into_iter()
-            .filter_map(|rs| match rs {
-                Ok(rs) => Some(rs),
-                Err(err) => {
-                    eprintln!("{err}");
-                    None
-                }
-            })
-            .collect::<Vec<RetrievedSequence>>();
-
-        Ok(retrieved_sequences)
     }
 
     /// Retrieve a SequenceRecord from the store by its MD5 digest
@@ -732,10 +795,11 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    /// Export sequences by their digests to a FASTA file
+    /// Export sequences by their sequence digests to a FASTA file
     ///
+    /// Bypasses collection information and exports sequences directly via sequence digests.
     /// # Arguments
-    /// * `digests` - List of SHA512t24u digests to export
+    /// * `seq_digests` - List of SHA512t24u sequence digests (not collection digests) to export
     /// * `output_path` - Path to write the FASTA file
     /// * `line_width` - Optional line width for wrapping sequences (default: 80)
     ///
@@ -743,7 +807,7 @@ impl GlobalRefgetStore {
     /// Result indicating success or error
     pub fn export_fasta_by_digests<P: AsRef<Path>>(
         &mut self,
-        digests: Vec<&str>,
+        seq_digests: Vec<&str>,
         output_path: P,
         line_width: Option<usize>,
     ) -> Result<()> {
@@ -755,7 +819,7 @@ impl GlobalRefgetStore {
             .context(format!("Failed to create output file: {}", output_path.display()))?;
 
         // Export each sequence
-        for digest_str in digests {
+        for digest_str in seq_digests {
             let digest_key = digest_str.as_bytes().to_key();
 
             // Ensure sequence is loaded
@@ -1167,18 +1231,29 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    /// Write the sequence_store component to a FARG file (without collection headers).
-    /// * `file_path` - The path to the FARG file to be written.
-    pub fn to_farg<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        // Write the FARGI file
+    /// Write all sequence metadata to a FARG file (without collection headers).
+    ///
+    /// Creates a global sequence index file containing metadata for all sequences
+    /// in the store across all collections. Does not include collection-level digest headers.
+    ///
+    /// # Arguments
+    /// * `file_path` - The path to the FARG file to be written
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Notes
+    /// For writing individual collection FARG files with collection headers,
+    /// use `SequenceCollection::write_collection_farg()` instead.
+    pub fn write_sequences_farg<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let file_path = file_path.as_ref();
-        println!("Writing farg file: {:?}", file_path);
+        println!("Writing sequences farg file: {:?}", file_path);
         let mut file = std::fs::File::create(file_path)?;
 
-        // Write header with digest metadata
+        // Write header with column names
         writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
 
-        // Write sequence data
+        // Write sequence metadata for all sequences
         for result_sr in self.sequence_store.values() {
             let result = result_sr.metadata.clone();
             writeln!(
@@ -1191,7 +1266,7 @@ impl GlobalRefgetStore {
     }
 
     /// Write a GlobalRefgetStore object to a directory
-    pub fn write_store_to_directory<P: AsRef<Path>>(
+    pub fn write_store_to_dir<P: AsRef<Path>>(
         &self,
         root_path: P,
         seqdata_path_template: &str,
@@ -1236,12 +1311,12 @@ impl GlobalRefgetStore {
         for collection in self.collections.values() {
             let collection_file_path =
                 root_path.join(format!("collections/{}.farg", collection.digest));
-            collection.to_farg_path(&collection_file_path)?;
+            collection.write_collection_farg(&collection_file_path)?;
         }
 
         // Write the sequence metadata index file
         let sequence_index_path = root_path.join("sequences.farg");
-        self.to_farg(&sequence_index_path)?;
+        self.write_sequences_farg(&sequence_index_path)?;
 
         // Create the metadata structure
         let metadata = StoreMetadata {
@@ -1259,6 +1334,20 @@ impl GlobalRefgetStore {
         fs::write(root_path.join("index.json"), json).context("Failed to write index.json")?;
 
         Ok(())
+    }
+
+    /// Returns statistics about the store
+    ///
+    /// # Returns
+    /// A tuple of (n_sequences, n_collections, storage_mode_str)
+    pub fn stats(&self) -> (usize, usize, &'static str) {
+        let n_sequences = self.sequence_store.len();
+        let n_collections = self.collections.len();
+        let mode_str = match self.mode {
+            StorageMode::Raw => "Raw",
+            StorageMode::Encoded => "Encoded",
+        };
+        (n_sequences, n_collections, mode_str)
     }
 }
 
@@ -1347,7 +1436,7 @@ mod tests {
             .expect("Failed to create SeqColDigest from FASTA file");
 
         // Write FARG to temporary directory
-        seqcol.to_farg().expect("Failed to write farg file");
+        seqcol.write_farg().expect("Failed to write farg file");
 
         // Load and verify
         let loaded_seqcol = read_fasta_refget_file(&temp_farg).expect("Failed to read refget file");
@@ -1386,7 +1475,7 @@ GGGGAAAA
 
         // --- 2. Initialize GlobalRefgetStore and import FASTA ---
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&temp_fasta_path).unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
 
@@ -1415,12 +1504,12 @@ chr1\t-5\t100
         let temp_output_fa_path = temp_path.join("output.fa");
 
         store
-            .get_seqs_bed_file(
+            .export_fasta_from_regions(
                 collection_digest_ref,
                 temp_bed_path.to_str().unwrap(),
                 temp_output_fa_path.to_str().unwrap(),
             )
-            .expect("get_seqs_bed_file failed");
+            .expect("export_fasta_from_regions failed");
 
         // Read the output FASTA file and verify its content
         let output_fa_content =
@@ -1436,12 +1525,14 @@ chr1\t-5\t100
             expected_fa_content.trim(),
             "Output FASTA file content mismatch"
         );
-        println!("✓ get_seqs_bed_file test passed.");
+        println!("✓ export_fasta_from_regions test passed.");
 
-        // --- Test get_seqs_bed_file_to_vec (returns Vec<RetrievedSequence>) ---
-        let vec_result = store
-            .get_seqs_bed_file_to_vec(collection_digest_ref, temp_bed_path.to_str().unwrap())
-            .expect("get_seqs_bed_file_to_vec failed");
+        // --- Test substrings_from_regions iterator (returns iterator of RetrievedSequence) ---
+        let vec_result: Vec<_> = store
+            .substrings_from_regions(collection_digest_ref, temp_bed_path.to_str().unwrap())
+            .expect("substrings_from_regions failed")
+            .filter_map(Result::ok)  // Skip errors
+            .collect();
 
         // Define the expected vector of RetrievedSequence structs
         let expected_vec = vec![
@@ -1470,7 +1561,7 @@ chr1\t-5\t100
             vec_result, expected_vec,
             "Retrieved sequence vector mismatch"
         );
-        println!("✓ get_seqs_bed_file_to_vec test passed.");
+        println!("✓ substrings_from_regions test passed.");
     }
 
     #[test]
@@ -1574,7 +1665,7 @@ chr1\t-5\t100
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
 
         // Import the FASTA file
-        store.import_fasta(temp_fa).unwrap();
+        store.add_sequence_collection_from_fasta(temp_fa).unwrap();
 
         // Check that the store has sequences
         assert!(!store.sequence_store.is_empty());
@@ -1583,7 +1674,7 @@ chr1\t-5\t100
         let seq_template = "sequences/%s2/%s.seq";
         // let col_template = "collections/%s.farg";
         store
-            .write_store_to_directory(temp_path.to_str().unwrap(), seq_template)
+            .write_store_to_dir(temp_path.to_str().unwrap(), seq_template)
             .unwrap();
     }
 
@@ -1600,8 +1691,8 @@ chr1\t-5\t100
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
 
         // Import a FASTA file into the store
-        // store.import_fasta("../tests/data/subset.fa.gz").unwrap();
-        store.import_fasta(&temp_fasta).unwrap();
+        // store.add_sequence_collection_from_fasta("../tests/data/subset.fa.gz").unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta).unwrap();
 
         // Get the sequence keys for verification (assuming we know the test file contains 3 sequences)
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
@@ -1621,7 +1712,7 @@ chr1\t-5\t100
         // Write the store to the temporary directory
         let seq_template = "sequences/%s2/%s.seq";
         store
-            .write_store_to_directory(temp_path, seq_template)
+            .write_store_to_dir(temp_path, seq_template)
             .unwrap();
 
         // Verify that the files were created
@@ -1715,7 +1806,7 @@ TTTTCCCC
 
         // Import into store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&temp_fasta_path).unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
         let collections: Vec<_> = store.collections.keys().cloned().collect();
@@ -1761,7 +1852,7 @@ TTTTCCCC
 
         // Import into store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&temp_fasta_path).unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
         let collections: Vec<_> = store.collections.keys().cloned().collect();
@@ -1806,7 +1897,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
 
         // Import into store
         let mut store1 = GlobalRefgetStore::new(StorageMode::Encoded);
-        store1.import_fasta(&temp_fasta_path).unwrap();
+        store1.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get original digests
         let original_digests: Vec<String> = store1
@@ -1825,7 +1916,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
 
         // Re-import the exported FASTA
         let mut store2 = GlobalRefgetStore::new(StorageMode::Encoded);
-        store2.import_fasta(&exported_path).unwrap();
+        store2.add_sequence_collection_from_fasta(&exported_path).unwrap();
 
         // Verify digests match (same sequences)
         let new_digests: Vec<String> = store2
@@ -1863,7 +1954,7 @@ GGGGAAAA
 
         // Import into store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&temp_fasta_path).unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get digests
         let digests: Vec<String> = store
@@ -1906,7 +1997,7 @@ ATGCATGCATGC
 
         // Import into store
         let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&temp_fasta_path).unwrap();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Test with non-existent collection
         let output_path = temp_path.join("should_fail.fa");

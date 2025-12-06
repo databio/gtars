@@ -747,7 +747,7 @@ mod tests {
     fn digests_fa_to_farg() {
         let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
             .expect("Failed to create SequenceCollection from FASTA file");
-        seqcol.to_farg().expect("Failed to write farg file");
+        seqcol.write_farg().expect("Failed to write farg file");
 
         let loaded_seqcol = read_fasta_refget_file("../tests/data/fasta/base.farg")
             .expect("Failed to read refget file");

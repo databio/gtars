@@ -407,6 +407,41 @@ impl PySequenceCollection {
             ))
         }
     }
+
+    /// Iterate over sequences in the collection.
+    ///
+    /// Allows Pythonic iteration: `for seq in collection:`
+    ///
+    /// Yields:
+    ///     SequenceRecord: Each sequence record in the collection.
+    ///
+    /// Example:
+    ///     >>> collection = digest_fasta("genome.fa")
+    ///     >>> for seq in collection:
+    ///     ...     print(f"{seq.metadata.name}: {seq.metadata.length} bp")
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<Py<PySequenceCollectionIterator>> {
+        let py = slf.py();
+        Py::new(py, PySequenceCollectionIterator {
+            iter: slf.sequences.clone().into_iter(),
+        })
+    }
+}
+
+/// Iterator for SequenceCollection - simple wrapper around Vec iterator.
+#[pyclass]
+pub struct PySequenceCollectionIterator {
+    iter: std::vec::IntoIter<PySequenceRecord>,
+}
+
+#[pymethods]
+impl PySequenceCollectionIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<PySequenceRecord> {
+        slf.iter.next()
+    }
 }
 
 // Conversion from Rust AlphabetType to Python PyAlphabetType
@@ -547,22 +582,22 @@ impl PyGlobalRefgetStore {
         }
     }
 
-    /// Import sequences from a FASTA file into the store.
+    /// Add a sequence collection from a FASTA file.
     ///
-    /// Reads all sequences from a FASTA file and adds them to the store.
-    /// Computes GA4GH digests and creates a sequence collection.
+    /// Reads a FASTA file, digests the sequences, creates a SequenceCollection,
+    /// and adds it to the store along with all its sequences.
     ///
     /// Args:
-    ///     file_path: Path to the FASTA file.
+    ///     file_path: Path to the FASTA file to import.
     ///
     /// Raises:
-    ///     IOError: If the file cannot be read or parsed.
+    ///     IOError: If the file cannot be read or processed.
     ///
     /// Example:
     ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
-    ///     >>> store.import_fasta("genome.fa")
-    fn import_fasta(&mut self, file_path: &str) -> PyResult<()> {
-        self.inner.import_fasta(file_path).map_err(|e| {
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    fn add_sequence_collection_from_fasta(&mut self, file_path: &str) -> PyResult<()> {
+        self.inner.add_sequence_collection_from_fasta(file_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
         })
     }
@@ -660,29 +695,79 @@ impl PyGlobalRefgetStore {
         self.inner.remote_source().map(|s| s.to_string())
     }
 
-    fn list_sequences(&self) -> Vec<PySequenceMetadata> {
+    #[getter]
+    fn storage_mode(&self) -> PyStorageMode {
+        self.inner.storage_mode().into()
+    }
+
+    /// Returns a list of sequence metadata for all sequences in the store.
+    ///
+    /// This is a lightweight operation that returns only metadata (name, length, digests)
+    /// without loading sequence data. Use `sequence_records()` if you need full records.
+    ///
+    /// Returns:
+    ///     list[SequenceMetadata]: List of sequence metadata objects.
+    ///
+    /// Example:
+    ///     >>> for metadata in store.sequence_metadata():
+    ///     ...     print(f"{metadata.name}: {metadata.length} bp")
+    fn sequence_metadata(&self) -> Vec<PySequenceMetadata> {
         self.inner
-            .list_sequences()
-            .into_iter()
+            .sequence_metadata()
             .map(|meta| PySequenceMetadata::from(meta.clone()))
             .collect()
     }
 
-    fn list_collections(&self) -> Vec<PySequenceCollection> {
+    /// Returns a list of complete sequence records from the store.
+    ///
+    /// This returns full `SequenceRecord` objects including both metadata and sequence data.
+    /// Use `sequence_metadata()` if you only need metadata (more efficient).
+    ///
+    /// Returns:
+    ///     list[SequenceRecord]: List of sequence record objects.
+    ///
+    /// Example:
+    ///     >>> for record in store.sequence_records():
+    ///     ...     print(f"{record.metadata.name}: {record.decode()}")
+    fn sequence_records(&self) -> Vec<PySequenceRecord> {
         self.inner
-            .list_collections()
-            .into_iter()
+            .sequence_records()
+            .map(|rec| PySequenceRecord::from(rec.clone()))
+            .collect()
+    }
+
+    fn collections(&self) -> Vec<PySequenceCollection> {
+        self.inner
+            .collections()
             .map(|col| PySequenceCollection::from(col.clone()))
             .collect()
     }
 
-    fn write_store_to_directory(
+    /// Returns statistics about the store.
+    ///
+    /// Returns:
+    ///     dict: Dictionary with keys 'n_sequences', 'n_collections', 'storage_mode'
+    ///
+    /// Example:
+    ///     >>> stats = store.stats()
+    ///     >>> print(f"Store has {stats['n_sequences']} sequences in {stats['n_collections']} collections")
+    ///     >>> print(f"Storage mode: {stats['storage_mode']}")
+    fn stats(&self) -> std::collections::HashMap<String, String> {
+        let (n_sequences, n_collections, mode_str) = self.inner.stats();
+        let mut stats = std::collections::HashMap::new();
+        stats.insert("n_sequences".to_string(), n_sequences.to_string());
+        stats.insert("n_collections".to_string(), n_collections.to_string());
+        stats.insert("storage_mode".to_string(), mode_str.to_string());
+        stats
+    }
+
+    fn write_store_to_dir(
         &self,
         root_path: &str,
         seqdata_path_template: &str,
     ) -> PyResult<()> {
         self.inner
-            .write_store_to_directory(root_path, seqdata_path_template)
+            .write_store_to_dir(root_path, seqdata_path_template)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error writing store: {}", e))
             })
@@ -753,48 +838,121 @@ impl PyGlobalRefgetStore {
         Ok(Self { inner: store })
     }
 
-    fn get_seqs_bed_file(
+    /// Export sequences from BED file regions to a FASTA file.
+    ///
+    /// Reads a BED file defining genomic regions and exports the sequences
+    /// for those regions to a FASTA file.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///     bed_file_path: Path to BED file defining regions.
+    ///     output_file_path: Path to write the output FASTA file.
+    ///
+    /// Raises:
+    ///     IOError: If files cannot be read/written or sequences not found.
+    ///
+    /// Example:
+    ///     >>> store.export_fasta_from_regions(
+    ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
+    ///     ...     "regions.bed",
+    ///     ...     "output.fa"
+    ///     ... )
+    fn export_fasta_from_regions(
         &mut self,
         collection_digest: &str,
         bed_file_path: &str,
         output_file_path: &str,
     ) -> PyResult<()> {
-        // Rust function expects K: AsRef<[u8]>, &str works directly
         self.inner
-            .get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
+            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                    "Error retrieving sequences and writing to file: {}",
+                    "Error exporting FASTA from regions: {}",
                     e
                 ))
             })
     }
 
-    fn get_seqs_bed_file_to_vec(
+    /// Get substrings for BED file regions as a list.
+    ///
+    /// Reads a BED file and returns a list of sequences for each region.
+    /// This is a convenience wrapper around the iterator for cases where
+    /// you want all results in memory at once.
+    ///
+    /// Note: For large BED files, consider using the Rust API's iterator
+    /// directly to avoid loading all results into memory.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///     bed_file_path: Path to BED file defining regions.
+    ///
+    /// Returns:
+    ///     list[RetrievedSequence]: List of sequences with region metadata.
+    ///
+    /// Raises:
+    ///     IOError: If files cannot be read or sequences not found.
+    ///
+    /// Example:
+    ///     >>> sequences = store.substrings_from_regions(
+    ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
+    ///     ...     "regions.bed"
+    ///     ... )
+    ///     >>> for seq in sequences:
+    ///     ...     print(f"{seq.chrom_name}:{seq.start}-{seq.end}")
+    fn substrings_from_regions(
         &mut self,
         collection_digest: &str,
         bed_file_path: &str,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
-        // Corrected: use `let ... = ...?;` to bind the result
-        let rust_results = self
+        // Get iterator and collect results
+        let iter = self
             .inner
-            .get_seqs_bed_file_to_vec(collection_digest, bed_file_path)
+            .substrings_from_regions(collection_digest, bed_file_path)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                    "Error retrieving sequences to list: {}",
+                    "Error getting substrings from regions: {}",
                     e
                 ))
             })?;
 
-        // Now `rust_results` is available
-        let py_results: Vec<PyRetrievedSequence> = rust_results
-            .into_iter()
+        // Collect results, filtering out errors
+        let py_results: Vec<PyRetrievedSequence> = iter
+            .filter_map(Result::ok)
             .map(PyRetrievedSequence::from)
             .collect();
 
         Ok(py_results)
     }
 
+    /// Export sequences from a collection to a FASTA file.
+    ///
+    /// This method exports sequences from a specific sequence collection (genome assembly)
+    /// using the collection digest. You can optionally filter which sequences to export
+    /// by providing sequence names.
+    ///
+    /// **Use this method when:** You have a collection digest and want to export sequences
+    /// from that specific collection, optionally filtering by chromosome/sequence names.
+    ///
+    /// **Contrast with export_fasta_by_digests:** That method exports sequences by their
+    /// individual sequence digests (not collection digest) and bypasses collection
+    /// information entirely.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest (identifies the genome
+    ///         assembly/sequence collection).
+    ///     output_path: Path to write the output FASTA file.
+    ///     sequence_names: Optional list of sequence names to export (e.g., ["chr1", "chr2"]).
+    ///         If None, exports all sequences in the collection.
+    ///     line_width: Number of bases per line in output FASTA (default: 80).
+    ///
+    /// Raises:
+    ///     IOError: If file cannot be written or collection/sequences not found.
+    ///
+    /// Example:
+    ///     >>> # Export all sequences from a collection
+    ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", None, None)
+    ///     >>> # Export only chr1 and chr2
+    ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", ["chr1", "chr2"], None)
     fn export_fasta(
         &mut self,
         collection_digest: &str,
@@ -815,13 +973,42 @@ impl PyGlobalRefgetStore {
             })
     }
 
+    /// Export sequences by their individual sequence digests to a FASTA file.
+    ///
+    /// This method exports sequences directly by their SHA-512/24u sequence digests,
+    /// bypassing collection information. Useful when you have specific sequence
+    /// identifiers and want to retrieve them regardless of which collection(s) they
+    /// belong to.
+    ///
+    /// **Use this method when:** You have a list of sequence digests (SHA-512/24u)
+    /// and want to export those specific sequences from the global sequence store.
+    ///
+    /// **Contrast with export_fasta:** That method uses a collection digest and
+    /// optionally filters by sequence names within that collection.
+    ///
+    /// Args:
+    ///     seq_digests: List of SHA-512/24u sequence digests (not collection digests)
+    ///         to export. Each digest identifies an individual sequence.
+    ///     output_path: Path to write the output FASTA file.
+    ///     line_width: Number of bases per line in output FASTA (default: 80).
+    ///
+    /// Raises:
+    ///     IOError: If file cannot be written or sequences not found.
+    ///
+    /// Example:
+    ///     >>> # Export specific sequences by their digests
+    ///     >>> seq_digests = [
+    ///     ...     "aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2",
+    ///     ...     "bXE123dAxcJAqme6QYQ7EZ07-fiw8Kw2"
+    ///     ... ]
+    ///     >>> store.export_fasta_by_digests(seq_digests, "output.fa", None)
     fn export_fasta_by_digests(
         &mut self,
-        digests: Vec<String>,
+        seq_digests: Vec<String>,
         output_path: &str,
         line_width: Option<usize>,
     ) -> PyResult<()> {
-        let digests_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
+        let digests_refs: Vec<&str> = seq_digests.iter().map(|s| s.as_str()).collect();
         self.inner
             .export_fasta_by_digests(digests_refs, output_path, line_width)
             .map_err(|e| {
@@ -837,7 +1024,7 @@ impl PyGlobalRefgetStore {
     }
 
     fn __repr__(&self) -> String {
-        let n_sequences = self.inner.list_sequence_digests().len();
+        let (n_sequences, n_collections, mode_str) = self.inner.stats();
 
         let location = if let Some(remote) = self.inner.remote_source() {
             let cache = self.inner.local_path()
@@ -851,9 +1038,72 @@ impl PyGlobalRefgetStore {
         };
 
         format!(
-            "GlobalRefgetStore(n_sequences={}, {})",
-            n_sequences, location
+            "GlobalRefgetStore(n_sequences={}, n_collections={}, mode={}, {})",
+            n_sequences, n_collections, mode_str, location
         )
+    }
+
+    /// Return the number of sequences in the store.
+    ///
+    /// Allows using `len(store)` in Python to get the total number of sequences
+    /// across all collections.
+    ///
+    /// Returns:
+    ///     int: Total number of sequences in the store.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
+    ///     >>> store.import_fasta("genome.fa")
+    ///     >>> print(f"Store contains {len(store)} sequences")
+    fn __len__(&self) -> usize {
+        self.inner.sequence_digests().count()
+    }
+
+    /// Iterate over all sequences in the store.
+    ///
+    /// Allows using `for sequence in store:` in Python to iterate over all
+    /// sequence metadata in the store.
+    ///
+    /// Yields:
+    ///     SequenceMetadata: Metadata for each sequence in the store.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
+    ///     >>> store.import_fasta("genome.fa")
+    ///     >>> for seq_meta in store:
+    ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
+    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
+        let sequences = slf.inner.sequence_metadata()
+            .map(|meta| PySequenceMetadata::from(meta.clone()))
+            .collect();
+        Ok(PyRefgetStoreIterator {
+            sequences,
+            index: 0,
+        })
+    }
+}
+
+/// Iterator for GlobalRefgetStore that yields SequenceMetadata.
+#[pyclass]
+pub struct PyRefgetStoreIterator {
+    sequences: Vec<PySequenceMetadata>,
+    index: usize,
+}
+
+#[pymethods]
+impl PyRefgetStoreIterator {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(mut slf: PyRefMut<'_, Self>) -> Option<PySequenceMetadata> {
+        if slf.index < slf.sequences.len() {
+            let item = slf.sequences[slf.index].clone();
+            slf.index += 1;
+            Some(item)
+        } else {
+            None
+        }
     }
 }
 

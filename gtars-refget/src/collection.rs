@@ -279,7 +279,7 @@ impl SequenceCollection {
 
         // Write the SequenceCollection to the FARG file
         if write_cache && !farg_file_path.exists() {
-            seqcol.to_farg()?;
+            seqcol.write_farg()?;
             println!("Farg file written to {:?}", farg_file_path);
         } else {
             println!(
@@ -290,22 +290,35 @@ impl SequenceCollection {
         Ok(seqcol)
     }
 
-    /// Write the SequenceCollection to a FASTA refget (FARG) file
-    /// * `file_path` - The path to the FARG file to be written.
-    pub fn to_farg_path<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        // Write the FARGI file
+    /// Write the SequenceCollection to a collection FARG file.
+    ///
+    /// Creates a FARG file with collection-level digest headers followed by
+    /// sequence metadata for all sequences in this collection.
+    ///
+    /// # Arguments
+    /// * `file_path` - The path to the FARG file to be written
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Format
+    /// The file includes:
+    /// - Collection digest headers (##seqcol_digest, ##names_digest, etc.)
+    /// - Column header (#name, length, alphabet, sha512t24u, md5)
+    /// - One line per sequence with metadata
+    pub fn write_collection_farg<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let file_path = file_path.as_ref();
-        println!("Writing farg file: {:?}", file_path);
+        println!("Writing collection farg file: {:?}", file_path);
         let mut file = std::fs::File::create(file_path)?;
 
-        // Write header with digest metadata
+        // Write collection digest headers
         writeln!(file, "##seqcol_digest={}", self.digest)?;
         writeln!(file, "##names_digest={}", self.lvl1.names_digest)?;
         writeln!(file, "##sequences_digest={}", self.lvl1.sequences_digest)?;
         writeln!(file, "##lengths_digest={}", self.lvl1.lengths_digest)?;
         writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
 
-        // Write sequence data
+        // Write sequence metadata
         for result_sr in &self.sequences {
             let result = result_sr.metadata.clone();
             writeln!(
@@ -317,14 +330,14 @@ impl SequenceCollection {
         Ok(())
     }
 
-    /// Write the SeqColDigest to a FARG file, using the file path stored in the struct.
-    pub fn to_farg(&self) -> Result<()> {
+    /// Write the SequenceCollection to a FARG file, using the file path stored in the struct.
+    pub fn write_farg(&self) -> Result<()> {
         if let Some(ref file_path) = self.file_path {
             let farg_file_path = file_path.replace_exts_with("farg");
-            self.to_farg_path(farg_file_path)
+            self.write_collection_farg(farg_file_path)
         } else {
             Err(anyhow::anyhow!(
-                "No file path specified for FARG output. Use `to_farg_path` to specify a file path."
+                "No file path specified for FARG output. Use `write_collection_farg` to specify a file path."
             ))
         }
     }
@@ -358,6 +371,28 @@ impl Display for SequenceRecord {
             &self.metadata.md5
         )?;
         Ok(())
+    }
+}
+
+// Iterator implementations for SequenceCollection
+// Allows: for seq in &collection { ... }
+impl<'a> IntoIterator for &'a SequenceCollection {
+    type Item = &'a SequenceRecord;
+    type IntoIter = std::slice::Iter<'a, SequenceRecord>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.sequences.iter()
+    }
+}
+
+// Consuming iterator
+// Allows: for seq in collection { ... } (consumes the collection)
+impl IntoIterator for SequenceCollection {
+    type Item = SequenceRecord;
+    type IntoIter = std::vec::IntoIter<SequenceRecord>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.sequences.into_iter()
     }
 }
 
@@ -558,5 +593,34 @@ mod tests {
 
         let decoded_encoded = record_encoded.decode().expect("Should decode encoded data");
         assert_eq!(decoded_encoded, "GGGGGGGG");
+    }
+
+    #[test]
+    fn test_sequence_collection_iterator() {
+        // Test that SequenceCollection can be iterated over
+        let collection = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        // Test borrowing iterator (&collection)
+        let mut count = 0;
+        for seq in &collection {
+            assert!(seq.metadata.length > 0, "Sequence should have length");
+            count += 1;
+        }
+        assert_eq!(count, 3, "base.fa should have 3 sequences");
+
+        // Collection should still be usable after borrowing iteration
+        assert_eq!(collection.sequences.len(), 3);
+
+        // Test consuming iterator (collection)
+        let names: Vec<String> = collection
+            .into_iter()
+            .map(|seq| seq.metadata.name)
+            .collect();
+
+        assert_eq!(names.len(), 3);
+        assert!(names.contains(&"chrX".to_string()));
+        assert!(names.contains(&"chr1".to_string()));
+        assert!(names.contains(&"chr2".to_string()));
     }
 }
