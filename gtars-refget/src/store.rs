@@ -158,7 +158,7 @@ where
                 }
             };
 
-            self.current_seq_digest = result.metadata.sha512t24u.clone();
+            self.current_seq_digest = result.metadata().sha512t24u.clone();
         }
 
         let retrieved_substring = match self.store.get_substring(
@@ -225,13 +225,16 @@ impl GlobalRefgetStore {
             anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest)
         })?;
 
+        // Get metadata from the record (works for both Stub and Full variants)
+        let metadata = sequence_record.metadata();
+
         // Add to name lookup for the collection
         self.name_lookup
             .entry(collection_digest)
             .or_default()
             .insert(
-                sequence_record.metadata.name.clone(),
-                sequence_record.metadata.sha512t24u.to_key(),
+                metadata.name.clone(),
+                metadata.sha512t24u.to_key(),
             );
 
         // Finally, add SequenceRecord to store (consuming the object)
@@ -258,10 +261,11 @@ impl GlobalRefgetStore {
     // Adds SequenceRecord to the store.
     // Should only be used internally, via `add_sequence`, which ensures sequences are added to collections.
     fn add_sequence_record(&mut self, sr: SequenceRecord) -> Result<()> {
+        let metadata = sr.metadata();
         self.md5_lookup
-            .insert(sr.metadata.md5.to_key(), sr.metadata.sha512t24u.to_key());
+            .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
         self.sequence_store
-            .insert(sr.metadata.sha512t24u.to_key(), sr);
+            .insert(metadata.sha512t24u.to_key(), sr);
         Ok(())
     }
 
@@ -291,7 +295,7 @@ impl GlobalRefgetStore {
         let mut seqmeta_hashmap: HashMap<String, SequenceMetadata> = HashMap::new();
         let seqcol_sequences = seqcol.sequences.clone(); // Clone to avoid partial move
         for record in seqcol_sequences {
-            let seqmeta = record.metadata;
+            let seqmeta = record.metadata().clone();
             seqmeta_hashmap.insert(seqmeta.name.clone(), seqmeta);
         }
 
@@ -319,10 +323,9 @@ impl GlobalRefgetStore {
                     );
 
                     self.add_sequence(
-                        SequenceRecord {
+                        SequenceRecord::Full {
                             metadata: dr,
-                            fai: None,  // Store doesn't preserve FAI data
-                            data: Some(raw_sequence),
+                            sequence: raw_sequence,
                         },
                         seqcol.digest.to_key(),
                     )?;
@@ -341,10 +344,9 @@ impl GlobalRefgetStore {
                         id, dr.alphabet, dr.sha512t24u
                     );
                     self.add_sequence(
-                        SequenceRecord {
+                        SequenceRecord::Full {
                             metadata: dr,
-                            fai: None,  // Store doesn't preserve FAI data
-                            data: Some(encoded_sequence),
+                            sequence: encoded_sequence,
                         },
                         seqcol.digest.to_key(),
                     )?;
@@ -376,7 +378,7 @@ impl GlobalRefgetStore {
     /// }
     /// ```
     pub fn sequence_metadata(&self) -> impl Iterator<Item = &SequenceMetadata> + '_ {
-        self.sequence_store.values().map(|rec| &rec.metadata)
+        self.sequence_store.values().map(|rec| rec.metadata())
     }
 
     /// Returns an iterator over all complete sequence records in the store.
@@ -390,7 +392,7 @@ impl GlobalRefgetStore {
     /// # Example
     /// ```ignore
     /// for record in store.sequence_records() {
-    ///     println!("{}: {:?}", record.metadata.name, record.data);
+    ///     println!("{}: has_data={}", record.metadata().name, record.has_data());
     /// }
     /// ```
     pub fn sequence_records(&self) -> impl Iterator<Item = &SequenceRecord> + '_ {
@@ -568,14 +570,15 @@ impl GlobalRefgetStore {
                     .iter()
                     .filter_map(|(name, seq_digest)| {
                         self.sequence_store.get(seq_digest).map(|record| {
+                            let metadata = record.metadata();
                             (
                                 name.clone(),
                                 (
-                                    record.metadata.name.clone(),
-                                    record.metadata.length,
-                                    record.metadata.alphabet,
-                                    record.metadata.sha512t24u.clone(),
-                                    record.metadata.md5.clone(),
+                                    metadata.name.clone(),
+                                    metadata.length,
+                                    metadata.alphabet,
+                                    metadata.sha512t24u.clone(),
+                                    metadata.md5.clone(),
                                 ),
                             )
                         })
@@ -670,19 +673,22 @@ impl GlobalRefgetStore {
         }
 
         let record = self.sequence_store.get(&digest_key)?;
-        let sequence = record.data.as_ref()?;
+        let (metadata, sequence) = match record {
+            SequenceRecord::Stub(_) => return None,
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+        };
 
-        if start >= record.metadata.length || end > record.metadata.length || start >= end {
+        if start >= metadata.length || end > metadata.length || start >= end {
             println!(
                 "Invalid substring range: start={}, end={}, sequence length={}",
-                start, end, record.metadata.length
+                start, end, metadata.length
             );
             return None;
         }
 
         match self.mode {
             StorageMode::Encoded => {
-                let alphabet = lookup_alphabet(&record.metadata.alphabet);
+                let alphabet = lookup_alphabet(&metadata.alphabet);
                 let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
                 Some(String::from_utf8(decoded_sequence).expect("Invalid UTF-8"))
             }
@@ -760,18 +766,21 @@ impl GlobalRefgetStore {
             })?;
 
             // Get the sequence data
-            let sequence_data = record.data.as_ref().ok_or_else(|| {
-                anyhow!("Sequence data not loaded for '{}'", seq_name)
-            })?;
+            let (metadata, sequence_data) = match record {
+                SequenceRecord::Stub(_) => {
+                    return Err(anyhow!("Sequence data not loaded for '{}'", seq_name));
+                }
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            };
 
             // Decode the sequence based on storage mode
             let decoded_sequence = match self.mode {
                 StorageMode::Encoded => {
-                    let alphabet = lookup_alphabet(&record.metadata.alphabet);
+                    let alphabet = lookup_alphabet(&metadata.alphabet);
                     let decoded = decode_substring_from_bytes(
                         sequence_data,
                         0,
-                        record.metadata.length,
+                        metadata.length,
                         alphabet,
                     );
                     String::from_utf8(decoded).context("Failed to decode sequence as UTF-8")?
@@ -831,18 +840,21 @@ impl GlobalRefgetStore {
             })?;
 
             // Get the sequence data
-            let sequence_data = record.data.as_ref().ok_or_else(|| {
-                anyhow!("Sequence data not loaded for digest: {}", digest_str)
-            })?;
+            let (metadata, sequence_data) = match record {
+                SequenceRecord::Stub(_) => {
+                    return Err(anyhow!("Sequence data not loaded for digest: {}", digest_str));
+                }
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            };
 
             // Decode the sequence based on storage mode
             let decoded_sequence = match self.mode {
                 StorageMode::Encoded => {
-                    let alphabet = lookup_alphabet(&record.metadata.alphabet);
+                    let alphabet = lookup_alphabet(&metadata.alphabet);
                     let decoded = decode_substring_from_bytes(
                         sequence_data,
                         0,
-                        record.metadata.length,
+                        metadata.length,
                         alphabet,
                     );
                     String::from_utf8(decoded).context("Failed to decode sequence as UTF-8")?
@@ -854,7 +866,7 @@ impl GlobalRefgetStore {
             };
 
             // Write FASTA header with sequence name
-            writeln!(output_file, ">{}", record.metadata.name)?;
+            writeln!(output_file, ">{}", metadata.name)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
@@ -972,14 +984,11 @@ impl GlobalRefgetStore {
                     alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
                     sha512t24u: parts[3].to_string(),
                     md5: parts[4].to_string(),
+                    fai: None,  // Lazy loading doesn't preserve FAI data
                 };
 
                 // Create a SequenceRecord with no data (lazy loading)
-                let record = SequenceRecord {
-                    metadata: seq_metadata.clone(),
-                    fai: None,
-                    data: None,  // Data will be loaded on-demand
-                };
+                let record = SequenceRecord::Stub(seq_metadata.clone());
 
                 // Add to store
                 let sha512_key = seq_metadata.sha512t24u.to_key();
@@ -1011,8 +1020,9 @@ impl GlobalRefgetStore {
                     // Build name lookup for this collection
                     let mut name_map = HashMap::new();
                     for sequence_record in &collection.sequences {
-                        let sha512_key = sequence_record.metadata.sha512t24u.to_key();
-                        name_map.insert(sequence_record.metadata.name.clone(), sha512_key);
+                        let metadata = sequence_record.metadata();
+                        let sha512_key = metadata.sha512t24u.to_key();
+                        name_map.insert(metadata.name.clone(), sha512_key);
                     }
                     store.name_lookup.insert(collection_digest, name_map);
                 }
@@ -1076,14 +1086,11 @@ impl GlobalRefgetStore {
                 alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
                 sha512t24u: parts[3].to_string(),
                 md5: parts[4].to_string(),
+                fai: None,  // Lazy loading doesn't preserve FAI data
             };
 
             // Create a SequenceRecord with no data (lazy loading)
-            let record = SequenceRecord {
-                metadata: seq_metadata.clone(),
-                fai: None,
-                data: None,
-            };
+            let record = SequenceRecord::Stub(seq_metadata.clone());
 
             // Add to store
             let sha512_key = seq_metadata.sha512t24u.to_key();
@@ -1123,8 +1130,9 @@ impl GlobalRefgetStore {
                     // Build name lookup for this collection
                     let mut name_map = HashMap::new();
                     for sequence_record in &collection.sequences {
-                        let sha512_key = sequence_record.metadata.sha512t24u.to_key();
-                        name_map.insert(sequence_record.metadata.name.clone(), sha512_key);
+                        let metadata = sequence_record.metadata();
+                        let sha512_key = metadata.sha512t24u.to_key();
+                        name_map.insert(metadata.name.clone(), sha512_key);
                     }
                     store.name_lookup.insert(collection_digest, name_map);
                 }
@@ -1180,8 +1188,9 @@ impl GlobalRefgetStore {
         // Build name lookup for this collection
         let mut name_map = HashMap::new();
         for sequence_record in &collection.sequences {
-            let sha512_key = sequence_record.metadata.sha512t24u.to_key();
-            name_map.insert(sequence_record.metadata.name.clone(), sha512_key);
+            let metadata = sequence_record.metadata();
+            let sha512_key = metadata.sha512t24u.to_key();
+            name_map.insert(metadata.name.clone(), sha512_key);
         }
         self.name_lookup.insert(*collection_digest, name_map);
 
@@ -1198,12 +1207,12 @@ impl GlobalRefgetStore {
             .ok_or_else(|| anyhow!("Sequence not found in store"))?;
 
         // If data is already loaded, return early
-        if record.data.is_some() {
+        if matches!(record, SequenceRecord::Full { .. }) {
             return Ok(());
         }
 
         // Get the necessary information before borrowing mutably
-        let digest_str = &record.metadata.sha512t24u;
+        let digest_str = &record.metadata().sha512t24u;
         let template = self
             .seqdata_path_template
             .as_ref()
@@ -1224,9 +1233,9 @@ impl GlobalRefgetStore {
         let data = Self::fetch_file(local_path, &self.remote_source, &relative_path)?;
 
         // Update the record with the loaded data
-        if let Some(record) = self.sequence_store.get_mut(digest) {
-            record.data = Some(data);
-        }
+        self.sequence_store.entry(*digest).and_modify(|r| {
+            *r = r.clone().with_data(data);
+        });
 
         Ok(())
     }
@@ -1255,7 +1264,7 @@ impl GlobalRefgetStore {
 
         // Write sequence metadata for all sequences
         for result_sr in self.sequence_store.values() {
-            let result = result_sr.metadata.clone();
+            let result = result_sr.metadata().clone();
             writeln!(
                 file,
                 "{}\t{}\t{}\t{}\t{}",
@@ -1291,19 +1300,22 @@ impl GlobalRefgetStore {
 
         // Write each sequence to its own file
         for record in self.sequence_store.values() {
-            if record.data.is_some() {
-                // Get the path for this sequence using the template and base64url-encoded digest
-                let rel_path =
-                    Self::get_sequence_path(&record.metadata.sha512t24u, seqdata_path_template);
-                let full_path = root_path.join(&rel_path);
+            match record {
+                SequenceRecord::Full { metadata, .. } => {
+                    // Get the path for this sequence using the template and base64url-encoded digest
+                    let rel_path =
+                        Self::get_sequence_path(&metadata.sha512t24u, seqdata_path_template);
+                    let full_path = root_path.join(&rel_path);
 
-                // Write the sequence data to file
-                record.to_file(full_path)?;
-            } else {
-                return Err(anyhow!(
-                    "Sequence data is missing for digest: {}",
-                    &record.metadata.sha512t24u
-                ));
+                    // Write the sequence data to file
+                    record.to_file(full_path)?;
+                }
+                SequenceRecord::Stub(metadata) => {
+                    return Err(anyhow!(
+                        "Sequence data is missing for digest: {}",
+                        &metadata.sha512t24u
+                    ));
+                }
             }
         }
 
@@ -1358,21 +1370,26 @@ impl Display for GlobalRefgetStore {
         // Print out the sequences in the store
         for (i, (sha512_digest, sequence_record)) in self.sequence_store.iter().take(10).enumerate()
         {
-            let seq = sequence_record.data.as_ref().unwrap();
-            // Extract the first 3 characters of the sequence (or fewer if the sequence is shorter)
-            let first_8_chars = match self.mode {
-                StorageMode::Encoded => {
-                    let alphabet = lookup_alphabet(&sequence_record.metadata.alphabet);
-                    let decoded = decode_substring_from_bytes(
-                        seq,
-                        0,
-                        8.min(sequence_record.metadata.length),
-                        alphabet,
-                    );
-                    String::from_utf8(decoded).unwrap_or_else(|_| "???".to_string())
+            let metadata = sequence_record.metadata();
+            let first_8_chars = match sequence_record {
+                SequenceRecord::Stub(_) => "<stub>".to_string(),
+                SequenceRecord::Full { metadata, sequence: seq } => {
+                    // Extract the first 8 characters of the sequence (or fewer if the sequence is shorter)
+                    match self.mode {
+                        StorageMode::Encoded => {
+                            let alphabet = lookup_alphabet(&metadata.alphabet);
+                            let decoded = decode_substring_from_bytes(
+                                seq,
+                                0,
+                                8.min(metadata.length),
+                                alphabet,
+                            );
+                            String::from_utf8(decoded).unwrap_or_else(|_| "???".to_string())
+                        }
+                        StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
+                            .unwrap_or_else(|_| "???".to_string()),
+                    }
                 }
-                StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
-                    .unwrap_or_else(|_| "???".to_string()),
             };
 
             writeln!(
@@ -1380,9 +1397,9 @@ impl Display for GlobalRefgetStore {
                 "   - {}. {:02x?}, MD5: {:02x?}, Length: {}, Alphabet: {:?}, Start: {}",
                 i + 1,
                 std::str::from_utf8(sha512_digest).unwrap(),
-                &sequence_record.metadata.md5,
-                &sequence_record.metadata.length,
-                &sequence_record.metadata.alphabet,
+                &metadata.md5,
+                &metadata.length,
+                &metadata.alphabet,
                 first_8_chars
             )?;
         }
@@ -1443,11 +1460,11 @@ mod tests {
 
         // Test round-trip integrity
         for (original, loaded) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
-            assert_eq!(original.metadata.name, loaded.metadata.name);
-            assert_eq!(original.metadata.length, loaded.metadata.length);
-            assert_eq!(original.metadata.sha512t24u, loaded.metadata.sha512t24u);
-            assert_eq!(original.metadata.md5, loaded.metadata.md5);
-            assert_eq!(original.metadata.alphabet, loaded.metadata.alphabet);
+            assert_eq!(original.metadata().name, loaded.metadata().name);
+            assert_eq!(original.metadata().length, loaded.metadata().length);
+            assert_eq!(original.metadata().sha512t24u, loaded.metadata().sha512t24u);
+            assert_eq!(original.metadata().md5, loaded.metadata().md5);
+            assert_eq!(original.metadata().alphabet, loaded.metadata().alphabet);
         }
     }
 
@@ -1589,12 +1606,12 @@ chr1\t-5\t100
             sha512t24u: sha512t24u(sequence),
             md5: md5(sequence),
             alphabet: AlphabetType::Dna2bit,
+            fai: None,
         };
 
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: seq_metadata.clone(),
-            fai: None,  // Test data doesn't need FAI
-            data: Some(sequence.to_vec()),
+            sequence: sequence.to_vec(),
         };
 
         collection.sequences.push(record);
@@ -1611,44 +1628,44 @@ chr1\t-5\t100
             store.get_sequence_by_collection_and_name(&collection.digest, name);
         assert!(retrieved_by_name_str.is_some());
         let retrieved_record = retrieved_by_name_str.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by collection+name (using [u8; 32] digest)
         let retrieved_by_name_key =
             store.get_sequence_by_collection_and_name(collection.digest.to_key(), name);
         assert!(retrieved_by_name_key.is_some());
         let retrieved_record = retrieved_by_name_key.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by SHA512 digest (using string)
         let retrieved_by_sha512_str = store.get_sequence_by_id(&seq_metadata.sha512t24u);
         assert!(retrieved_by_sha512_str.is_some());
         let retrieved_record = retrieved_by_sha512_str.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by SHA512 digest (using [u8; 32])
         let retrieved_by_sha512_key = store.get_sequence_by_id(seq_metadata.sha512t24u.to_key());
         assert!(retrieved_by_sha512_key.is_some());
         let retrieved_record = retrieved_by_sha512_key.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by MD5 digest (using string)
         let retrieved_by_md5_str = store.get_sequence_by_md5(&seq_metadata.md5);
         assert!(retrieved_by_md5_str.is_some());
         let retrieved_record = retrieved_by_md5_str.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by MD5 digest (using [u8; 32])
         let retrieved_by_md5_key = store.get_sequence_by_md5(seq_metadata.md5.to_key());
         assert!(retrieved_by_md5_key.is_some());
         let retrieved_record = retrieved_by_md5_key.unwrap();
-        assert_eq!(retrieved_record.metadata.name, name);
-        assert_eq!(retrieved_record.data.as_ref().unwrap(), sequence);
+        assert_eq!(retrieved_record.metadata().name, name);
+        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
     }
 
     #[test]
@@ -1737,25 +1754,25 @@ chr1\t-5\t100
         let loaded_seq2 = loaded_store.sequence_store.get(&sha512_key2).unwrap();
 
         // Check metadata equality
-        assert_eq!(original_seq1.metadata.name, loaded_seq1.metadata.name);
-        assert_eq!(original_seq1.metadata.length, loaded_seq1.metadata.length);
+        assert_eq!(original_seq1.metadata().name, loaded_seq1.metadata().name);
+        assert_eq!(original_seq1.metadata().length, loaded_seq1.metadata().length);
         assert_eq!(
-            original_seq1.metadata.sha512t24u,
-            loaded_seq1.metadata.sha512t24u
+            original_seq1.metadata().sha512t24u,
+            loaded_seq1.metadata().sha512t24u
         );
-        assert_eq!(original_seq1.metadata.md5, loaded_seq1.metadata.md5);
+        assert_eq!(original_seq1.metadata().md5, loaded_seq1.metadata().md5);
 
-        assert_eq!(original_seq2.metadata.name, loaded_seq2.metadata.name);
-        assert_eq!(original_seq2.metadata.length, loaded_seq2.metadata.length);
+        assert_eq!(original_seq2.metadata().name, loaded_seq2.metadata().name);
+        assert_eq!(original_seq2.metadata().length, loaded_seq2.metadata().length);
         assert_eq!(
-            original_seq2.metadata.sha512t24u,
-            loaded_seq2.metadata.sha512t24u
+            original_seq2.metadata().sha512t24u,
+            loaded_seq2.metadata().sha512t24u
         );
-        assert_eq!(original_seq2.metadata.md5, loaded_seq2.metadata.md5);
+        assert_eq!(original_seq2.metadata().md5, loaded_seq2.metadata().md5);
 
         // Check data is not loaded initially (lazy loading)
-        assert_eq!(loaded_seq1.data, None, "Data should not be loaded initially with lazy loading");
-        assert_eq!(loaded_seq2.data, None, "Data should not be loaded initially with lazy loading");
+        assert_eq!(loaded_seq1.has_data(), false, "Data should not be loaded initially with lazy loading");
+        assert_eq!(loaded_seq2.has_data(), false, "Data should not be loaded initially with lazy loading");
 
         // Verify MD5 lookup is preserved
         assert_eq!(loaded_store.md5_lookup.len(), 3);
@@ -1766,15 +1783,15 @@ chr1\t-5\t100
         // Test sequence retrieval functionality
         for (digest, original_record) in &store.sequence_store {
             let loaded_record = loaded_store.get_sequence_by_id(*digest).unwrap();
-            assert_eq!(original_record.metadata.name, loaded_record.metadata.name);
+            assert_eq!(original_record.metadata().name, loaded_record.metadata().name);
             assert_eq!(
-                original_record.metadata.length,
-                loaded_record.metadata.length
+                original_record.metadata().length,
+                loaded_record.metadata().length
             );
 
             // Test substring retrieval works on loaded store
-            if original_record.metadata.length > 0 {
-                let substring_len = std::cmp::min(5, original_record.metadata.length);
+            if original_record.metadata().length > 0 {
+                let substring_len = std::cmp::min(5, original_record.metadata().length);
                 let substring = loaded_store.get_substring(digest, 0, substring_len);
                 assert!(
                     substring.is_some(),
@@ -1903,7 +1920,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         let original_digests: Vec<String> = store1
             .sequence_store
             .values()
-            .map(|r| r.metadata.sha512t24u.clone())
+            .map(|r| r.metadata().sha512t24u.clone())
             .collect();
 
         // Export to new FASTA
@@ -1922,7 +1939,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         let new_digests: Vec<String> = store2
             .sequence_store
             .values()
-            .map(|r| r.metadata.sha512t24u.clone())
+            .map(|r| r.metadata().sha512t24u.clone())
             .collect();
 
         assert_eq!(original_digests.len(), new_digests.len(), "Should have same number of sequences");
@@ -1960,7 +1977,7 @@ GGGGAAAA
         let digests: Vec<String> = store
             .sequence_store
             .values()
-            .map(|r| r.metadata.sha512t24u.clone())
+            .map(|r| r.metadata().sha512t24u.clone())
             .collect();
 
         // Export by digests

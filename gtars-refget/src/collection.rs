@@ -101,12 +101,20 @@ impl SeqColDigestLvl1 {
 }
 
 /// A representation of a single sequence that includes metadata and optionally data.
-/// Combines sequence metadata with optional raw/encoded data
+/// Combines sequence metadata with optional raw/encoded data.
+///
+/// This enum has two variants:
+/// - `Stub`: Contains only metadata, no sequence data loaded
+/// - `Full`: Contains both metadata and the actual sequence data
 #[derive(Clone, Debug)]
-pub struct SequenceRecord {
-    pub metadata: SequenceMetadata,
-    pub fai: Option<FaiMetadata>,
-    pub data: Option<Vec<u8>>,
+pub enum SequenceRecord {
+    /// A sequence record with only metadata, no sequence data
+    Stub(SequenceMetadata),
+    /// A sequence record with both metadata and sequence data
+    Full {
+        metadata: SequenceMetadata,
+        sequence: Vec<u8>,
+    },
 }
 
 use std::fs::{self, File};
@@ -118,6 +126,7 @@ pub struct SequenceMetadata {
     pub sha512t24u: String,
     pub md5: String,
     pub alphabet: AlphabetType,
+    pub fai: Option<FaiMetadata>,
 }
 
 /// FASTA index (FAI) metadata for a sequence.
@@ -130,17 +139,52 @@ pub struct FaiMetadata {
 }
 
 impl SequenceRecord {
+    /// Get metadata regardless of variant
+    pub fn metadata(&self) -> &SequenceMetadata {
+        match self {
+            SequenceRecord::Stub(meta) => meta,
+            SequenceRecord::Full { metadata, .. } => metadata,
+        }
+    }
+
+    /// Get sequence data if present
+    pub fn sequence(&self) -> Option<&[u8]> {
+        match self {
+            SequenceRecord::Stub(_) => None,
+            SequenceRecord::Full { sequence, .. } => Some(sequence),
+        }
+    }
+
+    /// Check if data is loaded
+    pub fn has_data(&self) -> bool {
+        matches!(self, SequenceRecord::Full { .. })
+    }
+
+    /// Load data into a Stub record, or replace data in a Full record
+    pub fn with_data(self, sequence: Vec<u8>) -> Self {
+        let metadata = match self {
+            SequenceRecord::Stub(m) => m,
+            SequenceRecord::Full { metadata, .. } => metadata,
+        };
+        SequenceRecord::Full { metadata, sequence }
+    }
+
     /// Utility function to write a single sequence to a file
     pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let data = match self {
+            SequenceRecord::Stub(_) => {
+                return Err(anyhow::anyhow!("Cannot write file: sequence data not loaded"));
+            }
+            SequenceRecord::Full { sequence, .. } => sequence,
+        };
+
         // Create parent directories if they don't exist
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
 
         let mut file = File::create(path)?;
-        if let Some(data) = &self.data {
-            file.write_all(data)?;
-        }
+        file.write_all(data)?;
         Ok(())
     }
 
@@ -171,20 +215,23 @@ impl SequenceRecord {
         use crate::alphabet::lookup_alphabet;
         use crate::encoder::decode_substring_from_bytes;
 
-        let data = self.data.as_ref()?;
+        let (metadata, data) = match self {
+            SequenceRecord::Stub(_) => return None,
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+        };
 
         // For ASCII alphabet (8 bits per symbol), the data is always stored raw
-        if self.metadata.alphabet == crate::alphabet::AlphabetType::Ascii {
+        if metadata.alphabet == crate::alphabet::AlphabetType::Ascii {
             return String::from_utf8(data.clone()).ok();
         }
 
         // Try to detect if data is raw or encoded
         // Heuristic: for encoded data, the size should be approximately length * bits_per_symbol / 8
         // For raw data, the size should be approximately equal to length
-        let alphabet = lookup_alphabet(&self.metadata.alphabet);
+        let alphabet = lookup_alphabet(&metadata.alphabet);
 
         // If data size matches the expected length (not the encoded size), it's probably raw
-        if data.len() == self.metadata.length {
+        if data.len() == metadata.length {
             // Try to decode as UTF-8
             if let Ok(raw_string) = String::from_utf8(data.clone()) {
                 // Data appears to be raw UTF-8
@@ -196,7 +243,7 @@ impl SequenceRecord {
         let decoded_bytes = decode_substring_from_bytes(
             data,
             0,
-            self.metadata.length,
+            metadata.length,
             alphabet
         );
 
@@ -230,7 +277,7 @@ impl SequenceCollection {
     /// Create a SequenceCollection from a vector of SequenceRecords.
     pub fn from_records(records: Vec<SequenceRecord>) -> Self {
         // Compute lvl1 digests from the metadata
-        let metadata_refs: Vec<&SequenceMetadata> = records.iter().map(|r| &r.metadata).collect();
+        let metadata_refs: Vec<&SequenceMetadata> = records.iter().map(|r| r.metadata()).collect();
         let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
 
         // Compute collection digest from lvl1 digests
@@ -320,7 +367,7 @@ impl SequenceCollection {
 
         // Write sequence metadata
         for result_sr in &self.sequences {
-            let result = result_sr.metadata.clone();
+            let result = result_sr.metadata().clone();
             writeln!(
                 file,
                 "{}\t{}\t{}\t{}\t{}",
@@ -340,6 +387,54 @@ impl SequenceCollection {
                 "No file path specified for FARG output. Use `write_collection_farg` to specify a file path."
             ))
         }
+    }
+
+    /// Write the SequenceCollection to a FASTA file.
+    ///
+    /// Writes all sequences in this collection to a FASTA file with the specified line width.
+    /// Only sequences with loaded data (Full variant) will be written.
+    ///
+    /// # Arguments
+    /// * `file_path` - The path to the output FASTA file
+    /// * `line_width` - Number of bases per line (default: 70)
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Errors
+    /// Returns an error if any sequence doesn't have data loaded (Stub variant)
+    pub fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()> {
+        let line_width = line_width.unwrap_or(70);
+        let mut output_file = File::create(file_path)?;
+
+        for record in &self.sequences {
+            // Check if record has data
+            if !record.has_data() {
+                return Err(anyhow::anyhow!(
+                    "Cannot write FASTA: sequence '{}' does not have data loaded",
+                    record.metadata().name
+                ));
+            }
+
+            // Decode the sequence
+            let decoded_sequence = record.decode().ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Failed to decode sequence '{}'",
+                    record.metadata().name
+                )
+            })?;
+
+            // Write FASTA header
+            writeln!(output_file, ">{}", record.metadata().name)?;
+
+            // Write sequence with line wrapping
+            for chunk in decoded_sequence.as_bytes().chunks(line_width) {
+                output_file.write_all(chunk)?;
+                output_file.write_all(b"\n")?;
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -364,11 +459,11 @@ impl Display for SequenceRecord {
         write!(
             f,
             "SequenceRecord: {} (length: {}, alphabet: {}, ga4gh: {:02x?}, md5: {:02x?})",
-            &self.metadata.name,
-            &self.metadata.length,
-            &self.metadata.alphabet,
-            &self.metadata.sha512t24u,
-            &self.metadata.md5
+            &self.metadata().name,
+            &self.metadata().length,
+            &self.metadata().alphabet,
+            &self.metadata().sha512t24u,
+            &self.metadata().md5
         )?;
         Ok(())
     }
@@ -409,8 +504,9 @@ mod tests {
             .expect("Failed to load test FASTA file");
 
         for seq_record in &seqcol.sequences {
-            assert!(seq_record.data.is_none(), "digest_fasta should not load sequence data");
-            assert_eq!(seq_record.decode(), None, "decode() should return None when data is None");
+            assert!(!seq_record.has_data(), "digest_fasta should not load sequence data");
+            assert!(matches!(seq_record, SequenceRecord::Stub(_)), "digest_fasta should create Stub records");
+            assert_eq!(seq_record.decode(), None, "decode() should return None for Stub records");
         }
     }
 
@@ -428,8 +524,9 @@ mod tests {
         ];
 
         for (seq_record, (expected_name, expected_seq)) in seqcol.sequences.iter().zip(expected_sequences.iter()) {
-            assert_eq!(seq_record.metadata.name, *expected_name);
-            assert!(seq_record.data.is_some(), "load_fasta should load sequence data");
+            assert_eq!(seq_record.metadata().name, *expected_name);
+            assert!(seq_record.has_data(), "load_fasta should load sequence data");
+            assert!(matches!(seq_record, SequenceRecord::Full { .. }), "load_fasta should create Full records");
 
             let decoded = seq_record.decode().expect("decode() should return Some when data is present");
             assert_eq!(decoded, *expected_seq,
@@ -446,16 +543,16 @@ mod tests {
         let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
         let encoded_data = encode_sequence(sequence, alphabet);
 
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "test_seq".to_string(),
                 length: 4,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Dna2bit,
+                fai: None,
             },
-            fai: None,
-            data: Some(encoded_data),
+            sequence: encoded_data,
         };
 
         let decoded = record.decode().expect("Should decode encoded data");
@@ -467,16 +564,16 @@ mod tests {
         // Test that decode() handles raw UTF-8 data (not encoded)
         let raw_sequence = b"ACGTACGT".to_vec();
 
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "test_seq".to_string(),
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Ascii,
+                fai: None,
             },
-            fai: None,
-            data: Some(raw_sequence),
+            sequence: raw_sequence,
         };
 
         let decoded = record.decode().expect("Should decode raw UTF-8 data");
@@ -492,16 +589,16 @@ mod tests {
         let alphabet = lookup_alphabet(&AlphabetType::DnaIupac);
         let encoded_data = encode_sequence(sequence, alphabet);
 
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "iupac_test".to_string(),
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::DnaIupac,
+                fai: None,
             },
-            fai: None,
-            data: Some(encoded_data),
+            sequence: encoded_data,
         };
 
         let decoded = record.decode().expect("Should decode IUPAC encoded data");
@@ -517,16 +614,16 @@ mod tests {
         let alphabet = lookup_alphabet(&AlphabetType::Protein);
         let encoded_data = encode_sequence(sequence, alphabet);
 
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "protein_test".to_string(),
                 length: 20,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Protein,
+                fai: None,
             },
-            fai: None,
-            data: Some(encoded_data),
+            sequence: encoded_data,
         };
 
         let decoded = record.decode().expect("Should decode protein encoded data");
@@ -536,16 +633,16 @@ mod tests {
     #[test]
     fn test_decode_empty_sequence() {
         // Test decode with empty data
-        let record = SequenceRecord {
+        let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "empty_seq".to_string(),
                 length: 0,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Dna2bit,
+                fai: None,
             },
-            fai: None,
-            data: Some(Vec::new()),
+            sequence: Vec::new(),
         };
 
         let decoded = record.decode().expect("Should handle empty sequence");
@@ -559,16 +656,16 @@ mod tests {
 
         // Create raw UTF-8 data that matches the sequence length (heuristic for raw data)
         let raw_sequence = b"GGGGGGGG";  // 8 bytes for 8-symbol sequence
-        let record_raw = SequenceRecord {
+        let record_raw = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "raw_test".to_string(),
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Dna2bit,
+                fai: None,
             },
-            fai: None,
-            data: Some(raw_sequence.to_vec()),
+            sequence: raw_sequence.to_vec(),
         };
 
         let decoded_raw = record_raw.decode().expect("Should decode raw data");
@@ -579,16 +676,16 @@ mod tests {
         let encoded_data = encode_sequence(b"GGGGGGGG", alphabet);
         assert_eq!(encoded_data.len(), 2, "Encoded 2-bit DNA should be 2 bytes for 8 symbols");
 
-        let record_encoded = SequenceRecord {
+        let record_encoded = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "encoded_test".to_string(),
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
                 alphabet: AlphabetType::Dna2bit,
+                fai: None,
             },
-            fai: None,
-            data: Some(encoded_data),
+            sequence: encoded_data,
         };
 
         let decoded_encoded = record_encoded.decode().expect("Should decode encoded data");
@@ -604,7 +701,7 @@ mod tests {
         // Test borrowing iterator (&collection)
         let mut count = 0;
         for seq in &collection {
-            assert!(seq.metadata.length > 0, "Sequence should have length");
+            assert!(seq.metadata().length > 0, "Sequence should have length");
             count += 1;
         }
         assert_eq!(count, 3, "base.fa should have 3 sequences");
@@ -615,7 +712,7 @@ mod tests {
         // Test consuming iterator (collection)
         let names: Vec<String> = collection
             .into_iter()
-            .map(|seq| seq.metadata.name)
+            .map(|seq| seq.metadata().name.clone())
             .collect();
 
         assert_eq!(names.len(), 3);

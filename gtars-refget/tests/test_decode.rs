@@ -52,7 +52,7 @@ fn test_decode_workflow_encoded() {
             .get_sequence_by_collection_and_name(&collection_digest, name)
             .unwrap_or_else(|| panic!("Failed to retrieve {}", name));
 
-        assert!(record.data.is_some(), "Record should have data");
+        assert!(record.has_data(), "Record should have data");
 
         let decoded = record
             .decode()

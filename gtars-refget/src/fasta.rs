@@ -53,9 +53,9 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // For non-gzipped files, compute FAI data
-    // For gzipped files, FAI data is not meaningful (offsets are for compressed data)
-    let fai_enabled = !is_gzipped;
+    // Compute FAI data for both gzipped and non-gzipped files
+    // For gzipped files, FAI offsets represent positions in the uncompressed stream
+    let fai_enabled = true;
 
     let mut byte_position: u64 = 0;
 
@@ -82,14 +82,6 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                 let md5 = format!("{:x}", md5_hasher.finalize_reset());
                 let alphabet = alphabet_guesser.guess();
 
-                let metadata = SequenceMetadata {
-                    name: id.to_string(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                };
-
                 let fai = if fai_enabled {
                     if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
                         Some(super::collection::FaiMetadata {
@@ -104,11 +96,16 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                     None
                 };
 
-                results.push(SequenceRecord {
-                    metadata,
+                let metadata = SequenceMetadata {
+                    name: id.to_string(),
+                    length,
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
                     fai,
-                    data: None,
-                });
+                };
+
+                results.push(SequenceRecord::Stub(metadata));
             }
             break;
         }
@@ -120,14 +117,6 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                 let md5 = format!("{:x}", md5_hasher.finalize_reset());
                 let alphabet = alphabet_guesser.guess();
 
-                let metadata = SequenceMetadata {
-                    name: id.to_string(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                };
-
                 let fai = if fai_enabled {
                     if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
                         Some(super::collection::FaiMetadata {
@@ -142,11 +131,16 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                     None
                 };
 
-                results.push(SequenceRecord {
-                    metadata,
+                let metadata = SequenceMetadata {
+                    name: id.to_string(),
+                    length,
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
                     fai,
-                    data: None,
-                });
+                };
+
+                results.push(SequenceRecord::Stub(metadata));
             }
 
             // Start new sequence
@@ -198,7 +192,7 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
     }
 
     // Compute lvl1 digests from the sequence records
-    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
+    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
     let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
 
     // Compute collection digest from lvl1 digests
@@ -254,8 +248,9 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // For gzipped files, FAI data is not meaningful (offsets are for compressed data)
-    let fai_enabled = !is_gzipped;
+    // Compute FAI data for both gzipped and non-gzipped files
+    // For gzipped files, FAI offsets represent positions in the uncompressed stream
+    let fai_enabled = true;
 
     let mut byte_position: u64 = 0;
 
@@ -397,8 +392,8 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
 ///
 /// let seqcol = load_fasta("../tests/data/fasta/base.fa").expect("Failed to load FASTA");
 /// for seq_record in &seqcol.sequences {
-///     println!("Sequence: {}", seq_record.metadata.name);
-///     if let Some(data) = &seq_record.data {
+///     println!("Sequence: {}", seq_record.metadata().name);
+///     if let Some(data) = seq_record.sequence() {
 ///         println!("  Data: {} bytes", data.len());
 ///     }
 /// }
@@ -414,9 +409,9 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // For non-gzipped files, compute FAI data
-    // For gzipped files, FAI data is not meaningful (offsets are for compressed data)
-    let fai_enabled = !is_gzipped;
+    // Compute FAI data for both gzipped and non-gzipped files
+    // For gzipped files, FAI offsets represent positions in the uncompressed stream
+    let fai_enabled = true;
 
     let mut byte_position: u64 = 0;
 
@@ -444,14 +439,6 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                 let md5 = format!("{:x}", md5_hasher.finalize_reset());
                 let alphabet = alphabet_guesser.guess();
 
-                let metadata = SequenceMetadata {
-                    name: id.to_string(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                };
-
                 let fai = if fai_enabled {
                     if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
                         Some(super::collection::FaiMetadata {
@@ -466,10 +453,18 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                     None
                 };
 
-                results.push(SequenceRecord {
-                    metadata,
+                let metadata = SequenceMetadata {
+                    name: id.to_string(),
+                    length,
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
                     fai,
-                    data: Some(sequence_data.clone()),
+                };
+
+                results.push(SequenceRecord::Full {
+                    metadata,
+                    sequence: sequence_data.clone(),
                 });
             }
             break;
@@ -482,14 +477,6 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                 let md5 = format!("{:x}", md5_hasher.finalize_reset());
                 let alphabet = alphabet_guesser.guess();
 
-                let metadata = SequenceMetadata {
-                    name: id.to_string(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                };
-
                 let fai = if fai_enabled {
                     if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
                         Some(super::collection::FaiMetadata {
@@ -504,10 +491,18 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                     None
                 };
 
-                results.push(SequenceRecord {
-                    metadata,
+                let metadata = SequenceMetadata {
+                    name: id.to_string(),
+                    length,
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
                     fai,
-                    data: Some(sequence_data.clone()),
+                };
+
+                results.push(SequenceRecord::Full {
+                    metadata,
+                    sequence: sequence_data.clone(),
                 });
             }
 
@@ -564,7 +559,7 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
     }
 
     // Compute lvl1 digests from the sequence records
-    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
+    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
     let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
 
     // Compute collection digest from lvl1 digests
@@ -630,13 +625,10 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
             alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
             sha512t24u: parts[3].to_string(),
             md5: parts[4].to_string(),
+            fai: None,  // FARG files don't store FAI data
         };
 
-        let record = SequenceRecord {
-            metadata: result,
-            fai: None,  // FARG files don't store FAI data
-            data: None,
-        };
+        let record = SequenceRecord::Stub(result);
         results.push(record);
     }
     // If the digests were not found in the file, compute them
@@ -645,7 +637,7 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
     if (sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty())
         && !results.is_empty()
     {
-        let metadata_vec: Vec<&SequenceMetadata> = results.iter().map(|r| &r.metadata).collect();
+        let metadata_vec: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
         lvl1 = SeqColDigestLvl1::from_metadata(&metadata_vec);
     } else {
         lvl1 = SeqColDigestLvl1 {
@@ -680,43 +672,43 @@ mod tests {
         let results = seqcol.sequences;
         println!("{:?}", results);
         assert_eq!(results.len(), 3);
-        assert_eq!(results[0].metadata.length, 8);
+        assert_eq!(results[0].metadata().length, 8);
         assert_eq!(
-            results[0].metadata.sha512t24u,
+            results[0].metadata().sha512t24u,
             "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         );
-        assert_eq!(results[0].metadata.md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
-        assert_eq!(results[0].metadata.alphabet, AlphabetType::Dna2bit);
-        assert_eq!(results[1].metadata.length, 4);
+        assert_eq!(results[0].metadata().md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
+        assert_eq!(results[0].metadata().alphabet, AlphabetType::Dna2bit);
+        assert_eq!(results[1].metadata().length, 4);
         assert_eq!(
-            results[1].metadata.sha512t24u,
+            results[1].metadata().sha512t24u,
             "YBbVX0dLKG1ieEDCiMmkrTZFt_Z5Vdaj"
         );
-        assert_eq!(results[1].metadata.md5, "31fc6ca291a32fb9df82b85e5f077e31");
-        assert_eq!(results[1].metadata.alphabet, AlphabetType::Dna2bit);
-        assert_eq!(results[2].metadata.length, 4);
+        assert_eq!(results[1].metadata().md5, "31fc6ca291a32fb9df82b85e5f077e31");
+        assert_eq!(results[1].metadata().alphabet, AlphabetType::Dna2bit);
+        assert_eq!(results[2].metadata().length, 4);
         assert_eq!(
-            results[2].metadata.sha512t24u,
+            results[2].metadata().sha512t24u,
             "AcLxtBuKEPk_7PGE_H4dGElwZHCujwH6"
         );
-        assert_eq!(results[2].metadata.md5, "92c6a56c9e9459d8a42b96f7884710bc");
-        assert_eq!(results[2].metadata.alphabet, AlphabetType::Dna2bit);
+        assert_eq!(results[2].metadata().md5, "92c6a56c9e9459d8a42b96f7884710bc");
+        assert_eq!(results[2].metadata().alphabet, AlphabetType::Dna2bit);
 
         // Test FAI metadata
-        assert!(results[0].fai.is_some());
-        let fai0 = results[0].fai.as_ref().unwrap();
+        assert!(results[0].metadata().fai.is_some());
+        let fai0 = results[0].metadata().fai.as_ref().unwrap();
         assert_eq!(fai0.offset, 6);  // After ">chrX\n"
         assert_eq!(fai0.line_bases, 8);
         assert_eq!(fai0.line_bytes, 9);  // Includes \n
 
-        assert!(results[1].fai.is_some());
-        let fai1 = results[1].fai.as_ref().unwrap();
+        assert!(results[1].metadata().fai.is_some());
+        let fai1 = results[1].metadata().fai.as_ref().unwrap();
         assert_eq!(fai1.offset, 21);  // After ">chr1\n"
         assert_eq!(fai1.line_bases, 4);
         assert_eq!(fai1.line_bytes, 5);
 
-        assert!(results[2].fai.is_some());
-        let fai2 = results[2].fai.as_ref().unwrap();
+        assert!(results[2].metadata().fai.is_some());
+        let fai2 = results[2].metadata().fai.as_ref().unwrap();
         assert_eq!(fai2.offset, 32);  // After ">chr2\n"
         assert_eq!(fai2.line_bases, 4);
         assert_eq!(fai2.line_bytes, 5);
@@ -728,13 +720,13 @@ mod tests {
             digest_fasta("../tests/data/fasta/base.fa.gz").expect("Can't open test fasta file");
         let results = seqcol.sequences;
         println!("{:?}", results);
-        assert_eq!(results[0].metadata.length, 8);
+        assert_eq!(results[0].metadata().length, 8);
         assert_eq!(
-            results[0].metadata.sha512t24u,
+            results[0].metadata().sha512t24u,
             "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         );
-        assert_eq!(results[0].metadata.md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
-        assert_eq!(results[0].metadata.alphabet, AlphabetType::Dna2bit);
+        assert_eq!(results[0].metadata().md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
+        assert_eq!(results[0].metadata().alphabet, AlphabetType::Dna2bit);
     }
 
     #[test]
@@ -755,11 +747,11 @@ mod tests {
         println!("Loaded SequenceCollection: {}", loaded_seqcol);
         // Test round-trip integrity
         for (original, read) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
-            assert_eq!(original.metadata.name, read.metadata.name);
-            assert_eq!(original.metadata.length, read.metadata.length);
-            assert_eq!(original.metadata.sha512t24u, read.metadata.sha512t24u);
-            assert_eq!(original.metadata.md5, read.metadata.md5);
-            assert_eq!(original.metadata.alphabet, read.metadata.alphabet);
+            assert_eq!(original.metadata().name, read.metadata().name);
+            assert_eq!(original.metadata().length, read.metadata().length);
+            assert_eq!(original.metadata().sha512t24u, read.metadata().sha512t24u);
+            assert_eq!(original.metadata().md5, read.metadata().md5);
+            assert_eq!(original.metadata().alphabet, read.metadata().alphabet);
         }
     }
 
@@ -819,10 +811,10 @@ mod tests {
         for (seq, (name, length, offset, line_bases, line_bytes)) in
             seqcol.sequences.iter().zip(fai_data.iter())
         {
-            assert_eq!(seq.metadata.name, *name);
-            assert_eq!(seq.metadata.length, *length as usize);
-            assert!(seq.fai.is_some(), "FAI data should be present");
-            let fai = seq.fai.as_ref().unwrap();
+            assert_eq!(seq.metadata().name, *name);
+            assert_eq!(seq.metadata().length, *length as usize);
+            assert!(seq.metadata().fai.is_some(), "FAI data should be present");
+            let fai = seq.metadata().fai.as_ref().unwrap();
             assert_eq!(fai.offset, *offset, "Offset mismatch for {}", name);
             assert_eq!(fai.line_bases, *line_bases, "Line bases mismatch for {}", name);
             assert_eq!(fai.line_bytes, *line_bytes, "Line bytes mismatch for {}", name);
@@ -840,10 +832,10 @@ mod tests {
         for (seq, (name, length, offset, line_bases, line_bytes)) in
             seqcol.sequences.iter().zip(fai_data.iter())
         {
-            assert_eq!(seq.metadata.name, *name);
-            assert_eq!(seq.metadata.length, *length as usize);
-            assert!(seq.fai.is_some(), "FAI data should be present");
-            let fai = seq.fai.as_ref().unwrap();
+            assert_eq!(seq.metadata().name, *name);
+            assert_eq!(seq.metadata().length, *length as usize);
+            assert!(seq.metadata().fai.is_some(), "FAI data should be present");
+            let fai = seq.metadata().fai.as_ref().unwrap();
             assert_eq!(fai.offset, *offset, "Offset mismatch for {}", name);
             assert_eq!(fai.line_bases, *line_bases, "Line bases mismatch for {}", name);
             assert_eq!(fai.line_bytes, *line_bytes, "Line bytes mismatch for {}", name);
@@ -861,10 +853,10 @@ mod tests {
         for (seq, (name, length, offset, line_bases, line_bytes)) in
             seqcol.sequences.iter().zip(fai_data.iter())
         {
-            assert_eq!(seq.metadata.name, *name);
-            assert_eq!(seq.metadata.length, *length as usize);
-            assert!(seq.fai.is_some(), "FAI data should be present");
-            let fai = seq.fai.as_ref().unwrap();
+            assert_eq!(seq.metadata().name, *name);
+            assert_eq!(seq.metadata().length, *length as usize);
+            assert!(seq.metadata().fai.is_some(), "FAI data should be present");
+            let fai = seq.metadata().fai.as_ref().unwrap();
             assert_eq!(fai.offset, *offset, "Offset mismatch for {}", name);
             assert_eq!(fai.line_bases, *line_bases, "Line bases mismatch for {}", name);
             assert_eq!(fai.line_bytes, *line_bytes, "Line bytes mismatch for {}", name);
@@ -884,10 +876,10 @@ mod tests {
         for (seq, (name, length, offset, line_bases, line_bytes)) in
             seqcol.sequences.iter().zip(fai_data.iter())
         {
-            assert_eq!(seq.metadata.name, *name);
-            assert_eq!(seq.metadata.length, *length as usize);
-            assert!(seq.fai.is_some(), "FAI data should be present");
-            let fai = seq.fai.as_ref().unwrap();
+            assert_eq!(seq.metadata().name, *name);
+            assert_eq!(seq.metadata().length, *length as usize);
+            assert!(seq.metadata().fai.is_some(), "FAI data should be present");
+            let fai = seq.metadata().fai.as_ref().unwrap();
             assert_eq!(fai.offset, *offset, "Offset mismatch for {}", name);
             assert_eq!(fai.line_bases, *line_bases, "Line bases mismatch for {}", name);
             assert_eq!(fai.line_bytes, *line_bytes, "Line bytes mismatch for {}", name);
@@ -901,9 +893,9 @@ mod tests {
 
         // All sequences should have None for FAI data
         for seq in seqcol.sequences.iter() {
-            assert!(seq.fai.is_none(),
+            assert!(seq.metadata().fai.is_none(),
                 "Gzipped files should not have FAI data for sequence {}",
-                seq.metadata.name);
+                seq.metadata().name);
         }
     }
 
@@ -918,10 +910,10 @@ mod tests {
         for (seq, (name, length, offset, line_bases, line_bytes)) in
             seqcol.sequences.iter().zip(fai_data.iter())
         {
-            assert_eq!(seq.metadata.name, *name);
-            assert_eq!(seq.metadata.length, *length as usize);
-            assert!(seq.fai.is_some(), "FAI data should be present");
-            let fai = seq.fai.as_ref().unwrap();
+            assert_eq!(seq.metadata().name, *name);
+            assert_eq!(seq.metadata().length, *length as usize);
+            assert!(seq.metadata().fai.is_some(), "FAI data should be present");
+            let fai = seq.metadata().fai.as_ref().unwrap();
             assert_eq!(fai.offset, *offset, "Offset mismatch for {}", name);
             assert_eq!(fai.line_bases, *line_bases, "Line bases mismatch for {}", name);
             assert_eq!(fai.line_bytes, *line_bytes, "Line bytes mismatch for {} (should be +2 for CRLF)", name);
@@ -953,49 +945,49 @@ mod tests {
             .zip(seqcol_unwrapped.sequences.iter())
         {
             // Same name
-            assert_eq!(seq40.metadata.name, seq20.metadata.name);
-            assert_eq!(seq40.metadata.name, seq_unwrap.metadata.name);
+            assert_eq!(seq40.metadata().name, seq20.metadata().name);
+            assert_eq!(seq40.metadata().name, seq_unwrap.metadata().name);
 
             // Same length
-            assert_eq!(seq40.metadata.length, seq20.metadata.length,
-                "Length mismatch for {}", seq40.metadata.name);
-            assert_eq!(seq40.metadata.length, seq_unwrap.metadata.length,
-                "Length mismatch for {}", seq40.metadata.name);
+            assert_eq!(seq40.metadata().length, seq20.metadata().length,
+                "Length mismatch for {}", seq40.metadata().name);
+            assert_eq!(seq40.metadata().length, seq_unwrap.metadata().length,
+                "Length mismatch for {}", seq40.metadata().name);
 
             // Same digests (proves sequences are identical)
-            assert_eq!(seq40.metadata.sha512t24u, seq20.metadata.sha512t24u,
+            assert_eq!(seq40.metadata().sha512t24u, seq20.metadata().sha512t24u,
                 "SHA512 digest mismatch for {} - sequences not identical",
-                seq40.metadata.name);
-            assert_eq!(seq40.metadata.sha512t24u, seq_unwrap.metadata.sha512t24u,
+                seq40.metadata().name);
+            assert_eq!(seq40.metadata().sha512t24u, seq_unwrap.metadata().sha512t24u,
                 "SHA512 digest mismatch for {} - sequences not identical",
-                seq40.metadata.name);
-            assert_eq!(seq40.metadata.md5, seq20.metadata.md5,
+                seq40.metadata().name);
+            assert_eq!(seq40.metadata().md5, seq20.metadata().md5,
                 "MD5 digest mismatch for {} - sequences not identical",
-                seq40.metadata.name);
-            assert_eq!(seq40.metadata.md5, seq_unwrap.metadata.md5,
+                seq40.metadata().name);
+            assert_eq!(seq40.metadata().md5, seq_unwrap.metadata().md5,
                 "MD5 digest mismatch for {} - sequences not identical",
-                seq40.metadata.name);
+                seq40.metadata().name);
 
             // But different FAI data (different wrapping)
-            assert!(seq40.fai.is_some() && seq20.fai.is_some() && seq_unwrap.fai.is_some());
-            let fai40 = seq40.fai.as_ref().unwrap();
-            let fai20 = seq20.fai.as_ref().unwrap();
-            let fai_unwrap = seq_unwrap.fai.as_ref().unwrap();
+            assert!(seq40.metadata().fai.is_some() && seq20.metadata().fai.is_some() && seq_unwrap.metadata().fai.is_some());
+            let fai40 = seq40.metadata().fai.as_ref().unwrap();
+            let fai20 = seq20.metadata().fai.as_ref().unwrap();
+            let fai_unwrap = seq_unwrap.metadata().fai.as_ref().unwrap();
 
             // Different line_bases due to different wrapping (for multi-line sequences)
             // Note: short sequences like chr3 that fit on one line may have same line_bases
             // across different wrapping styles, which is correct behavior
-            if seq40.metadata.length > 40 {
+            if seq40.metadata().length > 40 {
                 // Long enough to require wrapping in wrapped_40
                 assert_ne!(fai40.line_bases, fai20.line_bases,
                     "wrapped_40 and wrapped_20 should have different line_bases for {}",
-                    seq40.metadata.name);
+                    seq40.metadata().name);
             }
-            if seq40.metadata.length > 20 {
+            if seq40.metadata().length > 20 {
                 // Long enough to require wrapping in wrapped_20
                 assert_ne!(fai20.line_bases, fai_unwrap.line_bases,
                     "wrapped_20 and unwrapped should have different line_bases for {}",
-                    seq40.metadata.name);
+                    seq40.metadata().name);
             }
         }
     }
@@ -1134,33 +1126,33 @@ mod tests {
 
         // Check first sequence (chrX)
         let seq0 = &seqcol.sequences[0];
-        assert_eq!(seq0.metadata.name, "chrX");
-        assert_eq!(seq0.metadata.length, 8);
-        assert!(seq0.data.is_some(), "Sequence should have data");
+        assert_eq!(seq0.metadata().name, "chrX");
+        assert_eq!(seq0.metadata().length, 8);
+        assert!(seq0.has_data(), "Sequence should have data");
 
-        if let Some(ref data) = seq0.data {
+        if let Some(data) = seq0.sequence() {
             assert_eq!(data.len(), 8);
             assert_eq!(std::str::from_utf8(data).unwrap(), "TTGGGGAA");
         }
 
         // Check second sequence (chr1)
         let seq1 = &seqcol.sequences[1];
-        assert_eq!(seq1.metadata.name, "chr1");
-        assert_eq!(seq1.metadata.length, 4);
-        assert!(seq1.data.is_some(), "Sequence should have data");
+        assert_eq!(seq1.metadata().name, "chr1");
+        assert_eq!(seq1.metadata().length, 4);
+        assert!(seq1.has_data(), "Sequence should have data");
 
-        if let Some(ref data) = seq1.data {
+        if let Some(data) = seq1.sequence() {
             assert_eq!(data.len(), 4);
             assert_eq!(std::str::from_utf8(data).unwrap(), "GGAA");
         }
 
         // Check third sequence (chr2)
         let seq2 = &seqcol.sequences[2];
-        assert_eq!(seq2.metadata.name, "chr2");
-        assert_eq!(seq2.metadata.length, 4);
-        assert!(seq2.data.is_some(), "Sequence should have data");
+        assert_eq!(seq2.metadata().name, "chr2");
+        assert_eq!(seq2.metadata().length, 4);
+        assert!(seq2.has_data(), "Sequence should have data");
 
-        if let Some(ref data) = seq2.data {
+        if let Some(data) = seq2.sequence() {
             assert_eq!(data.len(), 4);
             assert_eq!(std::str::from_utf8(data).unwrap(), "GCGC");
         }
@@ -1170,11 +1162,11 @@ mod tests {
             .expect("Failed to digest FASTA");
 
         for (loaded, digested) in seqcol.sequences.iter().zip(digest_seqcol.sequences.iter()) {
-            assert_eq!(loaded.metadata.name, digested.metadata.name);
-            assert_eq!(loaded.metadata.length, digested.metadata.length);
-            assert_eq!(loaded.metadata.sha512t24u, digested.metadata.sha512t24u);
-            assert_eq!(loaded.metadata.md5, digested.metadata.md5);
-            assert_eq!(loaded.metadata.alphabet, digested.metadata.alphabet);
+            assert_eq!(loaded.metadata().name, digested.metadata().name);
+            assert_eq!(loaded.metadata().length, digested.metadata().length);
+            assert_eq!(loaded.metadata().sha512t24u, digested.metadata().sha512t24u);
+            assert_eq!(loaded.metadata().md5, digested.metadata().md5);
+            assert_eq!(loaded.metadata().alphabet, digested.metadata().alphabet);
         }
     }
 
@@ -1185,11 +1177,11 @@ mod tests {
 
         // Verify all sequences have data
         for seq in &seqcol.sequences {
-            assert!(seq.data.is_some(), "Sequence {} should have data", seq.metadata.name);
+            assert!(seq.has_data(), "Sequence {} should have data", seq.metadata().name);
 
-            if let Some(ref data) = seq.data {
-                assert_eq!(data.len(), seq.metadata.length,
-                    "Data length mismatch for {}", seq.metadata.name);
+            if let Some(data) = seq.sequence() {
+                assert_eq!(data.len(), seq.metadata().length,
+                    "Data length mismatch for {}", seq.metadata().name);
 
                 // Verify data is uppercase
                 let data_str = std::str::from_utf8(data).unwrap();
@@ -1206,11 +1198,11 @@ mod tests {
 
         // Should still load data from gzipped files
         assert_eq!(seqcol.sequences.len(), 3);
-        assert!(seqcol.sequences[0].data.is_some(), "Should have sequence data");
+        assert!(seqcol.sequences[0].has_data(), "Should have sequence data");
 
         for seq in &seqcol.sequences {
-            assert!(seq.data.is_some(), "Gzipped file should still have sequence data");
-            assert!(seq.fai.is_none(), "Gzipped file should not have FAI metadata");
+            assert!(seq.has_data(), "Gzipped file should still have sequence data");
+            assert!(seq.metadata().fai.is_none(), "Gzipped file should not have FAI metadata");
         }
     }
 }

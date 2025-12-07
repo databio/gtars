@@ -118,6 +118,8 @@ pub struct PySequenceMetadata {
     pub md5: String,
     #[pyo3(get, set)]
     pub alphabet: PyAlphabetType,
+    #[pyo3(get, set)]
+    pub fai: Option<PyFaiMetadata>,
 }
 
 #[pyclass(name = "FaiMetadata")]
@@ -148,9 +150,7 @@ pub struct PySequenceRecord {
     #[pyo3(get, set)]
     pub metadata: PySequenceMetadata,
     #[pyo3(get, set)]
-    pub fai: Option<PyFaiMetadata>,
-    #[pyo3(get, set)]
-    pub data: Option<Vec<u8>>,
+    pub sequence: Option<Vec<u8>>,
 }
 
 #[pyclass(name = "SeqColDigestLvl1")]
@@ -302,7 +302,7 @@ impl PySequenceRecord {
             self.metadata.name,
             self.metadata.length,
             self.metadata.sha512t24u,
-            self.data.is_some()
+            self.sequence.is_some()
         )
     }
 
@@ -326,27 +326,32 @@ impl PySequenceRecord {
     ///     ...     print(f"First 50 bases: {sequence[:50]}")
     pub fn decode(&self) -> Option<String> {
         // Convert PySequenceRecord to Rust SequenceRecord
-        let rust_record = SequenceRecord {
-            metadata: SequenceMetadata {
-                name: self.metadata.name.clone(),
-                length: self.metadata.length,
-                sha512t24u: self.metadata.sha512t24u.clone(),
-                md5: self.metadata.md5.clone(),
-                alphabet: match self.metadata.alphabet {
-                    PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
-                    PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
-                    PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
-                    PyAlphabetType::Protein => AlphabetType::Protein,
-                    PyAlphabetType::Ascii => AlphabetType::Ascii,
-                    PyAlphabetType::Unknown => AlphabetType::Unknown,
-                },
+        let metadata = SequenceMetadata {
+            name: self.metadata.name.clone(),
+            length: self.metadata.length,
+            sha512t24u: self.metadata.sha512t24u.clone(),
+            md5: self.metadata.md5.clone(),
+            alphabet: match self.metadata.alphabet {
+                PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
+                PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
+                PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
+                PyAlphabetType::Protein => AlphabetType::Protein,
+                PyAlphabetType::Ascii => AlphabetType::Ascii,
+                PyAlphabetType::Unknown => AlphabetType::Unknown,
             },
-            fai: self.fai.as_ref().map(|fai| FaiMetadata {
+            fai: self.metadata.fai.as_ref().map(|fai| FaiMetadata {
                 offset: fai.offset,
                 line_bases: fai.line_bases,
                 line_bytes: fai.line_bytes,
             }),
-            data: self.data.clone(),
+        };
+
+        let rust_record = match &self.sequence {
+            None => SequenceRecord::Stub(metadata),
+            Some(seq) => SequenceRecord::Full {
+                metadata,
+                sequence: seq.clone(),
+            },
         };
 
         // Call the Rust decode method
@@ -406,6 +411,68 @@ impl PySequenceCollection {
                 "SequenceCollection index out of range",
             ))
         }
+    }
+
+    /// Write the collection to a FASTA file.
+    ///
+    /// Args:
+    ///     file_path (str): Path to the output FASTA file
+    ///     line_width (int, optional): Number of bases per line (default: 70)
+    ///
+    /// Raises:
+    ///     IOError: If any sequence doesn't have data loaded
+    ///
+    /// Example:
+    ///     >>> collection = load_fasta("genome.fa")
+    ///     >>> collection.write_fasta("output.fa")
+    ///     >>> collection.write_fasta("output.fa", line_width=60)
+    fn write_fasta(&self, file_path: &str, line_width: Option<usize>) -> PyResult<()> {
+        // Convert Python sequences back to Rust SequenceCollection
+        let rust_collection = SequenceCollection {
+            sequences: self.sequences.iter().map(|py_rec| {
+                let metadata = SequenceMetadata {
+                    name: py_rec.metadata.name.clone(),
+                    length: py_rec.metadata.length,
+                    sha512t24u: py_rec.metadata.sha512t24u.clone(),
+                    md5: py_rec.metadata.md5.clone(),
+                    alphabet: match &py_rec.metadata.alphabet {
+                        PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
+                        PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
+                        PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
+                        PyAlphabetType::Protein => AlphabetType::Protein,
+                        PyAlphabetType::Ascii => AlphabetType::Ascii,
+                        PyAlphabetType::Unknown => AlphabetType::Unknown,
+                    },
+                    fai: py_rec.metadata.fai.as_ref().map(|f| FaiMetadata {
+                        offset: f.offset,
+                        line_bases: f.line_bases,
+                        line_bytes: f.line_bytes,
+                    }),
+                };
+
+                match &py_rec.sequence {
+                    None => SequenceRecord::Stub(metadata),
+                    Some(seq) => SequenceRecord::Full {
+                        metadata,
+                        sequence: seq.clone(),
+                    },
+                }
+            }).collect(),
+            digest: self.digest.clone(),
+            lvl1: SeqColDigestLvl1 {
+                sequences_digest: self.lvl1.sequences_digest.clone(),
+                names_digest: self.lvl1.names_digest.clone(),
+                lengths_digest: self.lvl1.lengths_digest.clone(),
+            },
+            file_path: None,
+        };
+
+        rust_collection
+            .write_fasta(file_path, line_width)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Failed to write FASTA: {}",
+                e
+            )))
     }
 
     /// Iterate over sequences in the collection.
@@ -489,6 +556,7 @@ impl From<SequenceMetadata> for PySequenceMetadata {
             sha512t24u: value.sha512t24u,
             md5: value.md5,
             alphabet: PyAlphabetType::from(value.alphabet),
+            fai: value.fai.map(PyFaiMetadata::from),
         }
     }
 }
@@ -496,10 +564,15 @@ impl From<SequenceMetadata> for PySequenceMetadata {
 // Conversion from Rust SequenceRecord to Python PySequenceRecord
 impl From<SequenceRecord> for PySequenceRecord {
     fn from(value: SequenceRecord) -> Self {
-        PySequenceRecord {
-            metadata: PySequenceMetadata::from(value.metadata),
-            fai: value.fai.map(PyFaiMetadata::from),
-            data: value.data,
+        match value {
+            SequenceRecord::Stub(metadata) => PySequenceRecord {
+                metadata: PySequenceMetadata::from(metadata),
+                sequence: None,
+            },
+            SequenceRecord::Full { metadata, sequence } => PySequenceRecord {
+                metadata: PySequenceMetadata::from(metadata),
+                sequence: Some(sequence),
+            },
         }
     }
 }
