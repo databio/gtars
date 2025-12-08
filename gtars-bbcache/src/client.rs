@@ -371,7 +371,8 @@ impl BBClient {
         let response = get(&bedset_url)
             .call()
             .map_err(|e| anyhow!("Failed to GET {}: {}", bedset_url, e))?
-            .into_string()
+            .body_mut()
+            .read_to_string()
             .map_err(|e| anyhow!("Failed to read response body for {}: {}", bedset_url, e))?;
 
         let json: serde_json::Value = serde_json::from_str(&response)?;
