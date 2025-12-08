@@ -7,7 +7,6 @@ use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
-//use reqwest::blocking::get;
 use ureq::get;
 use std::fs::{File, create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
