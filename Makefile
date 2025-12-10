@@ -1,5 +1,5 @@
 wasm:
-	wasm-pack build --target bundler --release gtars-wasm
+	wasm-pack build --target web --release gtars-wasm
 	jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
 
 test:

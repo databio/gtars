@@ -183,7 +183,7 @@ impl TryFrom<String> for RegionSet {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self> {
-        println!("Converting String to Path: {}", value);
+        // println!("Converting String to Path: {}", value);
         RegionSet::try_from(Path::new(&value))
     }
 }
@@ -567,14 +567,13 @@ mod tests {
     }
 
     #[rstest]
-    #[ignore = "Failing but low priority for now"]
     fn test_open_from_url() {
-        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        let file_path = String::from("https://www.encodeproject.org/files/ENCFF321QPN/@@download/ENCFF321QPN.bed.gz");
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
     #[rstest]
-    #[ignore = "Failing but low priority"]
+    #[ignore = "Avoid BEDbase dependency in CI"]
     fn test_open_from_bedbase() {
         let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
         let region_set = RegionSet::try_from(bbid);
