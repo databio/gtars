@@ -155,7 +155,7 @@ pub fn get_dynamic_reader_from_url(
         Err(e) => return Err(format!("Request error when fetching {}: {}", url_str, e).into()),
     };
 
-    // Read full body into memory (same behavior as reqwest .bytes()?)
+    // Read the entire HTTP response body into memory as a Vec<u8>
     let mut bytes = Vec::new();
     response
         .into_body()
