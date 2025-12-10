@@ -144,8 +144,6 @@ pub fn get_dynamic_reader_from_url(
         url_str = url_str.replacen("ftp://", "http://", 1);
     }
 
-    let is_gzipped = url_str.ends_with(".gz");
-
     // Perform request
     let response = match get(&url_str).call() {
         Ok(resp) => resp,
@@ -165,10 +163,11 @@ pub fn get_dynamic_reader_from_url(
 
     let cursor = Cursor::new(bytes);
 
-    let reader: Box<dyn std::io::Read> = if is_gzipped {
-        Box::new(GzDecoder::new(cursor))
-    } else {
-        Box::new(cursor)
+    let is_gzipped = url_str.ends_with(".gz");
+
+    let reader: Box<dyn std::io::Read> = match is_gzipped {
+        true => Box::new(GzDecoder::new(cursor)),
+        false => Box::new(cursor),
     };
 
     Ok(BufReader::new(reader))
