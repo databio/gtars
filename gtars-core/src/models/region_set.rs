@@ -183,7 +183,7 @@ impl TryFrom<String> for RegionSet {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self> {
-        println!("Converting String to Path: {}", value);
+        // println!("Converting String to Path: {}", value);
         RegionSet::try_from(Path::new(&value))
     }
 }
