@@ -571,10 +571,11 @@ mod tests {
         //let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
         let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/dev/tests/data/regionset/dummy.narrowPeak.bed.gz");
         assert!(RegionSet::try_from(file_path).is_ok());
+        // let res = RegionSet::try_from(file_path);
+        // assert!(res.is_ok(), "try_from failed:\n{:#}", res.unwrap_err());
     }
 
     #[rstest]
-    #[ignore = "Failing but low priority"]
     fn test_open_from_bedbase() {
         let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
         let region_set = RegionSet::try_from(bbid);

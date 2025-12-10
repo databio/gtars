@@ -8,10 +8,9 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use flate2::read::{GzDecoder, MultiGzDecoder};
-#[cfg(feature = "http")]
-use ureq::get;
 use std::error::Error;
-//use reqwest::blocking::Client;
+#[cfg(feature = "http")]
+use ureq::{get, Error as UreqError};
 
 use crate::models::region::Region;
 
@@ -134,51 +133,45 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
 pub fn get_dynamic_reader_from_url(
     url: &Path,
 ) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
-    // Create an HTTP client and fetch the content
-    let mut url = url.to_string_lossy().to_string();
+    let mut url_str = url
+        .to_str()
+        .ok_or_else(|| "URL path is not valid UTF-8")?
+        .to_string();
 
-    if url.starts_with("ftp://") {
+    let is_ftp = url_str.starts_with("ftp://");
+    if is_ftp {
         println!("ftp is not fully implemented. Bugs could appear");
-        url = url.replacen("ftp://", "http://", 1);
+        url_str = url_str.replacen("ftp://", "http://", 1);
     }
 
-    let is_gzipped = url.ends_with(".gz");
+    let is_gzipped = url_str.ends_with(".gz");
 
-    let agent = ureq::AgentBuilder::new()
-        .redirects(10)
-        .build();
-
-    let response = agent.get(&url).call()
-        .map_err(|e| format!("Failed to GET {}: {}", url, e))?;
-
-    let body_reader = response.into_body().into_reader();
-
-    let reader: Box<dyn std::io::Read> = if is_gzipped {
-        Box::new(flate2::read::MultiGzDecoder::new(body_reader))
-    } else {
-        Box::new(body_reader)
+    // Perform request
+    let response = match get(&url_str).call() {
+        Ok(resp) => resp,
+        Err(UreqError::StatusCode(code)) => {
+            return Err(format!("HTTP status {} when fetching {}", code, url_str).into())
+        }
+        Err(e) => return Err(format!("Request error when fetching {}: {}", url_str, e).into()),
     };
 
-    Ok(std::io::BufReader::new(reader))
+    // Read full body into memory (same behavior as reqwest .bytes()?)
+    let mut bytes = Vec::new();
+    response
+        .into_body()
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("Failed reading response body from {}: {}", url_str, e))?;
 
-    // let response = Client::new()
-    //     .get(&url)
-    //     .send()
-    //     .with_context(|| format!("Failed to fetch content from URL: {}", &url))?
-    //     .error_for_status()?
-    //     .bytes()?;
+    let cursor = Cursor::new(bytes);
 
-    // // Convert the response into a cursor for reading
-    // let cursor = Cursor::new(response);
+    let reader: Box<dyn std::io::Read> = if is_gzipped {
+        Box::new(GzDecoder::new(cursor))
+    } else {
+        Box::new(cursor)
+    };
 
-    // let is_gzipped = url.ends_with(".gz");
-
-    // let reader: Box<dyn std::io::Read> = match is_gzipped {
-    //     true => Box::new(GzDecoder::new(cursor)),
-    //     false => Box::new(cursor),
-    // };
-
-    // Ok(BufReader::new(reader))
+    Ok(BufReader::new(reader))
 }
 
 /// Get a reader for either a gzipped, non-gzipped file, or stdin
