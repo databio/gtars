@@ -65,6 +65,8 @@ pub struct GlobalRefgetStore {
     remote_source: Option<String>,
     /// Template for sequence file paths (e.g., "sequences/%s2/%s.seq")
     seqdata_path_template: Option<String>,
+    /// Whether to cache fetched remote files to disk
+    cache_to_disk: bool,
 }
 
 /// Metadata for the entire store.
@@ -204,6 +206,7 @@ impl GlobalRefgetStore {
             local_path: None,
             remote_source: None,
             seqdata_path_template: None,
+            cache_to_disk: true,  // Default to true for backward compatibility
         }
     }
 
@@ -890,16 +893,20 @@ impl GlobalRefgetStore {
     /// Helper function to fetch a file from local path or remote source
     /// Returns the file contents as Vec<u8>
     fn fetch_file(
-        local_path: &Path,
+        local_path: &Option<PathBuf>,
         remote_source: &Option<String>,
         relative_path: &str,
+        cache_to_disk: bool,
     ) -> Result<Vec<u8>> {
-        let full_local_path = local_path.join(relative_path);
-
-        // Check if file exists locally
-        if full_local_path.exists() {
-            return fs::read(&full_local_path)
-                .context(format!("Failed to read local file: {}", full_local_path.display()));
+        // Check if file exists locally (only if caching is enabled and path exists)
+        if cache_to_disk {
+            if let Some(local_path) = local_path {
+                let full_local_path = local_path.join(relative_path);
+                if full_local_path.exists() {
+                    return fs::read(&full_local_path)
+                        .context(format!("Failed to read local file: {}", full_local_path.display()));
+                }
+            }
         }
 
         // If not local and we have a remote source, fetch from remote
@@ -920,14 +927,21 @@ impl GlobalRefgetStore {
                 .read_to_end(&mut data)
                 .context("Failed to read response body")?;
 
-            // Create parent directory if needed
-            if let Some(parent) = full_local_path.parent() {
-                create_dir_all(parent)?;
-            }
+            // Save to local cache only if caching is enabled
+            if cache_to_disk {
+                if let Some(local_path) = local_path {
+                    let full_local_path = local_path.join(relative_path);
 
-            // Save to local cache
-            fs::write(&full_local_path, &data)
-                .context(format!("Failed to cache file to: {}", full_local_path.display()))?;
+                    // Create parent directory if needed
+                    if let Some(parent) = full_local_path.parent() {
+                        create_dir_all(parent)?;
+                    }
+
+                    // Save to disk
+                    fs::write(&full_local_path, &data)
+                        .context(format!("Failed to cache file to: {}", full_local_path.display()))?;
+                }
+            }
 
             Ok(data)
         } else {
@@ -957,6 +971,7 @@ impl GlobalRefgetStore {
         let mut store = GlobalRefgetStore::new(metadata.mode);
         store.local_path = Some(root_path.to_path_buf());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
+        store.cache_to_disk = true;  // Local stores always use disk
 
         // Load sequence metadata from the sequence index file (metadata only, no data)
         let sequence_index_path = root_path.join(&metadata.sequence_index);
@@ -1034,18 +1049,24 @@ impl GlobalRefgetStore {
 
     /// Load a remote-backed RefgetStore
     /// This loads metadata from remote and caches sequence data on-demand
+    ///
+    /// # Arguments
+    /// * `cache_path` - Local directory for caching (used even if cache_to_disk is false for temp operations)
+    /// * `remote_url` - Remote URL to fetch data from
+    /// * `cache_to_disk` - If true, cache fetched data to disk; if false, keep only in memory
     pub fn load_remote<P: AsRef<Path>, S: AsRef<str>>(
         cache_path: P,
         remote_url: S,
+        cache_to_disk: bool,
     ) -> Result<Self> {
         let cache_path = cache_path.as_ref();
         let remote_url = remote_url.as_ref().to_string();
 
-        // Create cache directory if it doesn't exist
+        // Create cache directory (needed for metadata even in memory-only mode)
         create_dir_all(cache_path)?;
 
-        // Fetch index.json from remote
-        let index_data = Self::fetch_file(cache_path, &Some(remote_url.clone()), "index.json")?;
+        // Fetch index.json from remote (always cache metadata - it's small)
+        let index_data = Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "index.json", true)?;
         let json = String::from_utf8(index_data)
             .context("index.json contains invalid UTF-8")?;
 
@@ -1057,12 +1078,14 @@ impl GlobalRefgetStore {
         store.local_path = Some(cache_path.to_path_buf());
         store.remote_source = Some(remote_url.clone());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
+        store.cache_to_disk = cache_to_disk;
 
-        // Fetch sequence index from remote
+        // Fetch sequence index from remote (always cache metadata - it's small)
         let sequence_index_data = Self::fetch_file(
-            cache_path,
+            &Some(cache_path.to_path_buf()),
             &Some(remote_url.clone()),
             &metadata.sequence_index,
+            true,  // Always cache metadata
         )?;
         let sequence_index_str = String::from_utf8(sequence_index_data)
             .context("sequence index contains invalid UTF-8")?;
@@ -1159,17 +1182,16 @@ impl GlobalRefgetStore {
         let relative_path = format!("collections/{}.farg", digest_str);
 
         // Try to fetch the collection file
-        let local_path = self
-            .local_path
-            .as_ref()
-            .ok_or_else(|| anyhow!("No local path configured"))?;
-
-        // Try to fetch (this will use cache if available)
-        // fetch_file will save the file to local_path/relative_path
-        let _collection_data = Self::fetch_file(local_path, &self.remote_source, &relative_path)?;
+        // Always cache metadata files (they're small), even when cache_to_disk is false
+        // The memory-only benefit comes from not caching large sequence data files
+        let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
 
         // Read the collection from the cached file
-        let collection_file_path = local_path.join(&relative_path);
+        let collection_file_path = self.local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("No local path configured"))?
+            .join(&relative_path);
+
         let collection = read_fasta_refget_file(&collection_file_path)?;
 
         // Verify the collection digest matches what we requested
@@ -1225,12 +1247,8 @@ impl GlobalRefgetStore {
             .replace("%s", digest_str);
 
         // Fetch the sequence data
-        let local_path = self
-            .local_path
-            .as_ref()
-            .ok_or_else(|| anyhow!("No local path configured"))?;
-
-        let data = Self::fetch_file(local_path, &self.remote_source, &relative_path)?;
+        // Use cache_to_disk flag - this is where memory-only mode saves disk I/O
+        let data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, self.cache_to_disk)?;
 
         // Update the record with the loaded data
         self.sequence_store.entry(*digest).and_modify(|r| {

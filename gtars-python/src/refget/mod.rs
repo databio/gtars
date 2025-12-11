@@ -893,19 +893,28 @@ impl PyGlobalRefgetStore {
     /// Raises:
     ///     IOError: If remote metadata cannot be fetched or cache cannot be written.
     ///
+    /// Args:
+    ///     cache_path: Local directory for caching
+    ///     remote_url: Remote URL to fetch data from
+    ///     cache_to_disk: If True (default), cache sequence data to disk. If False, keep only in memory.
+    ///
     /// Example:
     ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> # With disk caching (default)
     ///     >>> store = GlobalRefgetStore.load_remote(
     ///     ...     "/data/cache/hg38",
     ///     ...     "https://refget-server.com/hg38"
     ///     ... )
-    ///     >>> # First access fetches from remote and caches
-    ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
-    ///     >>> # Second access uses cache
-    ///     >>> seq2 = store.get_substring("chr1_digest", 1000, 2000)
+    ///     >>> # Memory-only mode (no sequence data caching to disk)
+    ///     >>> store = GlobalRefgetStore.load_remote(
+    ///     ...     "/tmp/cache",
+    ///     ...     "https://refget-server.com/hg38",
+    ///     ...     cache_to_disk=False
+    ///     ... )
     #[classmethod]
-    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &str, remote_url: &str) -> PyResult<Self> {
-        let store = GlobalRefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
+    #[pyo3(signature = (cache_path, remote_url, cache_to_disk=true))]
+    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &str, remote_url: &str, cache_to_disk: bool) -> PyResult<Self> {
+        let store = GlobalRefgetStore::load_remote(cache_path, remote_url, cache_to_disk).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
         })?;
         Ok(Self { inner: store })
