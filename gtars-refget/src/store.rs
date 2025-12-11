@@ -1,6 +1,7 @@
 use super::alphabet::{AlphabetType, lookup_alphabet};
 use seq_io::fasta::{Reader, Record};
 use std::collections::HashMap;
+use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
@@ -12,11 +13,13 @@ use anyhow::anyhow;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use gtars_core::utils::{get_dynamic_reader, get_file_info, parse_bedlike_file};
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions, create_dir_all};
+use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::{io, str};
+use std::str;
 // Import the HashKeyable trait for converting types to a 32-byte key
 
 // Import collection types
@@ -548,20 +551,19 @@ impl GlobalRefgetStore {
         output_file_path: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Set up the output path and create directories if they don't exist
-        let output_path = Path::new(output_file_path).parent().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "Invalid output file path: parent directory not found",
-            )
-        })?;
+        let output_path_obj = Path::new(output_file_path);
+        if let Some(parent) = output_path_obj.parent() {
+            create_dir_all(parent)?;
+        }
 
-        create_dir_all(output_path)?;
+        // Create output file with optional gzip compression
+        let file = File::create(output_file_path)?;
 
-        // Open file for writing to
-        let mut output_file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(output_file_path)?;
+        let mut writer: Box<dyn Write> = if output_path_obj.extension() == Some(OsStr::new("gz")) {
+            Box::new(GzEncoder::new(file, Compression::default()))
+        } else {
+            Box::new(file)
+        };
 
         // Pre-fetch all sequence metadata from the collection to avoid borrowing issues
         let collection_key = collection_digest.as_ref().to_key();
@@ -626,11 +628,14 @@ impl GlobalRefgetStore {
 
                 // Combine the prefix, current_header, and a trailing newline
                 let header_to_be_written = format!("{}{}\n", prefix, current_header);
-                output_file.write_all(header_to_be_written.as_bytes())?;
+                writer.write_all(header_to_be_written.as_bytes())?;
             }
 
-            output_file.write_all(retrieved_substring.as_ref())?;
+            writer.write_all(retrieved_substring.as_ref())?;
         }
+
+        // Ensure all data is flushed (important for gzip)
+        writer.flush()?;
 
         Ok(())
     }
@@ -749,9 +754,15 @@ impl GlobalRefgetStore {
             name_to_digest.keys().cloned().collect()
         };
 
-        // Create output file
-        let mut output_file = File::create(output_path)
+        // Create output file with optional gzip compression
+        let file = File::create(output_path)
             .context(format!("Failed to create output file: {}", output_path.display()))?;
+
+        let mut writer: Box<dyn Write> = if output_path.extension() == Some(OsStr::new("gz")) {
+            Box::new(GzEncoder::new(file, Compression::default()))
+        } else {
+            Box::new(file)
+        };
 
         // Export each sequence
         for seq_name in names_to_export {
@@ -795,14 +806,17 @@ impl GlobalRefgetStore {
             };
 
             // Write FASTA header
-            writeln!(output_file, ">{}", seq_name)?;
+            writeln!(writer, ">{}", seq_name)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
-                output_file.write_all(chunk)?;
-                output_file.write_all(b"\n")?;
+                writer.write_all(chunk)?;
+                writer.write_all(b"\n")?;
             }
         }
+
+        // Ensure all data is flushed (important for gzip)
+        writer.flush()?;
 
         Ok(())
     }
@@ -826,9 +840,15 @@ impl GlobalRefgetStore {
         let line_width = line_width.unwrap_or(80);
         let output_path = output_path.as_ref();
 
-        // Create output file
-        let mut output_file = File::create(output_path)
+        // Create output file with optional gzip compression
+        let file = File::create(output_path)
             .context(format!("Failed to create output file: {}", output_path.display()))?;
+
+        let mut writer: Box<dyn Write> = if output_path.extension() == Some(OsStr::new("gz")) {
+            Box::new(GzEncoder::new(file, Compression::default()))
+        } else {
+            Box::new(file)
+        };
 
         // Export each sequence
         for digest_str in seq_digests {
@@ -869,14 +889,17 @@ impl GlobalRefgetStore {
             };
 
             // Write FASTA header with sequence name
-            writeln!(output_file, ">{}", metadata.name)?;
+            writeln!(writer, ">{}", metadata.name)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
-                output_file.write_all(chunk)?;
-                output_file.write_all(b"\n")?;
+                writer.write_all(chunk)?;
+                writer.write_all(b"\n")?;
             }
         }
+
+        // Ensure all data is flushed (important for gzip)
+        writer.flush()?;
 
         Ok(())
     }
