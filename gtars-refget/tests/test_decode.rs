@@ -29,7 +29,7 @@ fn test_decode_workflow_encoded() {
     let fasta_path = fasta_file.path();
 
     // Create an encoded (bit-packed) store
-    let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+    let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
     store
         .add_sequence_collection_from_fasta(fasta_path)
         .expect("Failed to import FASTA");
@@ -73,7 +73,7 @@ fn test_decode_workflow_raw() {
     let fasta_path = fasta_file.path();
 
     // Create a raw store
-    let mut store = GlobalRefgetStore::new(StorageMode::Raw);
+    let mut store = GlobalRefgetStore::in_memory(StorageMode::Raw);
     store
         .add_sequence_collection_from_fasta(fasta_path)
         .expect("Failed to import FASTA");

@@ -195,7 +195,8 @@ where
 
 impl GlobalRefgetStore {
     /// Generic constructor. Creates a new, empty `GlobalRefgetStore`.
-    pub fn new(mode: StorageMode) -> Self {
+    /// This is a private helper - use `on_disk()` or `in_memory()` instead.
+    fn new(mode: StorageMode) -> Self {
         // Initialize the name lookup with a default collection
         let mut name_lookup = HashMap::new();
         name_lookup.insert(DEFAULT_COLLECTION_ID.to_key(), HashMap::new());
@@ -209,8 +210,61 @@ impl GlobalRefgetStore {
             local_path: None,
             remote_source: None,
             seqdata_path_template: None,
-            cache_to_disk: true,  // Default to true for backward compatibility
+            cache_to_disk: false,  // Default to false - users should explicitly choose
         }
+    }
+
+    /// Create a disk-backed RefgetStore
+    ///
+    /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
+    /// Only metadata is kept in memory.
+    ///
+    /// # Arguments
+    /// * `cache_path` - Directory for storing sequences and metadata
+    /// * `mode` - Storage mode (Raw or Encoded)
+    ///
+    /// # Returns
+    /// Result with a configured disk-backed store
+    ///
+    /// # Example
+    /// ```ignore
+    /// let store = GlobalRefgetStore::on_disk("/data/store", StorageMode::Encoded)?;
+    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// ```
+    pub fn on_disk<P: AsRef<Path>>(
+        cache_path: P,
+        mode: StorageMode,
+    ) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        create_dir_all(cache_path)?;
+
+        // Use private new() helper
+        let mut store = Self::new(mode);
+        store.local_path = Some(cache_path.to_path_buf());
+        store.seqdata_path_template = Some("sequences/%s2/%s.seq".to_string());
+        store.cache_to_disk = true;  // Always true for on_disk
+
+        // Create directory structure
+        create_dir_all(cache_path.join("sequences"))?;
+        create_dir_all(cache_path.join("collections"))?;
+
+        Ok(store)
+    }
+
+    /// Create an in-memory RefgetStore
+    ///
+    /// All sequences kept in RAM for fast access.
+    ///
+    /// # Arguments
+    /// * `mode` - Storage mode (Raw or Encoded)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
+    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// ```
+    pub fn in_memory(mode: StorageMode) -> Self {
+        Self::new(mode)  // Simple wrapper around private new()
     }
 
     /// Adds a sequence to the Store
@@ -266,10 +320,30 @@ impl GlobalRefgetStore {
 
     // Adds SequenceRecord to the store.
     // Should only be used internally, via `add_sequence`, which ensures sequences are added to collections.
+    // If the store is disk-backed (cache_to_disk=true), Full records are written to disk and replaced with Stubs.
     fn add_sequence_record(&mut self, sr: SequenceRecord) -> Result<()> {
         let metadata = sr.metadata();
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+
+        // Check if we should write Full records to disk
+        if self.cache_to_disk && self.local_path.is_some() {
+            match &sr {
+                SequenceRecord::Full { metadata, sequence } => {
+                    // Write to disk
+                    self.write_sequence_to_disk_single(metadata, sequence)?;
+                    // Store as stub instead
+                    let stub = SequenceRecord::Stub(metadata.clone());
+                    self.sequence_store.insert(metadata.sha512t24u.to_key(), stub);
+                    return Ok(());
+                }
+                SequenceRecord::Stub(_) => {
+                    // Already a stub, just add it normally below
+                }
+            }
+        }
+
+        // Add as-is (either memory-only mode, or already a Stub)
         self.sequence_store
             .insert(metadata.sha512t24u.to_key(), sr);
         Ok(())
@@ -378,6 +452,10 @@ impl GlobalRefgetStore {
         }
 
         println!("Loaded {} sequences into refget SeqColStore.", seq_count);
+
+        // Note: If cache_to_disk=true, sequences were already written to disk
+        // and replaced with stubs by add_sequence_record()
+
         Ok(())
     }
 
@@ -928,6 +1006,33 @@ impl GlobalRefgetStore {
             .replace("%s", digest_str);
 
         PathBuf::from(path_str)
+    }
+
+    /// Write a single sequence to disk using the configured path template
+    fn write_sequence_to_disk_single(
+        &self,
+        metadata: &SequenceMetadata,
+        sequence: &[u8],
+    ) -> Result<()> {
+        let template = self.seqdata_path_template.as_ref()
+            .context("seqdata_path_template not set")?;
+        let local_path = self.local_path.as_ref()
+            .context("local_path not set")?;
+
+        // Build path using template
+        let seq_file_path = Self::get_sequence_path(&metadata.sha512t24u, template);
+        let full_path = local_path.join(&seq_file_path);
+
+        // Create parent directory
+        if let Some(parent) = full_path.parent() {
+            create_dir_all(parent)?;
+        }
+
+        // Write sequence data
+        let mut file = File::create(&full_path)?;
+        file.write_all(sequence)?;
+
+        Ok(())
     }
 
     /// Helper function to fetch a file from local path or remote source
@@ -1554,7 +1659,7 @@ GGGGAAAA
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // --- 2. Initialize GlobalRefgetStore and import FASTA ---
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
@@ -1680,7 +1785,7 @@ chr1\t-5\t100
         collection.sequences.push(record);
 
         // Add the sequence to the store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection(collection.clone()).unwrap();
 
         // Verify the store has the sequence
@@ -1742,7 +1847,7 @@ chr1\t-5\t100
 
         std::fs::copy(test_fa, &temp_fa).expect("Failed to copy test FASTA file");
 
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
 
         // Import the FASTA file
         store.add_sequence_collection_from_fasta(temp_fa).unwrap();
@@ -1768,7 +1873,7 @@ chr1\t-5\t100
             .expect("Failed to copy base.fa.gz to tempdir");
 
         // Create a new sequence store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
 
         // Import a FASTA file into the store
         // store.add_sequence_collection_from_fasta("../tests/data/subset.fa.gz").unwrap();
@@ -1885,7 +1990,7 @@ TTTTCCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
@@ -1931,7 +2036,7 @@ TTTTCCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
@@ -1976,7 +2081,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store1 = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store1 = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store1.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get original digests
@@ -1995,7 +2100,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
             .expect("Failed to export FASTA");
 
         // Re-import the exported FASTA
-        let mut store2 = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store2 = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store2.add_sequence_collection_from_fasta(&exported_path).unwrap();
 
         // Verify digests match (same sequences)
@@ -2033,7 +2138,7 @@ GGGGAAAA
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get digests
@@ -2076,7 +2181,7 @@ ATGCATGCATGC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Test with non-existent collection
@@ -2120,7 +2225,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import FASTA with sequence names containing spaces
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta_path)
             .expect("Should handle sequence names with spaces");
 
@@ -2160,7 +2265,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::copy(test_file, &temp_fasta).expect("Failed to copy test file");
 
         // Load the FASTA - this creates a .farg file
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
         store.add_sequence_collection_from_fasta(&temp_fasta)
             .expect("Should load FASTA");
 

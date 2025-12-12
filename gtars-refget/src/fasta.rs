@@ -53,9 +53,8 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // Compute FAI data for both gzipped and non-gzipped files
-    // For gzipped files, FAI offsets represent positions in the uncompressed stream
-    let fai_enabled = true;
+    // Skip FAI data for gzipped files (can't seek into compressed files)
+    let fai_enabled = !is_gzipped;
 
     let mut byte_position: u64 = 0;
 
@@ -248,9 +247,8 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // Compute FAI data for both gzipped and non-gzipped files
-    // For gzipped files, FAI offsets represent positions in the uncompressed stream
-    let fai_enabled = true;
+    // Skip FAI data for gzipped files (can't seek into compressed files)
+    let fai_enabled = !is_gzipped;
 
     let mut byte_position: u64 = 0;
 
@@ -409,9 +407,8 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
         .map(|s| s == "gz")
         .unwrap_or(false);
 
-    // Compute FAI data for both gzipped and non-gzipped files
-    // For gzipped files, FAI offsets represent positions in the uncompressed stream
-    let fai_enabled = true;
+    // Skip FAI data for gzipped files (can't seek into compressed files)
+    let fai_enabled = !is_gzipped;
 
     let mut byte_position: u64 = 0;
 

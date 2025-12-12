@@ -636,22 +636,48 @@ pub struct PyGlobalRefgetStore {
 
 #[pymethods]
 impl PyGlobalRefgetStore {
-    /// Create a new GlobalRefgetStore.
+    /// Create a disk-backed RefgetStore.
+    ///
+    /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
+    /// Only metadata is kept in memory.
     ///
     /// Args:
-    ///     mode: Storage mode - either StorageMode.Raw (uncompressed) or
-    ///         StorageMode.Encoded (bit-packed, space-efficient).
+    ///     cache_path: Directory for storing sequences and metadata
+    ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
     ///
     /// Returns:
-    ///     GlobalRefgetStore: A new empty refget store.
+    ///     GlobalRefgetStore: A configured disk-backed store
     ///
     /// Example:
     ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
-    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
-    #[new]
-    fn new(mode: PyStorageMode) -> Self {
+    ///     >>> store = GlobalRefgetStore.on_disk("/data/store", StorageMode.Encoded)
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    #[classmethod]
+    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &str, mode: PyStorageMode) -> PyResult<Self> {
+        let store = GlobalRefgetStore::on_disk(cache_path, mode.into()).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error creating disk-backed store: {}", e))
+        })?;
+        Ok(Self { inner: store })
+    }
+
+    /// Create an in-memory RefgetStore.
+    ///
+    /// All sequences kept in RAM for fast access.
+    ///
+    /// Args:
+    ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
+    ///
+    /// Returns:
+    ///     GlobalRefgetStore: A new in-memory store
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
+    ///     >>> store = GlobalRefgetStore.in_memory(StorageMode.Encoded)
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    #[classmethod]
+    fn in_memory(_cls: &Bound<'_, PyType>, mode: PyStorageMode) -> Self {
         Self {
-            inner: GlobalRefgetStore::new(mode.into()),
+            inner: GlobalRefgetStore::in_memory(mode.into()),
         }
     }
 
