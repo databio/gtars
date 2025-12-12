@@ -642,7 +642,7 @@ impl PyGlobalRefgetStore {
     /// Only metadata is kept in memory.
     ///
     /// Args:
-    ///     cache_path: Directory for storing sequences and metadata
+    ///     cache_path (str or Path): Directory for storing sequences and metadata
     ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
     ///
     /// Returns:
@@ -653,7 +653,8 @@ impl PyGlobalRefgetStore {
     ///     >>> store = GlobalRefgetStore.on_disk("/data/store", StorageMode.Encoded)
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     #[classmethod]
-    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &str, mode: PyStorageMode) -> PyResult<Self> {
+    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, mode: PyStorageMode) -> PyResult<Self> {
+        let cache_path = cache_path.to_string();
         let store = GlobalRefgetStore::on_disk(cache_path, mode.into()).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error creating disk-backed store: {}", e))
         })?;
@@ -687,7 +688,7 @@ impl PyGlobalRefgetStore {
     /// and adds it to the store along with all its sequences.
     ///
     /// Args:
-    ///     file_path: Path to the FASTA file to import.
+    ///     file_path (str or Path): Path to the FASTA file to import.
     ///
     /// Raises:
     ///     IOError: If the file cannot be read or processed.
@@ -695,7 +696,8 @@ impl PyGlobalRefgetStore {
     /// Example:
     ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
-    fn add_sequence_collection_from_fasta(&mut self, file_path: &str) -> PyResult<()> {
+    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>) -> PyResult<()> {
+        let file_path = file_path.to_string();
         self.inner.add_sequence_collection_from_fasta(file_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
         })
@@ -862,9 +864,10 @@ impl PyGlobalRefgetStore {
 
     fn write_store_to_dir(
         &self,
-        root_path: &str,
+        root_path: &Bound<'_, PyAny>,
         seqdata_path_template: &str,
     ) -> PyResult<()> {
+        let root_path = root_path.to_string();
         self.inner
             .write_store_to_dir(root_path, seqdata_path_template)
             .map_err(|e| {
@@ -879,7 +882,7 @@ impl PyGlobalRefgetStore {
     /// you may only need specific sequences.
     ///
     /// Args:
-    ///     cache_path: Local directory containing the refget store (must have
+    ///     cache_path (str or Path): Local directory containing the refget store (must have
     ///         index.json and sequences.farg files).
     ///
     /// Returns:
@@ -893,7 +896,8 @@ impl PyGlobalRefgetStore {
     ///     >>> store = GlobalRefgetStore.load_local("/data/hg38_store")
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     #[classmethod]
-    fn load_local(_cls: &Bound<'_, PyType>, cache_path: &str) -> PyResult<Self> {
+    fn load_local(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let cache_path = cache_path.to_string();
         let store = GlobalRefgetStore::load_local(cache_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading local store: {}", e))
         })?;
@@ -908,9 +912,9 @@ impl PyGlobalRefgetStore {
     /// you only need specific sequences.
     ///
     /// Args:
-    ///     cache_path: Local directory to cache downloaded metadata and sequences.
+    ///     cache_path (str or Path): Local directory to cache downloaded metadata and sequences.
     ///         Created if it doesn't exist.
-    ///     remote_url: Base URL of the remote refget store (e.g.,
+    ///     remote_url (str): Base URL of the remote refget store (e.g.,
     ///         "https://example.com/hg38" or "s3://bucket/hg38").
     ///
     /// Returns:
@@ -920,8 +924,8 @@ impl PyGlobalRefgetStore {
     ///     IOError: If remote metadata cannot be fetched or cache cannot be written.
     ///
     /// Args:
-    ///     cache_path: Local directory for caching
-    ///     remote_url: Remote URL to fetch data from
+    ///     cache_path (str or Path): Local directory for caching
+    ///     remote_url (str): Remote URL to fetch data from
     ///     cache_to_disk: If True (default), cache sequence data to disk. If False, keep only in memory.
     ///
     /// Example:
@@ -939,7 +943,9 @@ impl PyGlobalRefgetStore {
     ///     ... )
     #[classmethod]
     #[pyo3(signature = (cache_path, remote_url, cache_to_disk=true))]
-    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &str, remote_url: &str, cache_to_disk: bool) -> PyResult<Self> {
+    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>, cache_to_disk: bool) -> PyResult<Self> {
+        let cache_path = cache_path.to_string();
+        let remote_url = remote_url.to_string();
         let store = GlobalRefgetStore::load_remote(cache_path, remote_url, cache_to_disk).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
         })?;
@@ -968,11 +974,13 @@ impl PyGlobalRefgetStore {
     fn export_fasta_from_regions(
         &mut self,
         collection_digest: &str,
-        bed_file_path: &str,
-        output_file_path: &str,
+        bed_file_path: &Bound<'_, PyAny>,
+        output_file_path: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
+        let bed_file_path = bed_file_path.to_string();
+        let output_file_path = output_file_path.to_string();
         self.inner
-            .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path)
+            .export_fasta_from_regions(collection_digest, &bed_file_path, &output_file_path)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA from regions: {}",
@@ -1010,12 +1018,13 @@ impl PyGlobalRefgetStore {
     fn substrings_from_regions(
         &mut self,
         collection_digest: &str,
-        bed_file_path: &str,
+        bed_file_path: &Bound<'_, PyAny>,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
+        let bed_file_path = bed_file_path.to_string();
         // Get iterator and collect results
         let iter = self
             .inner
-            .substrings_from_regions(collection_digest, bed_file_path)
+            .substrings_from_regions(collection_digest, &bed_file_path)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error getting substrings from regions: {}",
@@ -1064,15 +1073,16 @@ impl PyGlobalRefgetStore {
     fn export_fasta(
         &mut self,
         collection_digest: &str,
-        output_path: &str,
+        output_path: &Bound<'_, PyAny>,
         sequence_names: Option<Vec<String>>,
         line_width: Option<usize>,
     ) -> PyResult<()> {
+        let output_path = output_path.to_string();
         let sequence_names_refs = sequence_names.as_ref().map(|names| {
             names.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
         });
         self.inner
-            .export_fasta(collection_digest, output_path, sequence_names_refs, line_width)
+            .export_fasta(collection_digest, &output_path, sequence_names_refs, line_width)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA: {}",
@@ -1113,12 +1123,13 @@ impl PyGlobalRefgetStore {
     fn export_fasta_by_digests(
         &mut self,
         seq_digests: Vec<String>,
-        output_path: &str,
+        output_path: &Bound<'_, PyAny>,
         line_width: Option<usize>,
     ) -> PyResult<()> {
+        let output_path = output_path.to_string();
         let digests_refs: Vec<&str> = seq_digests.iter().map(|s| s.as_str()).collect();
         self.inner
-            .export_fasta_by_digests(digests_refs, output_path, line_width)
+            .export_fasta_by_digests(digests_refs, &output_path, line_width)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA by digests: {}",

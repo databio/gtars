@@ -307,6 +307,11 @@ impl GlobalRefgetStore {
     pub fn add_sequence_collection(&mut self, collection: SequenceCollection) -> Result<()> {
         let coll_digest = collection.digest.to_key();
 
+        // Write collection to disk if cache_to_disk is enabled (before moving sequences)
+        if self.cache_to_disk && self.local_path.is_some() {
+            self.write_collection_to_disk_single(&collection)?;
+        }
+
         // Register the collection
         self.collections.insert(coll_digest, collection.clone());
 
@@ -1031,6 +1036,27 @@ impl GlobalRefgetStore {
         // Write sequence data
         let mut file = File::create(&full_path)?;
         file.write_all(sequence)?;
+
+        Ok(())
+    }
+
+    /// Write a single collection FARG file to disk
+    /// Used when cache_to_disk=true to persist collections incrementally
+    fn write_collection_to_disk_single(&self, collection: &SequenceCollection) -> Result<()> {
+        let local_path = self.local_path.as_ref()
+            .context("local_path not set")?;
+
+        // Build path: collections/{digest}.farg
+        let coll_file_path = format!("collections/{}.farg", collection.digest);
+        let full_path = local_path.join(&coll_file_path);
+
+        // Create parent directory
+        if let Some(parent) = full_path.parent() {
+            create_dir_all(parent)?;
+        }
+
+        // Write collection FARG file
+        collection.write_collection_farg(&full_path)?;
 
         Ok(())
     }
@@ -2289,5 +2315,36 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         );
 
         println!("✓ FARG filename with dots test passed");
+    }
+
+    #[test]
+    fn test_on_disk_collection_written_incrementally() {
+        // Test that collection FARG files are written to disk immediately
+        // when using on_disk() store, not just when write_store_to_dir() is called
+        let temp_dir = tempdir().unwrap();
+        let temp_path = temp_dir.path();
+        let temp_fasta = temp_path.join("base.fa.gz");
+        std::fs::copy("../tests/data/fasta/base.fa.gz", &temp_fasta)
+            .expect("Failed to copy base.fa.gz to tempdir");
+
+        let cache_path = temp_path.join("cache");
+        let mut store = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+
+        // Load FASTA file into the store
+        store.add_sequence_collection_from_fasta(&temp_fasta).unwrap();
+
+        // BEFORE calling write_store_to_dir, verify collection FARG files exist
+        let collections_dir = cache_path.join("collections");
+        assert!(collections_dir.exists(), "Collections directory should exist");
+
+        let farg_files: Vec<_> = std::fs::read_dir(&collections_dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert!(!farg_files.is_empty(), "Collection FARG files should be written incrementally, found: {:?}", farg_files);
+        assert!(farg_files.iter().any(|f| f.ends_with(".farg")), "Should have .farg files");
+
+        println!("✓ On-disk collection incremental write test passed");
     }
 }
