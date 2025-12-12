@@ -308,19 +308,38 @@ impl GlobalRefgetStore {
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
 
-        println!("Preparing to load sequences into refget SeqColStore...");
+        println!("Loading sequences into refget SeqColStore...");
 
+        let mut seq_count = 0;
         while let Some(record) = fasta_reader.next() {
             let record = record?;
             let id = std::str::from_utf8(record.head())?;
             let dr = seqmeta_hashmap.get(id)
-                .ok_or_else(|| anyhow::anyhow!(
-                    "Sequence '{}' not found in metadata. Available: {:?}",
-                    id,
-                    seqmeta_hashmap.keys().collect::<Vec<_>>()
-                ))?
+                .ok_or_else(|| {
+                    let available_keys: Vec<_> = seqmeta_hashmap.keys().collect();
+                    let total = available_keys.len();
+                    let sample: Vec<_> = available_keys.iter().take(3).collect();
+                    anyhow::anyhow!(
+                        "Sequence '{}' not found in metadata. Available ({} total): {:?}{}",
+                        id,
+                        total,
+                        sample,
+                        if total > 3 { " ..." } else { "" }
+                    )
+                })?
                 .clone();
-            println!("Digest result: {:?}", dr);
+
+            seq_count += 1;
+            if seq_count <= 3 {
+                let display_name = if dr.name.len() > 120 {
+                    format!("{}...", &dr.name[..117])
+                } else {
+                    dr.name.clone()
+                };
+                println!("  [{}] {} ({} bp)", seq_count, display_name, dr.length);
+            } else if seq_count == 4 {
+                println!("  ...");
+            }
 
             match self.mode {
                 StorageMode::Raw => {
@@ -329,10 +348,6 @@ impl GlobalRefgetStore {
                     for seq_line in record.seq_lines() {
                         raw_sequence.extend(seq_line);
                     }
-                    println!(
-                        "Storing raw sequence. Name: {}; Alphabet: {}; Digest: {}",
-                        id, dr.alphabet, dr.sha512t24u
-                    );
 
                     self.add_sequence(
                         SequenceRecord::Full {
@@ -351,10 +366,6 @@ impl GlobalRefgetStore {
                     // let encoded_sequence = BitVec::<u8, Msb0>::from_vec(encoder.finalize());
                     let encoded_sequence = encoder.finalize();
 
-                    println!(
-                        "Storing encoded sequence. Name: {}; Alphabet: {}; Digest: {}",
-                        id, dr.alphabet, dr.sha512t24u
-                    );
                     self.add_sequence(
                         SequenceRecord::Full {
                             metadata: dr,
@@ -366,7 +377,7 @@ impl GlobalRefgetStore {
             }
         }
 
-        println!("Finished loading sequences into refget SeqColStore.");
+        println!("Loaded {} sequences into refget SeqColStore.", seq_count);
         Ok(())
     }
 
@@ -1457,14 +1468,19 @@ impl Display for GlobalRefgetStore {
             let seqcol_digest_str = String::from_utf8_lossy(digest);
             writeln!(
                 f,
-                "  {}. Collection Digest: {:02x?}",
+                "  {}. Collection Digest: {:02x?} ({} sequences)",
                 i + 1,
-                seqcol_digest_str
+                seqcol_digest_str,
+                name_map.len()
             )?;
-            for (name, sha512_digest) in name_map {
+            // Only show first 5 sequences in each collection
+            for (j, (name, sha512_digest)) in name_map.iter().enumerate().take(5) {
                 // Convert the sha512_digest to a hex string
                 let sha512_str = String::from_utf8_lossy(sha512_digest);
                 writeln!(f, "   - Name: {}, SHA512: {:02x?}", name, sha512_str)?;
+            }
+            if name_map.len() > 5 {
+                writeln!(f, "   - ... and {} more", name_map.len() - 5)?;
             }
         }
 
@@ -2127,5 +2143,46 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(seq2.is_some(), "Should retrieve sequence by full name with spaces");
 
         println!("✓ Sequence names with spaces test passed");
+    }
+
+    #[test]
+    fn test_farg_filename_with_dots() {
+        // Test that FARG filenames preserve dots in the base name
+        // Real HPRC files like "HG002.alt.pat.f1_v2.unmasked.fa.gz"
+        // should create "HG002.alt.pat.f1_v2.unmasked.farg", NOT "HG002.farg"
+
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Copy test file to temp (so .farg file gets created there, not in test data)
+        let test_file = "../tests/data/fasta/HG002.alt.pat.f1_v2.unmasked.fa";
+        let temp_fasta = temp_path.join("HG002.alt.pat.f1_v2.unmasked.fa");
+        fs::copy(test_file, &temp_fasta).expect("Failed to copy test file");
+
+        // Load the FASTA - this creates a .farg file
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.add_sequence_collection_from_fasta(&temp_fasta)
+            .expect("Should load FASTA");
+
+        // Check which .farg file was created
+        let correct_farg = temp_path.join("HG002.alt.pat.f1_v2.unmasked.farg");
+        let wrong_farg = temp_path.join("HG002.farg");
+
+        let files: Vec<_> = std::fs::read_dir(temp_path).unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert!(
+            correct_farg.exists(),
+            "Expected 'HG002.alt.pat.f1_v2.unmasked.farg' but found: {:?}",
+            files
+        );
+
+        assert!(
+            !wrong_farg.exists(),
+            "Should NOT create 'HG002.farg' (strips too many dots)"
+        );
+
+        println!("✓ FARG filename with dots test passed");
     }
 }
