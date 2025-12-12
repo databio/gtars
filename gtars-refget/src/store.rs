@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use super::encoder::SequenceEncoder;
 use super::encoder::decode_substring_from_bytes;
@@ -387,7 +388,8 @@ impl GlobalRefgetStore {
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
 
-        println!("Loading sequences into refget SeqColStore...");
+        println!("Loading sequences into GlobalRefgetStore...");
+        let start_time = Instant::now();
 
         let mut seq_count = 0;
         while let Some(record) = fasta_reader.next() {
@@ -456,7 +458,12 @@ impl GlobalRefgetStore {
             }
         }
 
-        println!("Loaded {} sequences into refget SeqColStore.", seq_count);
+        let elapsed = start_time.elapsed();
+        let mode_str = match self.mode {
+            StorageMode::Raw => "Raw",
+            StorageMode::Encoded => "Encoded",
+        };
+        println!("Loaded {} sequences into GlobalRefgetStore ({}) in {:.2}s.", seq_count, mode_str, elapsed.as_secs_f64());
 
         // Note: If cache_to_disk=true, sequences were already written to disk
         // and replaced with stubs by add_sequence_record()
@@ -485,6 +492,34 @@ impl GlobalRefgetStore {
     /// ```
     pub fn sequence_metadata(&self) -> impl Iterator<Item = &SequenceMetadata> + '_ {
         self.sequence_store.values().map(|rec| rec.metadata())
+    }
+
+    /// Calculate the total disk size of all sequences in the store
+    ///
+    /// This computes the disk space used by sequence data based on:
+    /// - Sequence length
+    /// - Alphabet type (bits per symbol)
+    /// - Storage mode (Raw or Encoded)
+    ///
+    /// # Returns
+    /// Total bytes used for sequence data on disk
+    ///
+    /// # Note
+    /// This only accounts for sequence data files (.seq), not metadata files
+    /// like FARG files, index.json, or directory overhead.
+    ///
+    /// # Examples
+    /// ```ignore
+    /// let store = GlobalRefgetStore::on_disk("store", StorageMode::Encoded);
+    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// let disk_size = store.total_disk_size();
+    /// println!("Sequences use {} bytes on disk", disk_size);
+    /// ```
+    pub fn total_disk_size(&self) -> usize {
+        self.sequence_store
+            .values()
+            .map(|rec| rec.metadata().disk_size(&self.mode))
+            .sum()
     }
 
     /// Returns an iterator over all complete sequence records in the store.
@@ -1552,9 +1587,31 @@ impl GlobalRefgetStore {
     }
 }
 
+/// Format bytes into human-readable size (KB, MB, GB, etc.)
+fn format_bytes(bytes: usize) -> String {
+    const UNITS: &[&str] = &["B", "KB", "MB", "GB", "TB"];
+    let mut size = bytes as f64;
+    let mut unit_idx = 0;
+
+    while size >= 1024.0 && unit_idx < UNITS.len() - 1 {
+        size /= 1024.0;
+        unit_idx += 1;
+    }
+
+    if unit_idx == 0 {
+        format!("{} {}", bytes, UNITS[0])
+    } else {
+        format!("{:.2} {}", size, UNITS[unit_idx])
+    }
+}
+
 impl Display for GlobalRefgetStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let total_size = self.total_disk_size();
+        let size_str = format_bytes(total_size);
         writeln!(f, "SeqColStore object:")?;
+        writeln!(f, "  Mode: {:?}", self.mode)?;
+        writeln!(f, "  Disk size: {} ({} bytes)", size_str, total_size)?;
         writeln!(f, ">Sequences (n={}):", self.sequence_store.len())?;
         // Print out the sequences in the store
         for (i, (sha512_digest, sequence_record)) in self.sequence_store.iter().take(10).enumerate()
@@ -2346,5 +2403,20 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(farg_files.iter().any(|f| f.ends_with(".farg")), "Should have .farg files");
 
         println!("✓ On-disk collection incremental write test passed");
+    }
+
+    #[test]
+    fn test_disk_size_calculation() {
+        let mut store = GlobalRefgetStore::in_memory(StorageMode::Encoded);
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+
+        let disk_size = store.total_disk_size();
+        assert!(disk_size > 0, "Disk size should be greater than 0");
+
+        // Verify against manual calculation
+        let manual: usize = store.sequence_metadata()
+            .map(|m| (m.length * m.alphabet.bits_per_symbol()).div_ceil(8))
+            .sum();
+        assert_eq!(disk_size, manual);
     }
 }

@@ -101,6 +101,20 @@ impl FromStr for AlphabetType {
     }
 }
 
+impl AlphabetType {
+    /// Returns the number of bits used per symbol for this alphabet type
+    pub fn bits_per_symbol(&self) -> usize {
+        match self {
+            AlphabetType::Dna2bit => 2,
+            AlphabetType::Dna3bit => 3,
+            AlphabetType::DnaIupac => 4,
+            AlphabetType::Protein => 5,
+            AlphabetType::Ascii => 8,
+            AlphabetType::Unknown => 8, // Default to 8 bits for unknown
+        }
+    }
+}
+
 /// A lookup table that maps ASCII characters representing DNA bases
 /// (T, C, A, G, and their lowercase counterparts) to their 2-bit encoding.
 /// This constant is used for efficient conversion of DNA sequences into a

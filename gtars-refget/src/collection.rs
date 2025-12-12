@@ -138,6 +138,33 @@ pub struct FaiMetadata {
     pub line_bytes: u32,   // number of bytes per line (including newline chars)
 }
 
+impl SequenceMetadata {
+    /// Calculate the disk size in bytes for this sequence
+    ///
+    /// # Arguments
+    /// * `mode` - The storage mode (Raw or Encoded)
+    ///
+    /// # Returns
+    /// The number of bytes this sequence occupies on disk
+    ///
+    /// # Examples
+    /// ```ignore
+    /// // For a 1000bp DNA sequence in Encoded mode with Dna2bit alphabet:
+    /// // disk_size = (1000 * 2 bits).div_ceil(8) = 250 bytes
+    /// let size = metadata.disk_size(&StorageMode::Encoded);
+    /// ```
+    pub fn disk_size(&self, mode: &crate::store::StorageMode) -> usize {
+        match mode {
+            crate::store::StorageMode::Raw => self.length,
+            crate::store::StorageMode::Encoded => {
+                let bits_per_symbol = self.alphabet.bits_per_symbol();
+                let total_bits = self.length * bits_per_symbol;
+                total_bits.div_ceil(8)
+            }
+        }
+    }
+}
+
 impl SequenceRecord {
     /// Get metadata regardless of variant
     pub fn metadata(&self) -> &SequenceMetadata {
