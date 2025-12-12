@@ -312,8 +312,14 @@ impl GlobalRefgetStore {
 
         while let Some(record) = fasta_reader.next() {
             let record = record?;
-            let id = record.id()?;
-            let dr = seqmeta_hashmap[id].clone();
+            let id = std::str::from_utf8(record.head())?;
+            let dr = seqmeta_hashmap.get(id)
+                .ok_or_else(|| anyhow::anyhow!(
+                    "Sequence '{}' not found in metadata. Available: {:?}",
+                    id,
+                    seqmeta_hashmap.keys().collect::<Vec<_>>()
+                ))?
+                .clone();
             println!("Digest result: {:?}", dr);
 
             match self.mode {
@@ -2075,5 +2081,51 @@ ATGCATGCATGC
         assert!(result.is_err(), "Should fail with non-existent sequence name");
 
         println!("✓ Error handling test passed");
+    }
+
+    #[test]
+    fn test_sequence_names_with_spaces() {
+        // Ensure FASTA headers with spaces work correctly
+        // This is common in real-world files like pangenome assemblies
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+
+        // Create test FASTA with sequence names containing spaces
+        // This mimics the structure from HPRC pangenome files
+        let fasta_content = "\
+>JAHKSE010000016.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000016.1:1:100:1
+ATGCATGCATGCATGCATGCATGCATGCATGCATGC
+ATGCATGCATGCATGCATGCATGCATGCATGCATGC
+>JAHKSE010000012.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000012.1:1:100:1
+GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
+GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
+";
+        let temp_fasta_path = temp_path.join("spaces_in_names.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        // Import FASTA with sequence names containing spaces
+        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        store.add_sequence_collection_from_fasta(&temp_fasta_path)
+            .expect("Should handle sequence names with spaces");
+
+        // Verify the sequences were loaded with full names including spaces
+        assert_eq!(store.sequence_store.len(), 2);
+
+        let full_name1 = "JAHKSE010000016.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000016.1:1:100:1";
+        let full_name2 = "JAHKSE010000012.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000012.1:1:100:1";
+
+        // Get the collection
+        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        assert_eq!(collections.len(), 1);
+        let collection_digest = collections[0];
+
+        // Verify we can retrieve sequences by their full names (with spaces)
+        let seq1 = store.get_sequence_by_collection_and_name(&collection_digest, full_name1);
+        assert!(seq1.is_some(), "Should retrieve sequence by full name with spaces");
+
+        let seq2 = store.get_sequence_by_collection_and_name(&collection_digest, full_name2);
+        assert!(seq2.is_some(), "Should retrieve sequence by full name with spaces");
+
+        println!("✓ Sequence names with spaces test passed");
     }
 }
