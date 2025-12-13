@@ -649,13 +649,13 @@ impl PyGlobalRefgetStore {
     ///     GlobalRefgetStore: A configured disk-backed store
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
-    ///     >>> store = GlobalRefgetStore.on_disk("/data/store", StorageMode.Encoded)
+    ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> store = GlobalRefgetStore.on_disk("/data/store")
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     #[classmethod]
-    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, mode: PyStorageMode) -> PyResult<Self> {
+    fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
-        let store = GlobalRefgetStore::on_disk(cache_path, mode.into()).map_err(|e| {
+        let store = GlobalRefgetStore::on_disk(cache_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error with disk-backed store: {}", e))
         })?;
         Ok(Self { inner: store })
@@ -664,22 +664,61 @@ impl PyGlobalRefgetStore {
     /// Create an in-memory RefgetStore.
     ///
     /// All sequences kept in RAM for fast access.
-    ///
-    /// Args:
-    ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
+    /// Defaults to Encoded storage mode (2-bit packing for space efficiency).
+    /// Use set_mode() to change storage mode after creation.
     ///
     /// Returns:
     ///     GlobalRefgetStore: A new in-memory store
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
-    ///     >>> store = GlobalRefgetStore.in_memory(StorageMode.Encoded)
+    ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> store = GlobalRefgetStore.in_memory()
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     #[classmethod]
-    fn in_memory(_cls: &Bound<'_, PyType>, mode: PyStorageMode) -> Self {
+    fn in_memory(_cls: &Bound<'_, PyType>) -> Self {
         Self {
-            inner: GlobalRefgetStore::in_memory(mode.into()),
+            inner: GlobalRefgetStore::in_memory(),
         }
+    }
+
+    /// Change the storage mode, re-encoding/decoding existing sequences as needed.
+    ///
+    /// When switching from Raw to Encoded:
+    /// - All Full sequences in memory are encoded (2-bit packed)
+    ///
+    /// When switching from Encoded to Raw:
+    /// - All Full sequences in memory are decoded back to raw bytes
+    ///
+    /// Args:
+    ///     mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded)
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
+    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store.set_mode(StorageMode.Raw)
+    fn set_mode(&mut self, mode: PyStorageMode) {
+        self.inner.set_mode(mode.into());
+    }
+
+    /// Enable 2-bit encoding for space efficiency.
+    /// Re-encodes any existing Raw sequences in memory.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store.disable_encoding()  # Switch to Raw
+    ///     >>> store.enable_encoding()   # Back to Encoded
+    fn enable_encoding(&mut self) {
+        self.inner.enable_encoding();
+    }
+
+    /// Disable encoding, use raw byte storage.
+    /// Decodes any existing Encoded sequences in memory.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store.disable_encoding()  # Switch to Raw mode
+    fn disable_encoding(&mut self) {
+        self.inner.disable_encoding();
     }
 
     /// Add a sequence collection from a FASTA file.
