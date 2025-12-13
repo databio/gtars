@@ -29,6 +29,7 @@ use super::collection::{SequenceCollection, SequenceMetadata, SequenceRecord};
 // const DEFAULT_COLLECTION_ID: [u8; 32] = [0u8; 32]; // Default collection ID for the name lookup table
 
 const DEFAULT_COLLECTION_ID: &str = "DEFAULT_REFGET_SEQUENCE_COLLECTION"; // Default collection ID for the name lookup table
+const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
 
 /// Enum storing whether sequences will be stored in Raw or Encoded form
 #[derive(Serialize, Deserialize, Debug, Clone, Copy)]
@@ -237,19 +238,27 @@ impl GlobalRefgetStore {
         mode: StorageMode,
     ) -> Result<Self> {
         let cache_path = cache_path.as_ref();
-        create_dir_all(cache_path)?;
+        let index_path = cache_path.join("index.json");
 
-        // Use private new() helper
-        let mut store = Self::new(mode);
-        store.local_path = Some(cache_path.to_path_buf());
-        store.seqdata_path_template = Some("sequences/%s2/%s.seq".to_string());
-        store.cache_to_disk = true;  // Always true for on_disk
+        if index_path.exists() {
+            // Load existing store (mode parameter ignored)
+            Self::load_local(cache_path)
+        } else {
+            // Create new store
+            create_dir_all(cache_path)?;
 
-        // Create directory structure
-        create_dir_all(cache_path.join("sequences"))?;
-        create_dir_all(cache_path.join("collections"))?;
+            // Use private new() helper
+            let mut store = Self::new(mode);
+            store.local_path = Some(cache_path.to_path_buf());
+            store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+            store.cache_to_disk = true;  // Always true for on_disk
 
-        Ok(store)
+            // Create directory structure
+            create_dir_all(cache_path.join("sequences"))?;
+            create_dir_all(cache_path.join("collections"))?;
+
+            Ok(store)
+        }
     }
 
     /// Create an in-memory RefgetStore
@@ -319,6 +328,11 @@ impl GlobalRefgetStore {
         // Add all sequences in the collection to the store
         for sequence_record in collection.sequences {
             self.add_sequence(sequence_record, coll_digest)?;
+        }
+
+        // Write index files so store is immediately loadable
+        if self.cache_to_disk && self.local_path.is_some() {
+            self.write_index_files()?;
         }
 
         Ok(())
@@ -1096,6 +1110,39 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
+    /// Write index files (sequences.farg and index.json) to disk
+    ///
+    /// This allows the store to be loaded later via load_local().
+    /// Called automatically when adding collections in disk-backed mode.
+    fn write_index_files(&self) -> Result<()> {
+        let local_path = self.local_path.as_ref()
+            .context("local_path not set")?;
+        let template = self.seqdata_path_template.as_ref()
+            .context("seqdata_path_template not set")?;
+
+        // Write the sequence metadata index file
+        let sequence_index_path = local_path.join("sequences.farg");
+        self.write_sequences_farg(&sequence_index_path)?;
+
+        // Create the metadata structure
+        let metadata = StoreMetadata {
+            version: 1,
+            seqdata_path_template: template.clone(),
+            collections_path_template: "collections/%s.farg".to_string(),
+            sequence_index: "sequences.farg".to_string(),
+            mode: self.mode,
+            created_at: Utc::now().to_rfc3339(),
+        };
+
+        // Write metadata to index.json
+        let json = serde_json::to_string_pretty(&metadata)
+            .context("Failed to serialize metadata to JSON")?;
+        fs::write(local_path.join("index.json"), json)
+            .context("Failed to write index.json")?;
+
+        Ok(())
+    }
+
     /// Helper function to fetch a file from local path or remote source
     /// Returns the file contents as Vec<u8>
     fn fetch_file(
@@ -1498,17 +1545,50 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
+    /// Write the store using its configured paths
+    ///
+    /// For disk-backed stores (on_disk), this updates index files only since
+    /// sequences/collections are already written incrementally.
+    /// For in-memory stores, this is not supported (use write_store_to_dir instead).
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    ///
+    /// # Errors
+    /// Returns an error if `local_path` is not set.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let store = GlobalRefgetStore::on_disk("/data/store", StorageMode::Encoded)?;
+    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// store.write()?;  // Updates index files
+    /// ```
+    pub fn write(&self) -> Result<()> {
+        if !self.cache_to_disk {
+            return Err(anyhow!("write() only works with disk-backed stores - use write_store_to_dir() instead"));
+        }
+
+        // For disk-backed stores, just update indexes (sequences/collections already written)
+        self.write_index_files()
+    }
+
     /// Write a GlobalRefgetStore object to a directory
     pub fn write_store_to_dir<P: AsRef<Path>>(
         &self,
         root_path: P,
-        seqdata_path_template: &str,
+        seqdata_path_template: Option<&str>,
     ) -> Result<()> {
         let root_path = root_path.as_ref();
+
+        // Use provided template, or store's template, or default
+        let template = seqdata_path_template
+            .or(self.seqdata_path_template.as_deref())
+            .unwrap_or(DEFAULT_SEQDATA_PATH_TEMPLATE);
+
         println!(
             "Writing store to directory: {}; Using seqdata path template: {}",
             root_path.display(),
-            seqdata_path_template
+            template
         );
 
         // Create the root directory if it doesn't exist
@@ -1528,7 +1608,7 @@ impl GlobalRefgetStore {
                 SequenceRecord::Full { metadata, .. } => {
                     // Get the path for this sequence using the template and base64url-encoded digest
                     let rel_path =
-                        Self::get_sequence_path(&metadata.sha512t24u, seqdata_path_template);
+                        Self::get_sequence_path(&metadata.sha512t24u, template);
                     let full_path = root_path.join(&rel_path);
 
                     // Write the sequence data to file
@@ -1557,7 +1637,7 @@ impl GlobalRefgetStore {
         // Create the metadata structure
         let metadata = StoreMetadata {
             version: 1,
-            seqdata_path_template: seqdata_path_template.to_string(),
+            seqdata_path_template: template.to_string(),
             collections_path_template: "collections/%s.farg".to_string(),
             sequence_index: "sequences.farg".to_string(),
             mode: self.mode,
@@ -1942,7 +2022,7 @@ chr1\t-5\t100
         let seq_template = "sequences/%s2/%s.seq";
         // let col_template = "collections/%s.farg";
         store
-            .write_store_to_dir(temp_path.to_str().unwrap(), seq_template)
+            .write_store_to_dir(temp_path.to_str().unwrap(), Some(seq_template))
             .unwrap();
     }
 
@@ -1980,7 +2060,7 @@ chr1\t-5\t100
         // Write the store to the temporary directory
         let seq_template = "sequences/%s2/%s.seq";
         store
-            .write_store_to_dir(temp_path, seq_template)
+            .write_store_to_dir(temp_path, Some(seq_template))
             .unwrap();
 
         // Verify that the files were created
@@ -2418,5 +2498,47 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .map(|m| (m.length * m.alphabet.bits_per_symbol()).div_ceil(8))
             .sum();
         assert_eq!(disk_size, manual);
+    }
+
+    #[test]
+    fn test_incremental_index_writing() {
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+        let mut store = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+
+        // Index files should exist immediately
+        assert!(cache_path.join("index.json").exists(), "index.json should exist");
+        assert!(cache_path.join("sequences.farg").exists(), "sequences.farg should exist");
+
+        // Store should be loadable (mode ignored for existing store)
+        let _loaded = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+    }
+
+    #[test]
+    fn test_write_method() {
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+        let mut store = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+        store.write().unwrap();  // Should succeed
+
+        assert!(cache_path.join("index.json").exists());
+    }
+
+    #[test]
+    fn test_on_disk_smart_constructor() {
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+
+        // Create new store
+        let mut store1 = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+        store1.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+
+        // Load existing store (mode parameter ignored)
+        let store2 = GlobalRefgetStore::on_disk(&cache_path, StorageMode::Encoded).unwrap();
+        assert_eq!(store2.sequence_store.len(), store1.sequence_store.len());
     }
 }

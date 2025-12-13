@@ -656,7 +656,7 @@ impl PyGlobalRefgetStore {
     fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, mode: PyStorageMode) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
         let store = GlobalRefgetStore::on_disk(cache_path, mode.into()).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error creating disk-backed store: {}", e))
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error with disk-backed store: {}", e))
         })?;
         Ok(Self { inner: store })
     }
@@ -862,10 +862,21 @@ impl PyGlobalRefgetStore {
         stats
     }
 
+    /// Write the store using its configured paths.
+    ///
+    /// Convenience method for disk-backed stores.
+    /// Uses the store's own local_path and seqdata_path_template.
+    fn write(&self) -> PyResult<()> {
+        self.inner.write().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error writing store: {}", e))
+        })
+    }
+
+    #[pyo3(signature = (root_path, seqdata_path_template=None))]
     fn write_store_to_dir(
         &self,
         root_path: &Bound<'_, PyAny>,
-        seqdata_path_template: &str,
+        seqdata_path_template: Option<&str>,
     ) -> PyResult<()> {
         let root_path = root_path.to_string();
         self.inner
