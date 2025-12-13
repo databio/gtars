@@ -728,16 +728,25 @@ impl PyGlobalRefgetStore {
     ///
     /// Args:
     ///     file_path (str or Path): Path to the FASTA file to import.
+    ///     force (bool, optional): If True, overwrite existing collections/sequences.
+    ///                            If False (default), skip duplicates.
     ///
     /// Raises:
     ///     IOError: If the file cannot be read or processed.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
-    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
-    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>) -> PyResult<()> {
+    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")  # skip duplicates
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa", force=True)  # overwrite
+    #[pyo3(signature = (file_path, force=false))]
+    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>, force: bool) -> PyResult<()> {
         let file_path = file_path.to_string();
-        self.inner.add_sequence_collection_from_fasta(file_path).map_err(|e| {
+        let result = if force {
+            self.inner.add_sequence_collection_from_fasta_force(file_path)
+        } else {
+            self.inner.add_sequence_collection_from_fasta(file_path)
+        };
+        result.map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
         })
     }

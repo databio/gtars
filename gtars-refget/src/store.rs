@@ -338,12 +338,18 @@ impl GlobalRefgetStore {
     /// Adds a sequence to the Store
     /// Ensure that it is added to the appropriate collection.
     /// If no collection is specified, it will be added to the default collection.
+    ///
+    /// # Arguments
+    /// * `sequence_record` - The sequence to add
+    /// * `collection_digest` - Collection to add to (or None for default)
+    /// * `force` - If true, overwrite existing sequences. If false, skip duplicates.
     // Using Into here  instead of the Option direction allows us to accept
     // either None or [u8; 32], without having to wrap it in Some().
     pub fn add_sequence<T: Into<Option<[u8; 32]>>>(
         &mut self,
         sequence_record: SequenceRecord,
         collection_digest: T,
+        force: bool,
     ) -> Result<()> {
         // Ensure collection exists; otherwise use the default collection
         let collection_digest = collection_digest
@@ -366,14 +372,42 @@ impl GlobalRefgetStore {
             );
 
         // Finally, add SequenceRecord to store (consuming the object)
-        self.add_sequence_record(sequence_record)?;
+        self.add_sequence_record(sequence_record, force)?;
 
         Ok(())
     }
 
     /// Adds a collection, and all sequences in it, to the store.
+    ///
+    /// Skips collections and sequences that already exist.
+    /// Use `add_sequence_collection_force()` to overwrite existing data.
+    ///
+    /// # Arguments
+    /// * `collection` - The sequence collection to add
     pub fn add_sequence_collection(&mut self, collection: SequenceCollection) -> Result<()> {
+        self.add_sequence_collection_internal(collection, false)
+    }
+
+    /// Adds a collection, and all sequences in it, to the store, overwriting existing data.
+    ///
+    /// Forces overwrite of collections and sequences that already exist.
+    /// Use `add_sequence_collection()` to skip duplicates (safer default).
+    ///
+    /// # Arguments
+    /// * `collection` - The sequence collection to add
+    pub fn add_sequence_collection_force(&mut self, collection: SequenceCollection) -> Result<()> {
+        self.add_sequence_collection_internal(collection, true)
+    }
+
+    /// Internal implementation for adding a sequence collection.
+    fn add_sequence_collection_internal(&mut self, collection: SequenceCollection, force: bool) -> Result<()> {
         let coll_digest = collection.digest.to_key();
+
+        // Check if collection already exists
+        if !force && self.collections.contains_key(&coll_digest) {
+            // Skip - collection already exists and force=false
+            return Ok(());
+        }
 
         // Write collection to disk if cache_to_disk is enabled (before moving sequences)
         if self.cache_to_disk && self.local_path.is_some() {
@@ -385,7 +419,7 @@ impl GlobalRefgetStore {
 
         // Add all sequences in the collection to the store
         for sequence_record in collection.sequences {
-            self.add_sequence(sequence_record, coll_digest)?;
+            self.add_sequence(sequence_record, coll_digest, force)?;
         }
 
         // Write index files so store is immediately loadable
@@ -399,8 +433,16 @@ impl GlobalRefgetStore {
     // Adds SequenceRecord to the store.
     // Should only be used internally, via `add_sequence`, which ensures sequences are added to collections.
     // If the store is disk-backed (cache_to_disk=true), Full records are written to disk and replaced with Stubs.
-    fn add_sequence_record(&mut self, sr: SequenceRecord) -> Result<()> {
+    fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
         let metadata = sr.metadata();
+        let key = metadata.sha512t24u.to_key();
+
+        // Check if sequence already exists
+        if !force && self.sequence_store.contains_key(&key) {
+            // Skip - sequence already exists and force=false
+            return Ok(());
+        }
+
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
 
@@ -412,7 +454,7 @@ impl GlobalRefgetStore {
                     self.write_sequence_to_disk_single(metadata, sequence)?;
                     // Store as stub instead
                     let stub = SequenceRecord::Stub(metadata.clone());
-                    self.sequence_store.insert(metadata.sha512t24u.to_key(), stub);
+                    self.sequence_store.insert(key, stub);
                     return Ok(());
                 }
                 SequenceRecord::Stub(_) => {
@@ -422,15 +464,14 @@ impl GlobalRefgetStore {
         }
 
         // Add as-is (either memory-only mode, or already a Stub)
-        self.sequence_store
-            .insert(metadata.sha512t24u.to_key(), sr);
+        self.sequence_store.insert(key, sr);
         Ok(())
     }
 
     /// Add a sequence collection from a FASTA file.
     ///
-    /// Reads a FASTA file, digests the sequences, creates a SequenceCollection,
-    /// and adds it to the store along with all its sequences.
+    /// Skips sequences and collections that already exist in the store.
+    /// Use `add_sequence_collection_from_fasta_force()` to overwrite existing data.
     ///
     /// # Arguments
     /// * `file_path` - Path to the FASTA file
@@ -443,11 +484,36 @@ impl GlobalRefgetStore {
     /// 1. First pass digests and guesses the alphabet to produce SequenceMetadata
     /// 2. Second pass encodes the sequences based on the detected alphabet
     pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+        self.add_sequence_collection_from_fasta_internal(file_path, false)
+    }
+
+    /// Add a sequence collection from a FASTA file, overwriting existing data.
+    ///
+    /// Forces overwrite of collections and sequences that already exist in the store.
+    /// Use `add_sequence_collection_from_fasta()` to skip duplicates (safer default).
+    ///
+    /// # Arguments
+    /// * `file_path` - Path to the FASTA file
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn add_sequence_collection_from_fasta_force<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+        self.add_sequence_collection_from_fasta_internal(file_path, true)
+    }
+
+    /// Internal implementation for adding a sequence collection from FASTA.
+    fn add_sequence_collection_from_fasta_internal<P: AsRef<Path>>(&mut self, file_path: P, force: bool) -> Result<()> {
         println!("Loading farg index...");
         let seqcol = SequenceCollection::from_fasta(&file_path)?;
 
+        // Check if collection already exists and skip if not forcing
+        if !force && self.collections.contains_key(&seqcol.digest.to_key()) {
+            println!("Collection already exists, skipping (use force=true to overwrite)");
+            return Ok(());
+        }
+
         // Register the collection
-        self.add_sequence_collection(seqcol.clone())?;
+        self.add_sequence_collection_internal(seqcol.clone(), force)?;
 
         // Local hashmap to store SequenceMetadata (digests)
         let mut seqmeta_hashmap: HashMap<String, SequenceMetadata> = HashMap::new();
@@ -502,12 +568,14 @@ impl GlobalRefgetStore {
                         raw_sequence.extend(seq_line);
                     }
 
+                    // Always replace Stubs with Full sequences from FASTA
                     self.add_sequence(
                         SequenceRecord::Full {
                             metadata: dr,
                             sequence: raw_sequence,
                         },
                         seqcol.digest.to_key(),
+                        true,  // Always replace Stubs with Full
                     )?;
                 }
                 StorageMode::Encoded => {
@@ -519,12 +587,14 @@ impl GlobalRefgetStore {
                     // let encoded_sequence = BitVec::<u8, Msb0>::from_vec(encoder.finalize());
                     let encoded_sequence = encoder.finalize();
 
+                    // Always replace Stubs with Full sequences from FASTA
                     self.add_sequence(
                         SequenceRecord::Full {
                             metadata: dr,
                             sequence: encoded_sequence,
                         },
                         seqcol.digest.to_key(),
+                        true,  // Always replace Stubs with Full
                     )?;
                 }
             }
