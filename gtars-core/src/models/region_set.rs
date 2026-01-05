@@ -24,6 +24,11 @@ use crate::models::Region;
 use crate::utils::get_dynamic_reader_from_url;
 use crate::utils::{get_chrom_sizes, get_dynamic_reader};
 
+#[cfg(feature = "dataframe")]
+use polars::prelude::*;
+#[cfg(feature = "dataframe")]
+use std::io::Cursor;
+
 ///
 /// RegionSet struct, the representation of the interval region set file,
 /// such as bed file.
@@ -531,6 +536,50 @@ impl RegionSet {
         }
         total_count
     }
+
+    ///
+    /// Create Polars DataFrame
+    ///
+    #[cfg(feature = "dataframe")]
+    pub fn to_polars(&self) -> PolarsResult<DataFrame> {
+        // Convert regions to tab-separated string format
+        let data: String = self
+            .regions
+            .iter()
+            .map(|region| {
+                if let Some(rest) = region.rest.as_deref() {
+                    format!(
+                        "{}\t{}\t{}\t{}",
+                        region.chr,
+                        region.start,
+                        region.end,
+                        rest,
+                    )
+                } else {
+                    format!(
+                        "{}\t{}\t{}",
+                        region.chr,
+                        region.start,
+                        region.end,
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let cursor = Cursor::new(data);
+
+        let df = CsvReadOptions::default()
+            .with_has_header(false)
+            .map_parse_options(|parse_options| parse_options.with_separator(b'\t'))
+            .with_infer_schema_length(Some(10000))
+            .into_reader_with_file_handle(cursor)
+            .finish()?;
+        println!("{:?}", df);
+
+        Ok(df)
+    }
+
 }
 
 impl Display for RegionSet {
@@ -632,6 +681,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
+    #[cfg(feature = "bigbed")]
     #[rstest]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
@@ -704,4 +754,15 @@ mod tests {
 
         assert_eq!(region_set.nucleotides_length(), 38)
     }
+
+    // #[cfg(feature = "dataframe")]
+    #[rstest]
+    fn test_polars() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let rs_polars = region_set.to_polars().unwrap();
+        println!("Number of columns: {:?}", rs_polars.get_columns().len());
+        assert_eq!(rs_polars.get_columns().len(), 10);
+    }
+
 }
