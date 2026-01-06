@@ -22,9 +22,11 @@
 //! let distribution = regions.region_distribution();
 //! ```
 
+pub mod bed_classifier;
 pub mod models;
 pub mod statistics;
 pub mod utils;
 
 // re-exports
+pub use bed_classifier::classify_bed;
 pub use statistics::GenomicIntervalSetStatistics;
