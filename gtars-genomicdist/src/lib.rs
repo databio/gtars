@@ -28,5 +28,6 @@ pub mod statistics;
 pub mod utils;
 
 // re-exports
+#[cfg(feature = "dataframe")]
 pub use bed_classifier::classify_bed;
 pub use statistics::GenomicIntervalSetStatistics;

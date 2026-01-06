@@ -548,20 +548,9 @@ impl RegionSet {
             .iter()
             .map(|region| {
                 if let Some(rest) = region.rest.as_deref() {
-                    format!(
-                        "{}\t{}\t{}\t{}",
-                        region.chr,
-                        region.start,
-                        region.end,
-                        rest,
-                    )
+                    format!("{}\t{}\t{}\t{}", region.chr, region.start, region.end, rest,)
                 } else {
-                    format!(
-                        "{}\t{}\t{}",
-                        region.chr,
-                        region.start,
-                        region.end,
-                    )
+                    format!("{}\t{}\t{}", region.chr, region.start, region.end,)
                 }
             })
             .collect::<Vec<_>>()
@@ -579,7 +568,6 @@ impl RegionSet {
 
         Ok(df)
     }
-
 }
 
 impl Display for RegionSet {
@@ -617,7 +605,9 @@ mod tests {
 
     #[rstest]
     fn test_open_from_url() {
-        let file_path = String::from("https://www.encodeproject.org/files/ENCFF321QPN/@@download/ENCFF321QPN.bed.gz");
+        let file_path = String::from(
+            "https://www.encodeproject.org/files/ENCFF321QPN/@@download/ENCFF321QPN.bed.gz",
+        );
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
@@ -764,5 +754,4 @@ mod tests {
         println!("Number of columns: {:?}", rs_polars.get_columns().len());
         assert_eq!(rs_polars.get_columns().len(), 10);
     }
-
 }
