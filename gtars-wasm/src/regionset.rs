@@ -1,11 +1,11 @@
 use std::collections::HashMap;
 
+use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
+use gtars_genomicdist::bed_classifier::classify_bed;
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
-
-use crate::models::BedEntries;
 
 #[wasm_bindgen(js_name = "ChromosomeStatistics")]
 #[derive(serde::Serialize)]
@@ -71,6 +71,36 @@ pub struct JsRegionDistribution {
     rid: u32,
 }
 
+#[wasm_bindgen(js_name = "BedClassificationOutput")]
+#[derive(serde::Serialize)]
+pub struct JsBedClassificationOutput {
+    bed_compliance: String,
+    data_format: String,
+    compliant_columns: usize,
+    non_compliant_columns: usize,
+}
+
+#[wasm_bindgen(js_class = "BedClassificationOutput")]
+impl JsBedClassificationOutput {
+    #[wasm_bindgen(getter)]
+    pub fn bed_compliance(&self) -> String {
+        self.bed_compliance.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn data_format(&self) -> String {
+        self.data_format.clone()
+    }
+    #[wasm_bindgen(getter)]
+    pub fn compliant_columns(&self) -> usize {
+        self.compliant_columns
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn non_compliant_columns(&self) -> usize {
+        self.non_compliant_columns
+    }
+}
+
 #[wasm_bindgen(js_name = "RegionSet")]
 pub struct JsRegionSet {
     region_set: RegionSet,
@@ -88,12 +118,17 @@ impl JsRegionSet {
                 chr: be.0,
                 start: be.1,
                 end: be.2,
-                rest: None,
+                rest: Some(be.3),
             })
             .collect::<Vec<Region>>();
         let mut region_set: RegionSet = RegionSet::from(regions);
         region_set.sort();
         Ok(JsRegionSet { region_set })
+    }
+
+    #[wasm_bindgen(getter, js_name = "first_region")]
+    pub fn get_first(&self) -> String {
+        format!("{:#?}", self.region_set.regions.first())
     }
 
     #[wasm_bindgen(getter, js_name = "numberOfRegions")]
@@ -157,5 +192,16 @@ impl JsRegionSet {
             })
         }
         serde_wasm_bindgen::to_value(&result_vector).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(getter, js_name = "classify")]
+    pub fn classify_bed_js(&self) -> JsBedClassificationOutput {
+        let output = classify_bed(&self.region_set).unwrap();
+        JsBedClassificationOutput {
+            bed_compliance: output.bed_compliance.clone(),
+            data_format: format!("{:#?}", output.data_format),
+            compliant_columns: output.compliant_columns,
+            non_compliant_columns: output.non_compliant_columns,
+        }
     }
 }

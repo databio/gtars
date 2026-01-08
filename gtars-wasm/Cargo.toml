@@ -18,7 +18,7 @@ getrandom = { version = "0.2.16", features = ["js"] }
 
 # our code
 gtars-core = { path = "../gtars-core" }
-gtars-genomicdist = { path = "../gtars-genomicdist" }
+gtars-genomicdist = {path = "../gtars-genomicdist", features = ["dataframe"] }
 gtars-overlaprs = { path = "../gtars-overlaprs"}
 gtars-tokenizers = { path = "../gtars-tokenizers"}
 
@@ -34,4 +34,3 @@ wasm-bindgen-test = "0.3.34"
 [profile.release]
 # Tell `rustc` to optimize for small code size.
 opt-level = "s"
-

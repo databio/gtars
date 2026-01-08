@@ -12,7 +12,7 @@ num-traits = "0.2.19"
 ureq = {version = "3.1.4", optional=true}
 tokio = "1.47.1"
 bigtools = { version = "0.5.6", optional = true }
-polars = {version = "0.51.0", optional = true }
+polars = {version = "0.51.0", optional = true, default-features = false, features = ["csv"] }
 
 anyhow = { workspace = true }
 flate2 = { workspace = true }
