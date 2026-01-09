@@ -83,20 +83,19 @@ pub struct JsBedClassificationOutput {
 #[wasm_bindgen(js_class = "BedClassificationOutput")]
 impl JsBedClassificationOutput {
     #[wasm_bindgen(getter)]
-    pub fn bed_compliance(&self) -> String {
+    pub fn bedCompliance(&self) -> String {
         self.bed_compliance.clone()
     }
     #[wasm_bindgen(getter)]
-    pub fn data_format(&self) -> String {
+    pub fn dataFormat(&self) -> String {
         self.data_format.clone()
     }
     #[wasm_bindgen(getter)]
-    pub fn compliant_columns(&self) -> usize {
+    pub fn compliantColumns(&self) -> usize {
         self.compliant_columns
     }
-
     #[wasm_bindgen(getter)]
-    pub fn non_compliant_columns(&self) -> usize {
+    pub fn nonCompliantColumns(&self) -> usize {
         self.non_compliant_columns
     }
 }
@@ -126,13 +125,13 @@ impl JsRegionSet {
         Ok(JsRegionSet { region_set })
     }
 
-    #[wasm_bindgen(getter, js_name = "first_region")]
+    #[wasm_bindgen(getter, js_name = "firstRegion")]
     pub fn get_first(&self) -> String {
         format!("{:#?}", self.region_set.regions.first())
     }
 
     #[wasm_bindgen(getter, js_name = "numberOfRegions")]
-    pub fn get_region(&self) -> i32 {
+    pub fn get_region_number(&self) -> i32 {
         self.region_set.len() as i32
     }
 

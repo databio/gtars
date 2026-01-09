@@ -20,4 +20,4 @@ rstest = "0.26.1"
 
 [features]
 default = []
-dataframe = ["dep:polars", "gtars-core/dataframe"]
+bedclassifier = ["dep:polars", "gtars-core/dataframe"]

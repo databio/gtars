@@ -8,7 +8,7 @@ use gtars_core::models::RegionSet;
 use regex::Regex;
 use std::fmt::{self, Display};
 
-#[cfg(feature = "dataframe")]
+#[cfg(feature = "bedclassifier")]
 use polars::prelude::*;
 
 ///
@@ -95,7 +95,7 @@ impl Display for BedClassificationOutput {
 /// println!("Format: {}", classification.data_format);
 /// ```
 ///
-#[cfg(feature = "dataframe")]
+#[cfg(feature = "bedclassifier")]
 pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput> {
     // Get polars DataFrame
     let df = match region_set.to_polars() {
@@ -379,7 +379,7 @@ mod tests {
         Ok(file_path)
     }
 
-    #[cfg(feature = "dataframe")]
+    #[cfg(feature = "bedclassifier")]
     #[test]
     fn test_classify_bed_narrowpeak() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
@@ -400,7 +400,7 @@ mod tests {
         assert_eq!(classification.data_format, DataFormat::EncodeNarrowPeak);
     }
 
-    #[cfg(feature = "dataframe")]
+    #[cfg(feature = "bedclassifier")]
     #[test]
     fn test_classify_bed_basic() {
         let file_path = get_test_path("dummy_headers.bed").unwrap();
