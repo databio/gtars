@@ -23,6 +23,7 @@
 //! ```
 
 pub mod bed_classifier;
+pub mod errors;
 pub mod models;
 pub mod statistics;
 pub mod utils;

@@ -11,7 +11,8 @@ gtars-core = { path = "../gtars-core", version="0.5.2" }
 gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.1" }
 polars = { version = "0.51.0", optional = true, default-features = false }
 regex = "1.11.1"
-anyhow = "1.0"
+#anyhow = "1.0"
+thiserror = { workspace = true }
 
 
 [dev-dependencies]
