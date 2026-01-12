@@ -3,7 +3,6 @@ use pyo3::prelude::*;
 use crate::models::PyRegionSet;
 use gtars_genomicdist::statistics;
 use std::collections::HashMap;
-use std::path::Path;
 
 use crate::models::PyGenomeAssembly;
 

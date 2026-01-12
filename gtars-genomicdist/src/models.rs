@@ -1,6 +1,6 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::Region;
 use rust_lapper::Lapper; // TODO: do we actually need to use lapper here, or can we use something from gtars? !
 use std::collections::HashMap;
 use std::fs::File;

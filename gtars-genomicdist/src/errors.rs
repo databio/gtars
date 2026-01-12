@@ -17,7 +17,7 @@ pub enum GtarsGenomicDistError {
     #[error("Custom Error.")]
     CustomError(String),
     #[error("Error getting sequence for region.")]
-    GCContentError(String, u32, u32),
+    GCContentError(String, u32, u32, String),
     #[error("No TSS's found for region. Double-check your index!")]
     TSSContentError(String, u32, u32),
     #[error(transparent)]

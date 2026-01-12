@@ -83,19 +83,19 @@ pub struct JsBedClassificationOutput {
 #[wasm_bindgen(js_class = "BedClassificationOutput")]
 impl JsBedClassificationOutput {
     #[wasm_bindgen(getter)]
-    pub fn bedCompliance(&self) -> String {
+    pub fn bed_compliance(&self) -> String {
         self.bed_compliance.clone()
     }
     #[wasm_bindgen(getter)]
-    pub fn dataFormat(&self) -> String {
+    pub fn data_format(&self) -> String {
         self.data_format.clone()
     }
     #[wasm_bindgen(getter)]
-    pub fn compliantColumns(&self) -> usize {
+    pub fn compliant_columns(&self) -> usize {
         self.compliant_columns
     }
     #[wasm_bindgen(getter)]
-    pub fn nonCompliantColumns(&self) -> usize {
+    pub fn non_compliant_columns(&self) -> usize {
         self.non_compliant_columns
     }
 }

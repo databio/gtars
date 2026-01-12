@@ -1,4 +1,9 @@
-// use anyhow::{ensure, Result};
+//! GenomicDistributions functions and extensions for RegionSet module
+//!
+//! This file includes popular statistics calculated on RegionSets and functions involving
+//! TSS information and Reference Genome
+//!
+
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
@@ -155,6 +160,14 @@ impl GenomicIntervalSetStatistics for RegionSet {
     }
 }
 
+///
+///  Calculate GC content for bed file
+///
+/// Arguments:
+/// - region_set: RegionSet object
+/// - genome: GenomeAssembly object (reference genome)
+/// - ignore_unk_chroms: bool to ignore unknown chromosomes for reference genome
+///
 pub fn calc_gc_content(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
@@ -194,6 +207,7 @@ pub fn calc_gc_content(
                             region.chr.to_string(),
                             region.start,
                             region.end,
+                            format!("{}", e),
                         ));
                     }
                 }
@@ -204,6 +218,13 @@ pub fn calc_gc_content(
     Ok(gc_contents)
 }
 
+///
+///  Calculate Dinucleotide frequencies
+///
+/// Arguments:
+/// - region_set: RegionSet object
+/// - genome: GenomeAssembly object (reference genome)
+/// Return: Result of hashmap of dinucleotide and frequencies e.g. 'Aa: 13142'
 pub fn calc_dinucl_freq(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
