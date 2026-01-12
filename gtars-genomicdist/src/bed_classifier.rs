@@ -3,7 +3,7 @@
 //! This module provides functionality to classify BED files according to their format
 //! and compliance with UCSC and ENCODE specifications.
 
-use anyhow::Result;
+use crate::errors::BedClassifierError;
 use gtars_core::models::RegionSet;
 use regex::Regex;
 use std::fmt::{self, Display};
@@ -96,7 +96,7 @@ impl Display for BedClassificationOutput {
 /// ```
 ///
 #[cfg(feature = "bedclassifier")]
-pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput> {
+pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, BedClassifierError> {
     // Get polars DataFrame
     let df = match region_set.to_polars() {
         Ok(df) => df,
@@ -371,18 +371,17 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput> {
 mod tests {
     use super::*;
 
-    fn get_test_path(file_name: &str) -> Result<std::path::PathBuf> {
-        let file_path: std::path::PathBuf = std::env::current_dir()
+    fn get_test_path(file_name: &str) -> std::path::PathBuf {
+        std::env::current_dir()
             .unwrap()
             .join("../tests/data/regionset")
-            .join(file_name);
-        Ok(file_path)
+            .join(file_name)
     }
 
     #[cfg(feature = "bedclassifier")]
     #[test]
     fn test_classify_bed_narrowpeak() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let classification = classify_bed(&region_set).unwrap();
@@ -403,7 +402,7 @@ mod tests {
     #[cfg(feature = "bedclassifier")]
     #[test]
     fn test_classify_bed_basic() {
-        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let file_path = get_test_path("dummy_headers.bed");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let classification = classify_bed(&region_set).unwrap();
