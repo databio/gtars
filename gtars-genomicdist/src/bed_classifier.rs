@@ -3,7 +3,6 @@
 //! This module provides functionality to classify BED files according to their format
 //! and compliance with UCSC and ENCODE specifications.
 
-use crate::errors::BedClassifierError;
 use gtars_core::models::RegionSet;
 use regex::Regex;
 use std::fmt::{self, Display};
