@@ -7,10 +7,10 @@ use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
-use ureq::get;
 use std::fs::{File, create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use ureq::get;
 
 use super::consts::{
     DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
