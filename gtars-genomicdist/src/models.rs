@@ -99,20 +99,26 @@ impl TryFrom<&Path> for GenomeAssembly {
 impl GenomeAssembly {
     pub fn seq_from_region<'a>(&'a self, coords: &Region) -> Result<&'a [u8]> {
         let chr = &coords.chr;
-        let start = coords.start;
-        let end = coords.end;
+        let start = coords.start as usize;
+        let end = coords.end as usize;
 
-        let seq = self.seq_map.get(chr);
-
-        match seq {
-            Some(seq) => {
-                let seq = &seq[start as usize..end as usize];
-                Ok(seq)
+        if let Some(seq) = self.seq_map.get(chr) {
+            if end <= seq.len() && start <= end {
+                Ok(&seq[start..end])
+            } else {
+                Err(anyhow::anyhow!(
+                    "Invalid range: start={}, end={} for chromosome {} with length {}",
+                    start,
+                    end,
+                    chr,
+                    seq.len()
+                ))
             }
-            None => Err(anyhow::anyhow!(
+        } else {
+            Err(anyhow::anyhow!(
                 "Unknown chromosome found in region set: {}",
-                chr.to_string()
-            )),
+                chr
+            ))
         }
     }
 
@@ -143,23 +149,28 @@ pub enum Dinucleotide {
 
 impl Dinucleotide {
     pub fn from_bytes(bytes: &[u8]) -> Option<Dinucleotide> {
-        match bytes {
-            b"Aa" => Some(Dinucleotide::Aa),
-            b"Ac" => Some(Dinucleotide::Ac),
-            b"Ag" => Some(Dinucleotide::Ag),
-            b"At" => Some(Dinucleotide::At),
-            b"Ca" => Some(Dinucleotide::Ca),
-            b"Cc" => Some(Dinucleotide::Cc),
-            b"Cg" => Some(Dinucleotide::Cg),
-            b"Ct" => Some(Dinucleotide::Ct),
-            b"Ga" => Some(Dinucleotide::Ga),
-            b"Gc" => Some(Dinucleotide::Gc),
-            b"Gg" => Some(Dinucleotide::Gg),
-            b"Gt" => Some(Dinucleotide::Gt),
-            b"Ta" => Some(Dinucleotide::Ta),
-            b"Tc" => Some(Dinucleotide::Tc),
-            b"Tg" => Some(Dinucleotide::Tg),
-            b"Tt" => Some(Dinucleotide::Tt),
+        if bytes.len() != 2 {
+            return None;
+        }
+        // Normalize to uppercase for case-insensitive matching
+        let normalized = [bytes[0].to_ascii_uppercase(), bytes[1].to_ascii_uppercase()];
+        match &normalized {
+            b"AA" => Some(Dinucleotide::Aa),
+            b"AC" => Some(Dinucleotide::Ac),
+            b"AG" => Some(Dinucleotide::Ag),
+            b"AT" => Some(Dinucleotide::At),
+            b"CA" => Some(Dinucleotide::Ca),
+            b"CC" => Some(Dinucleotide::Cc),
+            b"CG" => Some(Dinucleotide::Cg),
+            b"CT" => Some(Dinucleotide::Ct),
+            b"GA" => Some(Dinucleotide::Ga),
+            b"GC" => Some(Dinucleotide::Gc),
+            b"GG" => Some(Dinucleotide::Gg),
+            b"GT" => Some(Dinucleotide::Gt),
+            b"TA" => Some(Dinucleotide::Ta),
+            b"TC" => Some(Dinucleotide::Tc),
+            b"TG" => Some(Dinucleotide::Tg),
+            b"TT" => Some(Dinucleotide::Tt),
             _ => None,
         }
     }

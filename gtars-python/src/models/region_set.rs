@@ -197,7 +197,7 @@ impl PyRegionSet {
         Ok(())
     }
 
-    fn region_widths(&self) -> Vec<usize> {
+    fn region_widths(&self) -> Vec<u32> {
         self.regionset.region_widths().unwrap()
     }
 

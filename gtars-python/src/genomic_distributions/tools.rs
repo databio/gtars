@@ -20,15 +20,14 @@ pub fn py_calc_gc_content(
     )
 }
 
-#[pyfunction(name = "calc_dincleotide_frequency")]
+#[pyfunction(name = "calc_dinucleotide_frequency")]
 pub fn py_calc_dinucleotide_frequency(
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
-) -> anyhow::Result<HashMap<String, f64>> {
+) -> anyhow::Result<HashMap<String, u64>> {
+    println!("Calculating dinucleotide_frequency...");
     let frequencies = statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly)?;
-
-    let mut freq_map: HashMap<String, f64> = HashMap::new();
-
+    let mut freq_map: HashMap<String, u64> = HashMap::new();
     // Convert Dinucleotide to String and push to HashMap
     for (di, freq) in frequencies {
         freq_map.insert(di.to_string()?, freq);

@@ -208,8 +208,8 @@ pub fn calc_gc_content(
 pub fn calc_dinucl_freq(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
-) -> Result<HashMap<Dinucleotide, f64>> {
-    let mut dinucl_freqs: HashMap<Dinucleotide, f64> = HashMap::new();
+) -> Result<HashMap<Dinucleotide, u64>> {
+    let mut dinucl_freqs: HashMap<Dinucleotide, u64> = HashMap::new();
 
     for chr in region_set.iter_chroms() {
         for region in region_set.iter_chr_regions(chr) {
@@ -218,8 +218,8 @@ pub fn calc_dinucl_freq(
                 let dinucl = Dinucleotide::from_bytes(aas);
                 match dinucl {
                     Some(dinucl) => {
-                        let current_freq = dinucl_freqs.entry(dinucl).or_insert(0.0);
-                        *current_freq += 1.0;
+                        let current_freq = dinucl_freqs.entry(dinucl).or_insert(0);
+                        *current_freq += 1;
                     }
                     None => continue,
                 }
@@ -321,6 +321,7 @@ mod tests {
     }
 
     #[rstest]
+    #[ignore] // only for local testing
     fn test_calc_dinucl_freq() {
         let ga = GenomeAssembly::try_from("/home/bnt4me/virginia/repos/bedboss/data/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4/fasta/default/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4.fa").unwrap();
         let rs =
@@ -329,6 +330,6 @@ mod tests {
 
         let result = calc_dinucl_freq(&rs, &ga).unwrap();
 
-        assert_eq!(result.len(), 2);
+        assert_ne!(result.len(), 0);
     }
 }

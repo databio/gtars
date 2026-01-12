@@ -15,6 +15,18 @@ class Region:
         """
         ...
 
+
+class ChromosomeStatistics:
+    chromosome: str
+    number_of_regions: int
+    minimum_region_length: int
+    maximum_region_length: int
+    mean_region_length: float
+    median_region_length: float
+    start_nucleotide_position: int
+    end_nucleotide_position: int
+
+
 class RegionSet:
     regions: List[Region]
     header: str
@@ -86,6 +98,18 @@ class RegionSet:
         Sort the regions
         """
         ...
+
+    def file_digest(self) -> str:
+        """
+        Get full file digest (all columns). It differs from identifier which is calculated only from first three columns.
+        """
+        ...
+
+    def region_widths(self) -> List[int]:
+        """
+        Get list of region widths
+        """
+        ...
     def mean_region_width(self) -> int:
         """
         Mean width of the regions
@@ -101,6 +125,13 @@ class RegionSet:
         Get total number of nucleotides in RegionSet
         """
         ...
+
+    def chromosome_statistics(self) -> Dict[str, ChromosomeStatistics]:
+        """
+        Get a dictionary of ChromosomeStatistics for each chromosome in the RegionSet
+        """
+        ...
+
     def __len__(self) -> int:
         """
         Size of the regionset
@@ -111,12 +142,12 @@ class RegionSet:
     def __repr__(self): ...
     def __str__(self): ...
 
-class ChromosomeStatistics:
-    chromosome: str
-    number_of_regions: int
-    minimum_region_length: int
-    maximum_region_length: int
-    mean_region_length: float
-    median_region_length: float
-    start_nucleotide_position: int
-    end_nucleotide_position: int
+
+class GenomeAssembly:
+    def __init__(self, path: str) -> "GenomeAssembly":
+    """
+    :param path: path to the fasta file
+    """
+    ...
+
+    def __str__(self): ...
