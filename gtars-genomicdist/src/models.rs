@@ -1,10 +1,10 @@
-use anyhow::Result;
+use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
 use gtars_core::models::{Region, RegionSet};
 use rust_lapper::Lapper; // TODO: do we actually need to use lapper here, or can we use something from gtars? !
 use std::collections::HashMap;
 use std::fs::File;
-use std::path::Path; // TODO: create own result output!
+use std::path::Path;
 
 /// Statistics summary for regions on a single chromosome.
 ///
@@ -51,29 +51,29 @@ pub struct GenomeAssembly {
 }
 
 impl TryFrom<&str> for GenomeAssembly {
-    type Error = anyhow::Error;
+    type Error = GtarsGenomicDistError;
 
-    fn try_from(value: &str) -> Result<Self> {
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
         GenomeAssembly::try_from(Path::new(value))
     }
 }
 
 impl TryFrom<String> for GenomeAssembly {
-    type Error = anyhow::Error;
+    type Error = GtarsGenomicDistError;
 
-    fn try_from(value: String) -> Result<Self> {
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
         // println!("Converting String to Path: {}", value);
         GenomeAssembly::try_from(Path::new(&value))
     }
 }
 
 impl TryFrom<&Path> for GenomeAssembly {
-    type Error = anyhow::Error;
+    type Error = GtarsGenomicDistError;
 
     ///
     /// Create a new [GenomeAssembly] from fasta file
     ///
-    fn try_from(value: &Path) -> Result<GenomeAssembly> {
+    fn try_from(value: &Path) -> Result<GenomeAssembly, GtarsGenomicDistError> {
         let file = File::open(value)?;
         let genome = fasta::Reader::new(file);
 
@@ -87,7 +87,10 @@ impl TryFrom<&Path> for GenomeAssembly {
                     seq_map.insert(record.id().to_string(), record.seq().to_owned());
                 }
                 Err(e) => {
-                    return Err(anyhow::anyhow!("Error reading genome file: {}", e));
+                    return Err(GtarsGenomicDistError::CustomError(format!(
+                        "Error reading genome file: {}",
+                        e
+                    )));
                 }
             }
         }
@@ -97,7 +100,10 @@ impl TryFrom<&Path> for GenomeAssembly {
 }
 
 impl GenomeAssembly {
-    pub fn seq_from_region<'a>(&'a self, coords: &Region) -> Result<&'a [u8]> {
+    pub fn seq_from_region<'a>(
+        &'a self,
+        coords: &Region,
+    ) -> Result<&'a [u8], GtarsGenomicDistError> {
         let chr = &coords.chr;
         let start = coords.start as usize;
         let end = coords.end as usize;
@@ -106,19 +112,19 @@ impl GenomeAssembly {
             if end <= seq.len() && start <= end {
                 Ok(&seq[start..end])
             } else {
-                Err(anyhow::anyhow!(
+                Err(GtarsGenomicDistError::CustomError(format!(
                     "Invalid range: start={}, end={} for chromosome {} with length {}",
                     start,
                     end,
                     chr,
                     seq.len()
-                ))
+                )))
             }
         } else {
-            Err(anyhow::anyhow!(
+            Err(GtarsGenomicDistError::CustomError(format!(
                 "Unknown chromosome found in region set: {}",
                 chr
-            ))
+            )))
         }
     }
 
@@ -175,7 +181,7 @@ impl Dinucleotide {
         }
     }
 
-    pub fn to_string(&self) -> Result<String> {
+    pub fn to_string(&self) -> Result<String, GtarsGenomicDistError> {
         match self {
             Dinucleotide::Aa => Ok("Aa".to_string()),
             Dinucleotide::Ac => Ok("Ac".to_string()),

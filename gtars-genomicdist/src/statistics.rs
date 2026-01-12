@@ -1,10 +1,11 @@
-use anyhow::{ensure, Result};
+// use anyhow::{ensure, Result};
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
 use gtars_overlaprs::OverlapperType;
 
+use crate::errors::GtarsGenomicDistError;
 use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin, TSSIndex};
 use crate::utils::partition_genome_into_bins;
 
@@ -34,7 +35,7 @@ pub trait GenomicIntervalSetStatistics {
     /// Compute Neighbor_distances
     ///
     /// Returns a vector of vectors between the regions
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>>;
+    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
 }
 
 impl GenomicIntervalSetStatistics for RegionSet {
@@ -130,7 +131,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
         plot_results
     }
 
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>> {
+    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
         let mut distances: Vec<u32> = vec![];
 
         for chr in self.iter_chroms() {
@@ -158,7 +159,7 @@ pub fn calc_gc_content(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
     ignore_unk_chroms: bool,
-) -> Result<Vec<f64>> {
+) -> Result<Vec<f64>, GtarsGenomicDistError> {
     // for region in region_set
     let mut gc_contents: Vec<f64> = vec![];
     for chr in region_set.iter_chroms() {
@@ -189,12 +190,10 @@ pub fn calc_gc_content(
                     if ignore_unk_chroms {
                         continue;
                     } else {
-                        return Err(anyhow::anyhow!(
-                            "Error getting sequence for region {}:{}-{}: {}",
+                        return Err(GtarsGenomicDistError::GCContentError(
                             region.chr.to_string(),
                             region.start,
                             region.end,
-                            e
                         ));
                     }
                 }
@@ -208,7 +207,7 @@ pub fn calc_gc_content(
 pub fn calc_dinucl_freq(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
-) -> Result<HashMap<Dinucleotide, u64>> {
+) -> Result<HashMap<Dinucleotide, u64>, GtarsGenomicDistError> {
     let mut dinucl_freqs: HashMap<Dinucleotide, u64> = HashMap::new();
 
     for chr in region_set.iter_chroms() {
@@ -239,7 +238,10 @@ pub fn calc_dinucl_freq(
 ///
 /// Returns:
 /// - Vector of tss distances to the region
-pub fn calc_tss_dist(region_set: &RegionSet, tss_index: &TSSIndex) -> Result<Vec<u32>> {
+pub fn calc_tss_dist(
+    region_set: &RegionSet,
+    tss_index: &TSSIndex,
+) -> Result<Vec<u32>, GtarsGenomicDistError> {
     let mut tss_dists: Vec<u32> = Vec::with_capacity(region_set.len());
 
     for chr in region_set.iter_chroms() {
@@ -248,13 +250,13 @@ pub fn calc_tss_dist(region_set: &RegionSet, tss_index: &TSSIndex) -> Result<Vec
         }
         for region in region_set.iter_chr_regions(chr) {
             let tsses = tss_index.query(region);
-            ensure!(
-                tsses.is_some(),
-                format!(
-                    "No TSS's found for region: {}:{}-{}. Double-check your index!",
-                    region.chr, region.start, region.end
-                )
-            );
+            if tsses.is_none() {
+                return Err(GtarsGenomicDistError::TSSContentError(
+                    region.chr.clone(),
+                    region.start,
+                    region.end,
+                ));
+            }
 
             let midpoint = region.end - region.start;
 

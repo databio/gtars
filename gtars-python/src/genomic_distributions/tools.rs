@@ -8,16 +8,18 @@ use std::path::Path;
 use crate::models::PyGenomeAssembly;
 
 #[pyfunction(name = "calc_gc_content")]
+#[pyo3(signature = (rs, genome, ignore_unk_chroms = Some(false)))]
 pub fn py_calc_gc_content(
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
     ignore_unk_chroms: Option<bool>,
 ) -> anyhow::Result<Vec<f64>> {
-    statistics::calc_gc_content(
+    let result = statistics::calc_gc_content(
         &rs.regionset,
         &genome.genome_assembly,
         ignore_unk_chroms.unwrap_or(false),
-    )
+    )?;
+    Ok(result)
 }
 
 #[pyfunction(name = "calc_dinucleotide_frequency")]
