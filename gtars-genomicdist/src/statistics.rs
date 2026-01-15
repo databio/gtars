@@ -140,12 +140,14 @@ impl GenomicIntervalSetStatistics for RegionSet {
         let mut distances: Vec<u32> = vec![];
 
         for chr in self.iter_chroms() {
+            let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+
             // if there is only one region on the chromosome, skip it, can't calculate distance between one region
-            if self.iter_chr_regions(chr).count() < 2 {
+            if chr_regions.len() < 2 {
                 continue;
             }
 
-            for window in self.regions.windows(2) {
+            for window in chr_regions.windows(2) {
                 let distance: f32 = window[1].start as f32 - window[0].end as f32;
                 let absolute_dist: u32 = if distance > 0f32 {
                     distance as u32
@@ -340,7 +342,7 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let distribution = region_set.calc_neighbor_distances().unwrap();
-        assert_eq!(distribution.len(), 72);
+        assert_eq!(distribution.len(), 8);
     }
 
     #[rstest]

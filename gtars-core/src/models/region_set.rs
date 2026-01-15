@@ -7,7 +7,7 @@ use md5::{Digest, Md5};
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, Write};
@@ -388,10 +388,11 @@ impl RegionSet {
     }
 
     ///
-    /// Iterate Chromosomes located in RegionSet
+    /// Iterate unique chromosomes located in RegionSet
     ///
     pub fn iter_chroms(&self) -> impl Iterator<Item = &String> {
-        self.regions.iter().map(|r| &r.chr)
+        let unique_chroms: HashSet<&String> = self.regions.iter().map(|r| &r.chr).collect();
+        unique_chroms.into_iter()
     }
 
     ///
@@ -594,7 +595,6 @@ impl RegionSet {
             .with_infer_schema_length(Some(10000))
             .into_reader_with_file_handle(cursor)
             .finish()?;
-        println!("{:?}", df);
 
         Ok(df)
     }
@@ -775,7 +775,15 @@ mod tests {
         assert_eq!(region_set.nucleotides_length(), 38)
     }
 
-    // #[cfg(feature = "dataframe")]
+    #[rstest]
+    fn test_iter_chroms() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.iter_chroms().collect::<Vec<_>>().len(), 1)
+    }
+
+    #[cfg(feature = "dataframe")]
     #[rstest]
     fn test_polars() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();

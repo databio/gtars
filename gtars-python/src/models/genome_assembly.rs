@@ -15,9 +15,10 @@ impl PyGenomeAssembly {
     ///     path: path to the fasta file
     ///
     /// Returns:
-    ///     GenomeAssebly object
-    pub fn new(path: &Bound<'_, PyAny>) -> Self {
-        let genome_assembly = GenomeAssembly::try_from(path.to_string()).unwrap();
-        PyGenomeAssembly { genome_assembly }
+    ///     GenomeAssembly object
+    pub fn new(path: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let genome_assembly = GenomeAssembly::try_from(path.to_string())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(PyGenomeAssembly { genome_assembly })
     }
 }
