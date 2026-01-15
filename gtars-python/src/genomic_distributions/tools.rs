@@ -26,7 +26,6 @@ pub fn py_calc_dinucleotide_frequency(
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
 ) -> anyhow::Result<HashMap<String, u64>> {
-    println!("Calculating dinucleotide_frequency...");
     let frequencies = statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly)?;
     let mut freq_map: HashMap<String, u64> = HashMap::new();
     // Convert Dinucleotide to String and push to HashMap
