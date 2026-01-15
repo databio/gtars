@@ -212,7 +212,7 @@ impl GlobalRefgetStore {
             local_path: None,
             remote_source: None,
             seqdata_path_template: None,
-            cache_to_disk: false,  // Default to false - users should explicitly choose
+            cache_to_disk: false,  // on_disk() overrides to true
         }
     }
 
@@ -1781,15 +1781,18 @@ impl GlobalRefgetStore {
     /// Returns statistics about the store
     ///
     /// # Returns
-    /// A tuple of (n_sequences, n_collections, storage_mode_str)
+    /// A tuple of (n_sequences, n_collections_loaded, storage_mode_str)
+    ///
+    /// Note: n_collections_loaded only reflects collections currently loaded in memory.
+    /// For remote stores, collections are loaded on-demand when accessed.
     pub fn stats(&self) -> (usize, usize, &'static str) {
         let n_sequences = self.sequence_store.len();
-        let n_collections = self.collections.len();
+        let n_collections_loaded = self.collections.len();
         let mode_str = match self.mode {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
-        (n_sequences, n_collections, mode_str)
+        (n_sequences, n_collections_loaded, mode_str)
     }
 }
 

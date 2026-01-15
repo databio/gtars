@@ -94,7 +94,18 @@ pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
     }
 }
 
-#[pyclass(name = "AlphabetType")]
+/// The type of alphabet for a biological sequence.
+///
+/// Used to determine encoding strategy and validation rules.
+///
+/// Variants:
+///     Dna2bit: Standard DNA (A, C, G, T only) - can use 2-bit encoding.
+///     Dna3bit: DNA with N (A, C, G, T, N) - requires 3-bit encoding.
+///     DnaIupac: Full IUPAC DNA alphabet with ambiguity codes.
+///     Protein: Amino acid sequences.
+///     Ascii: Generic ASCII text.
+///     Unknown: Alphabet could not be determined.
+#[pyclass(name = "AlphabetType", module = "gtars.refget")]
 #[derive(Clone)]
 pub enum PyAlphabetType {
     Dna2bit,
@@ -105,7 +116,19 @@ pub enum PyAlphabetType {
     Unknown,
 }
 
-#[pyclass(name = "SequenceMetadata")]
+/// Metadata for a biological sequence.
+///
+/// Contains identifying information and computed digests for a sequence,
+/// without the actual sequence data.
+///
+/// Attributes:
+///     name (str): Sequence name (e.g., "chr1", "chrM").
+///     length (int): Length of the sequence in bases.
+///     sha512t24u (str): GA4GH SHA-512/24u digest (32-char base64url).
+///     md5 (str): MD5 digest (32-char hex string).
+///     alphabet (AlphabetType): Detected alphabet type (DNA, protein, etc.).
+///     fai (FaiMetadata | None): FASTA index metadata if available.
+#[pyclass(name = "SequenceMetadata", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PySequenceMetadata {
     #[pyo3(get, set)]
@@ -122,7 +145,16 @@ pub struct PySequenceMetadata {
     pub fai: Option<PyFaiMetadata>,
 }
 
-#[pyclass(name = "FaiMetadata")]
+/// FASTA index (FAI) metadata for a sequence.
+///
+/// Contains the information needed to quickly seek to a sequence
+/// in a FASTA file, compatible with samtools faidx format.
+///
+/// Attributes:
+///     offset (int): Byte offset of the first base in the FASTA file.
+///     line_bases (int): Number of bases per line.
+///     line_bytes (int): Number of bytes per line (including newline).
+#[pyclass(name = "FaiMetadata", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PyFaiMetadata {
     #[pyo3(get, set)]
@@ -133,7 +165,16 @@ pub struct PyFaiMetadata {
     pub line_bytes: u32,
 }
 
-#[pyclass(name = "FaiRecord")]
+/// A FASTA index record for a single sequence.
+///
+/// Represents one line of a .fai index file with sequence name,
+/// length, and FAI metadata for random access.
+///
+/// Attributes:
+///     name (str): Sequence name.
+///     length (int): Sequence length in bases.
+///     fai (FaiMetadata | None): FAI metadata (None for gzipped files).
+#[pyclass(name = "FaiRecord", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PyFaiRecord {
     #[pyo3(get, set)]
@@ -144,7 +185,15 @@ pub struct PyFaiRecord {
     pub fai: Option<PyFaiMetadata>,
 }
 
-#[pyclass(name = "SequenceRecord")]
+/// A record representing a biological sequence with metadata and optional data.
+///
+/// SequenceRecord can be either a "stub" (metadata only) or "full" (metadata + data).
+/// Stubs are used for lazy-loading where sequence data is fetched on demand.
+///
+/// Attributes:
+///     metadata (SequenceMetadata): Sequence metadata (name, length, digests).
+///     sequence (bytes | None): Raw sequence data if loaded, None for stubs.
+#[pyclass(name = "SequenceRecord", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PySequenceRecord {
     #[pyo3(get, set)]
@@ -153,7 +202,16 @@ pub struct PySequenceRecord {
     pub sequence: Option<Vec<u8>>,
 }
 
-#[pyclass(name = "SeqColDigestLvl1")]
+/// Level 1 digests for a sequence collection.
+///
+/// These are intermediate digests computed over the arrays of sequence
+/// properties, used in the GA4GH seqcol specification.
+///
+/// Attributes:
+///     sequences_digest (str): Digest of the array of sequence digests.
+///     names_digest (str): Digest of the array of sequence names.
+///     lengths_digest (str): Digest of the array of sequence lengths.
+#[pyclass(name = "SeqColDigestLvl1", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PySeqColDigestLvl1 {
     #[pyo3(get, set)]
@@ -164,8 +222,30 @@ pub struct PySeqColDigestLvl1 {
     pub lengths_digest: String,
 }
 
+/// A collection of biological sequences (e.g., a genome assembly).
+///
+/// SequenceCollection represents a set of sequences with collection-level
+/// digests following the GA4GH seqcol specification. Supports iteration
+/// and indexing.
+///
+/// Attributes:
+///     sequences (list[SequenceRecord]): List of sequence records.
+///     digest (str): Collection-level SHA-512/24u digest (Level 2).
+///     lvl1 (SeqColDigestLvl1): Level 1 digests for names, lengths, sequences.
+///     file_path (str | None): Source file path if loaded from FASTA.
+///
+/// Examples:
+///     Iterate over sequences::
+///
+///         for seq in collection:
+///             print(f"{seq.metadata.name}: {seq.metadata.length} bp")
+///
+///     Access by index::
+///
+///         first_seq = collection[0]
+///         last_seq = collection[-1]
 #[derive(Clone)]
-#[pyclass(name = "SequenceCollection")]
+#[pyclass(name = "SequenceCollection", module = "gtars.refget")]
 pub struct PySequenceCollection {
     #[pyo3(get, set)]
     pub sequences: Vec<PySequenceRecord>,
@@ -177,7 +257,17 @@ pub struct PySequenceCollection {
     pub file_path: Option<String>,
 }
 
-#[pyclass(name = "RetrievedSequence")]
+/// A retrieved sequence segment with its genomic coordinates.
+///
+/// Returned by methods that extract subsequences from specific regions,
+/// such as substrings_from_regions().
+///
+/// Attributes:
+///     sequence (str): The extracted sequence string.
+///     chrom_name (str): Chromosome/sequence name (e.g., "chr1").
+///     start (int): Start position (0-based, inclusive).
+///     end (int): End position (0-based, exclusive).
+#[pyclass(name = "RetrievedSequence", module = "gtars.refget")]
 #[derive(Debug, Clone, PartialEq)]
 pub struct PyRetrievedSequence {
     #[pyo3(get, set)]
@@ -604,7 +694,16 @@ impl From<SequenceCollection> for PySequenceCollection {
     }
 }
 
-#[pyclass(name = "StorageMode")]
+/// Defines how sequence data is stored in the RefgetStore.
+///
+/// StorageMode.Encoded uses 2-bit packing for DNA sequences (A=00, C=01, G=10, T=11),
+/// reducing memory usage by 75% compared to raw storage. StorageMode.Raw stores
+/// sequences as plain bytes.
+///
+/// Variants:
+///     Raw: Store sequences as raw bytes (1 byte per base).
+///     Encoded: Store sequences with 2-bit encoding (4 bases per byte).
+#[pyclass(name = "StorageMode", module = "gtars.refget")]
 #[derive(Clone)]
 pub enum PyStorageMode {
     Raw,
@@ -629,7 +728,36 @@ impl From<PyStorageMode> for StorageMode {
     }
 }
 
-#[pyclass(name = "GlobalRefgetStore")]
+/// A global store for GA4GH refget sequences with lazy-loading support.
+///
+/// GlobalRefgetStore provides content-addressable storage for reference genome
+/// sequences following the GA4GH refget specification. Supports both local and
+/// remote stores with on-demand sequence loading.
+///
+/// Attributes:
+///     cache_path (str | None): Local directory path where the store is located or cached.
+///         None for in-memory stores.
+///     remote_url (str | None): Remote URL of the store if loaded remotely, None otherwise.
+///
+/// Examples:
+///     Create a new in-memory store and import sequences::
+///
+///         from gtars.refget import GlobalRefgetStore
+///         store = GlobalRefgetStore.in_memory()
+///         store.add_sequence_collection_from_fasta("genome.fa")
+///
+///     Load an existing local store::
+///
+///         store = GlobalRefgetStore.load_local("/data/hg38")
+///         seq = store.get_substring("chr1_digest", 0, 1000)
+///
+///     Load a remote store with caching::
+///
+///         store = GlobalRefgetStore.load_remote(
+///             "/local/cache",
+///             "https://example.com/hg38"
+///         )
+#[pyclass(name = "GlobalRefgetStore", module = "gtars.refget")]
 pub struct PyGlobalRefgetStore {
     inner: GlobalRefgetStore,
 }
@@ -895,17 +1023,21 @@ impl PyGlobalRefgetStore {
     /// Returns statistics about the store.
     ///
     /// Returns:
-    ///     dict: Dictionary with keys 'n_sequences', 'n_collections', 'storage_mode'
+    ///     dict: Dictionary with keys 'n_sequences', 'n_collections_loaded', 'storage_mode'
+    ///
+    /// Note:
+    ///     n_collections_loaded only reflects collections currently in memory.
+    ///     For remote stores, collections are loaded on-demand when accessed.
     ///
     /// Example:
     ///     >>> stats = store.stats()
-    ///     >>> print(f"Store has {stats['n_sequences']} sequences in {stats['n_collections']} collections")
-    ///     >>> print(f"Storage mode: {stats['storage_mode']}")
+    ///     >>> print(f"Store has {stats['n_sequences']} sequences")
+    ///     >>> print(f"Collections loaded: {stats['n_collections_loaded']}")
     fn stats(&self) -> std::collections::HashMap<String, String> {
-        let (n_sequences, n_collections, mode_str) = self.inner.stats();
+        let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
         let mut stats = std::collections::HashMap::new();
         stats.insert("n_sequences".to_string(), n_sequences.to_string());
-        stats.insert("n_collections".to_string(), n_collections.to_string());
+        stats.insert("n_collections_loaded".to_string(), n_collections_loaded.to_string());
         stats.insert("storage_mode".to_string(), mode_str.to_string());
         stats
     }
@@ -1202,7 +1334,7 @@ impl PyGlobalRefgetStore {
     }
 
     fn __repr__(&self) -> String {
-        let (n_sequences, n_collections, mode_str) = self.inner.stats();
+        let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
 
         let location = if let Some(remote) = self.inner.remote_source() {
             let cache = self.inner.local_path()
@@ -1216,8 +1348,8 @@ impl PyGlobalRefgetStore {
         };
 
         format!(
-            "GlobalRefgetStore(n_sequences={}, n_collections={}, mode={}, {})",
-            n_sequences, n_collections, mode_str, location
+            "GlobalRefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {})",
+            n_sequences, n_collections_loaded, mode_str, location
         )
     }
 

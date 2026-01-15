@@ -9,7 +9,7 @@ use md5::Md5;
 use sha2::{Digest, Sha512};
 
 /// A lightweight record containing only FAI (FASTA index) metadata for a sequence.
-/// Used by `compute_fai()` for fast FAI-only computation without digest overhead.
+/// Returned by `compute_fai()` for fast FAI-only computation without digest overhead.
 #[derive(Clone, Debug)]
 pub struct FaiRecord {
     pub name: String,
