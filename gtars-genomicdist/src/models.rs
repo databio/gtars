@@ -1,8 +1,9 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
 use gtars_core::models::Region;
-use rust_lapper::Lapper; // TODO: do we actually need to use lapper here, or can we use something from gtars? !
-use std::collections::HashMap;
+// use gtars_overlaprs::Overlapper;
+use std::{collections::HashMap, fmt::Debug};
+// use num_traits::{PrimInt, Unsigned};
 use std::fs::File;
 use std::path::Path;
 
@@ -203,31 +204,36 @@ impl Dinucleotide {
     }
 }
 
-pub struct TSSIndex {
-    tree: HashMap<String, Lapper<u32, Vec<Region>>>,
-}
-
-impl TSSIndex {
-    pub fn has_chr(&self, chr: &str) -> bool {
-        self.tree.contains_key(chr)
-    }
-    pub fn query(&self, region: &Region) -> Option<Vec<&Region>> {
-        let chr = &region.chr;
-        let chr_tree = self.tree.get(chr);
-
-        match chr_tree {
-            None => None, // our index doesnt have that chromosome they gave us
-            Some(tree) => {
-                let mut tss_list: Vec<&Region> = Vec::new();
-                let hits = tree.find(region.start, region.end);
-
-                for hit in hits {
-                    for tss in &hit.val {
-                        tss_list.push(tss);
-                    }
-                }
-                Some(tss_list)
-            }
-        }
-    }
-}
+// /// TODO: fix and test this function
+// pub struct TSSIndex<I, T> {
+//     tree: HashMap<String, Box<dyn Overlapper<I, T>>>,
+// }
+// impl<I, T> TSSIndex<I, T>
+// where
+//     I: PrimInt + Unsigned + Send + Sync + Debug,
+//     T: Eq + Clone + Send + Sync + Debug,
+// {
+//     // TODO: potentially use MultiChromOverlapper
+//     pub fn has_chr(&self, chr: &str) -> bool {
+//         self.tree.contains_key(chr)
+//     }
+//     pub fn query(&self, region: &Region) -> Option<Vec<&Region>> {
+//         let chr = &region.chr;
+//         let chr_tree = self.tree.get(chr);
+//
+//         match chr_tree {
+//             None => None, // our index doesnt have that chromosome they gave us
+//             Some(tree) => {
+//                 let mut tss_list: Vec<&Region> = Vec::new();
+//                 let hits = tree.find(region.start, region.end);
+//
+//                 for hit in hits {
+//                     for tss in &hit.val {
+//                         tss_list.push(tss);
+//                     }
+//                  }
+//                 Some(tss_list)
+//             }
+//         }
+//     }
+// }

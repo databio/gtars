@@ -32,4 +32,4 @@ pub mod utils;
 #[cfg(feature = "bedclassifier")]
 pub use bed_classifier::classify_bed;
 pub use statistics::GenomicIntervalSetStatistics;
-pub use statistics::{calc_dinucl_freq, calc_gc_content, calc_tss_dist};
+pub use statistics::{calc_dinucl_freq, calc_gc_content};
