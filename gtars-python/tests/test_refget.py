@@ -122,7 +122,7 @@ class TestRefget:
         fasta_path = "../tests/data/fasta/base.fa"
         store.add_sequence_collection_from_fasta(fasta_path)
 
-        # Save store to temporary directory
+        # Save store to temporary directory - test with explicit template
         with tempfile.TemporaryDirectory() as tmpdir:
             store.write_store_to_dir(tmpdir, "sequences/%s2/%s.seq")
 
@@ -135,6 +135,19 @@ class TestRefget:
             seq2 = loaded_store.get_sequence_by_id(sha512)
 
             assert seq1 is not None
+            assert seq2 is not None
+            assert seq1.metadata.length == seq2.metadata.length
+            assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
+
+        # Test with default template (no second argument)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store.write_store_to_dir(tmpdir)
+
+            # Load store back
+            loaded_store = GlobalRefgetStore.load_local(tmpdir)
+
+            # Verify same sequences exist
+            seq2 = loaded_store.get_sequence_by_id(sha512)
             assert seq2 is not None
             assert seq1.metadata.length == seq2.metadata.length
             assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
@@ -191,7 +204,7 @@ class TestRefget:
 
 
             store = GlobalRefgetStore.in_memory()
-            imported_collection = store.add_sequence_collection_from_fasta(temp_fasta_path)
+            store.add_sequence_collection_from_fasta(temp_fasta_path)
             result = digest_fasta(temp_fasta_path)
 
             collection_digest = result.digest
@@ -311,7 +324,7 @@ GGGG
 
         # Test with Raw storage mode
         store_raw = GlobalRefgetStore.in_memory()
-        store_raw.set_mode(StorageMode.Raw)
+        store_raw.set_encoding_mode(StorageMode.Raw)
         store_raw.add_sequence_collection_from_fasta(fasta_path)
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         seq_raw = store_raw.get_sequence_by_id(sha512)
@@ -352,3 +365,48 @@ GGGG
         assert result.lvl1.sequences_digest == digest_result.lvl1.sequences_digest
         assert result.lvl1.names_digest == digest_result.lvl1.names_digest
         assert result.lvl1.lengths_digest == digest_result.lvl1.lengths_digest
+
+    def test_enable_persistence(self):
+        """Test enable_persistence() flushes in-memory store to disk"""
+        fasta_path = "../tests/data/fasta/base.fa"
+
+        # Create in-memory store and add sequences
+        store = GlobalRefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        # Enable persistence to a temp directory
+        with tempfile.TemporaryDirectory() as tmpdir:
+            store.enable_persistence(tmpdir)
+
+            # Check that index.json was created
+            assert os.path.exists(os.path.join(tmpdir, "index.json"))
+
+            # Load the store back and verify sequences are accessible
+            loaded_store = GlobalRefgetStore.load_local(tmpdir)
+
+            sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+            seq1 = store.get_sequence_by_id(sha512)
+            seq2 = loaded_store.get_sequence_by_id(sha512)
+
+            assert seq1 is not None
+            assert seq2 is not None
+            assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
+
+    def test_disable_persistence(self):
+        """Test disable_persistence() stops writing to disk"""
+        fasta_path = "../tests/data/fasta/base.fa"
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Create disk-backed store
+            store = GlobalRefgetStore.on_disk(tmpdir)
+
+            # Disable persistence
+            store.disable_persistence()
+
+            # Store should still work in memory
+            store.add_sequence_collection_from_fasta(fasta_path)
+
+            sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
+            seq = store.get_sequence_by_id(sha512)
+            assert seq is not None
+            assert seq.metadata.length == 8

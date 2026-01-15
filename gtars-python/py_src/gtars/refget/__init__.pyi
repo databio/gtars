@@ -191,6 +191,9 @@ class GlobalRefgetStore:
         cached locally. This is ideal for working with large remote genomes where
         you only need specific sequences.
 
+        By default, persistence is enabled (sequences are cached to disk).
+        Call `disable_persistence()` after loading to keep only in memory.
+
         Args:
             cache_path: Local directory to cache downloaded metadata and sequences.
                 Created if it doesn't exist.
@@ -213,6 +216,56 @@ class GlobalRefgetStore:
             seq = store.get_substring("chr1_digest", 0, 1000)
             # Second access uses cache
             seq2 = store.get_substring("chr1_digest", 1000, 2000)
+        """
+        ...
+
+    def set_encoding_mode(self, mode: StorageMode) -> None:
+        """Change the storage mode, re-encoding/decoding existing sequences as needed.
+
+        When switching from Raw to Encoded, all Full sequences in memory are
+        encoded (2-bit packed). When switching from Encoded to Raw, all Full
+        sequences in memory are decoded back to raw bytes.
+
+        Args:
+            mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded).
+
+        Example::
+
+            store = GlobalRefgetStore.in_memory()
+            store.set_encoding_mode(StorageMode.Raw)
+        """
+        ...
+
+    def enable_persistence(self, path: Union[str, PathLike]) -> None:
+        """Enable disk persistence for this store.
+
+        Sets up the store to write sequences to disk. Any in-memory Full sequences
+        are flushed to disk and converted to Stubs.
+
+        Args:
+            path: Directory for storing sequences and metadata.
+
+        Raises:
+            IOError: If the directory cannot be created or written to.
+
+        Example::
+
+            store = GlobalRefgetStore.in_memory()
+            store.add_sequence_collection_from_fasta("genome.fa")
+            store.enable_persistence("/data/store")  # Flush to disk
+        """
+        ...
+
+    def disable_persistence(self) -> None:
+        """Disable disk persistence for this store.
+
+        New sequences will be kept in memory only. Existing Stub sequences
+        can still be loaded from disk if local_path is set.
+
+        Example::
+
+            store = GlobalRefgetStore.load_remote("/cache", "https://example.com")
+            store.disable_persistence()  # Stop caching new sequences
         """
         ...
 

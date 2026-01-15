@@ -1,3 +1,29 @@
+//! # GlobalRefgetStore
+//!
+//! A store for managing reference genome sequences with support for both
+//! in-memory and disk-backed storage.
+//!
+//! ## Store Creation Patterns
+//!
+//! ### New stores (empty)
+//! - `in_memory()` - All data in RAM, fast but lost on drop
+//! - `on_disk(path)` - Sequences written to disk immediately, only metadata in RAM
+//!
+//! ### Loading existing stores
+//! - `load_local(path)` - Load from local directory (lazy-loads sequences)
+//! - `load_remote(path, url)` - Load from URL, caches to local directory
+//!
+//! ## Runtime Configuration
+//!
+//! ### Persistence control
+//! - `enable_persistence(path)` - Start writing to disk, flush in-memory data
+//! - `disable_persistence()` - Stop writing to disk (can still read)
+//!
+//! ### Encoding control
+//! - `set_encoding_mode(mode)` - Switch between Raw and Encoded storage
+//! - `enable_encoding()` - Use 2-bit encoding (space efficient)
+//! - `disable_encoding()` - Use raw bytes
+
 use super::alphabet::{AlphabetType, lookup_alphabet};
 use seq_io::fasta::{Reader, Record};
 use std::collections::HashMap;
@@ -70,8 +96,8 @@ pub struct GlobalRefgetStore {
     remote_source: Option<String>,
     /// Template for sequence file paths (e.g., "sequences/%s2/%s.seq")
     seqdata_path_template: Option<String>,
-    /// Whether to cache fetched remote files to disk
-    cache_to_disk: bool,
+    /// Whether to persist sequences to disk (write-through caching)
+    persist_to_disk: bool,
 }
 
 /// Metadata for the entire store.
@@ -212,7 +238,7 @@ impl GlobalRefgetStore {
             local_path: None,
             remote_source: None,
             seqdata_path_template: None,
-            cache_to_disk: false,  // on_disk() overrides to true
+            persist_to_disk: false,  // on_disk() overrides to true
         }
     }
 
@@ -249,7 +275,7 @@ impl GlobalRefgetStore {
             let mut store = Self::new(mode);
             store.local_path = Some(cache_path.to_path_buf());
             store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-            store.cache_to_disk = true;  // Always true for on_disk
+            store.persist_to_disk = true;  // Always true for on_disk
 
             // Create directory structure
             create_dir_all(cache_path.join("sequences"))?;
@@ -263,7 +289,7 @@ impl GlobalRefgetStore {
     ///
     /// All sequences kept in RAM for fast access.
     /// Defaults to Encoded storage mode (2-bit packing for space efficiency).
-    /// Use set_mode() to change storage mode after creation.
+    /// Use set_encoding_mode() to change storage mode after creation.
     ///
     /// # Example
     /// ```ignore
@@ -287,7 +313,7 @@ impl GlobalRefgetStore {
     ///
     /// # Arguments
     /// * `new_mode` - The storage mode to switch to
-    pub fn set_mode(&mut self, new_mode: StorageMode) {
+    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
         if self.mode == new_mode {
             return;  // No change needed
         }
@@ -326,13 +352,67 @@ impl GlobalRefgetStore {
     /// Enable 2-bit encoding for space efficiency.
     /// Re-encodes any existing Raw sequences in memory.
     pub fn enable_encoding(&mut self) {
-        self.set_mode(StorageMode::Encoded);
+        self.set_encoding_mode(StorageMode::Encoded);
     }
 
     /// Disable encoding, use raw byte storage.
     /// Decodes any existing Encoded sequences in memory.
     pub fn disable_encoding(&mut self) {
-        self.set_mode(StorageMode::Raw);
+        self.set_encoding_mode(StorageMode::Raw);
+    }
+
+    /// Enable disk persistence for this store.
+    ///
+    /// Sets up the store to write sequences to disk. Any in-memory Full sequences
+    /// are flushed to disk and converted to Stubs.
+    ///
+    /// # Arguments
+    /// * `path` - Directory for storing sequences and metadata
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn enable_persistence<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        let path = path.as_ref();
+
+        // Set up persistence configuration
+        self.local_path = Some(path.to_path_buf());
+        self.persist_to_disk = true;
+        self.seqdata_path_template
+            .get_or_insert_with(|| DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+
+        // Create directory structure
+        create_dir_all(path.join("sequences"))?;
+        create_dir_all(path.join("collections"))?;
+
+        // Flush any in-memory Full sequences to disk
+        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
+        for key in keys {
+            if let Some(SequenceRecord::Full { metadata, sequence }) = self.sequence_store.get(&key) {
+                // Write to disk
+                self.write_sequence_to_disk_single(metadata, sequence)?;
+                // Convert to stub
+                let stub = SequenceRecord::Stub(metadata.clone());
+                self.sequence_store.insert(key, stub);
+            }
+        }
+
+        // Write all collections to disk
+        for collection in self.collections.values() {
+            self.write_collection_to_disk_single(collection)?;
+        }
+
+        // Write index files
+        self.write_index_files()?;
+
+        Ok(())
+    }
+
+    /// Disable disk persistence for this store.
+    ///
+    /// New sequences will be kept in memory only. Existing Stub sequences
+    /// can still be loaded from disk if local_path is set.
+    pub fn disable_persistence(&mut self) {
+        self.persist_to_disk = false;
     }
 
     /// Adds a sequence to the Store
@@ -409,8 +489,8 @@ impl GlobalRefgetStore {
             return Ok(());
         }
 
-        // Write collection to disk if cache_to_disk is enabled (before moving sequences)
-        if self.cache_to_disk && self.local_path.is_some() {
+        // Write collection to disk if persist_to_disk is enabled (before moving sequences)
+        if self.persist_to_disk && self.local_path.is_some() {
             self.write_collection_to_disk_single(&collection)?;
         }
 
@@ -423,7 +503,7 @@ impl GlobalRefgetStore {
         }
 
         // Write index files so store is immediately loadable
-        if self.cache_to_disk && self.local_path.is_some() {
+        if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }
 
@@ -432,7 +512,7 @@ impl GlobalRefgetStore {
 
     // Adds SequenceRecord to the store.
     // Should only be used internally, via `add_sequence`, which ensures sequences are added to collections.
-    // If the store is disk-backed (cache_to_disk=true), Full records are written to disk and replaced with Stubs.
+    // If the store is disk-backed (persist_to_disk=true), Full records are written to disk and replaced with Stubs.
     fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
@@ -447,7 +527,7 @@ impl GlobalRefgetStore {
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
 
         // Check if we should write Full records to disk
-        if self.cache_to_disk && self.local_path.is_some() {
+        if self.persist_to_disk && self.local_path.is_some() {
             match &sr {
                 SequenceRecord::Full { metadata, sequence } => {
                     // Write to disk
@@ -607,7 +687,7 @@ impl GlobalRefgetStore {
         };
         println!("Loaded {} sequences into GlobalRefgetStore ({}) in {:.2}s.", seq_count, mode_str, elapsed.as_secs_f64());
 
-        // Note: If cache_to_disk=true, sequences were already written to disk
+        // Note: If persist_to_disk=true, sequences were already written to disk
         // and replaced with stubs by add_sequence_record()
 
         Ok(())
@@ -1218,7 +1298,7 @@ impl GlobalRefgetStore {
     }
 
     /// Write a single collection FARG file to disk
-    /// Used when cache_to_disk=true to persist collections incrementally
+    /// Used when persist_to_disk=true to persist collections incrementally
     fn write_collection_to_disk_single(&self, collection: &SequenceCollection) -> Result<()> {
         let local_path = self.local_path.as_ref()
             .context("local_path not set")?;
@@ -1277,10 +1357,10 @@ impl GlobalRefgetStore {
         local_path: &Option<PathBuf>,
         remote_source: &Option<String>,
         relative_path: &str,
-        cache_to_disk: bool,
+        persist_to_disk: bool,
     ) -> Result<Vec<u8>> {
         // Check if file exists locally (only if caching is enabled and path exists)
-        if cache_to_disk {
+        if persist_to_disk {
             if let Some(local_path) = local_path {
                 let full_local_path = local_path.join(relative_path);
                 if full_local_path.exists() {
@@ -1309,7 +1389,7 @@ impl GlobalRefgetStore {
                 .context("Failed to read response body")?;
 
             // Save to local cache only if caching is enabled
-            if cache_to_disk {
+            if persist_to_disk {
                 if let Some(local_path) = local_path {
                     let full_local_path = local_path.join(relative_path);
 
@@ -1352,7 +1432,7 @@ impl GlobalRefgetStore {
         let mut store = GlobalRefgetStore::new(metadata.mode);
         store.local_path = Some(root_path.to_path_buf());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
-        store.cache_to_disk = true;  // Local stores always use disk
+        store.persist_to_disk = true;  // Local stores always use disk
 
         // Load sequence metadata from the sequence index file (metadata only, no data)
         let sequence_index_path = root_path.join(&metadata.sequence_index);
@@ -1432,18 +1512,20 @@ impl GlobalRefgetStore {
     /// This loads metadata from remote and caches sequence data on-demand
     ///
     /// # Arguments
-    /// * `cache_path` - Local directory for caching (used even if cache_to_disk is false for temp operations)
+    /// * `cache_path` - Local directory for caching
     /// * `remote_url` - Remote URL to fetch data from
-    /// * `cache_to_disk` - If true, cache fetched data to disk; if false, keep only in memory
+    ///
+    /// # Notes
+    /// By default, persistence is enabled (sequences are cached to disk).
+    /// Call `disable_persistence()` after loading to keep only in memory.
     pub fn load_remote<P: AsRef<Path>, S: AsRef<str>>(
         cache_path: P,
         remote_url: S,
-        cache_to_disk: bool,
     ) -> Result<Self> {
         let cache_path = cache_path.as_ref();
         let remote_url = remote_url.as_ref().to_string();
 
-        // Create cache directory (needed for metadata even in memory-only mode)
+        // Create cache directory
         create_dir_all(cache_path)?;
 
         // Fetch index.json from remote (always cache metadata - it's small)
@@ -1459,7 +1541,7 @@ impl GlobalRefgetStore {
         store.local_path = Some(cache_path.to_path_buf());
         store.remote_source = Some(remote_url.clone());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
-        store.cache_to_disk = cache_to_disk;
+        store.persist_to_disk = true;  // Default to true; user can call disable_persistence() after
 
         // Fetch sequence index from remote (always cache metadata - it's small)
         let sequence_index_data = Self::fetch_file(
@@ -1563,7 +1645,7 @@ impl GlobalRefgetStore {
         let relative_path = format!("collections/{}.farg", digest_str);
 
         // Try to fetch the collection file
-        // Always cache metadata files (they're small), even when cache_to_disk is false
+        // Always cache metadata files (they're small), even when persist_to_disk is false
         // The memory-only benefit comes from not caching large sequence data files
         let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
 
@@ -1628,8 +1710,8 @@ impl GlobalRefgetStore {
             .replace("%s", digest_str);
 
         // Fetch the sequence data
-        // Use cache_to_disk flag - this is where memory-only mode saves disk I/O
-        let data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, self.cache_to_disk)?;
+        // Use persist_to_disk flag - this is where memory-only mode saves disk I/O
+        let data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, self.persist_to_disk)?;
 
         // Update the record with the loaded data
         self.sequence_store.entry(*digest).and_modify(|r| {
@@ -1692,7 +1774,7 @@ impl GlobalRefgetStore {
     /// store.write()?;  // Updates index files
     /// ```
     pub fn write(&self) -> Result<()> {
-        if !self.cache_to_disk {
+        if !self.persist_to_disk {
             return Err(anyhow!("write() only works with disk-backed stores - use write_store_to_dir() instead"));
         }
 
@@ -1947,10 +2029,10 @@ mod tests {
         store.enable_encoding();
         assert_eq!(store.mode, StorageMode::Encoded);
 
-        // set_mode() also works
-        store.set_mode(StorageMode::Raw);
+        // set_encoding_mode() also works
+        store.set_encoding_mode(StorageMode::Raw);
         assert_eq!(store.mode, StorageMode::Raw);
-        store.set_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded);
         assert_eq!(store.mode, StorageMode::Encoded);
     }
 
@@ -1981,7 +2063,7 @@ mod tests {
         let seq1 = store.get_sequence_by_id(&chr1_sha).unwrap().decode().unwrap();
 
         // Switch to Encoded
-        store.set_mode(StorageMode::Encoded);
+        store.set_encoding_mode(StorageMode::Encoded);
 
         // Verify raw bytes are now bit-packed
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {

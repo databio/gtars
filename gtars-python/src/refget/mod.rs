@@ -793,7 +793,7 @@ impl PyGlobalRefgetStore {
     ///
     /// All sequences kept in RAM for fast access.
     /// Defaults to Encoded storage mode (2-bit packing for space efficiency).
-    /// Use set_mode() to change storage mode after creation.
+    /// Use set_encoding_mode() to change storage mode after creation.
     ///
     /// Returns:
     ///     GlobalRefgetStore: A new in-memory store
@@ -823,9 +823,9 @@ impl PyGlobalRefgetStore {
     /// Example:
     ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
     ///     >>> store = GlobalRefgetStore.in_memory()
-    ///     >>> store.set_mode(StorageMode.Raw)
-    fn set_mode(&mut self, mode: PyStorageMode) {
-        self.inner.set_mode(mode.into());
+    ///     >>> store.set_encoding_mode(StorageMode.Raw)
+    fn set_encoding_mode(&mut self, mode: PyStorageMode) {
+        self.inner.set_encoding_mode(mode.into());
     }
 
     /// Enable 2-bit encoding for space efficiency.
@@ -847,6 +847,41 @@ impl PyGlobalRefgetStore {
     ///     >>> store.disable_encoding()  # Switch to Raw mode
     fn disable_encoding(&mut self) {
         self.inner.disable_encoding();
+    }
+
+    /// Enable disk persistence for this store.
+    ///
+    /// Sets up the store to write sequences to disk. Any in-memory Full sequences
+    /// are flushed to disk and converted to Stubs.
+    ///
+    /// Args:
+    ///     path (str or Path): Directory for storing sequences and metadata
+    ///
+    /// Raises:
+    ///     IOError: If the directory cannot be created or written to.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    ///     >>> store.enable_persistence("/data/store")  # Flush to disk
+    #[pyo3(signature = (path))]
+    fn enable_persistence(&mut self, path: &Bound<'_, PyAny>) -> PyResult<()> {
+        let path = path.to_string();
+        self.inner.enable_persistence(path).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error enabling persistence: {}", e))
+        })
+    }
+
+    /// Disable disk persistence for this store.
+    ///
+    /// New sequences will be kept in memory only. Existing Stub sequences
+    /// can still be loaded from disk if local_path is set.
+    ///
+    /// Example:
+    ///     >>> store = GlobalRefgetStore.load_remote("/cache", "https://example.com")
+    ///     >>> store.disable_persistence()  # Stop caching new sequences
+    fn disable_persistence(&mut self) {
+        self.inner.disable_persistence();
     }
 
     /// Add a sequence collection from a FASTA file.
@@ -1102,6 +1137,9 @@ impl PyGlobalRefgetStore {
     /// cached locally. This is ideal for working with large remote genomes where
     /// you only need specific sequences.
     ///
+    /// By default, persistence is enabled (sequences are cached to disk).
+    /// Call `disable_persistence()` after loading to keep only in memory.
+    ///
     /// Args:
     ///     cache_path (str or Path): Local directory to cache downloaded metadata and sequences.
     ///         Created if it doesn't exist.
@@ -1114,11 +1152,6 @@ impl PyGlobalRefgetStore {
     /// Raises:
     ///     IOError: If remote metadata cannot be fetched or cache cannot be written.
     ///
-    /// Args:
-    ///     cache_path (str or Path): Local directory for caching
-    ///     remote_url (str): Remote URL to fetch data from
-    ///     cache_to_disk: If True (default), cache sequence data to disk. If False, keep only in memory.
-    ///
     /// Example:
     ///     >>> from gtars.refget import GlobalRefgetStore
     ///     >>> # With disk caching (default)
@@ -1129,15 +1162,14 @@ impl PyGlobalRefgetStore {
     ///     >>> # Memory-only mode (no sequence data caching to disk)
     ///     >>> store = GlobalRefgetStore.load_remote(
     ///     ...     "/tmp/cache",
-    ///     ...     "https://refget-server.com/hg38",
-    ///     ...     cache_to_disk=False
+    ///     ...     "https://refget-server.com/hg38"
     ///     ... )
+    ///     >>> store.disable_persistence()
     #[classmethod]
-    #[pyo3(signature = (cache_path, remote_url, cache_to_disk=true))]
-    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>, cache_to_disk: bool) -> PyResult<Self> {
+    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
         let remote_url = remote_url.to_string();
-        let store = GlobalRefgetStore::load_remote(cache_path, remote_url, cache_to_disk).map_err(|e| {
+        let store = GlobalRefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
         })?;
         Ok(Self { inner: store })
