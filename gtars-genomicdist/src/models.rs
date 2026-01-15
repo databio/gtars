@@ -101,10 +101,7 @@ impl TryFrom<&Path> for GenomeAssembly {
 }
 
 impl GenomeAssembly {
-    pub fn seq_from_region<'a>(
-        &'a self,
-        coords: &Region,
-    ) -> Result<&'a [u8], GtarsGenomicDistError> {
+    pub fn seq_from_region<'a>(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
         let chr = &coords.chr;
         let start = coords.start as usize;
         let end = coords.end as usize;
