@@ -1,10 +1,17 @@
+//! GenomicDistributions functions and extensions for RegionSet module
+//!
+//! This file includes popular statistics calculated on RegionSets and functions involving
+//! TSS information and Reference Genome
+//!
+
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
 use gtars_overlaprs::OverlapperType;
 
-use crate::models::{ChromosomeStatistics, RegionBin};
+use crate::errors::GtarsGenomicDistError;
+use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin};
 use crate::utils::partition_genome_into_bins;
 
 /// Trait for computing statistics and distributions of genomic intervals.
@@ -29,6 +36,11 @@ pub trait GenomicIntervalSetStatistics {
     fn region_distribution(&self) -> HashMap<String, RegionBin> {
         self.region_distribution_with_bins(250)
     }
+
+    /// Compute Neighbor_distances
+    ///
+    /// Returns a vector of vectors between the regions
+    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
 }
 
 impl GenomicIntervalSetStatistics for RegionSet {
@@ -123,7 +135,163 @@ impl GenomicIntervalSetStatistics for RegionSet {
         }
         plot_results
     }
+
+    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
+        let mut distances: Vec<u32> = vec![];
+
+        for chr in self.iter_chroms() {
+            // if there is only one region on the chromosome, skip it, can't calculate distance between one region
+            if self.iter_chr_regions(chr).count() < 2 {
+                continue;
+            }
+
+            for window in self.regions.windows(2) {
+                let distance: f32 = window[1].start as f32 - window[0].end as f32;
+                let absolute_dist: u32 = if distance > 0f32 {
+                    distance as u32
+                } else {
+                    0u32
+                };
+                distances.push(absolute_dist);
+            }
+        }
+
+        Ok(distances)
+    }
 }
+
+///
+///  Calculate GC content for bed file
+///
+/// Arguments:
+/// - region_set: RegionSet object
+/// - genome: GenomeAssembly object (reference genome)
+/// - ignore_unk_chroms: bool to ignore unknown chromosomes for reference genome
+///
+pub fn calc_gc_content(
+    region_set: &RegionSet,
+    genome: &GenomeAssembly,
+    ignore_unk_chroms: bool,
+) -> Result<Vec<f64>, GtarsGenomicDistError> {
+    // for region in region_set
+    let mut gc_contents: Vec<f64> = vec![];
+    for chr in region_set.iter_chroms() {
+        // check if the chrom is even in genome
+        if ignore_unk_chroms && !genome.contains_chr(chr) {
+            continue;
+        }
+
+        for region in region_set.iter_chr_regions(chr) {
+            let mut gc_count: u32 = 0;
+            let mut total_count: u32 = 0;
+            let seq = genome.seq_from_region(region);
+
+            match seq {
+                Ok(seq) => {
+                    for base in seq {
+                        match base.to_ascii_lowercase() {
+                            b'g' | b'c' => {
+                                gc_count += 1;
+                            }
+                            _ => {}
+                        }
+                        total_count += 1;
+                    }
+                    gc_contents.push(gc_count as f64 / total_count as f64);
+                }
+                Err(e) => {
+                    if ignore_unk_chroms {
+                        continue;
+                    } else {
+                        return Err(GtarsGenomicDistError::GCContentError(
+                            region.chr.to_string(),
+                            region.start,
+                            region.end,
+                            format!("{}", e),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(gc_contents)
+}
+
+///
+///  Calculate Dinucleotide frequencies
+///
+/// Arguments:
+/// - region_set: RegionSet object
+/// - genome: GenomeAssembly object (reference genome)
+/// Return: Result of hashmap of dinucleotide and frequencies e.g. 'Aa: 13142'
+pub fn calc_dinucl_freq(
+    region_set: &RegionSet,
+    genome: &GenomeAssembly,
+) -> Result<HashMap<Dinucleotide, u64>, GtarsGenomicDistError> {
+    let mut dinucl_freqs: HashMap<Dinucleotide, u64> = HashMap::new();
+
+    for chr in region_set.iter_chroms() {
+        for region in region_set.iter_chr_regions(chr) {
+            let seq = genome.seq_from_region(region)?;
+            for aas in seq.windows(2) {
+                let dinucl = Dinucleotide::from_bytes(aas);
+                match dinucl {
+                    Some(dinucl) => {
+                        let current_freq = dinucl_freqs.entry(dinucl).or_insert(0);
+                        *current_freq += 1;
+                    }
+                    None => continue,
+                }
+            }
+        }
+    }
+
+    Ok(dinucl_freqs)
+}
+
+// /// TODO: fix and test this function
+// /// Calculate TSS distances of the regions in BED file
+// ///
+// /// Arguments:
+// /// - region_set: RegionSet object
+// /// - tss_index: TsSSindex object
+// ///
+// /// Returns:
+// /// - Vector of tss distances to the region
+// pub fn calc_tss_dist(
+//     region_set: &RegionSet,
+//     tss_index: &TSSIndex,
+// ) -> Result<Vec<u32>, GtarsGenomicDistError> {
+//     let mut tss_dists: Vec<u32> = Vec::with_capacity(region_set.len());
+//
+//     for chr in region_set.iter_chroms() {
+//         if !tss_index.has_chr(chr) {
+//             continue;
+//         }
+//         for region in region_set.iter_chr_regions(chr) {
+//             let tsses = tss_index.query(region);
+//             if tsses.is_none() {
+//                 return Err(GtarsGenomicDistError::TSSContentError(
+//                     region.chr.clone(),
+//                     region.start,
+//                     region.end,
+//                 ));
+//             }
+//
+//             let midpoint = region.end - region.start;
+//
+//             let dists = tsses.unwrap().into_iter().map(|tss| {
+//                 let tss_midpoint = tss.end - tss.start;
+//                 midpoint - tss_midpoint
+//             });
+//
+//             tss_dists.push(dists.min().unwrap());
+//         }
+//     }
+//
+//     Ok(tss_dists)
+// }
 
 #[cfg(test)]
 mod tests {
@@ -164,5 +332,27 @@ mod tests {
         let distribution = region_set.region_distribution_with_bins(5);
         assert_eq!(distribution.len(), 5);
         assert!((distribution.values().next().unwrap().rid as i32 > -1));
+    }
+
+    #[rstest]
+    fn test_calculate_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let distribution = region_set.calc_neighbor_distances().unwrap();
+        assert_eq!(distribution.len(), 72);
+    }
+
+    #[rstest]
+    #[ignore] // only for local testing
+    fn test_calc_dinucl_freq() {
+        let ga = GenomeAssembly::try_from("/home/bnt4me/virginia/repos/bedboss/data/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4/fasta/default/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4.fa").unwrap();
+        let rs =
+            RegionSet::try_from("/home/bnt4me/Downloads/dcc005e8761ad5599545cc538f6a2a4d.bed.gz")
+                .unwrap();
+
+        let result = calc_dinucl_freq(&rs, &ga).unwrap();
+
+        assert_ne!(result.len(), 0);
     }
 }

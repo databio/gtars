@@ -388,6 +388,23 @@ impl RegionSet {
     }
 
     ///
+    /// Iterate Chromosomes located in RegionSet
+    ///
+    pub fn iter_chroms(&self) -> impl Iterator<Item = &String> {
+        self.regions.iter().map(|r| &r.chr)
+    }
+
+    ///
+    /// Iterate through regions located on specific Chromosome in RegionSet
+    ///
+    /// # Arguments
+    /// - chr: chromosome name
+    ///
+    pub fn iter_chr_regions<'a>(&'a self, chr: &'a str) -> impl Iterator<Item = &'a Region> {
+        self.regions.iter().filter(move |r| r.chr == chr)
+    }
+
+    ///
     /// Save RegionSet as bigBed (binary version of bed file)
     ///
     /// # Arguments
@@ -476,6 +493,19 @@ impl RegionSet {
             return true;
         }
         false
+    }
+
+    ///
+    /// Calculate all regions width
+    ///
+    pub fn region_widths(&self) -> Result<Vec<u32>> {
+        let mut widths: Vec<u32> = Vec::new();
+
+        for region in &self.regions {
+            widths.push(region.width())
+        }
+
+        Ok(widths)
     }
 
     pub fn mean_region_width(&self) -> f64 {

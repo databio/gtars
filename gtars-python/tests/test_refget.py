@@ -187,13 +187,11 @@ class TestRefget:
             with open(temp_fasta_path, "w") as f:
                 f.write(fasta_content)
 
-
             store = GlobalRefgetStore(StorageMode.Encoded)
             imported_collection = store.import_fasta(temp_fasta_path)
             result = digest_fasta(temp_fasta_path)
 
             collection_digest = result.digest
-
 
             chr1_sha = sha512t24u_digest(b"ATGCATGCATGC")
             chr1_md5 = md5_digest(b"ATGCATGCATGC")
