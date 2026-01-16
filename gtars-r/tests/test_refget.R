@@ -28,15 +28,15 @@ test_that("fasta file digestion works", {
 })
 
 test_that("refget store initialization works", {
-  store <- global_refget_store('raw')
-  expect_s4_class(store, "GlobalRefgetStore")
+  store <- refget_store('raw')
+  expect_s4_class(store, "RefgetStore")
 })
 
 test_that("fasta import and sequence retrieval works", {
   fasta_path <- '../../gtars/tests/data/fasta/base.fa'
   skip_if_not(file.exists(fasta_path), "Test FASTA file not found")
   
-  store <- global_refget_store('raw')
+  store <- refget_store('raw')
   result <- gtars::digest_fasta(fasta_path)
   import_fasta(store, fasta_path)
   
@@ -58,7 +58,7 @@ test_that("store save and load works", {
   skip_if_not(file.exists(fasta_path), "Test FASTA file not found")
   
   temp_dir <- tempdir()
-  store <- global_refget_store('raw')
+  store <- refget_store('raw')
   import_fasta(store, fasta_path)
   
   write_store_to_directory(store, temp_dir, 'sequences/%s2/%s.seq')
@@ -83,7 +83,7 @@ test_that("BED file sequence extraction to FASTA works", {
   )
   writeLines(fasta_content, temp_fasta_path)
   
-  store <- global_refget_store('encoded')
+  store <- refget_store('encoded')
   import_fasta(store, temp_fasta_path)
   result <- digest_fasta(temp_fasta_path)
   
@@ -135,7 +135,7 @@ test_that("BED file sequence extraction to vector works", {
   )
   writeLines(fasta_content, temp_fasta_path)
   
-  store <- global_refget_store('encoded')
+  store <- refget_store('encoded')
   import_fasta(store, temp_fasta_path)
   result <- digest_fasta(temp_fasta_path)
   

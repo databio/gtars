@@ -1,4 +1,4 @@
-//! # GlobalRefgetStore
+//! # RefgetStore
 //!
 //! A store for managing reference genome sequences with support for both
 //! in-memory and disk-backed storage.
@@ -50,7 +50,7 @@ use std::str;
 // Import the HashKeyable trait for converting types to a 32-byte key
 
 // Import collection types
-use super::collection::{SequenceCollection, SequenceMetadata, SequenceRecord};
+use super::collection::{SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord};
 
 // const DEFAULT_COLLECTION_ID: [u8; 32] = [0u8; 32]; // Default collection ID for the name lookup table
 
@@ -76,9 +76,9 @@ pub struct RetrievedSequence {
 /// Holds a global sequence_store, which holds all sequences (across collections) so that
 /// sequences are deduplicated.
 /// This allows lookup by sequence digest directly (bypassing collection information).
-/// The GlobalRefgetStore also holds a collections hashmap, to provide lookup by collection+name
+/// The RefgetStore also holds a collections hashmap, to provide lookup by collection+name
 #[derive(Debug)]
-pub struct GlobalRefgetStore {
+pub struct RefgetStore {
     /// SHA512t24u digest -> SequenceRecord (metadata + optional data)
     sequence_store: HashMap<[u8; 32], SequenceRecord>,
     /// MD5 digest -> SHA512t24u digest lookup
@@ -86,8 +86,8 @@ pub struct GlobalRefgetStore {
 
     /// Collection digest -> {name -> SHA512t24u digest}
     name_lookup: HashMap<[u8; 32], HashMap<String, [u8; 32]>>,
-    /// Active sequence collections
-    collections: HashMap<[u8; 32], SequenceCollection>,
+    /// Active sequence collections (now using SequenceCollectionRecord for Stub/Full pattern)
+    collections: HashMap<[u8; 32], SequenceCollectionRecord>,
     /// Storage strategy for sequences
     mode: StorageMode,
     /// Where the store lives on disk (local store or cache directory)
@@ -101,7 +101,7 @@ pub struct GlobalRefgetStore {
 }
 
 /// Metadata for the entire store.
-/// This is used to serialize metadata to a `index.json`, which can be loaded by the application.
+/// This is used to serialize metadata to `rgstore.json` (formerly `index.json`), which can be loaded by the application.
 #[derive(Serialize, Deserialize, Debug)]
 struct StoreMetadata {
     /// Version of the metadata format
@@ -112,6 +112,9 @@ struct StoreMetadata {
     collections_path_template: String,
     /// Path to the sequence metadata index file
     sequence_index: String,
+    /// Path to the collection metadata index file (NEW)
+    #[serde(default)]
+    collection_index: Option<String>,
     /// Storage mode (Raw or Encoded)
     mode: StorageMode,
     /// Creation timestamp
@@ -122,7 +125,7 @@ pub struct SubstringsFromRegions<'a, K>
 where
     K: AsRef<[u8]>,
 {
-    store: &'a mut GlobalRefgetStore,
+    store: &'a mut RefgetStore,
     reader: BufReader<Box<dyn Read>>,
     collection_digest: K,
     previous_parsed_chr: String,
@@ -221,15 +224,15 @@ where
     }
 }
 
-impl GlobalRefgetStore {
-    /// Generic constructor. Creates a new, empty `GlobalRefgetStore`.
+impl RefgetStore {
+    /// Generic constructor. Creates a new, empty `RefgetStore`.
     /// This is a private helper - use `on_disk()` or `in_memory()` instead.
     fn new(mode: StorageMode) -> Self {
         // Initialize the name lookup with a default collection
         let mut name_lookup = HashMap::new();
         name_lookup.insert(DEFAULT_COLLECTION_ID.to_key(), HashMap::new());
 
-        GlobalRefgetStore {
+        RefgetStore {
             sequence_store: HashMap::new(),
             md5_lookup: HashMap::new(),
             name_lookup,
@@ -256,14 +259,16 @@ impl GlobalRefgetStore {
     ///
     /// # Example
     /// ```ignore
-    /// let store = GlobalRefgetStore::on_disk("/data/store")?;
+    /// let store = RefgetStore::on_disk("/data/store")?;
     /// store.add_sequence_collection_from_fasta("genome.fa")?;
     /// ```
     pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let cache_path = cache_path.as_ref();
-        let index_path = cache_path.join("index.json");
+        // Check for both new (rgstore.json) and old (index.json) format
+        let new_index_path = cache_path.join("rgstore.json");
+        let old_index_path = cache_path.join("index.json");
 
-        if index_path.exists() {
+        if new_index_path.exists() || old_index_path.exists() {
             // Load existing store
             Self::load_local(cache_path)
         } else {
@@ -293,7 +298,7 @@ impl GlobalRefgetStore {
     ///
     /// # Example
     /// ```ignore
-    /// let store = GlobalRefgetStore::in_memory();
+    /// let store = RefgetStore::in_memory();
     /// store.add_sequence_collection_from_fasta("genome.fa")?;
     /// ```
     pub fn in_memory() -> Self {
@@ -397,8 +402,8 @@ impl GlobalRefgetStore {
         }
 
         // Write all collections to disk
-        for collection in self.collections.values() {
-            self.write_collection_to_disk_single(collection)?;
+        for record in self.collections.values() {
+            self.write_collection_to_disk_single(record)?;
         }
 
         // Write index files
@@ -489,13 +494,16 @@ impl GlobalRefgetStore {
             return Ok(());
         }
 
+        // Convert to SequenceCollectionRecord
+        let record = SequenceCollectionRecord::from(collection.clone());
+
         // Write collection to disk if persist_to_disk is enabled (before moving sequences)
         if self.persist_to_disk && self.local_path.is_some() {
-            self.write_collection_to_disk_single(&collection)?;
+            self.write_collection_to_disk_single(&record)?;
         }
 
-        // Register the collection
-        self.collections.insert(coll_digest, collection.clone());
+        // Register the collection record
+        self.collections.insert(coll_digest, record);
 
         // Add all sequences in the collection to the store
         for sequence_record in collection.sequences {
@@ -606,7 +614,7 @@ impl GlobalRefgetStore {
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
 
-        println!("Loading sequences into GlobalRefgetStore...");
+        println!("Loading sequences into RefgetStore...");
         let start_time = Instant::now();
 
         let mut seq_count = 0;
@@ -685,7 +693,7 @@ impl GlobalRefgetStore {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
-        println!("Loaded {} sequences into GlobalRefgetStore ({}) in {:.2}s.", seq_count, mode_str, elapsed.as_secs_f64());
+        println!("Loaded {} sequences into RefgetStore ({}) in {:.2}s.", seq_count, mode_str, elapsed.as_secs_f64());
 
         // Note: If persist_to_disk=true, sequences were already written to disk
         // and replaced with stubs by add_sequence_record()
@@ -732,7 +740,7 @@ impl GlobalRefgetStore {
     ///
     /// # Examples
     /// ```ignore
-    /// let store = GlobalRefgetStore::on_disk("store");
+    /// let store = RefgetStore::on_disk("store");
     /// store.add_sequence_collection_from_fasta("genome.fa")?;
     /// let disk_size = store.total_disk_size();
     /// println!("Sequences use {} bytes on disk", disk_size);
@@ -767,9 +775,33 @@ impl GlobalRefgetStore {
         self.collections.keys().cloned()
     }
 
-    /// Returns an iterator over all collections
-    pub fn collections(&self) -> impl Iterator<Item = &SequenceCollection> + '_ {
+    /// Returns an iterator over all collections as SequenceCollections
+    /// Note: For Stub records, this returns collections with empty sequence lists.
+    /// Use `collection_records()` to access the raw SequenceCollectionRecord values.
+    pub fn collections(&self) -> impl Iterator<Item = SequenceCollection> + '_ {
+        self.collections.values().map(|record| record.to_collection())
+    }
+
+    /// Returns an iterator over all collection records (Stub or Full)
+    pub fn collection_records(&self) -> impl Iterator<Item = &SequenceCollectionRecord> + '_ {
         self.collections.values()
+    }
+
+    /// List all collection digests in the store (both Stub and Full)
+    pub fn list_collections(&self) -> impl Iterator<Item = &str> + '_ {
+        self.collections.values().map(|record| record.metadata().digest.as_str())
+    }
+
+    /// Get metadata for a collection by digest without loading the full collection
+    pub fn get_collection_metadata<K: AsRef<[u8]>>(&self, collection_digest: K) -> Option<&SequenceCollectionMetadata> {
+        let key = collection_digest.to_key();
+        self.collections.get(&key).map(|record| record.metadata())
+    }
+
+    /// Check if a collection is fully loaded (Full) or just metadata (Stub)
+    pub fn is_collection_loaded<K: AsRef<[u8]>>(&self, collection_digest: K) -> bool {
+        let key = collection_digest.to_key();
+        self.collections.get(&key).map_or(false, |record| record.has_sequences())
     }
 
     /// Returns the local path where the store is located (if any)
@@ -1297,14 +1329,14 @@ impl GlobalRefgetStore {
         Ok(())
     }
 
-    /// Write a single collection FARG file to disk
+    /// Write a single collection RGSI file to disk (renamed from FARG)
     /// Used when persist_to_disk=true to persist collections incrementally
-    fn write_collection_to_disk_single(&self, collection: &SequenceCollection) -> Result<()> {
+    fn write_collection_to_disk_single(&self, record: &SequenceCollectionRecord) -> Result<()> {
         let local_path = self.local_path.as_ref()
             .context("local_path not set")?;
 
-        // Build path: collections/{digest}.farg
-        let coll_file_path = format!("collections/{}.farg", collection.digest);
+        // Build path: collections/{digest}.rgsi (renamed from .farg)
+        let coll_file_path = format!("collections/{}.rgsi", record.metadata().digest);
         let full_path = local_path.join(&coll_file_path);
 
         // Create parent directory
@@ -1312,13 +1344,13 @@ impl GlobalRefgetStore {
             create_dir_all(parent)?;
         }
 
-        // Write collection FARG file
-        collection.write_collection_farg(&full_path)?;
+        // Write collection RGSI file
+        record.write_collection_rgsi(&full_path)?;
 
         Ok(())
     }
 
-    /// Write index files (sequences.farg and index.json) to disk
+    /// Write index files (sequences.rgsi, collections.rgci, and rgstore.json) to disk
     ///
     /// This allows the store to be loaded later via load_local().
     /// Called automatically when adding collections in disk-backed mode.
@@ -1328,27 +1360,68 @@ impl GlobalRefgetStore {
         let template = self.seqdata_path_template.as_ref()
             .context("seqdata_path_template not set")?;
 
-        // Write the sequence metadata index file
-        let sequence_index_path = local_path.join("sequences.farg");
-        self.write_sequences_farg(&sequence_index_path)?;
+        // Write the sequence metadata index file (renamed from sequences.farg)
+        let sequence_index_path = local_path.join("sequences.rgsi");
+        self.write_sequences_rgsi(&sequence_index_path)?;
+
+        // Write the collection metadata index file (NEW)
+        let collection_index_path = local_path.join("collections.rgci");
+        self.write_collections_rgci(&collection_index_path)?;
 
         // Create the metadata structure
         let metadata = StoreMetadata {
             version: 1,
             seqdata_path_template: template.clone(),
-            collections_path_template: "collections/%s.farg".to_string(),
-            sequence_index: "sequences.farg".to_string(),
+            collections_path_template: "collections/%s.rgsi".to_string(),
+            sequence_index: "sequences.rgsi".to_string(),
+            collection_index: Some("collections.rgci".to_string()),
             mode: self.mode,
             created_at: Utc::now().to_rfc3339(),
         };
 
-        // Write metadata to index.json
+        // Write metadata to rgstore.json (renamed from index.json)
         let json = serde_json::to_string_pretty(&metadata)
             .context("Failed to serialize metadata to JSON")?;
-        fs::write(local_path.join("index.json"), json)
-            .context("Failed to write index.json")?;
+        fs::write(local_path.join("rgstore.json"), json)
+            .context("Failed to write rgstore.json")?;
 
         Ok(())
+    }
+
+    /// Write collection metadata index (collections.rgci) to disk
+    ///
+    /// Creates a master index of all collections with their metadata.
+    /// Format: TSV with columns: digest, n_sequences, names_digest, sequences_digest, lengths_digest
+    fn write_collections_rgci<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        let file_path = file_path.as_ref();
+        let mut file = File::create(file_path)?;
+
+        // Write header
+        writeln!(file, "#digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest")?;
+
+        // Write collection metadata for all collections
+        for record in self.collections.values() {
+            let meta = record.metadata();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}",
+                meta.digest,
+                meta.n_sequences,
+                meta.names_digest,
+                meta.sequences_digest,
+                meta.lengths_digest,
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Write all sequence metadata to an RGSI file (renamed from FARG).
+    ///
+    /// Creates a global sequence index file containing metadata for all sequences
+    /// in the store across all collections.
+    pub fn write_sequences_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        // RGSI format is identical to FARG, just a different extension
+        self.write_sequences_farg(file_path)
     }
 
     /// Helper function to fetch a file from local path or remote source
@@ -1415,21 +1488,32 @@ impl GlobalRefgetStore {
 
     /// Load a local RefgetStore from a directory
     /// This loads metadata only; sequence data is loaded on-demand
+    /// Supports both new format (rgstore.json, sequences.rgsi, collections.rgci)
+    /// and old format (index.json, sequences.farg, collections/*.farg) for backward compatibility
     pub fn load_local<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let root_path = cache_path.as_ref();
 
-        // Read and parse index.json
-        let index_path = root_path.join("index.json");
-        let json = fs::read_to_string(&index_path).context(format!(
-            "Failed to read index.json from {}",
-            index_path.display()
-        ))?;
+        // Try to read new format (rgstore.json) first, fall back to old format (index.json)
+        let new_index_path = root_path.join("rgstore.json");
+        let old_index_path = root_path.join("index.json");
+
+        let (json, is_new_format) = if new_index_path.exists() {
+            (fs::read_to_string(&new_index_path).context(format!(
+                "Failed to read rgstore.json from {}",
+                new_index_path.display()
+            ))?, true)
+        } else {
+            (fs::read_to_string(&old_index_path).context(format!(
+                "Failed to read index.json from {}",
+                old_index_path.display()
+            ))?, false)
+        };
 
         let metadata: StoreMetadata =
-            serde_json::from_str(&json).context("Failed to parse index.json")?;
+            serde_json::from_str(&json).context("Failed to parse store metadata")?;
 
         // Create a new empty store with the correct mode
-        let mut store = GlobalRefgetStore::new(metadata.mode);
+        let mut store = RefgetStore::new(metadata.mode);
         store.local_path = Some(root_path.to_path_buf());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
         store.persist_to_disk = true;  // Local stores always use disk
@@ -1437,70 +1521,49 @@ impl GlobalRefgetStore {
         // Load sequence metadata from the sequence index file (metadata only, no data)
         let sequence_index_path = root_path.join(&metadata.sequence_index);
         if sequence_index_path.exists() {
-            let file = std::fs::File::open(&sequence_index_path)?;
-            let reader = std::io::BufReader::new(file);
+            Self::load_sequences_from_index(&mut store, &sequence_index_path)?;
+        }
 
-            for line in reader.lines() {
-                let line = line?;
-
-                // Skip comment lines
-                if line.starts_with('#') {
-                    continue;
-                }
-
-                // Parse sequence metadata lines
-                let parts: Vec<&str> = line.split('\t').collect();
-                if parts.len() != 5 {
-                    continue; // Skip lines that don't have exactly 5 columns
-                }
-
-                let seq_metadata = SequenceMetadata {
-                    name: parts[0].to_string(),
-                    length: parts[1].parse().unwrap_or(0),
-                    alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                    sha512t24u: parts[3].to_string(),
-                    md5: parts[4].to_string(),
-                    fai: None,  // Lazy loading doesn't preserve FAI data
-                };
-
-                // Create a SequenceRecord with no data (lazy loading)
-                let record = SequenceRecord::Stub(seq_metadata.clone());
-
-                // Add to store
-                let sha512_key = seq_metadata.sha512t24u.to_key();
-                store.sequence_store.insert(sha512_key, record);
-
-                // Add to MD5 lookup
-                let md5_key = seq_metadata.md5.to_key();
-                store.md5_lookup.insert(md5_key, sha512_key);
+        // Try to load collection stubs from collections.rgci (new format)
+        if let Some(ref collection_index) = metadata.collection_index {
+            let collection_index_path = root_path.join(collection_index);
+            if collection_index_path.exists() {
+                Self::load_collection_stubs_from_rgci(&mut store, &collection_index_path)?;
             }
         }
 
-        // Load collections from the collections directory
-        let collections_dir = root_path.join("collections");
-        if collections_dir.exists() {
-            for entry in fs::read_dir(&collections_dir)? {
-                let entry = entry?;
-                let path = entry.path();
+        // If no collection stubs loaded (old format or missing rgci), load full collections from directory
+        if store.collections.is_empty() {
+            let collections_dir = root_path.join("collections");
+            if collections_dir.exists() {
+                // Check for both new (.rgsi) and old (.farg) extensions
+                for entry in fs::read_dir(&collections_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
 
-                if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("farg")) {
-                    // Load the collection from the .farg file
-                    let collection = read_fasta_refget_file(&path)?;
-                    let collection_digest = collection.digest.to_key();
+                    let is_rgsi = path.extension() == Some(std::ffi::OsStr::new("rgsi"));
+                    let is_farg = path.extension() == Some(std::ffi::OsStr::new("farg"));
 
-                    // Add collection to store
-                    store
-                        .collections
-                        .insert(collection_digest, collection.clone());
+                    if path.is_file() && (is_rgsi || is_farg) {
+                        // Load the collection from the file
+                        let collection = read_fasta_refget_file(&path)?;
+                        let collection_digest = collection.digest.to_key();
 
-                    // Build name lookup for this collection
-                    let mut name_map = HashMap::new();
-                    for sequence_record in &collection.sequences {
-                        let metadata = sequence_record.metadata();
-                        let sha512_key = metadata.sha512t24u.to_key();
-                        name_map.insert(metadata.name.clone(), sha512_key);
+                        // Convert to SequenceCollectionRecord::Full
+                        let record = SequenceCollectionRecord::from(collection.clone());
+
+                        // Add collection record to store
+                        store.collections.insert(collection_digest, record);
+
+                        // Build name lookup for this collection
+                        let mut name_map = HashMap::new();
+                        for sequence_record in &collection.sequences {
+                            let metadata = sequence_record.metadata();
+                            let sha512_key = metadata.sha512t24u.to_key();
+                            name_map.insert(metadata.name.clone(), sha512_key);
+                        }
+                        store.name_lookup.insert(collection_digest, name_map);
                     }
-                    store.name_lookup.insert(collection_digest, name_map);
                 }
             }
         }
@@ -1508,8 +1571,93 @@ impl GlobalRefgetStore {
         Ok(store)
     }
 
+    /// Load sequence metadata from a sequence index file (sequences.rgsi or sequences.farg)
+    fn load_sequences_from_index(store: &mut RefgetStore, index_path: &Path) -> Result<()> {
+        let file = std::fs::File::open(index_path)?;
+        let reader = std::io::BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+
+            // Skip comment lines
+            if line.starts_with('#') {
+                continue;
+            }
+
+            // Parse sequence metadata lines
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() != 5 {
+                continue; // Skip lines that don't have exactly 5 columns
+            }
+
+            let seq_metadata = SequenceMetadata {
+                name: parts[0].to_string(),
+                length: parts[1].parse().unwrap_or(0),
+                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+                sha512t24u: parts[3].to_string(),
+                md5: parts[4].to_string(),
+                fai: None,  // Lazy loading doesn't preserve FAI data
+            };
+
+            // Create a SequenceRecord with no data (lazy loading)
+            let record = SequenceRecord::Stub(seq_metadata.clone());
+
+            // Add to store
+            let sha512_key = seq_metadata.sha512t24u.to_key();
+            store.sequence_store.insert(sha512_key, record);
+
+            // Add to MD5 lookup
+            let md5_key = seq_metadata.md5.to_key();
+            store.md5_lookup.insert(md5_key, sha512_key);
+        }
+
+        Ok(())
+    }
+
+    /// Load collection stubs from collections.rgci index file (new format)
+    fn load_collection_stubs_from_rgci(store: &mut RefgetStore, index_path: &Path) -> Result<()> {
+        let file = std::fs::File::open(index_path)?;
+        let reader = std::io::BufReader::new(file);
+
+        for line in reader.lines() {
+            let line = line?;
+
+            // Skip comment/header lines
+            if line.starts_with('#') {
+                continue;
+            }
+
+            // Parse collection metadata lines
+            // Format: digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 5 {
+                continue;
+            }
+
+            let metadata = SequenceCollectionMetadata {
+                digest: parts[0].to_string(),
+                n_sequences: parts[1].parse().unwrap_or(0),
+                names_digest: parts[2].to_string(),
+                sequences_digest: parts[3].to_string(),
+                lengths_digest: parts[4].to_string(),
+                file_path: None,
+            };
+
+            let key = metadata.digest.to_key();
+
+            // Create a SequenceCollectionRecord::Stub (sequences not loaded)
+            store.collections.insert(key, SequenceCollectionRecord::Stub(metadata));
+
+            // Note: name_lookup is NOT populated for stubs - it will be populated
+            // when the collection is loaded via ensure_collection_loaded()
+        }
+
+        Ok(())
+    }
+
     /// Load a remote-backed RefgetStore
     /// This loads metadata from remote and caches sequence data on-demand
+    /// Supports both new format (rgstore.json) and old format (index.json)
     ///
     /// # Arguments
     /// * `cache_path` - Local directory for caching
@@ -1528,16 +1676,24 @@ impl GlobalRefgetStore {
         // Create cache directory
         create_dir_all(cache_path)?;
 
-        // Fetch index.json from remote (always cache metadata - it's small)
-        let index_data = Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "index.json", true)?;
+        // Try to fetch new format (rgstore.json) first, fall back to old format (index.json)
+        let (index_data, _is_new_format) = match Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "rgstore.json", true) {
+            Ok(data) => (data, true),
+            Err(_) => {
+                // Try old format
+                let data = Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "index.json", true)?;
+                (data, false)
+            }
+        };
+
         let json = String::from_utf8(index_data)
-            .context("index.json contains invalid UTF-8")?;
+            .context("Store metadata contains invalid UTF-8")?;
 
         let metadata: StoreMetadata =
-            serde_json::from_str(&json).context("Failed to parse index.json")?;
+            serde_json::from_str(&json).context("Failed to parse store metadata")?;
 
         // Create a new empty store with the correct mode
-        let mut store = GlobalRefgetStore::new(metadata.mode);
+        let mut store = RefgetStore::new(metadata.mode);
         store.local_path = Some(cache_path.to_path_buf());
         store.remote_source = Some(remote_url.clone());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
@@ -1587,40 +1743,77 @@ impl GlobalRefgetStore {
             store.md5_lookup.insert(md5_key, sha512_key);
         }
 
-        // Load collections from the collections directory
-        let collections_dir_path = "collections";
-        let local_collections_dir = cache_path.join(collections_dir_path);
+        // Try to fetch and load collection stubs from collections.rgci (new format)
+        if let Some(ref collection_index) = metadata.collection_index {
+            if let Ok(collection_index_data) = Self::fetch_file(
+                &Some(cache_path.to_path_buf()),
+                &Some(remote_url.clone()),
+                collection_index,
+                true,
+            ) {
+                let collection_index_str = String::from_utf8(collection_index_data)
+                    .context("collection index contains invalid UTF-8")?;
 
-        // Try to read from local cache first, or create if doesn't exist
-        if !local_collections_dir.exists() {
-            create_dir_all(&local_collections_dir)?;
+                // Parse collection stubs
+                for line in collection_index_str.lines() {
+                    if line.starts_with('#') {
+                        continue;
+                    }
+                    let parts: Vec<&str> = line.split('\t').collect();
+                    if parts.len() < 5 {
+                        continue;
+                    }
+
+                    let coll_metadata = SequenceCollectionMetadata {
+                        digest: parts[0].to_string(),
+                        n_sequences: parts[1].parse().unwrap_or(0),
+                        names_digest: parts[2].to_string(),
+                        sequences_digest: parts[3].to_string(),
+                        lengths_digest: parts[4].to_string(),
+                        file_path: None,
+                    };
+
+                    let key = coll_metadata.digest.to_key();
+                    store.collections.insert(key, SequenceCollectionRecord::Stub(coll_metadata));
+                }
+            }
         }
 
-        // Note: We'll try to fetch collection files on-demand when needed
-        // For now, just check if any exist locally
-        if local_collections_dir.exists() {
-            for entry in fs::read_dir(&local_collections_dir)? {
-                let entry = entry?;
-                let path = entry.path();
+        // If no collection stubs loaded, check for cached collections in local directory
+        if store.collections.is_empty() {
+            let local_collections_dir = cache_path.join("collections");
+            if !local_collections_dir.exists() {
+                create_dir_all(&local_collections_dir)?;
+            }
 
-                if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("farg")) {
-                    // Load the collection from the .farg file
-                    let collection = read_fasta_refget_file(&path)?;
-                    let collection_digest = collection.digest.to_key();
+            if local_collections_dir.exists() {
+                for entry in fs::read_dir(&local_collections_dir)? {
+                    let entry = entry?;
+                    let path = entry.path();
 
-                    // Add collection to store
-                    store
-                        .collections
-                        .insert(collection_digest, collection.clone());
+                    let is_rgsi = path.extension() == Some(std::ffi::OsStr::new("rgsi"));
+                    let is_farg = path.extension() == Some(std::ffi::OsStr::new("farg"));
 
-                    // Build name lookup for this collection
-                    let mut name_map = HashMap::new();
-                    for sequence_record in &collection.sequences {
-                        let metadata = sequence_record.metadata();
-                        let sha512_key = metadata.sha512t24u.to_key();
-                        name_map.insert(metadata.name.clone(), sha512_key);
+                    if path.is_file() && (is_rgsi || is_farg) {
+                        // Load the collection from the file
+                        let collection = read_fasta_refget_file(&path)?;
+                        let collection_digest = collection.digest.to_key();
+
+                        // Convert to SequenceCollectionRecord::Full
+                        let record = SequenceCollectionRecord::from(collection.clone());
+
+                        // Add collection record to store
+                        store.collections.insert(collection_digest, record);
+
+                        // Build name lookup for this collection
+                        let mut name_map = HashMap::new();
+                        for sequence_record in &collection.sequences {
+                            let metadata = sequence_record.metadata();
+                            let sha512_key = metadata.sha512t24u.to_key();
+                            name_map.insert(metadata.name.clone(), sha512_key);
+                        }
+                        store.name_lookup.insert(collection_digest, name_map);
                     }
-                    store.name_lookup.insert(collection_digest, name_map);
                 }
             }
         }
@@ -1629,55 +1822,88 @@ impl GlobalRefgetStore {
     }
 
     /// Ensure a collection is loaded into the store
-    /// If the collection is not already loaded, try to fetch it from local or remote
+    /// If the collection is a Stub, try to fetch full data from local or remote
+    /// and upgrade it to Full. Also builds name_lookup for the collection.
     fn ensure_collection_loaded(&mut self, collection_digest: &[u8; 32]) -> Result<()> {
-        // Check if collection is already loaded
+        // Check if name_lookup is already populated for this collection
         if self.name_lookup.contains_key(collection_digest) {
             return Ok(());
         }
 
-        // Collection not found - try to fetch it if we have a remote source
-        // Convert the collection digest to a string for the path
-        let digest_str = String::from_utf8_lossy(collection_digest);
+        // Check if we have a Stub that needs to be loaded
+        let needs_fetch = match self.collections.get(collection_digest) {
+            Some(SequenceCollectionRecord::Stub(_)) => true,
+            Some(SequenceCollectionRecord::Full { .. }) => false,
+            None => true,  // Not in collections at all, need to fetch
+        };
 
-        // Build the collection file path using the template
-        // Default template is "collections/%s.farg"
-        let relative_path = format!("collections/{}.farg", digest_str);
+        if needs_fetch {
+            // Get the digest string (either from Stub or from the key)
+            let digest_str = if let Some(SequenceCollectionRecord::Stub(meta)) = self.collections.get(collection_digest) {
+                meta.digest.clone()
+            } else {
+                String::from_utf8_lossy(collection_digest).to_string()
+            };
 
-        // Try to fetch the collection file
-        // Always cache metadata files (they're small), even when persist_to_disk is false
-        // The memory-only benefit comes from not caching large sequence data files
-        let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
+            // Try new format (.rgsi) first, fall back to old format (.farg)
+            let relative_path_new = format!("collections/{}.rgsi", digest_str);
+            let relative_path_old = format!("collections/{}.farg", digest_str);
 
-        // Read the collection from the cached file
-        let collection_file_path = self.local_path
-            .as_ref()
-            .ok_or_else(|| anyhow!("No local path configured"))?
-            .join(&relative_path);
+            // Try to fetch the collection file
+            // Always cache metadata files (they're small), even when persist_to_disk is false
+            let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path_new, true)
+                .or_else(|_| Self::fetch_file(&self.local_path, &self.remote_source, &relative_path_old, true))?;
 
-        let collection = read_fasta_refget_file(&collection_file_path)?;
+            // Read the collection from the cached file
+            let local_path = self.local_path
+                .as_ref()
+                .ok_or_else(|| anyhow!("No local path configured"))?;
 
-        // Verify the collection digest matches what we requested
-        let loaded_digest = collection.digest.to_key();
-        if loaded_digest != *collection_digest {
-            eprintln!(
-                "Warning: Collection digest mismatch. Expected {:?}, got {:?}",
-                String::from_utf8_lossy(collection_digest),
-                String::from_utf8_lossy(&loaded_digest)
-            );
+            // Try to read from new format first, then old format
+            let collection_file_path = if local_path.join(&relative_path_new).exists() {
+                local_path.join(&relative_path_new)
+            } else {
+                local_path.join(&relative_path_old)
+            };
+
+            let collection = read_fasta_refget_file(&collection_file_path)?;
+
+            // Verify the collection digest matches what we requested
+            let loaded_digest = collection.digest.to_key();
+            if loaded_digest != *collection_digest {
+                eprintln!(
+                    "Warning: Collection digest mismatch. Expected {:?}, got {:?}",
+                    String::from_utf8_lossy(collection_digest),
+                    String::from_utf8_lossy(&loaded_digest)
+                );
+            }
+
+            // Convert to SequenceCollectionRecord::Full and replace Stub if present
+            let record = SequenceCollectionRecord::from(collection.clone());
+
+            // Add collection to store (replacing Stub if present)
+            self.collections.insert(*collection_digest, record);
+
+            // Build name lookup for this collection
+            let mut name_map = HashMap::new();
+            for sequence_record in &collection.sequences {
+                let metadata = sequence_record.metadata();
+                let sha512_key = metadata.sha512t24u.to_key();
+                name_map.insert(metadata.name.clone(), sha512_key);
+            }
+            self.name_lookup.insert(*collection_digest, name_map);
+        } else {
+            // Collection is Full but name_lookup not built yet - build it now
+            if let Some(SequenceCollectionRecord::Full { sequences, .. }) = self.collections.get(collection_digest) {
+                let mut name_map = HashMap::new();
+                for sequence_record in sequences {
+                    let metadata = sequence_record.metadata();
+                    let sha512_key = metadata.sha512t24u.to_key();
+                    name_map.insert(metadata.name.clone(), sha512_key);
+                }
+                self.name_lookup.insert(*collection_digest, name_map);
+            }
         }
-
-        // Add collection to store
-        self.collections.insert(*collection_digest, collection.clone());
-
-        // Build name lookup for this collection
-        let mut name_map = HashMap::new();
-        for sequence_record in &collection.sequences {
-            let metadata = sequence_record.metadata();
-            let sha512_key = metadata.sha512t24u.to_key();
-            name_map.insert(metadata.name.clone(), sha512_key);
-        }
-        self.name_lookup.insert(*collection_digest, name_map);
 
         Ok(())
     }
@@ -1769,7 +1995,7 @@ impl GlobalRefgetStore {
     ///
     /// # Example
     /// ```ignore
-    /// let store = GlobalRefgetStore::on_disk("/data/store")?;
+    /// let store = RefgetStore::on_disk("/data/store")?;
     /// store.add_sequence_collection_from_fasta("genome.fa")?;
     /// store.write()?;  // Updates index files
     /// ```
@@ -1782,7 +2008,7 @@ impl GlobalRefgetStore {
         self.write_index_files()
     }
 
-    /// Write a GlobalRefgetStore object to a directory
+    /// Write a RefgetStore object to a directory
     pub fn write_store_to_dir<P: AsRef<Path>>(
         &self,
         root_path: P,
@@ -1831,31 +2057,36 @@ impl GlobalRefgetStore {
             }
         }
 
-        // Write each collection to its own .farg file
-        for collection in self.collections.values() {
+        // Write each collection to its own .rgsi file
+        for record in self.collections.values() {
             let collection_file_path =
-                root_path.join(format!("collections/{}.farg", collection.digest));
-            collection.write_collection_farg(&collection_file_path)?;
+                root_path.join(format!("collections/{}.rgsi", record.metadata().digest));
+            record.write_collection_rgsi(&collection_file_path)?;
         }
 
         // Write the sequence metadata index file
-        let sequence_index_path = root_path.join("sequences.farg");
+        let sequence_index_path = root_path.join("sequences.rgsi");
         self.write_sequences_farg(&sequence_index_path)?;
+
+        // Write the collection metadata index file
+        let collection_index_path = root_path.join("collections.rgci");
+        self.write_collections_rgci(&collection_index_path)?;
 
         // Create the metadata structure
         let metadata = StoreMetadata {
             version: 1,
             seqdata_path_template: template.to_string(),
-            collections_path_template: "collections/%s.farg".to_string(),
-            sequence_index: "sequences.farg".to_string(),
+            collections_path_template: "collections/%s.rgsi".to_string(),
+            sequence_index: "sequences.rgsi".to_string(),
+            collection_index: Some("collections.rgci".to_string()),
             mode: self.mode,
             created_at: Utc::now().to_rfc3339(),
         };
 
-        // Write metadata to index.json
+        // Write metadata to rgstore.json
         let json = serde_json::to_string_pretty(&metadata)
             .context("Failed to serialize metadata to JSON")?;
-        fs::write(root_path.join("index.json"), json).context("Failed to write index.json")?;
+        fs::write(root_path.join("rgstore.json"), json).context("Failed to write rgstore.json")?;
 
         Ok(())
     }
@@ -1869,13 +2100,53 @@ impl GlobalRefgetStore {
     /// For remote stores, collections are loaded on-demand when accessed.
     pub fn stats(&self) -> (usize, usize, &'static str) {
         let n_sequences = self.sequence_store.len();
-        let n_collections_loaded = self.collections.len();
+        let n_collections_loaded = self.collections.values()
+            .filter(|record| record.has_sequences())
+            .count();
         let mode_str = match self.mode {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
         (n_sequences, n_collections_loaded, mode_str)
     }
+
+    /// Extended statistics including stub/loaded breakdown for collections
+    pub fn stats_extended(&self) -> StoreStats {
+        let n_sequences = self.sequence_store.len();
+        let n_sequences_loaded = self.sequence_store.values()
+            .filter(|record| record.has_data())
+            .count();
+        let n_collections = self.collections.len();
+        let n_collections_loaded = self.collections.values()
+            .filter(|record| record.has_sequences())
+            .count();
+        let mode_str = match self.mode {
+            StorageMode::Raw => "Raw",
+            StorageMode::Encoded => "Encoded",
+        };
+        StoreStats {
+            n_sequences,
+            n_sequences_loaded,
+            n_collections,
+            n_collections_loaded,
+            storage_mode: mode_str.to_string(),
+        }
+    }
+}
+
+/// Extended statistics for a RefgetStore
+#[derive(Debug, Clone)]
+pub struct StoreStats {
+    /// Total number of sequences (Stub + Full)
+    pub n_sequences: usize,
+    /// Number of sequences with data loaded (Full)
+    pub n_sequences_loaded: usize,
+    /// Total number of collections (Stub + Full)
+    pub n_collections: usize,
+    /// Number of collections with sequences loaded (Full)
+    pub n_collections_loaded: usize,
+    /// Storage mode (Raw or Encoded)
+    pub storage_mode: String,
 }
 
 /// Format bytes into human-readable size (KB, MB, GB, etc.)
@@ -1896,7 +2167,7 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
-impl Display for GlobalRefgetStore {
+impl Display for RefgetStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let total_size = self.total_disk_size();
         let size_str = format_bytes(total_size);
@@ -2018,7 +2289,7 @@ mod tests {
     #[test]
     fn test_mode_basics() {
         // Test default mode and convenience methods (no sequences needed)
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
 
         // Default is Encoded
         assert_eq!(store.mode, StorageMode::Encoded);
@@ -2045,7 +2316,7 @@ mod tests {
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Create store in Raw mode and load sequences
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.disable_encoding();
         assert_eq!(store.mode, StorageMode::Raw);
 
@@ -2085,7 +2356,7 @@ mod tests {
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Create store in default Encoded mode and load sequences
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         assert_eq!(store.mode, StorageMode::Encoded);
 
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
@@ -2133,8 +2404,8 @@ GGGGAAAA
 
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
-        // --- 2. Initialize GlobalRefgetStore and import FASTA ---
-        let mut store = GlobalRefgetStore::in_memory();
+        // --- 2. Initialize RefgetStore and import FASTA ---
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
@@ -2228,7 +2499,7 @@ chr1\t-5\t100
     fn test_global_refget_store() {
         let sequence = b"ACGT";
         let name = "test_seq";
-        println!("Testing GlobalRefgetStore with sequence: {}", name);
+        println!("Testing RefgetStore with sequence: {}", name);
 
         // Create a sequence collection
         let mut collection = SequenceCollection {
@@ -2260,7 +2531,7 @@ chr1\t-5\t100
         collection.sequences.push(record);
 
         // Add the sequence to the store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection(collection.clone()).unwrap();
 
         // Verify the store has the sequence
@@ -2322,7 +2593,7 @@ chr1\t-5\t100
 
         std::fs::copy(test_fa, &temp_fa).expect("Failed to copy test FASTA file");
 
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
 
         // Import the FASTA file
         store.add_sequence_collection_from_fasta(temp_fa).unwrap();
@@ -2348,7 +2619,7 @@ chr1\t-5\t100
             .expect("Failed to copy base.fa.gz to tempdir");
 
         // Create a new sequence store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
 
         // Import a FASTA file into the store
         // store.add_sequence_collection_from_fasta("../tests/data/subset.fa.gz").unwrap();
@@ -2375,15 +2646,16 @@ chr1\t-5\t100
             .write_store_to_dir(temp_path, Some(seq_template))
             .unwrap();
 
-        // Verify that the files were created
+        // Verify that the files were created (using new names)
         assert!(temp_path.join("sequences").exists());
         assert!(temp_path.join("sequences").read_dir().unwrap().count() > 0);
-        assert!(temp_path.join("index.json").exists());
-        assert!(temp_path.join("sequences.farg").exists());
+        assert!(temp_path.join("rgstore.json").exists());
+        assert!(temp_path.join("sequences.rgsi").exists());
+        assert!(temp_path.join("collections.rgci").exists());
         assert!(temp_path.join("collections").exists());
 
         // Load the store from disk
-        let mut loaded_store = GlobalRefgetStore::load_local(temp_path).unwrap();
+        let mut loaded_store = RefgetStore::load_local(temp_path).unwrap();
 
         // Verify that the loaded store has the same sequences
         assert_eq!(loaded_store.sequence_store.len(), 3);
@@ -2465,7 +2737,7 @@ TTTTCCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
@@ -2511,7 +2783,7 @@ TTTTCCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get the collection digest
@@ -2556,7 +2828,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store1 = GlobalRefgetStore::in_memory();
+        let mut store1 = RefgetStore::in_memory();
         store1.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get original digests
@@ -2575,7 +2847,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
             .expect("Failed to export FASTA");
 
         // Re-import the exported FASTA
-        let mut store2 = GlobalRefgetStore::in_memory();
+        let mut store2 = RefgetStore::in_memory();
         store2.add_sequence_collection_from_fasta(&exported_path).unwrap();
 
         // Verify digests match (same sequences)
@@ -2613,7 +2885,7 @@ GGGGAAAA
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Get digests
@@ -2656,7 +2928,7 @@ ATGCATGCATGC
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import into store
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
         // Test with non-existent collection
@@ -2700,7 +2972,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
         // Import FASTA with sequence names containing spaces
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path)
             .expect("Should handle sequence names with spaces");
 
@@ -2740,7 +3012,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::copy(test_file, &temp_fasta).expect("Failed to copy test file");
 
         // Load the FASTA - this creates a .farg file
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta)
             .expect("Should load FASTA");
 
@@ -2777,7 +3049,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .expect("Failed to copy base.fa.gz to tempdir");
 
         let cache_path = temp_path.join("cache");
-        let mut store = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
 
         // Load FASTA file into the store
         store.add_sequence_collection_from_fasta(&temp_fasta).unwrap();
@@ -2791,15 +3063,15 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
 
-        assert!(!farg_files.is_empty(), "Collection FARG files should be written incrementally, found: {:?}", farg_files);
-        assert!(farg_files.iter().any(|f| f.ends_with(".farg")), "Should have .farg files");
+        assert!(!farg_files.is_empty(), "Collection RGSI files should be written incrementally, found: {:?}", farg_files);
+        assert!(farg_files.iter().any(|f| f.ends_with(".rgsi")), "Should have .rgsi files");
 
         println!("✓ On-disk collection incremental write test passed");
     }
 
     #[test]
     fn test_disk_size_calculation() {
-        let mut store = GlobalRefgetStore::in_memory();
+        let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
 
         let disk_size = store.total_disk_size();
@@ -2816,28 +3088,29 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     fn test_incremental_index_writing() {
         let temp_dir = tempdir().unwrap();
         let cache_path = temp_dir.path().join("store");
-        let mut store = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
 
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
 
-        // Index files should exist immediately
-        assert!(cache_path.join("index.json").exists(), "index.json should exist");
-        assert!(cache_path.join("sequences.farg").exists(), "sequences.farg should exist");
+        // Index files should exist immediately (using new names)
+        assert!(cache_path.join("rgstore.json").exists(), "rgstore.json should exist");
+        assert!(cache_path.join("sequences.rgsi").exists(), "sequences.rgsi should exist");
+        assert!(cache_path.join("collections.rgci").exists(), "collections.rgci should exist");
 
         // Store should be loadable (mode ignored for existing store)
-        let _loaded = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let _loaded = RefgetStore::on_disk(&cache_path).unwrap();
     }
 
     #[test]
     fn test_write_method() {
         let temp_dir = tempdir().unwrap();
         let cache_path = temp_dir.path().join("store");
-        let mut store = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
 
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
         store.write().unwrap();  // Should succeed
 
-        assert!(cache_path.join("index.json").exists());
+        assert!(cache_path.join("rgstore.json").exists());
     }
 
     #[test]
@@ -2846,30 +3119,108 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let cache_path = temp_dir.path().join("store");
 
         // Create new store (defaults to Encoded mode)
-        let mut store1 = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let mut store1 = RefgetStore::on_disk(&cache_path).unwrap();
         assert_eq!(store1.mode, StorageMode::Encoded);
         store1.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
 
         // Load existing store - should preserve Encoded mode
-        let store2 = GlobalRefgetStore::on_disk(&cache_path).unwrap();
+        let store2 = RefgetStore::on_disk(&cache_path).unwrap();
         assert_eq!(store2.sequence_store.len(), store1.sequence_store.len());
         assert_eq!(store2.mode, StorageMode::Encoded, "Loaded store should preserve Encoded mode");
 
         // Test with Raw mode
         let cache_path_raw = temp_dir.path().join("store_raw");
-        let mut store3 = GlobalRefgetStore::on_disk(&cache_path_raw).unwrap();
+        let mut store3 = RefgetStore::on_disk(&cache_path_raw).unwrap();
         store3.disable_encoding(); // Switch to Raw
         assert_eq!(store3.mode, StorageMode::Raw);
         store3.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
 
         // Load and verify Raw mode is persisted
-        let store4 = GlobalRefgetStore::on_disk(&cache_path_raw).unwrap();
+        let store4 = RefgetStore::on_disk(&cache_path_raw).unwrap();
         assert_eq!(store4.mode, StorageMode::Raw, "Loaded store should preserve Raw mode");
 
-        // Verify index.json contains the mode
-        let index_path = cache_path_raw.join("index.json");
+        // Verify rgstore.json contains the mode
+        let index_path = cache_path_raw.join("rgstore.json");
         let json = fs::read_to_string(&index_path).unwrap();
         assert!(json.contains("\"mode\":\"Raw\"") || json.contains("\"mode\": \"Raw\""),
-                "index.json should contain mode: Raw");
+                "rgstore.json should contain mode: Raw");
+    }
+
+    #[test]
+    fn test_collection_metadata_methods() {
+        // Test list_collections, get_collection_metadata, is_collection_loaded
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+
+        // Add a FASTA file
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+
+        // Test list_collections
+        let collections: Vec<_> = store.list_collections().collect();
+        assert_eq!(collections.len(), 1, "Should have 1 collection");
+        let digest = collections[0].to_string();
+
+        // Test get_collection_metadata
+        let meta = store.get_collection_metadata(&digest);
+        assert!(meta.is_some(), "Should get collection metadata");
+        let meta = meta.unwrap();
+        assert_eq!(meta.n_sequences, 3, "Collection should have 3 sequences");
+
+        // Test is_collection_loaded - should be true since we just added it
+        assert!(store.is_collection_loaded(&digest), "Collection should be loaded (Full)");
+
+        // Test stats_extended returns collection counts
+        let stats = store.stats_extended();
+        assert_eq!(stats.n_collections, 1, "Should have 1 collection total");
+        assert_eq!(stats.n_collections_loaded, 1, "Should have 1 collection loaded");
+        assert_eq!(stats.n_sequences, 3, "Should have 3 sequences");
+
+        println!("✓ Collection metadata methods test passed");
+    }
+
+    #[test]
+    fn test_collection_stub_lazy_loading() {
+        // Test that collections load as Stubs and upgrade to Full on-demand
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+
+        // Create and populate the store
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+        let digest = store.list_collections().next().unwrap().to_string();
+
+        // Drop the store and reload from disk
+        drop(store);
+        let mut loaded_store = RefgetStore::load_local(&cache_path).unwrap();
+
+        // VERIFY: Metadata is available (from collections.rgci)
+        let meta = loaded_store.get_collection_metadata(&digest);
+        assert!(meta.is_some(), "Metadata should be available for Stub");
+        assert_eq!(meta.unwrap().n_sequences, 3, "Stub should know sequence count");
+
+        // VERIFY: Collection is a Stub (not loaded into memory)
+        assert!(!loaded_store.is_collection_loaded(&digest),
+            "Collection should be Stub after loading from disk");
+
+        // VERIFY: stats shows 0 collections loaded
+        let stats_before = loaded_store.stats_extended();
+        assert_eq!(stats_before.n_collections, 1, "Should have 1 collection total");
+        assert_eq!(stats_before.n_collections_loaded, 0, "Should have 0 collections loaded initially");
+
+        // TRIGGER: Access a sequence by name - this should trigger lazy loading
+        let seq = loaded_store.get_sequence_by_collection_and_name(&digest, "chr1");
+        assert!(seq.is_some(), "Should be able to retrieve sequence after lazy load");
+        assert_eq!(seq.unwrap().metadata().name, "chr1");
+
+        // VERIFY: Collection is now Full (loaded into memory)
+        assert!(loaded_store.is_collection_loaded(&digest),
+            "Collection should be Full after accessing a sequence");
+
+        // VERIFY: stats now shows 1 collection loaded
+        let stats_after = loaded_store.stats_extended();
+        assert_eq!(stats_after.n_collections_loaded, 1, "Should have 1 collection loaded after access");
+
+        println!("✓ Collection stub lazy loading test passed");
     }
 }

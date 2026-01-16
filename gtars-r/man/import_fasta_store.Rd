@@ -7,7 +7,7 @@
 import_fasta_store(store_ptr, file_path)
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{file_path}{Path to FASTA file}
 }

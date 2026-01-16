@@ -48,35 +48,35 @@ md5_digest <- function(readable) .Call(wrap__md5_digest, readable)
 #' @param fasta A filepath string to a fasta file.
 digest_fasta_raw <- function(fasta) .Call(wrap__digest_fasta_raw, fasta)
 
-#' Create a GlobalRefgetStore
+#' Create a RefgetStore
 #' @param mode Storage mode: "raw" or "encoded"
-global_refget_store_raw <- function(mode) .Call(wrap__global_refget_store_raw, mode)
+refget_store_raw <- function(mode) .Call(wrap__refget_store_raw, mode)
 
 #' Import FASTA file into store
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
 import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_store, store_ptr, file_path)
 
 #' Get sequence by ID from store
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param digest Sequence digest
 get_sequence_by_id_store <- function(store_ptr, digest) .Call(wrap__get_sequence_by_id_store, store_ptr, digest)
 
 #' Get sequence by collection and name
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param sequence_name Sequence name
 get_sequence_by_collection_and_name_store <- function(store_ptr, collection_digest, sequence_name) .Call(wrap__get_sequence_by_collection_and_name_store, store_ptr, collection_digest, sequence_name)
 
 #' Get substring from sequence
-#' @param store_ptr External pointer to GlobalRefgetStore  
+#' @param store_ptr External pointer to RefgetStore  
 #' @param seq_digest Sequence digest
 #' @param start Start position
 #' @param end End position
 get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
 
 #' Write store to directory
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param root_path Path to write store
 #' @param seqdata_path_template Path template name
 write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_template) .Call(wrap__write_store_to_directory_store, store_ptr, root_path, seqdata_path_template)
@@ -87,14 +87,14 @@ write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_te
 load_from_directory_store <- function(root_path) .Call(wrap__load_from_directory_store, root_path)
 
 #' Extract BED file sequences from store as FASTA
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 #' @param output_file_path Path to output FASTA file
 get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path, output_file_path) .Call(wrap__get_seqs_bed_file_store, store_ptr, collection_digest, bed_file_path, output_file_path)
 
 #' Extract BED file sequences from store into memory
-#' @param store_ptr External pointer to GlobalRefgetStore
+#' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_vec_store, store_ptr, collection_digest, bed_file_path)

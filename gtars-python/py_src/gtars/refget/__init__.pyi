@@ -68,6 +68,30 @@ class SeqColDigestLvl1:
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
+class SequenceCollectionMetadata:
+    """
+    Metadata for a sequence collection.
+
+    Contains the collection digest and level 1 digests for names, sequences, and lengths.
+    This is a lightweight representation of a collection without the actual sequence list.
+
+    Attributes:
+        digest: The collection's SHA-512/24u digest.
+        n_sequences: Number of sequences in the collection.
+        names_digest: Level 1 digest of the names array.
+        sequences_digest: Level 1 digest of the sequences array.
+        lengths_digest: Level 1 digest of the lengths array.
+    """
+
+    digest: str
+    n_sequences: int
+    names_digest: str
+    sequences_digest: str
+    lengths_digest: str
+
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
 class SequenceCollection:
     """
     A collection of biological sequences.
@@ -107,10 +131,10 @@ class StorageMode(Enum):
     Raw: int
     Encoded: int
 
-class GlobalRefgetStore:
+class RefgetStore:
     """A global store for GA4GH refget sequences with lazy-loading support.
 
-    GlobalRefgetStore provides content-addressable storage for reference genome
+    RefgetStore provides content-addressable storage for reference genome
     sequences following the GA4GH refget specification. Supports both local and
     remote stores with on-demand sequence loading.
 
@@ -122,18 +146,18 @@ class GlobalRefgetStore:
     Examples:
         Create a new store and import sequences::
 
-            from gtars.refget import GlobalRefgetStore, StorageMode
-            store = GlobalRefgetStore(StorageMode.Encoded)
+            from gtars.refget import RefgetStore, StorageMode
+            store = RefgetStore(StorageMode.Encoded)
             store.import_fasta("genome.fa")
 
         Load an existing local store::
 
-            store = GlobalRefgetStore.load_local("/data/hg38")
+            store = RefgetStore.load_local("/data/hg38")
             seq = store.get_substring("chr1_digest", 0, 1000)
 
         Load a remote store with caching::
 
-            store = GlobalRefgetStore.load_remote(
+            store = RefgetStore.load_remote(
                 "/local/cache",
                 "https://example.com/hg38"
             )
@@ -143,7 +167,7 @@ class GlobalRefgetStore:
     remote_url: Optional[str]
 
     def __init__(self, mode: StorageMode) -> None:
-        """Create a new empty GlobalRefgetStore.
+        """Create a new empty RefgetStore.
 
         Args:
             mode: Storage mode - StorageMode.Raw (uncompressed) or
@@ -151,31 +175,71 @@ class GlobalRefgetStore:
 
         Example::
 
-            store = GlobalRefgetStore(StorageMode.Encoded)
+            store = RefgetStore(StorageMode.Encoded)
         """
         ...
 
     @classmethod
-    def load_local(cls, cache_path: Union[str, PathLike]) -> "GlobalRefgetStore":
+    def in_memory(cls) -> "RefgetStore":
+        """Create a new in-memory RefgetStore.
+
+        Creates a store that keeps all sequences in memory. Use this for
+        temporary processing or when you don't need disk persistence.
+
+        Returns:
+            New empty RefgetStore with Encoded storage mode.
+
+        Example::
+
+            store = RefgetStore.in_memory()
+            store.import_fasta("genome.fa")
+        """
+        ...
+
+    @classmethod
+    def on_disk(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
+        """Create or load a disk-backed RefgetStore.
+
+        If the directory contains an existing store (rgstore.json or index.json),
+        loads it. Otherwise creates a new store with Encoded mode.
+
+        Args:
+            cache_path: Directory path for the store. Created if it doesn't exist.
+
+        Returns:
+            RefgetStore (new or loaded from disk).
+
+        Example::
+
+            store = RefgetStore.on_disk("/data/my_store")
+            store.import_fasta("genome.fa")
+            # Store is automatically persisted to disk
+        """
+        ...
+
+    @classmethod
+    def load_local(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
         """Load a local RefgetStore from a directory.
 
         Loads metadata from the local store immediately; sequence data is loaded
         on-demand when first accessed. This is efficient for large genomes where
         you may only need specific sequences.
 
+        Supports both new format (rgstore.json, sequences.rgsi, collections.rgci)
+        and old format (index.json, sequences.farg) for backward compatibility.
+
         Args:
-            cache_path: Local directory containing the refget store (must have
-                index.json and sequences.farg files).
+            cache_path: Local directory containing the refget store.
 
         Returns:
-            GlobalRefgetStore with metadata loaded, sequences lazy-loaded.
+            RefgetStore with metadata loaded, sequences lazy-loaded.
 
         Raises:
             IOError: If the store directory or index files cannot be read.
 
         Example::
 
-            store = GlobalRefgetStore.load_local("/data/hg38_store")
+            store = RefgetStore.load_local("/data/hg38_store")
             seq = store.get_substring("chr1_digest", 0, 1000)
         """
         ...
@@ -183,13 +247,16 @@ class GlobalRefgetStore:
     @classmethod
     def load_remote(
         cls, cache_path: Union[str, PathLike], remote_url: str
-    ) -> "GlobalRefgetStore":
+    ) -> "RefgetStore":
         """Load a remote RefgetStore with local caching.
 
-        Fetches metadata (index.json, sequences.farg) from a remote URL immediately.
-        Sequence data (.seq files) are downloaded on-demand when first accessed and
-        cached locally. This is ideal for working with large remote genomes where
-        you only need specific sequences.
+        Fetches metadata from a remote URL immediately. Sequence data (.seq files)
+        are downloaded on-demand when first accessed and cached locally. This is
+        ideal for working with large remote genomes where you only need specific
+        sequences.
+
+        Supports both new format (rgstore.json) and old format (index.json) for
+        backward compatibility with existing remote stores.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
@@ -201,14 +268,14 @@ class GlobalRefgetStore:
                 "https://example.com/hg38" or "s3://bucket/hg38").
 
         Returns:
-            GlobalRefgetStore with metadata loaded, sequences fetched on-demand.
+            RefgetStore with metadata loaded, sequences fetched on-demand.
 
         Raises:
             IOError: If remote metadata cannot be fetched or cache cannot be written.
 
         Example::
 
-            store = GlobalRefgetStore.load_remote(
+            store = RefgetStore.load_remote(
                 "/data/cache/hg38",
                 "https://refget-server.com/hg38"
             )
@@ -231,7 +298,7 @@ class GlobalRefgetStore:
 
         Example::
 
-            store = GlobalRefgetStore.in_memory()
+            store = RefgetStore.in_memory()
             store.set_encoding_mode(StorageMode.Raw)
         """
         ...
@@ -250,7 +317,7 @@ class GlobalRefgetStore:
 
         Example::
 
-            store = GlobalRefgetStore.in_memory()
+            store = RefgetStore.in_memory()
             store.add_sequence_collection_from_fasta("genome.fa")
             store.enable_persistence("/data/store")  # Flush to disk
         """
@@ -264,7 +331,7 @@ class GlobalRefgetStore:
 
         Example::
 
-            store = GlobalRefgetStore.load_remote("/cache", "https://example.com")
+            store = RefgetStore.load_remote("/cache", "https://example.com")
             store.disable_persistence()  # Stop caching new sequences
         """
         ...
@@ -283,7 +350,7 @@ class GlobalRefgetStore:
 
         Example::
 
-            store = GlobalRefgetStore(StorageMode.Encoded)
+            store = RefgetStore(StorageMode.Encoded)
             store.import_fasta("genome.fa")
         """
         ...
@@ -364,11 +431,88 @@ class GlobalRefgetStore:
         """
         ...
 
-    def list_collections(self) -> List[SequenceCollection]:
-        """List all sequence collections in the store.
+    def collections(self) -> List[SequenceCollection]:
+        """Get all sequence collections in the store.
+
+        Note: For collections loaded as stubs (metadata only), this returns
+        collections with empty sequence lists. Use `list_collections()` to get
+        just the digests without loading full collection data.
 
         Returns:
             List of all sequence collections.
+        """
+        ...
+
+    def list_collections(self) -> List[str]:
+        """List all collection digests in the store.
+
+        Returns all collection digests, including both loaded (Full) and
+        not-yet-loaded (Stub) collections.
+
+        Returns:
+            List of collection digest strings.
+
+        Example::
+
+            for digest in store.list_collections():
+                print(f"Collection: {digest}")
+        """
+        ...
+
+    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
+        """Get metadata for a collection by digest.
+
+        Returns lightweight metadata without loading the full collection.
+        Use this for quick lookups of collection information.
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            Collection metadata if found, None otherwise.
+
+        Example::
+
+            meta = store.get_collection_metadata("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
+            if meta:
+                print(f"Collection has {meta.n_sequences} sequences")
+        """
+        ...
+
+    def is_collection_loaded(self, collection_digest: str) -> bool:
+        """Check if a collection is fully loaded.
+
+        Returns True if the collection's sequence list is loaded in memory,
+        False if it's only metadata (stub).
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            True if loaded, False otherwise.
+        """
+        ...
+
+    def stats(self) -> dict:
+        """Returns statistics about the store.
+
+        Returns:
+            dict with keys:
+                - 'n_sequences': Total number of sequences (Stub + Full)
+                - 'n_sequences_loaded': Number of sequences with data loaded (Full)
+                - 'n_collections': Total number of collections (Stub + Full)
+                - 'n_collections_loaded': Number of collections with sequences loaded (Full)
+                - 'storage_mode': Storage mode ('Raw' or 'Encoded')
+
+        Note:
+            n_collections_loaded only reflects collections fully loaded in memory.
+            For remote stores, collections are loaded on-demand when accessed.
+
+        Example::
+
+            stats = store.stats()
+            print(f"Store has {stats['n_sequences']} sequences")
+            print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
         """
         ...
 

@@ -1,4 +1,4 @@
-//! Integration tests for decode() workflow through GlobalRefgetStore
+//! Integration tests for decode() workflow through RefgetStore
 //!
 //! These tests validate the end-to-end workflow of importing FASTA files,
 //! storing sequences, retrieving them, and decoding them through the public API.
@@ -6,7 +6,7 @@
 //! Note: Unit tests for the decode() method itself (including edge cases,
 //! different alphabets, encoding schemes) are in src/collection.rs
 
-use gtars_refget::store::{GlobalRefgetStore, StorageMode};
+use gtars_refget::store::{RefgetStore, StorageMode};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -29,7 +29,7 @@ fn test_decode_workflow_encoded() {
     let fasta_path = fasta_file.path();
 
     // Create an encoded (bit-packed) store (default mode)
-    let mut store = GlobalRefgetStore::in_memory();
+    let mut store = RefgetStore::in_memory();
     store
         .add_sequence_collection_from_fasta(fasta_path)
         .expect("Failed to import FASTA");
@@ -73,7 +73,7 @@ fn test_decode_workflow_raw() {
     let fasta_path = fasta_file.path();
 
     // Create a raw store
-    let mut store = GlobalRefgetStore::in_memory();
+    let mut store = RefgetStore::in_memory();
     store.disable_encoding(); // Switch to Raw mode
     store
         .add_sequence_collection_from_fasta(fasta_path)

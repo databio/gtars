@@ -8,12 +8,13 @@ use pyo3::types::{PyBytes, PyString, PyType};
 
 use gtars_refget::alphabet::AlphabetType;
 use gtars_refget::collection::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::GlobalRefgetStore;
+use gtars_refget::store::RefgetStore;
 use gtars_refget::store::StorageMode;
+use gtars_refget::store::StoreStats;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -220,6 +221,61 @@ pub struct PySeqColDigestLvl1 {
     pub names_digest: String,
     #[pyo3(get, set)]
     pub lengths_digest: String,
+}
+
+/// Metadata for a sequence collection.
+///
+/// Contains the collection digest and level 1 digests for names, sequences, and lengths.
+/// This is a lightweight representation of a collection without the actual sequence list.
+///
+/// Attributes:
+///     digest (str): The collection's SHA-512/24u digest.
+///     n_sequences (int): Number of sequences in the collection.
+///     names_digest (str): Level 1 digest of the names array.
+///     sequences_digest (str): Level 1 digest of the sequences array.
+///     lengths_digest (str): Level 1 digest of the lengths array.
+#[pyclass(name = "SequenceCollectionMetadata", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PySequenceCollectionMetadata {
+    #[pyo3(get, set)]
+    pub digest: String,
+    #[pyo3(get, set)]
+    pub n_sequences: usize,
+    #[pyo3(get, set)]
+    pub names_digest: String,
+    #[pyo3(get, set)]
+    pub sequences_digest: String,
+    #[pyo3(get, set)]
+    pub lengths_digest: String,
+}
+
+#[pymethods]
+impl PySequenceCollectionMetadata {
+    fn __repr__(&self) -> String {
+        format!(
+            "SequenceCollectionMetadata(digest='{}', n_sequences={})",
+            self.digest, self.n_sequences
+        )
+    }
+
+    fn __str__(&self) -> String {
+        format!(
+            "SequenceCollectionMetadata:\n  digest: {}\n  n_sequences: {}\n  names_digest: {}\n  sequences_digest: {}\n  lengths_digest: {}",
+            self.digest, self.n_sequences, self.names_digest, self.sequences_digest, self.lengths_digest
+        )
+    }
+}
+
+impl From<SequenceCollectionMetadata> for PySequenceCollectionMetadata {
+    fn from(value: SequenceCollectionMetadata) -> Self {
+        PySequenceCollectionMetadata {
+            digest: value.digest,
+            n_sequences: value.n_sequences,
+            names_digest: value.names_digest,
+            sequences_digest: value.sequences_digest,
+            lengths_digest: value.lengths_digest,
+        }
+    }
 }
 
 /// A collection of biological sequences (e.g., a genome assembly).
@@ -730,7 +786,7 @@ impl From<PyStorageMode> for StorageMode {
 
 /// A global store for GA4GH refget sequences with lazy-loading support.
 ///
-/// GlobalRefgetStore provides content-addressable storage for reference genome
+/// RefgetStore provides content-addressable storage for reference genome
 /// sequences following the GA4GH refget specification. Supports both local and
 /// remote stores with on-demand sequence loading.
 ///
@@ -742,28 +798,28 @@ impl From<PyStorageMode> for StorageMode {
 /// Examples:
 ///     Create a new in-memory store and import sequences::
 ///
-///         from gtars.refget import GlobalRefgetStore
-///         store = GlobalRefgetStore.in_memory()
+///         from gtars.refget import RefgetStore
+///         store = RefgetStore.in_memory()
 ///         store.add_sequence_collection_from_fasta("genome.fa")
 ///
 ///     Load an existing local store::
 ///
-///         store = GlobalRefgetStore.load_local("/data/hg38")
+///         store = RefgetStore.load_local("/data/hg38")
 ///         seq = store.get_substring("chr1_digest", 0, 1000)
 ///
 ///     Load a remote store with caching::
 ///
-///         store = GlobalRefgetStore.load_remote(
+///         store = RefgetStore.load_remote(
 ///             "/local/cache",
 ///             "https://example.com/hg38"
 ///         )
-#[pyclass(name = "GlobalRefgetStore", module = "gtars.refget")]
-pub struct PyGlobalRefgetStore {
-    inner: GlobalRefgetStore,
+#[pyclass(name = "RefgetStore", module = "gtars.refget")]
+pub struct PyRefgetStore {
+    inner: RefgetStore,
 }
 
 #[pymethods]
-impl PyGlobalRefgetStore {
+impl PyRefgetStore {
     /// Create a disk-backed RefgetStore.
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
@@ -774,16 +830,16 @@ impl PyGlobalRefgetStore {
     ///     mode: Storage mode (StorageMode.Raw or StorageMode.Encoded)
     ///
     /// Returns:
-    ///     GlobalRefgetStore: A configured disk-backed store
+    ///     RefgetStore: A configured disk-backed store
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore
-    ///     >>> store = GlobalRefgetStore.on_disk("/data/store")
+    ///     >>> from gtars.refget import RefgetStore
+    ///     >>> store = RefgetStore.on_disk("/data/store")
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     #[classmethod]
     fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
-        let store = GlobalRefgetStore::on_disk(cache_path).map_err(|e| {
+        let store = RefgetStore::on_disk(cache_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error with disk-backed store: {}", e))
         })?;
         Ok(Self { inner: store })
@@ -796,16 +852,16 @@ impl PyGlobalRefgetStore {
     /// Use set_encoding_mode() to change storage mode after creation.
     ///
     /// Returns:
-    ///     GlobalRefgetStore: A new in-memory store
+    ///     RefgetStore: A new in-memory store
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> from gtars.refget import RefgetStore
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     #[classmethod]
     fn in_memory(_cls: &Bound<'_, PyType>) -> Self {
         Self {
-            inner: GlobalRefgetStore::in_memory(),
+            inner: RefgetStore::in_memory(),
         }
     }
 
@@ -821,8 +877,8 @@ impl PyGlobalRefgetStore {
     ///     mode: The storage mode to switch to (StorageMode.Raw or StorageMode.Encoded)
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore, StorageMode
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> from gtars.refget import RefgetStore, StorageMode
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.set_encoding_mode(StorageMode.Raw)
     fn set_encoding_mode(&mut self, mode: PyStorageMode) {
         self.inner.set_encoding_mode(mode.into());
@@ -832,7 +888,7 @@ impl PyGlobalRefgetStore {
     /// Re-encodes any existing Raw sequences in memory.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.disable_encoding()  # Switch to Raw
     ///     >>> store.enable_encoding()   # Back to Encoded
     fn enable_encoding(&mut self) {
@@ -843,7 +899,7 @@ impl PyGlobalRefgetStore {
     /// Decodes any existing Encoded sequences in memory.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.disable_encoding()  # Switch to Raw mode
     fn disable_encoding(&mut self) {
         self.inner.disable_encoding();
@@ -861,7 +917,7 @@ impl PyGlobalRefgetStore {
     ///     IOError: If the directory cannot be created or written to.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> store.enable_persistence("/data/store")  # Flush to disk
     #[pyo3(signature = (path))]
@@ -878,7 +934,7 @@ impl PyGlobalRefgetStore {
     /// can still be loaded from disk if local_path is set.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore.load_remote("/cache", "https://example.com")
+    ///     >>> store = RefgetStore.load_remote("/cache", "https://example.com")
     ///     >>> store.disable_persistence()  # Stop caching new sequences
     fn disable_persistence(&mut self) {
         self.inner.disable_persistence();
@@ -898,7 +954,7 @@ impl PyGlobalRefgetStore {
     ///     IOError: If the file cannot be read or processed.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore.in_memory()
+    ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")  # skip duplicates
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa", force=True)  # overwrite
     #[pyo3(signature = (file_path, force=false))]
@@ -1051,29 +1107,82 @@ impl PyGlobalRefgetStore {
     fn collections(&self) -> Vec<PySequenceCollection> {
         self.inner
             .collections()
-            .map(|col| PySequenceCollection::from(col.clone()))
+            .map(PySequenceCollection::from)
             .collect()
+    }
+
+    /// List all collection digests in the store.
+    ///
+    /// Returns all collection digests, including both loaded (Full) and
+    /// not-yet-loaded (Stub) collections.
+    ///
+    /// Returns:
+    ///     list[str]: List of collection digest strings.
+    ///
+    /// Example:
+    ///     >>> for digest in store.list_collections():
+    ///     ...     print(f"Collection: {digest}")
+    fn list_collections(&self) -> Vec<String> {
+        self.inner.list_collections().map(|s| s.to_string()).collect()
+    }
+
+    /// Get metadata for a collection by digest.
+    ///
+    /// Returns lightweight metadata without loading the full collection.
+    /// Use this for quick lookups of collection information.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///
+    /// Returns:
+    ///     Optional[SequenceCollectionMetadata]: Collection metadata if found, None otherwise.
+    ///
+    /// Example:
+    ///     >>> meta = store.get_collection_metadata("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
+    ///     >>> if meta:
+    ///     ...     print(f"Collection has {meta.n_sequences} sequences")
+    fn get_collection_metadata(&self, collection_digest: &str) -> Option<PySequenceCollectionMetadata> {
+        self.inner
+            .get_collection_metadata(collection_digest)
+            .map(|meta| PySequenceCollectionMetadata::from(meta.clone()))
+    }
+
+    /// Check if a collection is fully loaded.
+    ///
+    /// Returns True if the collection's sequence list is loaded in memory,
+    /// False if it's only metadata (stub).
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///
+    /// Returns:
+    ///     bool: True if loaded, False otherwise.
+    fn is_collection_loaded(&self, collection_digest: &str) -> bool {
+        self.inner.is_collection_loaded(collection_digest)
     }
 
     /// Returns statistics about the store.
     ///
     /// Returns:
-    ///     dict: Dictionary with keys 'n_sequences', 'n_collections_loaded', 'storage_mode'
+    ///     dict: Dictionary with keys 'n_sequences', 'n_collections', 'n_collections_loaded', 'storage_mode'
     ///
     /// Note:
-    ///     n_collections_loaded only reflects collections currently in memory.
+    ///     n_collections is the total number of collections (both loaded and stubs).
+    ///     n_collections_loaded only reflects collections fully loaded in memory.
     ///     For remote stores, collections are loaded on-demand when accessed.
     ///
     /// Example:
     ///     >>> stats = store.stats()
     ///     >>> print(f"Store has {stats['n_sequences']} sequences")
-    ///     >>> print(f"Collections loaded: {stats['n_collections_loaded']}")
+    ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
     fn stats(&self) -> std::collections::HashMap<String, String> {
-        let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
+        let extended_stats = self.inner.stats_extended();
         let mut stats = std::collections::HashMap::new();
-        stats.insert("n_sequences".to_string(), n_sequences.to_string());
-        stats.insert("n_collections_loaded".to_string(), n_collections_loaded.to_string());
-        stats.insert("storage_mode".to_string(), mode_str.to_string());
+        stats.insert("n_sequences".to_string(), extended_stats.n_sequences.to_string());
+        stats.insert("n_sequences_loaded".to_string(), extended_stats.n_sequences_loaded.to_string());
+        stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
+        stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
+        stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
         stats
     }
 
@@ -1112,19 +1221,19 @@ impl PyGlobalRefgetStore {
     ///         index.json and sequences.farg files).
     ///
     /// Returns:
-    ///         GlobalRefgetStore: Store with metadata loaded, sequences lazy-loaded.
+    ///         RefgetStore: Store with metadata loaded, sequences lazy-loaded.
     ///
     /// Raises:
     ///     IOError: If the store directory or index files cannot be read.
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore
-    ///     >>> store = GlobalRefgetStore.load_local("/data/hg38_store")
+    ///     >>> from gtars.refget import RefgetStore
+    ///     >>> store = RefgetStore.load_local("/data/hg38_store")
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     #[classmethod]
     fn load_local(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
-        let store = GlobalRefgetStore::load_local(cache_path).map_err(|e| {
+        let store = RefgetStore::load_local(cache_path).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading local store: {}", e))
         })?;
         Ok(Self { inner: store })
@@ -1147,20 +1256,20 @@ impl PyGlobalRefgetStore {
     ///         "https://example.com/hg38" or "s3://bucket/hg38").
     ///
     /// Returns:
-    ///     GlobalRefgetStore: Store with metadata loaded, sequences fetched on-demand.
+    ///     RefgetStore: Store with metadata loaded, sequences fetched on-demand.
     ///
     /// Raises:
     ///     IOError: If remote metadata cannot be fetched or cache cannot be written.
     ///
     /// Example:
-    ///     >>> from gtars.refget import GlobalRefgetStore
+    ///     >>> from gtars.refget import RefgetStore
     ///     >>> # With disk caching (default)
-    ///     >>> store = GlobalRefgetStore.load_remote(
+    ///     >>> store = RefgetStore.load_remote(
     ///     ...     "/data/cache/hg38",
     ///     ...     "https://refget-server.com/hg38"
     ///     ... )
     ///     >>> # Memory-only mode (no sequence data caching to disk)
-    ///     >>> store = GlobalRefgetStore.load_remote(
+    ///     >>> store = RefgetStore.load_remote(
     ///     ...     "/tmp/cache",
     ///     ...     "https://refget-server.com/hg38"
     ///     ... )
@@ -1169,7 +1278,7 @@ impl PyGlobalRefgetStore {
     fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
         let remote_url = remote_url.to_string();
-        let store = GlobalRefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
+        let store = RefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
         })?;
         Ok(Self { inner: store })
@@ -1380,7 +1489,7 @@ impl PyGlobalRefgetStore {
         };
 
         format!(
-            "GlobalRefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {})",
+            "RefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {})",
             n_sequences, n_collections_loaded, mode_str, location
         )
     }
@@ -1394,7 +1503,7 @@ impl PyGlobalRefgetStore {
     ///     int: Total number of sequences in the store.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
+    ///     >>> store = RefgetStore(StorageMode.Encoded)
     ///     >>> store.import_fasta("genome.fa")
     ///     >>> print(f"Store contains {len(store)} sequences")
     fn __len__(&self) -> usize {
@@ -1410,7 +1519,7 @@ impl PyGlobalRefgetStore {
     ///     SequenceMetadata: Metadata for each sequence in the store.
     ///
     /// Example:
-    ///     >>> store = GlobalRefgetStore(StorageMode.Encoded)
+    ///     >>> store = RefgetStore(StorageMode.Encoded)
     ///     >>> store.import_fasta("genome.fa")
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
@@ -1425,7 +1534,7 @@ impl PyGlobalRefgetStore {
     }
 }
 
-/// Iterator for GlobalRefgetStore that yields SequenceMetadata.
+/// Iterator for RefgetStore that yields SequenceMetadata.
 #[pyclass]
 pub struct PyRefgetStoreIterator {
     sequences: Vec<PySequenceMetadata>,
@@ -1463,9 +1572,10 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyFaiRecord>()?;
     m.add_class::<PySequenceRecord>()?;
     m.add_class::<PySeqColDigestLvl1>()?;
+    m.add_class::<PySequenceCollectionMetadata>()?;
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
-    m.add_class::<PyGlobalRefgetStore>()?;
+    m.add_class::<PyRefgetStore>()?;
     m.add_class::<PyRetrievedSequence>()?;
     Ok(())
 }

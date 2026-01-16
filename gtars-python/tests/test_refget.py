@@ -1,6 +1,6 @@
 import pytest
 from gtars.refget import (
-    GlobalRefgetStore,
+    RefgetStore,
     StorageMode,
     digest_fasta,
     load_fasta,
@@ -73,21 +73,21 @@ class TestRefget:
             digest_fasta("nonexistent.fa")
 
     def test_global_refget_store_basic(self):
-        """Test basic creation and operations of GlobalRefgetStore"""
+        """Test basic creation and operations of RefgetStore"""
         # Test store creation with both modes
-        store_raw = GlobalRefgetStore.in_memory()
-        store_encoded = GlobalRefgetStore.in_memory()
+        store_raw = RefgetStore.in_memory()
+        store_encoded = RefgetStore.in_memory()
 
         # Test string representations
         # New repr format shows n_sequences and location
-        assert repr(store_raw).startswith("GlobalRefgetStore")
-        assert repr(store_encoded).startswith("GlobalRefgetStore")
+        assert repr(store_raw).startswith("RefgetStore")
+        assert repr(store_encoded).startswith("RefgetStore")
         assert "n_sequences=0" in repr(store_raw)  # Empty store
         assert "memory-only" in repr(store_raw)  # No local path
 
     def test_store_import_and_retrieve(self):
         """Test importing FASTA and retrieving sequences"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
         # fasta_path = os.path.abspath("../tests/data/fasta/base.fa")
         # Import FASTA
@@ -106,7 +106,7 @@ class TestRefget:
 
     def test_store_substring(self):
         """Test substring retrieval"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
         store.add_sequence_collection_from_fasta(fasta_path)
 
@@ -118,7 +118,7 @@ class TestRefget:
 
     def test_store_persistence(self):
         """Test saving and loading store"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
         store.add_sequence_collection_from_fasta(fasta_path)
 
@@ -127,7 +127,7 @@ class TestRefget:
             store.write_store_to_dir(tmpdir, "sequences/%s2/%s.seq")
 
             # Load store back
-            loaded_store = GlobalRefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.load_local(tmpdir)
 
             # Verify same sequences exist
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -144,7 +144,7 @@ class TestRefget:
             store.write_store_to_dir(tmpdir)
 
             # Load store back
-            loaded_store = GlobalRefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.load_local(tmpdir)
 
             # Verify same sequences exist
             seq2 = loaded_store.get_sequence_by_id(sha512)
@@ -154,7 +154,7 @@ class TestRefget:
 
     def test_store_errors(self):
         """Test error conditions"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
 
         # Test importing non-existent file
         with pytest.raises(Exception):
@@ -172,7 +172,7 @@ class TestRefget:
 
     def test_store_collection_operations(self):
         """Test collection-related operations"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
 
         # Import sequences and get sequence by collection and name
@@ -203,7 +203,7 @@ class TestRefget:
                 f.write(fasta_content)
 
 
-            store = GlobalRefgetStore.in_memory()
+            store = RefgetStore.in_memory()
             store.add_sequence_collection_from_fasta(temp_fasta_path)
             result = digest_fasta(temp_fasta_path)
 
@@ -303,7 +303,7 @@ GGGG
 
     def test_decode_with_store_sequences(self):
         """Test decode() with sequences retrieved from a store"""
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
         store.add_sequence_collection_from_fasta(fasta_path)
 
@@ -323,7 +323,7 @@ GGGG
         fasta_path = "../tests/data/fasta/base.fa"
 
         # Test with Raw storage mode
-        store_raw = GlobalRefgetStore.in_memory()
+        store_raw = RefgetStore.in_memory()
         store_raw.set_encoding_mode(StorageMode.Raw)
         store_raw.add_sequence_collection_from_fasta(fasta_path)
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -331,7 +331,7 @@ GGGG
         decoded_raw = seq_raw.decode()
 
         # Test with Encoded storage mode
-        store_encoded = GlobalRefgetStore.in_memory()
+        store_encoded = RefgetStore.in_memory()
         store_encoded.add_sequence_collection_from_fasta(fasta_path)
         seq_encoded = store_encoded.get_sequence_by_id(sha512)
         decoded_encoded = seq_encoded.decode()
@@ -371,7 +371,7 @@ GGGG
         fasta_path = "../tests/data/fasta/base.fa"
 
         # Create in-memory store and add sequences
-        store = GlobalRefgetStore.in_memory()
+        store = RefgetStore.in_memory()
         store.add_sequence_collection_from_fasta(fasta_path)
 
         # Enable persistence to a temp directory
@@ -382,7 +382,7 @@ GGGG
             assert os.path.exists(os.path.join(tmpdir, "index.json"))
 
             # Load the store back and verify sequences are accessible
-            loaded_store = GlobalRefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.load_local(tmpdir)
 
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
             seq1 = store.get_sequence_by_id(sha512)
@@ -398,7 +398,7 @@ GGGG
 
         with tempfile.TemporaryDirectory() as tmpdir:
             # Create disk-backed store
-            store = GlobalRefgetStore.on_disk(tmpdir)
+            store = RefgetStore.on_disk(tmpdir)
 
             # Disable persistence
             store.disable_persistence()

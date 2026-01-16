@@ -121,7 +121,7 @@ digest_fasta <- function(fasta) {
 }
 
 setClass(
-  'GlobalRefgetStore',
+  'RefgetStore',
   slots = list(
     ptr = 'externalptr'
   )
@@ -158,28 +158,28 @@ convert_to_sequence_record <- function(raw_result) {
 
 #' @export
 setGeneric('import_fasta', function(store, file_path) standardGeneric('import_fasta'))
-setMethod('import_fasta', 'GlobalRefgetStore', function(store, file_path) {
+setMethod('import_fasta', 'RefgetStore', function(store, file_path) {
   .Call(wrap__import_fasta_store, store@ptr, file_path)
   invisible(store)
 })
 
 #' @export
 setGeneric('get_sequence_by_id', function(store, digest) standardGeneric('get_sequence_by_id'))
-setMethod('get_sequence_by_id', 'GlobalRefgetStore', function(store, digest) {
+setMethod('get_sequence_by_id', 'RefgetStore', function(store, digest) {
   result <- .Call(wrap__get_sequence_by_id_store, store@ptr, digest)
   convert_to_sequence_record(result)
 })
 
 #' @export
 setGeneric('get_sequence_by_collection_and_name', function(store, collection_digest, sequence_name) standardGeneric('get_sequence_by_collection_and_name'))
-setMethod('get_sequence_by_collection_and_name', 'GlobalRefgetStore', function(store, collection_digest, sequence_name) {
+setMethod('get_sequence_by_collection_and_name', 'RefgetStore', function(store, collection_digest, sequence_name) {
   result <- .Call(wrap__get_sequence_by_collection_and_name_store, store@ptr, collection_digest, sequence_name)
   convert_to_sequence_record(result)
 })
 
 #' @export
 setGeneric('get_substring', function(store, seq_digest, start, end) standardGeneric('get_substring'))
-setMethod('get_substring', 'GlobalRefgetStore', function(store, seq_digest, start, end) {
+setMethod('get_substring', 'RefgetStore', function(store, seq_digest, start, end) {
   result <- .Call(wrap__get_substring_store, store@ptr, seq_digest, as.integer(start), as.integer(end))
   if (is.null(result)) NULL else as.character(result)
 })
@@ -198,7 +198,7 @@ convert_to_retrieved_sequence <- function(raw_result) {
 
 #' @export
 setGeneric('write_store_to_directory', function(store, root_path, seqdata_path_template) standardGeneric('write_store_to_directory'))
-setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_path, seqdata_path_template) {
+setMethod('write_store_to_directory', 'RefgetStore', function(store, root_path, seqdata_path_template) {
   .Call(wrap__write_store_to_directory_store, 
         store@ptr, root_path, seqdata_path_template)
   invisible(store)
@@ -206,7 +206,7 @@ setMethod('write_store_to_directory', 'GlobalRefgetStore', function(store, root_
 
 #' @export
 setGeneric('get_seqs_bed_file', function(store, collection_digest, bed_file_path, output_file_path) standardGeneric('get_seqs_bed_file'))
-setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
+setMethod('get_seqs_bed_file', 'RefgetStore', function(store, collection_digest, bed_file_path, output_file_path) {
   .Call(wrap__get_seqs_bed_file_store, 
         store@ptr, collection_digest, bed_file_path, output_file_path)
   invisible(store)
@@ -214,7 +214,7 @@ setMethod('get_seqs_bed_file', 'GlobalRefgetStore', function(store, collection_d
 
 #' @export
 setGeneric('get_seqs_bed_file_to_vec', function(store, collection_digest, bed_file_path) standardGeneric('get_seqs_bed_file_to_vec'))
-setMethod('get_seqs_bed_file_to_vec', 'GlobalRefgetStore', function(store, collection_digest, bed_file_path) {
+setMethod('get_seqs_bed_file_to_vec', 'RefgetStore', function(store, collection_digest, bed_file_path) {
   result <- .Call(wrap__get_seqs_bed_file_to_vec_store, 
                   store@ptr, collection_digest, bed_file_path)
   if (!is.null(result) && length(result) > 0) {
@@ -241,15 +241,15 @@ setMethod('[', c('SequenceCollection', 'numeric', 'missing'),
             return(x@sequences[[i]])
           })
 
-setMethod('show', 'GlobalRefgetStore', function(object) {
+setMethod('show', 'RefgetStore', function(object) {
   ptr_address <- sub('<pointer: (.*)>', '\\1', capture.output(object@ptr))
-  cat('GlobalRefgetStore: \n')
+  cat('RefgetStore: \n')
   cat(sprintf('  ptr: %s\n', ptr_address))
 })
 
-setMethod('as.character', 'GlobalRefgetStore', function(x) {
+setMethod('as.character', 'RefgetStore', function(x) {
   ptr_address <- sub('<pointer: (.*)>', '\\1', capture.output(x@ptr))
-  sprintf('GlobalRefgetStore (ptr = %s)', ptr_address)
+  sprintf('RefgetStore (ptr = %s)', ptr_address)
 })
 
 #' @title global refget store
@@ -258,21 +258,21 @@ setMethod('as.character', 'GlobalRefgetStore', function(x) {
 #' 
 #' @param mode either 'raw' or 'encoded'
 #' 
-#' @return a GlobalRefgetStore object
+#' @return a RefgetStore object
 #' 
 #' @examples
 #' \dontrun{
-#' store <- global_refget_store('raw')
+#' store <- refget_store('raw')
 #' fasta_path <- '../../gtars/tests/data/fasta/base.fa'
 #' import_fasta(store, fasta_path)
 #' seq <- get_sequence_by_id(store, 'iYtREV555dUFKg2_agSJW6suquUyPpMw')
 #' }
 #' 
 #' @export
-global_refget_store <- function(mode) {
-  result <- .Call(wrap__global_refget_store_raw, mode)
+refget_store <- function(mode) {
+  result <- .Call(wrap__refget_store_raw, mode)
   
-  invisible(new('GlobalRefgetStore', ptr = result))
+  invisible(new('RefgetStore', ptr = result))
 }
 
 #' @title load refget store from directory
@@ -281,7 +281,7 @@ global_refget_store <- function(mode) {
 #' 
 #' @param root_path path to refget store
 #' 
-#' @return a GlobalRefgetStore object
+#' @return a RefgetStore object
 #' 
 #' @examples
 #' \dontrun{
@@ -294,5 +294,5 @@ global_refget_store <- function(mode) {
 load_from_directory <- function(root_path) {
   result <- .Call(wrap__load_from_directory_store, root_path)
   
-  invisible(new('GlobalRefgetStore', ptr = result))
+  invisible(new('RefgetStore', ptr = result))
 }

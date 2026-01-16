@@ -9,6 +9,175 @@ use std::path::{Path, PathBuf};
 
 use crate::utils::PathExtension;
 
+/// Metadata for a sequence collection (parallel to SequenceMetadata).
+/// Contains the collection digest and level 1 digests for names, sequences, and lengths.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SequenceCollectionMetadata {
+    /// Top-level seqcol digest
+    pub digest: String,
+    /// Number of sequences in the collection
+    pub n_sequences: usize,
+    /// Level 1 digest of names array
+    pub names_digest: String,
+    /// Level 1 digest of sequences array
+    pub sequences_digest: String,
+    /// Level 1 digest of lengths array
+    pub lengths_digest: String,
+    /// Optional path to the source file
+    pub file_path: Option<PathBuf>,
+}
+
+impl SequenceCollectionMetadata {
+    /// Compute metadata from sequence records
+    pub fn from_sequences(sequences: &[SequenceRecord], file_path: Option<PathBuf>) -> Self {
+        // Extract metadata refs
+        let metadata_refs: Vec<&SequenceMetadata> = sequences.iter()
+            .map(|r| r.metadata())
+            .collect();
+
+        // Compute level 1 digests
+        let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
+
+        // Compute top-level digest from level 1 digests
+        let digest = lvl1.to_digest();
+
+        Self {
+            digest,
+            n_sequences: sequences.len(),
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            file_path,
+        }
+    }
+
+    /// Create from an existing SequenceCollection
+    pub fn from_collection(collection: &SequenceCollection) -> Self {
+        Self {
+            digest: collection.digest.clone(),
+            n_sequences: collection.sequences.len(),
+            names_digest: collection.lvl1.names_digest.clone(),
+            sequences_digest: collection.lvl1.sequences_digest.clone(),
+            lengths_digest: collection.lvl1.lengths_digest.clone(),
+            file_path: collection.file_path.clone(),
+        }
+    }
+
+    /// Convert to SeqColDigestLvl1 for compatibility
+    pub fn to_lvl1(&self) -> SeqColDigestLvl1 {
+        SeqColDigestLvl1 {
+            sequences_digest: self.sequences_digest.clone(),
+            names_digest: self.names_digest.clone(),
+            lengths_digest: self.lengths_digest.clone(),
+        }
+    }
+}
+
+/// A collection record that may or may not have its sequence list loaded.
+/// Parallel to SequenceRecord.
+#[derive(Clone, Debug)]
+pub enum SequenceCollectionRecord {
+    /// Collection with only metadata, sequence list not loaded
+    Stub(SequenceCollectionMetadata),
+    /// Collection with metadata and the actual sequence list
+    Full {
+        metadata: SequenceCollectionMetadata,
+        sequences: Vec<SequenceRecord>,
+    },
+}
+
+impl SequenceCollectionRecord {
+    /// Get metadata regardless of variant
+    pub fn metadata(&self) -> &SequenceCollectionMetadata {
+        match self {
+            SequenceCollectionRecord::Stub(meta) => meta,
+            SequenceCollectionRecord::Full { metadata, .. } => metadata,
+        }
+    }
+
+    /// Get sequences if loaded
+    pub fn sequences(&self) -> Option<&[SequenceRecord]> {
+        match self {
+            SequenceCollectionRecord::Stub(_) => None,
+            SequenceCollectionRecord::Full { sequences, .. } => Some(sequences),
+        }
+    }
+
+    /// Check if sequences are loaded
+    pub fn has_sequences(&self) -> bool {
+        matches!(self, SequenceCollectionRecord::Full { .. })
+    }
+
+    /// Load sequences into a Stub record, converting to Full
+    pub fn with_sequences(self, sequences: Vec<SequenceRecord>) -> Self {
+        let metadata = match self {
+            SequenceCollectionRecord::Stub(m) => m,
+            SequenceCollectionRecord::Full { metadata, .. } => metadata,
+        };
+        SequenceCollectionRecord::Full { metadata, sequences }
+    }
+
+    /// Convert to a SequenceCollection (requires Full variant or empty collection for Stub)
+    pub fn to_collection(&self) -> SequenceCollection {
+        match self {
+            SequenceCollectionRecord::Stub(meta) => {
+                // Create empty collection with metadata
+                SequenceCollection {
+                    sequences: Vec::new(),
+                    digest: meta.digest.clone(),
+                    lvl1: meta.to_lvl1(),
+                    file_path: meta.file_path.clone(),
+                }
+            }
+            SequenceCollectionRecord::Full { metadata, sequences } => {
+                SequenceCollection {
+                    sequences: sequences.clone(),
+                    digest: metadata.digest.clone(),
+                    lvl1: metadata.to_lvl1(),
+                    file_path: metadata.file_path.clone(),
+                }
+            }
+        }
+    }
+
+    /// Write the collection to an RGSI file (renamed from FARG)
+    pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        let file_path = file_path.as_ref();
+        let metadata = self.metadata();
+        let mut file = std::fs::File::create(file_path)?;
+
+        // Write collection digest headers
+        writeln!(file, "##seqcol_digest={}", metadata.digest)?;
+        writeln!(file, "##names_digest={}", metadata.names_digest)?;
+        writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
+        writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
+        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
+
+        // Write sequence metadata if available
+        if let Some(sequences) = self.sequences() {
+            for seq_record in sequences {
+                let seq_meta = seq_record.metadata();
+                writeln!(
+                    file,
+                    "{}\t{}\t{}\t{}\t{}",
+                    seq_meta.name, seq_meta.length, seq_meta.alphabet, seq_meta.sha512t24u, seq_meta.md5
+                )?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl From<SequenceCollection> for SequenceCollectionRecord {
+    fn from(collection: SequenceCollection) -> Self {
+        let metadata = SequenceCollectionMetadata::from_collection(&collection);
+        SequenceCollectionRecord::Full {
+            metadata,
+            sequences: collection.sequences,
+        }
+    }
+}
+
 /// A single Sequence Collection, which may or may not hold data.
 #[derive(Clone, Debug)]
 pub struct SequenceCollection {
@@ -414,6 +583,26 @@ impl SequenceCollection {
                 "No file path specified for FARG output. Use `write_collection_farg` to specify a file path."
             ))
         }
+    }
+
+    /// Write the SequenceCollection to an RGSI file (new format, renamed from FARG).
+    ///
+    /// Creates an RGSI file with collection-level digest headers followed by
+    /// sequence metadata for all sequences in this collection.
+    ///
+    /// # Arguments
+    /// * `file_path` - The path to the RGSI file to be written
+    ///
+    /// # Returns
+    /// Result indicating success or error
+    pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        // RGSI format is identical to FARG, just a different extension
+        self.write_collection_farg(file_path)
+    }
+
+    /// Convert to a SequenceCollectionRecord for storage in RefgetStore
+    pub fn to_record(&self) -> SequenceCollectionRecord {
+        SequenceCollectionRecord::from(self.clone())
     }
 
     /// Write the SequenceCollection to a FASTA file.

@@ -4,7 +4,7 @@ use gtars_refget::collection::{
     SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u};
-use gtars_refget::store::{GlobalRefgetStore, RetrievedSequence, StorageMode};
+use gtars_refget::store::{RefgetStore, RetrievedSequence, StorageMode};
 
 /// Create sha512t24u digest
 /// @export
@@ -32,28 +32,28 @@ pub fn digest_fasta_raw(fasta: &str) -> extendr_api::Result<List> {
     }
 }
 
-/// Create a GlobalRefgetStore
+/// Create a RefgetStore
 /// @param mode Storage mode: "raw" or "encoded"
 #[extendr]
-pub fn global_refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
+pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
     let storage_mode = match mode.to_lowercase().as_str() {
         "raw" => StorageMode::Raw,
         "encoded" => StorageMode::Encoded,
         _ => return Err(format!("Invalid mode: {}", mode).into()),
     };
 
-    let store = Box::new(GlobalRefgetStore::new(storage_mode));
+    let store = Box::new(RefgetStore::new(storage_mode));
     let ptr = unsafe { Robj::make_external_ptr(Box::into_raw(store), Robj::from(())) };
 
     Ok(ptr)
 }
 
 /// Import FASTA file into store
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param file_path Path to FASTA file
 #[extendr]
 pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Result<()> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -66,11 +66,11 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
 }
 
 /// Get sequence by ID from store
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param digest Sequence digest
 #[extendr]
 pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::Result<Robj> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -95,7 +95,7 @@ pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::R
 }
 
 /// Get sequence by collection and name
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param sequence_name Sequence name
 #[extendr]
@@ -104,7 +104,7 @@ pub fn get_sequence_by_collection_and_name_store(
     collection_digest: &str,
     sequence_name: &str,
 ) -> extendr_api::Result<Robj> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -121,7 +121,7 @@ pub fn get_sequence_by_collection_and_name_store(
 }
 
 /// Get substring from sequence
-/// @param store_ptr External pointer to GlobalRefgetStore  
+/// @param store_ptr External pointer to RefgetStore  
 /// @param seq_digest Sequence digest
 /// @param start Start position
 /// @param end End position
@@ -132,7 +132,7 @@ pub fn get_substring_store(
     start: i32,
     end: i32,
 ) -> extendr_api::Result<Robj> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -147,7 +147,7 @@ pub fn get_substring_store(
 }
 
 /// Write store to directory
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param root_path Path to write store
 /// @param seqdata_path_template Path template name
 #[extendr]
@@ -156,7 +156,7 @@ pub fn write_store_to_directory_store(
     root_path: &str,
     seqdata_path_template: &str,
 ) -> extendr_api::Result<()> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -173,7 +173,7 @@ pub fn write_store_to_directory_store(
 /// @param root_path Path to read store from
 #[extendr]
 pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
-    match GlobalRefgetStore::load_from_directory(root_path) {
+    match RefgetStore::load_from_directory(root_path) {
         Ok(store) => {
             let boxed_store = Box::new(store);
             let ptr =
@@ -185,7 +185,7 @@ pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
 }
 
 /// Extract BED file sequences from store as FASTA
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param bed_file_path Path to BED file
 /// @param output_file_path Path to output FASTA file
@@ -196,7 +196,7 @@ pub fn get_seqs_bed_file_store(
     bed_file_path: &str,
     output_file_path: &str,
 ) -> extendr_api::Result<()> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -209,7 +209,7 @@ pub fn get_seqs_bed_file_store(
 }
 
 /// Extract BED file sequences from store into memory
-/// @param store_ptr External pointer to GlobalRefgetStore
+/// @param store_ptr External pointer to RefgetStore
 /// @param collection_digest Sequence collection digest
 /// @param bed_file_path Path to BED file
 #[extendr]
@@ -218,7 +218,7 @@ pub fn get_seqs_bed_file_to_vec_store(
     collection_digest: &str,
     bed_file_path: &str,
 ) -> extendr_api::Result<Robj> {
-    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<GlobalRefgetStore>() };
+    let store_raw_ptr = unsafe { store_ptr.external_ptr_addr::<RefgetStore>() };
     if store_raw_ptr.is_null() {
         return Err("Invalid store pointer".into());
     }
@@ -305,7 +305,7 @@ extendr_module! {
     fn sha512t24u_digest;
     fn md5_digest;
     fn digest_fasta_raw;
-    fn global_refget_store_raw;
+    fn refget_store_raw;
     fn import_fasta_store;
     fn get_sequence_by_id_store;
     fn get_sequence_by_collection_and_name_store;
