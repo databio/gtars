@@ -123,7 +123,8 @@ pub enum PyAlphabetType {
 /// without the actual sequence data.
 ///
 /// Attributes:
-///     name (str): Sequence name (e.g., "chr1", "chrM").
+///     name (str): Sequence name (first word of FASTA header).
+///     description (str | None): Description from FASTA header (text after first whitespace).
 ///     length (int): Length of the sequence in bases.
 ///     sha512t24u (str): GA4GH SHA-512/24u digest (32-char base64url).
 ///     md5 (str): MD5 digest (32-char hex string).
@@ -134,6 +135,8 @@ pub enum PyAlphabetType {
 pub struct PySequenceMetadata {
     #[pyo3(get, set)]
     pub name: String,
+    #[pyo3(get, set)]
+    pub description: Option<String>,
     #[pyo3(get, set)]
     pub length: usize,
     #[pyo3(get, set)]
@@ -474,6 +477,7 @@ impl PySequenceRecord {
         // Convert PySequenceRecord to Rust SequenceRecord
         let metadata = SequenceMetadata {
             name: self.metadata.name.clone(),
+            description: self.metadata.description.clone(),
             length: self.metadata.length,
             sha512t24u: self.metadata.sha512t24u.clone(),
             md5: self.metadata.md5.clone(),
@@ -578,6 +582,7 @@ impl PySequenceCollection {
             sequences: self.sequences.iter().map(|py_rec| {
                 let metadata = SequenceMetadata {
                     name: py_rec.metadata.name.clone(),
+                    description: py_rec.metadata.description.clone(),
                     length: py_rec.metadata.length,
                     sha512t24u: py_rec.metadata.sha512t24u.clone(),
                     md5: py_rec.metadata.md5.clone(),
@@ -698,6 +703,7 @@ impl From<SequenceMetadata> for PySequenceMetadata {
     fn from(value: SequenceMetadata) -> Self {
         PySequenceMetadata {
             name: value.name,
+            description: value.description,
             length: value.length,
             sha512t24u: value.sha512t24u,
             md5: value.md5,
@@ -1218,7 +1224,7 @@ impl PyRefgetStore {
     ///
     /// Args:
     ///     cache_path (str or Path): Local directory containing the refget store (must have
-    ///         index.json and sequences.farg files).
+    ///         rgstore.json and sequences.rgsi files).
     ///
     /// Returns:
     ///         RefgetStore: Store with metadata loaded, sequences lazy-loaded.
@@ -1241,7 +1247,7 @@ impl PyRefgetStore {
 
     /// Load a remote RefgetStore with local caching.
     ///
-    /// Fetches metadata (index.json, sequences.farg) from a remote URL immediately.
+    /// Fetches metadata (rgstore.json, sequences.rgsi) from a remote URL immediately.
     /// Sequence data (.seq files) are downloaded on-demand when first accessed and
     /// cached locally. This is ideal for working with large remote genomes where
     /// you only need specific sequences.

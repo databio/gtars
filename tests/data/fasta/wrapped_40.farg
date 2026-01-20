@@ -1,8 +1,0 @@
-##seqcol_digest=13all_c09aZFzG2FTmqKeQPsBLJu6eEo
-##names_digest=g04lKdxiYtG3dOGeUC5AdKEifw65G0Wp
-##sequences_digest=wPijuRvJ8Ws13_skJWO-ohM2muaRGKrT
-##lengths_digest=7Wbn4JWcLVul2PgfQDeb4vMChCjzv_x2
-#name	length	alphabet	sha512t24u	md5
-chr1	120	dna2bit	SobnG7f3JogIwDMv3tG6_4k39TV1iw8G	b18543e5971bfb31c4579cbdd07e069a
-chr2	64	dna2bit	4K5kGIGkOWApR5zoZD8iONDoDVOvRW2T	ca45e5cc355d4551316adcca92e751fd
-chr3	40	dna3bit	jEVUwIZfApFYnVpkIecPgU0VNmWjgh-j	43f2519273570ee0b9a2bf15ead11cb1

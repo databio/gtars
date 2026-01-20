@@ -140,7 +140,7 @@ impl SequenceCollectionRecord {
         }
     }
 
-    /// Write the collection to an RGSI file (renamed from FARG)
+    /// Write the collection to an RGSI file
     pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let file_path = file_path.as_ref();
         let metadata = self.metadata();
@@ -151,7 +151,7 @@ impl SequenceCollectionRecord {
         writeln!(file, "##names_digest={}", metadata.names_digest)?;
         writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
         writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
-        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
+        writeln!(file, "#name\tdescription\tlength\talphabet\tsha512t24u\tmd5")?;
 
         // Write sequence metadata if available
         if let Some(sequences) = self.sequences() {
@@ -159,8 +159,13 @@ impl SequenceCollectionRecord {
                 let seq_meta = seq_record.metadata();
                 writeln!(
                     file,
-                    "{}\t{}\t{}\t{}\t{}",
-                    seq_meta.name, seq_meta.length, seq_meta.alphabet, seq_meta.sha512t24u, seq_meta.md5
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    seq_meta.name,
+                    seq_meta.description.as_deref().unwrap_or(""),
+                    seq_meta.length,
+                    seq_meta.alphabet,
+                    seq_meta.sha512t24u,
+                    seq_meta.md5
                 )?;
             }
         }
@@ -291,6 +296,10 @@ use std::fs::{self, File};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct SequenceMetadata {
     pub name: String,
+    /// Description from FASTA header (text after first whitespace).
+    /// Only populated when strict_seqnames=true during FASTA parsing.
+    #[serde(default)]
+    pub description: Option<String>,
     pub length: usize,
     pub sha512t24u: String,
     pub md5: String,
@@ -454,18 +463,18 @@ impl SequenceCollection {
         Self::from_path_with_cache(file_path, true, true)
     }
 
-    pub fn from_farg<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let farg_file_path = file_path.as_ref().replace_exts_with("farg");
-        println!("From_farg - Reading from file: {:?}", file_path.as_ref());
-        println!("Farg file path: {:?}", farg_file_path);
+    pub fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<Self> {
+        let rgsi_file_path = file_path.as_ref().replace_exts_with("rgsi");
+        println!("From_rgsi - Reading from file: {:?}", file_path.as_ref());
+        println!("RGSI file path: {:?}", rgsi_file_path);
 
-        if farg_file_path.exists() {
-            println!("Reading from existing farg file: {:?}", farg_file_path);
-            read_fasta_refget_file(&farg_file_path)
+        if rgsi_file_path.exists() {
+            println!("Reading from existing rgsi file: {:?}", rgsi_file_path);
+            read_fasta_refget_file(&rgsi_file_path)
         } else {
             Err(anyhow::anyhow!(
-                "FARG file does not exist at {:?}",
-                farg_file_path
+                "RGSI file does not exist at {:?}",
+                rgsi_file_path
             ))
         }
     }
@@ -497,95 +506,43 @@ impl SequenceCollection {
         read_cache: bool,
         write_cache: bool,
     ) -> Result<Self> {
-        // If the farg file exists, just use that.
+        // If the rgsi file exists, just use that.
         let fa_file_path = file_path.as_ref();
-        let farg_file_path = fa_file_path.replace_exts_with("farg");
+        let rgsi_file_path = fa_file_path.replace_exts_with("rgsi");
         println!(
             "from path with cache: reading from file: {:?}",
             file_path.as_ref()
         );
-        println!("Farg file path: {:?}", farg_file_path);
+        println!("RGSI file path: {:?}", rgsi_file_path);
         // Check if the file already exists
-        if read_cache && farg_file_path.exists() {
-            println!("Reading from existing farg file: {:?}", farg_file_path);
-            // Read the existing farg file
-            let seqcol = read_fasta_refget_file(&farg_file_path)?;
+        if read_cache && rgsi_file_path.exists() {
+            println!("Reading from existing rgsi file: {:?}", rgsi_file_path);
+            // Read the existing rgsi file
+            let seqcol = read_fasta_refget_file(&rgsi_file_path)?;
 
             // seqcol is already a SequenceCollection, just return it
             return Ok(seqcol);
         }
-        println!("Computing digests...: {:?}", farg_file_path);
+        println!("Computing digests...: {:?}", rgsi_file_path);
 
-        // If the farg file does not exist, compute the digests
+        // If the rgsi file does not exist, compute the digests
         // Digest the fasta file (your function)
         let seqcol: SequenceCollection = digest_fasta(file_path.as_ref())?;
 
-        // Write the SequenceCollection to the FARG file
-        if write_cache && !farg_file_path.exists() {
-            seqcol.write_farg()?;
-            println!("Farg file written to {:?}", farg_file_path);
+        // Write the SequenceCollection to the RGSI file
+        if write_cache && !rgsi_file_path.exists() {
+            seqcol.write_rgsi()?;
+            println!("RGSI file written to {:?}", rgsi_file_path);
         } else {
             println!(
-                "Farg file already exists, not writing: {:?}",
-                farg_file_path
+                "RGSI file already exists, not writing: {:?}",
+                rgsi_file_path
             );
         }
         Ok(seqcol)
     }
 
-    /// Write the SequenceCollection to a collection FARG file.
-    ///
-    /// Creates a FARG file with collection-level digest headers followed by
-    /// sequence metadata for all sequences in this collection.
-    ///
-    /// # Arguments
-    /// * `file_path` - The path to the FARG file to be written
-    ///
-    /// # Returns
-    /// Result indicating success or error
-    ///
-    /// # Format
-    /// The file includes:
-    /// - Collection digest headers (##seqcol_digest, ##names_digest, etc.)
-    /// - Column header (#name, length, alphabet, sha512t24u, md5)
-    /// - One line per sequence with metadata
-    pub fn write_collection_farg<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        let file_path = file_path.as_ref();
-        println!("Writing collection farg file: {:?}", file_path);
-        let mut file = std::fs::File::create(file_path)?;
-
-        // Write collection digest headers
-        writeln!(file, "##seqcol_digest={}", self.digest)?;
-        writeln!(file, "##names_digest={}", self.lvl1.names_digest)?;
-        writeln!(file, "##sequences_digest={}", self.lvl1.sequences_digest)?;
-        writeln!(file, "##lengths_digest={}", self.lvl1.lengths_digest)?;
-        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
-
-        // Write sequence metadata
-        for result_sr in &self.sequences {
-            let result = result_sr.metadata().clone();
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}\t{}",
-                result.name, result.length, result.alphabet, result.sha512t24u, result.md5
-            )?;
-        }
-        Ok(())
-    }
-
-    /// Write the SequenceCollection to a FARG file, using the file path stored in the struct.
-    pub fn write_farg(&self) -> Result<()> {
-        if let Some(ref file_path) = self.file_path {
-            let farg_file_path = file_path.replace_exts_with("farg");
-            self.write_collection_farg(farg_file_path)
-        } else {
-            Err(anyhow::anyhow!(
-                "No file path specified for FARG output. Use `write_collection_farg` to specify a file path."
-            ))
-        }
-    }
-
-    /// Write the SequenceCollection to an RGSI file (new format, renamed from FARG).
+    /// Write the SequenceCollection to a collection RGSI file.
     ///
     /// Creates an RGSI file with collection-level digest headers followed by
     /// sequence metadata for all sequences in this collection.
@@ -595,9 +552,51 @@ impl SequenceCollection {
     ///
     /// # Returns
     /// Result indicating success or error
+    ///
+    /// # Format
+    /// The file includes:
+    /// - Collection digest headers (##seqcol_digest, ##names_digest, etc.)
+    /// - Column header (#name, description, length, alphabet, sha512t24u, md5)
+    /// - One line per sequence with metadata
     pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        // RGSI format is identical to FARG, just a different extension
-        self.write_collection_farg(file_path)
+        let file_path = file_path.as_ref();
+        println!("Writing collection rgsi file: {:?}", file_path);
+        let mut file = std::fs::File::create(file_path)?;
+
+        // Write collection digest headers
+        writeln!(file, "##seqcol_digest={}", self.digest)?;
+        writeln!(file, "##names_digest={}", self.lvl1.names_digest)?;
+        writeln!(file, "##sequences_digest={}", self.lvl1.sequences_digest)?;
+        writeln!(file, "##lengths_digest={}", self.lvl1.lengths_digest)?;
+        writeln!(file, "#name\tdescription\tlength\talphabet\tsha512t24u\tmd5")?;
+
+        // Write sequence metadata
+        for result_sr in &self.sequences {
+            let result = result_sr.metadata();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                result.name,
+                result.description.as_deref().unwrap_or(""),
+                result.length,
+                result.alphabet,
+                result.sha512t24u,
+                result.md5
+            )?;
+        }
+        Ok(())
+    }
+
+    /// Write the SequenceCollection to an RGSI file, using the file path stored in the struct.
+    pub fn write_rgsi(&self) -> Result<()> {
+        if let Some(ref file_path) = self.file_path {
+            let rgsi_file_path = file_path.replace_exts_with("rgsi");
+            self.write_collection_rgsi(rgsi_file_path)
+        } else {
+            Err(anyhow::anyhow!(
+                "No file path specified for RGSI output. Use `write_collection_rgsi` to specify a file path."
+            ))
+        }
     }
 
     /// Convert to a SequenceCollectionRecord for storage in RefgetStore
@@ -640,8 +639,13 @@ impl SequenceCollection {
                 )
             })?;
 
-            // Write FASTA header
-            writeln!(output_file, ">{}", record.metadata().name)?;
+            // Write FASTA header (include description if present)
+            let metadata = record.metadata();
+            let header = match &metadata.description {
+                Some(desc) => format!(">{} {}", metadata.name, desc),
+                None => format!(">{}", metadata.name),
+            };
+            writeln!(output_file, "{}", header)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
@@ -762,6 +766,7 @@ mod tests {
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "test_seq".to_string(),
+                description: None,
                 length: 4,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -783,6 +788,7 @@ mod tests {
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "test_seq".to_string(),
+                description: None,
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -808,6 +814,7 @@ mod tests {
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "iupac_test".to_string(),
+                description: None,
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -833,6 +840,7 @@ mod tests {
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "protein_test".to_string(),
+                description: None,
                 length: 20,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -852,6 +860,7 @@ mod tests {
         let record = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "empty_seq".to_string(),
+                description: None,
                 length: 0,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -875,6 +884,7 @@ mod tests {
         let record_raw = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "raw_test".to_string(),
+                description: None,
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),
@@ -895,6 +905,7 @@ mod tests {
         let record_encoded = SequenceRecord::Full {
             metadata: SequenceMetadata {
                 name: "encoded_test".to_string(),
+                description: None,
                 length: 8,
                 sha512t24u: "test_digest".to_string(),
                 md5: "test_md5".to_string(),

@@ -6,7 +6,7 @@
 //! Note: Unit tests for the decode() method itself (including edge cases,
 //! different alphabets, encoding schemes) are in src/collection.rs
 
-use gtars_refget::store::{RefgetStore, StorageMode};
+use gtars_refget::store::RefgetStore;
 use std::io::Write;
 use tempfile::NamedTempFile;
 

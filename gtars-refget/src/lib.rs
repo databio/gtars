@@ -78,7 +78,6 @@ mod tests {
 
     use std::time::Instant;
     use store::RefgetStore;
-    use store::StorageMode;
     use tempfile::tempdir;
     #[test]
     #[ignore]

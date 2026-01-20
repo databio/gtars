@@ -143,6 +143,26 @@ class RefgetStore:
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
 
+    Note:
+        **Boolean evaluation**: RefgetStore follows Python container semantics,
+        meaning ``bool(store)`` is ``False`` for empty stores (like ``list``,
+        ``dict``, etc.). To check if a store variable is initialized (not None),
+        use ``if store is not None:`` rather than ``if store:``.
+
+        Example::
+
+            store = RefgetStore.in_memory()  # Empty store
+            bool(store)  # False (empty container)
+            len(store)   # 0
+
+            # Wrong: checks emptiness, not initialization
+            if store:
+                process(store)
+
+            # Right: checks if variable is set
+            if store is not None:
+                process(store)
+
     Examples:
         Create a new store and import sequences::
 
@@ -225,8 +245,7 @@ class RefgetStore:
         on-demand when first accessed. This is efficient for large genomes where
         you may only need specific sequences.
 
-        Supports both new format (rgstore.json, sequences.rgsi, collections.rgci)
-        and old format (index.json, sequences.farg) for backward compatibility.
+        Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
 
         Args:
             cache_path: Local directory containing the refget store.

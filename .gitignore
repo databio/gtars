@@ -26,5 +26,5 @@ bin/
 .DS_Store
 .Rhistory
 tests/data/out/region_scoring_count.csv.gz
-/gtars-refget/tests/store_test/index.json
-/gtars-refget/tests/store_test/sequences.farg
+/gtars-refget/tests/store_test/rgstore.json
+/gtars-refget/tests/store_test/sequences.rgsi

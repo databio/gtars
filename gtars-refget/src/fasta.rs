@@ -8,6 +8,35 @@ use super::collection::{FaiMetadata, SeqColDigestLvl1, SequenceCollection, Seque
 use md5::Md5;
 use sha2::{Digest, Sha512};
 
+/// Parse a FASTA header line (without the leading '>') into name and description.
+///
+/// Following FASTA standard: the sequence ID is the first word (up to first whitespace),
+/// and everything after is the description.
+///
+/// # Arguments
+/// * `header` - The header text (everything after '>')
+///
+/// # Returns
+/// Tuple of (name, description) where description is None if no whitespace in header.
+///
+/// # Examples
+/// ```ignore
+/// let (name, desc) = parse_fasta_header("chr1 some description here");
+/// assert_eq!(name, "chr1");
+/// assert_eq!(desc, Some("some description here".to_string()));
+///
+/// let (name, desc) = parse_fasta_header("chr1");
+/// assert_eq!(name, "chr1");
+/// assert_eq!(desc, None);
+/// ```
+pub fn parse_fasta_header(header: &str) -> (String, Option<String>) {
+    let header = header.trim();
+    match header.split_once(char::is_whitespace) {
+        Some((id, desc)) => (id.to_string(), Some(desc.trim().to_string())),
+        None => (header.to_string(), None),
+    }
+}
+
 /// A lightweight record containing only FAI (FASTA index) metadata for a sequence.
 /// Returned by `compute_fai()` for fast FAI-only computation without digest overhead.
 #[derive(Clone, Debug)]
@@ -64,6 +93,7 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
     let mut line = String::new();
 
     let mut current_id: Option<String> = None;
+    let mut current_description: Option<String> = None;
     let mut current_offset: u64 = 0;
     let mut current_line_bases: Option<u32> = None;
     let mut current_line_bytes: Option<u32> = None;
@@ -96,7 +126,8 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                 };
 
                 let metadata = SequenceMetadata {
-                    name: id.to_string(),
+                    name: id,
+                    description: current_description.take(),
                     length,
                     sha512t24u: sha512,
                     md5,
@@ -131,7 +162,8 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                 };
 
                 let metadata = SequenceMetadata {
-                    name: id.to_string(),
+                    name: id,
+                    description: current_description.take(),
                     length,
                     sha512t24u: sha512,
                     md5,
@@ -142,9 +174,10 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
                 results.push(SequenceRecord::Stub(metadata));
             }
 
-            // Start new sequence
-            let id = line[1..].trim().to_string();
-            current_id = Some(id);
+            // Start new sequence - parse header into name and description
+            let (name, description) = parse_fasta_header(&line[1..]);
+            current_id = Some(name);
+            current_description = description;
 
             // Track position for FAI
             if fai_enabled {
@@ -315,9 +348,9 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
                 });
             }
 
-            // Start new sequence
-            let id = line[1..].trim().to_string();
-            current_id = Some(id);
+            // Start new sequence - parse header into name and description (discard description for FAI)
+            let (name, _description) = parse_fasta_header(&line[1..]);
+            current_id = Some(name);
 
             // Track position for FAI
             if fai_enabled {
@@ -418,6 +451,7 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
     let mut line = String::new();
 
     let mut current_id: Option<String> = None;
+    let mut current_description: Option<String> = None;
     let mut current_offset: u64 = 0;
     let mut current_line_bases: Option<u32> = None;
     let mut current_line_bytes: Option<u32> = None;
@@ -451,7 +485,8 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                 };
 
                 let metadata = SequenceMetadata {
-                    name: id.to_string(),
+                    name: id,
+                    description: current_description.take(),
                     length,
                     sha512t24u: sha512,
                     md5,
@@ -489,7 +524,8 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                 };
 
                 let metadata = SequenceMetadata {
-                    name: id.to_string(),
+                    name: id,
+                    description: current_description.take(),
                     length,
                     sha512t24u: sha512,
                     md5,
@@ -503,9 +539,10 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
                 });
             }
 
-            // Start new sequence
-            let id = line[1..].trim().to_string();
-            current_id = Some(id);
+            // Start new sequence - parse header into name and description
+            let (name, description) = parse_fasta_header(&line[1..]);
+            current_id = Some(name);
+            current_description = description;
 
             // Track position for FAI
             if fai_enabled {
@@ -570,11 +607,11 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
     })
 }
 
-/// Read a FARG file and return a SequenceCollection struct with all metadata.
+/// Read an RGSI file and return a SequenceCollection struct with all metadata.
 ///
 /// This will not read the actual sequence data, only the metadata.
 /// # Arguments
-/// * `file_path` - The path to the FARG file to be read.
+/// * `file_path` - The path to the RGSI file to be read.
 pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
     let file = std::fs::File::open(&file_path)?;
     let reader = std::io::BufReader::new(file);
@@ -610,19 +647,32 @@ pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCo
             continue;
         }
 
-        // Parse sequence data lines
+        // Parse sequence data lines (supports 5-column legacy and 6-column new format)
         let parts: Vec<&str> = line.split('\t').collect();
-        if parts.len() != 5 {
-            continue; // Skip lines that don't have exactly 5 columns
-        }
-
-        let result = SequenceMetadata {
-            name: parts[0].to_string(),
-            length: parts[1].parse().unwrap_or(0),
-            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-            sha512t24u: parts[3].to_string(),
-            md5: parts[4].to_string(),
-            fai: None,  // FARG files don't store FAI data
+        let result = if parts.len() == 6 {
+            // New 6-column format: name, description, length, alphabet, sha512t24u, md5
+            SequenceMetadata {
+                name: parts[0].to_string(),
+                description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
+                length: parts[2].parse().unwrap_or(0),
+                alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
+                sha512t24u: parts[4].to_string(),
+                md5: parts[5].to_string(),
+                fai: None,
+            }
+        } else if parts.len() == 5 {
+            // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
+            SequenceMetadata {
+                name: parts[0].to_string(),
+                description: None,
+                length: parts[1].parse().unwrap_or(0),
+                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+                sha512t24u: parts[3].to_string(),
+                md5: parts[4].to_string(),
+                fai: None,
+            }
+        } else {
+            continue; // Skip lines that don't have 5 or 6 columns
         };
 
         let record = SequenceRecord::Stub(result);
@@ -733,12 +783,12 @@ mod tests {
     }
 
     #[test]
-    fn digests_fa_to_farg() {
+    fn digests_fa_to_rgsi() {
         let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
             .expect("Failed to create SequenceCollection from FASTA file");
-        seqcol.write_farg().expect("Failed to write farg file");
+        seqcol.write_rgsi().expect("Failed to write rgsi file");
 
-        let loaded_seqcol = read_fasta_refget_file("../tests/data/fasta/base.farg")
+        let loaded_seqcol = read_fasta_refget_file("../tests/data/fasta/base.rgsi")
             .expect("Failed to read refget file");
         println!("Original SequenceCollection: {}", seqcol);
         println!("Loaded SequenceCollection: {}", loaded_seqcol);

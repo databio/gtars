@@ -591,7 +591,7 @@ impl RefgetStore {
 
     /// Internal implementation for adding a sequence collection from FASTA.
     fn add_sequence_collection_from_fasta_internal<P: AsRef<Path>>(&mut self, file_path: P, force: bool) -> Result<()> {
-        println!("Loading farg index...");
+        println!("Loading rgsi index...");
         let seqcol = SequenceCollection::from_fasta(&file_path)?;
 
         // Check if collection already exists and skip if not forcing
@@ -620,15 +620,17 @@ impl RefgetStore {
         let mut seq_count = 0;
         while let Some(record) = fasta_reader.next() {
             let record = record?;
-            let id = std::str::from_utf8(record.head())?;
-            let dr = seqmeta_hashmap.get(id)
+            let header = std::str::from_utf8(record.head())?;
+            // Parse header to get name (first word) - same logic as digest_fasta
+            let (name, _description) = crate::fasta::parse_fasta_header(header);
+            let dr = seqmeta_hashmap.get(&name)
                 .ok_or_else(|| {
                     let available_keys: Vec<_> = seqmeta_hashmap.keys().collect();
                     let total = available_keys.len();
                     let sample: Vec<_> = available_keys.iter().take(3).collect();
                     anyhow::anyhow!(
                         "Sequence '{}' not found in metadata. Available ({} total): {:?}{}",
-                        id,
+                        name,
                         total,
                         sample,
                         if total > 3 { " ..." } else { "" }
@@ -736,7 +738,7 @@ impl RefgetStore {
     ///
     /// # Note
     /// This only accounts for sequence data files (.seq), not metadata files
-    /// like FARG files, index.json, or directory overhead.
+    /// like RGSI files, rgstore.json, or directory overhead.
     ///
     /// # Examples
     /// ```ignore
@@ -956,6 +958,10 @@ impl RefgetStore {
 
         // Pre-fetch all sequence metadata from the collection to avoid borrowing issues
         let collection_key = collection_digest.as_ref().to_key();
+
+        // Ensure collection is loaded (populates name_lookup for lazy-loaded stores)
+        self.ensure_collection_loaded(&collection_key)?;
+
         let name_to_metadata: HashMap<String, (String, usize, AlphabetType, String, String)> = self
             .name_lookup
             .get(&collection_key)
@@ -1091,7 +1097,6 @@ impl RefgetStore {
             }
             StorageMode::Raw => {
                 let raw_slice: &[u8] = &sequence[start..end];
-                println!("Raw sequence slice: {:?}", raw_slice);
                 match String::from_utf8(raw_slice.to_vec()) {
                     Ok(raw_string) => Some(raw_string),
                     Err(e) => {
@@ -1124,6 +1129,9 @@ impl RefgetStore {
         let line_width = line_width.unwrap_or(80);
         let output_path = output_path.as_ref();
         let collection_key = collection_digest.as_ref().to_key();
+
+        // Ensure collection is loaded (populates name_lookup for lazy-loaded stores)
+        self.ensure_collection_loaded(&collection_key)?;
 
         // Get the name map for this collection and build a map of name -> digest
         let name_to_digest: HashMap<String, [u8; 32]> = self
@@ -1194,8 +1202,12 @@ impl RefgetStore {
                 }
             };
 
-            // Write FASTA header
-            writeln!(writer, ">{}", seq_name)?;
+            // Write FASTA header (include description if present)
+            let header = match &metadata.description {
+                Some(desc) => format!(">{} {}", metadata.name, desc),
+                None => format!(">{}", metadata.name),
+            };
+            writeln!(writer, "{}", header)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
@@ -1277,8 +1289,12 @@ impl RefgetStore {
                 }
             };
 
-            // Write FASTA header with sequence name
-            writeln!(writer, ">{}", metadata.name)?;
+            // Write FASTA header (include description if present)
+            let header = match &metadata.description {
+                Some(desc) => format!(">{} {}", metadata.name, desc),
+                None => format!(">{}", metadata.name),
+            };
+            writeln!(writer, "{}", header)?;
 
             // Write sequence with line wrapping
             for chunk in decoded_sequence.as_bytes().chunks(line_width) {
@@ -1329,13 +1345,13 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Write a single collection RGSI file to disk (renamed from FARG)
+    /// Write a single collection RGSI file to disk
     /// Used when persist_to_disk=true to persist collections incrementally
     fn write_collection_to_disk_single(&self, record: &SequenceCollectionRecord) -> Result<()> {
         let local_path = self.local_path.as_ref()
             .context("local_path not set")?;
 
-        // Build path: collections/{digest}.rgsi (renamed from .farg)
+        // Build path: collections/{digest}.rgsi
         let coll_file_path = format!("collections/{}.rgsi", record.metadata().digest);
         let full_path = local_path.join(&coll_file_path);
 
@@ -1360,7 +1376,7 @@ impl RefgetStore {
         let template = self.seqdata_path_template.as_ref()
             .context("seqdata_path_template not set")?;
 
-        // Write the sequence metadata index file (renamed from sequences.farg)
+        // Write the sequence metadata index file (sequences.rgsi)
         let sequence_index_path = local_path.join("sequences.rgsi");
         self.write_sequences_rgsi(&sequence_index_path)?;
 
@@ -1415,13 +1431,28 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Write all sequence metadata to an RGSI file (renamed from FARG).
+    /// Write all sequence metadata to an RGSI file.
     ///
     /// Creates a global sequence index file containing metadata for all sequences
     /// in the store across all collections.
     pub fn write_sequences_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        // RGSI format is identical to FARG, just a different extension
-        self.write_sequences_farg(file_path)
+        let file_path = file_path.as_ref();
+        println!("Writing sequences rgsi file: {:?}", file_path);
+        let mut file = std::fs::File::create(file_path)?;
+
+        // Write header with column names
+        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
+
+        // Write sequence metadata for all sequences
+        for result_sr in self.sequence_store.values() {
+            let result = result_sr.metadata().clone();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}",
+                result.name, result.length, result.alphabet, result.sha512t24u, result.md5
+            )?;
+        }
+        Ok(())
     }
 
     /// Helper function to fetch a file from local path or remote source
@@ -1488,26 +1519,18 @@ impl RefgetStore {
 
     /// Load a local RefgetStore from a directory
     /// This loads metadata only; sequence data is loaded on-demand
-    /// Supports both new format (rgstore.json, sequences.rgsi, collections.rgci)
-    /// and old format (index.json, sequences.farg, collections/*.farg) for backward compatibility
+    /// Load a RefgetStore from a local directory.
+    ///
+    /// Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
     pub fn load_local<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let root_path = cache_path.as_ref();
 
-        // Try to read new format (rgstore.json) first, fall back to old format (index.json)
-        let new_index_path = root_path.join("rgstore.json");
-        let old_index_path = root_path.join("index.json");
-
-        let (json, is_new_format) = if new_index_path.exists() {
-            (fs::read_to_string(&new_index_path).context(format!(
-                "Failed to read rgstore.json from {}",
-                new_index_path.display()
-            ))?, true)
-        } else {
-            (fs::read_to_string(&old_index_path).context(format!(
-                "Failed to read index.json from {}",
-                old_index_path.display()
-            ))?, false)
-        };
+        // Read rgstore.json index file
+        let index_path = root_path.join("rgstore.json");
+        let json = fs::read_to_string(&index_path).context(format!(
+            "Failed to read rgstore.json from {}",
+            index_path.display()
+        ))?;
 
         let metadata: StoreMetadata =
             serde_json::from_str(&json).context("Failed to parse store metadata")?;
@@ -1532,19 +1555,15 @@ impl RefgetStore {
             }
         }
 
-        // If no collection stubs loaded (old format or missing rgci), load full collections from directory
+        // If no collection stubs loaded (missing rgci), load full collections from directory
         if store.collections.is_empty() {
             let collections_dir = root_path.join("collections");
             if collections_dir.exists() {
-                // Check for both new (.rgsi) and old (.farg) extensions
                 for entry in fs::read_dir(&collections_dir)? {
                     let entry = entry?;
                     let path = entry.path();
 
-                    let is_rgsi = path.extension() == Some(std::ffi::OsStr::new("rgsi"));
-                    let is_farg = path.extension() == Some(std::ffi::OsStr::new("farg"));
-
-                    if path.is_file() && (is_rgsi || is_farg) {
+                    if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("rgsi")) {
                         // Load the collection from the file
                         let collection = read_fasta_refget_file(&path)?;
                         let collection_digest = collection.digest.to_key();
@@ -1571,7 +1590,7 @@ impl RefgetStore {
         Ok(store)
     }
 
-    /// Load sequence metadata from a sequence index file (sequences.rgsi or sequences.farg)
+    /// Load sequence metadata from a sequence index file (sequences.rgsi)
     fn load_sequences_from_index(store: &mut RefgetStore, index_path: &Path) -> Result<()> {
         let file = std::fs::File::open(index_path)?;
         let reader = std::io::BufReader::new(file);
@@ -1584,19 +1603,32 @@ impl RefgetStore {
                 continue;
             }
 
-            // Parse sequence metadata lines
+            // Parse sequence metadata lines (supports 5-column legacy and 6-column new format)
             let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() != 5 {
-                continue; // Skip lines that don't have exactly 5 columns
-            }
-
-            let seq_metadata = SequenceMetadata {
-                name: parts[0].to_string(),
-                length: parts[1].parse().unwrap_or(0),
-                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                sha512t24u: parts[3].to_string(),
-                md5: parts[4].to_string(),
-                fai: None,  // Lazy loading doesn't preserve FAI data
+            let seq_metadata = if parts.len() == 6 {
+                // New 6-column format: name, description, length, alphabet, sha512t24u, md5
+                SequenceMetadata {
+                    name: parts[0].to_string(),
+                    description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
+                    length: parts[2].parse().unwrap_or(0),
+                    alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
+                    sha512t24u: parts[4].to_string(),
+                    md5: parts[5].to_string(),
+                    fai: None,
+                }
+            } else if parts.len() == 5 {
+                // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
+                SequenceMetadata {
+                    name: parts[0].to_string(),
+                    description: None,
+                    length: parts[1].parse().unwrap_or(0),
+                    alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+                    sha512t24u: parts[3].to_string(),
+                    md5: parts[4].to_string(),
+                    fai: None,
+                }
+            } else {
+                continue; // Skip lines that don't have 5 or 6 columns
             };
 
             // Create a SequenceRecord with no data (lazy loading)
@@ -1716,19 +1748,32 @@ impl RefgetStore {
                 continue;
             }
 
-            // Parse sequence metadata lines
+            // Parse sequence metadata lines (supports 5-column legacy and 6-column new format)
             let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() != 5 {
+            let seq_metadata = if parts.len() == 6 {
+                // New 6-column format: name, description, length, alphabet, sha512t24u, md5
+                SequenceMetadata {
+                    name: parts[0].to_string(),
+                    description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
+                    length: parts[2].parse().unwrap_or(0),
+                    alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
+                    sha512t24u: parts[4].to_string(),
+                    md5: parts[5].to_string(),
+                    fai: None,
+                }
+            } else if parts.len() == 5 {
+                // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
+                SequenceMetadata {
+                    name: parts[0].to_string(),
+                    description: None,
+                    length: parts[1].parse().unwrap_or(0),
+                    alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+                    sha512t24u: parts[3].to_string(),
+                    md5: parts[4].to_string(),
+                    fai: None,
+                }
+            } else {
                 continue;
-            }
-
-            let seq_metadata = SequenceMetadata {
-                name: parts[0].to_string(),
-                length: parts[1].parse().unwrap_or(0),
-                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                sha512t24u: parts[3].to_string(),
-                md5: parts[4].to_string(),
-                fai: None,  // Lazy loading doesn't preserve FAI data
             };
 
             // Create a SequenceRecord with no data (lazy loading)
@@ -1791,10 +1836,7 @@ impl RefgetStore {
                     let entry = entry?;
                     let path = entry.path();
 
-                    let is_rgsi = path.extension() == Some(std::ffi::OsStr::new("rgsi"));
-                    let is_farg = path.extension() == Some(std::ffi::OsStr::new("farg"));
-
-                    if path.is_file() && (is_rgsi || is_farg) {
+                    if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("rgsi")) {
                         // Load the collection from the file
                         let collection = read_fasta_refget_file(&path)?;
                         let collection_digest = collection.digest.to_key();
@@ -1845,26 +1887,18 @@ impl RefgetStore {
                 String::from_utf8_lossy(collection_digest).to_string()
             };
 
-            // Try new format (.rgsi) first, fall back to old format (.farg)
-            let relative_path_new = format!("collections/{}.rgsi", digest_str);
-            let relative_path_old = format!("collections/{}.farg", digest_str);
+            let relative_path = format!("collections/{}.rgsi", digest_str);
 
-            // Try to fetch the collection file
+            // Fetch the collection file
             // Always cache metadata files (they're small), even when persist_to_disk is false
-            let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path_new, true)
-                .or_else(|_| Self::fetch_file(&self.local_path, &self.remote_source, &relative_path_old, true))?;
+            let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
 
             // Read the collection from the cached file
             let local_path = self.local_path
                 .as_ref()
                 .ok_or_else(|| anyhow!("No local path configured"))?;
 
-            // Try to read from new format first, then old format
-            let collection_file_path = if local_path.join(&relative_path_new).exists() {
-                local_path.join(&relative_path_new)
-            } else {
-                local_path.join(&relative_path_old)
-            };
+            let collection_file_path = local_path.join(&relative_path);
 
             let collection = read_fasta_refget_file(&collection_file_path)?;
 
@@ -1947,39 +1981,11 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Write all sequence metadata to a FARG file (without collection headers).
+    /// Write all sequence metadata to an RGSI file (without collection headers).
     ///
     /// Creates a global sequence index file containing metadata for all sequences
     /// in the store across all collections. Does not include collection-level digest headers.
     ///
-    /// # Arguments
-    /// * `file_path` - The path to the FARG file to be written
-    ///
-    /// # Returns
-    /// Result indicating success or error
-    ///
-    /// # Notes
-    /// For writing individual collection FARG files with collection headers,
-    /// use `SequenceCollection::write_collection_farg()` instead.
-    pub fn write_sequences_farg<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        let file_path = file_path.as_ref();
-        println!("Writing sequences farg file: {:?}", file_path);
-        let mut file = std::fs::File::create(file_path)?;
-
-        // Write header with column names
-        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
-
-        // Write sequence metadata for all sequences
-        for result_sr in self.sequence_store.values() {
-            let result = result_sr.metadata().clone();
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}\t{}",
-                result.name, result.length, result.alphabet, result.sha512t24u, result.md5
-            )?;
-        }
-        Ok(())
-    }
 
     /// Write the store using its configured paths
     ///
@@ -2066,7 +2072,7 @@ impl RefgetStore {
 
         // Write the sequence metadata index file
         let sequence_index_path = root_path.join("sequences.rgsi");
-        self.write_sequences_farg(&sequence_index_path)?;
+        self.write_sequences_rgsi(&sequence_index_path)?;
 
         // Write the collection metadata index file
         let collection_index_path = root_path.join("collections.rgci");
@@ -2224,7 +2230,7 @@ impl Display for RefgetStore {
                 name_map.len()
             )?;
             // Only show first 5 sequences in each collection
-            for (j, (name, sha512_digest)) in name_map.iter().enumerate().take(5) {
+            for (name, sha512_digest) in name_map.iter().take(5) {
                 // Convert the sha512_digest to a hex string
                 let sha512_str = String::from_utf8_lossy(sha512_digest);
                 writeln!(f, "   - Name: {}, SHA512: {:02x?}", name, sha512_str)?;
@@ -2249,7 +2255,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn store_fa_to_farg() {
+    fn store_fa_to_rgsi() {
         // Create temporary directory
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
@@ -2257,7 +2263,7 @@ mod tests {
         // Copy test FASTA file to temp directory
         let test_fa = "../tests/data/fasta/base.fa";
         let temp_fa = temp_path.join("base.fa");
-        let temp_farg = temp_path.join("base.farg");
+        let temp_rgsi = temp_path.join("base.rgsi");
 
         std::fs::copy(test_fa, &temp_fa).expect("Failed to copy test FASTA file");
 
@@ -2265,11 +2271,11 @@ mod tests {
         let seqcol = SequenceCollection::from_fasta(&temp_fa)
             .expect("Failed to create SeqColDigest from FASTA file");
 
-        // Write FARG to temporary directory
-        seqcol.write_farg().expect("Failed to write farg file");
+        // Write RGSI to temporary directory
+        seqcol.write_rgsi().expect("Failed to write rgsi file");
 
         // Load and verify
-        let loaded_seqcol = read_fasta_refget_file(&temp_farg).expect("Failed to read refget file");
+        let loaded_seqcol = read_fasta_refget_file(&temp_rgsi).expect("Failed to read refget file");
 
         // Test round-trip integrity
         for (original, loaded) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
@@ -2516,6 +2522,7 @@ chr1\t-5\t100
         // Create a sequence record
         let seq_metadata = SequenceMetadata {
             name: name.to_string(),
+            description: None,
             length: sequence.len(),
             sha512t24u: sha512t24u(sequence),
             md5: md5(sequence),
@@ -2603,7 +2610,6 @@ chr1\t-5\t100
 
         // Try writing to a file
         let seq_template = "sequences/%s2/%s.seq";
-        // let col_template = "collections/%s.farg";
         store
             .write_store_to_dir(temp_path.to_str().unwrap(), Some(seq_template))
             .unwrap();
@@ -2712,7 +2718,6 @@ chr1\t-5\t100
                     substring.is_some(),
                     "Should be able to retrieve substring from loaded sequence"
                 );
-                println!("Do we ever get here?");
             }
         }
 
@@ -2952,13 +2957,61 @@ ATGCATGCATGC
     }
 
     #[test]
+    fn test_export_fasta_after_load_local() {
+        // Test that export_fasta works on disk-loaded stores
+        // This verifies the lazy loading fix (ensure_collection_loaded is called)
+        let temp_dir = tempdir().expect("Failed to create temporary directory");
+        let temp_path = temp_dir.path();
+        let store_path = temp_path.join("store");
+
+        // Create test FASTA
+        let fasta_content = ">chr1\nACGTACGT\n>chr2\nGGGGAAAA\n";
+        let fasta_path = temp_path.join("test.fa");
+        fs::write(&fasta_path, fasta_content).unwrap();
+
+        // Create and populate store on disk, save digest before closing
+        let collection_digest: [u8; 32];
+        {
+            let mut store = RefgetStore::on_disk(&store_path).unwrap();
+            store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+            let collections: Vec<_> = store.collections.keys().cloned().collect();
+            assert_eq!(collections.len(), 1, "Should have exactly one collection");
+            collection_digest = collections[0];
+        } // store dropped here
+
+        // Load the store fresh from disk
+        let mut loaded_store = RefgetStore::load_local(&store_path).unwrap();
+
+        // Verify collection is initially a stub (lazy loaded)
+        assert!(
+            !loaded_store.is_collection_loaded(&collection_digest),
+            "Collection should be Stub after loading from disk"
+        );
+
+        // This should work (was failing before fix due to missing ensure_collection_loaded call)
+        let output_path = temp_path.join("exported.fa");
+        loaded_store
+            .export_fasta(&collection_digest, &output_path, None, Some(80))
+            .expect("export_fasta should work on disk-loaded stores");
+
+        // Verify output
+        let exported = fs::read_to_string(&output_path).unwrap();
+        assert!(exported.contains(">chr1"));
+        assert!(exported.contains("ACGTACGT"));
+        assert!(exported.contains(">chr2"));
+        assert!(exported.contains("GGGGAAAA"));
+
+        println!("✓ export_fasta after load_local test passed");
+    }
+
+    #[test]
     fn test_sequence_names_with_spaces() {
-        // Ensure FASTA headers with spaces work correctly
-        // This is common in real-world files like pangenome assemblies
+        // Test FASTA header parsing: name is first word, rest is description
+        // Following FASTA standard, we now split on whitespace
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
 
-        // Create test FASTA with sequence names containing spaces
+        // Create test FASTA with headers containing descriptions after the ID
         // This mimics the structure from HPRC pangenome files
         let fasta_content = "\
 >JAHKSE010000016.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000016.1:1:100:1
@@ -2971,76 +3024,89 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let temp_fasta_path = temp_path.join("spaces_in_names.fa");
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
-        // Import FASTA with sequence names containing spaces
+        // Import FASTA - headers will be split into name (first word) and description (rest)
         let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta_path)
-            .expect("Should handle sequence names with spaces");
+            .expect("Should parse FASTA headers correctly");
 
-        // Verify the sequences were loaded with full names including spaces
+        // Verify the sequences were loaded
         assert_eq!(store.sequence_store.len(), 2);
 
-        let full_name1 = "JAHKSE010000016.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000016.1:1:100:1";
-        let full_name2 = "JAHKSE010000012.1 unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000012.1:1:100:1";
+        // Names are now just the first word (before whitespace)
+        let name1 = "JAHKSE010000016.1";
+        let name2 = "JAHKSE010000012.1";
 
         // Get the collection
         let collections: Vec<_> = store.collections.keys().cloned().collect();
         assert_eq!(collections.len(), 1);
         let collection_digest = collections[0];
 
-        // Verify we can retrieve sequences by their full names (with spaces)
-        let seq1 = store.get_sequence_by_collection_and_name(&collection_digest, full_name1);
-        assert!(seq1.is_some(), "Should retrieve sequence by full name with spaces");
+        // Verify we can retrieve sequences by their short names (first word only)
+        // and check the description was captured
+        {
+            let seq1 = store.get_sequence_by_collection_and_name(&collection_digest, name1);
+            assert!(seq1.is_some(), "Should retrieve sequence by name (first word)");
 
-        let seq2 = store.get_sequence_by_collection_and_name(&collection_digest, full_name2);
-        assert!(seq2.is_some(), "Should retrieve sequence by full name with spaces");
+            let seq1_meta = seq1.unwrap().metadata();
+            assert_eq!(seq1_meta.name, "JAHKSE010000016.1");
+            assert_eq!(
+                seq1_meta.description,
+                Some("unmasked:primary_assembly HG002.alt.pat.f1_v2:JAHKSE010000016.1:1:100:1".to_string())
+            );
+        }
 
-        println!("✓ Sequence names with spaces test passed");
+        {
+            let seq2 = store.get_sequence_by_collection_and_name(&collection_digest, name2);
+            assert!(seq2.is_some(), "Should retrieve sequence by name (first word)");
+        }
+
+        println!("✓ FASTA header parsing test passed");
     }
 
     #[test]
-    fn test_farg_filename_with_dots() {
-        // Test that FARG filenames preserve dots in the base name
+    fn test_rgsi_filename_with_dots() {
+        // Test that RGSI filenames preserve dots in the base name
         // Real HPRC files like "HG002.alt.pat.f1_v2.unmasked.fa.gz"
-        // should create "HG002.alt.pat.f1_v2.unmasked.farg", NOT "HG002.farg"
+        // should create "HG002.alt.pat.f1_v2.unmasked.rgsi", NOT "HG002.rgsi"
 
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
 
-        // Copy test file to temp (so .farg file gets created there, not in test data)
+        // Copy test file to temp (so .rgsi file gets created there, not in test data)
         let test_file = "../tests/data/fasta/HG002.alt.pat.f1_v2.unmasked.fa";
         let temp_fasta = temp_path.join("HG002.alt.pat.f1_v2.unmasked.fa");
         fs::copy(test_file, &temp_fasta).expect("Failed to copy test file");
 
-        // Load the FASTA - this creates a .farg file
+        // Load the FASTA - this creates a .rgsi file
         let mut store = RefgetStore::in_memory();
         store.add_sequence_collection_from_fasta(&temp_fasta)
             .expect("Should load FASTA");
 
-        // Check which .farg file was created
-        let correct_farg = temp_path.join("HG002.alt.pat.f1_v2.unmasked.farg");
-        let wrong_farg = temp_path.join("HG002.farg");
+        // Check which .rgsi file was created
+        let correct_rgsi = temp_path.join("HG002.alt.pat.f1_v2.unmasked.rgsi");
+        let wrong_rgsi = temp_path.join("HG002.rgsi");
 
         let files: Vec<_> = std::fs::read_dir(temp_path).unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
 
         assert!(
-            correct_farg.exists(),
-            "Expected 'HG002.alt.pat.f1_v2.unmasked.farg' but found: {:?}",
+            correct_rgsi.exists(),
+            "Expected 'HG002.alt.pat.f1_v2.unmasked.rgsi' but found: {:?}",
             files
         );
 
         assert!(
-            !wrong_farg.exists(),
-            "Should NOT create 'HG002.farg' (strips too many dots)"
+            !wrong_rgsi.exists(),
+            "Should NOT create 'HG002.rgsi' (strips too many dots)"
         );
 
-        println!("✓ FARG filename with dots test passed");
+        println!("✓ RGSI filename with dots test passed");
     }
 
     #[test]
     fn test_on_disk_collection_written_incrementally() {
-        // Test that collection FARG files are written to disk immediately
+        // Test that collection RGSI files are written to disk immediately
         // when using on_disk() store, not just when write_store_to_dir() is called
         let temp_dir = tempdir().unwrap();
         let temp_path = temp_dir.path();
@@ -3054,17 +3120,17 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Load FASTA file into the store
         store.add_sequence_collection_from_fasta(&temp_fasta).unwrap();
 
-        // BEFORE calling write_store_to_dir, verify collection FARG files exist
+        // BEFORE calling write_store_to_dir, verify collection RGSI files exist
         let collections_dir = cache_path.join("collections");
         assert!(collections_dir.exists(), "Collections directory should exist");
 
-        let farg_files: Vec<_> = std::fs::read_dir(&collections_dir)
+        let rgsi_files: Vec<_> = std::fs::read_dir(&collections_dir)
             .unwrap()
             .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
             .collect();
 
-        assert!(!farg_files.is_empty(), "Collection RGSI files should be written incrementally, found: {:?}", farg_files);
-        assert!(farg_files.iter().any(|f| f.ends_with(".rgsi")), "Should have .rgsi files");
+        assert!(!rgsi_files.is_empty(), "Collection RGSI files should be written incrementally, found: {:?}", rgsi_files);
+        assert!(rgsi_files.iter().any(|f| f.ends_with(".rgsi")), "Should have .rgsi files");
 
         println!("✓ On-disk collection incremental write test passed");
     }
