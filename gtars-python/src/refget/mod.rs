@@ -1370,11 +1370,14 @@ impl PyRefgetStore {
                 ))
             })?;
 
-        // Collect results, filtering out errors
-        let py_results: Vec<PyRetrievedSequence> = iter
-            .filter_map(Result::ok)
-            .map(PyRetrievedSequence::from)
-            .collect();
+        // Collect results, logging errors to stderr (matches Rust export_fasta_from_regions behavior)
+        let mut py_results: Vec<PyRetrievedSequence> = Vec::new();
+        for item in iter {
+            match item {
+                Ok(retrieved) => py_results.push(PyRetrievedSequence::from(retrieved)),
+                Err(e) => eprintln!("{}", e),
+            }
+        }
 
         Ok(py_results)
     }
