@@ -47,6 +47,13 @@ impl Region {
         let chrom_hash = hasher.finalize();
         format!("{:x}", chrom_hash)
     }
+
+    ///
+    /// Calculate mid point
+    ///
+    pub fn mid_point(&self) -> u32 {
+        self.start + self.width() / 2
+    }
 }
 
 impl Display for Region {

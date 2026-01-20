@@ -252,49 +252,6 @@ pub fn calc_dinucl_freq(
     Ok(dinucl_freqs)
 }
 
-// /// TODO: fix and test this function
-// /// Calculate TSS distances of the regions in BED file
-// ///
-// /// Arguments:
-// /// - region_set: RegionSet object
-// /// - tss_index: TsSSindex object
-// ///
-// /// Returns:
-// /// - Vector of tss distances to the region
-// pub fn calc_tss_dist(
-//     region_set: &RegionSet,
-//     tss_index: &TSSIndex,
-// ) -> Result<Vec<u32>, GtarsGenomicDistError> {
-//     let mut tss_dists: Vec<u32> = Vec::with_capacity(region_set.len());
-//
-//     for chr in region_set.iter_chroms() {
-//         if !tss_index.has_chr(chr) {
-//             continue;
-//         }
-//         for region in region_set.iter_chr_regions(chr) {
-//             let tsses = tss_index.query(region);
-//             if tsses.is_none() {
-//                 return Err(GtarsGenomicDistError::TSSContentError(
-//                     region.chr.clone(),
-//                     region.start,
-//                     region.end,
-//                 ));
-//             }
-//
-//             let midpoint = region.end - region.start;
-//
-//             let dists = tsses.unwrap().into_iter().map(|tss| {
-//                 let tss_midpoint = tss.end - tss.start;
-//                 midpoint - tss_midpoint
-//             });
-//
-//             tss_dists.push(dists.min().unwrap());
-//         }
-//     }
-//
-//     Ok(tss_dists)
-// }
-
 #[cfg(test)]
 mod tests {
     use super::*;

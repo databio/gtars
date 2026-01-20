@@ -160,4 +160,24 @@ class GenomeAssembly:
         """
         ...
 
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+
+class TssIndex:
+    def __init__(self, path: str) -> "TssIndex":
+        """
+        :param path: path to the bed file with tss regions
+        """
+        ...
+
+    def calc_tss_distances(self, rs: RegionSet) -> List[int]:
+        """
+        :param rs: RegionSet
+
+        :return : list of region distances to the nearest TSS
+        """
+        ...
+
     def __str__(self): ...
+    def __repr__(self) -> str: ...
