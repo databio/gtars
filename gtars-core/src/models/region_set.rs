@@ -509,6 +509,9 @@ impl RegionSet {
         Ok(widths)
     }
 
+    ///
+    /// Calculate mean region width for whole RegionSet
+    ///
     pub fn mean_region_width(&self) -> f64 {
         let sum: u32 = self
             .regions
@@ -519,6 +522,21 @@ impl RegionSet {
 
         // must be f64 because python doesn't understand f32
         ((sum as f64 / count as f64) * 100.0).round() / 100.0
+    }
+
+    ///
+    /// Calculate middle point for each region, and return hashmap with midpoints for each chromosome
+    ///
+    pub fn calc_mid_points(&self) -> HashMap<String, Vec<u32>> {
+        let mut mid_points: HashMap<String, Vec<u32>> = HashMap::new();
+        for chromosome in self.iter_chroms() {
+            let mut chr_mid_points: Vec<u32> = Vec::new();
+            for region in self.iter_chr_regions(chromosome) {
+                chr_mid_points.push(region.mid_point());
+            }
+            mid_points.insert(chromosome.clone(), chr_mid_points);
+        }
+        mid_points
     }
 
     ///
@@ -791,5 +809,25 @@ mod tests {
         let rs_polars = region_set.to_polars().unwrap();
         println!("Number of columns: {:?}", rs_polars.get_columns().len());
         assert_eq!(rs_polars.get_columns().len(), 10);
+    }
+
+    #[rstest]
+    fn test_calc_mid_points() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let mid_points = region_set.calc_mid_points();
+        assert_eq!(mid_points.get("chr1").unwrap().len(), 9);
+        assert_eq!(mid_points.len(), 1);
+        assert_eq!(
+            mid_points
+                .get("chr1")
+                .unwrap()
+                .iter()
+                .min()
+                .copied()
+                .unwrap(),
+            6u32
+        );
     }
 }

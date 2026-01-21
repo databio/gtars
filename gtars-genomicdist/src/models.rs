@@ -1,11 +1,11 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
-use gtars_core::models::Region;
+use gtars_core::models::{Region, RegionSet};
 // use gtars_overlaprs::Overlapper;
 use std::{collections::HashMap, fmt::Debug};
 // use num_traits::{PrimInt, Unsigned};
 use std::fs::File;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Statistics summary for regions on a single chromosome.
 ///
@@ -201,36 +201,142 @@ impl Dinucleotide {
     }
 }
 
-// /// TODO: fix and test this function
-// pub struct TSSIndex<I, T> {
-//     tree: HashMap<String, Box<dyn Overlapper<I, T>>>,
-// }
-// impl<I, T> TSSIndex<I, T>
-// where
-//     I: PrimInt + Unsigned + Send + Sync + Debug,
-//     T: Eq + Clone + Send + Sync + Debug,
-// {
-//     // TODO: potentially use MultiChromOverlapper
-//     pub fn has_chr(&self, chr: &str) -> bool {
-//         self.tree.contains_key(chr)
-//     }
-//     pub fn query(&self, region: &Region) -> Option<Vec<&Region>> {
-//         let chr = &region.chr;
-//         let chr_tree = self.tree.get(chr);
-//
-//         match chr_tree {
-//             None => None, // our index doesnt have that chromosome they gave us
-//             Some(tree) => {
-//                 let mut tss_list: Vec<&Region> = Vec::new();
-//                 let hits = tree.find(region.start, region.end);
-//
-//                 for hit in hits {
-//                     for tss in &hit.val {
-//                         tss_list.push(tss);
-//                     }
-//                  }
-//                 Some(tss_list)
-//             }
-//         }
-//     }
-// }
+///
+/// Struct to hold Tss information (RegionSet with additionally indexing) that is initialized from
+/// RegionSet or BED file that holds tss regions
+///
+pub struct TssIndex {
+    pub region_set: RegionSet,
+    pub mid_points: HashMap<String, Vec<u32>>,
+}
+
+impl TryFrom<RegionSet> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: RegionSet) -> Result<Self, GtarsGenomicDistError> {
+        let mut mid_points = value.calc_mid_points();
+
+        for points in mid_points.values_mut() {
+            points.sort_unstable();
+        }
+
+        Ok(TssIndex {
+            region_set: value,
+            mid_points,
+        })
+    }
+}
+
+impl TryFrom<&Path> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &Path) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TryFrom<&str> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TryFrom<String> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TssIndex {
+    ///
+    /// Calculate the distance from each region to the nearest TSS mid-point.
+    ///
+    /// Uses binary search for O(R * log M) complexity instead of O(R * M),
+    /// where R is the number of regions and M is the number of TSS midpoints.
+    ///
+    pub fn calc_tss_distances(&self, rs: &RegionSet) -> Result<Vec<u32>, GtarsGenomicDistError> {
+        let mut distances: Vec<u32> = Vec::with_capacity(rs.len());
+
+        for chromosome in rs.iter_chroms() {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
+                for region in rs.iter_chr_regions(chromosome.as_str()) {
+                    let target = region.mid_point();
+
+                    let min_distance = match chr_midpoints.binary_search(&target) {
+                        Ok(_) => 0,
+                        Err(idx) => {
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| target.abs_diff(chr_midpoints[i]));
+                            let right = chr_midpoints.get(idx).map(|&v| target.abs_diff(v));
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => l.min(r),
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(min_distance);
+                }
+            }
+        }
+        Ok(distances)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Error;
+    use std::path::PathBuf;
+
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
+        let file_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/regionset")
+            .join(file_name);
+        Ok(file_path)
+    }
+
+    #[rstest]
+    fn test_calc_tss_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let tss_path = get_test_path("dummy_tss.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
+
+        let distances = tss_index.calc_tss_distances(&region_set).unwrap();
+
+        assert_eq!(distances.len(), 9);
+        assert_eq!(distances.iter().min(), Some(&2));
+    }
+}
