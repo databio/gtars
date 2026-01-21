@@ -21,4 +21,4 @@ jobs:
         r-version: '4.4'
     
     - name: Run tests
-      run: cargo test --verbose --workspace
+      run: cargo test --verbose --workspace --all-features

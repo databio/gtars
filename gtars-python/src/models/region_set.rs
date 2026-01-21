@@ -197,6 +197,10 @@ impl PyRegionSet {
         Ok(())
     }
 
+    fn region_widths(&self) -> Vec<u32> {
+        self.regionset.region_widths().unwrap()
+    }
+
     fn mean_region_width(&self) -> f64 {
         self.regionset.mean_region_width()
     }

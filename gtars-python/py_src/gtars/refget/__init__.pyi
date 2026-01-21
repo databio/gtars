@@ -103,11 +103,13 @@ class GlobalRefgetStore:
         Import a fasta into the GlobalRefgetStore
         """
         ...
+
     def get_sequence_by_id(self, digest: str) -> Optional[SequenceRecord]:
         """
         Retrieves a sequence record by its SHA512t24u or MD5 digest.
         """
         ...
+
     def get_sequence_by_collection_and_name(
         self, collection_digest: str, sequence_name: str
     ) -> Optional[SequenceRecord]:
@@ -116,6 +118,7 @@ class GlobalRefgetStore:
         """
 
         ...
+
     def get_substring(self, seq_digest: str, start: int, end: int) -> Optional[str]:
         """
         Retrieves a substring from an encoded sequence by its SHA512t24u digest.
@@ -128,6 +131,7 @@ class GlobalRefgetStore:
 
         """
         ...
+
     def write_store_to_directory(
         self, root_path: Union[str, PathLike], seqdata_path_template: str
     ) -> None:
@@ -135,6 +139,7 @@ class GlobalRefgetStore:
         Write a GlobalRefgetStore object to a directory
         """
         ...
+
     @classmethod
     def load_from_directory(
         cls: Type["GlobalRefgetStore"], root_path: Union[str, PathLike]
@@ -144,6 +149,7 @@ class GlobalRefgetStore:
         """
 
         ...
+
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
