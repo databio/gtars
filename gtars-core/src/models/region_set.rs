@@ -816,12 +816,11 @@ mod tests {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
-        let chr1_mid = region_set.calc_mid_points().get("chr1").unwrap().len();
-        assert_eq!(chr1_mid, 9);
-        assert_eq!(region_set.calc_mid_points().len(), 1);
+        let mid_points = region_set.calc_mid_points();
+        assert_eq!(mid_points.get("chr1").unwrap().len(), 9);
+        assert_eq!(mid_points.len(), 1);
         assert_eq!(
-            region_set
-                .calc_mid_points()
+            mid_points
                 .get("chr1")
                 .unwrap()
                 .iter()

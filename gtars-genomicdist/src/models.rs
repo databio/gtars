@@ -201,6 +201,10 @@ impl Dinucleotide {
     }
 }
 
+///
+/// Struct to hold Tss information (RegionSet with additionally indexing) that is initialized from
+/// RegionSet or BED file that holds tss regions
+///
 pub struct TssIndex {
     pub region_set: RegionSet,
     pub mid_points: HashMap<String, Vec<u32>>,
@@ -209,7 +213,11 @@ pub struct TssIndex {
 impl TryFrom<RegionSet> for TssIndex {
     type Error = GtarsGenomicDistError;
     fn try_from(value: RegionSet) -> Result<Self, GtarsGenomicDistError> {
-        let mid_points = value.calc_mid_points();
+        let mut mid_points = value.calc_mid_points();
+
+        for points in mid_points.values_mut() {
+            points.sort_unstable();
+        }
 
         Ok(TssIndex {
             region_set: value,
@@ -264,21 +272,38 @@ impl TryFrom<String> for TssIndex {
 }
 
 impl TssIndex {
+    ///
+    /// Calculate the distance from each region to the nearest TSS mid-point.
+    ///
+    /// Uses binary search for O(R * log M) complexity instead of O(R * M),
+    /// where R is the number of regions and M is the number of TSS midpoints.
+    ///
     pub fn calc_tss_distances(&self, rs: &RegionSet) -> Result<Vec<u32>, GtarsGenomicDistError> {
         let mut distances: Vec<u32> = Vec::with_capacity(rs.len());
+
         for chromosome in rs.iter_chroms() {
-            if self.mid_points.contains_key(chromosome.as_str()) {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
                 for region in rs.iter_chr_regions(chromosome.as_str()) {
-                    if let Some(min_distance) = self.mid_points[chromosome.as_str()]
-                        .iter()
-                        .map(|x| region.mid_point().abs_diff(*x))
-                        .min()
-                    {
-                        distances.push(min_distance);
-                    }
+                    let target = region.mid_point();
+
+                    let min_distance = match chr_midpoints.binary_search(&target) {
+                        Ok(_) => 0,
+                        Err(idx) => {
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| target.abs_diff(chr_midpoints[i]));
+                            let right = chr_midpoints.get(idx).map(|&v| target.abs_diff(v));
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => l.min(r),
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(min_distance);
                 }
-            } else {
-                continue;
             }
         }
         Ok(distances)
