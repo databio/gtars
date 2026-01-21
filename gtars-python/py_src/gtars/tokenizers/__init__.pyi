@@ -11,6 +11,7 @@ class Tokenizer:
         Returns:
             Tokenizer: An instance of the Tokenizer class.
         """
+
     @classmethod
     def from_bed(cls, path: str) -> "Tokenizer":
         """
@@ -20,6 +21,7 @@ class Tokenizer:
         Returns:
             Tokenizer: An instance of the Tokenizer class.
         """
+
     @classmethod
     def from_pretrained(cls, model_name: str) -> "Tokenizer":
         """
@@ -29,6 +31,7 @@ class Tokenizer:
         Returns:
             Tokenizer: An instance of the Tokenizer class.
         """
+
     def tokenize(self, regions: Any) -> List[str]:
         """
         Tokenizes the input regions into a list of tokens.
@@ -37,6 +40,7 @@ class Tokenizer:
         Returns:
             List[str]: A list of tokens.
         """
+
     def encode(self, tokens: Any) -> Union[List[int], int]:
         """
         Encodes the input tokens into a list of token IDs.
@@ -45,6 +49,7 @@ class Tokenizer:
         Returns:
             Union[List[int], int]: A list of token IDs or a single token ID.
         """
+
     def decode(self, ids: Any) -> Union[List[str], str]:
         """
         Decodes the input token IDs into a list of tokens.
@@ -53,6 +58,7 @@ class Tokenizer:
         Returns:
             Union[List[str], str]: A list of tokens or a single token.
         """
+
     def convert_ids_to_tokens(self, id: Any) -> Union[List[str], str]:
         """
         Converts the input token IDs into a list of tokens.
@@ -61,6 +67,7 @@ class Tokenizer:
         Returns:
             Union[List[str], str]: A list of tokens or a single token.
         """
+
     def convert_tokens_to_ids(self, region: Any) -> Union[List[int], int]:
         """
         Converts the input tokens into a list of token IDs.
@@ -69,6 +76,7 @@ class Tokenizer:
         Returns:
             Union[List[int], int]: A list of token IDs or a single token ID.
         """
+
     @property
     def unk_token(self) -> str: ...
     @property
@@ -106,12 +114,14 @@ class Tokenizer:
         Returns:
             Dict[str, Optional[str]]: A dictionary mapping special tokens to their string representations.
         """
+
     def get_vocab(self) -> Dict[str, int]:
         """
         Returns the vocabulary of the tokenizer.
         Returns:
             Dict[str, int]: A dictionary mapping tokens to their IDs.
         """
+
     def __len__(self) -> int: ...
     def __repr__(self) -> str: ...
     def __call__(self, regions: Any) -> Any: ...
@@ -127,24 +137,28 @@ class Universe:
         Args:
             universe (Any): The underlying Rust Universe object.
         """
+
     def len(self) -> int:
         """
         Returns the number of regions in the Universe.
         Returns:
             int: The number of regions.
         """
+
     def is_empty(self) -> bool:
         """
         Checks if the Universe is empty.
         Returns:
             bool: True if the Universe is empty, False otherwise.
         """
+
     def __len__(self) -> int:
         """
         Returns the number of regions in the Universe.
         Returns:
             int: The number of regions.
         """
+
     def __repr__(self) -> str:
         """
         Returns a string representation of the Universe.

@@ -3,7 +3,6 @@ pub mod fragments;
 pub mod interval;
 pub mod region;
 pub mod region_set;
-pub mod universe;
 
 // re-export for cleaner imports
 pub use self::fragments::Fragment;

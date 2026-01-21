@@ -12,10 +12,9 @@ use anyhow::{Context, Result};
 #[cfg(feature = "http")]
 use flate2::read::GzDecoder;
 use flate2::read::MultiGzDecoder;
-#[cfg(feature = "http")]
-use reqwest::blocking::Client;
-#[cfg(feature = "http")]
 use std::error::Error;
+#[cfg(feature = "http")]
+use ureq::{get, Error as UreqError};
 
 use crate::models::region::Region;
 
@@ -138,27 +137,37 @@ pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
 pub fn get_dynamic_reader_from_url(
     url: &Path,
 ) -> Result<BufReader<Box<dyn std::io::Read>>, Box<dyn Error>> {
-    // Create an HTTP client and fetch the content
-    let mut url: String = url.to_str().unwrap().to_string();
+    let mut url_str = url
+        .to_str()
+        .ok_or_else(|| "URL path is not valid UTF-8")?
+        .to_string();
 
-    let is_ftp: bool = url.starts_with("ftp");
-
+    let is_ftp = url_str.starts_with("ftp://");
     if is_ftp {
         println!("ftp is not fully implemented. Bugs could appear");
-        url = url.replacen("ftp://", "http://", 1);
+        url_str = url_str.replacen("ftp://", "http://", 1);
     }
 
-    let response = Client::new()
-        .get(&url)
-        .send()
-        .with_context(|| format!("Failed to fetch content from URL: {}", &url))?
-        .error_for_status()?
-        .bytes()?;
+    // Perform request
+    let response = match get(&url_str).call() {
+        Ok(resp) => resp,
+        Err(UreqError::StatusCode(code)) => {
+            return Err(format!("HTTP status {} when fetching {}", code, url_str).into())
+        }
+        Err(e) => return Err(format!("Request error when fetching {}: {}", url_str, e).into()),
+    };
 
-    // Convert the response into a cursor for reading
-    let cursor = Cursor::new(response);
+    // Read the entire HTTP response body into memory as a Vec<u8>
+    let mut bytes = Vec::new();
+    response
+        .into_body()
+        .into_reader()
+        .read_to_end(&mut bytes)
+        .map_err(|e| format!("Failed reading response body from {}: {}", url_str, e))?;
 
-    let is_gzipped = url.ends_with(".gz");
+    let cursor = Cursor::new(bytes);
+
+    let is_gzipped = url_str.ends_with(".gz");
 
     let reader: Box<dyn std::io::Read> = match is_gzipped {
         true => Box::new(GzDecoder::new(cursor)),

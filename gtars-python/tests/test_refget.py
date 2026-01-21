@@ -202,13 +202,11 @@ class TestRefget:
             with open(temp_fasta_path, "w") as f:
                 f.write(fasta_content)
 
-
             store = RefgetStore.in_memory()
             store.add_sequence_collection_from_fasta(temp_fasta_path)
             result = digest_fasta(temp_fasta_path)
 
             collection_digest = result.digest
-
 
             chr1_sha = sha512t24u_digest(b"ATGCATGCATGC")
             chr1_md5 = md5_digest(b"ATGCATGCATGC")

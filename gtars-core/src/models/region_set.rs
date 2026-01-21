@@ -7,7 +7,7 @@ use md5::{Digest, Md5};
 
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
 use std::io::{BufWriter, Error, Write};
@@ -25,6 +25,11 @@ use crate::utils::get_dynamic_reader_from_url;
 use crate::utils::get_dynamic_reader;
 #[cfg(feature = "bigbed")]
 use crate::utils::get_chrom_sizes;
+
+#[cfg(feature = "dataframe")]
+use polars::prelude::*;
+#[cfg(feature = "dataframe")]
+use std::io::Cursor;
 
 ///
 /// RegionSet struct, the representation of the interval region set file,
@@ -185,7 +190,7 @@ impl TryFrom<String> for RegionSet {
     type Error = anyhow::Error;
 
     fn try_from(value: String) -> Result<Self> {
-        println!("Converting String to Path: {}", value);
+        // println!("Converting String to Path: {}", value);
         RegionSet::try_from(Path::new(&value))
     }
 }
@@ -385,6 +390,24 @@ impl RegionSet {
     }
 
     ///
+    /// Iterate unique chromosomes located in RegionSet
+    ///
+    pub fn iter_chroms(&self) -> impl Iterator<Item = &String> {
+        let unique_chroms: HashSet<&String> = self.regions.iter().map(|r| &r.chr).collect();
+        unique_chroms.into_iter()
+    }
+
+    ///
+    /// Iterate through regions located on specific Chromosome in RegionSet
+    ///
+    /// # Arguments
+    /// - chr: chromosome name
+    ///
+    pub fn iter_chr_regions<'a>(&'a self, chr: &'a str) -> impl Iterator<Item = &'a Region> {
+        self.regions.iter().filter(move |r| r.chr == chr)
+    }
+
+    ///
     /// Save RegionSet as bigBed (binary version of bed file)
     ///
     /// # Arguments
@@ -475,6 +498,22 @@ impl RegionSet {
         false
     }
 
+    ///
+    /// Calculate all regions width
+    ///
+    pub fn region_widths(&self) -> Result<Vec<u32>> {
+        let mut widths: Vec<u32> = Vec::new();
+
+        for region in &self.regions {
+            widths.push(region.width())
+        }
+
+        Ok(widths)
+    }
+
+    ///
+    /// Calculate mean region width for whole RegionSet
+    ///
     pub fn mean_region_width(&self) -> f64 {
         let sum: u32 = self
             .regions
@@ -485,6 +524,21 @@ impl RegionSet {
 
         // must be f64 because python doesn't understand f32
         ((sum as f64 / count as f64) * 100.0).round() / 100.0
+    }
+
+    ///
+    /// Calculate middle point for each region, and return hashmap with midpoints for each chromosome
+    ///
+    pub fn calc_mid_points(&self) -> HashMap<String, Vec<u32>> {
+        let mut mid_points: HashMap<String, Vec<u32>> = HashMap::new();
+        for chromosome in self.iter_chroms() {
+            let mut chr_mid_points: Vec<u32> = Vec::new();
+            for region in self.iter_chr_regions(chromosome) {
+                chr_mid_points.push(region.mid_point());
+            }
+            mid_points.insert(chromosome.clone(), chr_mid_points);
+        }
+        mid_points
     }
 
     ///
@@ -533,6 +587,37 @@ impl RegionSet {
         }
         total_count
     }
+
+    ///
+    /// Create Polars DataFrame
+    ///
+    #[cfg(feature = "dataframe")]
+    pub fn to_polars(&self) -> PolarsResult<DataFrame> {
+        // Convert regions to tab-separated string format
+        let data: String = self
+            .regions
+            .iter()
+            .map(|region| {
+                if let Some(rest) = region.rest.as_deref() {
+                    format!("{}\t{}\t{}\t{}", region.chr, region.start, region.end, rest,)
+                } else {
+                    format!("{}\t{}\t{}", region.chr, region.start, region.end,)
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let cursor = Cursor::new(data);
+
+        let df = CsvReadOptions::default()
+            .with_has_header(false)
+            .map_parse_options(|parse_options| parse_options.with_separator(b'\t'))
+            .with_infer_schema_length(Some(10000))
+            .into_reader_with_file_handle(cursor)
+            .finish()?;
+
+        Ok(df)
+    }
 }
 
 impl Display for RegionSet {
@@ -569,14 +654,15 @@ mod tests {
     }
 
     #[rstest]
-    #[ignore = "Failing but low priority for now"]
     fn test_open_from_url() {
-        let file_path = String::from("https://github.com/databio/gtars/raw/refs/heads/master/gtars/tests/data/regionset/dummy.narrowPeak.bed.gz");
+        let file_path = String::from(
+            "https://www.encodeproject.org/files/ENCFF321QPN/@@download/ENCFF321QPN.bed.gz",
+        );
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
     #[rstest]
-    #[ignore = "Failing but low priority"]
+    #[ignore = "Avoid BEDbase dependency in CI"]
     fn test_open_from_bedbase() {
         let bbid = String::from("6b2e163a1d4319d99bd465c6c78a9741");
         let region_set = RegionSet::try_from(bbid);
@@ -635,6 +721,7 @@ mod tests {
         assert_eq!(new_region.unwrap().identifier(), region_set.identifier())
     }
 
+    #[cfg(feature = "bigbed")]
     #[rstest]
     fn test_save_bigbed() {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
@@ -706,5 +793,43 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.nucleotides_length(), 38)
+    }
+
+    #[rstest]
+    fn test_iter_chroms() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        assert_eq!(region_set.iter_chroms().collect::<Vec<_>>().len(), 1)
+    }
+
+    #[cfg(feature = "dataframe")]
+    #[rstest]
+    fn test_polars() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let rs_polars = region_set.to_polars().unwrap();
+        println!("Number of columns: {:?}", rs_polars.get_columns().len());
+        assert_eq!(rs_polars.get_columns().len(), 10);
+    }
+
+    #[rstest]
+    fn test_calc_mid_points() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let mid_points = region_set.calc_mid_points();
+        assert_eq!(mid_points.get("chr1").unwrap().len(), 9);
+        assert_eq!(mid_points.len(), 1);
+        assert_eq!(
+            mid_points
+                .get("chr1")
+                .unwrap()
+                .iter()
+                .min()
+                .copied()
+                .unwrap(),
+            6u32
+        );
     }
 }
