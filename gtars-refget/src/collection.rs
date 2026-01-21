@@ -228,9 +228,7 @@ impl SeqColDigestLvl1 {
 
         // Canonicalize the JSON object and compute collection digest
         let lvl1_canonical = canonicalize_json(&lvl1_json);
-        let digest = sha512t24u(lvl1_canonical.as_bytes());
-        println!("lvl1 digest: {}", digest);
-        digest
+        sha512t24u(lvl1_canonical.as_bytes())
     }
 
     /// Compute lvl1 digests from a collection of SequenceMetadata
@@ -465,11 +463,8 @@ impl SequenceCollection {
 
     pub fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<Self> {
         let rgsi_file_path = file_path.as_ref().replace_exts_with("rgsi");
-        println!("From_rgsi - Reading from file: {:?}", file_path.as_ref());
-        println!("RGSI file path: {:?}", rgsi_file_path);
 
         if rgsi_file_path.exists() {
-            println!("Reading from existing rgsi file: {:?}", rgsi_file_path);
             read_fasta_refget_file(&rgsi_file_path)
         } else {
             Err(anyhow::anyhow!(
@@ -509,21 +504,15 @@ impl SequenceCollection {
         // If the rgsi file exists, just use that.
         let fa_file_path = file_path.as_ref();
         let rgsi_file_path = fa_file_path.replace_exts_with("rgsi");
-        println!(
-            "from path with cache: reading from file: {:?}",
-            file_path.as_ref()
-        );
-        println!("RGSI file path: {:?}", rgsi_file_path);
+
         // Check if the file already exists
         if read_cache && rgsi_file_path.exists() {
-            println!("Reading from existing rgsi file: {:?}", rgsi_file_path);
             // Read the existing rgsi file
             let seqcol = read_fasta_refget_file(&rgsi_file_path)?;
 
             // seqcol is already a SequenceCollection, just return it
             return Ok(seqcol);
         }
-        println!("Computing digests...: {:?}", rgsi_file_path);
 
         // If the rgsi file does not exist, compute the digests
         // Digest the fasta file (your function)
@@ -532,12 +521,6 @@ impl SequenceCollection {
         // Write the SequenceCollection to the RGSI file
         if write_cache && !rgsi_file_path.exists() {
             seqcol.write_rgsi()?;
-            println!("RGSI file written to {:?}", rgsi_file_path);
-        } else {
-            println!(
-                "RGSI file already exists, not writing: {:?}",
-                rgsi_file_path
-            );
         }
         Ok(seqcol)
     }
@@ -560,7 +543,6 @@ impl SequenceCollection {
     /// - One line per sequence with metadata
     pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let file_path = file_path.as_ref();
-        println!("Writing collection rgsi file: {:?}", file_path);
         let mut file = std::fs::File::create(file_path)?;
 
         // Write collection digest headers
@@ -946,5 +928,373 @@ mod tests {
         assert!(names.contains(&"chrX".to_string()));
         assert!(names.contains(&"chr1".to_string()));
         assert!(names.contains(&"chr2".to_string()));
+    }
+
+    // ===== SeqColDigestLvl1 Tests =====
+
+    #[test]
+    fn test_seqcol_digest_lvl1_from_metadata() {
+        // Test computing lvl1 digests from sequence metadata
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let metadata_refs: Vec<&SequenceMetadata> = seqcol.sequences.iter()
+            .map(|r| r.metadata())
+            .collect();
+
+        let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
+
+        // Verify digests are non-empty and valid base64url
+        assert!(!lvl1.names_digest.is_empty());
+        assert!(!lvl1.sequences_digest.is_empty());
+        assert!(!lvl1.lengths_digest.is_empty());
+
+        // Verify they match what the collection has
+        assert_eq!(lvl1.names_digest, seqcol.lvl1.names_digest);
+        assert_eq!(lvl1.sequences_digest, seqcol.lvl1.sequences_digest);
+        assert_eq!(lvl1.lengths_digest, seqcol.lvl1.lengths_digest);
+    }
+
+    #[test]
+    fn test_seqcol_digest_lvl1_to_digest() {
+        // Test that to_digest() produces consistent collection digest
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let computed_digest = seqcol.lvl1.to_digest();
+        assert_eq!(computed_digest, seqcol.digest);
+    }
+
+    // ===== SequenceCollectionMetadata Tests =====
+
+    #[test]
+    fn test_sequence_collection_metadata_from_sequences() {
+        use std::path::PathBuf;
+
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let meta = SequenceCollectionMetadata::from_sequences(
+            &seqcol.sequences,
+            Some(PathBuf::from("../tests/data/fasta/base.fa"))
+        );
+
+        assert_eq!(meta.digest, seqcol.digest);
+        assert_eq!(meta.n_sequences, 3);
+        assert_eq!(meta.names_digest, seqcol.lvl1.names_digest);
+        assert!(meta.file_path.is_some());
+    }
+
+    #[test]
+    fn test_sequence_collection_metadata_from_collection() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let meta = SequenceCollectionMetadata::from_collection(&seqcol);
+
+        assert_eq!(meta.digest, seqcol.digest);
+        assert_eq!(meta.n_sequences, seqcol.sequences.len());
+        assert_eq!(meta.names_digest, seqcol.lvl1.names_digest);
+    }
+
+    #[test]
+    fn test_sequence_collection_metadata_to_lvl1() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let meta = SequenceCollectionMetadata::from_collection(&seqcol);
+        let lvl1 = meta.to_lvl1();
+
+        assert_eq!(lvl1.names_digest, seqcol.lvl1.names_digest);
+        assert_eq!(lvl1.sequences_digest, seqcol.lvl1.sequences_digest);
+        assert_eq!(lvl1.lengths_digest, seqcol.lvl1.lengths_digest);
+    }
+
+    // ===== SequenceCollectionRecord Tests =====
+
+    #[test]
+    fn test_sequence_collection_record_stub() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let meta = SequenceCollectionMetadata::from_collection(&seqcol);
+        let record = SequenceCollectionRecord::Stub(meta.clone());
+
+        assert_eq!(record.metadata().digest, seqcol.digest);
+        assert!(record.sequences().is_none());
+        assert!(!record.has_sequences());
+    }
+
+    #[test]
+    fn test_sequence_collection_record_full() {
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let record: SequenceCollectionRecord = seqcol.clone().into();
+
+        assert!(record.has_sequences());
+        assert!(record.sequences().is_some());
+        assert_eq!(record.sequences().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_sequence_collection_record_with_sequences() {
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let meta = SequenceCollectionMetadata::from_collection(&seqcol);
+        let stub = SequenceCollectionRecord::Stub(meta);
+
+        // Convert stub to full by adding sequences
+        let full = stub.with_sequences(seqcol.sequences.clone());
+
+        assert!(full.has_sequences());
+        assert_eq!(full.sequences().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn test_sequence_collection_record_to_collection() {
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let record: SequenceCollectionRecord = seqcol.clone().into();
+        let converted = record.to_collection();
+
+        assert_eq!(converted.digest, seqcol.digest);
+        assert_eq!(converted.sequences.len(), seqcol.sequences.len());
+    }
+
+    // ===== SequenceRecord Methods Tests =====
+
+    #[test]
+    fn test_sequence_record_metadata() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let record = &seqcol.sequences[0];
+        let meta = record.metadata();
+
+        assert_eq!(meta.name, "chrX");
+        assert_eq!(meta.length, 8);
+        assert!(!meta.sha512t24u.is_empty());
+        assert!(!meta.md5.is_empty());
+    }
+
+    #[test]
+    fn test_sequence_record_sequence() {
+        // Stub should return None
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+        assert!(seqcol.sequences[0].sequence().is_none());
+
+        // Full should return Some
+        let seqcol_with_data = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+        assert!(seqcol_with_data.sequences[0].sequence().is_some());
+    }
+
+    #[test]
+    fn test_sequence_record_with_data() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let stub = seqcol.sequences[0].clone();
+        assert!(!stub.has_data());
+
+        let full = stub.with_data(b"TTGGGGAA".to_vec());
+        assert!(full.has_data());
+        assert_eq!(full.sequence().unwrap(), b"TTGGGGAA");
+    }
+
+    #[test]
+    fn test_sequence_record_to_file() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let file_path = dir.path().join("test_seq.txt");
+
+        seqcol.sequences[0].to_file(&file_path).expect("Failed to write file");
+
+        let content = fs::read(&file_path).expect("Failed to read file");
+        assert!(!content.is_empty());
+    }
+
+    // ===== SequenceMetadata disk_size Tests =====
+
+    #[test]
+    fn test_sequence_metadata_disk_size() {
+        use crate::store::StorageMode;
+        use crate::alphabet::AlphabetType;
+
+        let metadata = SequenceMetadata {
+            name: "test".to_string(),
+            description: None,
+            length: 1000,
+            sha512t24u: "test".to_string(),
+            md5: "test".to_string(),
+            alphabet: AlphabetType::Dna2bit,
+            fai: None,
+        };
+
+        // Raw mode: 1 byte per base
+        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
+
+        // Encoded mode for Dna2bit: 2 bits per base = 250 bytes for 1000 bases
+        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
+    }
+
+    #[test]
+    fn test_sequence_metadata_disk_size_protein() {
+        use crate::store::StorageMode;
+        use crate::alphabet::AlphabetType;
+
+        let metadata = SequenceMetadata {
+            name: "protein_test".to_string(),
+            description: None,
+            length: 100,
+            sha512t24u: "test".to_string(),
+            md5: "test".to_string(),
+            alphabet: AlphabetType::Protein,  // 5 bits per symbol
+            fai: None,
+        };
+
+        // Raw mode: 1 byte per symbol
+        assert_eq!(metadata.disk_size(&StorageMode::Raw), 100);
+
+        // Encoded mode for Protein: 5 bits per symbol = 500 bits = 63 bytes (ceil(500/8))
+        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 63);
+    }
+
+    // ===== SequenceCollection I/O Tests =====
+
+    #[test]
+    fn test_sequence_collection_from_fasta() {
+        let seqcol = SequenceCollection::from_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load FASTA");
+
+        assert_eq!(seqcol.sequences.len(), 3);
+        assert!(!seqcol.digest.is_empty());
+        assert!(seqcol.file_path.is_some());
+    }
+
+    #[test]
+    fn test_sequence_collection_from_records() {
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let records = seqcol.sequences.clone();
+        let reconstructed = SequenceCollection::from_records(records);
+
+        assert_eq!(reconstructed.digest, seqcol.digest);
+        assert_eq!(reconstructed.sequences.len(), 3);
+    }
+
+    #[test]
+    fn test_sequence_collection_write_and_read_rgsi() {
+        use tempfile::tempdir;
+        use crate::fasta::read_fasta_refget_file;
+
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let rgsi_path = dir.path().join("test.rgsi");
+
+        seqcol.write_collection_rgsi(&rgsi_path).expect("Failed to write RGSI");
+
+        // Read it back using read_fasta_refget_file (from_rgsi appends .rgsi to the path)
+        let loaded = read_fasta_refget_file(&rgsi_path)
+            .expect("Failed to read RGSI");
+
+        assert_eq!(loaded.digest, seqcol.digest);
+        assert_eq!(loaded.sequences.len(), seqcol.sequences.len());
+    }
+
+    #[test]
+    fn test_sequence_collection_write_fasta() {
+        use tempfile::tempdir;
+        use std::fs;
+
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let fasta_path = dir.path().join("output.fa");
+
+        seqcol.write_fasta(&fasta_path, None).expect("Failed to write FASTA");
+
+        let content = fs::read_to_string(&fasta_path).expect("Failed to read file");
+        assert!(content.contains(">chrX"));
+        assert!(content.contains("TTGGGGAA"));
+    }
+
+    #[test]
+    fn test_sequence_collection_write_fasta_with_line_width() {
+        use tempfile::tempdir;
+        use std::fs;
+
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let fasta_path = dir.path().join("output.fa");
+
+        // Write with 4 chars per line
+        seqcol.write_fasta(&fasta_path, Some(4)).expect("Failed to write FASTA");
+
+        let content = fs::read_to_string(&fasta_path).expect("Failed to read file");
+        // TTGGGGAA (8 chars) should be split into 2 lines
+        assert!(content.contains("TTGG\n") || content.contains("GGAA\n"));
+    }
+
+    // ===== Display Implementation Tests =====
+
+    #[test]
+    fn test_sequence_collection_display() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let display = format!("{}", seqcol);
+        assert!(display.contains("3 sequences"));
+        assert!(display.contains(&seqcol.digest));
+    }
+
+    #[test]
+    fn test_sequence_record_display() {
+        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let display = format!("{}", seqcol.sequences[0]);
+        assert!(display.contains("chrX"));
+        assert!(display.contains("length: 8"));
+    }
+
+    // ===== SequenceCollectionRecord write_collection_rgsi Test =====
+
+    #[test]
+    fn test_sequence_collection_record_write_rgsi() {
+        use tempfile::tempdir;
+        use std::fs;
+
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+
+        let record: SequenceCollectionRecord = seqcol.clone().into();
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let rgsi_path = dir.path().join("test.rgsi");
+
+        record.write_collection_rgsi(&rgsi_path).expect("Failed to write RGSI");
+
+        let content = fs::read_to_string(&rgsi_path).expect("Failed to read file");
+        assert!(content.contains("##seqcol_digest="));
+        assert!(content.contains("##names_digest="));
+        assert!(content.contains("chrX"));
+        assert!(content.contains("chr1"));
+        assert!(content.contains("chr2"));
     }
 }

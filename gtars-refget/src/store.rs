@@ -98,6 +98,8 @@ pub struct RefgetStore {
     seqdata_path_template: Option<String>,
     /// Whether to persist sequences to disk (write-through caching)
     persist_to_disk: bool,
+    /// Whether to suppress progress output
+    quiet: bool,
 }
 
 /// Metadata for the entire store.
@@ -242,7 +244,24 @@ impl RefgetStore {
             remote_source: None,
             seqdata_path_template: None,
             persist_to_disk: false,  // on_disk() overrides to true
+            quiet: false,
         }
+    }
+
+    /// Set whether to suppress progress output.
+    ///
+    /// When quiet is true, operations like add_sequence_collection_from_fasta
+    /// will not print progress messages.
+    ///
+    /// # Arguments
+    /// * `quiet` - Whether to suppress progress output
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.quiet = quiet;
+    }
+
+    /// Returns whether the store is in quiet mode.
+    pub fn is_quiet(&self) -> bool {
+        self.quiet
     }
 
     /// Create a disk-backed RefgetStore
@@ -565,13 +584,14 @@ impl RefgetStore {
     /// * `file_path` - Path to the FASTA file
     ///
     /// # Returns
-    /// Result indicating success or error
+    /// A tuple of (SequenceCollectionMetadata, was_new) where was_new indicates
+    /// whether the collection was newly added (true) or already existed (false).
     ///
     /// # Notes
     /// Loading sequence data requires 2 passes through the FASTA file:
     /// 1. First pass digests and guesses the alphabet to produce SequenceMetadata
     /// 2. Second pass encodes the sequences based on the detected alphabet
-    pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+    pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(&mut self, file_path: P) -> Result<(SequenceCollectionMetadata, bool)> {
         self.add_sequence_collection_from_fasta_internal(file_path, false)
     }
 
@@ -584,20 +604,41 @@ impl RefgetStore {
     /// * `file_path` - Path to the FASTA file
     ///
     /// # Returns
-    /// Result indicating success or error
-    pub fn add_sequence_collection_from_fasta_force<P: AsRef<Path>>(&mut self, file_path: P) -> Result<()> {
+    /// A tuple of (SequenceCollectionMetadata, was_new) where was_new is always true
+    /// since force mode always overwrites.
+    pub fn add_sequence_collection_from_fasta_force<P: AsRef<Path>>(&mut self, file_path: P) -> Result<(SequenceCollectionMetadata, bool)> {
         self.add_sequence_collection_from_fasta_internal(file_path, true)
     }
 
     /// Internal implementation for adding a sequence collection from FASTA.
-    fn add_sequence_collection_from_fasta_internal<P: AsRef<Path>>(&mut self, file_path: P, force: bool) -> Result<()> {
-        println!("Loading rgsi index...");
+    /// Returns (SequenceCollectionMetadata, was_new) where was_new indicates if the collection was added.
+    fn add_sequence_collection_from_fasta_internal<P: AsRef<Path>>(&mut self, file_path: P, force: bool) -> Result<(SequenceCollectionMetadata, bool)> {
+        // Print start message
+        if !self.quiet {
+            println!("Processing {}...", file_path.as_ref().display());
+        }
+
+        // Phase 1: Digest computation
+        let digest_start = Instant::now();
         let seqcol = SequenceCollection::from_fasta(&file_path)?;
+        let digest_elapsed = digest_start.elapsed();
+
+        // Build metadata from what we already computed
+        let metadata = SequenceCollectionMetadata {
+            digest: seqcol.digest.clone(),
+            n_sequences: seqcol.sequences.len(),
+            names_digest: seqcol.lvl1.names_digest.clone(),
+            sequences_digest: seqcol.lvl1.sequences_digest.clone(),
+            lengths_digest: seqcol.lvl1.lengths_digest.clone(),
+            file_path: seqcol.file_path.clone(),
+        };
 
         // Check if collection already exists and skip if not forcing
         if !force && self.collections.contains_key(&seqcol.digest.to_key()) {
-            println!("Collection already exists, skipping (use force=true to overwrite)");
-            return Ok(());
+            if !self.quiet {
+                println!("Skipped {} (already exists)", seqcol.digest);
+            }
+            return Ok((metadata, false));
         }
 
         // Register the collection
@@ -614,8 +655,8 @@ impl RefgetStore {
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
 
-        println!("Loading sequences into RefgetStore...");
-        let start_time = Instant::now();
+        // Phase 2: Load/encode sequences
+        let encode_start = Instant::now();
 
         let mut seq_count = 0;
         while let Some(record) = fasta_reader.next() {
@@ -639,16 +680,6 @@ impl RefgetStore {
                 .clone();
 
             seq_count += 1;
-            if seq_count <= 3 {
-                let display_name = if dr.name.len() > 120 {
-                    format!("{}...", &dr.name[..117])
-                } else {
-                    dr.name.clone()
-                };
-                println!("  [{}] {} ({} bp)", seq_count, display_name, dr.length);
-            } else if seq_count == 4 {
-                println!("  ...");
-            }
 
             match self.mode {
                 StorageMode::Raw => {
@@ -674,7 +705,6 @@ impl RefgetStore {
                     for seq_line in record.seq_lines() {
                         encoder.update(seq_line);
                     }
-                    // let encoded_sequence = BitVec::<u8, Msb0>::from_vec(encoder.finalize());
                     let encoded_sequence = encoder.finalize();
 
                     // Always replace Stubs with Full sequences from FASTA
@@ -690,17 +720,24 @@ impl RefgetStore {
             }
         }
 
-        let elapsed = start_time.elapsed();
-        let mode_str = match self.mode {
-            StorageMode::Raw => "Raw",
-            StorageMode::Encoded => "Encoded",
-        };
-        println!("Loaded {} sequences into RefgetStore ({}) in {:.2}s.", seq_count, mode_str, elapsed.as_secs_f64());
+        let encode_elapsed = encode_start.elapsed();
+
+        // Print summary with timing breakdown
+        if !self.quiet {
+            println!(
+                "Added {} ({} seqs) in {:.1}s [{:.1}s digest + {:.1}s encode]",
+                seqcol.digest,
+                seq_count,
+                digest_elapsed.as_secs_f64() + encode_elapsed.as_secs_f64(),
+                digest_elapsed.as_secs_f64(),
+                encode_elapsed.as_secs_f64()
+            );
+        }
 
         // Note: If persist_to_disk=true, sequences were already written to disk
         // and replaced with stubs by add_sequence_record()
 
-        Ok(())
+        Ok((metadata, true))
     }
 
     /// Returns an iterator over all sequence digests in the store
@@ -1437,7 +1474,6 @@ impl RefgetStore {
     /// in the store across all collections.
     pub fn write_sequences_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let file_path = file_path.as_ref();
-        println!("Writing sequences rgsi file: {:?}", file_path);
         let mut file = std::fs::File::create(file_path)?;
 
         // Write header with column names

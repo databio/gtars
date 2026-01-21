@@ -376,8 +376,8 @@ GGGG
         with tempfile.TemporaryDirectory() as tmpdir:
             store.enable_persistence(tmpdir)
 
-            # Check that index.json was created
-            assert os.path.exists(os.path.join(tmpdir, "index.json"))
+            # Check that rgstore.json was created (new format)
+            assert os.path.exists(os.path.join(tmpdir, "rgstore.json"))
 
             # Load the store back and verify sequences are accessible
             loaded_store = RefgetStore.load_local(tmpdir)
@@ -408,3 +408,296 @@ GGGG
             seq = store.get_sequence_by_id(sha512)
             assert seq is not None
             assert seq.metadata.length == 8
+
+    def test_compute_fai(self):
+        """Test compute_fai() returns correct FAI records"""
+        from gtars.refget import compute_fai
+
+        fasta_path = "../tests/data/fasta/base.fa"
+        fai_records = compute_fai(fasta_path)
+
+        # Should have 3 records for base.fa
+        assert len(fai_records) == 3
+
+        # Check first record structure
+        rec = fai_records[0]
+        assert rec.name == "chrX"
+        assert rec.length == 8
+        assert rec.fai is not None
+        assert rec.fai.offset > 0  # Byte offset after header
+        assert rec.fai.line_bases == 8  # All bases on one line
+        assert rec.fai.line_bytes == 9  # 8 bases + newline
+
+        # Check other records
+        assert fai_records[1].name == "chr1"
+        assert fai_records[1].length == 4
+        assert fai_records[2].name == "chr2"
+        assert fai_records[2].length == 4
+
+    def test_compute_fai_gzipped(self):
+        """Test compute_fai() returns fai=None for gzipped files"""
+        from gtars.refget import compute_fai
+
+        fasta_path = "../tests/data/fasta/base.fa.gz"
+        fai_records = compute_fai(fasta_path)
+
+        # Should still have 3 records
+        assert len(fai_records) == 3
+
+        # But FAI should be None for gzipped files
+        for rec in fai_records:
+            assert rec.fai is None
+
+    def test_sequence_collection_pythonic_interface(self):
+        """Test SequenceCollection supports len(), indexing, and iteration"""
+        result = digest_fasta("../tests/data/fasta/base.fa")
+
+        # Test __len__
+        assert len(result) == 3
+
+        # Test __getitem__ with positive index
+        assert result[0].metadata.name == "chrX"
+        assert result[1].metadata.name == "chr1"
+        assert result[2].metadata.name == "chr2"
+
+        # Test __getitem__ with negative index
+        assert result[-1].metadata.name == "chr2"
+        assert result[-3].metadata.name == "chrX"
+
+        # Test index out of range
+        with pytest.raises(IndexError):
+            _ = result[10]
+
+        # Test iteration
+        names = [seq.metadata.name for seq in result]
+        assert names == ["chrX", "chr1", "chr2"]
+
+    def test_refget_store_pythonic_interface(self):
+        """Test RefgetStore supports len() and iteration"""
+        store = RefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        # Test __len__
+        assert len(store) == 3
+
+        # Test iteration yields SequenceMetadata
+        count = 0
+        for seq_meta in store:
+            assert hasattr(seq_meta, 'name')
+            assert hasattr(seq_meta, 'length')
+            assert hasattr(seq_meta, 'sha512t24u')
+            count += 1
+        assert count == 3
+
+    def test_collection_inspection_methods(self):
+        """Test collection listing and metadata retrieval"""
+        store = RefgetStore.in_memory()
+        fasta_path = "../tests/data/fasta/base.fa"
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        # Get expected digest
+        result = digest_fasta(fasta_path)
+        expected_digest = result.digest
+
+        # Test list_collections
+        collections = store.list_collections()
+        assert len(collections) == 1
+        assert expected_digest in collections
+
+        # Test get_collection_metadata
+        meta = store.get_collection_metadata(expected_digest)
+        assert meta is not None
+        assert meta.digest == expected_digest
+        assert meta.n_sequences == 3
+        assert meta.names_digest == result.lvl1.names_digest
+        assert meta.sequences_digest == result.lvl1.sequences_digest
+        assert meta.lengths_digest == result.lvl1.lengths_digest
+
+        # Test str/repr
+        assert expected_digest in str(meta)
+        assert "n_sequences=3" in repr(meta)
+
+        # Test is_collection_loaded (in-memory store should be loaded)
+        assert store.is_collection_loaded(expected_digest)
+
+        # Test non-existent collection
+        assert store.get_collection_metadata("nonexistent") is None
+
+    def test_sequence_enumeration_methods(self):
+        """Test sequence_metadata() and sequence_records() methods"""
+        store = RefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        # Test sequence_metadata - returns metadata only
+        metadata_list = store.sequence_metadata()
+        assert len(metadata_list) == 3
+        for meta in metadata_list:
+            assert hasattr(meta, 'name')
+            assert hasattr(meta, 'length')
+            assert hasattr(meta, 'sha512t24u')
+            assert hasattr(meta, 'md5')
+
+        # Test sequence_records - returns full records
+        records_list = store.sequence_records()
+        assert len(records_list) == 3
+        for rec in records_list:
+            assert hasattr(rec, 'metadata')
+            # In-memory store should have sequence data that can be decoded
+            assert rec.decode() is not None
+
+    def test_export_fasta(self):
+        """Test export_fasta() exports full collection or subset"""
+        store = RefgetStore.in_memory()
+        fasta_path = "../tests/data/fasta/base.fa"
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        result = digest_fasta(fasta_path)
+        collection_digest = result.digest
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # Export all sequences
+            output_path = os.path.join(tmpdir, "all.fa")
+            store.export_fasta(collection_digest, output_path, None, None)
+
+            with open(output_path) as f:
+                content = f.read()
+            assert ">chrX" in content
+            assert ">chr1" in content
+            assert ">chr2" in content
+
+            # Export subset
+            subset_path = os.path.join(tmpdir, "subset.fa")
+            store.export_fasta(collection_digest, subset_path, ["chr1", "chr2"], 60)
+
+            with open(subset_path) as f:
+                subset_content = f.read()
+            assert ">chrX" not in subset_content
+            assert ">chr1" in subset_content
+            assert ">chr2" in subset_content
+
+    def test_export_fasta_by_digests(self):
+        """Test export_fasta_by_digests() exports specific sequences by digest"""
+        store = RefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        # Get digests for chr1 and chr2
+        sha_chr1 = sha512t24u_digest(b"GGAA")  # chr1 sequence
+        sha_chr2 = sha512t24u_digest(b"GCGC")  # chr2 sequence
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "by_digest.fa")
+            store.export_fasta_by_digests([sha_chr1, sha_chr2], output_path, None)
+
+            with open(output_path) as f:
+                content = f.read()
+
+            # Should contain chr1 and chr2 sequences
+            assert "GGAA" in content
+            assert "GCGC" in content
+            # chrX sequence should not be present
+            assert "TTGGGGAA" not in content
+
+    def test_sequence_collection_write_fasta(self):
+        """Test SequenceCollection.write_fasta() method"""
+        # load_fasta returns collection with data
+        collection = load_fasta("../tests/data/fasta/base.fa")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, "written.fa")
+            collection.write_fasta(output_path, 80)  # default line width
+
+            with open(output_path) as f:
+                content = f.read()
+
+            assert ">chrX" in content
+            assert "TTGGGGAA" in content
+            assert ">chr1" in content
+            assert "GGAA" in content
+
+            # Test with custom line width
+            output_path2 = os.path.join(tmpdir, "written2.fa")
+            collection.write_fasta(output_path2, 4)
+
+            with open(output_path2) as f:
+                content2 = f.read()
+            # With line_width=4, TTGGGGAA should be split
+            assert "TTGG\n" in content2 or "GGAA\n" in content2
+
+    def test_quiet_mode(self):
+        """Test store quiet mode suppresses output"""
+        store = RefgetStore.in_memory()
+
+        # Test getter
+        assert store.quiet == False
+
+        # Test setter
+        store.set_quiet(True)
+        assert store.quiet == True
+
+        store.set_quiet(False)
+        assert store.quiet == False
+
+    def test_collections_method(self):
+        """Test store.collections() returns SequenceCollection objects"""
+        store = RefgetStore.in_memory()
+        fasta_path = "../tests/data/fasta/base.fa"
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        collections = store.collections()
+        assert len(collections) == 1
+
+        coll = collections[0]
+        assert hasattr(coll, 'digest')
+        assert hasattr(coll, 'sequences')
+        assert hasattr(coll, 'lvl1')
+        assert len(coll.sequences) == 3
+
+    def test_string_representations(self):
+        """Test __str__ and __repr__ for all types"""
+        from gtars.refget import compute_fai
+
+        fasta_path = "../tests/data/fasta/base.fa"
+
+        # SequenceCollection
+        coll = digest_fasta(fasta_path)
+        assert "3 sequences" in str(coll)
+        assert "SequenceCollection" in repr(coll)
+
+        # SequenceRecord
+        rec = coll.sequences[0]
+        assert "chrX" in str(rec)
+        assert "SequenceRecord" in repr(rec)
+
+        # SequenceMetadata
+        meta = rec.metadata
+        assert "chrX" in str(meta)
+        assert "SequenceMetadata" in repr(meta)
+
+        # SeqColDigestLvl1
+        lvl1 = coll.lvl1
+        assert "SeqColDigestLvl1" in str(lvl1)
+        assert "SeqColDigestLvl1" in repr(lvl1)
+
+        # FaiRecord
+        fai_records = compute_fai(fasta_path)
+        fai = fai_records[0]
+        assert "chrX" in str(fai)
+        assert "FaiRecord" in repr(fai)
+
+        # FaiMetadata
+        if fai.fai:
+            assert "FaiMetadata" in str(fai.fai)
+            assert "FaiMetadata" in repr(fai.fai)
+
+        # AlphabetType - just check it has a string representation
+        assert str(meta.alphabet) is not None
+
+        # RetrievedSequence
+        rs = RetrievedSequence(sequence="ATGC", chrom_name="chr1", start=0, end=4)
+        assert "chr1" in str(rs)
+        assert "RetrievedSequence" in repr(rs)
+
+        # RefgetStore
+        store = RefgetStore.in_memory()
+        assert "RefgetStore" in repr(store)
+        assert "memory-only" in repr(store)

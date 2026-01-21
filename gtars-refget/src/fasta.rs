@@ -74,8 +74,6 @@ pub struct FaiRecord {
 pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
     use gtars_core::utils::get_dynamic_reader;
 
-    println!("Processing FASTA file: {}", file_path.as_ref().display());
-
     // Detect if file is gzipped
     let is_gzipped = file_path.as_ref().extension()
         .and_then(|s| s.to_str())
@@ -431,8 +429,6 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
 /// ```
 pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
     use gtars_core::utils::get_dynamic_reader;
-
-    println!("Loading FASTA file with data: {}", file_path.as_ref().display());
 
     // Detect if file is gzipped
     let is_gzipped = file_path.as_ref().extension()

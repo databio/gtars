@@ -911,6 +911,31 @@ impl PyRefgetStore {
         self.inner.disable_encoding();
     }
 
+    /// Set whether to suppress progress output.
+    ///
+    /// When quiet is True, operations like add_sequence_collection_from_fasta
+    /// will not print progress messages.
+    ///
+    /// Args:
+    ///     quiet (bool): Whether to suppress progress output.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> store.set_quiet(True)  # Suppress output
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")  # No output
+    fn set_quiet(&mut self, quiet: bool) {
+        self.inner.set_quiet(quiet);
+    }
+
+    /// Returns whether the store is in quiet mode.
+    ///
+    /// Returns:
+    ///     bool: True if quiet mode is enabled.
+    #[getter]
+    fn quiet(&self) -> bool {
+        self.inner.is_quiet()
+    }
+
     /// Enable disk persistence for this store.
     ///
     /// Sets up the store to write sequences to disk. Any in-memory Full sequences
@@ -956,24 +981,31 @@ impl PyRefgetStore {
     ///     force (bool, optional): If True, overwrite existing collections/sequences.
     ///                            If False (default), skip duplicates.
     ///
+    /// Returns:
+    ///     tuple[SequenceCollectionMetadata, bool]: A tuple containing:
+    ///         - SequenceCollectionMetadata: Metadata for the collection (digest, n_sequences, level 1 digests)
+    ///         - bool: True if the collection was newly added, False if it already existed
+    ///
     /// Raises:
     ///     IOError: If the file cannot be read or processed.
     ///
     /// Example:
     ///     >>> store = RefgetStore.in_memory()
-    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")  # skip duplicates
-    ///     >>> store.add_sequence_collection_from_fasta("genome.fa", force=True)  # overwrite
+    ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
+    ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
     #[pyo3(signature = (file_path, force=false))]
-    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>, force: bool) -> PyResult<()> {
+    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>, force: bool) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let result = if force {
             self.inner.add_sequence_collection_from_fasta_force(file_path)
         } else {
             self.inner.add_sequence_collection_from_fasta(file_path)
         };
-        result.map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
-        })
+        result
+            .map(|(metadata, was_new)| (PySequenceCollectionMetadata::from(metadata), was_new))
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
+            })
     }
 
     /// Retrieve a sequence record by its digest (SHA-512/24u or MD5).
