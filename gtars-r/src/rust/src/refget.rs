@@ -42,7 +42,9 @@ pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
         _ => return Err(format!("Invalid mode: {}", mode).into()),
     };
 
-    let store = Box::new(RefgetStore::new(storage_mode));
+    let mut store = RefgetStore::in_memory();
+    store.set_encoding_mode(storage_mode);
+    let store = Box::new(store);
     let ptr = unsafe { Robj::make_external_ptr(Box::into_raw(store), Robj::from(())) };
 
     Ok(ptr)
@@ -61,7 +63,7 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
     let store = unsafe { &mut *store_raw_ptr };
 
     store
-        .import_fasta(file_path)
+        .add_sequence_collection_from_fasta(file_path)
         .map_err(|e| format!("Error importing FASTA: {}", e).into())
 }
 
@@ -75,7 +77,7 @@ pub fn get_sequence_by_id_store(store_ptr: Robj, digest: &str) -> extendr_api::R
         return Err("Invalid store pointer".into());
     }
 
-    let store = unsafe { &*store_raw_ptr };
+    let store = unsafe { &mut *store_raw_ptr };
 
     // Try as SHA512t24u first
     let result = store.get_sequence_by_id(digest.as_bytes());
@@ -109,7 +111,7 @@ pub fn get_sequence_by_collection_and_name_store(
         return Err("Invalid store pointer".into());
     }
 
-    let store = unsafe { &*store_raw_ptr };
+    let store = unsafe { &mut *store_raw_ptr };
 
     let result = store.get_sequence_by_collection_and_name(collection_digest, sequence_name);
 
@@ -121,7 +123,7 @@ pub fn get_sequence_by_collection_and_name_store(
 }
 
 /// Get substring from sequence
-/// @param store_ptr External pointer to RefgetStore  
+/// @param store_ptr External pointer to RefgetStore
 /// @param seq_digest Sequence digest
 /// @param start Start position
 /// @param end End position
@@ -137,7 +139,7 @@ pub fn get_substring_store(
         return Err("Invalid store pointer".into());
     }
 
-    let store = unsafe { &*store_raw_ptr };
+    let store = unsafe { &mut *store_raw_ptr };
 
     if let Some(substr) = store.get_substring(seq_digest, start as usize, end as usize) {
         Ok(Robj::from(substr))
@@ -149,7 +151,7 @@ pub fn get_substring_store(
 /// Write store to directory
 /// @param store_ptr External pointer to RefgetStore
 /// @param root_path Path to write store
-/// @param seqdata_path_template Path template name
+/// @param seqdata_path_template Path template name (optional, pass empty string for default)
 #[extendr]
 pub fn write_store_to_directory_store(
     store_ptr: Robj,
@@ -163,17 +165,23 @@ pub fn write_store_to_directory_store(
 
     let store = unsafe { &*store_raw_ptr };
 
+    let template = if seqdata_path_template.is_empty() {
+        None
+    } else {
+        Some(seqdata_path_template)
+    };
+
     store
-        .write_store_to_directory(root_path, seqdata_path_template)
+        .write_store_to_dir(root_path, template)
         .map_err(|e| format!("Error writing store to directory: {}", e).into())
 }
 
 /// Load store from directory
-/// @export  
+/// @export
 /// @param root_path Path to read store from
 #[extendr]
 pub fn load_from_directory_store(root_path: &str) -> extendr_api::Result<Robj> {
-    match RefgetStore::load_from_directory(root_path) {
+    match RefgetStore::load_local(root_path) {
         Ok(store) => {
             let boxed_store = Box::new(store);
             let ptr =
@@ -201,10 +209,10 @@ pub fn get_seqs_bed_file_store(
         return Err("Invalid store pointer".into());
     }
 
-    let store = unsafe { &*store_raw_ptr };
+    let store = unsafe { &mut *store_raw_ptr };
 
     store
-        .get_seqs_bed_file(collection_digest, bed_file_path, output_file_path)
+        .export_fasta_from_regions(collection_digest, bed_file_path, output_file_path)
         .map_err(|e| format!("Error writing sequences to file: {}", e).into())
 }
 
@@ -223,14 +231,21 @@ pub fn get_seqs_bed_file_to_vec_store(
         return Err("Invalid store pointer".into());
     }
 
-    let store = unsafe { &*store_raw_ptr };
+    let store = unsafe { &mut *store_raw_ptr };
 
-    match store.get_seqs_bed_file_to_vec(collection_digest, bed_file_path) {
-        Ok(rust_results) => {
-            let r_results: Vec<Robj> = rust_results
-                .into_iter()
-                .map(|retrieved_seq| retrieved_sequence_to_list(retrieved_seq).into())
-                .collect();
+    match store.substrings_from_regions(collection_digest, bed_file_path) {
+        Ok(iter) => {
+            let mut r_results: Vec<Robj> = Vec::new();
+            for result in iter {
+                match result {
+                    Ok(retrieved_seq) => {
+                        r_results.push(retrieved_sequence_to_list(retrieved_seq).into());
+                    }
+                    Err(e) => {
+                        return Err(format!("Error retrieving sequence: {}", e).into());
+                    }
+                }
+            }
             Ok(r_results.into())
         }
         Err(e) => Err(format!("Error retrieving sequences from BED file: {}", e).into()),
@@ -260,8 +275,8 @@ fn metadata_to_list(metadata: SequenceMetadata) -> List {
 
 fn record_to_list(record: SequenceRecord) -> List {
     list!(
-        metadata = metadata_to_list(record.metadata),
-        data = record.data.unwrap_or_default()
+        metadata = metadata_to_list(record.metadata().clone()),
+        data = record.decode().unwrap_or_default()
     )
 }
 
