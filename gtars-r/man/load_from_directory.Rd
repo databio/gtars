@@ -10,7 +10,7 @@ load_from_directory(root_path)
 \item{root_path}{path to refget store}
 }
 \value{
-a GlobalRefgetStore object
+a RefgetStore object
 }
 \description{
 load refget store from directory

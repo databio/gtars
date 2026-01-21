@@ -30,7 +30,7 @@ mod tests {
     // #[test]
     // fn test_sequence_retrieval_performance() {
     //     // Create a new sequence store
-    //     let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+    //     let mut store = RefgetStore::new(StorageMode::Encoded);
 
     //     // Add a variety of sequences
     //     let sequences = vec![
@@ -77,8 +77,7 @@ mod tests {
     // }
 
     use std::time::Instant;
-    use store::GlobalRefgetStore;
-    use store::StorageMode;
+    use store::RefgetStore;
     use tempfile::tempdir;
     #[test]
     #[ignore]
@@ -94,16 +93,17 @@ mod tests {
         // Create a new sequence store, and dd sequences to the store
         println!("Adding sequences from FASTA file...");
         let start = Instant::now();
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&fasta_path).unwrap();
+        let mut store = RefgetStore::in_memory();
+        store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
         let duration = start.elapsed();
         println!("⏱️  Time taken to load: {:.2?}", duration);
 
-        let mut store2 = GlobalRefgetStore::new(StorageMode::Raw);
-        store2.import_fasta(&fasta_path).unwrap();
+        let mut store2 = RefgetStore::in_memory();
+        store2.disable_encoding();  // Switch to Raw mode
+        store2.add_sequence_collection_from_fasta(&fasta_path).unwrap();
 
         // Get list of sequences
-        let sequences = store.list_sequence_digests();
+        let sequences: Vec<_> = store.sequence_digests().collect();
         assert!(!sequences.is_empty(), "No sequences found in the store");
 
         // Look up the first sequence by digest
@@ -147,16 +147,16 @@ mod tests {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
         // Create a new sequence store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = RefgetStore::in_memory();
         // let fasta_path = "../tests/data/subset.fa.gz";
         let fasta_path = "../tests/data/fasta/base.fa.gz";
         let temp_fasta = temp_path.join("base.fa.gz");
         std::fs::copy(fasta_path, &temp_fasta).expect("Failed to copy base.fa.gz to tempdir");
 
         // Add sequences to the store
-        store.import_fasta(temp_fasta).unwrap();
+        store.add_sequence_collection_from_fasta(temp_fasta).unwrap();
         println!("Listing sequences in the store...");
-        // let sequences = store.list_sequence_digests();
+        // let sequences = store.sequence_digests();
         // let digest = &sequences[0];
         // let digest_str = String::from_utf8(digest.to_vec()).expect("Invalid ASCII data");
         // let digest = "Ya6Rs7DHhDeg7YaOSg1EoNi3U_nQ9SvO";  // from subset.fa.gz

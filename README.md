@@ -27,16 +27,24 @@ This repository is a work in progress, and still in early development. This repo
 
 ## Installation
 
-To install any component of `gtars`, you must have the rust toolchain installed. You can install it by [following the instructions](https://www.rust-lang.org/tools/install).
+To install `gtars`, you must first [install the rust toolchain](https://www.rust-lang.org/tools/install).
 
 ### Command-line interface
+
 You may build the cli binary locally by navigating to `gtars-cli` and using `cargo build --release`. This will create a binary in `target/release/gtars` at the top level of the workspace. You can then add this to your path, or run it directly.
 
 Alternatively, you can run `cargo install --path gtars-cli` from the top level of the workspace. This will install the binary to your cargo bin directory (usually `~/.cargo/bin`).
 
+We feature-gate binary dependencies maximize compatibility and minimize install size. You can specify features during installation like so:
+
+```
+cargo install --path gtars-cli gtars-cli --features "uniwig tokenizers"
+```
+
 Finally, you can download precompiled binaries from the [releases page](https://github.com/databio/gtars/releases).
 
 ### Python bindings
+
 You can install the Python bindings via pip. First, ensure you have a recent version of pip installed. Then run:
 
 ```bash
@@ -49,6 +57,11 @@ Then, you can use it in Python like so:
 from gtars import __version__
 print(__version__)
 ```
+
+### Dev Python bindings
+
+
+
 
 ## Usage
 

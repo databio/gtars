@@ -22,7 +22,9 @@ use bigtools::{BedEntry, BigBedWrite};
 use crate::models::Region;
 #[cfg(feature = "http")]
 use crate::utils::get_dynamic_reader_from_url;
-use crate::utils::{get_chrom_sizes, get_dynamic_reader};
+use crate::utils::get_dynamic_reader;
+#[cfg(feature = "bigbed")]
+use crate::utils::get_chrom_sizes;
 
 #[cfg(feature = "dataframe")]
 use polars::prelude::*;

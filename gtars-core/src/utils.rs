@@ -2,12 +2,16 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufRead, BufReader, Cursor};
+use std::io::{BufRead, BufReader};
+#[cfg(feature = "http")]
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-use flate2::read::{GzDecoder, MultiGzDecoder};
+#[cfg(feature = "http")]
+use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use std::error::Error;
 #[cfg(feature = "http")]
 use ureq::{get, Error as UreqError};

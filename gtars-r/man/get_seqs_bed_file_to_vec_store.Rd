@@ -7,7 +7,7 @@
 get_seqs_bed_file_to_vec_store(store_ptr, collection_digest, bed_file_path)
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{collection_digest}{Sequence collection digest}
 
