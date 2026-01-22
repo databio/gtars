@@ -103,7 +103,7 @@ pub struct RefgetStore {
 }
 
 /// Metadata for the entire store.
-/// This is used to serialize metadata to `rgstore.json` (formerly `index.json`), which can be loaded by the application.
+/// This is used to serialize metadata to `rgstore.json`, which can be loaded by the application.
 #[derive(Serialize, Deserialize, Debug)]
 struct StoreMetadata {
     /// Version of the metadata format
@@ -283,11 +283,9 @@ impl RefgetStore {
     /// ```
     pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let cache_path = cache_path.as_ref();
-        // Check for both new (rgstore.json) and old (index.json) format
-        let new_index_path = cache_path.join("rgstore.json");
-        let old_index_path = cache_path.join("index.json");
+        let index_path = cache_path.join("rgstore.json");
 
-        if new_index_path.exists() || old_index_path.exists() {
+        if index_path.exists() {
             // Load existing store
             Self::load_local(cache_path)
         } else {
@@ -1432,7 +1430,7 @@ impl RefgetStore {
             created_at: Utc::now().to_rfc3339(),
         };
 
-        // Write metadata to rgstore.json (renamed from index.json)
+        // Write metadata to rgstore.json
         let json = serde_json::to_string_pretty(&metadata)
             .context("Failed to serialize metadata to JSON")?;
         fs::write(local_path.join("rgstore.json"), json)
@@ -1725,7 +1723,6 @@ impl RefgetStore {
 
     /// Load a remote-backed RefgetStore
     /// This loads metadata from remote and caches sequence data on-demand
-    /// Supports both new format (rgstore.json) and old format (index.json)
     ///
     /// # Arguments
     /// * `cache_path` - Local directory for caching
@@ -1744,15 +1741,8 @@ impl RefgetStore {
         // Create cache directory
         create_dir_all(cache_path)?;
 
-        // Try to fetch new format (rgstore.json) first, fall back to old format (index.json)
-        let (index_data, _is_new_format) = match Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "rgstore.json", true) {
-            Ok(data) => (data, true),
-            Err(_) => {
-                // Try old format
-                let data = Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "index.json", true)?;
-                (data, false)
-            }
-        };
+        // Fetch rgstore.json from remote
+        let index_data = Self::fetch_file(&Some(cache_path.to_path_buf()), &Some(remote_url.clone()), "rgstore.json", true)?;
 
         let json = String::from_utf8(index_data)
             .context("Store metadata contains invalid UTF-8")?;

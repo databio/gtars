@@ -220,7 +220,7 @@ class RefgetStore:
     def on_disk(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
         """Create or load a disk-backed RefgetStore.
 
-        If the directory contains an existing store (rgstore.json or index.json),
+        If the directory contains an existing store (rgstore.json),
         loads it. Otherwise creates a new store with Encoded mode.
 
         Args:
@@ -273,9 +273,6 @@ class RefgetStore:
         are downloaded on-demand when first accessed and cached locally. This is
         ideal for working with large remote genomes where you only need specific
         sequences.
-
-        Supports both new format (rgstore.json) and old format (index.json) for
-        backward compatibility with existing remote stores.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
