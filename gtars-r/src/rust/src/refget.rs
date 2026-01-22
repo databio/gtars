@@ -64,6 +64,7 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
 
     store
         .add_sequence_collection_from_fasta(file_path)
+        .map(|_| ())
         .map_err(|e| format!("Error importing FASTA: {}", e).into())
 }
 
