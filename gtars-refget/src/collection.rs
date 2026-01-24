@@ -1,6 +1,6 @@
-use crate::alphabet::AlphabetType;
-use crate::digest::{canonicalize_json, sha512t24u};
-use crate::fasta::{digest_fasta, read_fasta_refget_file};
+use crate::alphabet::{guess_alphabet, AlphabetType};
+use crate::digest::{canonicalize_json, md5, sha512t24u};
+use crate::fasta::digest_fasta;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -8,6 +8,115 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::utils::PathExtension;
+
+/// Shared implementation for writing RGSI (Refget Sequence Index) files.
+///
+/// This helper function writes the RGSI format:
+/// - Collection digest headers (##seqcol_digest, ##names_digest, etc.)
+/// - Column header line
+/// - Per-sequence metadata lines (if sequences are provided)
+///
+/// # Arguments
+/// * `file_path` - Path to the output RGSI file
+/// * `metadata` - Collection-level metadata containing digests
+/// * `sequences` - Optional slice of sequence records to write
+fn write_rgsi_impl<P: AsRef<Path>>(
+    file_path: P,
+    metadata: &SequenceCollectionMetadata,
+    sequences: Option<&[SequenceRecord]>,
+) -> Result<()> {
+    let file_path = file_path.as_ref();
+    let mut file = std::fs::File::create(file_path)?;
+
+    // Write collection digest headers
+    writeln!(file, "##seqcol_digest={}", metadata.digest)?;
+    writeln!(file, "##names_digest={}", metadata.names_digest)?;
+    writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
+    writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
+    writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription")?;
+
+    // Write sequence metadata if available
+    if let Some(seqs) = sequences {
+        for seq_record in seqs {
+            let seq_meta = seq_record.metadata();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                seq_meta.name,
+                seq_meta.length,
+                seq_meta.alphabet,
+                seq_meta.sha512t24u,
+                seq_meta.md5,
+                seq_meta.description.as_deref().unwrap_or("")
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// Create a SequenceRecord from raw data, computing all metadata.
+///
+/// This is the sequence-level parallel to `digest_fasta()` for collections.
+/// It computes the GA4GH sha512t24u digest, MD5 digest, detects the alphabet,
+/// and packages everything into a SequenceRecord with Full variant.
+///
+/// # Arguments
+/// * `name` - The sequence name (e.g., "chr1")
+/// * `data` - The raw sequence bytes (e.g., b"ACGTACGT")
+///
+/// # Returns
+/// A SequenceRecord::Full with computed metadata and the original data
+///
+/// # Example
+/// ```
+/// use gtars_refget::collection::digest_sequence;
+///
+/// let seq = digest_sequence("chr1", b"ACGTACGT");
+/// assert_eq!(seq.metadata().name, "chr1");
+/// assert_eq!(seq.metadata().length, 8);
+/// assert!(!seq.metadata().sha512t24u.is_empty());
+/// ```
+pub fn digest_sequence(name: &str, data: &[u8]) -> SequenceRecord {
+    // Uppercase the data for consistent digest computation (matches FASTA processing)
+    let uppercased: Vec<u8> = data.iter().map(|b| b.to_ascii_uppercase()).collect();
+
+    let metadata = SequenceMetadata {
+        name: name.to_string(),
+        description: None,
+        length: data.len(),
+        sha512t24u: sha512t24u(&uppercased),
+        md5: md5(&uppercased),
+        alphabet: guess_alphabet(&uppercased),
+        fai: None, // No FAI data for programmatically created sequences
+    };
+    SequenceRecord::Full {
+        metadata,
+        sequence: uppercased,
+    }
+}
+
+/// Create a SequenceRecord with a description field.
+///
+/// Same as `digest_sequence()` but allows specifying an optional description.
+///
+/// # Arguments
+/// * `name` - The sequence name (e.g., "chr1")
+/// * `description` - Optional description text
+/// * `data` - The raw sequence bytes (e.g., b"ACGTACGT")
+///
+/// # Returns
+/// A SequenceRecord::Full with computed metadata and the original data
+pub fn digest_sequence_with_description(
+    name: &str,
+    description: Option<&str>,
+    data: &[u8],
+) -> SequenceRecord {
+    let mut seq = digest_sequence(name, data);
+    if let SequenceRecord::Full { ref mut metadata, .. } = seq {
+        metadata.description = description.map(String::from);
+    }
+    seq
+}
 
 /// Metadata for a sequence collection (parallel to SequenceMetadata).
 /// Contains the collection digest and level 1 digests for names, sequences, and lengths.
@@ -53,14 +162,7 @@ impl SequenceCollectionMetadata {
 
     /// Create from an existing SequenceCollection
     pub fn from_collection(collection: &SequenceCollection) -> Self {
-        Self {
-            digest: collection.digest.clone(),
-            n_sequences: collection.sequences.len(),
-            names_digest: collection.lvl1.names_digest.clone(),
-            sequences_digest: collection.lvl1.sequences_digest.clone(),
-            lengths_digest: collection.lvl1.lengths_digest.clone(),
-            file_path: collection.file_path.clone(),
-        }
+        collection.metadata.clone()
     }
 
     /// Convert to SeqColDigestLvl1 for compatibility
@@ -123,18 +225,14 @@ impl SequenceCollectionRecord {
             SequenceCollectionRecord::Stub(meta) => {
                 // Create empty collection with metadata
                 SequenceCollection {
+                    metadata: meta.clone(),
                     sequences: Vec::new(),
-                    digest: meta.digest.clone(),
-                    lvl1: meta.to_lvl1(),
-                    file_path: meta.file_path.clone(),
                 }
             }
             SequenceCollectionRecord::Full { metadata, sequences } => {
                 SequenceCollection {
+                    metadata: metadata.clone(),
                     sequences: sequences.clone(),
-                    digest: metadata.digest.clone(),
-                    lvl1: metadata.to_lvl1(),
-                    file_path: metadata.file_path.clone(),
                 }
             }
         }
@@ -142,42 +240,14 @@ impl SequenceCollectionRecord {
 
     /// Write the collection to an RGSI file
     pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        let file_path = file_path.as_ref();
-        let metadata = self.metadata();
-        let mut file = std::fs::File::create(file_path)?;
-
-        // Write collection digest headers
-        writeln!(file, "##seqcol_digest={}", metadata.digest)?;
-        writeln!(file, "##names_digest={}", metadata.names_digest)?;
-        writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
-        writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
-        writeln!(file, "#name\tdescription\tlength\talphabet\tsha512t24u\tmd5")?;
-
-        // Write sequence metadata if available
-        if let Some(sequences) = self.sequences() {
-            for seq_record in sequences {
-                let seq_meta = seq_record.metadata();
-                writeln!(
-                    file,
-                    "{}\t{}\t{}\t{}\t{}\t{}",
-                    seq_meta.name,
-                    seq_meta.description.as_deref().unwrap_or(""),
-                    seq_meta.length,
-                    seq_meta.alphabet,
-                    seq_meta.sha512t24u,
-                    seq_meta.md5
-                )?;
-            }
-        }
-        Ok(())
+        write_rgsi_impl(file_path, self.metadata(), self.sequences())
     }
 }
 
 impl From<SequenceCollection> for SequenceCollectionRecord {
     fn from(collection: SequenceCollection) -> Self {
-        let metadata = SequenceCollectionMetadata::from_collection(&collection);
         SequenceCollectionRecord::Full {
-            metadata,
+            metadata: collection.metadata,
             sequences: collection.sequences,
         }
     }
@@ -186,20 +256,12 @@ impl From<SequenceCollection> for SequenceCollectionRecord {
 /// A single Sequence Collection, which may or may not hold data.
 #[derive(Clone, Debug)]
 pub struct SequenceCollection {
+    /// Collection metadata (digest, level 1 digests, n_sequences, file_path)
+    pub metadata: SequenceCollectionMetadata,
+
     /// Vector of SequenceRecords, which contain metadata (name, length, digests, alphabet)
     /// and optionally the actual sequence data.
     pub sequences: Vec<SequenceRecord>,
-
-    /// The SHA512t24u collection digest identifier as a string.
-    pub digest: String,
-
-    /// Level 1 digest components. Contains separate digests for
-    /// sequences, names, and lengths arrays.
-    pub lvl1: SeqColDigestLvl1,
-
-    /// Optional path to the source file from which this collection was loaded.
-    /// Used for caching and reference purposes.
-    pub file_path: Option<PathBuf>,
 }
 
 /// A struct representing the first level of digests for a refget sequence collection.
@@ -314,6 +376,20 @@ pub struct FaiMetadata {
     pub line_bytes: u32,   // number of bytes per line (including newline chars)
 }
 
+impl Default for SequenceMetadata {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            description: None,
+            length: 0,
+            sha512t24u: String::new(),
+            md5: String::new(),
+            alphabet: AlphabetType::Ascii,
+            fai: None,
+        }
+    }
+}
+
 impl SequenceMetadata {
     /// Calculate the disk size in bytes for this sequence
     ///
@@ -358,18 +434,37 @@ impl SequenceRecord {
         }
     }
 
-    /// Check if data is loaded
-    pub fn has_data(&self) -> bool {
+    /// Check if sequence data is loaded (Full) or just metadata (Stub).
+    pub fn is_loaded(&self) -> bool {
         matches!(self, SequenceRecord::Full { .. })
     }
 
-    /// Load data into a Stub record, or replace data in a Full record
+    /// Load data into a Stub record, or replace data in a Full record (takes ownership)
     pub fn with_data(self, sequence: Vec<u8>) -> Self {
         let metadata = match self {
             SequenceRecord::Stub(m) => m,
             SequenceRecord::Full { metadata, .. } => metadata,
         };
         SequenceRecord::Full { metadata, sequence }
+    }
+
+    /// Load data into a Stub record in-place, converting it to Full.
+    /// If already Full, replaces the existing sequence data.
+    ///
+    /// This is more efficient than `with_data()` when you have a mutable reference,
+    /// as it avoids cloning the metadata.
+    pub fn load_data(&mut self, sequence: Vec<u8>) {
+        match self {
+            SequenceRecord::Stub(metadata) => {
+                // Take ownership of metadata without cloning
+                let metadata = std::mem::take(metadata);
+                *self = SequenceRecord::Full { metadata, sequence };
+            }
+            SequenceRecord::Full { sequence: existing, .. } => {
+                // Just replace the sequence data
+                *existing = sequence;
+            }
+        }
     }
 
     /// Utility function to write a single sequence to a file
@@ -465,7 +560,7 @@ impl SequenceCollection {
         let rgsi_file_path = file_path.as_ref().replace_exts_with("rgsi");
 
         if rgsi_file_path.exists() {
-            read_fasta_refget_file(&rgsi_file_path)
+            read_rgsi_file(&rgsi_file_path)
         } else {
             Err(anyhow::anyhow!(
                 "RGSI file does not exist at {:?}",
@@ -476,18 +571,12 @@ impl SequenceCollection {
 
     /// Create a SequenceCollection from a vector of SequenceRecords.
     pub fn from_records(records: Vec<SequenceRecord>) -> Self {
-        // Compute lvl1 digests from the metadata
-        let metadata_refs: Vec<&SequenceMetadata> = records.iter().map(|r| r.metadata()).collect();
-        let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
-
-        // Compute collection digest from lvl1 digests
-        let collection_digest = lvl1.to_digest();
+        // Compute metadata from the sequence records
+        let metadata = SequenceCollectionMetadata::from_sequences(&records, None);
 
         SequenceCollection {
+            metadata,
             sequences: records,
-            digest: collection_digest,
-            lvl1,
-            file_path: None,
         }
     }
 
@@ -508,7 +597,7 @@ impl SequenceCollection {
         // Check if the file already exists
         if read_cache && rgsi_file_path.exists() {
             // Read the existing rgsi file
-            let seqcol = read_fasta_refget_file(&rgsi_file_path)?;
+            let seqcol = read_rgsi_file(&rgsi_file_path)?;
 
             // seqcol is already a SequenceCollection, just return it
             return Ok(seqcol);
@@ -542,36 +631,12 @@ impl SequenceCollection {
     /// - Column header (#name, description, length, alphabet, sha512t24u, md5)
     /// - One line per sequence with metadata
     pub fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        let file_path = file_path.as_ref();
-        let mut file = std::fs::File::create(file_path)?;
-
-        // Write collection digest headers
-        writeln!(file, "##seqcol_digest={}", self.digest)?;
-        writeln!(file, "##names_digest={}", self.lvl1.names_digest)?;
-        writeln!(file, "##sequences_digest={}", self.lvl1.sequences_digest)?;
-        writeln!(file, "##lengths_digest={}", self.lvl1.lengths_digest)?;
-        writeln!(file, "#name\tdescription\tlength\talphabet\tsha512t24u\tmd5")?;
-
-        // Write sequence metadata
-        for result_sr in &self.sequences {
-            let result = result_sr.metadata();
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}\t{}\t{}",
-                result.name,
-                result.description.as_deref().unwrap_or(""),
-                result.length,
-                result.alphabet,
-                result.sha512t24u,
-                result.md5
-            )?;
-        }
-        Ok(())
+        write_rgsi_impl(file_path, &self.metadata, Some(&self.sequences))
     }
 
     /// Write the SequenceCollection to an RGSI file, using the file path stored in the struct.
     pub fn write_rgsi(&self) -> Result<()> {
-        if let Some(ref file_path) = self.file_path {
+        if let Some(file_path) = &self.metadata.file_path {
             let rgsi_file_path = file_path.replace_exts_with("rgsi");
             self.write_collection_rgsi(rgsi_file_path)
         } else {
@@ -606,7 +671,7 @@ impl SequenceCollection {
 
         for record in &self.sequences {
             // Check if record has data
-            if !record.has_data() {
+            if !record.is_loaded() {
                 return Err(anyhow::anyhow!(
                     "Cannot write FASTA: sequence '{}' does not have data loaded",
                     record.metadata().name
@@ -646,7 +711,7 @@ impl Display for SequenceCollection {
             f,
             "SequenceCollection with {} sequences, digest: {}",
             self.sequences.len(),
-            self.digest
+            self.metadata.digest
         )?;
         write!(f, "\nFirst 3 sequences:")?;
         for seqrec in self.sequences.iter().take(3) {
@@ -693,6 +758,141 @@ impl IntoIterator for SequenceCollection {
     }
 }
 
+// ============================================================================
+// RGSI File I/O
+// ============================================================================
+
+/// Parse a single RGSI line into SequenceMetadata.
+///
+/// Supports two formats:
+/// - 5-column (no description): `name\tlength\talphabet\tsha512t24u\tmd5`
+/// - 6-column (with description): `name\tlength\talphabet\tsha512t24u\tmd5\tdescription`
+///
+/// Returns None if the line is a comment, empty, or has wrong column count.
+pub fn parse_rgsi_line(line: &str) -> Option<SequenceMetadata> {
+    // Skip empty lines
+    if line.trim().is_empty() {
+        return None;
+    }
+
+    let parts: Vec<&str> = line.split('\t').collect();
+
+    match parts.len() {
+        // 5-column format: no description
+        5 => Some(SequenceMetadata {
+            name: parts[0].to_string(),
+            description: None,
+            length: parts[1].parse().ok()?,
+            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+            sha512t24u: parts[3].to_string(),
+            md5: parts[4].to_string(),
+            fai: None,
+        }),
+        // 6-column format: description at end
+        6 => Some(SequenceMetadata {
+            name: parts[0].to_string(),
+            description: if parts[5].is_empty() { None } else { Some(parts[5].to_string()) },
+            length: parts[1].parse().ok()?,
+            alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
+            sha512t24u: parts[3].to_string(),
+            md5: parts[4].to_string(),
+            fai: None,
+        }),
+        _ => None,
+    }
+}
+
+/// Read an RGSI file and return a SequenceCollection.
+///
+/// RGSI (Refget Sequence Index) files contain sequence metadata in a tab-separated format.
+/// This function reads the metadata without loading actual sequence data.
+///
+/// # Arguments
+/// * `file_path` - The path to the RGSI file to be read.
+///
+/// # Returns
+/// A SequenceCollection with sequence metadata (Stub records, no sequence data).
+pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
+    use std::io::BufRead;
+
+    let file = std::fs::File::open(&file_path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut results = Vec::new();
+
+    // Variables to store header metadata
+    let mut seqcol_digest = String::new();
+    let mut names_digest = String::new();
+    let mut sequences_digest = String::new();
+    let mut lengths_digest = String::new();
+
+    for line in reader.lines() {
+        let line = line?;
+
+        // Parse header metadata lines
+        if line.starts_with("##") {
+            if let Some(stripped) = line.strip_prefix("##") {
+                if let Some((key, value)) = stripped.split_once('=') {
+                    match key {
+                        "seqcol_digest" => seqcol_digest = value.to_string(),
+                        "names_digest" => names_digest = value.to_string(),
+                        "sequences_digest" => sequences_digest = value.to_string(),
+                        "lengths_digest" => lengths_digest = value.to_string(),
+                        _ => {} // Ignore unknown metadata keys
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Skip other comment lines
+        if line.starts_with('#') {
+            continue;
+        }
+
+        // Parse sequence data line
+        if let Some(metadata) = parse_rgsi_line(&line) {
+            results.push(SequenceRecord::Stub(metadata));
+        }
+    }
+
+    // If the digests were not found in the file, compute them from sequence records
+    // Otherwise, use the digests from the file header
+    let collection_metadata = if sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty() {
+        // Compute from sequence records
+        SequenceCollectionMetadata::from_sequences(
+            &results,
+            Some(file_path.as_ref().to_path_buf())
+        )
+    } else {
+        // Use digests from file header
+        let lvl1 = SeqColDigestLvl1 {
+            sequences_digest,
+            names_digest,
+            lengths_digest,
+        };
+
+        let digest = if seqcol_digest.is_empty() {
+            lvl1.to_digest()
+        } else {
+            seqcol_digest
+        };
+
+        SequenceCollectionMetadata {
+            digest,
+            n_sequences: results.len(),
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            file_path: Some(file_path.as_ref().to_path_buf()),
+        }
+    };
+
+    Ok(SequenceCollection {
+        metadata: collection_metadata,
+        sequences: results,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -706,7 +906,7 @@ mod tests {
             .expect("Failed to load test FASTA file");
 
         for seq_record in &seqcol.sequences {
-            assert!(!seq_record.has_data(), "digest_fasta should not load sequence data");
+            assert!(!seq_record.is_loaded(), "digest_fasta should not load sequence data");
             assert!(matches!(seq_record, SequenceRecord::Stub(_)), "digest_fasta should create Stub records");
             assert_eq!(seq_record.decode(), None, "decode() should return None for Stub records");
         }
@@ -727,7 +927,7 @@ mod tests {
 
         for (seq_record, (expected_name, expected_seq)) in seqcol.sequences.iter().zip(expected_sequences.iter()) {
             assert_eq!(seq_record.metadata().name, *expected_name);
-            assert!(seq_record.has_data(), "load_fasta should load sequence data");
+            assert!(seq_record.is_loaded(), "load_fasta should load sequence data");
             assert!(matches!(seq_record, SequenceRecord::Full { .. }), "load_fasta should create Full records");
 
             let decoded = seq_record.decode().expect("decode() should return Some when data is present");
@@ -950,9 +1150,9 @@ mod tests {
         assert!(!lvl1.lengths_digest.is_empty());
 
         // Verify they match what the collection has
-        assert_eq!(lvl1.names_digest, seqcol.lvl1.names_digest);
-        assert_eq!(lvl1.sequences_digest, seqcol.lvl1.sequences_digest);
-        assert_eq!(lvl1.lengths_digest, seqcol.lvl1.lengths_digest);
+        assert_eq!(lvl1.names_digest, seqcol.metadata.names_digest);
+        assert_eq!(lvl1.sequences_digest, seqcol.metadata.sequences_digest);
+        assert_eq!(lvl1.lengths_digest, seqcol.metadata.lengths_digest);
     }
 
     #[test]
@@ -961,8 +1161,8 @@ mod tests {
         let seqcol = digest_fasta("../tests/data/fasta/base.fa")
             .expect("Failed to load test FASTA file");
 
-        let computed_digest = seqcol.lvl1.to_digest();
-        assert_eq!(computed_digest, seqcol.digest);
+        let computed_digest = seqcol.metadata.to_lvl1().to_digest();
+        assert_eq!(computed_digest, seqcol.metadata.digest);
     }
 
     // ===== SequenceCollectionMetadata Tests =====
@@ -979,9 +1179,9 @@ mod tests {
             Some(PathBuf::from("../tests/data/fasta/base.fa"))
         );
 
-        assert_eq!(meta.digest, seqcol.digest);
+        assert_eq!(meta.digest, seqcol.metadata.digest);
         assert_eq!(meta.n_sequences, 3);
-        assert_eq!(meta.names_digest, seqcol.lvl1.names_digest);
+        assert_eq!(meta.names_digest, seqcol.metadata.names_digest);
         assert!(meta.file_path.is_some());
     }
 
@@ -992,9 +1192,9 @@ mod tests {
 
         let meta = SequenceCollectionMetadata::from_collection(&seqcol);
 
-        assert_eq!(meta.digest, seqcol.digest);
+        assert_eq!(meta.digest, seqcol.metadata.digest);
         assert_eq!(meta.n_sequences, seqcol.sequences.len());
-        assert_eq!(meta.names_digest, seqcol.lvl1.names_digest);
+        assert_eq!(meta.names_digest, seqcol.metadata.names_digest);
     }
 
     #[test]
@@ -1005,9 +1205,9 @@ mod tests {
         let meta = SequenceCollectionMetadata::from_collection(&seqcol);
         let lvl1 = meta.to_lvl1();
 
-        assert_eq!(lvl1.names_digest, seqcol.lvl1.names_digest);
-        assert_eq!(lvl1.sequences_digest, seqcol.lvl1.sequences_digest);
-        assert_eq!(lvl1.lengths_digest, seqcol.lvl1.lengths_digest);
+        assert_eq!(lvl1.names_digest, seqcol.metadata.names_digest);
+        assert_eq!(lvl1.sequences_digest, seqcol.metadata.sequences_digest);
+        assert_eq!(lvl1.lengths_digest, seqcol.metadata.lengths_digest);
     }
 
     // ===== SequenceCollectionRecord Tests =====
@@ -1020,7 +1220,7 @@ mod tests {
         let meta = SequenceCollectionMetadata::from_collection(&seqcol);
         let record = SequenceCollectionRecord::Stub(meta.clone());
 
-        assert_eq!(record.metadata().digest, seqcol.digest);
+        assert_eq!(record.metadata().digest, seqcol.metadata.digest);
         assert!(record.sequences().is_none());
         assert!(!record.has_sequences());
     }
@@ -1060,7 +1260,7 @@ mod tests {
         let record: SequenceCollectionRecord = seqcol.clone().into();
         let converted = record.to_collection();
 
-        assert_eq!(converted.digest, seqcol.digest);
+        assert_eq!(converted.metadata.digest, seqcol.metadata.digest);
         assert_eq!(converted.sequences.len(), seqcol.sequences.len());
     }
 
@@ -1099,11 +1299,39 @@ mod tests {
             .expect("Failed to load test FASTA file");
 
         let stub = seqcol.sequences[0].clone();
-        assert!(!stub.has_data());
+        assert!(!stub.is_loaded());
 
         let full = stub.with_data(b"TTGGGGAA".to_vec());
-        assert!(full.has_data());
+        assert!(full.is_loaded());
         assert_eq!(full.sequence().unwrap(), b"TTGGGGAA");
+    }
+
+    #[test]
+    fn test_sequence_record_load_data() {
+        // Test Stub -> Full conversion (in-place, no clone)
+        let metadata = SequenceMetadata {
+            name: "chr1".to_string(),
+            description: None,
+            length: 8,
+            sha512t24u: "test_digest".to_string(),
+            md5: "test_md5".to_string(),
+            alphabet: AlphabetType::Dna2bit,
+            fai: None,
+        };
+
+        let mut record = SequenceRecord::Stub(metadata);
+        assert!(!record.is_loaded());
+
+        record.load_data(b"ATGCATGC".to_vec());
+        assert!(record.is_loaded());
+        assert_eq!(record.sequence().unwrap(), b"ATGCATGC");
+        assert_eq!(record.metadata().name, "chr1");
+
+        // Test Full -> Full (data replacement)
+        record.load_data(b"GGGGAAAA".to_vec());
+        assert_eq!(record.sequence().unwrap(), b"GGGGAAAA");
+        // Metadata should be preserved
+        assert_eq!(record.metadata().name, "chr1");
     }
 
     #[test]
@@ -1177,8 +1405,8 @@ mod tests {
             .expect("Failed to load FASTA");
 
         assert_eq!(seqcol.sequences.len(), 3);
-        assert!(!seqcol.digest.is_empty());
-        assert!(seqcol.file_path.is_some());
+        assert!(!seqcol.metadata.digest.is_empty());
+        assert!(seqcol.metadata.file_path.is_some());
     }
 
     #[test]
@@ -1189,14 +1417,13 @@ mod tests {
         let records = seqcol.sequences.clone();
         let reconstructed = SequenceCollection::from_records(records);
 
-        assert_eq!(reconstructed.digest, seqcol.digest);
+        assert_eq!(reconstructed.metadata.digest, seqcol.metadata.digest);
         assert_eq!(reconstructed.sequences.len(), 3);
     }
 
     #[test]
     fn test_sequence_collection_write_and_read_rgsi() {
         use tempfile::tempdir;
-        use crate::fasta::read_fasta_refget_file;
 
         let seqcol = digest_fasta("../tests/data/fasta/base.fa")
             .expect("Failed to load test FASTA file");
@@ -1206,11 +1433,11 @@ mod tests {
 
         seqcol.write_collection_rgsi(&rgsi_path).expect("Failed to write RGSI");
 
-        // Read it back using read_fasta_refget_file (from_rgsi appends .rgsi to the path)
-        let loaded = read_fasta_refget_file(&rgsi_path)
+        // Read it back using read_rgsi_file
+        let loaded = read_rgsi_file(&rgsi_path)
             .expect("Failed to read RGSI");
 
-        assert_eq!(loaded.digest, seqcol.digest);
+        assert_eq!(loaded.metadata.digest, seqcol.metadata.digest);
         assert_eq!(loaded.sequences.len(), seqcol.sequences.len());
     }
 
@@ -1260,7 +1487,7 @@ mod tests {
 
         let display = format!("{}", seqcol);
         assert!(display.contains("3 sequences"));
-        assert!(display.contains(&seqcol.digest));
+        assert!(display.contains(&seqcol.metadata.digest));
     }
 
     #[test]
@@ -1296,5 +1523,118 @@ mod tests {
         assert!(content.contains("chrX"));
         assert!(content.contains("chr1"));
         assert!(content.contains("chr2"));
+    }
+
+    // ===== digest_sequence() Tests =====
+
+    #[test]
+    fn test_digest_sequence_basic() {
+        use super::digest_sequence;
+
+        let seq = digest_sequence("test_seq", b"ACGTACGT");
+        assert_eq!(seq.metadata().name, "test_seq");
+        assert_eq!(seq.metadata().length, 8);
+        assert!(!seq.metadata().sha512t24u.is_empty());
+        assert!(!seq.metadata().md5.is_empty());
+        assert!(seq.is_loaded());
+
+        // Verify data is uppercased
+        let data = seq.sequence().unwrap();
+        assert_eq!(data, b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_digest_sequence_empty() {
+        use super::digest_sequence;
+
+        let seq = digest_sequence("empty", b"");
+        assert_eq!(seq.metadata().name, "empty");
+        assert_eq!(seq.metadata().length, 0);
+        assert!(seq.is_loaded());
+        assert_eq!(seq.sequence().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn test_digest_sequence_protein() {
+        use super::digest_sequence;
+        use crate::alphabet::AlphabetType;
+
+        // Sequence with protein-only characters (E, F, I, L, P, Q are protein-only)
+        let seq = digest_sequence("protein", b"EFILPQ");
+        assert_eq!(seq.metadata().alphabet, AlphabetType::Protein);
+        assert_eq!(seq.metadata().length, 6);
+    }
+
+    #[test]
+    fn test_digest_sequence_digest_matches() {
+        use super::digest_sequence;
+        use crate::digest::{sha512t24u, md5};
+
+        // Verify digest matches what sha512t24u() returns directly
+        let data = b"ACGTACGT";
+        let seq = digest_sequence("test", data);
+        assert_eq!(seq.metadata().sha512t24u, sha512t24u(data));
+        assert_eq!(seq.metadata().md5, md5(data));
+    }
+
+    #[test]
+    fn test_digest_sequence_lowercase_uppercased() {
+        use super::digest_sequence;
+
+        // Verify lowercase input is uppercased for digests
+        let seq_lower = digest_sequence("test_lower", b"acgtacgt");
+        let seq_upper = digest_sequence("test_upper", b"ACGTACGT");
+
+        // Digests should match because both are uppercased
+        assert_eq!(seq_lower.metadata().sha512t24u, seq_upper.metadata().sha512t24u);
+        assert_eq!(seq_lower.metadata().md5, seq_upper.metadata().md5);
+
+        // Stored data should be uppercased
+        assert_eq!(seq_lower.sequence().unwrap(), b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_digest_sequence_no_fai() {
+        use super::digest_sequence;
+
+        // Programmatically created sequences should not have FAI data
+        let seq = digest_sequence("test", b"ACGT");
+        assert!(seq.metadata().fai.is_none());
+    }
+
+    #[test]
+    fn test_digest_sequence_with_description() {
+        use super::digest_sequence_with_description;
+
+        let seq = digest_sequence_with_description("test_seq", Some("my description"), b"ACGT");
+        assert_eq!(seq.metadata().name, "test_seq");
+        assert_eq!(seq.metadata().description, Some("my description".to_string()));
+        assert_eq!(seq.metadata().length, 4);
+
+        // Without description
+        let seq_no_desc = digest_sequence_with_description("test_seq2", None, b"ACGT");
+        assert!(seq_no_desc.metadata().description.is_none());
+    }
+
+    #[test]
+    fn test_digest_sequence_matches_fasta_digest() {
+        use super::digest_sequence;
+
+        // Verify that digest_sequence produces the same digests as digest_fasta
+        // for the same sequence data
+
+        // Load a FASTA file and get the first sequence
+        let seqcol = load_fasta("../tests/data/fasta/base.fa")
+            .expect("Failed to load test FASTA file");
+        let fasta_seq = &seqcol.sequences[0]; // chrX: TTGGGGAA
+
+        // Create the same sequence with digest_sequence
+        let prog_seq = digest_sequence("chrX", b"TTGGGGAA");
+
+        // Digests should match
+        assert_eq!(prog_seq.metadata().sha512t24u, fasta_seq.metadata().sha512t24u);
+        assert_eq!(prog_seq.metadata().md5, fasta_seq.metadata().md5);
+        assert_eq!(prog_seq.metadata().length, fasta_seq.metadata().length);
+        assert_eq!(prog_seq.metadata().alphabet, fasta_seq.metadata().alphabet);
     }
 }

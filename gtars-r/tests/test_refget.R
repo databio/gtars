@@ -40,11 +40,11 @@ test_that("fasta import and sequence retrieval works", {
   result <- gtars::digest_fasta(fasta_path)
   import_fasta(store, fasta_path)
   
-  seq <- get_sequence_by_id(store, result@sequences[[1]]@metadata@sha512t24u)
+  seq <- get_sequence(store, result@sequences[[1]]@metadata@sha512t24u)
   expect_s4_class(seq, "Sequence")
   expect_s4_class(seq@metadata, "SequenceMetadata")
-  
-  seq2 <- get_sequence_by_collection_and_name(store, result@digest, result@sequences[[2]]@metadata@name)
+
+  seq2 <- get_sequence_by_name(store, result@digest, result@sequences[[2]]@metadata@name)
   expect_s4_class(seq2, "Sequence")
   expect_s4_class(seq2@metadata, "SequenceMetadata")
   
@@ -64,7 +64,7 @@ test_that("store save and load works", {
   write_store_to_directory(store, temp_dir, 'sequences/%s2/%s.seq')
   expect_true(dir.exists(temp_dir))
   
-  store_load <- load_from_directory(temp_dir)
+  store_load <- open_local(temp_dir)
   expect_s4_class(store_load, "RefgetStore")
 })
 

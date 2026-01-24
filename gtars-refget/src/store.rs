@@ -34,7 +34,7 @@ use std::time::Instant;
 
 use super::encoder::SequenceEncoder;
 use super::encoder::{decode_substring_from_bytes, decode_string_from_bytes, encode_sequence};
-use crate::fasta::read_fasta_refget_file;
+use crate::collection::{parse_rgsi_line, read_rgsi_file};
 use crate::hashkeyable::HashKeyable;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
@@ -56,6 +56,31 @@ use super::collection::{SequenceCollection, SequenceCollectionMetadata, Sequence
 
 const DEFAULT_COLLECTION_ID: &str = "DEFAULT_REFGET_SEQUENCE_COLLECTION"; // Default collection ID for the name lookup table
 const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
+
+/// Parse a single line from an RGCI (collection index) file.
+///
+/// RGCI format is tab-separated with 5 columns:
+/// digest, n_sequences, names_digest, sequences_digest, lengths_digest
+///
+/// Lines starting with '#' are treated as comments and return None.
+/// Lines with fewer than 5 columns return None.
+fn parse_rgci_line(line: &str) -> Option<SequenceCollectionMetadata> {
+    if line.starts_with('#') {
+        return None;
+    }
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    Some(SequenceCollectionMetadata {
+        digest: parts[0].to_string(),
+        n_sequences: parts[1].parse().ok()?,
+        names_digest: parts[2].to_string(),
+        sequences_digest: parts[3].to_string(),
+        lengths_digest: parts[4].to_string(),
+        file_path: None,
+    })
+}
 
 /// Enum storing whether sequences will be stored in Raw or Encoded form
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -182,15 +207,16 @@ where
 
             let result = match self
                 .store
-                .get_sequence_by_collection_and_name(&self.collection_digest, &parsed_chr)
+                .get_sequence_by_name(&self.collection_digest, &parsed_chr)
             {
-                Some(seq_record) => seq_record,
-                None => {
+                Ok(seq_record) => seq_record,
+                Err(e) => {
                     let err_str = format!(
-                        "Warning: Skipping line {} because sequence '{}' not found in collection '{}'.",
+                        "Line {}: sequence '{}' not found in collection '{}': {}",
                         self.line_num + 1,
                         parsed_chr,
-                        String::from_utf8_lossy(self.collection_digest.as_ref())
+                        String::from_utf8_lossy(self.collection_digest.as_ref()),
+                        e
                     );
                     return Some(Err(err_str.into()));
                 }
@@ -204,14 +230,15 @@ where
             parsed_start as usize,
             parsed_end as usize,
         ) {
-            Some(substring) => substring,
-            None => {
+            Ok(substring) => substring,
+            Err(e) => {
                 let err_str = format!(
-                    "Warning: Skipping line {} because substring for digest '{}' from {} to {} not found or invalid.",
+                    "Line {}: failed to get substring for digest '{}' from {} to {}: {}",
                     self.line_num + 1,
                     self.current_seq_digest,
                     parsed_start,
-                    parsed_end
+                    parsed_end,
+                    e
                 );
                 return Some(Err(err_str.into()));
             }
@@ -287,7 +314,7 @@ impl RefgetStore {
 
         if index_path.exists() {
             // Load existing store
-            Self::load_local(cache_path)
+            Self::open_local(cache_path)
         } else {
             // Create new store with default Encoded mode
             let mode = StorageMode::Encoded;
@@ -437,6 +464,11 @@ impl RefgetStore {
         self.persist_to_disk = false;
     }
 
+    /// Check if persistence to disk is enabled.
+    pub fn is_persisting(&self) -> bool {
+        self.persist_to_disk
+    }
+
     /// Adds a sequence to the Store
     /// Ensure that it is added to the appropriate collection.
     /// If no collection is specified, it will be added to the default collection.
@@ -503,7 +535,7 @@ impl RefgetStore {
 
     /// Internal implementation for adding a sequence collection.
     fn add_sequence_collection_internal(&mut self, collection: SequenceCollection, force: bool) -> Result<()> {
-        let coll_digest = collection.digest.to_key();
+        let coll_digest = collection.metadata.digest.to_key();
 
         // Check if collection already exists
         if !force && self.collections.contains_key(&coll_digest) {
@@ -621,20 +653,13 @@ impl RefgetStore {
         let seqcol = SequenceCollection::from_fasta(&file_path)?;
         let digest_elapsed = digest_start.elapsed();
 
-        // Build metadata from what we already computed
-        let metadata = SequenceCollectionMetadata {
-            digest: seqcol.digest.clone(),
-            n_sequences: seqcol.sequences.len(),
-            names_digest: seqcol.lvl1.names_digest.clone(),
-            sequences_digest: seqcol.lvl1.sequences_digest.clone(),
-            lengths_digest: seqcol.lvl1.lengths_digest.clone(),
-            file_path: seqcol.file_path.clone(),
-        };
+        // Get metadata directly from the collection
+        let metadata = seqcol.metadata.clone();
 
         // Check if collection already exists and skip if not forcing
-        if !force && self.collections.contains_key(&seqcol.digest.to_key()) {
+        if !force && self.collections.contains_key(&seqcol.metadata.digest.to_key()) {
             if !self.quiet {
-                println!("Skipped {} (already exists)", seqcol.digest);
+                println!("Skipped {} (already exists)", seqcol.metadata.digest);
             }
             return Ok((metadata, false));
         }
@@ -693,7 +718,7 @@ impl RefgetStore {
                             metadata: dr,
                             sequence: raw_sequence,
                         },
-                        seqcol.digest.to_key(),
+                        seqcol.metadata.digest.to_key(),
                         true,  // Always replace Stubs with Full
                     )?;
                 }
@@ -711,7 +736,7 @@ impl RefgetStore {
                             metadata: dr,
                             sequence: encoded_sequence,
                         },
-                        seqcol.digest.to_key(),
+                        seqcol.metadata.digest.to_key(),
                         true,  // Always replace Stubs with Full
                     )?;
                 }
@@ -724,7 +749,7 @@ impl RefgetStore {
         if !self.quiet {
             println!(
                 "Added {} ({} seqs) in {:.1}s [{:.1}s digest + {:.1}s encode]",
-                seqcol.digest,
+                seqcol.metadata.digest,
                 seq_count,
                 digest_elapsed.as_secs_f64() + encode_elapsed.as_secs_f64(),
                 digest_elapsed.as_secs_f64(),
@@ -789,50 +814,234 @@ impl RefgetStore {
             .sum()
     }
 
-    /// Returns an iterator over all complete sequence records in the store.
+    /// Returns the actual disk usage of the store directory.
     ///
-    /// This returns full `SequenceRecord` objects including both metadata and sequence data.
-    /// Use `sequence_metadata()` if you only need metadata.
+    /// Walks the local_path directory (if set) and sums all file sizes.
+    /// For in-memory stores without a local_path, returns 0.
     ///
-    /// # Returns
-    /// An iterator over `SequenceRecord` references.
+    /// This is useful for stats reporting to show actual disk consumption
+    /// regardless of whether sequences are loaded in memory.
+    pub fn actual_disk_usage(&self) -> usize {
+        let Some(path) = &self.local_path else {
+            return 0;
+        };
+
+        fn dir_size(path: &std::path::Path) -> usize {
+            let mut total = 0;
+            if let Ok(entries) = std::fs::read_dir(path) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        total += entry.metadata().map(|m| m.len() as usize).unwrap_or(0);
+                    } else if path.is_dir() {
+                        total += dir_size(&path);
+                    }
+                }
+            }
+            total
+        }
+
+        dir_size(path)
+    }
+
+    // =========================================================================
+    // Collection API
+    // =========================================================================
+
+    /// List all collections in the store (metadata only, no sequence data).
+    ///
+    /// Returns metadata for all collections without loading sequence data.
+    /// Use this for browsing/inventory operations.
     ///
     /// # Example
     /// ```ignore
-    /// for record in store.sequence_records() {
-    ///     println!("{}: has_data={}", record.metadata().name, record.has_data());
+    /// for meta in store.list_collections() {
+    ///     println!("{}: {} sequences", meta.digest, meta.n_sequences);
     /// }
     /// ```
-    pub fn sequence_records(&self) -> impl Iterator<Item = &SequenceRecord> + '_ {
-        self.sequence_store.values()
+    pub fn list_collections(&self) -> Vec<SequenceCollectionMetadata> {
+        let mut result: Vec<_> = self.collections.values().map(|record| record.metadata().clone()).collect();
+        result.sort_by(|a, b| a.digest.cmp(&b.digest));
+        result
     }
 
-    /// Returns an iterator over all collection digests
-    pub fn collection_digests(&self) -> impl Iterator<Item = [u8; 32]> + '_ {
-        self.collections.keys().cloned()
-    }
-
-    /// Returns an iterator over all collections as SequenceCollections
-    /// Note: For Stub records, this returns collections with empty sequence lists.
-    /// Use `collection_records()` to access the raw SequenceCollectionRecord values.
-    pub fn collections(&self) -> impl Iterator<Item = SequenceCollection> + '_ {
-        self.collections.values().map(|record| record.to_collection())
-    }
-
-    /// Returns an iterator over all collection records (Stub or Full)
-    pub fn collection_records(&self) -> impl Iterator<Item = &SequenceCollectionRecord> + '_ {
-        self.collections.values()
-    }
-
-    /// List all collection digests in the store (both Stub and Full)
-    pub fn list_collections(&self) -> impl Iterator<Item = &str> + '_ {
-        self.collections.values().map(|record| record.metadata().digest.as_str())
-    }
-
-    /// Get metadata for a collection by digest without loading the full collection
+    /// Get metadata for a single collection by digest (no sequence data).
+    ///
+    /// Use this for lightweight lookups when you don't need sequence data.
     pub fn get_collection_metadata<K: AsRef<[u8]>>(&self, collection_digest: K) -> Option<&SequenceCollectionMetadata> {
         let key = collection_digest.to_key();
         self.collections.get(&key).map(|record| record.metadata())
+    }
+
+    /// Get a collection with all its sequences loaded.
+    ///
+    /// This loads the collection metadata and all sequence data, returning
+    /// a complete `SequenceCollection` ready for use.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let collection = store.get_collection("abc123")?;
+    /// for seq in &collection.sequences {
+    ///     println!("{}: {}", seq.metadata().name, seq.decode()?);
+    /// }
+    /// ```
+    pub fn get_collection(&mut self, collection_digest: &str) -> Result<SequenceCollection> {
+        let key = collection_digest.to_key();
+        self.ensure_collection_loaded(&key)?;
+
+        // Get all sequence digests for this collection
+        let seq_digests: Vec<[u8; 32]> = self.name_lookup
+            .get(&key)
+            .map(|name_map| name_map.values().cloned().collect())
+            .unwrap_or_default();
+
+        // NOTE: We do NOT load sequence data here - that would be too slow for remote stores
+        // with hundreds of sequences. Sequences are returned as Stubs with metadata.
+        // Call decode() on individual sequences to load their data on demand.
+
+        // Get collection metadata
+        let metadata = self.collections.get(&key)
+            .ok_or_else(|| anyhow!("Collection not found: {}", collection_digest))?
+            .metadata()
+            .clone();
+
+        // Build sequences list from sequence_store (as Stubs with metadata only)
+        let sequences: Vec<SequenceRecord> = seq_digests
+            .iter()
+            .filter_map(|seq_key| self.sequence_store.get(seq_key).cloned())
+            .collect();
+
+        Ok(SequenceCollection { metadata, sequences })
+    }
+
+    // =========================================================================
+    // Sequence API
+    // =========================================================================
+
+    /// List all sequences in the store (metadata only, no sequence data).
+    ///
+    /// Returns metadata for all sequences without loading sequence data.
+    /// Use this for browsing/inventory operations.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for meta in store.list_sequences() {
+    ///     println!("{}: {} bp", meta.name, meta.length);
+    /// }
+    /// ```
+    pub fn list_sequences(&self) -> Vec<SequenceMetadata> {
+        let mut result: Vec<_> = self.sequence_store.values().map(|rec| rec.metadata().clone()).collect();
+        result.sort_by(|a, b| a.sha512t24u.cmp(&b.sha512t24u));
+        result
+    }
+
+    /// Get metadata for a single sequence by digest (no sequence data).
+    ///
+    /// Use this for lightweight lookups when you don't need the actual sequence.
+    pub fn get_sequence_metadata<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&SequenceMetadata> {
+        let key = seq_digest.to_key();
+        self.sequence_store.get(&key).map(|rec| rec.metadata())
+    }
+
+    /// Get a sequence by its SHA512t24u digest, loading data if needed.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = store.get_sequence("abc123")?;
+    /// println!("{}: {}", seq.metadata().name, seq.decode()?);
+    /// ```
+    pub fn get_sequence<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<&SequenceRecord> {
+        let digest_key = seq_digest.to_key();
+        // Try MD5 lookup first, fallback to using digest directly (SHA512t24u)
+        let actual_key = self.md5_lookup.get(&digest_key).copied().unwrap_or(digest_key);
+        self.ensure_sequence_loaded(&actual_key)?;
+        self.sequence_store.get(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found: {}", String::from_utf8_lossy(seq_digest.as_ref())))
+    }
+
+    /// Get a sequence by collection digest and name, loading data if needed.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let seq = store.get_sequence_by_name("collection123", "chr1")?;
+    /// println!("{}", seq.decode()?);
+    /// ```
+    pub fn get_sequence_by_name<K: AsRef<[u8]>>(
+        &mut self,
+        collection_digest: K,
+        sequence_name: &str,
+    ) -> Result<&SequenceRecord> {
+        let collection_key = collection_digest.to_key();
+        self.ensure_collection_loaded(&collection_key)?;
+
+        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_key) {
+            name_map.get(sequence_name).cloned()
+                .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?
+        } else {
+            return Err(anyhow!("Collection not found: {}", String::from_utf8_lossy(collection_digest.as_ref())));
+        };
+
+        self.ensure_sequence_loaded(&digest_key)?;
+        self.sequence_store.get(&digest_key)
+            .ok_or_else(|| anyhow!("Sequence record not found for '{}' after loading", sequence_name))
+    }
+
+    /// Iterate over all collections with their sequences loaded.
+    ///
+    /// This loads all collection data upfront and returns an iterator over
+    /// `SequenceCollection` objects with full sequence data.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for collection in store.iter_collections() {
+    ///     println!("{}: {} sequences", collection.metadata.digest, collection.sequences.len());
+    /// }
+    /// ```
+    ///
+    /// Note: For browsing without loading data, use `list_collections()` instead.
+    pub fn iter_collections(&mut self) -> impl Iterator<Item = SequenceCollection> {
+        // Collect digests first to avoid borrow issues
+        let mut digests: Vec<String> = self.collections.values()
+            .map(|rec| rec.metadata().digest.clone())
+            .collect();
+        digests.sort();
+
+        // Load each collection in sorted order
+        let mut collections = Vec::new();
+        for digest in digests {
+            if let Ok(collection) = self.get_collection(&digest) {
+                collections.push(collection);
+            }
+        }
+        collections.into_iter()
+    }
+
+    /// Iterate over all sequences with their data loaded.
+    ///
+    /// This ensures all sequence data is loaded and returns an iterator over
+    /// `SequenceRecord` objects with full sequence data.
+    ///
+    /// # Example
+    /// ```ignore
+    /// for seq in store.iter_sequences() {
+    ///     println!("{}: {}", seq.metadata().name, seq.decode().unwrap_or_default());
+    /// }
+    /// ```
+    ///
+    /// Note: For browsing without loading data, use `list_sequences()` instead.
+    pub fn iter_sequences(&mut self) -> impl Iterator<Item = SequenceRecord> {
+        // Collect keys first to avoid borrow issues
+        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
+
+        // Load each sequence
+        for key in &keys {
+            let _ = self.ensure_sequence_loaded(key);
+        }
+
+        // Return cloned records sorted by digest
+        let mut records: Vec<_> = self.sequence_store.values().cloned().collect();
+        records.sort_by(|a, b| a.metadata().sha512t24u.cmp(&b.metadata().sha512t24u));
+        records.into_iter()
     }
 
     /// Check if a collection is fully loaded (Full) or just metadata (Stub)
@@ -854,51 +1063,6 @@ impl RefgetStore {
     /// Returns the storage mode used by this store
     pub fn storage_mode(&self) -> StorageMode {
         self.mode
-    }
-
-    /// Retrieve a SequenceRecord from the store by its SHA512t24u digest
-    pub fn get_sequence_by_id<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Option<&SequenceRecord> {
-        let digest_key = seq_digest.to_key();
-
-        // Ensure the sequence data is loaded
-        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
-            eprintln!("Failed to load sequence: {}", e);
-            return None;
-        }
-
-        self.sequence_store.get(&digest_key)
-    }
-
-    /// Retrieve a SequenceRecord from the store by its collection digest and name
-    pub fn get_sequence_by_collection_and_name<K: AsRef<[u8]>>(
-        &mut self,
-        collection_digest: K,
-        sequence_name: &str,
-    ) -> Option<&SequenceRecord> {
-        let collection_key = collection_digest.to_key();
-
-        // Try to ensure collection is loaded (lazy-load from remote if needed)
-        if let Err(e) = self.ensure_collection_loaded(&collection_key) {
-            eprintln!("Failed to load collection: {}", e);
-            return None;
-        }
-
-        // Look up the collection by digest
-        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_key) {
-            // Look up the sequence name in the collection's name map
-            name_map.get(sequence_name).cloned()?
-        } else {
-            return None;
-        };
-
-        // Ensure the sequence data is loaded
-        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
-            eprintln!("Failed to load sequence: {}", e);
-            return None;
-        }
-
-        // Retrieve the sequence record from the store
-        self.sequence_store.get(&digest_key)
     }
 
     /// Get an iterator over substrings defined by BED file regions.
@@ -1029,11 +1193,7 @@ impl RefgetStore {
         let mut previous_header: String = String::new();
 
         for rs in seq_iter.into_iter() {
-            if let Err(err) = rs {
-                eprintln!("{err}");
-                continue;
-            }
-            let rs = rs.unwrap();
+            let rs = rs?;
 
             if previous_parsed_chr != rs.chrom_name {
                 previous_parsed_chr = rs.chrom_name.clone();
@@ -1070,21 +1230,6 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Retrieve a SequenceRecord from the store by its MD5 digest
-    pub fn get_sequence_by_md5<K: AsRef<[u8]>>(&mut self, seq_md5: K) -> Option<&SequenceRecord> {
-        // Look up the SHA512t24u digest using the MD5 lookup
-        let sha512_digest = self.md5_lookup.get(&seq_md5.to_key()).cloned()?;
-
-        // Ensure the sequence data is loaded
-        if let Err(e) = self.ensure_sequence_loaded(&sha512_digest) {
-            eprintln!("Failed to load sequence: {}", e);
-            return None;
-        }
-
-        // Retrieve the sequence record from the store
-        self.sequence_store.get(&sha512_digest)
-    }
-
     /// Retrieves a substring from an encoded sequence by its SHA512t24u digest.
     ///
     /// # Arguments
@@ -1095,50 +1240,43 @@ impl RefgetStore {
     ///
     /// # Returns
     ///
-    /// The substring if the sequence is found, or None if not found
+    /// The substring if the sequence is found, or an error if not found or invalid range
     pub fn get_substring<K: AsRef<[u8]>>(
         &mut self,
         sha512_digest: K,
         start: usize,
         end: usize,
-    ) -> Option<String> {
+    ) -> Result<String> {
         let digest_key = sha512_digest.to_key();
 
         // Ensure the sequence data is loaded
-        if let Err(e) = self.ensure_sequence_loaded(&digest_key) {
-            eprintln!("Failed to load sequence: {}", e);
-            return None;
-        }
+        self.ensure_sequence_loaded(&digest_key)?;
 
-        let record = self.sequence_store.get(&digest_key)?;
+        let record = self.sequence_store.get(&digest_key)
+            .ok_or_else(|| anyhow!("Sequence not found: {}", String::from_utf8_lossy(sha512_digest.as_ref())))?;
         let (metadata, sequence) = match record {
-            SequenceRecord::Stub(_) => return None,
+            SequenceRecord::Stub(_) => return Err(anyhow!("Sequence data not loaded (stub only)")),
             SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
         };
 
         if start >= metadata.length || end > metadata.length || start >= end {
-            println!(
+            return Err(anyhow!(
                 "Invalid substring range: start={}, end={}, sequence length={}",
                 start, end, metadata.length
-            );
-            return None;
+            ));
         }
 
         match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
                 let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
-                Some(String::from_utf8(decoded_sequence).expect("Invalid UTF-8"))
+                String::from_utf8(decoded_sequence)
+                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
             }
             StorageMode::Raw => {
                 let raw_slice: &[u8] = &sequence[start..end];
-                match String::from_utf8(raw_slice.to_vec()) {
-                    Ok(raw_string) => Some(raw_string),
-                    Err(e) => {
-                        eprintln!("Failed to decode UTF-8 sequence: {}", e);
-                        None
-                    }
-                }
+                String::from_utf8(raw_slice.to_vec())
+                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
             }
         }
     }
@@ -1474,17 +1612,33 @@ impl RefgetStore {
         let file_path = file_path.as_ref();
         let mut file = std::fs::File::create(file_path)?;
 
-        // Write header with column names
-        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
+        // Write header with column names (6-column format, description at end)
+        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription")?;
 
         // Write sequence metadata for all sequences
         for result_sr in self.sequence_store.values() {
             let result = result_sr.metadata().clone();
+            let description = result.description.as_deref().unwrap_or("");
             writeln!(
                 file,
-                "{}\t{}\t{}\t{}\t{}",
-                result.name, result.length, result.alphabet, result.sha512t24u, result.md5
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                result.name, result.length, result.alphabet, result.sha512t24u, result.md5, description
             )?;
+        }
+        Ok(())
+    }
+
+    /// Validate a relative path to prevent directory traversal attacks.
+    /// Rejects absolute paths, paths with "..", and paths with null bytes.
+    fn sanitize_relative_path(path: &str) -> Result<()> {
+        if path.starts_with('/') || path.starts_with('\\') {
+            return Err(anyhow!("Absolute paths not allowed: {}", path));
+        }
+        if path.contains("..") {
+            return Err(anyhow!("Directory traversal not allowed: {}", path));
+        }
+        if path.contains('\0') {
+            return Err(anyhow!("Null bytes not allowed in path"));
         }
         Ok(())
     }
@@ -1497,6 +1651,9 @@ impl RefgetStore {
         relative_path: &str,
         persist_to_disk: bool,
     ) -> Result<Vec<u8>> {
+        // Validate the relative path to prevent directory traversal
+        Self::sanitize_relative_path(relative_path)?;
+
         // Check if file exists locally (only if caching is enabled and path exists)
         if persist_to_disk {
             if let Some(local_path) = local_path {
@@ -1551,13 +1708,17 @@ impl RefgetStore {
         }
     }
 
-    /// Load a local RefgetStore from a directory
-    /// This loads metadata only; sequence data is loaded on-demand
-    /// Load a RefgetStore from a local directory.
+    /// Open a local RefgetStore from a directory.
+    ///
+    /// This loads only lightweight metadata and stubs. Collections and sequences
+    /// remain as stubs until explicitly loaded with load_collection()/load_sequence().
+    ///
+    /// # Arguments
+    /// * `path` - Path to the store directory
     ///
     /// Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
-    pub fn load_local<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
-        let root_path = cache_path.as_ref();
+    pub fn open_local<P: AsRef<Path>>(path: P) -> Result<Self> {
+        let root_path = path.as_ref();
 
         // Read rgstore.json index file
         let index_path = root_path.join("rgstore.json");
@@ -1568,6 +1729,13 @@ impl RefgetStore {
 
         let metadata: StoreMetadata =
             serde_json::from_str(&json).context("Failed to parse store metadata")?;
+
+        // Validate paths from metadata to prevent directory traversal
+        Self::sanitize_relative_path(&metadata.seqdata_path_template)?;
+        Self::sanitize_relative_path(&metadata.sequence_index)?;
+        if let Some(ref ci) = metadata.collection_index {
+            Self::sanitize_relative_path(ci)?;
+        }
 
         // Create a new empty store with the correct mode
         let mut store = RefgetStore::new(metadata.mode);
@@ -1592,33 +1760,7 @@ impl RefgetStore {
         // If no collection stubs loaded (missing rgci), load full collections from directory
         if store.collections.is_empty() {
             let collections_dir = root_path.join("collections");
-            if collections_dir.exists() {
-                for entry in fs::read_dir(&collections_dir)? {
-                    let entry = entry?;
-                    let path = entry.path();
-
-                    if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("rgsi")) {
-                        // Load the collection from the file
-                        let collection = read_fasta_refget_file(&path)?;
-                        let collection_digest = collection.digest.to_key();
-
-                        // Convert to SequenceCollectionRecord::Full
-                        let record = SequenceCollectionRecord::from(collection.clone());
-
-                        // Add collection record to store
-                        store.collections.insert(collection_digest, record);
-
-                        // Build name lookup for this collection
-                        let mut name_map = HashMap::new();
-                        for sequence_record in &collection.sequences {
-                            let metadata = sequence_record.metadata();
-                            let sha512_key = metadata.sha512t24u.to_key();
-                            name_map.insert(metadata.name.clone(), sha512_key);
-                        }
-                        store.name_lookup.insert(collection_digest, name_map);
-                    }
-                }
-            }
+            Self::load_collections_from_directory(&mut store, &collections_dir)?;
         }
 
         Ok(store)
@@ -1637,44 +1779,19 @@ impl RefgetStore {
                 continue;
             }
 
-            // Parse sequence metadata lines (supports 5-column legacy and 6-column new format)
-            let parts: Vec<&str> = line.split('\t').collect();
-            let seq_metadata = if parts.len() == 6 {
-                // New 6-column format: name, description, length, alphabet, sha512t24u, md5
-                SequenceMetadata {
-                    name: parts[0].to_string(),
-                    description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
-                    length: parts[2].parse().unwrap_or(0),
-                    alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
-                    sha512t24u: parts[4].to_string(),
-                    md5: parts[5].to_string(),
-                    fai: None,
-                }
-            } else if parts.len() == 5 {
-                // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
-                SequenceMetadata {
-                    name: parts[0].to_string(),
-                    description: None,
-                    length: parts[1].parse().unwrap_or(0),
-                    alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                    sha512t24u: parts[3].to_string(),
-                    md5: parts[4].to_string(),
-                    fai: None,
-                }
-            } else {
-                continue; // Skip lines that don't have 5 or 6 columns
-            };
+            // Parse sequence metadata line
+            if let Some(seq_metadata) = parse_rgsi_line(&line) {
+                // Create a SequenceRecord with no data (lazy loading)
+                let record = SequenceRecord::Stub(seq_metadata.clone());
 
-            // Create a SequenceRecord with no data (lazy loading)
-            let record = SequenceRecord::Stub(seq_metadata.clone());
+                // Add to store
+                let sha512_key = seq_metadata.sha512t24u.to_key();
+                store.sequence_store.insert(sha512_key, record);
 
-            // Add to store
-            let sha512_key = seq_metadata.sha512t24u.to_key();
-            store.sequence_store.insert(sha512_key, record);
-
-            // Add to MD5 lookup
-            let md5_key = seq_metadata.md5.to_key();
-            store.md5_lookup.insert(md5_key, sha512_key);
+                // Add to MD5 lookup
+                let md5_key = seq_metadata.md5.to_key();
+                store.md5_lookup.insert(md5_key, sha512_key);
+            }
         }
 
         Ok(())
@@ -1688,50 +1805,68 @@ impl RefgetStore {
         for line in reader.lines() {
             let line = line?;
 
-            // Skip comment/header lines
-            if line.starts_with('#') {
-                continue;
+            if let Some(metadata) = parse_rgci_line(&line) {
+                let key = metadata.digest.to_key();
+                // Create a SequenceCollectionRecord::Stub (sequences not loaded)
+                // Note: name_lookup is NOT populated for stubs - it will be populated
+                // when the collection is loaded via ensure_collection_loaded()
+                store.collections.insert(key, SequenceCollectionRecord::Stub(metadata));
             }
-
-            // Parse collection metadata lines
-            // Format: digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() < 5 {
-                continue;
-            }
-
-            let metadata = SequenceCollectionMetadata {
-                digest: parts[0].to_string(),
-                n_sequences: parts[1].parse().unwrap_or(0),
-                names_digest: parts[2].to_string(),
-                sequences_digest: parts[3].to_string(),
-                lengths_digest: parts[4].to_string(),
-                file_path: None,
-            };
-
-            let key = metadata.digest.to_key();
-
-            // Create a SequenceCollectionRecord::Stub (sequences not loaded)
-            store.collections.insert(key, SequenceCollectionRecord::Stub(metadata));
-
-            // Note: name_lookup is NOT populated for stubs - it will be populated
-            // when the collection is loaded via ensure_collection_loaded()
         }
 
         Ok(())
     }
 
-    /// Load a remote-backed RefgetStore
-    /// This loads metadata from remote and caches sequence data on-demand
+    /// Load full collections from a collections directory (fallback when no RGCI exists).
+    ///
+    /// Reads all .rgsi files in the directory and loads them as Full collections.
+    fn load_collections_from_directory(store: &mut RefgetStore, collections_dir: &Path) -> Result<()> {
+        if !collections_dir.exists() {
+            return Ok(());
+        }
+
+        for entry in fs::read_dir(collections_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+
+            if path.is_file() && path.extension() == Some(OsStr::new("rgsi")) {
+                // Load the collection from the file
+                let collection = read_rgsi_file(&path)?;
+                let collection_digest = collection.metadata.digest.to_key();
+
+                // Convert to SequenceCollectionRecord::Full
+                let record = SequenceCollectionRecord::from(collection.clone());
+
+                // Add collection record to store
+                store.collections.insert(collection_digest, record);
+
+                // Build name lookup for this collection
+                let mut name_map = HashMap::new();
+                for sequence_record in &collection.sequences {
+                    let metadata = sequence_record.metadata();
+                    let sha512_key = metadata.sha512t24u.to_key();
+                    name_map.insert(metadata.name.clone(), sha512_key);
+                }
+                store.name_lookup.insert(collection_digest, name_map);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Open a remote RefgetStore with local caching.
+    ///
+    /// This loads only lightweight metadata and stubs from the remote URL.
+    /// Data is fetched on-demand when load_collection()/load_sequence() is called.
     ///
     /// # Arguments
-    /// * `cache_path` - Local directory for caching
-    /// * `remote_url` - Remote URL to fetch data from
+    /// * `cache_path` - Local directory for caching fetched data
+    /// * `remote_url` - URL of the remote store
     ///
     /// # Notes
     /// By default, persistence is enabled (sequences are cached to disk).
     /// Call `disable_persistence()` after loading to keep only in memory.
-    pub fn load_remote<P: AsRef<Path>, S: AsRef<str>>(
+    pub fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
         cache_path: P,
         remote_url: S,
     ) -> Result<Self> {
@@ -1749,6 +1884,13 @@ impl RefgetStore {
 
         let metadata: StoreMetadata =
             serde_json::from_str(&json).context("Failed to parse store metadata")?;
+
+        // Validate paths from metadata to prevent directory traversal
+        Self::sanitize_relative_path(&metadata.seqdata_path_template)?;
+        Self::sanitize_relative_path(&metadata.sequence_index)?;
+        if let Some(ref ci) = metadata.collection_index {
+            Self::sanitize_relative_path(ci)?;
+        }
 
         // Create a new empty store with the correct mode
         let mut store = RefgetStore::new(metadata.mode);
@@ -1774,44 +1916,19 @@ impl RefgetStore {
                 continue;
             }
 
-            // Parse sequence metadata lines (supports 5-column legacy and 6-column new format)
-            let parts: Vec<&str> = line.split('\t').collect();
-            let seq_metadata = if parts.len() == 6 {
-                // New 6-column format: name, description, length, alphabet, sha512t24u, md5
-                SequenceMetadata {
-                    name: parts[0].to_string(),
-                    description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
-                    length: parts[2].parse().unwrap_or(0),
-                    alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
-                    sha512t24u: parts[4].to_string(),
-                    md5: parts[5].to_string(),
-                    fai: None,
-                }
-            } else if parts.len() == 5 {
-                // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
-                SequenceMetadata {
-                    name: parts[0].to_string(),
-                    description: None,
-                    length: parts[1].parse().unwrap_or(0),
-                    alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                    sha512t24u: parts[3].to_string(),
-                    md5: parts[4].to_string(),
-                    fai: None,
-                }
-            } else {
-                continue;
-            };
+            // Parse sequence metadata line
+            if let Some(seq_metadata) = parse_rgsi_line(line) {
+                // Create a SequenceRecord with no data (lazy loading)
+                let record = SequenceRecord::Stub(seq_metadata.clone());
 
-            // Create a SequenceRecord with no data (lazy loading)
-            let record = SequenceRecord::Stub(seq_metadata.clone());
+                // Add to store
+                let sha512_key = seq_metadata.sha512t24u.to_key();
+                store.sequence_store.insert(sha512_key, record);
 
-            // Add to store
-            let sha512_key = seq_metadata.sha512t24u.to_key();
-            store.sequence_store.insert(sha512_key, record);
-
-            // Add to MD5 lookup
-            let md5_key = seq_metadata.md5.to_key();
-            store.md5_lookup.insert(md5_key, sha512_key);
+                // Add to MD5 lookup
+                let md5_key = seq_metadata.md5.to_key();
+                store.md5_lookup.insert(md5_key, sha512_key);
+            }
         }
 
         // Try to fetch and load collection stubs from collections.rgci (new format)
@@ -1827,25 +1944,10 @@ impl RefgetStore {
 
                 // Parse collection stubs
                 for line in collection_index_str.lines() {
-                    if line.starts_with('#') {
-                        continue;
+                    if let Some(coll_metadata) = parse_rgci_line(line) {
+                        let key = coll_metadata.digest.to_key();
+                        store.collections.insert(key, SequenceCollectionRecord::Stub(coll_metadata));
                     }
-                    let parts: Vec<&str> = line.split('\t').collect();
-                    if parts.len() < 5 {
-                        continue;
-                    }
-
-                    let coll_metadata = SequenceCollectionMetadata {
-                        digest: parts[0].to_string(),
-                        n_sequences: parts[1].parse().unwrap_or(0),
-                        names_digest: parts[2].to_string(),
-                        sequences_digest: parts[3].to_string(),
-                        lengths_digest: parts[4].to_string(),
-                        file_path: None,
-                    };
-
-                    let key = coll_metadata.digest.to_key();
-                    store.collections.insert(key, SequenceCollectionRecord::Stub(coll_metadata));
                 }
             }
         }
@@ -1853,37 +1955,8 @@ impl RefgetStore {
         // If no collection stubs loaded, check for cached collections in local directory
         if store.collections.is_empty() {
             let local_collections_dir = cache_path.join("collections");
-            if !local_collections_dir.exists() {
-                create_dir_all(&local_collections_dir)?;
-            }
-
-            if local_collections_dir.exists() {
-                for entry in fs::read_dir(&local_collections_dir)? {
-                    let entry = entry?;
-                    let path = entry.path();
-
-                    if path.is_file() && path.extension() == Some(std::ffi::OsStr::new("rgsi")) {
-                        // Load the collection from the file
-                        let collection = read_fasta_refget_file(&path)?;
-                        let collection_digest = collection.digest.to_key();
-
-                        // Convert to SequenceCollectionRecord::Full
-                        let record = SequenceCollectionRecord::from(collection.clone());
-
-                        // Add collection record to store
-                        store.collections.insert(collection_digest, record);
-
-                        // Build name lookup for this collection
-                        let mut name_map = HashMap::new();
-                        for sequence_record in &collection.sequences {
-                            let metadata = sequence_record.metadata();
-                            let sha512_key = metadata.sha512t24u.to_key();
-                            name_map.insert(metadata.name.clone(), sha512_key);
-                        }
-                        store.name_lookup.insert(collection_digest, name_map);
-                    }
-                }
-            }
+            create_dir_all(&local_collections_dir)?;  // Ensure cache dir exists
+            Self::load_collections_from_directory(&mut store, &local_collections_dir)?;
         }
 
         Ok(store)
@@ -1917,6 +1990,13 @@ impl RefgetStore {
 
             // Fetch the collection file
             // Always cache metadata files (they're small), even when persist_to_disk is false
+            if !self.quiet {
+                let cached = self.local_path.as_ref()
+                    .map(|p| p.join(&relative_path).exists())
+                    .unwrap_or(false);
+                let verb = if cached { "Loading" } else { "Downloading" };
+                eprintln!("{} collection {}...", verb, digest_str);
+            }
             let _collection_data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
 
             // Read the collection from the cached file
@@ -1926,16 +2006,16 @@ impl RefgetStore {
 
             let collection_file_path = local_path.join(&relative_path);
 
-            let collection = read_fasta_refget_file(&collection_file_path)?;
+            let collection = read_rgsi_file(&collection_file_path)?;
 
             // Verify the collection digest matches what we requested
-            let loaded_digest = collection.digest.to_key();
+            let loaded_digest = collection.metadata.digest.to_key();
             if loaded_digest != *collection_digest {
-                eprintln!(
-                    "Warning: Collection digest mismatch. Expected {:?}, got {:?}",
+                return Err(anyhow!(
+                    "Collection digest mismatch: expected {}, got {}",
                     String::from_utf8_lossy(collection_digest),
                     String::from_utf8_lossy(&loaded_digest)
-                );
+                ));
             }
 
             // Convert to SequenceCollectionRecord::Full and replace Stub if present
@@ -1944,25 +2024,49 @@ impl RefgetStore {
             // Add collection to store (replacing Stub if present)
             self.collections.insert(*collection_digest, record);
 
-            // Build name lookup for this collection
+            // Build name lookup and add sequences to sequence_store as Stubs
             let mut name_map = HashMap::new();
             for sequence_record in &collection.sequences {
                 let metadata = sequence_record.metadata();
                 let sha512_key = metadata.sha512t24u.to_key();
                 name_map.insert(metadata.name.clone(), sha512_key);
+
+                // Add to sequence_store if not already present (as Stub for lazy loading)
+                if !self.sequence_store.contains_key(&sha512_key) {
+                    self.sequence_store.insert(sha512_key, SequenceRecord::Stub(metadata.clone()));
+                    // Also add MD5 lookup
+                    let md5_key = metadata.md5.to_key();
+                    self.md5_lookup.insert(md5_key, sha512_key);
+                }
             }
             self.name_lookup.insert(*collection_digest, name_map);
         } else {
             // Collection is Full but name_lookup not built yet - build it now
-            if let Some(SequenceCollectionRecord::Full { sequences, .. }) = self.collections.get(collection_digest) {
-                let mut name_map = HashMap::new();
-                for sequence_record in sequences {
-                    let metadata = sequence_record.metadata();
-                    let sha512_key = metadata.sha512t24u.to_key();
-                    name_map.insert(metadata.name.clone(), sha512_key);
+            // First, collect the data we need to avoid borrow conflicts
+            let sequences_data: Vec<(SequenceMetadata, [u8; 32], [u8; 32])> =
+                if let Some(SequenceCollectionRecord::Full { sequences, .. }) = self.collections.get(collection_digest) {
+                    sequences.iter().map(|seq| {
+                        let metadata = seq.metadata().clone();
+                        let sha512_key = metadata.sha512t24u.to_key();
+                        let md5_key = metadata.md5.to_key();
+                        (metadata, sha512_key, md5_key)
+                    }).collect()
+                } else {
+                    Vec::new()
+                };
+
+            // Now build name_lookup and add sequences to sequence_store
+            let mut name_map = HashMap::new();
+            for (metadata, sha512_key, md5_key) in sequences_data {
+                name_map.insert(metadata.name.clone(), sha512_key);
+
+                // Add to sequence_store if not already present
+                if !self.sequence_store.contains_key(&sha512_key) {
+                    self.sequence_store.insert(sha512_key, SequenceRecord::Stub(metadata));
+                    self.md5_lookup.insert(md5_key, sha512_key);
                 }
-                self.name_lookup.insert(*collection_digest, name_map);
             }
+            self.name_lookup.insert(*collection_digest, name_map);
         }
 
         Ok(())
@@ -1997,11 +2101,16 @@ impl RefgetStore {
 
         // Fetch the sequence data
         // Use persist_to_disk flag - this is where memory-only mode saves disk I/O
+        if !self.quiet {
+            let cached = self.local_path.as_ref().map(|p| p.join(&relative_path).exists()).unwrap_or(false);
+            let verb = if cached { "Loading" } else { "Downloading" };
+            eprintln!("{} sequence {}...", verb, digest_str);
+        }
         let data = Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, self.persist_to_disk)?;
 
-        // Update the record with the loaded data
+        // Update the record with the loaded data (in-place, no clone needed)
         self.sequence_store.entry(*digest).and_modify(|r| {
-            *r = r.clone().with_data(data);
+            r.load_data(data);
         });
 
         Ok(())
@@ -2146,7 +2255,7 @@ impl RefgetStore {
     pub fn stats_extended(&self) -> StoreStats {
         let n_sequences = self.sequence_store.len();
         let n_sequences_loaded = self.sequence_store.values()
-            .filter(|record| record.has_data())
+            .filter(|record| record.is_loaded())
             .count();
         let n_collections = self.collections.len();
         let n_collections_loaded = self.collections.values()
@@ -2156,12 +2265,14 @@ impl RefgetStore {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
+        let total_disk_size = self.actual_disk_usage();
         StoreStats {
             n_sequences,
             n_sequences_loaded,
             n_collections,
             n_collections_loaded,
             storage_mode: mode_str.to_string(),
+            total_disk_size,
         }
     }
 }
@@ -2179,6 +2290,8 @@ pub struct StoreStats {
     pub n_collections_loaded: usize,
     /// Storage mode (Raw or Encoded)
     pub storage_mode: String,
+    /// Actual disk usage in bytes (all files in store directory)
+    pub total_disk_size: usize,
 }
 
 /// Format bytes into human-readable size (KB, MB, GB, etc.)
@@ -2275,47 +2388,31 @@ mod tests {
     use super::*;
     // use std::time::Instant;
     use crate::collection::{
-        SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
+        SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
     };
     use crate::digest::{md5, sha512t24u};
     use tempfile::tempdir;
 
-    #[test]
-    fn store_fa_to_rgsi() {
-        // Create temporary directory
-        let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
-
-        // Copy test FASTA file to temp directory
-        let test_fa = "../tests/data/fasta/base.fa";
-        let temp_fa = temp_path.join("base.fa");
-        let temp_rgsi = temp_path.join("base.rgsi");
-
-        std::fs::copy(test_fa, &temp_fa).expect("Failed to copy test FASTA file");
-
-        // Create sequence collection from temporary file
-        let seqcol = SequenceCollection::from_fasta(&temp_fa)
-            .expect("Failed to create SeqColDigest from FASTA file");
-
-        // Write RGSI to temporary directory
-        seqcol.write_rgsi().expect("Failed to write rgsi file");
-
-        // Load and verify
-        let loaded_seqcol = read_fasta_refget_file(&temp_rgsi).expect("Failed to read refget file");
-
-        // Test round-trip integrity
-        for (original, loaded) in seqcol.sequences.iter().zip(loaded_seqcol.sequences.iter()) {
-            assert_eq!(original.metadata().name, loaded.metadata().name);
-            assert_eq!(original.metadata().length, loaded.metadata().length);
-            assert_eq!(original.metadata().sha512t24u, loaded.metadata().sha512t24u);
-            assert_eq!(original.metadata().md5, loaded.metadata().md5);
-            assert_eq!(original.metadata().alphabet, loaded.metadata().alphabet);
-        }
-    }
+    // Note: FASTA→RGSI roundtrip testing is in fasta.rs::digests_fa_to_rgsi
 
     // Helper function to calculate actual digests for testing
     fn calculate_test_digests(sequence: &[u8]) -> (String, String) {
         (sha512t24u(sequence), md5(sequence))
+    }
+
+    /// Creates a test store with 3 sequences for export testing
+    fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, [u8; 32]) {
+        let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n>chr3\nTTTTCCCC\n";
+        let temp_fasta_path = temp_path.join("test.fa");
+        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+        let mut store = RefgetStore::in_memory();
+        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
+
+        let collections: Vec<_> = store.collections.keys().cloned().collect();
+        let collection_digest = collections[0];
+
+        (store, collection_digest)
     }
 
     #[test]
@@ -2340,83 +2437,60 @@ mod tests {
     }
 
     #[test]
-    fn test_mode_switching_raw_to_encoded() {
+    fn test_mode_switching() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
         let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n";
         let temp_fasta_path = temp_path.join("test.fa");
         fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
 
-        // Create store in Raw mode and load sequences
-        let mut store = RefgetStore::in_memory();
-        store.disable_encoding();
-        assert_eq!(store.mode, StorageMode::Raw);
-
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
-
         let (chr1_sha, _) = calculate_test_digests(b"ATGCATGCATGC");
         let chr1_key = chr1_sha.as_bytes().to_key();
 
-        // Verify raw bytes in Raw mode - plain ASCII
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
-            assert_eq!(sequence.len(), 12);
+        // Test Raw -> Encoded
+        {
+            let mut store = RefgetStore::in_memory();
+            store.disable_encoding();
+            store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
+
+            // Verify raw (ASCII)
+            if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+                assert_eq!(sequence, b"ATGCATGCATGC");
+            }
+            let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
+
+            // Switch to encoded
+            store.set_encoding_mode(StorageMode::Encoded);
+
+            // Verify encoded (smaller)
+            if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+                assert_eq!(sequence.len(), 3); // 12 bases * 2 bits = 3 bytes
+            }
+            let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
+            assert_eq!(seq_before, seq_after);
         }
 
-        let seq1 = store.get_sequence_by_id(&chr1_sha).unwrap().decode().unwrap();
+        // Test Encoded -> Raw
+        {
+            let mut store = RefgetStore::in_memory();
+            store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
 
-        // Switch to Encoded
-        store.set_encoding_mode(StorageMode::Encoded);
+            // Verify encoded
+            if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+                assert_eq!(sequence.len(), 3);
+            }
+            let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
-        // Verify raw bytes are now bit-packed
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence.len(), 3); // 12 bases * 2 bits = 3 bytes
-            assert!(sequence.len() < 12);
+            // Switch to raw
+            store.disable_encoding();
+
+            // Verify raw (full size)
+            if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
+                assert_eq!(sequence, b"ATGCATGCATGC");
+            }
+            let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
+            assert_eq!(seq_before, seq_after);
         }
-
-        // Verify decoded sequence is identical
-        let seq2 = store.get_sequence_by_id(&chr1_sha).unwrap().decode().unwrap();
-        assert_eq!(seq1, seq2);
-    }
-
-    #[test]
-    fn test_mode_switching_encoded_to_raw() {
-        let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
-        let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n";
-        let temp_fasta_path = temp_path.join("test.fa");
-        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
-
-        // Create store in default Encoded mode and load sequences
-        let mut store = RefgetStore::in_memory();
-        assert_eq!(store.mode, StorageMode::Encoded);
-
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
-
-        let (chr1_sha, _) = calculate_test_digests(b"ATGCATGCATGC");
-        let chr1_key = chr1_sha.as_bytes().to_key();
-
-        // Verify raw bytes in Encoded mode - bit-packed
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence.len(), 3);
-            assert!(sequence.len() < 12);
-        }
-
-        let seq1 = store.get_sequence_by_id(&chr1_sha).unwrap().decode().unwrap();
-
-        // Switch to Raw
-        store.disable_encoding();
-
-        // Verify raw bytes are now plain ASCII
-        if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
-            assert_eq!(sequence.len(), 12);
-        }
-
-        // Verify decoded sequence is identical
-        let seq2 = store.get_sequence_by_id(&chr1_sha).unwrap().decode().unwrap();
-        assert_eq!(seq1, seq2);
-        assert!(!seq2.is_empty());
     }
 
     #[test]
@@ -2453,12 +2527,11 @@ GGGGAAAA
         println!("chr2 values: {}  {}", chr2_sha, chr2_md5);
 
         // --- 3. Prepare Test BED Data ---
+        // Use only valid entries for the success test
         let bed_content = "\
 chr1\t0\t5
 chr1\t8\t12
 chr2\t0\t4
-chr_nonexistent\t10\t20
-chr1\t-5\t100
 ";
         let temp_bed_path = temp_path.join("test.bed");
 
@@ -2494,8 +2567,8 @@ chr1\t-5\t100
         let vec_result: Vec<_> = store
             .substrings_from_regions(collection_digest_ref, temp_bed_path.to_str().unwrap())
             .expect("substrings_from_regions failed")
-            .filter_map(Result::ok)  // Skip errors
-            .collect();
+            .collect::<Result<Vec<_>, _>>()
+            .expect("substrings_from_regions had errors");
 
         // Define the expected vector of RetrievedSequence structs
         let expected_vec = vec![
@@ -2535,14 +2608,15 @@ chr1\t-5\t100
 
         // Create a sequence collection
         let mut collection = SequenceCollection {
-            sequences: Vec::new(),
-            digest: "test_collection".to_string(),
-            lvl1: SeqColDigestLvl1 {
+            metadata: SequenceCollectionMetadata {
+                digest: "test_collection".to_string(),
+                n_sequences: 0,
                 names_digest: "test".to_string(),
                 sequences_digest: "test".to_string(),
                 lengths_digest: "test".to_string(),
+                file_path: None,
             },
-            file_path: None,
+            sequences: Vec::new(),
         };
 
         // Create a sequence record
@@ -2572,45 +2646,31 @@ chr1\t-5\t100
 
         // Test sequence lookup by collection+name (using string digest)
         let retrieved_by_name_str =
-            store.get_sequence_by_collection_and_name(&collection.digest, name);
-        assert!(retrieved_by_name_str.is_some());
+            store.get_sequence_by_name(&collection.metadata.digest, name);
+        assert!(retrieved_by_name_str.is_ok());
         let retrieved_record = retrieved_by_name_str.unwrap();
         assert_eq!(retrieved_record.metadata().name, name);
         assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by collection+name (using [u8; 32] digest)
         let retrieved_by_name_key =
-            store.get_sequence_by_collection_and_name(collection.digest.to_key(), name);
-        assert!(retrieved_by_name_key.is_some());
+            store.get_sequence_by_name(collection.metadata.digest.to_key(), name);
+        assert!(retrieved_by_name_key.is_ok());
         let retrieved_record = retrieved_by_name_key.unwrap();
         assert_eq!(retrieved_record.metadata().name, name);
         assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by SHA512 digest (using string)
-        let retrieved_by_sha512_str = store.get_sequence_by_id(&seq_metadata.sha512t24u);
-        assert!(retrieved_by_sha512_str.is_some());
+        let retrieved_by_sha512_str = store.get_sequence(&seq_metadata.sha512t24u);
+        assert!(retrieved_by_sha512_str.is_ok());
         let retrieved_record = retrieved_by_sha512_str.unwrap();
         assert_eq!(retrieved_record.metadata().name, name);
         assert_eq!(retrieved_record.sequence().unwrap(), sequence);
 
         // Test sequence lookup by SHA512 digest (using [u8; 32])
-        let retrieved_by_sha512_key = store.get_sequence_by_id(seq_metadata.sha512t24u.to_key());
-        assert!(retrieved_by_sha512_key.is_some());
+        let retrieved_by_sha512_key = store.get_sequence(seq_metadata.sha512t24u.to_key());
+        assert!(retrieved_by_sha512_key.is_ok());
         let retrieved_record = retrieved_by_sha512_key.unwrap();
-        assert_eq!(retrieved_record.metadata().name, name);
-        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
-
-        // Test sequence lookup by MD5 digest (using string)
-        let retrieved_by_md5_str = store.get_sequence_by_md5(&seq_metadata.md5);
-        assert!(retrieved_by_md5_str.is_some());
-        let retrieved_record = retrieved_by_md5_str.unwrap();
-        assert_eq!(retrieved_record.metadata().name, name);
-        assert_eq!(retrieved_record.sequence().unwrap(), sequence);
-
-        // Test sequence lookup by MD5 digest (using [u8; 32])
-        let retrieved_by_md5_key = store.get_sequence_by_md5(seq_metadata.md5.to_key());
-        assert!(retrieved_by_md5_key.is_some());
-        let retrieved_record = retrieved_by_md5_key.unwrap();
         assert_eq!(retrieved_record.metadata().name, name);
         assert_eq!(retrieved_record.sequence().unwrap(), sequence);
     }
@@ -2687,7 +2747,7 @@ chr1\t-5\t100
         assert!(temp_path.join("collections").exists());
 
         // Load the store from disk
-        let mut loaded_store = RefgetStore::load_local(temp_path).unwrap();
+        let mut loaded_store = RefgetStore::open_local(temp_path).unwrap();
 
         // Verify that the loaded store has the same sequences
         assert_eq!(loaded_store.sequence_store.len(), 3);
@@ -2718,8 +2778,8 @@ chr1\t-5\t100
         assert_eq!(original_seq2.metadata().md5, loaded_seq2.metadata().md5);
 
         // Check data is not loaded initially (lazy loading)
-        assert_eq!(loaded_seq1.has_data(), false, "Data should not be loaded initially with lazy loading");
-        assert_eq!(loaded_seq2.has_data(), false, "Data should not be loaded initially with lazy loading");
+        assert_eq!(loaded_seq1.is_loaded(), false, "Data should not be loaded initially with lazy loading");
+        assert_eq!(loaded_seq2.is_loaded(), false, "Data should not be loaded initially with lazy loading");
 
         // Verify MD5 lookup is preserved
         assert_eq!(loaded_store.md5_lookup.len(), 3);
@@ -2729,7 +2789,7 @@ chr1\t-5\t100
 
         // Test sequence retrieval functionality
         for (digest, original_record) in &store.sequence_store {
-            let loaded_record = loaded_store.get_sequence_by_id(*digest).unwrap();
+            let loaded_record = loaded_store.get_sequence(*digest).unwrap();
             assert_eq!(original_record.metadata().name, loaded_record.metadata().name);
             assert_eq!(
                 original_record.metadata().length,
@@ -2741,7 +2801,7 @@ chr1\t-5\t100
                 let substring_len = std::cmp::min(5, original_record.metadata().length);
                 let substring = loaded_store.get_substring(digest, 0, substring_len);
                 assert!(
-                    substring.is_some(),
+                    substring.is_ok(),
                     "Should be able to retrieve substring from loaded sequence"
                 );
             }
@@ -2753,93 +2813,27 @@ chr1\t-5\t100
     #[test]
     fn test_export_fasta_all_sequences() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
+        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
-        // Create test FASTA
-        let fasta_content = "\
->chr1
-ATGCATGCATGC
->chr2
-GGGGAAAA
->chr3
-TTTTCCCC
-";
-        let temp_fasta_path = temp_path.join("test.fa");
-        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+        let output_path = temp_dir.path().join("exported_all.fa");
+        store.export_fasta(&collection_digest, &output_path, None, Some(80)).unwrap();
 
-        // Import into store
-        let mut store = RefgetStore::in_memory();
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
-
-        // Get the collection digest
-        let collections: Vec<_> = store.collections.keys().cloned().collect();
-        assert_eq!(collections.len(), 1, "Should have exactly one collection");
-        let collection_digest = collections[0];
-
-        // Export all sequences
-        let output_path = temp_path.join("exported_all.fa");
-        store
-            .export_fasta(&collection_digest, &output_path, None, Some(80))
-            .expect("Failed to export FASTA");
-
-        // Read and verify the exported file
-        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
-
-        // Check that all sequences are present
-        assert!(exported_content.contains(">chr1"), "Should contain chr1");
-        assert!(exported_content.contains(">chr2"), "Should contain chr2");
-        assert!(exported_content.contains(">chr3"), "Should contain chr3");
-        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
-        assert!(exported_content.contains("GGGGAAAA"), "Should contain chr2 sequence");
-        assert!(exported_content.contains("TTTTCCCC"), "Should contain chr3 sequence");
-
-        println!("✓ Export all sequences test passed");
+        let exported = fs::read_to_string(&output_path).unwrap();
+        assert!(exported.contains(">chr1") && exported.contains(">chr2") && exported.contains(">chr3"));
+        assert!(exported.contains("ATGCATGCATGC") && exported.contains("GGGGAAAA") && exported.contains("TTTTCCCC"));
     }
 
     #[test]
     fn test_export_fasta_subset_sequences() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
+        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
-        // Create test FASTA
-        let fasta_content = "\
->chr1
-ATGCATGCATGC
->chr2
-GGGGAAAA
->chr3
-TTTTCCCC
-";
-        let temp_fasta_path = temp_path.join("test.fa");
-        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+        let output_path = temp_dir.path().join("exported_subset.fa");
+        store.export_fasta(&collection_digest, &output_path, Some(vec!["chr1", "chr3"]), Some(80)).unwrap();
 
-        // Import into store
-        let mut store = RefgetStore::in_memory();
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
-
-        // Get the collection digest
-        let collections: Vec<_> = store.collections.keys().cloned().collect();
-        let collection_digest = collections[0];
-
-        // Export only chr1 and chr3
-        let output_path = temp_path.join("exported_subset.fa");
-        let subset_names = vec!["chr1", "chr3"];
-        store
-            .export_fasta(&collection_digest, &output_path, Some(subset_names), Some(80))
-            .expect("Failed to export subset FASTA");
-
-        // Read and verify the exported file
-        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
-
-        // Check that only selected sequences are present
-        assert!(exported_content.contains(">chr1"), "Should contain chr1");
-        assert!(!exported_content.contains(">chr2"), "Should NOT contain chr2");
-        assert!(exported_content.contains(">chr3"), "Should contain chr3");
-        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
-        assert!(!exported_content.contains("GGGGAAAA"), "Should NOT contain chr2 sequence");
-        assert!(exported_content.contains("TTTTCCCC"), "Should contain chr3 sequence");
-
-        println!("✓ Export subset sequences test passed");
+        let exported = fs::read_to_string(&output_path).unwrap();
+        assert!(exported.contains(">chr1") && exported.contains(">chr3"));
+        assert!(!exported.contains(">chr2") && !exported.contains("GGGGAAAA"));
     }
 
     #[test]
@@ -2903,83 +2897,32 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
     #[test]
     fn test_export_fasta_by_digests() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
+        let (mut store, _) = setup_export_test_store(temp_dir.path());
 
-        // Create test FASTA
-        let fasta_content = "\
->chr1
-ATGCATGCATGC
->chr2
-GGGGAAAA
-";
-        let temp_fasta_path = temp_path.join("test.fa");
-        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
-
-        // Import into store
-        let mut store = RefgetStore::in_memory();
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
-
-        // Get digests
-        let digests: Vec<String> = store
-            .sequence_store
-            .values()
-            .map(|r| r.metadata().sha512t24u.clone())
-            .collect();
-
-        // Export by digests
-        let output_path = temp_path.join("exported_by_digests.fa");
+        let digests: Vec<String> = store.sequence_store.values()
+            .map(|r| r.metadata().sha512t24u.clone()).collect();
         let digest_refs: Vec<&str> = digests.iter().map(|s| s.as_str()).collect();
-        store
-            .export_fasta_by_digests(digest_refs, &output_path, Some(80))
-            .expect("Failed to export FASTA by digests");
 
-        // Read and verify the exported file
-        let exported_content = fs::read_to_string(&output_path).expect("Failed to read exported file");
+        let output_path = temp_dir.path().join("exported_by_digests.fa");
+        store.export_fasta_by_digests(digest_refs, &output_path, Some(80)).unwrap();
 
-        // Check that all sequences are present
-        assert!(exported_content.contains(">chr1"), "Should contain chr1");
-        assert!(exported_content.contains(">chr2"), "Should contain chr2");
-        assert!(exported_content.contains("ATGCATGCATGC"), "Should contain chr1 sequence");
-        assert!(exported_content.contains("GGGGAAAA"), "Should contain chr2 sequence");
-
-        println!("✓ Export by digests test passed");
+        let exported = fs::read_to_string(&output_path).unwrap();
+        assert!(exported.contains(">chr1") && exported.contains(">chr2") && exported.contains(">chr3"));
     }
 
     #[test]
     fn test_export_fasta_error_handling() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let temp_path = temp_dir.path();
+        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
 
-        // Create test FASTA
-        let fasta_content = "\
->chr1
-ATGCATGCATGC
-";
-        let temp_fasta_path = temp_path.join("test.fa");
-        fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
-
-        // Import into store
-        let mut store = RefgetStore::in_memory();
-        store.add_sequence_collection_from_fasta(&temp_fasta_path).unwrap();
+        let output_path = temp_dir.path().join("should_fail.fa");
 
         // Test with non-existent collection
-        let output_path = temp_path.join("should_fail.fa");
         let fake_collection = b"fake_collection_digest_12345678";
-        let result = store.export_fasta(fake_collection, &output_path, None, Some(80));
-        assert!(result.is_err(), "Should fail with non-existent collection");
+        assert!(store.export_fasta(fake_collection, &output_path, None, Some(80)).is_err());
 
         // Test with non-existent sequence name
-        let collections: Vec<_> = store.collections.keys().cloned().collect();
-        let collection_digest = collections[0];
-        let result = store.export_fasta(
-            &collection_digest,
-            &output_path,
-            Some(vec!["nonexistent_chr"]),
-            Some(80),
-        );
-        assert!(result.is_err(), "Should fail with non-existent sequence name");
-
-        println!("✓ Error handling test passed");
+        assert!(store.export_fasta(&collection_digest, &output_path, Some(vec!["nonexistent_chr"]), Some(80)).is_err());
     }
 
     #[test]
@@ -3006,7 +2949,7 @@ ATGCATGCATGC
         } // store dropped here
 
         // Load the store fresh from disk
-        let mut loaded_store = RefgetStore::load_local(&store_path).unwrap();
+        let mut loaded_store = RefgetStore::open_local(&store_path).unwrap();
 
         // Verify collection is initially a stub (lazy loaded)
         assert!(
@@ -3070,8 +3013,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Verify we can retrieve sequences by their short names (first word only)
         // and check the description was captured
         {
-            let seq1 = store.get_sequence_by_collection_and_name(&collection_digest, name1);
-            assert!(seq1.is_some(), "Should retrieve sequence by name (first word)");
+            let seq1 = store.get_sequence_by_name(&collection_digest, name1);
+            assert!(seq1.is_ok(), "Should retrieve sequence by name (first word)");
 
             let seq1_meta = seq1.unwrap().metadata();
             assert_eq!(seq1_meta.name, "JAHKSE010000016.1");
@@ -3082,8 +3025,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         }
 
         {
-            let seq2 = store.get_sequence_by_collection_and_name(&collection_digest, name2);
-            assert!(seq2.is_some(), "Should retrieve sequence by name (first word)");
+            let seq2 = store.get_sequence_by_name(&collection_digest, name2);
+            assert!(seq2.is_ok(), "Should retrieve sequence by name (first word)");
         }
 
         println!("✓ FASTA header parsing test passed");
@@ -3170,7 +3113,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(disk_size > 0, "Disk size should be greater than 0");
 
         // Verify against manual calculation
-        let manual: usize = store.sequence_metadata()
+        let manual: usize = store.list_sequences()
+            .iter()
             .map(|m| (m.length * m.alphabet.bits_per_symbol()).div_ceil(8))
             .sum();
         assert_eq!(disk_size, manual);
@@ -3249,9 +3193,9 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
 
         // Test list_collections
-        let collections: Vec<_> = store.list_collections().collect();
+        let collections = store.list_collections();
         assert_eq!(collections.len(), 1, "Should have 1 collection");
-        let digest = collections[0].to_string();
+        let digest = collections[0].digest.clone();
 
         // Test get_collection_metadata
         let meta = store.get_collection_metadata(&digest);
@@ -3280,11 +3224,11 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Create and populate the store
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
-        let digest = store.list_collections().next().unwrap().to_string();
+        let digest = store.list_collections()[0].digest.clone();
 
         // Drop the store and reload from disk
         drop(store);
-        let mut loaded_store = RefgetStore::load_local(&cache_path).unwrap();
+        let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
 
         // VERIFY: Metadata is available (from collections.rgci)
         let meta = loaded_store.get_collection_metadata(&digest);
@@ -3301,8 +3245,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert_eq!(stats_before.n_collections_loaded, 0, "Should have 0 collections loaded initially");
 
         // TRIGGER: Access a sequence by name - this should trigger lazy loading
-        let seq = loaded_store.get_sequence_by_collection_and_name(&digest, "chr1");
-        assert!(seq.is_some(), "Should be able to retrieve sequence after lazy load");
+        let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
+        assert!(seq.is_ok(), "Should be able to retrieve sequence after lazy load");
         assert_eq!(seq.unwrap().metadata().name, "chr1");
 
         // VERIFY: Collection is now Full (loaded into memory)
@@ -3314,5 +3258,131 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert_eq!(stats_after.n_collections_loaded, 1, "Should have 1 collection loaded after access");
 
         println!("✓ Collection stub lazy loading test passed");
+    }
+
+    // Note: open_local is tested in test_disk_persistence which is more comprehensive
+
+    #[test]
+    fn test_get_collection() {
+        // Test the get_collection method (returns collection with sequence metadata, lazy loading)
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+
+        // Create and populate the store
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+        let digest = store.list_collections()[0].digest.clone();
+        drop(store);
+
+        // Reload and test get_collection
+        let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
+
+        // Before loading - collection is a Stub
+        assert!(!loaded_store.is_collection_loaded(&digest));
+
+        // Before loading - no sequences loaded
+        let stats_before = loaded_store.stats_extended();
+        assert_eq!(stats_before.n_sequences_loaded, 0, "No sequences should be loaded initially");
+
+        // Get the collection (loads metadata only, sequences are lazy)
+        let collection = loaded_store.get_collection(&digest).unwrap();
+        assert!(!collection.sequences.is_empty(), "Collection should have sequences");
+        assert_eq!(collection.sequences.len(), 3);
+
+        // After get_collection - collection is loaded but sequences are still stubs (lazy loading)
+        let stats_after = loaded_store.stats_extended();
+        assert_eq!(stats_after.n_sequences_loaded, 0, "Sequences not loaded until explicitly fetched");
+        assert_eq!(stats_after.n_collections_loaded, 1, "Collection should be loaded");
+
+        // Verify sequences are stubs (not loaded)
+        for record in loaded_store.sequence_store.values() {
+            assert!(!record.is_loaded(), "Sequences should be stubs after get_collection");
+        }
+
+        // Now explicitly load a sequence
+        let seq_digest = collection.sequences[0].metadata().sha512t24u.clone();
+        let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
+        assert!(loaded_seq.is_loaded(), "Sequence should be loaded after get_sequence");
+
+        println!("✓ get_collection test passed");
+    }
+
+    #[test]
+    fn test_get_sequence() {
+        // Test the get_sequence method (loads sequence on demand)
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+
+        // Create and populate the store
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+
+        // Get a sequence digest from the sequence_store
+        let seq_digest = store.sequence_store.values().next().unwrap().metadata().sha512t24u.clone();
+        drop(store);
+
+        // Reload and test get_sequence
+        let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
+
+        // Before loading - sequence is a Stub (no data)
+        let seq_before = loaded_store.sequence_store.get(&seq_digest.to_key()).unwrap();
+        assert!(!seq_before.is_loaded(), "Sequence should not have data before get_sequence");
+
+        // Get the sequence (loads data on demand)
+        let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
+        assert!(loaded_seq.is_loaded(), "Sequence should have data after get_sequence");
+        assert!(loaded_seq.sequence().is_some(), "Sequence data should be available");
+
+        println!("✓ get_sequence test passed");
+    }
+
+    #[test]
+    fn test_get_collection_idempotent() {
+        // Test that calling get_collection twice is safe (idempotent)
+        let temp_dir = tempdir().unwrap();
+        let cache_path = temp_dir.path().join("store");
+
+        // Create and populate the store
+        let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz").unwrap();
+        let digest = store.list_collections()[0].digest.clone();
+        drop(store);
+
+        // Reload and test idempotent loading
+        let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
+
+        // Get twice - both should succeed
+        let result1 = loaded_store.get_collection(&digest);
+        assert!(result1.is_ok(), "First get should succeed");
+
+        let result2 = loaded_store.get_collection(&digest);
+        assert!(result2.is_ok(), "Second get should also succeed");
+
+        // Store state should be unchanged after second get
+        assert_eq!(loaded_store.stats_extended().n_collections_loaded, 1);
+
+        println!("✓ get_collection idempotent test passed");
+    }
+
+    #[test]
+    fn test_sanitize_relative_path_rejects_traversal() {
+        assert!(RefgetStore::sanitize_relative_path("../etc/passwd").is_err());
+        assert!(RefgetStore::sanitize_relative_path("foo/../bar").is_err());
+        assert!(RefgetStore::sanitize_relative_path("foo/../../bar").is_err());
+        assert!(RefgetStore::sanitize_relative_path("..").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_relative_path_rejects_absolute() {
+        assert!(RefgetStore::sanitize_relative_path("/etc/passwd").is_err());
+        assert!(RefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
+    }
+
+    #[test]
+    fn test_sanitize_relative_path_accepts_valid() {
+        assert!(RefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
+        assert!(RefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
+        assert!(RefgetStore::sanitize_relative_path("rgstore.json").is_ok());
+        assert!(RefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
     }
 }

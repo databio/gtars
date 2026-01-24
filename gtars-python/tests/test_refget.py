@@ -95,12 +95,12 @@ class TestRefget:
 
         # Get known sequence by SHA512t24u digest
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-        seq = store.get_sequence_by_id(sha512)
+        seq = store.get_sequence(sha512)
         assert seq is not None
         assert seq.metadata.length == 8
 
         md5 = "5f63cfaa3ef61f88c9635fb9d18ec945"
-        seq = store.get_sequence_by_id(md5)
+        seq = store.get_sequence(md5)
         assert seq is not None
         assert seq.metadata.length == 8
 
@@ -127,12 +127,12 @@ class TestRefget:
             store.write_store_to_dir(tmpdir, "sequences/%s2/%s.seq")
 
             # Load store back
-            loaded_store = RefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.open_local(tmpdir)
 
             # Verify same sequences exist
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-            seq1 = store.get_sequence_by_id(sha512)
-            seq2 = loaded_store.get_sequence_by_id(sha512)
+            seq1 = store.get_sequence(sha512)
+            seq2 = loaded_store.get_sequence(sha512)
 
             assert seq1 is not None
             assert seq2 is not None
@@ -144,10 +144,10 @@ class TestRefget:
             store.write_store_to_dir(tmpdir)
 
             # Load store back
-            loaded_store = RefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.open_local(tmpdir)
 
             # Verify same sequences exist
-            seq2 = loaded_store.get_sequence_by_id(sha512)
+            seq2 = loaded_store.get_sequence(sha512)
             assert seq2 is not None
             assert seq1.metadata.length == seq2.metadata.length
             assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
@@ -162,7 +162,7 @@ class TestRefget:
 
         # Test getting non-existent sequence
         bogus_digest = "not_a_sequence"
-        assert store.get_sequence_by_id(bogus_digest) is None
+        assert store.get_sequence(bogus_digest) is None
 
         # Test invalid substring parameters
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
@@ -180,7 +180,7 @@ class TestRefget:
 
         # Get sequence from default collection
         result = digest_fasta(fasta_path)
-        seq = store.get_sequence_by_collection_and_name(
+        seq = store.get_sequence_by_name(
             result.digest, result.sequences[0].metadata.name
         )
 
@@ -213,12 +213,11 @@ class TestRefget:
             chr2_sha = sha512t24u_digest(b"GGGGAAAA")
             chr2_md5 = md5_digest(b"GGGGAAAA")
 
+            # Use only valid entries - errors now propagate instead of being silently skipped
             bed_content = (
                 "chr1\t0\t5\n"
                 "chr1\t8\t12\n"
-                "chr2\t0\t4\n"
-                "chr_nonexistent\t10\t20\n"
-                "chr1\t-5\t100"
+                "chr2\t0\t4"
             )
             temp_bed_path = os.path.join(temp_dir, "test.bed")
             with open(temp_bed_path, "w") as f:
@@ -307,7 +306,7 @@ GGGG
 
         # Get sequence by ID
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-        seq = store.get_sequence_by_id(sha512)
+        seq = store.get_sequence(sha512)
 
         assert seq is not None
         assert seq.sequence is not None, "Store should have loaded sequence data"
@@ -325,13 +324,13 @@ GGGG
         store_raw.set_encoding_mode(StorageMode.Raw)
         store_raw.add_sequence_collection_from_fasta(fasta_path)
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-        seq_raw = store_raw.get_sequence_by_id(sha512)
+        seq_raw = store_raw.get_sequence(sha512)
         decoded_raw = seq_raw.decode()
 
         # Test with Encoded storage mode
         store_encoded = RefgetStore.in_memory()
         store_encoded.add_sequence_collection_from_fasta(fasta_path)
-        seq_encoded = store_encoded.get_sequence_by_id(sha512)
+        seq_encoded = store_encoded.get_sequence(sha512)
         decoded_encoded = seq_encoded.decode()
 
         # Both should produce the same decoded sequence
@@ -380,11 +379,11 @@ GGGG
             assert os.path.exists(os.path.join(tmpdir, "rgstore.json"))
 
             # Load the store back and verify sequences are accessible
-            loaded_store = RefgetStore.load_local(tmpdir)
+            loaded_store = RefgetStore.open_local(tmpdir)
 
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-            seq1 = store.get_sequence_by_id(sha512)
-            seq2 = loaded_store.get_sequence_by_id(sha512)
+            seq1 = store.get_sequence(sha512)
+            seq2 = loaded_store.get_sequence(sha512)
 
             assert seq1 is not None
             assert seq2 is not None
@@ -405,7 +404,7 @@ GGGG
             store.add_sequence_collection_from_fasta(fasta_path)
 
             sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
-            seq = store.get_sequence_by_id(sha512)
+            seq = store.get_sequence(sha512)
             assert seq is not None
             assert seq.metadata.length == 8
 
@@ -499,10 +498,10 @@ GGGG
         result = digest_fasta(fasta_path)
         expected_digest = result.digest
 
-        # Test list_collections
+        # Test list_collections - now returns metadata objects
         collections = store.list_collections()
         assert len(collections) == 1
-        assert expected_digest in collections
+        assert collections[0].digest == expected_digest
 
         # Test get_collection_metadata
         meta = store.get_collection_metadata(expected_digest)
@@ -524,26 +523,18 @@ GGGG
         assert store.get_collection_metadata("nonexistent") is None
 
     def test_sequence_enumeration_methods(self):
-        """Test sequence_metadata() and sequence_records() methods"""
+        """Test list_sequences() method"""
         store = RefgetStore.in_memory()
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
-        # Test sequence_metadata - returns metadata only
-        metadata_list = store.sequence_metadata()
+        # Test list_sequences - returns metadata
+        metadata_list = store.list_sequences()
         assert len(metadata_list) == 3
         for meta in metadata_list:
             assert hasattr(meta, 'name')
             assert hasattr(meta, 'length')
             assert hasattr(meta, 'sha512t24u')
             assert hasattr(meta, 'md5')
-
-        # Test sequence_records - returns full records
-        records_list = store.sequence_records()
-        assert len(records_list) == 3
-        for rec in records_list:
-            assert hasattr(rec, 'metadata')
-            # In-memory store should have sequence data that can be decoded
-            assert rec.decode() is not None
 
     def test_export_fasta(self):
         """Test export_fasta() exports full collection or subset"""
@@ -637,20 +628,57 @@ GGGG
         store.set_quiet(False)
         assert store.quiet == False
 
-    def test_collections_method(self):
-        """Test store.collections() returns SequenceCollection objects"""
+    def test_get_collection_method(self):
+        """Test store.get_collection() returns SequenceCollection with loaded sequences"""
         store = RefgetStore.in_memory()
         fasta_path = "../tests/data/fasta/base.fa"
         store.add_sequence_collection_from_fasta(fasta_path)
 
-        collections = store.collections()
+        # Get the collection digest
+        collections = store.list_collections()
+        assert len(collections) == 1
+        digest = collections[0].digest
+
+        # Get full collection with sequences
+        coll = store.get_collection(digest)
+        assert hasattr(coll, 'digest')
+        assert hasattr(coll, 'sequences')
+        assert hasattr(coll, 'lvl1')
+        assert len(coll.sequences) == 3
+        # Sequences should have data loaded
+        for seq in coll.sequences:
+            assert seq.decode() is not None
+
+    def test_iter_collections(self):
+        """Test iter_collections() returns loaded collections"""
+        store = RefgetStore.in_memory()
+        fasta_path = "../tests/data/fasta/base.fa"
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        collections = store.iter_collections()
         assert len(collections) == 1
 
         coll = collections[0]
         assert hasattr(coll, 'digest')
         assert hasattr(coll, 'sequences')
-        assert hasattr(coll, 'lvl1')
         assert len(coll.sequences) == 3
+        # All sequences should have data loaded
+        for seq in coll.sequences:
+            assert seq.decode() is not None
+
+    def test_iter_sequences(self):
+        """Test iter_sequences() returns loaded sequences"""
+        store = RefgetStore.in_memory()
+        fasta_path = "../tests/data/fasta/base.fa"
+        store.add_sequence_collection_from_fasta(fasta_path)
+
+        sequences = store.iter_sequences()
+        assert len(sequences) == 3
+
+        # All sequences should have data loaded
+        for seq in sequences:
+            assert hasattr(seq, 'metadata')
+            assert seq.decode() is not None
 
     def test_string_representations(self):
         """Test __str__ and __repr__ for all types"""

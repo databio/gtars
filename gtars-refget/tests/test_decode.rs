@@ -35,7 +35,7 @@ fn test_decode_workflow_encoded() {
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections: Vec<_> = store.collections().collect();
+    let collections = store.list_collections();
     assert!(!collections.is_empty(), "No collections found");
     let collection_digest = collections[0].digest.clone();
 
@@ -49,10 +49,10 @@ fn test_decode_workflow_encoded() {
     // Verify all sequences can be retrieved and decoded correctly
     for (name, expected_seq) in expected.iter() {
         let record = store
-            .get_sequence_by_collection_and_name(&collection_digest, name)
-            .unwrap_or_else(|| panic!("Failed to retrieve {}", name));
+            .get_sequence_by_name(&collection_digest, name)
+            .unwrap_or_else(|e| panic!("Failed to retrieve {}: {}", name, e));
 
-        assert!(record.has_data(), "Record should have data");
+        assert!(record.is_loaded(), "Record should have data");
 
         let decoded = record
             .decode()
@@ -80,13 +80,13 @@ fn test_decode_workflow_raw() {
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections: Vec<_> = store.collections().collect();
+    let collections = store.list_collections();
     assert!(!collections.is_empty(), "No collections found");
     let collection_digest = collections[0].digest.clone();
 
     // Verify sequences decode correctly with raw storage
     let record = store
-        .get_sequence_by_collection_and_name(&collection_digest, "seq1")
+        .get_sequence_by_name(&collection_digest, "seq1")
         .expect("Failed to retrieve seq1");
 
     let decoded = record.decode().expect("decode() returned None");
@@ -97,7 +97,7 @@ fn test_decode_workflow_raw() {
 
     // Verify IUPAC sequences work with raw storage too
     let record2 = store
-        .get_sequence_by_collection_and_name(&collection_digest, "seq3")
+        .get_sequence_by_name(&collection_digest, "seq3")
         .expect("Failed to retrieve seq3");
 
     let decoded2 = record2.decode().expect("decode() returned None for seq3");

@@ -95,6 +95,35 @@ pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
     }
 }
 
+/// Create a SequenceRecord from raw data, computing all metadata.
+///
+/// This is the sequence-level parallel to `digest_fasta()` for collections.
+/// It computes the GA4GH sha512t24u digest, MD5 digest, detects the alphabet,
+/// and returns a SequenceRecord with the computed metadata and original data.
+///
+/// Args:
+///     name: The sequence name (e.g., "chr1")
+///     data: The raw sequence bytes (e.g., b"ACGTACGT")
+///     description: Optional description text
+///
+/// Returns:
+///     A SequenceRecord with computed metadata and the original data (uppercased)
+///
+/// Example:
+///     >>> from gtars.refget import digest_sequence
+///     >>> seq = digest_sequence("chr1", b"ACGTACGT")
+///     >>> print(seq.name, seq.length)
+///     chr1 8
+#[pyfunction]
+#[pyo3(signature = (name, data, description=None))]
+pub fn digest_sequence(name: &str, data: &[u8], description: Option<&str>) -> PySequenceRecord {
+    let seq_record = match description {
+        Some(desc) => gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data),
+        None => gtars_refget::collection::digest_sequence(name, data),
+    };
+    PySequenceRecord::from(seq_record)
+}
+
 /// The type of alphabet for a biological sequence.
 ///
 /// Used to determine encoding strategy and validation rules.
@@ -447,7 +476,7 @@ impl PyFaiRecord {
 impl PySequenceRecord {
     fn __repr__(&self) -> String {
         format!(
-            "SequenceRecord(name='{}', length={}, sha512t24u='{}', has_data={})",
+            "SequenceRecord(name='{}', length={}, sha512t24u='{}', is_loaded={})",
             self.metadata.name,
             self.metadata.length,
             self.metadata.sha512t24u,
@@ -457,6 +486,12 @@ impl PySequenceRecord {
 
     fn __str__(&self) -> String {
         format!("SequenceRecord for {}", self.metadata.name)
+    }
+
+    /// Whether sequence data is loaded (true) or just metadata (false).
+    #[getter]
+    fn is_loaded(&self) -> bool {
+        self.sequence.is_some()
     }
 
     /// Decode the sequence data to a string.
@@ -609,13 +644,14 @@ impl PySequenceCollection {
                     },
                 }
             }).collect(),
-            digest: self.digest.clone(),
-            lvl1: SeqColDigestLvl1 {
+            metadata: SequenceCollectionMetadata {
+                digest: self.digest.clone(),
+                n_sequences: self.sequences.len(),
                 sequences_digest: self.lvl1.sequences_digest.clone(),
                 names_digest: self.lvl1.names_digest.clone(),
                 lengths_digest: self.lvl1.lengths_digest.clone(),
+                file_path: None,
             },
-            file_path: None,
         };
 
         rust_collection
@@ -743,15 +779,20 @@ impl From<SeqColDigestLvl1> for PySeqColDigestLvl1 {
 // Conversion from Rust SequenceCollection to Python PySequenceCollection
 impl From<SequenceCollection> for PySequenceCollection {
     fn from(value: SequenceCollection) -> Self {
+        let metadata = value.metadata;
         PySequenceCollection {
             sequences: value
                 .sequences
                 .into_iter()
                 .map(PySequenceRecord::from)
                 .collect(),
-            digest: value.digest,
-            lvl1: PySeqColDigestLvl1::from(value.lvl1),
-            file_path: value.file_path.map(|p| p.to_string_lossy().to_string()),
+            digest: metadata.digest,
+            lvl1: PySeqColDigestLvl1 {
+                names_digest: metadata.names_digest,
+                sequences_digest: metadata.sequences_digest,
+                lengths_digest: metadata.lengths_digest,
+            },
+            file_path: metadata.file_path.map(|p| p.to_string_lossy().to_string()),
         }
     }
 }
@@ -1014,59 +1055,63 @@ impl PyRefgetStore {
     /// and the input looks like an MD5 digest (32 hex characters), tries MD5 lookup.
     ///
     /// Args:
-    ///     digest: Sequence digest (SHA-512/24u base64url or MD5 hex string).
+    ///     digest: Sequence digest (SHA-512/24u).
     ///
     /// Returns:
-    ///     Optional[SequenceRecord]: The sequence record if found, None otherwise.
+    ///     Optional[SequenceRecord]: The sequence record with data if found, None otherwise.
     ///
     /// Example:
-    ///     >>> record = store.get_sequence_by_id("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
+    ///     >>> record = store.get_sequence("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
     ///     >>> if record:
     ///     ...     print(f"Found: {record.metadata.name}")
-    fn get_sequence_by_id(&mut self, digest: &str) -> PyResult<Option<PySequenceRecord>> {
-        // Try as SHA512t24u first (32 bytes)
-        let result = self
-            .inner
-            .get_sequence_by_id(digest.as_bytes())
-            .map(|record| PySequenceRecord::from(record.clone()));
-
-        // If not found and input looks like MD5 (32 hex chars), try MD5 lookup
-        if result.is_none() && digest.len() == 32 {
-            return Ok(self
-                .inner
-                .get_sequence_by_md5(digest.as_bytes())
-                .map(|record| PySequenceRecord::from(record.clone())));
-        }
-
-        Ok(result)
+    fn get_sequence(&mut self, digest: &str) -> Option<PySequenceRecord> {
+        self.inner
+            .get_sequence(digest.as_bytes())
+            .ok()
+            .map(|record| PySequenceRecord::from(record.clone()))
     }
 
     /// Retrieve a sequence by collection digest and sequence name.
     ///
     /// Looks up a sequence within a specific collection using its name
-    /// (e.g., "chr1", "chrM"). This is useful when you know the genome assembly
-    /// (collection) and chromosome name.
+    /// (e.g., "chr1", "chrM"). Loads sequence data if needed.
     ///
     /// Args:
     ///     collection_digest: The collection's SHA-512/24u digest.
     ///     sequence_name: Name of the sequence within that collection.
     ///
     /// Returns:
-    ///     Optional[SequenceRecord]: The sequence record if found, None otherwise.
+    ///     Optional[SequenceRecord]: The sequence record with data if found, None otherwise.
     ///
     /// Example:
-    ///     >>> record = store.get_sequence_by_collection_and_name(
+    ///     >>> record = store.get_sequence_by_name(
     ///     ...     "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
     ///     ...     "chr1"
     ///     ... )
-    fn get_sequence_by_collection_and_name(
+    fn get_sequence_by_name(
         &mut self,
         collection_digest: &str,
         sequence_name: &str,
     ) -> Option<PySequenceRecord> {
         self.inner
-            .get_sequence_by_collection_and_name(collection_digest, sequence_name)
+            .get_sequence_by_name(collection_digest, sequence_name)
+            .ok()
             .map(|record| PySequenceRecord::from(record.clone()))
+    }
+
+    /// Get metadata for a single sequence by digest (no sequence data).
+    ///
+    /// Use this for lightweight lookups when you don't need the actual sequence.
+    ///
+    /// Args:
+    ///     digest: Sequence digest (SHA-512/24u).
+    ///
+    /// Returns:
+    ///     Optional[SequenceMetadata]: Sequence metadata if found, None otherwise.
+    fn get_sequence_metadata(&self, digest: &str) -> Option<PySequenceMetadata> {
+        self.inner
+            .get_sequence_metadata(digest.as_bytes())
+            .map(|meta| PySequenceMetadata::from(meta.clone()))
     }
 
     /// Extract a substring from a sequence.
@@ -1088,7 +1133,7 @@ impl PyRefgetStore {
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     ///     >>> print(f"First 50bp: {seq[:50]}")
     fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
-        self.inner.get_substring(seq_digest, start, end)
+        self.inner.get_substring(seq_digest, start, end).ok()
     }
 
     #[getter]
@@ -1106,62 +1151,64 @@ impl PyRefgetStore {
         self.inner.storage_mode().into()
     }
 
-    /// Returns a list of sequence metadata for all sequences in the store.
+    /// List all sequences in the store (metadata only, no sequence data).
     ///
-    /// This is a lightweight operation that returns only metadata (name, length, digests)
-    /// without loading sequence data. Use `sequence_records()` if you need full records.
+    /// Returns metadata for all sequences without loading sequence data.
+    /// Use this for browsing/inventory operations.
     ///
     /// Returns:
     ///     list[SequenceMetadata]: List of sequence metadata objects.
     ///
     /// Example:
-    ///     >>> for metadata in store.sequence_metadata():
-    ///     ...     print(f"{metadata.name}: {metadata.length} bp")
-    fn sequence_metadata(&self) -> Vec<PySequenceMetadata> {
+    ///     >>> for meta in store.list_sequences():
+    ///     ...     print(f"{meta.name}: {meta.length} bp")
+    fn list_sequences(&self) -> Vec<PySequenceMetadata> {
         self.inner
-            .sequence_metadata()
-            .map(|meta| PySequenceMetadata::from(meta.clone()))
+            .list_sequences()
+            .into_iter()
+            .map(|meta| PySequenceMetadata::from(meta))
             .collect()
     }
 
-    /// Returns a list of complete sequence records from the store.
+    /// List all collections in the store (metadata only, no sequence data).
     ///
-    /// This returns full `SequenceRecord` objects including both metadata and sequence data.
-    /// Use `sequence_metadata()` if you only need metadata (more efficient).
+    /// Returns metadata for all collections without loading sequence data.
+    /// Use this for browsing/inventory operations.
     ///
     /// Returns:
-    ///     list[SequenceRecord]: List of sequence record objects.
+    ///     list[SequenceCollectionMetadata]: List of collection metadata objects.
     ///
     /// Example:
-    ///     >>> for record in store.sequence_records():
-    ///     ...     print(f"{record.metadata.name}: {record.decode()}")
-    fn sequence_records(&self) -> Vec<PySequenceRecord> {
+    ///     >>> for meta in store.list_collections():
+    ///     ...     print(f"{meta.digest}: {meta.n_sequences} sequences")
+    fn list_collections(&self) -> Vec<PySequenceCollectionMetadata> {
         self.inner
-            .sequence_records()
-            .map(|rec| PySequenceRecord::from(rec.clone()))
+            .list_collections()
+            .into_iter()
+            .map(|meta| PySequenceCollectionMetadata::from(meta))
             .collect()
     }
 
-    fn collections(&self) -> Vec<PySequenceCollection> {
-        self.inner
-            .collections()
-            .map(PySequenceCollection::from)
-            .collect()
-    }
-
-    /// List all collection digests in the store.
+    /// Get a collection with all its sequences loaded.
     ///
-    /// Returns all collection digests, including both loaded (Full) and
-    /// not-yet-loaded (Stub) collections.
+    /// This loads the collection metadata and all sequence data, returning
+    /// a complete `SequenceCollection` ready for use.
+    ///
+    /// Args:
+    ///     collection_digest: The collection's SHA-512/24u digest.
     ///
     /// Returns:
-    ///     list[str]: List of collection digest strings.
+    ///     SequenceCollection: The loaded collection with sequence data.
     ///
     /// Example:
-    ///     >>> for digest in store.list_collections():
-    ///     ...     print(f"Collection: {digest}")
-    fn list_collections(&self) -> Vec<String> {
-        self.inner.list_collections().map(|s| s.to_string()).collect()
+    ///     >>> collection = store.get_collection("abc123")
+    ///     >>> for seq in collection.sequences:
+    ///     ...     print(f"{seq.metadata.name}: {seq.decode()[:20]}...")
+    fn get_collection(&mut self, collection_digest: &str) -> PyResult<PySequenceCollection> {
+        let collection = self.inner.get_collection(collection_digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading collection: {}", e))
+        })?;
+        Ok(PySequenceCollection::from(collection))
     }
 
     /// Get metadata for a collection by digest.
@@ -1199,6 +1246,46 @@ impl PyRefgetStore {
         self.inner.is_collection_loaded(collection_digest)
     }
 
+    /// Iterate over all collections with their sequences loaded.
+    ///
+    /// This loads all collection data upfront and returns a list of
+    /// SequenceCollection objects with full sequence data.
+    ///
+    /// For browsing without loading data, use list_collections() instead.
+    ///
+    /// Returns:
+    ///     list[SequenceCollection]: All collections with loaded sequences.
+    ///
+    /// Example:
+    ///     >>> for coll in store.iter_collections():
+    ///     ...     print(f"{coll.digest}: {len(coll.sequences)} sequences")
+    fn iter_collections(&mut self) -> Vec<PySequenceCollection> {
+        self.inner
+            .iter_collections()
+            .map(|coll| PySequenceCollection::from(coll))
+            .collect()
+    }
+
+    /// Iterate over all sequences with their data loaded.
+    ///
+    /// This ensures all sequence data is loaded and returns a list of
+    /// SequenceRecord objects with full sequence data.
+    ///
+    /// For browsing without loading data, use list_sequences() instead.
+    ///
+    /// Returns:
+    ///     list[SequenceRecord]: All sequences with loaded data.
+    ///
+    /// Example:
+    ///     >>> for seq in store.iter_sequences():
+    ///     ...     print(f"{seq.metadata.name}: {seq.decode()[:20]}...")
+    fn iter_sequences(&mut self) -> Vec<PySequenceRecord> {
+        self.inner
+            .iter_sequences()
+            .map(|rec| PySequenceRecord::from(rec))
+            .collect()
+    }
+
     /// Returns statistics about the store.
     ///
     /// Returns:
@@ -1221,6 +1308,7 @@ impl PyRefgetStore {
         stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
         stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats.insert("total_disk_size".to_string(), extended_stats.total_disk_size.to_string());
         stats
     }
 
@@ -1255,7 +1343,7 @@ impl PyRefgetStore {
     /// you may only need specific sequences.
     ///
     /// Args:
-    ///     cache_path (str or Path): Local directory containing the refget store (must have
+    ///     path (str or Path): Local directory containing the refget store (must have
     ///         rgstore.json and sequences.rgsi files).
     ///
     /// Returns:
@@ -1266,18 +1354,18 @@ impl PyRefgetStore {
     ///
     /// Example:
     ///     >>> from gtars.refget import RefgetStore
-    ///     >>> store = RefgetStore.load_local("/data/hg38_store")
+    ///     >>> store = RefgetStore.open_local("/data/hg38_store")
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     #[classmethod]
-    fn load_local(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let cache_path = cache_path.to_string();
-        let store = RefgetStore::load_local(cache_path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading local store: {}", e))
+    fn open_local(_cls: &Bound<'_, PyType>, path: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let path = path.to_string();
+        let store = RefgetStore::open_local(path).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error opening local store: {}", e))
         })?;
         Ok(Self { inner: store })
     }
 
-    /// Load a remote RefgetStore with local caching.
+    /// Open a remote RefgetStore with local caching.
     ///
     /// Fetches metadata (rgstore.json, sequences.rgsi) from a remote URL immediately.
     /// Sequence data (.seq files) are downloaded on-demand when first accessed and
@@ -1302,22 +1390,50 @@ impl PyRefgetStore {
     /// Example:
     ///     >>> from gtars.refget import RefgetStore
     ///     >>> # With disk caching (default)
-    ///     >>> store = RefgetStore.load_remote(
+    ///     >>> store = RefgetStore.open_remote(
     ///     ...     "/data/cache/hg38",
     ///     ...     "https://refget-server.com/hg38"
     ///     ... )
     ///     >>> # Memory-only mode (no sequence data caching to disk)
-    ///     >>> store = RefgetStore.load_remote(
+    ///     >>> store = RefgetStore.open_remote(
     ///     ...     "/tmp/cache",
     ///     ...     "https://refget-server.com/hg38"
     ///     ... )
     ///     >>> store.disable_persistence()
     #[classmethod]
-    fn load_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>) -> PyResult<Self> {
-        let cache_path = cache_path.to_string();
+    fn open_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>) -> PyResult<Self> {
+        let cache_path_str = cache_path.to_string();
         let remote_url = remote_url.to_string();
-        let store = RefgetStore::load_remote(cache_path, remote_url).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading remote store: {}", e))
+
+        // Validate cache_path is not empty
+        if cache_path_str.trim().is_empty() {
+            return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                "cache_path cannot be empty"
+            ));
+        }
+
+        // Expand tilde in path (Python users often pass paths with ~)
+        let cache_path_expanded = if cache_path_str.starts_with("~/") {
+            if let Some(home) = std::env::var_os("HOME") {
+                let home_str = home.to_string_lossy();
+                cache_path_str.replacen("~", &home_str, 1)
+            } else {
+                cache_path_str
+            }
+        } else if cache_path_str == "~" {
+            if let Some(home) = std::env::var_os("HOME") {
+                home.to_string_lossy().to_string()
+            } else {
+                return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
+                    "Cannot expand '~': HOME environment variable not set"
+                ));
+            }
+        } else {
+            cache_path_str
+        };
+
+        let store = RefgetStore::open_remote(&cache_path_expanded, remote_url).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error opening remote store: {}", e))
         })?;
         Ok(Self { inner: store })
     }
@@ -1517,6 +1633,8 @@ impl PyRefgetStore {
 
     fn __repr__(&self) -> String {
         let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
+        let persist_str = if self.inner.is_persisting() { "persist=on" } else { "persist=off" };
+        let quiet_str = if self.inner.is_quiet() { "quiet=on" } else { "quiet=off" };
 
         let location = if let Some(remote) = self.inner.remote_source() {
             let cache = self.inner.local_path()
@@ -1530,8 +1648,8 @@ impl PyRefgetStore {
         };
 
         format!(
-            "RefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {})",
-            n_sequences, n_collections_loaded, mode_str, location
+            "RefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {}, {}, {})",
+            n_sequences, n_collections_loaded, mode_str, persist_str, quiet_str, location
         )
     }
 
@@ -1565,8 +1683,9 @@ impl PyRefgetStore {
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
-        let sequences = slf.inner.sequence_metadata()
-            .map(|meta| PySequenceMetadata::from(meta.clone()))
+        let sequences = slf.inner.list_sequences()
+            .into_iter()
+            .map(|meta| PySequenceMetadata::from(meta))
             .collect();
         Ok(PyRefgetStoreIterator {
             sequences,
@@ -1607,6 +1726,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(digest_fasta, m)?)?;
     m.add_function(wrap_pyfunction!(compute_fai, m)?)?;
     m.add_function(wrap_pyfunction!(load_fasta, m)?)?;
+    m.add_function(wrap_pyfunction!(digest_sequence, m)?)?;
     m.add_class::<PyAlphabetType>()?;
     m.add_class::<PySequenceMetadata>()?;
     m.add_class::<PyFaiMetadata>()?;

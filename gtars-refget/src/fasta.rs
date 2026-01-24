@@ -2,11 +2,233 @@ use anyhow::Result;
 use std::io::BufRead;
 use std::path::Path;
 
-use super::alphabet::{AlphabetGuesser, AlphabetType};
-use super::collection::{FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord};
+use super::alphabet::AlphabetGuesser;
+use super::collection::{FaiMetadata, SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord};
 
 use md5::Md5;
 use sha2::{Digest, Sha512};
+
+/// Helper to construct FAI metadata when enabled and line info is available.
+fn make_fai(
+    fai_enabled: bool,
+    offset: u64,
+    line_bases: Option<u32>,
+    line_bytes: Option<u32>,
+) -> Option<FaiMetadata> {
+    if !fai_enabled {
+        return None;
+    }
+    match (line_bases, line_bytes) {
+        (Some(lb), Some(lby)) => Some(FaiMetadata {
+            offset,
+            line_bases: lb,
+            line_bytes: lby,
+        }),
+        _ => None,
+    }
+}
+
+/// Configuration for FASTA parsing to avoid unnecessary work.
+#[derive(Clone, Copy)]
+struct ParseOptions {
+    /// Compute SHA512, MD5 digests and alphabet (requires uppercase conversion)
+    compute_digests: bool,
+    /// Store sequence data in memory
+    store_sequence: bool,
+}
+
+impl ParseOptions {
+    const FAI_ONLY: Self = Self { compute_digests: false, store_sequence: false };
+    const DIGEST_ONLY: Self = Self { compute_digests: true, store_sequence: false };
+    const FULL: Self = Self { compute_digests: true, store_sequence: true };
+}
+
+/// Result of internal FASTA parsing - either FaiRecords or SequenceRecords
+enum ParseResult {
+    Fai(Vec<FaiRecord>),
+    Sequences(Vec<SequenceRecord>),
+}
+
+/// Unified internal FASTA parser. Conditionally performs work based on options.
+fn parse_fasta_internal<P: AsRef<Path>>(file_path: P, opts: ParseOptions) -> Result<ParseResult> {
+    use gtars_core::utils::get_dynamic_reader;
+
+    // Detect if file is gzipped
+    let is_gzipped = file_path.as_ref().extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s == "gz")
+        .unwrap_or(false);
+
+    // Skip FAI data for gzipped files (can't seek into compressed files)
+    let fai_enabled = !is_gzipped;
+
+    let mut byte_position: u64 = 0;
+
+    let file_reader = get_dynamic_reader(file_path.as_ref())?;
+    let mut reader = std::io::BufReader::new(file_reader);
+    let mut line = String::new();
+
+    // Common state
+    let mut current_id: Option<String> = None;
+    let mut current_description: Option<String> = None;
+    let mut current_offset: u64 = 0;
+    let mut current_line_bases: Option<u32> = None;
+    let mut current_line_bytes: Option<u32> = None;
+    let mut length = 0;
+
+    // Digest state (only initialized if needed)
+    let mut sha512_hasher = if opts.compute_digests { Some(Sha512::new()) } else { None };
+    let mut md5_hasher = if opts.compute_digests { Some(Md5::new()) } else { None };
+    let mut alphabet_guesser = if opts.compute_digests { Some(AlphabetGuesser::new()) } else { None };
+
+    // Sequence data (only if storing)
+    let mut sequence_data: Vec<u8> = Vec::new();
+
+    // Results
+    let mut fai_results: Vec<FaiRecord> = Vec::new();
+    let mut seq_results: Vec<SequenceRecord> = Vec::new();
+
+    loop {
+        let bytes_read = reader.read_line(&mut line)?;
+        if bytes_read == 0 {
+            // EOF - finalize the last sequence if any
+            if let Some(id) = current_id.take() {
+                let fai = make_fai(fai_enabled, current_offset, current_line_bases, current_line_bytes);
+
+                if opts.compute_digests {
+                    let sha512 = base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
+                    let alphabet = alphabet_guesser.as_mut().unwrap().guess();
+
+                    let metadata = SequenceMetadata {
+                        name: id,
+                        description: current_description.take(),
+                        length,
+                        sha512t24u: sha512,
+                        md5,
+                        alphabet,
+                        fai,
+                    };
+
+                    if opts.store_sequence {
+                        seq_results.push(SequenceRecord::Full {
+                            metadata,
+                            sequence: std::mem::take(&mut sequence_data),
+                        });
+                    } else {
+                        seq_results.push(SequenceRecord::Stub(metadata));
+                    }
+                } else {
+                    // FAI-only mode
+                    fai_results.push(FaiRecord { name: id, length, fai });
+                }
+            }
+            break;
+        }
+
+        if line.starts_with('>') {
+            // Save previous sequence if any
+            if let Some(id) = current_id.take() {
+                let fai = make_fai(fai_enabled, current_offset, current_line_bases, current_line_bytes);
+
+                if opts.compute_digests {
+                    let sha512 = base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
+                    let alphabet = alphabet_guesser.as_mut().unwrap().guess();
+
+                    let metadata = SequenceMetadata {
+                        name: id,
+                        description: current_description.take(),
+                        length,
+                        sha512t24u: sha512,
+                        md5,
+                        alphabet,
+                        fai,
+                    };
+
+                    if opts.store_sequence {
+                        seq_results.push(SequenceRecord::Full {
+                            metadata,
+                            sequence: std::mem::take(&mut sequence_data),
+                        });
+                    } else {
+                        seq_results.push(SequenceRecord::Stub(metadata));
+                    }
+                } else {
+                    // FAI-only mode
+                    fai_results.push(FaiRecord { name: id, length, fai });
+                }
+            }
+
+            // Start new sequence - parse header
+            let (name, description) = parse_fasta_header(&line[1..]);
+            current_id = Some(name);
+            current_description = description;
+
+            // Track position for FAI
+            if fai_enabled {
+                byte_position += bytes_read as u64;
+                current_offset = byte_position;
+            }
+            current_line_bases = None;
+            current_line_bytes = None;
+            length = 0;
+
+            // Reset digest state if needed
+            if opts.compute_digests {
+                *sha512_hasher.as_mut().unwrap() = Sha512::new();
+                *md5_hasher.as_mut().unwrap() = Md5::new();
+                *alphabet_guesser.as_mut().unwrap() = AlphabetGuesser::new();
+            }
+        } else if current_id.is_some() && !line.trim().is_empty() {
+            // Sequence line
+            let trimmed = line.trim_end();
+            let line_len_bytes = bytes_read as u32;
+            let line_len_bases = trimmed.len() as u32;
+
+            // Record line dimensions from first sequence line
+            if current_line_bases.is_none() {
+                current_line_bases = Some(line_len_bases);
+                current_line_bytes = Some(line_len_bytes);
+            }
+
+            length += trimmed.len();
+
+            // Only do expensive work if needed
+            if opts.compute_digests || opts.store_sequence {
+                let seq_upper = trimmed.to_ascii_uppercase();
+
+                if opts.compute_digests {
+                    sha512_hasher.as_mut().unwrap().update(seq_upper.as_bytes());
+                    md5_hasher.as_mut().unwrap().update(seq_upper.as_bytes());
+                    alphabet_guesser.as_mut().unwrap().update(seq_upper.as_bytes());
+                }
+
+                if opts.store_sequence {
+                    sequence_data.extend_from_slice(seq_upper.as_bytes());
+                }
+            }
+
+            // Track position for FAI
+            if fai_enabled {
+                byte_position += bytes_read as u64;
+            }
+        } else {
+            // Track position for empty lines or other content
+            if fai_enabled {
+                byte_position += bytes_read as u64;
+            }
+        }
+
+        line.clear();
+    }
+
+    if opts.compute_digests {
+        Ok(ParseResult::Sequences(seq_results))
+    } else {
+        Ok(ParseResult::Fai(fai_results))
+    }
+}
 
 /// Parse a FASTA header line (without the leading '>') into name and description.
 ///
@@ -72,167 +294,19 @@ pub struct FaiRecord {
 ///
 ///
 pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
-    use gtars_core::utils::get_dynamic_reader;
+    let results = match parse_fasta_internal(file_path.as_ref(), ParseOptions::DIGEST_ONLY)? {
+        ParseResult::Sequences(seqs) => seqs,
+        ParseResult::Fai(_) => unreachable!("DIGEST_ONLY mode returns Sequences"),
+    };
 
-    // Detect if file is gzipped
-    let is_gzipped = file_path.as_ref().extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s == "gz")
-        .unwrap_or(false);
-
-    // Skip FAI data for gzipped files (can't seek into compressed files)
-    let fai_enabled = !is_gzipped;
-
-    let mut byte_position: u64 = 0;
-
-    let file_reader = get_dynamic_reader(file_path.as_ref())?;
-    let mut reader = std::io::BufReader::new(file_reader);
-    let mut results = Vec::new();
-    let mut line = String::new();
-
-    let mut current_id: Option<String> = None;
-    let mut current_description: Option<String> = None;
-    let mut current_offset: u64 = 0;
-    let mut current_line_bases: Option<u32> = None;
-    let mut current_line_bytes: Option<u32> = None;
-    let mut sha512_hasher = Sha512::new();
-    let mut md5_hasher = Md5::new();
-    let mut length = 0;
-    let mut alphabet_guesser = AlphabetGuesser::new();
-
-    loop {
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            // EOF - finalize the last sequence if any
-            if let Some(id) = current_id.take() {
-                let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
-                let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                let alphabet = alphabet_guesser.guess();
-
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(super::collection::FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let metadata = SequenceMetadata {
-                    name: id,
-                    description: current_description.take(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                    fai,
-                };
-
-                results.push(SequenceRecord::Stub(metadata));
-            }
-            break;
-        }
-
-        if line.starts_with('>') {
-            // Save previous sequence if any
-            if let Some(id) = current_id.take() {
-                let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
-                let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                let alphabet = alphabet_guesser.guess();
-
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(super::collection::FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let metadata = SequenceMetadata {
-                    name: id,
-                    description: current_description.take(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                    fai,
-                };
-
-                results.push(SequenceRecord::Stub(metadata));
-            }
-
-            // Start new sequence - parse header into name and description
-            let (name, description) = parse_fasta_header(&line[1..]);
-            current_id = Some(name);
-            current_description = description;
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-                current_offset = byte_position;
-            }
-            current_line_bases = None;
-            current_line_bytes = None;
-            sha512_hasher = Sha512::new();
-            md5_hasher = Md5::new();
-            length = 0;
-            alphabet_guesser = AlphabetGuesser::new();
-        } else if current_id.is_some() && !line.trim().is_empty() {
-            // Sequence line
-            let trimmed = line.trim_end();
-            let line_len_bytes = bytes_read as u32;
-            let line_len_bases = trimmed.len() as u32;
-
-            // Record line dimensions from first sequence line
-            if current_line_bases.is_none() {
-                current_line_bases = Some(line_len_bases);
-                current_line_bytes = Some(line_len_bytes);
-            }
-
-            // Update digests and length
-            let seq_upper = trimmed.to_ascii_uppercase();
-            sha512_hasher.update(seq_upper.as_bytes());
-            md5_hasher.update(seq_upper.as_bytes());
-            length += trimmed.len();
-            alphabet_guesser.update(seq_upper.as_bytes());
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        } else {
-            // Track position for empty lines or other content
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        }
-
-        line.clear();
-    }
-
-    // Compute lvl1 digests from the sequence records
-    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
-    let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
-
-    // Compute collection digest from lvl1 digests
-    let collection_digest = lvl1.to_digest();
+    let collection_metadata = SequenceCollectionMetadata::from_sequences(
+        &results,
+        Some(file_path.as_ref().to_path_buf())
+    );
 
     Ok(SequenceCollection {
+        metadata: collection_metadata,
         sequences: results,
-        digest: collection_digest,
-        lvl1,
-        file_path: Some(file_path.as_ref().to_path_buf()),
     })
 }
 
@@ -270,124 +344,10 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
 /// }
 /// ```
 pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
-    use gtars_core::utils::get_dynamic_reader;
-
-    // Detect if file is gzipped
-    let is_gzipped = file_path.as_ref().extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s == "gz")
-        .unwrap_or(false);
-
-    // Skip FAI data for gzipped files (can't seek into compressed files)
-    let fai_enabled = !is_gzipped;
-
-    let mut byte_position: u64 = 0;
-
-    let file_reader = get_dynamic_reader(file_path.as_ref())?;
-    let mut reader = std::io::BufReader::new(file_reader);
-    let mut results = Vec::new();
-    let mut line = String::new();
-
-    let mut current_id: Option<String> = None;
-    let mut current_offset: u64 = 0;
-    let mut current_line_bases: Option<u32> = None;
-    let mut current_line_bytes: Option<u32> = None;
-    let mut length = 0;
-
-    loop {
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            // EOF - finalize the last sequence if any
-            if let Some(id) = current_id.take() {
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                results.push(FaiRecord {
-                    name: id,
-                    length,
-                    fai,
-                });
-            }
-            break;
-        }
-
-        if line.starts_with('>') {
-            // Save previous sequence if any
-            if let Some(id) = current_id.take() {
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                results.push(FaiRecord {
-                    name: id,
-                    length,
-                    fai,
-                });
-            }
-
-            // Start new sequence - parse header into name and description (discard description for FAI)
-            let (name, _description) = parse_fasta_header(&line[1..]);
-            current_id = Some(name);
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-                current_offset = byte_position;
-            }
-            current_line_bases = None;
-            current_line_bytes = None;
-            length = 0;
-        } else if current_id.is_some() && !line.trim().is_empty() {
-            // Sequence line
-            let trimmed = line.trim_end();
-            let line_len_bytes = bytes_read as u32;
-            let line_len_bases = trimmed.len() as u32;
-
-            // Record line dimensions from first sequence line
-            if current_line_bases.is_none() {
-                current_line_bases = Some(line_len_bases);
-                current_line_bytes = Some(line_len_bytes);
-            }
-
-            // Update length (no need for uppercase or hashing)
-            length += trimmed.len();
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        } else {
-            // Track position for empty lines or other content
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        }
-
-        line.clear();
+    match parse_fasta_internal(file_path, ParseOptions::FAI_ONLY)? {
+        ParseResult::Fai(records) => Ok(records),
+        ParseResult::Sequences(_) => unreachable!("FAI_ONLY mode returns Fai"),
     }
-
-    Ok(results)
 }
 
 /// Loads a FASTA file with sequence data in memory (not just metadata).
@@ -428,285 +388,27 @@ pub fn compute_fai<T: AsRef<Path>>(file_path: T) -> Result<Vec<FaiRecord>> {
 /// }
 /// ```
 pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
-    use gtars_core::utils::get_dynamic_reader;
+    let results = match parse_fasta_internal(file_path.as_ref(), ParseOptions::FULL)? {
+        ParseResult::Sequences(seqs) => seqs,
+        ParseResult::Fai(_) => unreachable!("FULL mode returns Sequences"),
+    };
 
-    // Detect if file is gzipped
-    let is_gzipped = file_path.as_ref().extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s == "gz")
-        .unwrap_or(false);
-
-    // Skip FAI data for gzipped files (can't seek into compressed files)
-    let fai_enabled = !is_gzipped;
-
-    let mut byte_position: u64 = 0;
-
-    let file_reader = get_dynamic_reader(file_path.as_ref())?;
-    let mut reader = std::io::BufReader::new(file_reader);
-    let mut results = Vec::new();
-    let mut line = String::new();
-
-    let mut current_id: Option<String> = None;
-    let mut current_description: Option<String> = None;
-    let mut current_offset: u64 = 0;
-    let mut current_line_bases: Option<u32> = None;
-    let mut current_line_bytes: Option<u32> = None;
-    let mut sha512_hasher = Sha512::new();
-    let mut md5_hasher = Md5::new();
-    let mut length = 0;
-    let mut alphabet_guesser = AlphabetGuesser::new();
-    let mut sequence_data = Vec::new(); // Accumulate sequence data
-
-    loop {
-        let bytes_read = reader.read_line(&mut line)?;
-        if bytes_read == 0 {
-            // EOF - finalize the last sequence if any
-            if let Some(id) = current_id.take() {
-                let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
-                let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                let alphabet = alphabet_guesser.guess();
-
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(super::collection::FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let metadata = SequenceMetadata {
-                    name: id,
-                    description: current_description.take(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                    fai,
-                };
-
-                results.push(SequenceRecord::Full {
-                    metadata,
-                    sequence: sequence_data.clone(),
-                });
-            }
-            break;
-        }
-
-        if line.starts_with('>') {
-            // Save previous sequence if any
-            if let Some(id) = current_id.take() {
-                let sha512 = base64_url::encode(&sha512_hasher.finalize_reset()[0..24]);
-                let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                let alphabet = alphabet_guesser.guess();
-
-                let fai = if fai_enabled {
-                    if let (Some(lb), Some(lby)) = (current_line_bases, current_line_bytes) {
-                        Some(super::collection::FaiMetadata {
-                            offset: current_offset,
-                            line_bases: lb,
-                            line_bytes: lby,
-                        })
-                    } else {
-                        None
-                    }
-                } else {
-                    None
-                };
-
-                let metadata = SequenceMetadata {
-                    name: id,
-                    description: current_description.take(),
-                    length,
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                    fai,
-                };
-
-                results.push(SequenceRecord::Full {
-                    metadata,
-                    sequence: sequence_data.clone(),
-                });
-            }
-
-            // Start new sequence - parse header into name and description
-            let (name, description) = parse_fasta_header(&line[1..]);
-            current_id = Some(name);
-            current_description = description;
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-                current_offset = byte_position;
-            }
-            current_line_bases = None;
-            current_line_bytes = None;
-            sha512_hasher = Sha512::new();
-            md5_hasher = Md5::new();
-            length = 0;
-            alphabet_guesser = AlphabetGuesser::new();
-            sequence_data = Vec::new(); // Reset for new sequence
-        } else if current_id.is_some() && !line.trim().is_empty() {
-            // Sequence line
-            let trimmed = line.trim_end();
-            let line_len_bytes = bytes_read as u32;
-            let line_len_bases = trimmed.len() as u32;
-
-            // Record line dimensions from first sequence line
-            if current_line_bases.is_none() {
-                current_line_bases = Some(line_len_bases);
-                current_line_bytes = Some(line_len_bytes);
-            }
-
-            // Update digests and length
-            let seq_upper = trimmed.to_ascii_uppercase();
-            sha512_hasher.update(seq_upper.as_bytes());
-            md5_hasher.update(seq_upper.as_bytes());
-            length += trimmed.len();
-            alphabet_guesser.update(seq_upper.as_bytes());
-
-            // Accumulate sequence data
-            sequence_data.extend_from_slice(seq_upper.as_bytes());
-
-            // Track position for FAI
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        } else {
-            // Track position for empty lines or other content
-            if fai_enabled {
-                byte_position += bytes_read as u64;
-            }
-        }
-
-        line.clear();
-    }
-
-    // Compute lvl1 digests from the sequence records
-    let metadata_refs: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
-    let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
-
-    // Compute collection digest from lvl1 digests
-    let collection_digest = lvl1.to_digest();
+    let collection_metadata = SequenceCollectionMetadata::from_sequences(
+        &results,
+        Some(file_path.as_ref().to_path_buf())
+    );
 
     Ok(SequenceCollection {
+        metadata: collection_metadata,
         sequences: results,
-        digest: collection_digest,
-        lvl1,
-        file_path: Some(file_path.as_ref().to_path_buf()),
-    })
-}
-
-/// Read an RGSI file and return a SequenceCollection struct with all metadata.
-///
-/// This will not read the actual sequence data, only the metadata.
-/// # Arguments
-/// * `file_path` - The path to the RGSI file to be read.
-pub fn read_fasta_refget_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
-    let file = std::fs::File::open(&file_path)?;
-    let reader = std::io::BufReader::new(file);
-    let mut results = Vec::new();
-
-    // Variables to store header metadata
-    let mut seqcol_digest = String::new();
-    let mut names_digest = String::new();
-    let mut sequences_digest = String::new();
-    let mut lengths_digest = String::new();
-
-    for line in reader.lines() {
-        let line = line?;
-
-        // Parse header metadata lines
-        if line.starts_with("##") {
-            if let Some(stripped) = line.strip_prefix("##") {
-                if let Some((key, value)) = stripped.split_once('=') {
-                    match key {
-                        "seqcol_digest" => seqcol_digest = value.to_string(),
-                        "names_digest" => names_digest = value.to_string(),
-                        "sequences_digest" => sequences_digest = value.to_string(),
-                        "lengths_digest" => lengths_digest = value.to_string(),
-                        _ => {} // Ignore unknown metadata keys
-                    }
-                }
-            }
-            continue;
-        }
-
-        // Skip other comment lines
-        if line.starts_with('#') {
-            continue;
-        }
-
-        // Parse sequence data lines (supports 5-column legacy and 6-column new format)
-        let parts: Vec<&str> = line.split('\t').collect();
-        let result = if parts.len() == 6 {
-            // New 6-column format: name, description, length, alphabet, sha512t24u, md5
-            SequenceMetadata {
-                name: parts[0].to_string(),
-                description: if parts[1].is_empty() { None } else { Some(parts[1].to_string()) },
-                length: parts[2].parse().unwrap_or(0),
-                alphabet: parts[3].parse().unwrap_or(AlphabetType::Unknown),
-                sha512t24u: parts[4].to_string(),
-                md5: parts[5].to_string(),
-                fai: None,
-            }
-        } else if parts.len() == 5 {
-            // Legacy 5-column format: name, length, alphabet, sha512t24u, md5
-            SequenceMetadata {
-                name: parts[0].to_string(),
-                description: None,
-                length: parts[1].parse().unwrap_or(0),
-                alphabet: parts[2].parse().unwrap_or(AlphabetType::Unknown),
-                sha512t24u: parts[3].to_string(),
-                md5: parts[4].to_string(),
-                fai: None,
-            }
-        } else {
-            continue; // Skip lines that don't have 5 or 6 columns
-        };
-
-        let record = SequenceRecord::Stub(result);
-        results.push(record);
-    }
-    // If the digests were not found in the file, compute them
-    #[allow(clippy::needless_late_init)]
-    let lvl1: SeqColDigestLvl1;
-    if (sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty())
-        && !results.is_empty()
-    {
-        let metadata_vec: Vec<&SequenceMetadata> = results.iter().map(|r| r.metadata()).collect();
-        lvl1 = SeqColDigestLvl1::from_metadata(&metadata_vec);
-    } else {
-        lvl1 = SeqColDigestLvl1 {
-            sequences_digest,
-            names_digest,
-            lengths_digest,
-        };
-    }
-
-    if seqcol_digest.is_empty() {
-        // If seqcol_digest is not provided, compute it from lvl1
-        seqcol_digest = lvl1.to_digest();
-    }
-
-    // Return the complete SequenceCollection
-    Ok(SequenceCollection {
-        sequences: results,
-        digest: seqcol_digest,
-        lvl1,
-        file_path: Some(file_path.as_ref().to_path_buf()),
     })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::alphabet::AlphabetType;
+    use crate::collection::read_rgsi_file;
 
     #[test]
     fn digests_digest_fasta() {
@@ -784,8 +486,8 @@ mod tests {
             .expect("Failed to create SequenceCollection from FASTA file");
         seqcol.write_rgsi().expect("Failed to write rgsi file");
 
-        let loaded_seqcol = read_fasta_refget_file("../tests/data/fasta/base.rgsi")
-            .expect("Failed to read refget file");
+        let loaded_seqcol = read_rgsi_file("../tests/data/fasta/base.rgsi")
+            .expect("Failed to read RGSI file");
         println!("Original SequenceCollection: {}", seqcol);
         println!("Loaded SequenceCollection: {}", loaded_seqcol);
         // Test round-trip integrity
@@ -802,19 +504,19 @@ mod tests {
     fn digests_seqcol_from_fasta() {
         let seqcol = SequenceCollection::from_fasta("../tests/data/fasta/base.fa")
             .expect("Failed to create SequenceCollection from FASTA file");
-        println!("SeqCol digest: {:?}", seqcol.digest);
+        println!("SeqCol digest: {:?}", seqcol.metadata.digest);
         println!(
             "SeqCol sequences_digest: {:?}",
-            seqcol.lvl1.sequences_digest
+            seqcol.metadata.sequences_digest
         );
         println!("SequenceCollection: {:?}", seqcol);
         assert_eq!(
-            seqcol.lvl1.sequences_digest,
+            seqcol.metadata.sequences_digest,
             "0uDQVLuHaOZi1u76LjV__yrVUIz9Bwhr"
         );
-        assert_eq!(seqcol.lvl1.names_digest, "Fw1r9eRxfOZD98KKrhlYQNEdSRHoVxAG");
+        assert_eq!(seqcol.metadata.names_digest, "Fw1r9eRxfOZD98KKrhlYQNEdSRHoVxAG");
         assert_eq!(
-            seqcol.lvl1.lengths_digest,
+            seqcol.metadata.lengths_digest,
             "cGRMZIb3AVgkcAfNv39RN7hnT5Chk7RX"
         );
     }
@@ -1171,7 +873,7 @@ mod tests {
         let seq0 = &seqcol.sequences[0];
         assert_eq!(seq0.metadata().name, "chrX");
         assert_eq!(seq0.metadata().length, 8);
-        assert!(seq0.has_data(), "Sequence should have data");
+        assert!(seq0.is_loaded(), "Sequence should have data");
 
         if let Some(data) = seq0.sequence() {
             assert_eq!(data.len(), 8);
@@ -1182,7 +884,7 @@ mod tests {
         let seq1 = &seqcol.sequences[1];
         assert_eq!(seq1.metadata().name, "chr1");
         assert_eq!(seq1.metadata().length, 4);
-        assert!(seq1.has_data(), "Sequence should have data");
+        assert!(seq1.is_loaded(), "Sequence should have data");
 
         if let Some(data) = seq1.sequence() {
             assert_eq!(data.len(), 4);
@@ -1193,7 +895,7 @@ mod tests {
         let seq2 = &seqcol.sequences[2];
         assert_eq!(seq2.metadata().name, "chr2");
         assert_eq!(seq2.metadata().length, 4);
-        assert!(seq2.has_data(), "Sequence should have data");
+        assert!(seq2.is_loaded(), "Sequence should have data");
 
         if let Some(data) = seq2.sequence() {
             assert_eq!(data.len(), 4);
@@ -1220,7 +922,7 @@ mod tests {
 
         // Verify all sequences have data
         for seq in &seqcol.sequences {
-            assert!(seq.has_data(), "Sequence {} should have data", seq.metadata().name);
+            assert!(seq.is_loaded(), "Sequence {} should have data", seq.metadata().name);
 
             if let Some(data) = seq.sequence() {
                 assert_eq!(data.len(), seq.metadata().length,
@@ -1241,10 +943,10 @@ mod tests {
 
         // Should still load data from gzipped files
         assert_eq!(seqcol.sequences.len(), 3);
-        assert!(seqcol.sequences[0].has_data(), "Should have sequence data");
+        assert!(seqcol.sequences[0].is_loaded(), "Should have sequence data");
 
         for seq in &seqcol.sequences {
-            assert!(seq.has_data(), "Gzipped file should still have sequence data");
+            assert!(seq.is_loaded(), "Gzipped file should still have sequence data");
             assert!(seq.metadata().fai.is_none(), "Gzipped file should not have FAI metadata");
         }
     }

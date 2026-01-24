@@ -51,7 +51,18 @@ class SequenceRecord:
     """
 
     metadata: SequenceMetadata
-    data: Optional[bytes]  # Vec<u8> maps to bytes in Python
+    sequence: Optional[bytes]  # Raw sequence bytes when loaded (Full), None when stub-only
+
+    def decode(self) -> Optional[str]:
+        """Decode and return the sequence data as a string.
+
+        For Full records with sequence data, returns the decoded sequence.
+        For Stub records without sequence data, returns None.
+
+        Returns:
+            Decoded sequence string if data is available, None otherwise.
+        """
+        ...
 
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
@@ -102,6 +113,28 @@ class SequenceCollection:
     lvl1: SeqColDigestLvl1
     file_path: Optional[str]
     has_data: bool
+
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
+class SequenceCollectionRecord:
+    """
+    A record representing a sequence collection, which may be a Stub or Full.
+
+    Stub records contain only metadata (digest, n_sequences, level 1 digests).
+    Full records contain metadata plus the list of SequenceRecord objects.
+    """
+
+    metadata: SequenceCollectionMetadata
+
+    @property
+    def sequences(self) -> Optional[List[SequenceRecord]]:
+        """Get the sequences if loaded (Full), None if stub-only."""
+        ...
+
+    def has_sequences(self) -> bool:
+        """Check if this record has sequences loaded (is Full, not Stub)."""
+        ...
 
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
@@ -170,14 +203,14 @@ class RefgetStore:
             store = RefgetStore(StorageMode.Encoded)
             store.import_fasta("genome.fa")
 
-        Load an existing local store::
+        Open an existing local store::
 
-            store = RefgetStore.load_local("/data/hg38")
+            store = RefgetStore.open_local("/data/hg38")
             seq = store.get_substring("chr1_digest", 0, 1000)
 
-        Load a remote store with caching::
+        Open a remote store with caching::
 
-            store = RefgetStore.load_remote(
+            store = RefgetStore.open_remote(
                 "/local/cache",
                 "https://example.com/hg38"
             )
@@ -238,17 +271,16 @@ class RefgetStore:
         ...
 
     @classmethod
-    def load_local(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
-        """Load a local RefgetStore from a directory.
+    def open_local(cls, path: Union[str, PathLike]) -> "RefgetStore":
+        """Open a local RefgetStore from a directory.
 
-        Loads metadata from the local store immediately; sequence data is loaded
-        on-demand when first accessed. This is efficient for large genomes where
-        you may only need specific sequences.
+        Loads only lightweight metadata and stubs. Collections and sequences
+        remain as stubs until explicitly accessed with get_collection()/get_sequence().
 
         Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
 
         Args:
-            cache_path: Local directory containing the refget store.
+            path: Local directory containing the refget store.
 
         Returns:
             RefgetStore with metadata loaded, sequences lazy-loaded.
@@ -258,21 +290,19 @@ class RefgetStore:
 
         Example::
 
-            store = RefgetStore.load_local("/data/hg38_store")
+            store = RefgetStore.open_local("/data/hg38_store")
             seq = store.get_substring("chr1_digest", 0, 1000)
         """
         ...
 
     @classmethod
-    def load_remote(
+    def open_remote(
         cls, cache_path: Union[str, PathLike], remote_url: str
     ) -> "RefgetStore":
-        """Load a remote RefgetStore with local caching.
+        """Open a remote RefgetStore with local caching.
 
-        Fetches metadata from a remote URL immediately. Sequence data (.seq files)
-        are downloaded on-demand when first accessed and cached locally. This is
-        ideal for working with large remote genomes where you only need specific
-        sequences.
+        Loads only lightweight metadata and stubs from the remote URL.
+        Data is fetched on-demand when get_collection()/get_sequence() is called.
 
         By default, persistence is enabled (sequences are cached to disk).
         Call `disable_persistence()` after loading to keep only in memory.
@@ -291,7 +321,7 @@ class RefgetStore:
 
         Example::
 
-            store = RefgetStore.load_remote(
+            store = RefgetStore.open_remote(
                 "/data/cache/hg38",
                 "https://refget-server.com/hg38"
             )
@@ -347,7 +377,7 @@ class RefgetStore:
 
         Example::
 
-            store = RefgetStore.load_remote("/cache", "https://example.com")
+            store = RefgetStore.open_remote("/cache", "https://example.com")
             store.disable_persistence()  # Stop caching new sequences
         """
         ...
@@ -371,48 +401,196 @@ class RefgetStore:
         """
         ...
 
-    def get_sequence_by_id(self, digest: str) -> Optional[SequenceRecord]:
+    # =========================================================================
+    # Collection API
+    # =========================================================================
+
+    def list_collections(self) -> List[SequenceCollectionMetadata]:
+        """List all collection metadata in the store.
+
+        Returns metadata for all collections without loading full collection data.
+        Use this for browsing/inventory operations.
+
+        Returns:
+            List of metadata for all collections.
+
+        Example::
+
+            for meta in store.list_collections():
+                print(f"Collection {meta.digest}: {meta.n_sequences} sequences")
+        """
+        ...
+
+    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
+        """Get metadata for a collection by digest.
+
+        Returns lightweight metadata without loading the full collection.
+        Use this for quick lookups of collection information.
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            Collection metadata if found, None otherwise.
+
+        Example::
+
+            meta = store.get_collection_metadata("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
+            if meta:
+                print(f"Collection has {meta.n_sequences} sequences")
+        """
+        ...
+
+    def get_collection(self, collection_digest: str) -> SequenceCollection:
+        """Get a collection by digest with all sequences loaded.
+
+        Loads the collection and all its sequence data into memory.
+        Use this when you need full access to sequence content.
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            The collection with all sequence data loaded.
+
+        Raises:
+            IOError: If the collection cannot be loaded.
+
+        Example::
+
+            collection = store.get_collection("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
+            for seq in collection.sequences:
+                print(f"{seq.metadata.name}: {seq.decode()[:20]}...")
+        """
+        ...
+
+    def iter_collections(self) -> List[SequenceCollection]:
+        """Iterate over all collections with their sequences loaded.
+
+        This loads all collection data upfront and returns a list of
+        SequenceCollection objects with full sequence data.
+
+        For browsing without loading data, use list_collections() instead.
+
+        Returns:
+            List of all collections with loaded sequences.
+
+        Example::
+
+            for coll in store.iter_collections():
+                print(f"{coll.digest}: {len(coll.sequences)} sequences")
+        """
+        ...
+
+    def is_collection_loaded(self, collection_digest: str) -> bool:
+        """Check if a collection is fully loaded.
+
+        Returns True if the collection's sequence list is loaded in memory,
+        False if it's only metadata (stub).
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            True if loaded, False otherwise.
+        """
+        ...
+
+    # =========================================================================
+    # Sequence API
+    # =========================================================================
+
+    def list_sequences(self) -> List[SequenceMetadata]:
+        """List all sequence metadata in the store.
+
+        Returns metadata for all sequences without loading sequence data.
+        Use this for browsing/inventory operations.
+
+        Returns:
+            List of metadata for all sequences in the store.
+
+        Example::
+
+            for meta in store.list_sequences():
+                print(f"{meta.name}: {meta.length} bp")
+        """
+        ...
+
+    def get_sequence_metadata(self, seq_digest: str) -> Optional[SequenceMetadata]:
+        """Get metadata for a sequence by digest (no data loaded).
+
+        Use this for lightweight lookups when you don't need the actual sequence.
+
+        Args:
+            seq_digest: The sequence's SHA-512/24u digest.
+
+        Returns:
+            Sequence metadata if found, None otherwise.
+        """
+        ...
+
+    def get_sequence(self, digest: str) -> Optional[SequenceRecord]:
         """Retrieve a sequence record by its digest (SHA-512/24u or MD5).
 
-        Searches for a sequence by its GA4GH SHA-512/24u digest. If not found
-        and the input looks like an MD5 digest (32 hex characters), tries MD5 lookup.
+        Loads the sequence data if not already in memory. Supports lookup
+        by either SHA-512/24u (preferred) or MD5 digest.
 
         Args:
             digest: Sequence digest (SHA-512/24u base64url or MD5 hex string).
 
         Returns:
-            The sequence record if found, None otherwise.
+            The sequence record with data if found, None otherwise.
 
         Example::
 
-            record = store.get_sequence_by_id("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
+            record = store.get_sequence("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
             if record:
                 print(f"Found: {record.metadata.name}")
+                print(f"Sequence: {record.decode()[:50]}...")
         """
         ...
 
-    def get_sequence_by_collection_and_name(
+    def get_sequence_by_name(
         self, collection_digest: str, sequence_name: str
     ) -> Optional[SequenceRecord]:
         """Retrieve a sequence by collection digest and sequence name.
 
         Looks up a sequence within a specific collection using its name
-        (e.g., "chr1", "chrM"). This is useful when you know the genome assembly
-        (collection) and chromosome name.
+        (e.g., "chr1", "chrM"). Loads the sequence data if needed.
 
         Args:
             collection_digest: The collection's SHA-512/24u digest.
             sequence_name: Name of the sequence within that collection.
 
         Returns:
-            The sequence record if found, None otherwise.
+            The sequence record with data if found, None otherwise.
 
         Example::
 
-            record = store.get_sequence_by_collection_and_name(
+            record = store.get_sequence_by_name(
                 "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
                 "chr1"
             )
+            if record:
+                print(f"Sequence: {record.decode()[:50]}...")
+        """
+        ...
+
+    def iter_sequences(self) -> List[SequenceRecord]:
+        """Iterate over all sequences with their data loaded.
+
+        This ensures all sequence data is loaded and returns a list of
+        SequenceRecord objects with full sequence data.
+
+        For browsing without loading data, use list_sequences() instead.
+
+        Returns:
+            List of all sequences with loaded data.
+
+        Example::
+
+            for seq in store.iter_sequences():
+                print(f"{seq.metadata.name}: {seq.decode()[:20]}...")
         """
         ...
 
@@ -439,75 +617,9 @@ class RefgetStore:
         """
         ...
 
-    def list_sequences(self) -> List[SequenceMetadata]:
-        """List all sequence metadata in the store.
-
-        Returns:
-            List of metadata for all sequences in the store.
-        """
-        ...
-
-    def collections(self) -> List[SequenceCollection]:
-        """Get all sequence collections in the store.
-
-        Note: For collections loaded as stubs (metadata only), this returns
-        collections with empty sequence lists. Use `list_collections()` to get
-        just the digests without loading full collection data.
-
-        Returns:
-            List of all sequence collections.
-        """
-        ...
-
-    def list_collections(self) -> List[str]:
-        """List all collection digests in the store.
-
-        Returns all collection digests, including both loaded (Full) and
-        not-yet-loaded (Stub) collections.
-
-        Returns:
-            List of collection digest strings.
-
-        Example::
-
-            for digest in store.list_collections():
-                print(f"Collection: {digest}")
-        """
-        ...
-
-    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
-        """Get metadata for a collection by digest.
-
-        Returns lightweight metadata without loading the full collection.
-        Use this for quick lookups of collection information.
-
-        Args:
-            collection_digest: The collection's SHA-512/24u digest.
-
-        Returns:
-            Collection metadata if found, None otherwise.
-
-        Example::
-
-            meta = store.get_collection_metadata("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
-            if meta:
-                print(f"Collection has {meta.n_sequences} sequences")
-        """
-        ...
-
-    def is_collection_loaded(self, collection_digest: str) -> bool:
-        """Check if a collection is fully loaded.
-
-        Returns True if the collection's sequence list is loaded in memory,
-        False if it's only metadata (stub).
-
-        Args:
-            collection_digest: The collection's SHA-512/24u digest.
-
-        Returns:
-            True if loaded, False otherwise.
-        """
-        ...
+    # =========================================================================
+    # Store Management
+    # =========================================================================
 
     def stats(self) -> dict:
         """Returns statistics about the store.
@@ -519,6 +631,7 @@ class RefgetStore:
                 - 'n_collections': Total number of collections (Stub + Full)
                 - 'n_collections_loaded': Number of collections with sequences loaded (Full)
                 - 'storage_mode': Storage mode ('Raw' or 'Encoded')
+                - 'total_disk_size': Total size of all files on disk in bytes
 
         Note:
             n_collections_loaded only reflects collections fully loaded in memory.
@@ -554,6 +667,10 @@ class RefgetStore:
             )
         """
         ...
+
+    # =========================================================================
+    # BED/FASTA Export
+    # =========================================================================
 
     def get_seqs_bed_file(
         self,
@@ -738,5 +855,40 @@ def load_fasta(fasta: Union[str, PathLike]) -> SequenceCollection:
         collection = load_fasta("genome.fa")
         first_seq = collection[0]
         print(f"Sequence: {first_seq.data[:50]}...")
+    """
+    ...
+
+def digest_sequence(
+    name: str,
+    data: bytes,
+    description: Optional[str] = None,
+) -> SequenceRecord:
+    """Create a SequenceRecord from raw data, computing all metadata.
+
+    This is the sequence-level parallel to digest_fasta() for collections.
+    It computes the GA4GH sha512t24u digest, MD5 digest, detects the alphabet,
+    and returns a SequenceRecord with computed metadata and the original data.
+
+    The input data is automatically uppercased to ensure consistent digest
+    computation (matching FASTA processing behavior).
+
+    Args:
+        name: The sequence name (e.g., "chr1").
+        data: The raw sequence bytes (e.g., b"ACGTACGT").
+        description: Optional description text for the sequence.
+
+    Returns:
+        A SequenceRecord with computed metadata and the original data (uppercased).
+
+    Example::
+        from gtars.refget import digest_sequence
+        seq = digest_sequence("chr1", b"ACGTACGT")
+        print(seq.metadata.name, seq.metadata.length)
+        # Output: chr1 8
+
+        # With description
+        seq2 = digest_sequence("chr1", b"ACGT", description="Chromosome 1")
+        print(seq2.metadata.description)
+        # Output: Chromosome 1
     """
     ...
