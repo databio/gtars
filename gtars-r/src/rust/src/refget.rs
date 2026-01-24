@@ -287,10 +287,11 @@ fn sequence_collection_to_list(collection: SequenceCollection) -> List {
         .map(|seq_record| record_to_list(seq_record).into())
         .collect();
 
+    let lvl1 = lvl1_to_list(collection.metadata.to_lvl1());
     list!(
         sequences = sequences,
         digest = collection.metadata.digest,
-        lvl1 = lvl1_to_list(collection.metadata.to_lvl1()),
+        lvl1 = lvl1,
         file_path = collection
             .metadata
             .file_path

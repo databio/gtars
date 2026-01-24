@@ -8,13 +8,12 @@ use pyo3::types::{PyBytes, PyString, PyType};
 
 use gtars_refget::alphabet::AlphabetType;
 use gtars_refget::collection::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::RefgetStore;
 use gtars_refget::store::StorageMode;
-use gtars_refget::store::StoreStats;
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
