@@ -594,16 +594,21 @@ impl SequenceCollection {
         let fa_file_path = file_path.as_ref();
         let rgsi_file_path = fa_file_path.replace_exts_with("rgsi");
 
-        // Check if the file already exists
+        // Check if the cache file exists and is valid
         if read_cache && rgsi_file_path.exists() {
             // Read the existing rgsi file
             let seqcol = read_rgsi_file(&rgsi_file_path)?;
 
-            // seqcol is already a SequenceCollection, just return it
-            return Ok(seqcol);
+            // Validate that the cache has sequences - empty cache is invalid
+            if !seqcol.sequences.is_empty() {
+                return Ok(seqcol);
+            }
+            // Cache is empty/stale - fall through to re-digest
+            // Optionally delete the stale cache file
+            let _ = std::fs::remove_file(&rgsi_file_path);
         }
 
-        // If the rgsi file does not exist, compute the digests
+        // If the rgsi file does not exist or was invalid, compute the digests
         // Digest the fasta file (your function)
         let seqcol: SequenceCollection = digest_fasta(file_path.as_ref())?;
 

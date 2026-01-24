@@ -3385,4 +3385,37 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(RefgetStore::sanitize_relative_path("rgstore.json").is_ok());
         assert!(RefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
     }
+
+    #[test]
+    fn test_stale_rgsi_cache_is_ignored() {
+        // Reproduces issue where empty/stale .rgsi cache causes
+        // "Sequence not found in metadata. Available (0 total): []"
+        use std::io::Write;
+
+        let temp_dir = tempdir().unwrap();
+
+        // Create a test FASTA file
+        let fasta_path = temp_dir.path().join("test.fa");
+        let mut fasta_file = fs::File::create(&fasta_path).unwrap();
+        writeln!(fasta_file, ">chr1\nATGCATGC\n>chr2\nGGGGAAAA").unwrap();
+
+        // Create an EMPTY .rgsi cache file (simulating stale/corrupt cache)
+        let rgsi_path = temp_dir.path().join("test.rgsi");
+        let mut rgsi_file = fs::File::create(&rgsi_path).unwrap();
+        writeln!(rgsi_file, "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription").unwrap();
+
+        // Create on-disk store
+        let store_path = temp_dir.path().join("store");
+        let mut store = RefgetStore::on_disk(&store_path).unwrap();
+
+        // Before fix: Failed with "Sequence 'chr1' not found in metadata. Available (0 total): []"
+        // After fix: Detects empty cache, deletes it, re-digests FASTA
+        let result = store.add_sequence_collection_from_fasta(&fasta_path);
+        assert!(result.is_ok(), "Should handle stale cache: {:?}", result.err());
+
+        // Verify sequences were loaded
+        assert_eq!(store.sequence_store.len(), 2, "Should have 2 sequences");
+
+        println!("✓ Stale RGSI cache test passed");
+    }
 }
