@@ -38,6 +38,8 @@ use std::sync::Mutex;
 // ============================================================================
 
 /// Global storage for hasher instances, protected by a mutex.
+/// The Mutex ensures only one caller can access the storage at a time,
+/// preventing data races (no two mutable references can exist simultaneously).
 /// Uses a simple counter for handle IDs.
 static HASHER_STORAGE: Mutex<Option<HasherStorage>> = Mutex::new(None);
 
