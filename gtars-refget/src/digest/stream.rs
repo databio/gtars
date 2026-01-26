@@ -54,6 +54,11 @@ impl FastaProcessor {
     }
 
     fn process_byte(&mut self, byte: u8) {
+        // Stop processing if we already have an error
+        if self.processing_error.is_some() {
+            return;
+        }
+
         if byte == b'\n' || byte == b'\r' {
             if let Err(e) = self.process_line() {
                 self.processing_error = Some(e.to_string());
@@ -156,6 +161,10 @@ impl Write for FastaProcessor {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         for &byte in buf {
             self.process_byte(byte);
+            // Check for processing errors after each byte
+            if let Some(ref err) = self.processing_error {
+                return Err(io::Error::new(io::ErrorKind::InvalidData, err.clone()));
+            }
         }
         Ok(buf.len())
     }

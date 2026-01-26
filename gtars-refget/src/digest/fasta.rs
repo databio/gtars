@@ -90,7 +90,7 @@ impl ParseOptions {
 
 /// Core FASTA parser that works with any `BufRead` implementation.
 /// This is WASM-compatible as it doesn't require filesystem access.
-pub fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) -> Result<Vec<SequenceRecord>> {
+pub(crate) fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) -> Result<Vec<SequenceRecord>> {
     let fai_enabled = opts.fai_enabled;
     let mut byte_position: u64 = 0;
     let mut line = String::new();

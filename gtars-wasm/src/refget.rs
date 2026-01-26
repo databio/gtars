@@ -8,16 +8,20 @@
 //!
 //! For large files, use the streaming API to process data in chunks:
 //! ```javascript
-//! const handle = fasta_hasher_new();
-//! await fetch(url).then(response => {
+//! const handle = fastaHasherNew();
+//! try {
+//!     const response = await fetch(url);
 //!     const reader = response.body.getReader();
 //!     while (true) {
 //!         const { done, value } = await reader.read();
 //!         if (done) break;
-//!         fasta_hasher_update(handle, value);
+//!         fastaHasherUpdate(handle, value);  // throws on error
 //!     }
-//! });
-//! const result = fasta_hasher_finish(handle);
+//!     const result = fastaHasherFinish(handle);
+//! } catch (err) {
+//!     fastaHasherFree(handle);  // cleanup on error
+//!     throw err;
+//! }
 //! ```
 
 use wasm_bindgen::prelude::*;
@@ -51,10 +55,17 @@ impl HasherStorage {
     }
 
     fn insert(&mut self, hasher: FastaStreamHasher) -> u32 {
-        let id = self.next_id;
-        self.next_id = self.next_id.wrapping_add(1);
+        // Find an unused ID (handles wrap-around after ~4 billion allocations)
+        let mut id = self.next_id;
+        while self.hashers.contains_key(&id) || id == 0 {
+            id = id.wrapping_add(1);
+            if id == 0 {
+                id = 1; // Skip 0
+            }
+        }
+        self.next_id = id.wrapping_add(1);
         if self.next_id == 0 {
-            self.next_id = 1; // Skip 0 as it's reserved for errors
+            self.next_id = 1;
         }
         self.hashers.insert(id, hasher);
         id
@@ -73,7 +84,9 @@ fn with_storage<F, R>(f: F) -> R
 where
     F: FnOnce(&mut HasherStorage) -> R,
 {
-    let mut guard = HASHER_STORAGE.lock().unwrap();
+    let mut guard = HASHER_STORAGE
+        .lock()
+        .expect("HASHER_STORAGE mutex poisoned");
     if guard.is_none() {
         *guard = Some(HasherStorage::new());
     }
@@ -105,10 +118,10 @@ where
 /// # Example (JavaScript)
 /// ```javascript
 /// const fastaContent = new TextEncoder().encode(">chr1\nACGT\n");
-/// const result = digest_seqcol(fastaContent);
+/// const result = digestSeqcol(fastaContent);
 /// console.log(result.digest);  // Top-level seqcol digest
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "digestSeqcol")]
 pub fn digest_seqcol(fasta_content: &[u8]) -> Result<JsValue, JsError> {
     let collection = digest_fasta_bytes(fasta_content)
         .map_err(|e| JsError::new(&format!("Failed to digest FASTA: {}", e)))?;
@@ -132,10 +145,10 @@ pub fn digest_seqcol(fasta_content: &[u8]) -> Result<JsValue, JsError> {
 ///
 /// # Example (JavaScript)
 /// ```javascript
-/// const digest = sequence_digest("ACGT");
+/// const digest = sequenceDigest("ACGT");
 /// console.log(digest);  // "aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2"
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "sequenceDigest")]
 pub fn sequence_digest(sequence: &str) -> String {
     sha512t24u(sequence.to_ascii_uppercase())
 }
@@ -149,7 +162,7 @@ pub fn sequence_digest(sequence: &str) -> String {
 ///
 /// # Returns
 /// The MD5 digest as a hex string
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "sequenceMd5")]
 pub fn sequence_md5(sequence: &str) -> String {
     md5(sequence.to_ascii_uppercase())
 }
@@ -165,7 +178,7 @@ pub fn sequence_md5(sequence: &str) -> String {
 ///
 /// # Returns
 /// The sha512t24u digest string (base64url encoded)
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "computeSha512t24u")]
 pub fn compute_sha512t24u(input: &str) -> String {
     sha512t24u(input)
 }
@@ -179,7 +192,7 @@ pub fn compute_sha512t24u(input: &str) -> String {
 ///
 /// # Returns
 /// The MD5 digest as a hex string
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "computeMd5")]
 pub fn compute_md5(input: &str) -> String {
     md5(input)
 }
@@ -193,7 +206,7 @@ pub fn compute_md5(input: &str) -> String {
 ///
 /// # Returns
 /// The canonicalized JSON string
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "canonicalizeJsonString")]
 pub fn canonicalize_json_string(json_str: &str) -> Result<String, JsError> {
     let value: serde_json::Value = serde_json::from_str(json_str)
         .map_err(|e| JsError::new(&format!("Invalid JSON: {}", e)))?;
@@ -207,18 +220,18 @@ pub fn canonicalize_json_string(json_str: &str) -> Result<String, JsError> {
 /// Create a new streaming FASTA hasher.
 ///
 /// Returns a handle (u32) that must be used in subsequent calls.
-/// The handle must be freed with `fasta_hasher_finish()` or `fasta_hasher_free()`.
+/// The handle must be freed with `fastaHasherFinish()` or `fastaHasherFree()`.
 ///
 /// # Returns
-/// A handle ID (> 0) on success, or 0 on error.
+/// A handle ID (always > 0).
 ///
 /// # Example (JavaScript)
 /// ```javascript
-/// const handle = fasta_hasher_new();
-/// // ... use handle with fasta_hasher_update ...
-/// const result = fasta_hasher_finish(handle);
+/// const handle = fastaHasherNew();
+/// // ... use handle with fastaHasherUpdate ...
+/// const result = fastaHasherFinish(handle);
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "fastaHasherNew")]
 pub fn fasta_hasher_new() -> u32 {
     with_storage(|storage| storage.insert(FastaStreamHasher::new()))
 }
@@ -229,25 +242,26 @@ pub fn fasta_hasher_new() -> u32 {
 /// Handles both plain text and gzip-compressed FASTA.
 ///
 /// # Arguments
-/// * `handle` - The hasher handle from `fasta_hasher_new()`
+/// * `handle` - The hasher handle from `fastaHasherNew()`
 /// * `chunk` - A chunk of FASTA data as Uint8Array
 ///
 /// # Returns
-/// `true` on success, `false` on error.
+/// Ok on success, or an error with details about what went wrong.
 ///
 /// # Example (JavaScript)
 /// ```javascript
-/// const handle = fasta_hasher_new();
-/// fasta_hasher_update(handle, new TextEncoder().encode(">chr1\nACGT"));
-/// fasta_hasher_update(handle, new TextEncoder().encode("\n>chr2\nTGCA\n"));
+/// const handle = fastaHasherNew();
+/// fastaHasherUpdate(handle, new TextEncoder().encode(">chr1\nACGT"));
+/// fastaHasherUpdate(handle, new TextEncoder().encode("\n>chr2\nTGCA\n"));
 /// ```
-#[wasm_bindgen]
-pub fn fasta_hasher_update(handle: u32, chunk: &[u8]) -> bool {
+#[wasm_bindgen(js_name = "fastaHasherUpdate")]
+pub fn fasta_hasher_update(handle: u32, chunk: &[u8]) -> Result<(), JsError> {
     with_storage(|storage| {
         if let Some(hasher) = storage.get_mut(handle) {
-            hasher.update(chunk).is_ok()
+            hasher.update(chunk)
+                .map_err(|e| JsError::new(&format!("Failed to process chunk: {}", e)))
         } else {
-            false
+            Err(JsError::new("Invalid hasher handle"))
         }
     })
 }
@@ -258,7 +272,7 @@ pub fn fasta_hasher_update(handle: u32, chunk: &[u8]) -> bool {
 /// After calling this, the handle is no longer valid.
 ///
 /// # Arguments
-/// * `handle` - The hasher handle from `fasta_hasher_new()`
+/// * `handle` - The hasher handle from `fastaHasherNew()`
 ///
 /// # Returns
 /// A JavaScript object with the sequence collection result,
@@ -266,12 +280,12 @@ pub fn fasta_hasher_update(handle: u32, chunk: &[u8]) -> bool {
 ///
 /// # Example (JavaScript)
 /// ```javascript
-/// const handle = fasta_hasher_new();
-/// fasta_hasher_update(handle, fastaData);
-/// const result = fasta_hasher_finish(handle);
+/// const handle = fastaHasherNew();
+/// fastaHasherUpdate(handle, fastaData);
+/// const result = fastaHasherFinish(handle);
 /// console.log(result.digest);
 /// ```
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "fastaHasherFinish")]
 pub fn fasta_hasher_finish(handle: u32) -> Result<JsValue, JsError> {
     let hasher = with_storage(|storage| storage.remove(handle))
         .ok_or_else(|| JsError::new("Invalid hasher handle"))?;
@@ -291,11 +305,11 @@ pub fn fasta_hasher_finish(handle: u32) -> Result<JsValue, JsError> {
 /// After calling this, the handle is no longer valid.
 ///
 /// # Arguments
-/// * `handle` - The hasher handle from `fasta_hasher_new()`
+/// * `handle` - The hasher handle from `fastaHasherNew()`
 ///
 /// # Returns
 /// `true` if the handle was valid and freed, `false` otherwise.
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "fastaHasherFree")]
 pub fn fasta_hasher_free(handle: u32) -> bool {
     with_storage(|storage| storage.remove(handle).is_some())
 }
@@ -303,7 +317,7 @@ pub fn fasta_hasher_free(handle: u32) -> bool {
 /// Get the current progress of a streaming hasher.
 ///
 /// # Arguments
-/// * `handle` - The hasher handle from `fasta_hasher_new()`
+/// * `handle` - The hasher handle from `fastaHasherNew()`
 ///
 /// # Returns
 /// A JavaScript object with progress information, or null if handle is invalid.
@@ -311,7 +325,7 @@ pub fn fasta_hasher_free(handle: u32) -> bool {
 /// - `completed_sequences`: Number of fully processed sequences
 /// - `current_sequence_name`: Name of sequence being processed (if any)
 /// - `current_sequence_length`: Length of sequence being processed
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "fastaHasherProgress")]
 pub fn fasta_hasher_progress(handle: u32) -> Result<JsValue, JsError> {
     let progress = with_storage(|storage| {
         storage.get_mut(handle).map(|hasher| HasherProgress {
@@ -403,5 +417,41 @@ impl SeqColResult {
             lengths_digest: collection.metadata.lengths_digest.clone(),
             sequences,
         }
+    }
+}
+
+// Tests use wasm-bindgen-test since JsError/JsValue require WASM runtime
+#[cfg(test)]
+#[cfg(target_arch = "wasm32")]
+mod tests {
+    use super::*;
+    use wasm_bindgen_test::*;
+
+    #[wasm_bindgen_test]
+    fn test_streaming_lifecycle() {
+        // Basic new -> update -> finish cycle
+        let handle = fasta_hasher_new();
+        assert!(handle > 0);
+
+        // Update with FASTA data
+        let fasta = b">chr1\nACGT\n>chr2\nTGCA\n";
+        fasta_hasher_update(handle, fasta).expect("update should succeed");
+
+        // Finish and verify result
+        let result = fasta_hasher_finish(handle).expect("finish should succeed");
+        let seqcol: SeqColResult = serde_wasm_bindgen::from_value(result).expect("deserialize");
+        assert_eq!(seqcol.n_sequences, 2);
+        assert_eq!(seqcol.sequences[0].name, "chr1");
+        assert_eq!(seqcol.sequences[1].name, "chr2");
+    }
+
+    #[wasm_bindgen_test]
+    fn test_invalid_handle_error() {
+        // Using handle 9999 which doesn't exist
+        let result = fasta_hasher_update(9999, b"data");
+        assert!(result.is_err());
+
+        let result = fasta_hasher_finish(9999);
+        assert!(result.is_err());
     }
 }

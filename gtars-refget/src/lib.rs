@@ -83,7 +83,10 @@ mod utils;
 #[cfg(feature = "filesystem")]
 pub use fasta::{compute_fai, digest_fasta, load_fasta, FaiRecord};
 #[cfg(feature = "filesystem")]
-pub use collection::read_rgsi_file;
+pub use collection::{
+    read_rgsi_file,
+    SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt,
+};
 
 // ============================================================================
 // Tests
