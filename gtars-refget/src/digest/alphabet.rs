@@ -1,3 +1,5 @@
+//! Alphabet types and encoding - WASM-safe, no filesystem dependencies.
+
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::str::FromStr;
@@ -52,6 +54,12 @@ impl AlphabetGuesser {
 
     pub fn guess(&self) -> AlphabetType {
         self.alphabet_type
+    }
+}
+
+impl Default for AlphabetGuesser {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

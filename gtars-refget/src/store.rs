@@ -24,7 +24,7 @@
 //! - `enable_encoding()` - Use 2-bit encoding (space efficient)
 //! - `disable_encoding()` - Use raw bytes
 
-use super::alphabet::{AlphabetType, lookup_alphabet};
+use crate::digest::{AlphabetType, lookup_alphabet};
 use seq_io::fasta::{Reader, Record};
 use std::collections::HashMap;
 use std::ffi::OsStr;
@@ -32,9 +32,9 @@ use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use super::encoder::SequenceEncoder;
-use super::encoder::{decode_substring_from_bytes, decode_string_from_bytes, encode_sequence};
-use crate::collection::{parse_rgsi_line, read_rgsi_file};
+use crate::digest::{SequenceEncoder, decode_substring_from_bytes, decode_string_from_bytes, encode_sequence};
+use crate::digest::{parse_rgsi_line, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord};
+use crate::collection::{read_rgsi_file, SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt};
 use crate::hashkeyable::HashKeyable;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
@@ -47,10 +47,6 @@ use serde::{Deserialize, Serialize};
 use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str;
-// Import the HashKeyable trait for converting types to a 32-byte key
-
-// Import collection types
-use super::collection::{SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord};
 
 // const DEFAULT_COLLECTION_ID: [u8; 32] = [0u8; 32]; // Default collection ID for the name lookup table
 
