@@ -27,58 +27,8 @@ mod utils;
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_sequence_retrieval_performance() {
-    //     // Create a new sequence store
-    //     let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-
-    //     // Add a variety of sequences
-    //     let sequences = vec![
-    //         ("seq1", b"ACGTACGT".to_vec()),
-    //         ("seq2", b"TGCATGCA".to_vec()),
-    //         ("seq3", b"NNNNRRYY".to_vec()),
-    //         ("seq4", b"ACTGACTG".to_vec()),
-    //     ];
-
-    //     // Add sequences to store
-    //     for (name, seq) in &sequences {
-    //         println!("Add sequence with name: {}", name);
-    //         store.add_sequence(name, seq, None);
-    //         let retrieved = store.get_sequence(&name).unwrap();
-    //         println!("Retrieved sequence: {:?}", retrieved);
-    //     }
-    //     println!("{}", store);
-
-    //     // Test retrieving subsequences in a loop
-    //     for _ in 0..1000 {
-    //         for (name, seq) in &sequences {
-    //             // Get the sha512t24u digest
-    //             let sha512_digest = sha512t24u(seq);
-    //             let md5_digest = md5(seq);
-
-    //             // Try retrieving by all three methods
-    //             for key in &[&sha512_digest, &md5_digest, *name] {
-    //                 // Get full sequence
-    //                 // println!("Getting full sequence for: {}", key);
-    //                 let stored_sequence = store.get_sequence(key).unwrap();
-    //                 // println!("Stored sequence: {:?}", stored_sequence);
-    //                 assert_eq!(stored_sequence.len(), seq.len());
-
-    //                 // Get various substrings
-    //                 for start in 0..seq.len() {
-    //                     for end in (start + 1)..=seq.len() {
-    //                         let substring = store.get_substring(key, start, end).unwrap();
-    //                         assert_eq!(substring.len(), end - start);
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     use std::time::Instant;
-    use store::GlobalRefgetStore;
-    use store::StorageMode;
+    use store::RefgetStore;
     use tempfile::tempdir;
     #[test]
     #[ignore]
@@ -94,16 +44,17 @@ mod tests {
         // Create a new sequence store, and dd sequences to the store
         println!("Adding sequences from FASTA file...");
         let start = Instant::now();
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&fasta_path).unwrap();
+        let mut store = RefgetStore::in_memory();
+        store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
         let duration = start.elapsed();
         println!("⏱️  Time taken to load: {:.2?}", duration);
 
-        let mut store2 = GlobalRefgetStore::new(StorageMode::Raw);
-        store2.import_fasta(&fasta_path).unwrap();
+        let mut store2 = RefgetStore::in_memory();
+        store2.disable_encoding();  // Switch to Raw mode
+        store2.add_sequence_collection_from_fasta(&fasta_path).unwrap();
 
         // Get list of sequences
-        let sequences = store.list_sequence_digests();
+        let sequences: Vec<_> = store.sequence_digests().collect();
         assert!(!sequences.is_empty(), "No sequences found in the store");
 
         // Look up the first sequence by digest
@@ -120,7 +71,7 @@ mod tests {
         let end_basic = 3;
         let substring = store.get_substring(digest, start_basic, end_basic);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
@@ -131,13 +82,13 @@ mod tests {
         let end = 148 * 70 + 70;
         let substring2 = store.get_substring(digest, start, end);
         assert!(
-            substring2.is_some(),
+            substring2.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
 
         let substring3 = store2.get_substring(digest, start, end);
-        assert!(substring2 == substring3);
+        assert_eq!(substring2.as_ref().unwrap(), substring3.as_ref().unwrap());
         println!("Retrieved substring: {:?}", substring2.unwrap());
         println!("Retrieved substring: {:?}", substring3.unwrap());
     }
@@ -147,16 +98,16 @@ mod tests {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
         // Create a new sequence store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
+        let mut store = RefgetStore::in_memory();
         // let fasta_path = "../tests/data/subset.fa.gz";
         let fasta_path = "../tests/data/fasta/base.fa.gz";
         let temp_fasta = temp_path.join("base.fa.gz");
         std::fs::copy(fasta_path, &temp_fasta).expect("Failed to copy base.fa.gz to tempdir");
 
         // Add sequences to the store
-        store.import_fasta(temp_fasta).unwrap();
+        store.add_sequence_collection_from_fasta(temp_fasta).unwrap();
         println!("Listing sequences in the store...");
-        // let sequences = store.list_sequence_digests();
+        // let sequences = store.sequence_digests();
         // let digest = &sequences[0];
         // let digest_str = String::from_utf8(digest.to_vec()).expect("Invalid ASCII data");
         // let digest = "Ya6Rs7DHhDeg7YaOSg1EoNi3U_nQ9SvO";  // from subset.fa.gz
@@ -169,12 +120,12 @@ mod tests {
         let end = start + 5;
         let substring = store.get_substring(digest, start, end);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!("Retrieved substring: {:?}", substring.clone().unwrap());
-        assert!(substring.unwrap() == "GGGGA");
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
+        assert_eq!(substring.unwrap(), "GGGGA");
         // assert!(substring.unwrap() == "CCTAACCCTAACCCTAACCCTAACCCTAACCCCTAACCCCTAACCCTAACCCTAACCCTAACCCTAACCC");
 
         println!("Retrieving a substring of sequence named: {:?}", digest_str);
@@ -182,12 +133,12 @@ mod tests {
         let end = start + 2;
         let substring = store.get_substring(digest, start, end);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!("Retrieved substring: {:?}", substring.clone().unwrap());
-        assert!(substring.unwrap() == "GG");
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
+        assert_eq!(substring.unwrap(), "GG");
         // assert!(substring.unwrap() == "TCTGACCTGAGGAGAACTGTGCTCCGCCTTCAGAGTACCACCGAAATCTGTGCAGAGGACAACGCAGCTC");
     }
 }

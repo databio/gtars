@@ -12,7 +12,7 @@ get_seqs_bed_file_store(
 )
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{collection_digest}{Sequence collection digest}
 

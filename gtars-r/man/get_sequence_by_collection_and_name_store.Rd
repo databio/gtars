@@ -11,7 +11,7 @@ get_sequence_by_collection_and_name_store(
 )
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{collection_digest}{Sequence collection digest}
 

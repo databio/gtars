@@ -7,7 +7,7 @@
 get_sequence_by_id_store(store_ptr, digest)
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{digest}{Sequence digest}
 }
