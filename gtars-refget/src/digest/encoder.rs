@@ -1,3 +1,5 @@
+//! Sequence encoding and decoding - WASM-safe, no filesystem dependencies.
+
 use super::alphabet;
 use super::alphabet::Alphabet;
 

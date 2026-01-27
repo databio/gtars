@@ -1,3 +1,5 @@
+//! Core digest algorithms - WASM-safe, no filesystem dependencies.
+
 use md5::Md5;
 use serde_json::Value;
 use sha2::{Digest, Sha512};

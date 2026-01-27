@@ -5,7 +5,7 @@ use gtars_core::models::{Region, RegionSet};
 use std::{collections::HashMap, fmt::Debug};
 // use num_traits::{PrimInt, Unsigned};
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Statistics summary for regions on a single chromosome.
 ///

@@ -112,7 +112,6 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
 
     let num_cols = df.width();
     let mut compliant_columns = 0;
-    let mut bed_format_named = DataFormat::UcscBed;
     let mut relaxed = false;
 
     // Helper function to check if a column matches a regex pattern
@@ -254,14 +253,13 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
                     && check_float_or_minus_one(&df, 8)
                     && check_int_column(&df, 9, None, None)
                 {
-                    bed_format_named = if relaxed {
-                        DataFormat::EncodeNarrowPeakRs
-                    } else {
-                        DataFormat::EncodeNarrowPeak
-                    };
                     return Ok(BedClassificationOutput {
                         bed_compliance: format!("bed{}+{}", compliant_columns, nccols),
-                        data_format: bed_format_named,
+                        data_format: if relaxed {
+                            DataFormat::EncodeNarrowPeakRs
+                        } else {
+                            DataFormat::EncodeNarrowPeak
+                        },
                         compliant_columns,
                         non_compliant_columns: nccols,
                     });
@@ -273,14 +271,13 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
                         && check_float_or_minus_one(&df, 7)
                         && check_float_or_minus_one(&df, 8)
                     {
-                        bed_format_named = if relaxed {
-                            DataFormat::EncodeBroadPeakRs
-                        } else {
-                            DataFormat::EncodeBroadPeak
-                        };
                         return Ok(BedClassificationOutput {
                             bed_compliance: format!("bed{}+{}", compliant_columns, nccols),
-                            data_format: bed_format_named,
+                            data_format: if relaxed {
+                                DataFormat::EncodeBroadPeakRs
+                            } else {
+                                DataFormat::EncodeBroadPeak
+                            },
                             compliant_columns,
                             non_compliant_columns: nccols,
                         });
@@ -290,17 +287,16 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
                             if let Ok(ca) = col.i64() {
                                 if let Some(first) = ca.get(0) {
                                     if first != -1 {
-                                        bed_format_named = if relaxed {
-                                            DataFormat::EncodeRnaElementsRs
-                                        } else {
-                                            DataFormat::EncodeRnaElements
-                                        };
                                         return Ok(BedClassificationOutput {
                                             bed_compliance: format!(
                                                 "bed{}+{}",
                                                 compliant_columns, nccols
                                             ),
-                                            data_format: bed_format_named,
+                                            data_format: if relaxed {
+                                                DataFormat::EncodeRnaElementsRs
+                                            } else {
+                                                DataFormat::EncodeRnaElements
+                                            },
                                             compliant_columns,
                                             non_compliant_columns: nccols,
                                         });
@@ -318,14 +314,13 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
                     && check_float_or_minus_one(&df, 13)
                     && check_float_or_minus_one(&df, 14)
                 {
-                    bed_format_named = if relaxed {
-                        DataFormat::EncodeGappedPeakRs
-                    } else {
-                        DataFormat::EncodeGappedPeak
-                    };
                     return Ok(BedClassificationOutput {
                         bed_compliance: format!("bed{}+{}", compliant_columns, nccols),
-                        data_format: bed_format_named,
+                        data_format: if relaxed {
+                            DataFormat::EncodeGappedPeakRs
+                        } else {
+                            DataFormat::EncodeGappedPeak
+                        },
                         compliant_columns,
                         non_compliant_columns: nccols,
                     });
@@ -333,19 +328,17 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
             }
 
             // Default to BED_LIKE if validation fails
-            bed_format_named = if relaxed {
-                if nccols == 0 {
-                    DataFormat::UcscBedRs
-                } else {
-                    DataFormat::BedLikeRs
-                }
-            } else {
-                DataFormat::BedLike
-            };
-
             return Ok(BedClassificationOutput {
                 bed_compliance: format!("bed{}+{}", compliant_columns, nccols),
-                data_format: bed_format_named,
+                data_format: if relaxed {
+                    if nccols == 0 {
+                        DataFormat::UcscBedRs
+                    } else {
+                        DataFormat::BedLikeRs
+                    }
+                } else {
+                    DataFormat::BedLike
+                },
                 compliant_columns,
                 non_compliant_columns: nccols,
             });
@@ -353,15 +346,13 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
     }
 
     // All columns validated successfully
-    bed_format_named = if relaxed {
-        DataFormat::UcscBedRs
-    } else {
-        DataFormat::UcscBed
-    };
-
     Ok(BedClassificationOutput {
         bed_compliance: format!("bed{}+0", compliant_columns),
-        data_format: bed_format_named,
+        data_format: if relaxed {
+            DataFormat::UcscBedRs
+        } else {
+            DataFormat::UcscBed
+        },
         compliant_columns,
         non_compliant_columns: 0,
     })

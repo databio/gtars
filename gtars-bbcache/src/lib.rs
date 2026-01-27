@@ -100,7 +100,7 @@ mod tests {
         path_to_bed_gz_from_bb: PathBuf,
         bbid: PathBuf,
         path_to_bedset: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         fn cleaned_subfolders(subfolder: PathBuf) {
             let subdirs: Vec<_> = read_dir(&subfolder)
                 .unwrap_or_else(|e| {
