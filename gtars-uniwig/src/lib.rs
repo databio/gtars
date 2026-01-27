@@ -1605,7 +1605,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_run_uniwig_main_wig_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_wig_type() -> Result<(), Box<dyn std::error::Error + 'static>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -1653,7 +1653,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_run_uniwig_main_npy_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_npy_type() -> Result<(), Box<dyn std::error::Error + 'static>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -1699,7 +1699,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_run_uniwig_main_directory_type() -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    fn test_run_uniwig_main_directory_type() -> Result<(), Box<dyn std::error::Error + 'static>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 

@@ -2,7 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/gtars?&logo=rust)](https://crates.io/crates/gtars)
 
 <h1 align="center">
-<img src="docs/gtars_logo_new_with_words.png" alt="gtars logo" height="100px">
+<img src="https://raw.githubusercontent.com/databio/gtars/master/gtars_logo.png" alt="gtars logo" height="100px">
 </h1>
 
 
