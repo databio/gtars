@@ -1,6 +1,6 @@
 [package]
 name = "gtars-refget"
-version = "0.6.0"
+version = "0.7.0"
 edition = "2024"
 description = "Rust implementation of the refget standard for accessing reference sequences"
 license = "MIT"
