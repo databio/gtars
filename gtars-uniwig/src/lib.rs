@@ -1514,7 +1514,7 @@ mod tests {
     #[rstest]
     fn test_process_bam(
         path_to_small_bam_file: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/../tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
@@ -1561,7 +1561,7 @@ mod tests {
     #[rstest]
     fn test_process_bam_to_bed(
         path_to_small_bam_file: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath: String = format!("{}{}", path_to_crate, "/../tests/hg38.chrom.sizes");
         let chromsizerefpath = chromsizerefpath.as_str();
@@ -1756,7 +1756,7 @@ mod tests {
 
     #[rstest]
     fn test_run_uniwig_main_directory_narrowpeaks_type()
-    -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    -> Result<(), Box<dyn std::error::Error + 'static>> {
         // This test uses the bed file to determine chromsizes for speed
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
 
@@ -2135,7 +2135,7 @@ mod tests {
     #[rstest]
     fn test_process_narrowpeak(
         path_to_dummy_narrowpeak: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath = PathBuf::from(path_to_crate)
             .parent()
@@ -2185,7 +2185,7 @@ mod tests {
     #[rstest]
     fn test_process_bed_to_bw(
         _path_to_dummy_bed_file: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let path_to_crate = env!("CARGO_MANIFEST_DIR");
         let chromsizerefpath = PathBuf::from(path_to_crate)
             .parent()
@@ -2235,7 +2235,7 @@ mod tests {
     fn test_npy_to_wig(
         _path_to_dummy_bed_file: PathBuf,
         _path_to_dummy_chromsizes: PathBuf,
-    ) -> Result<(), Box<(dyn std::error::Error + 'static)>> {
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
         let chromsizerefpath = &_path_to_dummy_chromsizes.to_string_lossy();
         let combinedbedpath = &_path_to_dummy_bed_file.to_string_lossy();
         let tempdir = tempfile::tempdir()?; // use `?` for idiomatic error handling
