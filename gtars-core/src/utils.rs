@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
-use std::io::{BufRead, BufReader};
 #[cfg(feature = "http")]
 use std::io::Cursor;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -145,7 +145,7 @@ pub fn get_dynamic_reader_from_url(
     let is_ftp = url_str.starts_with("ftp://");
     if is_ftp {
         println!("ftp is not fully implemented. Bugs could appear");
-        url_str = url_str.replacen("ftp://", "http://", 1);
+        url_str = url_str.replacen("ftp://", "https://", 1);
     }
 
     // Perform request
