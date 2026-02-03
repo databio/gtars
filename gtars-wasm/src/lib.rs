@@ -1,3 +1,4 @@
+mod bed_stream;
 mod models;
 mod overlaprs;
 mod refget;
@@ -9,6 +10,9 @@ use wasm_bindgen::prelude::*;
 
 // Re-export refget functions at the top level
 pub use refget::*;
+
+// Re-export bed_stream functions at the top level
+pub use bed_stream::*;
 
 #[wasm_bindgen]
 pub fn greet(name: &str) {

@@ -10,14 +10,14 @@ use wasm_bindgen::prelude::*;
 #[wasm_bindgen(js_name = "ChromosomeStatistics")]
 #[derive(serde::Serialize)]
 pub struct JsChromosomeStatistics {
-    chromosome: String,
-    number_of_regions: u32,
-    minimum_region_length: u32,
-    maximum_region_length: u32,
-    mean_region_length: f64,
-    median_region_length: f64,
-    start_nucleotide_position: u32,
-    end_nucleotide_position: u32,
+    pub(crate) chromosome: String,
+    pub(crate) number_of_regions: u32,
+    pub(crate) minimum_region_length: u32,
+    pub(crate) maximum_region_length: u32,
+    pub(crate) mean_region_length: f64,
+    pub(crate) median_region_length: f64,
+    pub(crate) start_nucleotide_position: u32,
+    pub(crate) end_nucleotide_position: u32,
 }
 
 #[wasm_bindgen(js_class = "ChromosomeStatistics")]
@@ -64,20 +64,20 @@ impl JsChromosomeStatistics {
 #[wasm_bindgen(js_name = "RegionDistribution")]
 #[derive(serde::Serialize)]
 pub struct JsRegionDistribution {
-    chr: String,
-    start: u32,
-    end: u32,
-    n: u32,
-    rid: u32,
+    pub(crate) chr: String,
+    pub(crate) start: u32,
+    pub(crate) end: u32,
+    pub(crate) n: u32,
+    pub(crate) rid: u32,
 }
 
 #[wasm_bindgen(js_name = "BedClassificationOutput")]
 #[derive(serde::Serialize)]
 pub struct JsBedClassificationOutput {
-    bed_compliance: String,
-    data_format: String,
-    compliant_columns: usize,
-    non_compliant_columns: usize,
+    pub(crate) bed_compliance: String,
+    pub(crate) data_format: String,
+    pub(crate) compliant_columns: usize,
+    pub(crate) non_compliant_columns: usize,
 }
 
 #[wasm_bindgen(js_class = "BedClassificationOutput")]

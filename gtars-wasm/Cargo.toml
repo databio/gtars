@@ -17,6 +17,8 @@ serde-wasm-bindgen = "0.4"
 serde_json = "1.0"
 getrandom = { version = "0.2.16", features = ["js"] }
 
+flate2 = "1.0"
+
 # our code
 gtars-core = { path = "../gtars-core" }
 gtars-genomicdist = {path = "../gtars-genomicdist", features = ["bedclassifier"] }
