@@ -24,17 +24,17 @@ pub mod types;
 // Re-export commonly used items at the module level
 pub use algorithms::{canonicalize_json, md5, sha512t24u};
 pub use alphabet::{
-    guess_alphabet, lookup_alphabet, Alphabet, AlphabetGuesser, AlphabetType,
-    ASCII_ALPHABET, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET, DNA_IUPAC_ALPHABET, PROTEIN_ALPHABET,
+    ASCII_ALPHABET, Alphabet, AlphabetGuesser, AlphabetType, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET,
+    DNA_IUPAC_ALPHABET, PROTEIN_ALPHABET, guess_alphabet, lookup_alphabet,
 };
-pub use encoder::{
-    decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, SequenceEncoder,
-};
-pub use fasta::{digest_fasta_bytes, load_fasta_bytes, parse_fasta_header, ParseOptions};
 pub use auto_decompress::AutoDecompressWriter;
+pub use encoder::{
+    SequenceEncoder, decode_string_from_bytes, decode_substring_from_bytes, encode_sequence,
+};
+pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;
 pub use types::{
-    digest_sequence, digest_sequence_with_description, parse_rgsi_line,
     FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
+    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
+    digest_sequence_with_description, parse_rgsi_line,
 };

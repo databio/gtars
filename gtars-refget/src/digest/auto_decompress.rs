@@ -159,8 +159,8 @@ impl<W: Write> Write for AutoDecompressWriter<W> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::write::GzEncoder;
     use flate2::Compression;
+    use flate2::write::GzEncoder;
 
     #[test]
     fn test_plain_passthrough() {

@@ -10,7 +10,9 @@ use std::io::{self, Write};
 
 use super::alphabet::AlphabetGuesser;
 use super::fasta::parse_fasta_header;
-use super::types::{SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord};
+use super::types::{
+    SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+};
 
 /// Streaming state for FASTA processing.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -95,7 +97,9 @@ impl FastaProcessor {
             self.state = ParserState::InSequence;
         } else if self.state == ParserState::InSequence && self.current_name.is_some() {
             // Sequence line - uppercase and hash
-            let uppercased: Vec<u8> = self.line_buffer.iter()
+            let uppercased: Vec<u8> = self
+                .line_buffer
+                .iter()
                 .filter(|&&b| !b.is_ascii_whitespace())
                 .map(|b| b.to_ascii_uppercase())
                 .collect();
@@ -281,12 +285,11 @@ impl FastaStreamHasher {
                     sequences: Vec::new(),
                 })
             }
-            ProcessorState::Plain(processor) => {
-                processor.finish()
-            }
+            ProcessorState::Plain(processor) => processor.finish(),
             ProcessorState::Gzipped(decoder) => {
                 // Finish decompression and get the inner processor
-                let processor = decoder.finish()
+                let processor = decoder
+                    .finish()
                     .map_err(|e| anyhow::anyhow!("Gzip decompression error: {}", e))?;
                 processor.finish()
             }
@@ -345,7 +348,9 @@ mod tests {
     #[test]
     fn test_streaming_basic() {
         let mut hasher = FastaStreamHasher::new();
-        hasher.update(b">chr1\nACGT\n>chr2\nTGCA\n").expect("update");
+        hasher
+            .update(b">chr1\nACGT\n>chr2\nTGCA\n")
+            .expect("update");
         let collection = hasher.finish().expect("finish");
 
         assert_eq!(collection.sequences.len(), 2);
@@ -431,16 +436,17 @@ mod tests {
                 stream_seq.metadata().sha512t24u
             );
             assert_eq!(batch_seq.metadata().md5, stream_seq.metadata().md5);
-            assert_eq!(batch_seq.metadata().alphabet, stream_seq.metadata().alphabet);
+            assert_eq!(
+                batch_seq.metadata().alphabet,
+                stream_seq.metadata().alphabet
+            );
         }
     }
 
     #[test]
     fn test_streaming_multiline_sequence() {
         let mut hasher = FastaStreamHasher::new();
-        hasher
-            .update(b">chr1\nACGT\nTGCA\nAAAA\n")
-            .expect("update");
+        hasher.update(b">chr1\nACGT\nTGCA\nAAAA\n").expect("update");
         let collection = hasher.finish().expect("finish");
 
         assert_eq!(collection.sequences.len(), 1);
@@ -476,8 +482,8 @@ mod tests {
 
     #[test]
     fn test_streaming_gzipped() {
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let fasta = b">chr1\nACGT\n";
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -496,8 +502,8 @@ mod tests {
     #[test]
     fn test_streaming_gzipped_chunked() {
         // Test that gzipped data can be split across chunks
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
 
         let fasta = b">chr1\nACGTTGCA\n>chr2\nGGGGAAAA\n";
         let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
@@ -556,8 +562,7 @@ mod tests {
             let stream_result = hasher.finish().expect("finish");
 
             assert_eq!(
-                batch_result.metadata.digest,
-                stream_result.metadata.digest,
+                batch_result.metadata.digest, stream_result.metadata.digest,
                 "Mismatch with chunk size {}",
                 chunk_size
             );

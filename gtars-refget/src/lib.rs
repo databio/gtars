@@ -37,22 +37,44 @@ pub mod digest;
 
 // Re-export commonly used items from digest at crate root for convenience
 pub use digest::{
-    // Algorithms
-    sha512t24u, md5, canonicalize_json,
+    ASCII_ALPHABET,
     // Alphabet
-    Alphabet, AlphabetType, AlphabetGuesser,
-    lookup_alphabet, guess_alphabet,
-    ASCII_ALPHABET, DNA_2BIT_ALPHABET, DNA_3BIT_ALPHABET, DNA_IUPAC_ALPHABET, PROTEIN_ALPHABET,
-    // Encoder
-    encode_sequence, decode_string_from_bytes, decode_substring_from_bytes, SequenceEncoder,
-    // Types
-    SequenceRecord, SequenceMetadata, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SeqColDigestLvl1, FaiMetadata,
-    digest_sequence, digest_sequence_with_description, parse_rgsi_line,
-    // Fasta (bytes-based, WASM-compatible)
-    digest_fasta_bytes, load_fasta_bytes, parse_fasta_header, ParseOptions,
+    Alphabet,
+    AlphabetGuesser,
+    AlphabetType,
+    DNA_2BIT_ALPHABET,
+    DNA_3BIT_ALPHABET,
+    DNA_IUPAC_ALPHABET,
+    FaiMetadata,
     // Streaming
     FastaStreamHasher,
+    PROTEIN_ALPHABET,
+    ParseOptions,
+    SeqColDigestLvl1,
+    SequenceCollection,
+    SequenceCollectionMetadata,
+    SequenceCollectionRecord,
+    SequenceEncoder,
+    SequenceMetadata,
+    // Types
+    SequenceRecord,
+    canonicalize_json,
+    decode_string_from_bytes,
+    decode_substring_from_bytes,
+    // Fasta (bytes-based, WASM-compatible)
+    digest_fasta_bytes,
+    digest_sequence,
+    digest_sequence_with_description,
+    // Encoder
+    encode_sequence,
+    guess_alphabet,
+    load_fasta_bytes,
+    lookup_alphabet,
+    md5,
+    parse_fasta_header,
+    parse_rgsi_line,
+    // Algorithms
+    sha512t24u,
 };
 
 // ============================================================================
@@ -81,12 +103,12 @@ mod utils;
 
 // Re-export filesystem functions at crate root for backward compatibility
 #[cfg(feature = "filesystem")]
-pub use fasta::{compute_fai, digest_fasta, load_fasta, FaiRecord};
-#[cfg(feature = "filesystem")]
 pub use collection::{
-    read_rgsi_file,
     SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt,
+    read_rgsi_file,
 };
+#[cfg(feature = "filesystem")]
+pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 
 // ============================================================================
 // Tests
@@ -177,14 +199,10 @@ mod tests {
             .unwrap();
         println!("Listing sequences in the store...");
         let digest = "iYtREV555dUFKg2_agSJW6suquUyPpMw"; // from base.fa.gz
-        let digest_str =
-            String::from_utf8(digest.as_bytes().to_vec()).expect("Invalid ASCII data");
+        let digest_str = String::from_utf8(digest.as_bytes().to_vec()).expect("Invalid ASCII data");
 
         // Test retrieval of a substring
-        println!(
-            "Retrieving a substring of sequence named: {:?}",
-            digest_str
-        );
+        println!("Retrieving a substring of sequence named: {:?}", digest_str);
         let start = 2;
         let end = start + 5;
         let substring = store.get_substring(digest, start, end);
@@ -193,16 +211,10 @@ mod tests {
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!(
-            "Retrieved substring: {:?}",
-            substring.as_ref().unwrap()
-        );
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
         assert_eq!(substring.unwrap(), "GGGGA");
 
-        println!(
-            "Retrieving a substring of sequence named: {:?}",
-            digest_str
-        );
+        println!("Retrieving a substring of sequence named: {:?}", digest_str);
         let start = 3;
         let end = start + 2;
         let substring = store.get_substring(digest, start, end);
@@ -211,10 +223,7 @@ mod tests {
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!(
-            "Retrieved substring: {:?}",
-            substring.as_ref().unwrap()
-        );
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
         assert_eq!(substring.unwrap(), "GG");
     }
 }

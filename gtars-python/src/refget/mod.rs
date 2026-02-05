@@ -7,7 +7,8 @@ use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyString, PyType};
 
 use gtars_refget::collection::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionExt, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionExt,
+    SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
@@ -116,7 +117,9 @@ pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
 #[pyo3(signature = (name, data, description=None))]
 pub fn digest_sequence(name: &str, data: &[u8], description: Option<&str>) -> PySequenceRecord {
     let seq_record = match description {
-        Some(desc) => gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data),
+        Some(desc) => {
+            gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data)
+        }
         None => gtars_refget::collection::digest_sequence(name, data),
     };
     PySequenceRecord::from(seq_record)
@@ -425,7 +428,11 @@ impl PySequenceMetadata {
     fn __repr__(&self) -> String {
         format!(
             "SequenceMetadata(name='{}', length={}, sha512t24u='{}', md5='{}', alphabet={})",
-            self.name, self.length, self.sha512t24u, self.md5, self.alphabet.__str__()
+            self.name,
+            self.length,
+            self.sha512t24u,
+            self.md5,
+            self.alphabet.__str__()
         )
     }
 
@@ -440,8 +447,10 @@ impl PySequenceMetadata {
 #[pymethods]
 impl PyFaiMetadata {
     fn __repr__(&self) -> String {
-        format!("<FaiMetadata offset={} line_bases={} line_bytes={}>",
-                self.offset, self.line_bases, self.line_bytes)
+        format!(
+            "<FaiMetadata offset={} line_bases={} line_bytes={}>",
+            self.offset, self.line_bases, self.line_bytes
+        )
     }
 
     fn __str__(&self) -> String {
@@ -460,13 +469,17 @@ impl PyFaiRecord {
 
     fn __str__(&self) -> String {
         let fai_str = if let Some(ref fai) = self.fai {
-            format!("\n  FAI offset: {}\n  FAI line_bases: {}\n  FAI line_bytes: {}",
-                    fai.offset, fai.line_bases, fai.line_bytes)
+            format!(
+                "\n  FAI offset: {}\n  FAI line_bases: {}\n  FAI line_bytes: {}",
+                fai.offset, fai.line_bases, fai.line_bytes
+            )
         } else {
             "\n  FAI: None (gzipped file)".to_string()
         };
-        format!("FaiRecord:\n  name: {}\n  length: {}{}",
-                self.name, self.length, fai_str)
+        format!(
+            "FaiRecord:\n  name: {}\n  length: {}{}",
+            self.name, self.length, fai_str
+        )
     }
 }
 
@@ -612,36 +625,40 @@ impl PySequenceCollection {
     fn write_fasta(&self, file_path: &str, line_width: Option<usize>) -> PyResult<()> {
         // Convert Python sequences back to Rust SequenceCollection
         let rust_collection = SequenceCollection {
-            sequences: self.sequences.iter().map(|py_rec| {
-                let metadata = SequenceMetadata {
-                    name: py_rec.metadata.name.clone(),
-                    description: py_rec.metadata.description.clone(),
-                    length: py_rec.metadata.length,
-                    sha512t24u: py_rec.metadata.sha512t24u.clone(),
-                    md5: py_rec.metadata.md5.clone(),
-                    alphabet: match &py_rec.metadata.alphabet {
-                        PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
-                        PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
-                        PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
-                        PyAlphabetType::Protein => AlphabetType::Protein,
-                        PyAlphabetType::Ascii => AlphabetType::Ascii,
-                        PyAlphabetType::Unknown => AlphabetType::Unknown,
-                    },
-                    fai: py_rec.metadata.fai.as_ref().map(|f| FaiMetadata {
-                        offset: f.offset,
-                        line_bases: f.line_bases,
-                        line_bytes: f.line_bytes,
-                    }),
-                };
+            sequences: self
+                .sequences
+                .iter()
+                .map(|py_rec| {
+                    let metadata = SequenceMetadata {
+                        name: py_rec.metadata.name.clone(),
+                        description: py_rec.metadata.description.clone(),
+                        length: py_rec.metadata.length,
+                        sha512t24u: py_rec.metadata.sha512t24u.clone(),
+                        md5: py_rec.metadata.md5.clone(),
+                        alphabet: match &py_rec.metadata.alphabet {
+                            PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
+                            PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
+                            PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
+                            PyAlphabetType::Protein => AlphabetType::Protein,
+                            PyAlphabetType::Ascii => AlphabetType::Ascii,
+                            PyAlphabetType::Unknown => AlphabetType::Unknown,
+                        },
+                        fai: py_rec.metadata.fai.as_ref().map(|f| FaiMetadata {
+                            offset: f.offset,
+                            line_bases: f.line_bases,
+                            line_bytes: f.line_bytes,
+                        }),
+                    };
 
-                match &py_rec.sequence {
-                    None => SequenceRecord::Stub(metadata),
-                    Some(seq) => SequenceRecord::Full {
-                        metadata,
-                        sequence: seq.clone(),
-                    },
-                }
-            }).collect(),
+                    match &py_rec.sequence {
+                        None => SequenceRecord::Stub(metadata),
+                        Some(seq) => SequenceRecord::Full {
+                            metadata,
+                            sequence: seq.clone(),
+                        },
+                    }
+                })
+                .collect(),
             metadata: SequenceCollectionMetadata {
                 digest: self.digest.clone(),
                 n_sequences: self.sequences.len(),
@@ -654,10 +671,12 @@ impl PySequenceCollection {
 
         rust_collection
             .write_fasta(file_path, line_width)
-            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
-                "Failed to write FASTA: {}",
-                e
-            )))
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Failed to write FASTA: {}",
+                    e
+                ))
+            })
     }
 
     /// Iterate over sequences in the collection.
@@ -673,9 +692,12 @@ impl PySequenceCollection {
     ///     ...     print(f"{seq.metadata.name}: {seq.metadata.length} bp")
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<Py<PySequenceCollectionIterator>> {
         let py = slf.py();
-        Py::new(py, PySequenceCollectionIterator {
-            iter: slf.sequences.clone().into_iter(),
-        })
+        Py::new(
+            py,
+            PySequenceCollectionIterator {
+                iter: slf.sequences.clone().into_iter(),
+            },
+        )
     }
 }
 
@@ -885,7 +907,10 @@ impl PyRefgetStore {
     fn on_disk(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let cache_path = cache_path.to_string();
         let store = RefgetStore::on_disk(cache_path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error with disk-backed store: {}", e))
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error with disk-backed store: {}",
+                e
+            ))
         })?;
         Ok(Self { inner: store })
     }
@@ -994,7 +1019,10 @@ impl PyRefgetStore {
     fn enable_persistence(&mut self, path: &Bound<'_, PyAny>) -> PyResult<()> {
         let path = path.to_string();
         self.inner.enable_persistence(path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error enabling persistence: {}", e))
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error enabling persistence: {}",
+                e
+            ))
         })
     }
 
@@ -1033,17 +1061,25 @@ impl PyRefgetStore {
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
     #[pyo3(signature = (file_path, force=false))]
-    fn add_sequence_collection_from_fasta(&mut self, file_path: &Bound<'_, PyAny>, force: bool) -> PyResult<(PySequenceCollectionMetadata, bool)> {
+    fn add_sequence_collection_from_fasta(
+        &mut self,
+        file_path: &Bound<'_, PyAny>,
+        force: bool,
+    ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let result = if force {
-            self.inner.add_sequence_collection_from_fasta_force(file_path)
+            self.inner
+                .add_sequence_collection_from_fasta_force(file_path)
         } else {
             self.inner.add_sequence_collection_from_fasta(file_path)
         };
         result
             .map(|(metadata, was_new)| (PySequenceCollectionMetadata::from(metadata), was_new))
             .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error importing FASTA: {}", e))
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error importing FASTA: {}",
+                    e
+                ))
             })
     }
 
@@ -1224,7 +1260,10 @@ impl PyRefgetStore {
     ///     >>> meta = store.get_collection_metadata("uC_UorBNf3YUu1YIDainBhI94CedlNeH")
     ///     >>> if meta:
     ///     ...     print(f"Collection has {meta.n_sequences} sequences")
-    fn get_collection_metadata(&self, collection_digest: &str) -> Option<PySequenceCollectionMetadata> {
+    fn get_collection_metadata(
+        &self,
+        collection_digest: &str,
+    ) -> Option<PySequenceCollectionMetadata> {
         self.inner
             .get_collection_metadata(collection_digest)
             .map(|meta| PySequenceCollectionMetadata::from(meta.clone()))
@@ -1301,12 +1340,27 @@ impl PyRefgetStore {
     fn stats(&self) -> std::collections::HashMap<String, String> {
         let extended_stats = self.inner.stats_extended();
         let mut stats = std::collections::HashMap::new();
-        stats.insert("n_sequences".to_string(), extended_stats.n_sequences.to_string());
-        stats.insert("n_sequences_loaded".to_string(), extended_stats.n_sequences_loaded.to_string());
-        stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
-        stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
+        stats.insert(
+            "n_sequences".to_string(),
+            extended_stats.n_sequences.to_string(),
+        );
+        stats.insert(
+            "n_sequences_loaded".to_string(),
+            extended_stats.n_sequences_loaded.to_string(),
+        );
+        stats.insert(
+            "n_collections".to_string(),
+            extended_stats.n_collections.to_string(),
+        );
+        stats.insert(
+            "n_collections_loaded".to_string(),
+            extended_stats.n_collections_loaded.to_string(),
+        );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
-        stats.insert("total_disk_size".to_string(), extended_stats.total_disk_size.to_string());
+        stats.insert(
+            "total_disk_size".to_string(),
+            extended_stats.total_disk_size.to_string(),
+        );
         stats
     }
 
@@ -1358,7 +1412,10 @@ impl PyRefgetStore {
     fn open_local(_cls: &Bound<'_, PyType>, path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let path = path.to_string();
         let store = RefgetStore::open_local(path).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error opening local store: {}", e))
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error opening local store: {}",
+                e
+            ))
         })?;
         Ok(Self { inner: store })
     }
@@ -1399,14 +1456,18 @@ impl PyRefgetStore {
     ///     ... )
     ///     >>> store.disable_persistence()
     #[classmethod]
-    fn open_remote(_cls: &Bound<'_, PyType>, cache_path: &Bound<'_, PyAny>, remote_url: &Bound<'_, PyAny>) -> PyResult<Self> {
+    fn open_remote(
+        _cls: &Bound<'_, PyType>,
+        cache_path: &Bound<'_, PyAny>,
+        remote_url: &Bound<'_, PyAny>,
+    ) -> PyResult<Self> {
         let cache_path_str = cache_path.to_string();
         let remote_url = remote_url.to_string();
 
         // Validate cache_path is not empty
         if cache_path_str.trim().is_empty() {
             return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                "cache_path cannot be empty"
+                "cache_path cannot be empty",
             ));
         }
 
@@ -1423,7 +1484,7 @@ impl PyRefgetStore {
                 home.to_string_lossy().to_string()
             } else {
                 return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(
-                    "Cannot expand '~': HOME environment variable not set"
+                    "Cannot expand '~': HOME environment variable not set",
                 ));
             }
         } else {
@@ -1431,7 +1492,10 @@ impl PyRefgetStore {
         };
 
         let store = RefgetStore::open_remote(&cache_path_expanded, remote_url).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error opening remote store: {}", e))
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error opening remote store: {}",
+                e
+            ))
         })?;
         Ok(Self { inner: store })
     }
@@ -1565,11 +1629,16 @@ impl PyRefgetStore {
         line_width: Option<usize>,
     ) -> PyResult<()> {
         let output_path = output_path.to_string();
-        let sequence_names_refs = sequence_names.as_ref().map(|names| {
-            names.iter().map(|s| s.as_str()).collect::<Vec<&str>>()
-        });
+        let sequence_names_refs = sequence_names
+            .as_ref()
+            .map(|names| names.iter().map(|s| s.as_str()).collect::<Vec<&str>>());
         self.inner
-            .export_fasta(collection_digest, &output_path, sequence_names_refs, line_width)
+            .export_fasta(
+                collection_digest,
+                &output_path,
+                sequence_names_refs,
+                line_width,
+            )
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error exporting FASTA: {}",
@@ -1631,11 +1700,21 @@ impl PyRefgetStore {
 
     fn __repr__(&self) -> String {
         let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
-        let persist_str = if self.inner.is_persisting() { "persist=on" } else { "persist=off" };
-        let quiet_str = if self.inner.is_quiet() { "quiet=on" } else { "quiet=off" };
+        let persist_str = if self.inner.is_persisting() {
+            "persist=on"
+        } else {
+            "persist=off"
+        };
+        let quiet_str = if self.inner.is_quiet() {
+            "quiet=on"
+        } else {
+            "quiet=off"
+        };
 
         let location = if let Some(remote) = self.inner.remote_source() {
-            let cache = self.inner.local_path()
+            let cache = self
+                .inner
+                .local_path()
                 .map(|p| p.display().to_string())
                 .unwrap_or_else(|| "None".to_string());
             format!("cache='{}', remote='{}'", cache, remote)
@@ -1681,7 +1760,9 @@ impl PyRefgetStore {
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
-        let sequences = slf.inner.list_sequences()
+        let sequences = slf
+            .inner
+            .list_sequences()
             .into_iter()
             .map(|meta| PySequenceMetadata::from(meta))
             .collect();

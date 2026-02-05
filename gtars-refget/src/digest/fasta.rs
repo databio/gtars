@@ -90,7 +90,10 @@ impl ParseOptions {
 
 /// Core FASTA parser that works with any `BufRead` implementation.
 /// This is WASM-compatible as it doesn't require filesystem access.
-pub(crate) fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) -> Result<Vec<SequenceRecord>> {
+pub(crate) fn parse_fasta_reader<R: BufRead>(
+    mut reader: R,
+    opts: ParseOptions,
+) -> Result<Vec<SequenceRecord>> {
     let fai_enabled = opts.fai_enabled;
     let mut byte_position: u64 = 0;
     let mut line = String::new();
@@ -131,11 +134,17 @@ pub(crate) fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) 
         if bytes_read == 0 {
             // EOF - finalize the last sequence if any
             if let Some(id) = current_id.take() {
-                let fai = make_fai(fai_enabled, current_offset, current_line_bases, current_line_bytes);
+                let fai = make_fai(
+                    fai_enabled,
+                    current_offset,
+                    current_line_bases,
+                    current_line_bytes,
+                );
 
                 if opts.compute_digests {
-                    let sha512 =
-                        base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let sha512 = base64_url::encode(
+                        &sha512_hasher.as_mut().unwrap().finalize_reset()[0..24],
+                    );
                     let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
                     let alphabet = alphabet_guesser.as_mut().unwrap().guess();
 
@@ -165,11 +174,17 @@ pub(crate) fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) 
         if line.starts_with('>') {
             // Save previous sequence if any
             if let Some(id) = current_id.take() {
-                let fai = make_fai(fai_enabled, current_offset, current_line_bases, current_line_bytes);
+                let fai = make_fai(
+                    fai_enabled,
+                    current_offset,
+                    current_line_bases,
+                    current_line_bytes,
+                );
 
                 if opts.compute_digests {
-                    let sha512 =
-                        base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let sha512 = base64_url::encode(
+                        &sha512_hasher.as_mut().unwrap().finalize_reset()[0..24],
+                    );
                     let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
                     let alphabet = alphabet_guesser.as_mut().unwrap().guess();
 
@@ -235,7 +250,10 @@ pub(crate) fn parse_fasta_reader<R: BufRead>(mut reader: R, opts: ParseOptions) 
                 if opts.compute_digests {
                     sha512_hasher.as_mut().unwrap().update(seq_upper.as_bytes());
                     md5_hasher.as_mut().unwrap().update(seq_upper.as_bytes());
-                    alphabet_guesser.as_mut().unwrap().update(seq_upper.as_bytes());
+                    alphabet_guesser
+                        .as_mut()
+                        .unwrap()
+                        .update(seq_upper.as_bytes());
                 }
 
                 if opts.store_sequence {
@@ -464,8 +482,8 @@ mod tests {
     #[test]
     fn test_digest_fasta_bytes_gzipped() {
         // Test with gzip content (pre-compressed base.fa content)
-        use flate2::write::GzEncoder;
         use flate2::Compression;
+        use flate2::write::GzEncoder;
         use std::io::Write;
 
         let fasta = b">chr1\nACGT\n";

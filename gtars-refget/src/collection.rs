@@ -12,9 +12,9 @@ use crate::utils::PathExtension;
 
 // Re-export core types from digest::types for backward compatibility
 pub use crate::digest::types::{
-    digest_sequence, digest_sequence_with_description, parse_rgsi_line,
     FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
+    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
+    digest_sequence_with_description, parse_rgsi_line,
 };
 
 /// Shared implementation for writing RGSI (Refget Sequence Index) files.
@@ -31,7 +31,10 @@ fn write_rgsi_impl<P: AsRef<Path>>(
     writeln!(file, "##names_digest={}", metadata.names_digest)?;
     writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
     writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
-    writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription")?;
+    writeln!(
+        file,
+        "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
+    )?;
 
     // Write sequence metadata if available
     if let Some(seqs) = sequences {
@@ -307,33 +310,35 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
     }
 
     // Build collection metadata
-    let collection_metadata =
-        if sequences_digest.is_empty() || names_digest.is_empty() || lengths_digest.is_empty() {
-            // Compute from sequence records
-            SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()))
-        } else {
-            // Use digests from file header
-            let lvl1 = SeqColDigestLvl1 {
-                sequences_digest,
-                names_digest,
-                lengths_digest,
-            };
-
-            let digest = if seqcol_digest.is_empty() {
-                lvl1.to_digest()
-            } else {
-                seqcol_digest
-            };
-
-            SequenceCollectionMetadata {
-                digest,
-                n_sequences: results.len(),
-                names_digest: lvl1.names_digest,
-                sequences_digest: lvl1.sequences_digest,
-                lengths_digest: lvl1.lengths_digest,
-                file_path: Some(file_path.as_ref().to_path_buf()),
-            }
+    let collection_metadata = if sequences_digest.is_empty()
+        || names_digest.is_empty()
+        || lengths_digest.is_empty()
+    {
+        // Compute from sequence records
+        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()))
+    } else {
+        // Use digests from file header
+        let lvl1 = SeqColDigestLvl1 {
+            sequences_digest,
+            names_digest,
+            lengths_digest,
         };
+
+        let digest = if seqcol_digest.is_empty() {
+            lvl1.to_digest()
+        } else {
+            seqcol_digest
+        };
+
+        SequenceCollectionMetadata {
+            digest,
+            n_sequences: results.len(),
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            file_path: Some(file_path.as_ref().to_path_buf()),
+        }
+    };
 
     Ok(SequenceCollection {
         metadata: collection_metadata,
@@ -348,14 +353,14 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fasta::{digest_fasta, load_fasta};
     use crate::digest::encode_sequence;
-    use crate::digest::{lookup_alphabet, AlphabetType};
+    use crate::digest::{AlphabetType, lookup_alphabet};
+    use crate::fasta::{digest_fasta, load_fasta};
 
     #[test]
     fn test_decode_returns_none_when_no_data() {
-        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
 
         for seq_record in &seqcol.sequences {
             assert!(!seq_record.is_loaded());
@@ -365,14 +370,10 @@ mod tests {
 
     #[test]
     fn test_decode_with_loaded_data() {
-        let seqcol = load_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
 
-        let expected_sequences = vec![
-            ("chrX", "TTGGGGAA"),
-            ("chr1", "GGAA"),
-            ("chr2", "GCGC"),
-        ];
+        let expected_sequences = vec![("chrX", "TTGGGGAA"), ("chr1", "GGAA"), ("chr2", "GCGC")];
 
         for (seq_record, (expected_name, expected_seq)) in
             seqcol.sequences.iter().zip(expected_sequences.iter())
@@ -420,13 +421,15 @@ mod tests {
     fn test_sequence_collection_write_and_read_rgsi() {
         use tempfile::tempdir;
 
-        let seqcol = digest_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
 
         let dir = tempdir().expect("Failed to create temp dir");
         let rgsi_path = dir.path().join("test.rgsi");
 
-        seqcol.write_collection_rgsi(&rgsi_path).expect("Failed to write RGSI");
+        seqcol
+            .write_collection_rgsi(&rgsi_path)
+            .expect("Failed to write RGSI");
 
         let loaded = read_rgsi_file(&rgsi_path).expect("Failed to read RGSI");
 
@@ -439,13 +442,15 @@ mod tests {
         use std::fs;
         use tempfile::tempdir;
 
-        let seqcol = load_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
 
         let dir = tempdir().expect("Failed to create temp dir");
         let fasta_path = dir.path().join("output.fa");
 
-        seqcol.write_fasta(&fasta_path, None).expect("Failed to write FASTA");
+        seqcol
+            .write_fasta(&fasta_path, None)
+            .expect("Failed to write FASTA");
 
         let content = fs::read_to_string(&fasta_path).expect("Failed to read file");
         assert!(content.contains(">chrX"));
@@ -464,8 +469,8 @@ mod tests {
 
     #[test]
     fn test_digest_sequence_matches_fasta_digest() {
-        let seqcol = load_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
         let fasta_seq = &seqcol.sequences[0]; // chrX: TTGGGGAA
 
         let prog_seq = digest_sequence("chrX", b"TTGGGGAA");
@@ -500,8 +505,8 @@ mod tests {
         use std::fs;
         use tempfile::tempdir;
 
-        let seqcol = load_fasta("../tests/data/fasta/base.fa")
-            .expect("Failed to load test FASTA file");
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
 
         let dir = tempdir().expect("Failed to create temp dir");
         let file_path = dir.path().join("test_seq.txt");

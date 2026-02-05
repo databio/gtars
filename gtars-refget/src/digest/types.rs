@@ -9,7 +9,7 @@ use std::fmt::Display;
 use std::path::PathBuf;
 
 use super::algorithms::{canonicalize_json, md5, sha512t24u};
-use super::alphabet::{guess_alphabet, AlphabetType};
+use super::alphabet::{AlphabetType, guess_alphabet};
 
 /// Metadata for a single sequence, including its name, length, digests, and alphabet type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -409,7 +409,10 @@ impl SequenceCollectionRecord {
             SequenceCollectionRecord::Stub(m) => m,
             SequenceCollectionRecord::Full { metadata, .. } => metadata,
         };
-        SequenceCollectionRecord::Full { metadata, sequences }
+        SequenceCollectionRecord::Full {
+            metadata,
+            sequences,
+        }
     }
 
     /// Convert to a SequenceCollection (requires Full variant or empty collection for Stub)
@@ -422,7 +425,10 @@ impl SequenceCollectionRecord {
                     sequences: Vec::new(),
                 }
             }
-            SequenceCollectionRecord::Full { metadata, sequences } => SequenceCollection {
+            SequenceCollectionRecord::Full {
+                metadata,
+                sequences,
+            } => SequenceCollection {
                 metadata: metadata.clone(),
                 sequences: sequences.clone(),
             },

@@ -24,14 +24,13 @@
 //! }
 //! ```
 
-use wasm_bindgen::prelude::*;
 use gtars_refget::digest::{
-    sha512t24u, md5, canonicalize_json,
-    digest_fasta_bytes, FastaStreamHasher, SequenceCollection,
+    canonicalize_json, digest_fasta_bytes, md5, sha512t24u, FastaStreamHasher, SequenceCollection,
 };
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Mutex;
+use wasm_bindgen::prelude::*;
 
 // ============================================================================
 // Global storage for streaming hasher instances
@@ -260,7 +259,8 @@ pub fn fasta_hasher_new() -> u32 {
 pub fn fasta_hasher_update(handle: u32, chunk: &[u8]) -> Result<(), JsError> {
     with_storage(|storage| {
         if let Some(hasher) = storage.get_mut(handle) {
-            hasher.update(chunk)
+            hasher
+                .update(chunk)
                 .map_err(|e| JsError::new(&format!("Failed to process chunk: {}", e)))
         } else {
             Err(JsError::new("Invalid hasher handle"))

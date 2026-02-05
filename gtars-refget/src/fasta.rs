@@ -14,7 +14,7 @@ use crate::digest::types::{
 };
 
 // Re-export types from digest::fasta
-pub use digest::fasta::{parse_fasta_header, ParseOptions};
+pub use digest::fasta::{ParseOptions, parse_fasta_header};
 
 /// A lightweight record containing only FAI (FASTA index) metadata for a sequence.
 /// Returned by `compute_fai()` for fast FAI-only computation without digest overhead.
@@ -60,7 +60,10 @@ enum FileParseResult {
 }
 
 /// Internal file-based FASTA parser.
-fn parse_fasta_file<P: AsRef<Path>>(file_path: P, mut opts: FileParseOptions) -> Result<FileParseResult> {
+fn parse_fasta_file<P: AsRef<Path>>(
+    file_path: P,
+    mut opts: FileParseOptions,
+) -> Result<FileParseResult> {
     use gtars_core::utils::get_dynamic_reader;
     use md5::Md5;
     use sha2::{Digest, Sha512};
@@ -130,8 +133,9 @@ fn parse_fasta_file<P: AsRef<Path>>(file_path: P, mut opts: FileParseOptions) ->
                 );
 
                 if opts.compute_digests {
-                    let sha512 =
-                        base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let sha512 = base64_url::encode(
+                        &sha512_hasher.as_mut().unwrap().finalize_reset()[0..24],
+                    );
                     let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
                     let alphabet = alphabet_guesser.as_mut().unwrap().guess();
 
@@ -176,8 +180,9 @@ fn parse_fasta_file<P: AsRef<Path>>(file_path: P, mut opts: FileParseOptions) ->
                 );
 
                 if opts.compute_digests {
-                    let sha512 =
-                        base64_url::encode(&sha512_hasher.as_mut().unwrap().finalize_reset()[0..24]);
+                    let sha512 = base64_url::encode(
+                        &sha512_hasher.as_mut().unwrap().finalize_reset()[0..24],
+                    );
                     let md5 = format!("{:x}", md5_hasher.as_mut().unwrap().finalize_reset());
                     let alphabet = alphabet_guesser.as_mut().unwrap().guess();
 
@@ -323,8 +328,10 @@ pub fn digest_fasta<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> 
         _ => unreachable!("DIGEST_ONLY mode returns Sequences"),
     };
 
-    let collection_metadata =
-        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()));
+    let collection_metadata = SequenceCollectionMetadata::from_sequences(
+        &results,
+        Some(file_path.as_ref().to_path_buf()),
+    );
 
     Ok(SequenceCollection {
         metadata: collection_metadata,
@@ -394,8 +401,10 @@ pub fn load_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
         _ => unreachable!("FULL mode returns Sequences"),
     };
 
-    let collection_metadata =
-        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()));
+    let collection_metadata = SequenceCollectionMetadata::from_sequences(
+        &results,
+        Some(file_path.as_ref().to_path_buf()),
+    );
 
     Ok(SequenceCollection {
         metadata: collection_metadata,
@@ -414,7 +423,8 @@ mod tests {
 
     #[test]
     fn test_digest_fasta() {
-        let seqcol = digest_fasta("../tests/data/fasta/base.fa").expect("Can't open test fasta file");
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Can't open test fasta file");
         let results = &seqcol.sequences;
         assert_eq!(results.len(), 3);
         assert_eq!(results[0].metadata().length, 8);
@@ -422,7 +432,10 @@ mod tests {
             results[0].metadata().sha512t24u,
             "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         );
-        assert_eq!(results[0].metadata().md5, "5f63cfaa3ef61f88c9635fb9d18ec945");
+        assert_eq!(
+            results[0].metadata().md5,
+            "5f63cfaa3ef61f88c9635fb9d18ec945"
+        );
         assert_eq!(results[0].metadata().alphabet, AlphabetType::Dna2bit);
     }
 
@@ -445,15 +458,13 @@ mod tests {
         let seqcol = load_fasta("../tests/data/fasta/base.fa").expect("Failed to load FASTA");
         assert_eq!(seqcol.sequences.len(), 3);
         assert!(seqcol.sequences[0].is_loaded());
-        assert_eq!(
-            seqcol.sequences[0].sequence().unwrap(),
-            b"TTGGGGAA"
-        );
+        assert_eq!(seqcol.sequences[0].sequence().unwrap(), b"TTGGGGAA");
     }
 
     #[test]
     fn test_compute_fai() {
-        let fai_records = compute_fai("../tests/data/fasta/base.fa").expect("Failed to compute FAI");
+        let fai_records =
+            compute_fai("../tests/data/fasta/base.fa").expect("Failed to compute FAI");
         assert_eq!(fai_records.len(), 3);
         assert_eq!(fai_records[0].name, "chrX");
         assert_eq!(fai_records[0].length, 8);
@@ -486,7 +497,8 @@ mod tests {
             results
         }
 
-        let seqcol = digest_fasta("../tests/data/fasta/base.fa").expect("Failed to digest FASTA file");
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to digest FASTA file");
         let fai_data = parse_fai_file("../tests/data/fasta/base.fa.fai");
 
         assert_eq!(seqcol.sequences.len(), fai_data.len());
