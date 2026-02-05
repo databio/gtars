@@ -1,6 +1,6 @@
 [package]
 name = "gtars"
-version = "0.6.0"
+version = "0.6.1"
 edition = "2024"
 description = "Performance critical tools for genomic interval analysis."
 homepage = "https://github.com/databio/gtars"
@@ -12,10 +12,10 @@ categories = ["science::bioinformatics::genomics", "science::bioinformatics"]
 
 
 [dependencies]
-gtars-core = { path = "../gtars-core", optional = true, version="0.5.4", features = ["bigbed"] }
+gtars-core = { path = "../gtars-core", optional = true, version="0.5.5", features = ["bigbed"] }
 gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true, version="0.5.2" }
 gtars-io = { path = "../gtars-io", optional = true, version="0.5.0" }
-gtars-refget = { path = "../gtars-refget", optional = true, version="0.6.0" }
+gtars-refget = { path = "../gtars-refget", optional = true, version="0.7.0" }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.1" }
 gtars-uniwig = { path = "../gtars-uniwig", optional = true, version="0.5.0" }
 gtars-igd = { path = "../gtars-igd", optional = true, version="0.5.0" }

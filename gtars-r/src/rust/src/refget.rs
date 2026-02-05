@@ -1,9 +1,8 @@
 use extendr_api::prelude::*;
-use gtars_refget::alphabet::AlphabetType;
 use gtars_refget::collection::{
     SeqColDigestLvl1, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
-use gtars_refget::digest::{md5, sha512t24u};
+use gtars_refget::digest::{AlphabetType, md5, sha512t24u};
 use gtars_refget::store::{RefgetStore, RetrievedSequence, StorageMode};
 
 /// Create sha512t24u digest

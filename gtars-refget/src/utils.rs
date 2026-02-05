@@ -16,7 +16,8 @@ impl<T: AsRef<Path>> PathExtension for T {
             // Check longest extensions first (.fa.gz, .fasta.gz) before shorter ones
             let known_extensions = [".fa.gz", ".fasta.gz", ".fa", ".fasta"];
 
-            let base_name = known_extensions.iter()
+            let base_name = known_extensions
+                .iter()
                 .find_map(|ext| file_name_str.strip_suffix(ext))
                 .unwrap_or(&file_name_str);
 

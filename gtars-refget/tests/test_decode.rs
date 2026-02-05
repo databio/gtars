@@ -43,7 +43,7 @@ fn test_decode_workflow_encoded() {
     let expected = vec![
         ("seq1", "ACGTACGTACGT"),
         ("seq2", "TTGGCCAA"),
-        ("seq3", "NNNNAAAA"),  // Tests IUPAC 'N' handling
+        ("seq3", "NNNNAAAA"), // Tests IUPAC 'N' handling
     ];
 
     // Verify all sequences can be retrieved and decoded correctly

@@ -1,4 +1,3 @@
-use anyhow::Result;
 use std::fs::File;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -10,7 +9,7 @@ use flate2::Compression;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::fmt::{self, Display};
-use std::io::{BufWriter, Error, Write};
+use std::io::{BufWriter, Write};
 #[cfg(feature = "bigbed")]
 use tokio::runtime;
 
@@ -19,12 +18,13 @@ use bigtools::beddata::BedParserStreamingIterator;
 #[cfg(feature = "bigbed")]
 use bigtools::{BedEntry, BigBedWrite};
 
+use crate::errors::RegionSetError;
 use crate::models::Region;
-#[cfg(feature = "http")]
-use crate::utils::get_dynamic_reader_from_url;
-use crate::utils::get_dynamic_reader;
 #[cfg(feature = "bigbed")]
 use crate::utils::get_chrom_sizes;
+use crate::utils::get_dynamic_reader;
+#[cfg(feature = "http")]
+use crate::utils::get_dynamic_reader_from_url;
 
 #[cfg(feature = "dataframe")]
 use polars::prelude::*;
@@ -48,20 +48,21 @@ pub struct RegionSetIterator<'a> {
 }
 
 impl TryFrom<&Path> for RegionSet {
-    type Error = anyhow::Error;
+    type Error = RegionSetError;
 
     ///
     /// Create a new [RegionSet] from a bed file.
     ///
     /// # Arguments:
     /// - value: path to bed file on disk.
-    fn try_from(value: &Path) -> Result<Self> {
+    fn try_from(value: &Path) -> Result<Self, RegionSetError> {
         let path = value;
 
         let mut new_regions: Vec<Region> = Vec::new();
 
         let reader = match path.is_file() {
-            true => get_dynamic_reader(path).expect("!Can't read file"),
+            true => get_dynamic_reader(path)
+                .map_err(|e| RegionSetError::FileReadError(e.to_string()))?,
             #[cfg(feature = "http")]
             false => {
                 match get_dynamic_reader_from_url(path) {
@@ -69,28 +70,35 @@ impl TryFrom<&Path> for RegionSet {
                     Err(_) => {
                         // Extract bbid from the path (e.g., the file stem)
                         let bbid = path.to_str().ok_or_else(|| {
-                            anyhow::anyhow!("BEDbase identifier is not valid UTF-8: {:?}", path)
+                            RegionSetError::InvalidBedbaseIdentifier(format!("{:?}", path))
                         })?;
 
-                        let fallback_url = format!(
-                            "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
-                            &bbid[0..1],
-                            &bbid[1..2],
-                            bbid
-                        );
+                        return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
 
-                        let fallback_path = PathBuf::from(fallback_url);
-
-                        get_dynamic_reader_from_url(&fallback_path)
-                            .expect("!Can't get file from path, url, or BEDbase identifier")
+                        // // This code should be disabled, because it potentially breaks bedboss pipeline
+                        // // BEDbase identifiers are 32-character MD5 hashes
+                        // if bbid.len() != 32 {
+                        //     return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
+                        // }
+                        //
+                        // let fallback_url = format!(
+                        //     "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+                        //     &bbid[0..1],
+                        //     &bbid[1..2],
+                        //     bbid
+                        // );
+                        //
+                        // let fallback_path = PathBuf::from(fallback_url);
+                        //
+                        // get_dynamic_reader_from_url(&fallback_path)
+                        //     .map_err(|e| RegionSetError::BedbaseFetchError(e.to_string()))?
                     }
                 }
             }
             #[cfg(not(feature = "http"))]
             false => {
-                return Err(anyhow::anyhow!(
-                    "File not found and HTTP feature not enabled: {}",
-                    path.display()
+                return Err(RegionSetError::HttpFeatureDisabled(
+                    path.display().to_string(),
                 ));
             }
         };
@@ -129,6 +137,13 @@ impl TryFrom<&Path> for RegionSet {
                 first_line = false;
             }
 
+            if parts.len() < 3 {
+                return Err(RegionSetError::RegionParseError(format!(
+                    "Error in parsing start position: {:?}",
+                    parts
+                )));
+            }
+
             new_regions.push(Region {
                 chr: parts[0].to_owned(),
 
@@ -136,31 +151,26 @@ impl TryFrom<&Path> for RegionSet {
                 start: match parts[1].parse() {
                     Ok(start) => start,
                     Err(_err) => {
-                        return Err(Error::other(format!(
+                        return Err(RegionSetError::RegionParseError(format!(
                             "Error in parsing start position: {:?}",
                             parts
-                        ))
-                        .into())
+                        )));
                     }
                 },
                 end: match parts[2].parse() {
                     Ok(end) => end,
                     Err(_err) => {
-                        return Err(anyhow::Error::from(Error::other(format!(
+                        return Err(RegionSetError::RegionParseError(format!(
                             "Error in parsing end position: {:?}",
                             parts
-                        ))))
+                        )));
                     }
                 },
                 rest: Some(parts[3..].join("\t")).filter(|s| !s.is_empty()),
             });
         }
         if new_regions.is_empty() {
-            let new_error = Error::other(format!(
-                "Corrupted file. 0 regions found in the file: {}",
-                path.display()
-            ));
-            return Err(new_error.into());
+            return Err(RegionSetError::EmptyRegionSet(path.display().to_string()));
         }
 
         let mut rs = RegionSet {
@@ -171,7 +181,7 @@ impl TryFrom<&Path> for RegionSet {
             },
             path: Some(value.to_owned()),
         };
-        // This line needed for correct calculate identifier
+        // This line needed for correct calculate identifier and to bigbed function
         rs.sort();
 
         Ok(rs)
@@ -179,26 +189,25 @@ impl TryFrom<&Path> for RegionSet {
 }
 
 impl TryFrom<&str> for RegionSet {
-    type Error = anyhow::Error;
+    type Error = RegionSetError;
 
-    fn try_from(value: &str) -> Result<Self> {
+    fn try_from(value: &str) -> Result<Self, RegionSetError> {
         RegionSet::try_from(Path::new(value))
     }
 }
 
 impl TryFrom<String> for RegionSet {
-    type Error = anyhow::Error;
+    type Error = RegionSetError;
 
-    fn try_from(value: String) -> Result<Self> {
-        // println!("Converting String to Path: {}", value);
+    fn try_from(value: String) -> Result<Self, RegionSetError> {
         RegionSet::try_from(Path::new(&value))
     }
 }
 
 impl TryFrom<PathBuf> for RegionSet {
-    type Error = anyhow::Error;
+    type Error = RegionSetError;
 
-    fn try_from(value: PathBuf) -> Result<Self> {
+    fn try_from(value: PathBuf) -> Result<Self, RegionSetError> {
         RegionSet::try_from(value.as_path())
     }
 }
@@ -415,7 +424,11 @@ impl RegionSet {
     /// - chrom_size: the path to chrom sizes file
     ///
     #[cfg(feature = "bigbed")]
-    pub fn to_bigbed<T: AsRef<Path>>(&self, out_path: T, chrom_size: T) -> Result<()> {
+    pub fn to_bigbed<T: AsRef<Path>>(
+        &self,
+        out_path: T,
+        chrom_size: T,
+    ) -> Result<(), RegionSetError> {
         let out_path = out_path.as_ref();
 
         if out_path.exists() {
@@ -442,7 +455,7 @@ impl RegionSet {
                 warnings_count += 1;
                 return None;
             }
-            Some(Ok::<_, Error>((
+            Some(Ok::<_, std::io::Error>((
                 i.chr.clone(),
                 BedEntry {
                     start: i.start,
@@ -474,7 +487,9 @@ impl RegionSet {
         bb_out.options.max_zooms = 8;
 
         let data = BedParserStreamingIterator::wrap_iter(region_vector.into_iter(), true);
-        bb_out.write(data, runtime)?;
+        bb_out
+            .write(data, runtime)
+            .map_err(|e| RegionSetError::BigBedError(e.to_string()))?;
         Ok(())
     }
 
@@ -501,14 +516,8 @@ impl RegionSet {
     ///
     /// Calculate all regions width
     ///
-    pub fn region_widths(&self) -> Result<Vec<u32>> {
-        let mut widths: Vec<u32> = Vec::new();
-
-        for region in &self.regions {
-            widths.push(region.width())
-        }
-
-        Ok(widths)
+    pub fn region_widths(&self) -> Vec<u32> {
+        self.regions.iter().map(|region| region.width()).collect()
     }
 
     ///
@@ -629,27 +638,28 @@ impl Display for RegionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt::Error;
 
     use pretty_assertions::assert_eq;
     use rstest::*;
 
-    fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
+    fn get_test_path(file_name: &str) -> PathBuf {
         let file_path: PathBuf = std::env::current_dir()
             .unwrap()
             .join("../tests/data/regionset")
             .join(file_name);
-        Ok(file_path)
+        file_path
     }
 
     #[rstest]
     fn test_open_from_path() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         assert!(RegionSet::try_from(file_path.as_path()).is_ok());
     }
 
     #[rstest]
     fn test_open_from_string() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
@@ -675,13 +685,13 @@ mod tests {
 
     #[rstest]
     fn test_open_bed_gz() {
-        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz");
         assert!(RegionSet::try_from(file_path.to_str().unwrap()).is_ok());
     }
 
     #[rstest]
     fn test_calculate_identifier() {
-        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
@@ -689,7 +699,7 @@ mod tests {
 
     #[rstest]
     fn test_save_bed_gz() {
-        let file_path = get_test_path("dummy.narrowPeak.bed.gz").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak.bed.gz");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
@@ -706,7 +716,7 @@ mod tests {
 
     #[rstest]
     fn test_save_bed() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let tempdir = tempfile::tempdir().unwrap();
@@ -724,7 +734,7 @@ mod tests {
     #[cfg(feature = "bigbed")]
     #[rstest]
     fn test_save_bigbed() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let chrom_sizes_path: PathBuf = std::env::current_dir()
@@ -742,7 +752,7 @@ mod tests {
 
     #[rstest]
     fn test_read_headers() {
-        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let file_path = get_test_path("dummy_headers.bed");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(region_set.header.is_some());
@@ -751,7 +761,7 @@ mod tests {
 
     #[rstest]
     fn test_is_empty() {
-        let file_path = get_test_path("dummy_headers.bed").unwrap();
+        let file_path = get_test_path("dummy_headers.bed");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert!(!region_set.is_empty());
@@ -759,7 +769,7 @@ mod tests {
 
     #[rstest]
     fn test_file_digest() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.file_digest(), "6224c4d40832b3e0889250f061e01120");
@@ -768,20 +778,20 @@ mod tests {
 
     #[rstest]
     fn test_mean_region_width() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.mean_region_width(), 4.22)
     }
     #[rstest]
     fn test_open_file_with_incorrect_headers() {
-        let file_path = get_test_path("dummy_incorrect_headers.bed").unwrap();
+        let file_path = get_test_path("dummy_incorrect_headers.bed");
         let _region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
     }
 
     #[rstest]
     fn test_chr_length() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         assert_eq!(*region_set.get_max_end_per_chr().get("chr1").unwrap(), 36);
         assert_eq!(region_set.get_max_end_per_chr().len(), 1)
@@ -789,7 +799,7 @@ mod tests {
 
     #[rstest]
     fn test_total_nucleotides_function() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.nucleotides_length(), 38)
@@ -797,7 +807,7 @@ mod tests {
 
     #[rstest]
     fn test_iter_chroms() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!(region_set.iter_chroms().collect::<Vec<_>>().len(), 1)
@@ -806,7 +816,7 @@ mod tests {
     #[cfg(feature = "dataframe")]
     #[rstest]
     fn test_polars() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         let rs_polars = region_set.to_polars().unwrap();
         println!("Number of columns: {:?}", rs_polars.get_columns().len());
@@ -815,7 +825,7 @@ mod tests {
 
     #[rstest]
     fn test_calc_mid_points() {
-        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let file_path = get_test_path("dummy.narrowPeak");
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let mid_points = region_set.calc_mid_points();
