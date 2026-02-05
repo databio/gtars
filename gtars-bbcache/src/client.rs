@@ -192,7 +192,7 @@ impl BBClient {
 
         if bedfile_path.exists() {
             println!("Loading cached BED file from {:?}", bedfile_path.display());
-            return RegionSet::try_from(bedfile_path);
+            return Ok(RegionSet::try_from(bedfile_path)?);
         }
 
         let region_set = RegionSet::try_from(bed_id)

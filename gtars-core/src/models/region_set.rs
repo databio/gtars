@@ -73,22 +73,25 @@ impl TryFrom<&Path> for RegionSet {
                             RegionSetError::InvalidBedbaseIdentifier(format!("{:?}", path))
                         })?;
 
-                        // BEDbase identifiers are 32-character MD5 hashes
-                        if bbid.len() != 32 {
-                            return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
-                        }
+                        return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
 
-                        let fallback_url = format!(
-                            "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
-                            &bbid[0..1],
-                            &bbid[1..2],
-                            bbid
-                        );
-
-                        let fallback_path = PathBuf::from(fallback_url);
-
-                        get_dynamic_reader_from_url(&fallback_path)
-                            .map_err(|e| RegionSetError::BedbaseFetchError(e.to_string()))?
+                        // // This code should be disabled, because it potentially breaks bedboss pipeline
+                        // // BEDbase identifiers are 32-character MD5 hashes
+                        // if bbid.len() != 32 {
+                        //     return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
+                        // }
+                        //
+                        // let fallback_url = format!(
+                        //     "https://api.bedbase.org/v1/files/files/{}/{}/{}.bed.gz",
+                        //     &bbid[0..1],
+                        //     &bbid[1..2],
+                        //     bbid
+                        // );
+                        //
+                        // let fallback_path = PathBuf::from(fallback_url);
+                        //
+                        // get_dynamic_reader_from_url(&fallback_path)
+                        //     .map_err(|e| RegionSetError::BedbaseFetchError(e.to_string()))?
                     }
                 }
             }
