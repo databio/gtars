@@ -56,9 +56,6 @@ use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, BufReader, Read, Write};
 use std::str;
 
-// const DEFAULT_COLLECTION_ID: [u8; 32] = [0u8; 32]; // Default collection ID for the name lookup table
-
-const DEFAULT_COLLECTION_ID: &str = "DEFAULT_REFGET_SEQUENCE_COLLECTION"; // Default collection ID for the name lookup table
 const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
 
 /// Parse a single line from an RGCI (collection index) file.
@@ -261,9 +258,7 @@ impl RefgetStore {
     /// Generic constructor. Creates a new, empty `RefgetStore`.
     /// This is a private helper - use `on_disk()` or `in_memory()` instead.
     fn new(mode: StorageMode) -> Self {
-        // Initialize the name lookup with a default collection
-        let mut name_lookup = HashMap::new();
-        name_lookup.insert(DEFAULT_COLLECTION_ID.to_key(), HashMap::new());
+        let name_lookup = HashMap::new();
 
         RefgetStore {
             sequence_store: HashMap::new(),
@@ -487,10 +482,9 @@ impl RefgetStore {
         collection_digest: T,
         force: bool,
     ) -> Result<()> {
-        // Ensure collection exists; otherwise use the default collection
         let collection_digest = collection_digest
             .into()
-            .unwrap_or(DEFAULT_COLLECTION_ID.to_key());
+            .ok_or_else(|| anyhow::anyhow!("Collection digest is required"))?;
         self.collections.get(&collection_digest).ok_or_else(|| {
             anyhow::anyhow!("Collection not found for digest: {:?}", collection_digest)
         })?;
@@ -570,10 +564,19 @@ impl RefgetStore {
         Ok(())
     }
 
-    // Adds SequenceRecord to the store.
-    // Should only be used internally, via `add_sequence`, which ensures sequences are added to collections.
-    // If the store is disk-backed (persist_to_disk=true), Full records are written to disk and replaced with Stubs.
-    fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
+    /// Adds a SequenceRecord directly to the store without collection association.
+    ///
+    /// The sequence is stored by its SHA512t24u digest and can be retrieved by digest.
+    /// No name lookup or collection tracking is performed.
+    /// Also used internally by `add_sequence` for collection-associated sequences.
+    ///
+    /// If the store is disk-backed (persist_to_disk=true), Full records are written
+    /// to disk and replaced with Stubs.
+    ///
+    /// # Arguments
+    /// * `sr` - The sequence record to add
+    /// * `force` - If true, overwrite existing sequences. If false, skip duplicates.
+    pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
@@ -3749,5 +3752,19 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert_eq!(store.sequence_store.len(), 2, "Should have 2 sequences");
 
         println!("✓ Stale RGSI cache test passed");
+    }
+
+    #[test]
+    fn test_add_sequence_record_standalone() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("test", b"ACGT");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+
+        let retrieved = store.get_sequence(digest.as_bytes()).unwrap();
+        assert_eq!(retrieved.metadata().length, 4);
     }
 }

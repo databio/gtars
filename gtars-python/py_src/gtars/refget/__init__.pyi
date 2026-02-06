@@ -401,6 +401,29 @@ class RefgetStore:
         """
         ...
 
+    def add_sequence(self, sequence: SequenceRecord, force: bool = False) -> None:
+        """Add a sequence to the store without collection association.
+
+        The sequence can be created using ``digest_sequence()`` and later
+        retrieved by its digest via ``get_sequence()``.
+
+        Args:
+            sequence: A SequenceRecord created by ``digest_sequence()``.
+            force: If True, overwrite existing. If False (default), skip duplicates.
+
+        Raises:
+            IOError: If the sequence cannot be stored.
+
+        Example::
+
+            from gtars.refget import RefgetStore, digest_sequence
+            store = RefgetStore.in_memory()
+            seq = digest_sequence(b"ACGTACGT")
+            store.add_sequence(seq)
+            retrieved = store.get_sequence(seq.metadata.sha512t24u)
+        """
+        ...
+
     # =========================================================================
     # Collection API
     # =========================================================================
@@ -859,8 +882,8 @@ def load_fasta(fasta: Union[str, PathLike]) -> SequenceCollection:
     ...
 
 def digest_sequence(
-    name: str,
     data: bytes,
+    name: Optional[str] = None,
     description: Optional[str] = None,
 ) -> SequenceRecord:
     """Create a SequenceRecord from raw data, computing all metadata.
@@ -873,8 +896,8 @@ def digest_sequence(
     computation (matching FASTA processing behavior).
 
     Args:
-        name: The sequence name (e.g., "chr1").
         data: The raw sequence bytes (e.g., b"ACGTACGT").
+        name: Optional sequence name (e.g., "chr1"). Defaults to "" if not provided.
         description: Optional description text for the sequence.
 
     Returns:
@@ -882,12 +905,16 @@ def digest_sequence(
 
     Example::
         from gtars.refget import digest_sequence
-        seq = digest_sequence("chr1", b"ACGTACGT")
+        seq = digest_sequence(b"ACGTACGT")
+        print(seq.metadata.length)
+        # Output: 8
+
+        seq = digest_sequence(b"ACGT", name="chr1")
         print(seq.metadata.name, seq.metadata.length)
-        # Output: chr1 8
+        # Output: chr1 4
 
         # With description
-        seq2 = digest_sequence("chr1", b"ACGT", description="Chromosome 1")
+        seq2 = digest_sequence(b"ACGT", name="chr1", description="Chromosome 1")
         print(seq2.metadata.description)
         # Output: Chromosome 1
     """

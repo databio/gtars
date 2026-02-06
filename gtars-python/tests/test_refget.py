@@ -3,6 +3,7 @@ from gtars.refget import (
     RefgetStore,
     StorageMode,
     digest_fasta,
+    digest_sequence,
     load_fasta,
     sha512t24u_digest,
     md5_digest,
@@ -729,3 +730,40 @@ GGGG
         store = RefgetStore.in_memory()
         assert "RefgetStore" in repr(store)
         assert "memory-only" in repr(store)
+
+    def test_add_standalone_sequence(self):
+        """Test adding a sequence without a collection."""
+        store = RefgetStore.in_memory()
+
+        # Nameless sequence
+        seq = digest_sequence(b"ACGTACGTACGT")
+        store.add_sequence(seq)
+        retrieved = store.get_sequence(seq.metadata.sha512t24u)
+        assert retrieved is not None
+        assert retrieved.metadata.length == 12
+
+        # Named sequence
+        seq2 = digest_sequence(b"TTTTAAAA", name="my_seq")
+        store.add_sequence(seq2)
+        retrieved2 = store.get_sequence(seq2.metadata.sha512t24u)
+        assert retrieved2 is not None
+
+        # Adding again should not error (skip duplicate)
+        store.add_sequence(seq)
+
+        # Force add should also work
+        store.add_sequence(seq, force=True)
+
+    def test_digest_sequence_name_optional(self):
+        """Test that digest_sequence works with and without name."""
+        # No name
+        seq1 = digest_sequence(b"ACGT")
+        assert seq1.metadata.length == 4
+        assert seq1.metadata.name == ""
+
+        # With name
+        seq2 = digest_sequence(b"ACGT", name="chr1")
+        assert seq2.metadata.name == "chr1"
+
+        # Same data should produce same digest regardless of name
+        assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u

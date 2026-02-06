@@ -101,8 +101,8 @@ pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
 /// and returns a SequenceRecord with the computed metadata and original data.
 ///
 /// Args:
-///     name: The sequence name (e.g., "chr1")
 ///     data: The raw sequence bytes (e.g., b"ACGTACGT")
+///     name: Optional sequence name (e.g., "chr1"). Defaults to "" if not provided.
 ///     description: Optional description text
 ///
 /// Returns:
@@ -110,12 +110,12 @@ pub fn load_fasta(fasta: &Bound<'_, PyAny>) -> PyResult<PySequenceCollection> {
 ///
 /// Example:
 ///     >>> from gtars.refget import digest_sequence
-///     >>> seq = digest_sequence("chr1", b"ACGTACGT")
-///     >>> print(seq.name, seq.length)
-///     chr1 8
+///     >>> seq = digest_sequence(b"ACGTACGT")
+///     >>> seq = digest_sequence(b"ACGT", name="chr1")
 #[pyfunction]
-#[pyo3(signature = (name, data, description=None))]
-pub fn digest_sequence(name: &str, data: &[u8], description: Option<&str>) -> PySequenceRecord {
+#[pyo3(signature = (data, name=None, description=None))]
+pub fn digest_sequence(data: &[u8], name: Option<&str>, description: Option<&str>) -> PySequenceRecord {
+    let name = name.unwrap_or("");
     let seq_record = match description {
         Some(desc) => {
             gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data)
@@ -785,6 +785,50 @@ impl From<SequenceRecord> for PySequenceRecord {
     }
 }
 
+// Conversion from Python PyAlphabetType to Rust AlphabetType
+impl From<PyAlphabetType> for AlphabetType {
+    fn from(value: PyAlphabetType) -> Self {
+        match value {
+            PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
+            PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
+            PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
+            PyAlphabetType::Protein => AlphabetType::Protein,
+            PyAlphabetType::Ascii => AlphabetType::Ascii,
+            PyAlphabetType::Unknown => AlphabetType::Unknown,
+        }
+    }
+}
+
+// Conversion from Python PySequenceMetadata to Rust SequenceMetadata
+impl From<PySequenceMetadata> for SequenceMetadata {
+    fn from(value: PySequenceMetadata) -> Self {
+        SequenceMetadata {
+            name: value.name,
+            description: value.description,
+            length: value.length,
+            sha512t24u: value.sha512t24u,
+            md5: value.md5,
+            alphabet: AlphabetType::from(value.alphabet),
+            fai: value.fai.map(|f| FaiMetadata {
+                offset: f.offset,
+                line_bases: f.line_bases,
+                line_bytes: f.line_bytes,
+            }),
+        }
+    }
+}
+
+// Conversion from Python PySequenceRecord to Rust SequenceRecord
+impl From<PySequenceRecord> for SequenceRecord {
+    fn from(value: PySequenceRecord) -> Self {
+        let metadata = SequenceMetadata::from(value.metadata);
+        match value.sequence {
+            Some(sequence) => SequenceRecord::Full { metadata, sequence },
+            None => SequenceRecord::Stub(metadata),
+        }
+    }
+}
+
 // Conversion from Rust SeqColDigestLvl1 to Python PySeqColDigestLvl1
 impl From<SeqColDigestLvl1> for PySeqColDigestLvl1 {
     fn from(value: SeqColDigestLvl1) -> Self {
@@ -1036,6 +1080,29 @@ impl PyRefgetStore {
     ///     >>> store.disable_persistence()  # Stop caching new sequences
     fn disable_persistence(&mut self) {
         self.inner.disable_persistence();
+    }
+
+    /// Add a sequence to the store without associating it with a collection.
+    ///
+    /// The sequence can be created using `digest_sequence()` and later retrieved
+    /// by its digest via `get_sequence()`.
+    ///
+    /// Args:
+    ///     sequence (SequenceRecord): A SequenceRecord created by `digest_sequence()`.
+    ///     force (bool, optional): If True, overwrite existing sequences.
+    ///                            If False (default), skip duplicates.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import RefgetStore, digest_sequence
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> seq = digest_sequence(b"ACGTACGT")
+    ///     >>> store.add_sequence(seq)
+    #[pyo3(signature = (sequence, force=false))]
+    fn add_sequence(&mut self, sequence: PySequenceRecord, force: bool) -> PyResult<()> {
+        let sr = SequenceRecord::from(sequence);
+        self.inner
+            .add_sequence_record(sr, force)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
     /// Add a sequence collection from a FASTA file.
