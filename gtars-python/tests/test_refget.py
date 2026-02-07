@@ -767,3 +767,63 @@ GGGG
 
         # Same data should produce same digest regardless of name
         assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
+
+    def test_sequence_aliases(self):
+        """Test sequence alias add, forward lookup, reverse lookup, and remove."""
+        store = RefgetStore.in_memory()
+        seq = digest_sequence(b"ACGTACGT", name="chr1")
+        store.add_sequence(seq)
+
+        digest = seq.metadata.sha512t24u
+        store.add_sequence_alias("ncbi", "NC_000001.11", digest)
+        store.add_sequence_alias("ucsc", "chr1", digest)
+
+        # Forward lookup
+        found = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+        assert found is not None
+        assert found.metadata.name == "chr1"
+
+        # Reverse lookup
+        aliases = store.get_aliases_for_sequence(digest)
+        assert len(aliases) == 2
+        assert ("ncbi", "NC_000001.11") in aliases
+        assert ("ucsc", "chr1") in aliases
+
+        # List namespaces
+        ns = store.list_sequence_alias_namespaces()
+        assert "ncbi" in ns
+        assert "ucsc" in ns
+
+        # List aliases in namespace
+        alias_list = store.list_sequence_aliases("ncbi")
+        assert "NC_000001.11" in alias_list
+
+        # Remove alias
+        assert store.remove_sequence_alias("ncbi", "NC_000001.11")
+        assert store.get_sequence_by_alias("ncbi", "NC_000001.11") is None
+
+    def test_collection_aliases(self):
+        """Test collection alias add, forward lookup, and reverse lookup."""
+        store = RefgetStore.in_memory()
+        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        store.add_collection_alias("ucsc", "hg38", meta.digest)
+
+        coll = store.get_collection_by_alias("ucsc", "hg38")
+        assert coll is not None
+        assert coll.digest == meta.digest
+
+        aliases = store.get_aliases_for_collection(meta.digest)
+        assert ("ucsc", "hg38") in aliases
+
+    def test_alias_persistence(self, tmp_path):
+        """Test that aliases persist across store save/reload."""
+        store_path = tmp_path / "store"
+        store = RefgetStore.on_disk(str(store_path))
+        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        store.add_collection_alias("ucsc", "hg38", meta.digest)
+
+        # Reload
+        store2 = RefgetStore.open_local(str(store_path))
+        assert store2.get_collection_by_alias("ucsc", "hg38") is not None

@@ -1925,6 +1925,118 @@ impl PyRefgetStore {
             })
     }
 
+    // =========================================================================
+    // Alias API
+    // =========================================================================
+
+    // --- Sequence aliases ---
+
+    /// Add a sequence alias: namespace/alias → sequence digest.
+    #[pyo3(signature = (namespace, alias, digest))]
+    fn add_sequence_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+        digest: &str,
+    ) -> PyResult<()> {
+        self.inner
+            .add_sequence_alias(namespace, alias, digest)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    /// Resolve a sequence alias to the sequence record.
+    fn get_sequence_by_alias(
+        &self,
+        namespace: &str,
+        alias: &str,
+    ) -> Option<PySequenceRecord> {
+        self.inner
+            .get_sequence_by_alias(namespace, alias)
+            .map(|r| PySequenceRecord::from(r.clone()))
+    }
+
+    /// Reverse lookup: find all aliases pointing to this sequence digest.
+    fn get_aliases_for_sequence(&self, digest: &str) -> Vec<(String, String)> {
+        self.inner.get_aliases_for_sequence(digest)
+    }
+
+    /// List all sequence alias namespaces.
+    fn list_sequence_alias_namespaces(&self) -> Vec<String> {
+        self.inner.list_sequence_alias_namespaces()
+    }
+
+    /// List all aliases in a sequence alias namespace.
+    fn list_sequence_aliases(&self, namespace: &str) -> Option<Vec<String>> {
+        self.inner.list_sequence_aliases(namespace)
+    }
+
+    /// Remove a single sequence alias. Returns true if it existed.
+    fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> bool {
+        self.inner.remove_sequence_alias(namespace, alias)
+    }
+
+    /// Load sequence aliases from a TSV file into a namespace.
+    #[pyo3(signature = (namespace, path))]
+    fn load_sequence_aliases(&mut self, namespace: &str, path: &str) -> PyResult<usize> {
+        self.inner
+            .load_sequence_aliases(namespace, path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    // --- Collection aliases ---
+
+    /// Add a collection alias: namespace/alias → collection digest.
+    #[pyo3(signature = (namespace, alias, digest))]
+    fn add_collection_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+        digest: &str,
+    ) -> PyResult<()> {
+        self.inner
+            .add_collection_alias(namespace, alias, digest)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    /// Resolve a collection alias to the collection metadata.
+    fn get_collection_by_alias(
+        &self,
+        namespace: &str,
+        alias: &str,
+    ) -> Option<PySequenceCollectionMetadata> {
+        self.inner
+            .get_collection_by_alias(namespace, alias)
+            .map(|r| PySequenceCollectionMetadata::from(r.metadata().clone()))
+    }
+
+    /// Reverse lookup: find all aliases pointing to this collection digest.
+    fn get_aliases_for_collection(&self, digest: &str) -> Vec<(String, String)> {
+        self.inner.get_aliases_for_collection(digest)
+    }
+
+    /// List all collection alias namespaces.
+    fn list_collection_alias_namespaces(&self) -> Vec<String> {
+        self.inner.list_collection_alias_namespaces()
+    }
+
+    /// List all aliases in a collection alias namespace.
+    fn list_collection_aliases(&self, namespace: &str) -> Option<Vec<String>> {
+        self.inner.list_collection_aliases(namespace)
+    }
+
+    /// Remove a single collection alias. Returns true if it existed.
+    fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> bool {
+        self.inner.remove_collection_alias(namespace, alias)
+    }
+
+    /// Load collection aliases from a TSV file into a namespace.
+    #[pyo3(signature = (namespace, path))]
+    fn load_collection_aliases(&mut self, namespace: &str, path: &str) -> PyResult<usize> {
+        self.inner
+            .load_collection_aliases(namespace, path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
     fn __str__(&self) -> String {
         format!("{}", self.inner)
     }

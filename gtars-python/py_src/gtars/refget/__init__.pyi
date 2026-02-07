@@ -846,6 +846,56 @@ class RefgetStore:
         """
         ...
 
+    # =========================================================================
+    # Alias API
+    # =========================================================================
+
+    # Sequence aliases
+    def add_sequence_alias(self, namespace: str, alias: str, digest: str) -> None:
+        """Add a sequence alias: namespace/alias maps to sequence digest."""
+        ...
+    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
+        """Resolve a sequence alias to the sequence record."""
+        ...
+    def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
+        """Reverse lookup: find all (namespace, alias) pairs pointing to this sequence digest."""
+        ...
+    def list_sequence_alias_namespaces(self) -> list[str]:
+        """List all sequence alias namespaces."""
+        ...
+    def list_sequence_aliases(self, namespace: str) -> Optional[list[str]]:
+        """List all aliases in a sequence alias namespace."""
+        ...
+    def remove_sequence_alias(self, namespace: str, alias: str) -> bool:
+        """Remove a single sequence alias. Returns True if it existed."""
+        ...
+    def load_sequence_aliases(self, namespace: str, path: str) -> int:
+        """Load sequence aliases from a TSV file (alias\\tdigest per line)."""
+        ...
+
+    # Collection aliases
+    def add_collection_alias(self, namespace: str, alias: str, digest: str) -> None:
+        """Add a collection alias: namespace/alias maps to collection digest."""
+        ...
+    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
+        """Resolve a collection alias to the collection metadata."""
+        ...
+    def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:
+        """Reverse lookup: find all (namespace, alias) pairs pointing to this collection digest."""
+        ...
+    def list_collection_alias_namespaces(self) -> list[str]:
+        """List all collection alias namespaces."""
+        ...
+    def list_collection_aliases(self, namespace: str) -> Optional[list[str]]:
+        """List all aliases in a collection alias namespace."""
+        ...
+    def remove_collection_alias(self, namespace: str, alias: str) -> bool:
+        """Remove a single collection alias. Returns True if it existed."""
+        ...
+    def load_collection_aliases(self, namespace: str, path: str) -> int:
+        """Load collection aliases from a TSV file (alias\\tdigest per line)."""
+        ...
+
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
