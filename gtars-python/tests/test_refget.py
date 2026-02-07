@@ -931,3 +931,48 @@ def test_fhr_metadata_persistence(tmp_path):
     retrieved = store2.get_fhr_metadata(meta.digest)
     assert retrieved is not None
     assert retrieved.genome == "Test"
+
+
+def test_fhr_metadata_spec_fields():
+    """Test creating FhrMetadata with all FHR 1.0 spec fields including new ones."""
+    import json
+    from gtars.refget import FhrMetadata
+
+    fhr = FhrMetadata(
+        genome="Bombas huntii",
+        version="0.0.1",
+        schemaVersion=1.0,
+        masking="soft-masked",
+        voucherSpecimen="Located in Freezer 33",
+        documentation="Built assembly from...",
+        identifier=["beetlebase:TC010103"],
+        scholarlyArticle="10.1371/journal.pntd.0008755",
+        funding="NIH R01",
+        vitalStats={
+            "L50": 42,
+            "N50": 1000000,
+            "totalBasePairs": 3000000000,
+            "readTechnology": "hifi",
+        },
+        accessionID={"name": "PBARC", "url": "https://example.com"},
+    )
+
+    assert fhr.genome == "Bombas huntii"
+    assert fhr.voucher_specimen == "Located in Freezer 33"
+    assert fhr.documentation == "Built assembly from..."
+    assert fhr.identifier == ["beetlebase:TC010103"]
+    assert fhr.scholarly_article == "10.1371/journal.pntd.0008755"
+    assert fhr.funding == "NIH R01"
+
+    # Round-trip through dict
+    d = fhr.to_dict()
+    assert d["voucherSpecimen"] == "Located in Freezer 33"
+    assert d["documentation"] == "Built assembly from..."
+    assert d["scholarlyArticle"] == "10.1371/journal.pntd.0008755"
+    assert d["funding"] == "NIH R01"
+    assert d["vitalStats"]["L50"] == 42
+    assert d["vitalStats"]["N50"] == 1000000
+    assert d["accessionID"]["name"] == "PBARC"
+    # seqcol_digest should NOT appear
+    assert "seqcolDigest" not in d
+    assert "seqcol_digest" not in d

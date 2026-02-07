@@ -978,6 +978,26 @@ impl PyFhrMetadata {
     fn genome_synonym(&self) -> Option<Vec<String>> {
         self.inner.genome_synonym.clone()
     }
+    #[getter]
+    fn voucher_specimen(&self) -> Option<String> {
+        self.inner.voucher_specimen.clone()
+    }
+    #[getter]
+    fn documentation(&self) -> Option<String> {
+        self.inner.documentation.clone()
+    }
+    #[getter]
+    fn identifier(&self) -> Option<Vec<String>> {
+        self.inner.identifier.clone()
+    }
+    #[getter]
+    fn scholarly_article(&self) -> Option<String> {
+        self.inner.scholarly_article.clone()
+    }
+    #[getter]
+    fn funding(&self) -> Option<String> {
+        self.inner.funding.clone()
+    }
 
     #[setter]
     fn set_genome(&mut self, value: Option<String>) {
