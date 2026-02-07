@@ -827,3 +827,107 @@ GGGG
         # Reload
         store2 = RefgetStore.open_local(str(store_path))
         assert store2.get_collection_by_alias("ucsc", "hg38") is not None
+
+
+# =========================================================================
+# FHR Metadata Tests
+# =========================================================================
+
+
+def test_fhr_metadata_disabled_by_default():
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store = RefgetStore.in_memory()
+    assert not store.has_fhr_metadata
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    assert store.get_fhr_metadata(meta.digest) is None
+
+    fhr = FhrMetadata(genome="Test")
+    with pytest.raises(Exception):
+        store.set_fhr_metadata(meta.digest, fhr)
+
+
+def test_fhr_metadata_set_get():
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store = RefgetStore.in_memory()
+    store.set_fhr_metadata_enabled(True)
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    fhr = FhrMetadata(genome="Homo sapiens", version="GRCh38", masking="soft-masked")
+    store.set_fhr_metadata(meta.digest, fhr)
+
+    retrieved = store.get_fhr_metadata(meta.digest)
+    assert retrieved is not None
+    assert retrieved.genome == "Homo sapiens"
+    assert retrieved.version == "GRCh38"
+    assert retrieved.masking == "soft-masked"
+
+
+def test_fhr_metadata_none_for_missing():
+    from gtars.refget import RefgetStore
+
+    store = RefgetStore.in_memory()
+    store.set_fhr_metadata_enabled(True)
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+    assert store.get_fhr_metadata(meta.digest) is None
+
+
+def test_fhr_metadata_to_dict():
+    from gtars.refget import FhrMetadata
+
+    fhr = FhrMetadata(genome="Test", version="1.0")
+    d = fhr.to_dict()
+    assert d["genome"] == "Test"
+    assert d["version"] == "1.0"
+
+
+def test_fhr_metadata_from_json(tmp_path):
+    import json
+    from gtars.refget import FhrMetadata
+
+    fhr_file = tmp_path / "test.fhr.json"
+    fhr_file.write_text(
+        json.dumps(
+            {
+                "genome": "Homo sapiens",
+                "version": "GRCh38.p14",
+                "taxon": {
+                    "name": "Homo sapiens",
+                    "uri": "https://identifiers.org/taxonomy:9606",
+                },
+                "masking": "soft-masked",
+            }
+        )
+    )
+
+    fhr = FhrMetadata.from_json(str(fhr_file))
+    assert fhr.genome == "Homo sapiens"
+    assert fhr.version == "GRCh38.p14"
+
+
+def test_fhr_metadata_persistence(tmp_path):
+    import json
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store_path = tmp_path / "store"
+    store = RefgetStore.on_disk(str(store_path))
+    store.set_fhr_metadata_enabled(True)
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    fhr = FhrMetadata(genome="Test", version="1.0")
+    store.set_fhr_metadata(meta.digest, fhr)
+
+    # Verify sidecar file was written
+    fhr_path = store_path / "collections" / f"{meta.digest}.fhr.json"
+    assert fhr_path.exists()
+    data = json.loads(fhr_path.read_text())
+    assert data["genome"] == "Test"
+
+    # Reload — flag persisted in rgstore.json
+    store2 = RefgetStore.open_local(str(store_path))
+    assert store2.has_fhr_metadata
+    retrieved = store2.get_fhr_metadata(meta.digest)
+    assert retrieved is not None
+    assert retrieved.genome == "Test"

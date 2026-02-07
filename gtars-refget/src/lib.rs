@@ -95,6 +95,10 @@ pub mod collection;
 #[cfg(feature = "filesystem")]
 pub mod store;
 
+/// FAIR Headers Reference genome (FHR) metadata types and disk I/O.
+#[cfg(feature = "filesystem")]
+pub mod fhr_metadata;
+
 // Internal modules for filesystem operations
 #[cfg(feature = "filesystem")]
 mod hashkeyable;
@@ -109,6 +113,8 @@ pub use collection::{
 };
 #[cfg(feature = "filesystem")]
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
+#[cfg(feature = "filesystem")]
+pub use fhr_metadata::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon};
 
 // ============================================================================
 // Tests

@@ -13,7 +13,7 @@ and compiled via PyO3. This stub file provides the Python interface definition
 and structured documentation that tools can parse properly.
 """
 
-from typing import Union, Optional, List, Type
+from typing import Any, Union, Optional, List, Type
 from enum import Enum
 from os import PathLike
 
@@ -166,6 +166,24 @@ class StorageMode(Enum):
 
     Raw: int
     Encoded: int
+
+class FhrMetadata:
+    """FAIR Headers Reference genome metadata for a sequence collection."""
+
+    genome: Optional[str]
+    version: Optional[str]
+    masking: Optional[str]
+    genome_synonym: Optional[list[str]]
+
+    def __init__(self, **kwargs: Any) -> None: ...
+
+    @staticmethod
+    def from_json(path: str) -> "FhrMetadata": ...
+
+    def to_dict(self) -> dict[str, Any]: ...
+    def to_json(self, path: str) -> None: ...
+
+    def __repr__(self) -> str: ...
 
 class RefgetStore:
     """A global store for GA4GH refget sequences with lazy-loading support.
@@ -894,6 +912,31 @@ class RefgetStore:
         ...
     def load_collection_aliases(self, namespace: str, path: str) -> int:
         """Load collection aliases from a TSV file (alias\\tdigest per line)."""
+        ...
+
+    # FHR metadata
+    def set_fhr_metadata_enabled(self, enabled: bool) -> None:
+        """Enable or disable FHR metadata support."""
+        ...
+    @property
+    def has_fhr_metadata(self) -> bool:
+        """Whether FHR metadata support is enabled."""
+        ...
+
+    def set_fhr_metadata(self, collection_digest: str, metadata: FhrMetadata) -> None:
+        """Set FHR metadata for a collection."""
+        ...
+    def get_fhr_metadata(self, collection_digest: str) -> Optional[FhrMetadata]:
+        """Get FHR metadata for a collection. Returns None if disabled or missing."""
+        ...
+    def remove_fhr_metadata(self, collection_digest: str) -> bool:
+        """Remove FHR metadata for a collection."""
+        ...
+    def list_fhr_metadata(self) -> list[str]:
+        """List all collection digests that have FHR metadata."""
+        ...
+    def load_fhr_metadata(self, collection_digest: str, path: str) -> None:
+        """Load FHR metadata from a JSON file and attach it to a collection."""
         ...
 
     def __str__(self) -> str: ...

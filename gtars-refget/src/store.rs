@@ -44,6 +44,7 @@ use crate::digest::{
 use crate::digest::{
     SequenceEncoder, decode_string_from_bytes, decode_substring_from_bytes, encode_sequence,
 };
+use crate::fhr_metadata::{self, FhrMetadata};
 use crate::hashkeyable::HashKeyable;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
@@ -153,6 +154,10 @@ pub struct RefgetStore {
     sequence_aliases: AliasStore,
     /// Collection alias namespaces: namespace → {alias → collection_digest}
     collection_aliases: AliasStore,
+    /// Whether FHR metadata support is enabled for this store.
+    fhr_metadata_enabled: bool,
+    /// FHR metadata for collections, keyed by collection digest.
+    fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
 }
 
 /// Metadata for the entire store.
@@ -180,6 +185,9 @@ struct StoreMetadata {
     /// Whether on-disk attribute index is maintained (Part 2)
     #[serde(default)]
     attribute_index: bool,
+    /// Whether FHR metadata sidecars are maintained
+    #[serde(default)]
+    fhr_metadata: bool,
 }
 
 fn default_true() -> bool {
@@ -436,6 +444,8 @@ impl RefgetStore {
             attribute_search_limit: DEFAULT_ATTRIBUTE_SEARCH_LIMIT,
             sequence_aliases: HashMap::new(),
             collection_aliases: HashMap::new(),
+            fhr_metadata_enabled: false,
+            fhr_metadata: HashMap::new(),
         }
     }
 
@@ -1453,6 +1463,91 @@ impl RefgetStore {
     }
 
     // =========================================================================
+    // FHR metadata (delegates to fhr_metadata module)
+    // =========================================================================
+
+    /// Enable or disable FHR metadata support.
+    pub fn set_fhr_metadata_enabled(&mut self, enabled: bool) {
+        self.fhr_metadata_enabled = enabled;
+    }
+
+    /// Returns whether FHR metadata support is enabled.
+    pub fn has_fhr_metadata(&self) -> bool {
+        self.fhr_metadata_enabled
+    }
+
+    /// Set FHR metadata for a collection.
+    pub fn set_fhr_metadata(
+        &mut self,
+        collection_digest: &str,
+        metadata: FhrMetadata,
+    ) -> Result<()> {
+        if !self.fhr_metadata_enabled {
+            return Err(anyhow!(
+                "FHR metadata not enabled. Use set_fhr_metadata_enabled(true) first."
+            ));
+        }
+        let key = collection_digest.to_key();
+        if !self.collections.contains_key(&key) {
+            return Err(anyhow!("Collection not found: {}", collection_digest));
+        }
+        if self.persist_to_disk {
+            if let Some(ref local_path) = self.local_path {
+                let path = fhr_metadata::sidecar_path(
+                    &local_path.join("collections"),
+                    collection_digest,
+                );
+                fhr_metadata::write_sidecar(&path, &metadata)?;
+            }
+        }
+        self.fhr_metadata.insert(key, metadata);
+        Ok(())
+    }
+
+    /// Get FHR metadata for a collection. Returns None if disabled or missing.
+    pub fn get_fhr_metadata(&self, collection_digest: &str) -> Option<&FhrMetadata> {
+        if !self.fhr_metadata_enabled {
+            return None;
+        }
+        let key = collection_digest.to_key();
+        self.fhr_metadata.get(&key)
+    }
+
+    /// Remove FHR metadata for a collection. Returns false if disabled.
+    pub fn remove_fhr_metadata(&mut self, collection_digest: &str) -> bool {
+        if !self.fhr_metadata_enabled {
+            return false;
+        }
+        let key = collection_digest.to_key();
+        if self.persist_to_disk {
+            if let Some(ref local_path) = self.local_path {
+                fhr_metadata::remove_sidecar(
+                    &local_path.join("collections"),
+                    collection_digest,
+                );
+            }
+        }
+        self.fhr_metadata.remove(&key).is_some()
+    }
+
+    /// List all collection digests that have FHR metadata.
+    pub fn list_fhr_metadata(&self) -> Vec<String> {
+        if !self.fhr_metadata_enabled {
+            return Vec::new();
+        }
+        self.fhr_metadata
+            .keys()
+            .map(|key| key_to_digest_string(key))
+            .collect()
+    }
+
+    /// Load FHR metadata from a JSON file and attach it to a collection.
+    pub fn load_fhr_metadata(&mut self, collection_digest: &str, path: &str) -> Result<()> {
+        let metadata = fhr_metadata::load_from_json(path)?;
+        self.set_fhr_metadata(collection_digest, metadata)
+    }
+
+    // =========================================================================
     // Sequence API
     // =========================================================================
 
@@ -2139,6 +2234,7 @@ impl RefgetStore {
             created_at: Utc::now().to_rfc3339(),
             ancillary_digests: self.ancillary_digests,
             attribute_index: self.attribute_index,
+            fhr_metadata: self.fhr_metadata_enabled,
         };
 
         // Write metadata to rgstore.json
@@ -2363,6 +2459,13 @@ impl RefgetStore {
             &mut store.collection_aliases,
             &aliases_dir.join("collections"),
         )?;
+
+        // Load FHR metadata sidecars (if enabled)
+        store.fhr_metadata_enabled = metadata.fhr_metadata;
+        if store.fhr_metadata_enabled {
+            store.fhr_metadata =
+                fhr_metadata::load_sidecars(&root_path.join("collections"));
+        }
 
         Ok(store)
     }
@@ -2856,6 +2959,11 @@ impl RefgetStore {
         write_all_aliases(&self.sequence_aliases, &aliases_dir.join("sequences"))?;
         write_all_aliases(&self.collection_aliases, &aliases_dir.join("collections"))?;
 
+        // Write FHR metadata sidecars
+        if self.fhr_metadata_enabled {
+            fhr_metadata::write_sidecars(&root_path.join("collections"), &self.fhr_metadata)?;
+        }
+
         // Create the metadata structure
         let metadata = StoreMetadata {
             version: 1,
@@ -2867,6 +2975,7 @@ impl RefgetStore {
             created_at: Utc::now().to_rfc3339(),
             ancillary_digests: self.ancillary_digests,
             attribute_index: self.attribute_index,
+            fhr_metadata: self.fhr_metadata_enabled,
         };
 
         // Write metadata to rgstore.json
@@ -4832,5 +4941,124 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(store2
             .get_sequence_by_alias("ncbi", "NC_000001.11")
             .is_some());
+    }
+
+    // =========================================================================
+    // FHR metadata tests
+    // =========================================================================
+
+    #[test]
+    fn test_fhr_metadata_disabled_by_default() {
+        let mut store = RefgetStore::in_memory();
+        assert!(!store.has_fhr_metadata());
+
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .unwrap();
+        let fhr = FhrMetadata::default();
+
+        assert!(store.set_fhr_metadata(&meta.digest, fhr).is_err());
+        assert!(store.get_fhr_metadata(&meta.digest).is_none());
+        assert!(store.list_fhr_metadata().is_empty());
+    }
+
+    #[test]
+    fn test_fhr_metadata_set_get() {
+        let mut store = RefgetStore::in_memory();
+        store.set_fhr_metadata_enabled(true);
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .unwrap();
+
+        let mut fhr = FhrMetadata::default();
+        fhr.genome = Some("Test genome".to_string());
+        fhr.version = Some("1.0".to_string());
+        fhr.masking = Some("not-masked".to_string());
+
+        store.set_fhr_metadata(&meta.digest, fhr.clone()).unwrap();
+
+        let retrieved = store.get_fhr_metadata(&meta.digest).unwrap();
+        assert_eq!(retrieved.genome, Some("Test genome".to_string()));
+        assert_eq!(retrieved.version, Some("1.0".to_string()));
+    }
+
+    #[test]
+    fn test_fhr_metadata_nonexistent_collection() {
+        let mut store = RefgetStore::in_memory();
+        store.set_fhr_metadata_enabled(true);
+        let fhr = FhrMetadata::default();
+        assert!(store.set_fhr_metadata("nonexistent_digest", fhr).is_err());
+    }
+
+    #[test]
+    fn test_fhr_metadata_remove() {
+        let mut store = RefgetStore::in_memory();
+        store.set_fhr_metadata_enabled(true);
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .unwrap();
+
+        let fhr = FhrMetadata {
+            genome: Some("Test".to_string()),
+            ..Default::default()
+        };
+        store.set_fhr_metadata(&meta.digest, fhr).unwrap();
+
+        assert!(store.get_fhr_metadata(&meta.digest).is_some());
+        assert!(store.remove_fhr_metadata(&meta.digest));
+        assert!(store.get_fhr_metadata(&meta.digest).is_none());
+    }
+
+    #[test]
+    fn test_fhr_metadata_persistence() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+        let digest: String;
+
+        {
+            let mut store = RefgetStore::on_disk(&store_path).unwrap();
+            store.set_fhr_metadata_enabled(true);
+            let (meta, _) = store
+                .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+                .unwrap();
+            digest = meta.digest.clone();
+
+            let fhr = FhrMetadata {
+                genome: Some("Homo sapiens".to_string()),
+                version: Some("GRCh38".to_string()),
+                masking: Some("soft-masked".to_string()),
+                ..Default::default()
+            };
+            store.set_fhr_metadata(&digest, fhr).unwrap();
+        }
+
+        {
+            let store = RefgetStore::open_local(&store_path).unwrap();
+            assert!(store.has_fhr_metadata());
+            let fhr = store.get_fhr_metadata(&digest).unwrap();
+            assert_eq!(fhr.genome, Some("Homo sapiens".to_string()));
+            assert_eq!(fhr.version, Some("GRCh38".to_string()));
+            assert_eq!(fhr.masking, Some("soft-masked".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_fhr_list() {
+        let mut store = RefgetStore::in_memory();
+        store.set_fhr_metadata_enabled(true);
+        assert!(store.list_fhr_metadata().is_empty());
+
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .unwrap();
+        let fhr = FhrMetadata {
+            genome: Some("Test".to_string()),
+            ..Default::default()
+        };
+        store.set_fhr_metadata(&meta.digest, fhr).unwrap();
+
+        let list = store.list_fhr_metadata();
+        assert_eq!(list.len(), 1);
+        assert!(list.contains(&meta.digest));
     }
 }

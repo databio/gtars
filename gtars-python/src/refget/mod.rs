@@ -907,6 +907,113 @@ impl From<PyStorageMode> for StorageMode {
     }
 }
 
+// =========================================================================
+// FHR Metadata
+// =========================================================================
+
+/// FAIR Headers metadata for a sequence collection.
+#[pyclass(name = "FhrMetadata", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PyFhrMetadata {
+    inner: gtars_refget::fhr_metadata::FhrMetadata,
+}
+
+#[pymethods]
+impl PyFhrMetadata {
+    #[new]
+    #[pyo3(signature = (**kwargs))]
+    fn new(kwargs: Option<&Bound<'_, pyo3::types::PyDict>>) -> PyResult<Self> {
+        match kwargs {
+            Some(dict) => {
+                // Convert kwargs dict to JSON string, then deserialize
+                let json_str = dict_to_json_string(dict)?;
+                let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+                    serde_json::from_str(&json_str).map_err(|e| {
+                        PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
+                    })?;
+                Ok(Self { inner: metadata })
+            }
+            None => Ok(Self {
+                inner: gtars_refget::fhr_metadata::FhrMetadata::default(),
+            }),
+        }
+    }
+
+    #[staticmethod]
+    fn from_json(path: &str) -> PyResult<Self> {
+        let json = std::fs::read_to_string(path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+            serde_json::from_str(&json)
+                .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        Ok(Self { inner: metadata })
+    }
+
+    fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
+        let json_str = serde_json::to_string(&self.inner)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        json_string_to_py(py, &json_str)
+    }
+
+    fn to_json(&self, path: &str) -> PyResult<()> {
+        let json = serde_json::to_string_pretty(&self.inner)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
+        std::fs::write(path, json)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
+    }
+
+    #[getter]
+    fn genome(&self) -> Option<String> {
+        self.inner.genome.clone()
+    }
+    #[getter]
+    fn version(&self) -> Option<String> {
+        self.inner.version.clone()
+    }
+    #[getter]
+    fn masking(&self) -> Option<String> {
+        self.inner.masking.clone()
+    }
+    #[getter]
+    fn genome_synonym(&self) -> Option<Vec<String>> {
+        self.inner.genome_synonym.clone()
+    }
+
+    #[setter]
+    fn set_genome(&mut self, value: Option<String>) {
+        self.inner.genome = value;
+    }
+    #[setter]
+    fn set_version(&mut self, value: Option<String>) {
+        self.inner.version = value;
+    }
+    #[setter]
+    fn set_masking(&mut self, value: Option<String>) {
+        self.inner.masking = value;
+    }
+
+    fn __repr__(&self) -> String {
+        let genome = self.inner.genome.as_deref().unwrap_or("?");
+        let version = self.inner.version.as_deref().unwrap_or("?");
+        format!("FhrMetadata(genome='{}', version='{}')", genome, version)
+    }
+}
+
+/// Convert a Python dict to a JSON string for serde deserialization.
+fn dict_to_json_string(dict: &Bound<'_, pyo3::types::PyDict>) -> PyResult<String> {
+    let py = dict.py();
+    let json_mod = py.import("json")?;
+    let json_str = json_mod.call_method1("dumps", (dict,))?;
+    json_str.extract::<String>()
+}
+
+/// Convert a JSON string to a Python object (dict/list/scalar).
+fn json_string_to_py(py: Python<'_>, json_str: &str) -> PyResult<Py<PyAny>> {
+    let json_mod = py.import("json")?;
+    let result = json_mod.call_method1("loads", (json_str,))?;
+    Ok(result.into())
+}
+
 /// A global store for GA4GH refget sequences with lazy-loading support.
 ///
 /// RefgetStore provides content-addressable storage for reference genome
@@ -2037,6 +2144,60 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
+    // =========================================================================
+    // FHR Metadata API
+    // =========================================================================
+
+    /// Enable or disable FHR metadata support.
+    fn set_fhr_metadata_enabled(&mut self, enabled: bool) {
+        self.inner.set_fhr_metadata_enabled(enabled);
+    }
+
+    /// Returns whether FHR metadata support is enabled.
+    #[getter]
+    fn has_fhr_metadata(&self) -> bool {
+        self.inner.has_fhr_metadata()
+    }
+
+    /// Set FHR metadata for a collection.
+    #[pyo3(signature = (collection_digest, metadata))]
+    fn set_fhr_metadata(
+        &mut self,
+        collection_digest: &str,
+        metadata: &PyFhrMetadata,
+    ) -> PyResult<()> {
+        self.inner
+            .set_fhr_metadata(collection_digest, metadata.inner.clone())
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))
+    }
+
+    /// Get FHR metadata for a collection.
+    fn get_fhr_metadata(&self, collection_digest: &str) -> Option<PyFhrMetadata> {
+        self.inner
+            .get_fhr_metadata(collection_digest)
+            .map(|fhr| PyFhrMetadata {
+                inner: fhr.clone(),
+            })
+    }
+
+    /// Remove FHR metadata for a collection.
+    fn remove_fhr_metadata(&mut self, collection_digest: &str) -> bool {
+        self.inner.remove_fhr_metadata(collection_digest)
+    }
+
+    /// List all collection digests that have FHR metadata.
+    fn list_fhr_metadata(&self) -> Vec<String> {
+        self.inner.list_fhr_metadata()
+    }
+
+    /// Load FHR metadata from a JSON file and attach it to a collection.
+    #[pyo3(signature = (collection_digest, path))]
+    fn load_fhr_metadata(&mut self, collection_digest: &str, path: &str) -> PyResult<()> {
+        self.inner
+            .load_fhr_metadata(collection_digest, path)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
+    }
+
     fn __str__(&self) -> String {
         format!("{}", self.inner)
     }
@@ -2160,5 +2321,6 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;
     m.add_class::<PyRetrievedSequence>()?;
+    m.add_class::<PyFhrMetadata>()?;
     Ok(())
 }
