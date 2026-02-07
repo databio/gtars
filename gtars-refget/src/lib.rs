@@ -95,6 +95,10 @@ pub mod collection;
 #[cfg(feature = "filesystem")]
 pub mod store;
 
+/// Seqcol spec operations (comparison, level-based retrieval, attribute search).
+#[cfg(feature = "filesystem")]
+pub mod seqcol;
+
 /// FAIR Headers Reference genome (FHR) metadata types and disk I/O.
 #[cfg(feature = "filesystem")]
 pub mod fhr_metadata;
