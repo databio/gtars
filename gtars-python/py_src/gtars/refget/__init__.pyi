@@ -99,6 +99,9 @@ class SequenceCollectionMetadata:
     names_digest: str
     sequences_digest: str
     lengths_digest: str
+    name_length_pairs_digest: Optional[str]
+    sorted_name_length_pairs_digest: Optional[str]
+    sorted_sequences_digest: Optional[str]
 
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
@@ -666,6 +669,90 @@ class RefgetStore:
             print(f"Store has {stats['n_sequences']} sequences")
             print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
         """
+        ...
+
+    # =========================================================================
+    # Seqcol Features
+    # =========================================================================
+
+    def get_collection_level1(self, digest: str) -> dict:
+        """Get level 1 representation (attribute digests) for a collection.
+
+        Args:
+            digest: Collection digest.
+
+        Returns:
+            dict with spec-compliant field names (names, lengths, sequences,
+            plus optional name_length_pairs, sorted_name_length_pairs, sorted_sequences).
+        """
+        ...
+
+    def get_collection_level2(self, digest: str) -> dict:
+        """Get level 2 representation (full arrays, spec format) for a collection.
+
+        Args:
+            digest: Collection digest.
+
+        Returns:
+            dict with names (list[str]), lengths (list[int]), sequences (list[str]).
+        """
+        ...
+
+    def compare(self, digest_a: str, digest_b: str) -> dict:
+        """Compare two collections by digest.
+
+        Args:
+            digest_a: First collection digest.
+            digest_b: Second collection digest.
+
+        Returns:
+            dict with keys: digests, attributes, array_elements.
+        """
+        ...
+
+    def find_collections_by_attribute(self, attr_name: str, attr_digest: str) -> List[str]:
+        """Find collections by attribute digest.
+
+        Args:
+            attr_name: Attribute name (names, lengths, sequences,
+                name_length_pairs, sorted_name_length_pairs, sorted_sequences).
+            attr_digest: The digest to search for.
+
+        Returns:
+            List of collection digests that have the matching attribute.
+        """
+        ...
+
+    def get_attribute(self, attr_name: str, attr_digest: str) -> Optional[list]:
+        """Get attribute array by digest.
+
+        Args:
+            attr_name: Attribute name (names, lengths, or sequences).
+            attr_digest: The digest to search for.
+
+        Returns:
+            The attribute array, or None if not found.
+        """
+        ...
+
+    def set_attribute_search_limit(self, limit: int) -> None:
+        """Set brute-force attribute search limit (0 = unlimited)."""
+        ...
+
+    def enable_ancillary_digests(self) -> None:
+        """Enable computation of ancillary digests."""
+        ...
+
+    def disable_ancillary_digests(self) -> None:
+        """Disable computation of ancillary digests."""
+        ...
+
+    def has_ancillary_digests(self) -> bool:
+        """Returns whether ancillary digests are enabled."""
+        ...
+
+    def has_attribute_index(self) -> bool:
+        """Returns whether the on-disk attribute index is enabled."""
         ...
 
     def write_store_to_directory(

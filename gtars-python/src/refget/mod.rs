@@ -4,7 +4,7 @@
 
 use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
-use pyo3::types::{PyBytes, PyString, PyType};
+use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
 
 use gtars_refget::collection::{
     FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionExt,
@@ -280,6 +280,12 @@ pub struct PySequenceCollectionMetadata {
     pub sequences_digest: String,
     #[pyo3(get, set)]
     pub lengths_digest: String,
+    #[pyo3(get)]
+    pub name_length_pairs_digest: Option<String>,
+    #[pyo3(get)]
+    pub sorted_name_length_pairs_digest: Option<String>,
+    #[pyo3(get)]
+    pub sorted_sequences_digest: Option<String>,
 }
 
 #[pymethods]
@@ -307,6 +313,9 @@ impl From<SequenceCollectionMetadata> for PySequenceCollectionMetadata {
             names_digest: value.names_digest,
             sequences_digest: value.sequences_digest,
             lengths_digest: value.lengths_digest,
+            name_length_pairs_digest: value.name_length_pairs_digest,
+            sorted_name_length_pairs_digest: value.sorted_name_length_pairs_digest,
+            sorted_sequences_digest: value.sorted_sequences_digest,
         }
     }
 }
@@ -665,6 +674,9 @@ impl PySequenceCollection {
                 sequences_digest: self.lvl1.sequences_digest.clone(),
                 names_digest: self.lvl1.names_digest.clone(),
                 lengths_digest: self.lvl1.lengths_digest.clone(),
+                name_length_pairs_digest: None,
+                sorted_name_length_pairs_digest: None,
+                sorted_sequences_digest: None,
                 file_path: None,
             },
         };
@@ -1429,6 +1441,158 @@ impl PyRefgetStore {
             extended_stats.total_disk_size.to_string(),
         );
         stats
+    }
+
+    /// Get level 1 representation (attribute digests) for a collection.
+    ///
+    /// Returns a dict with spec-compliant field names (names, lengths, sequences,
+    /// plus optional ancillary digests).
+    fn get_collection_level1(&self, py: Python<'_>, digest: &str) -> PyResult<Py<PyAny>> {
+        let lvl1 = self.inner.get_collection_level1(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("names", &lvl1.names)?;
+        dict.set_item("lengths", &lvl1.lengths)?;
+        dict.set_item("sequences", &lvl1.sequences)?;
+        if let Some(ref v) = lvl1.name_length_pairs {
+            dict.set_item("name_length_pairs", v)?;
+        }
+        if let Some(ref v) = lvl1.sorted_name_length_pairs {
+            dict.set_item("sorted_name_length_pairs", v)?;
+        }
+        if let Some(ref v) = lvl1.sorted_sequences {
+            dict.set_item("sorted_sequences", v)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// Get level 2 representation (full arrays, spec format) for a collection.
+    ///
+    /// Returns a dict with names (list[str]), lengths (list[int]), sequences (list[str]).
+    fn get_collection_level2(&mut self, py: Python<'_>, digest: &str) -> PyResult<Py<PyAny>> {
+        let lvl2 = self.inner.get_collection_level2(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("names", &lvl2.names)?;
+        dict.set_item("lengths", &lvl2.lengths)?;
+        dict.set_item("sequences", &lvl2.sequences)?;
+        Ok(dict.into())
+    }
+
+    /// Compare two collections by digest.
+    ///
+    /// Returns a dict following the seqcol spec comparison format with keys:
+    /// digests, attributes, array_elements.
+    fn compare(&mut self, py: Python<'_>, digest_a: &str, digest_b: &str) -> PyResult<Py<PyAny>> {
+        let comparison = self.inner.compare(digest_a, digest_b).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let digests = pyo3::types::PyDict::new(py);
+        digests.set_item("a", &comparison.digests.a)?;
+        digests.set_item("b", &comparison.digests.b)?;
+
+        let attributes = pyo3::types::PyDict::new(py);
+        attributes.set_item("a_only", &comparison.attributes.a_only)?;
+        attributes.set_item("b_only", &comparison.attributes.b_only)?;
+        attributes.set_item("a_and_b", &comparison.attributes.a_and_b)?;
+
+        let elements = pyo3::types::PyDict::new(py);
+        elements.set_item("a_count", comparison.array_elements.a_count.into_py_dict(py)?)?;
+        elements.set_item("b_count", comparison.array_elements.b_count.into_py_dict(py)?)?;
+        elements.set_item("a_and_b_count", comparison.array_elements.a_and_b_count.into_py_dict(py)?)?;
+        elements.set_item("a_and_b_same_order", comparison.array_elements.a_and_b_same_order.into_py_dict(py)?)?;
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("digests", digests)?;
+        dict.set_item("attributes", attributes)?;
+        dict.set_item("array_elements", elements)?;
+        Ok(dict.into())
+    }
+
+    /// Find collections by attribute digest.
+    ///
+    /// Args:
+    ///     attr_name: Attribute name (names, lengths, sequences,
+    ///         name_length_pairs, sorted_name_length_pairs, sorted_sequences).
+    ///     attr_digest: The digest to search for.
+    ///
+    /// Returns:
+    ///     list[str]: Collection digests that have the matching attribute.
+    fn find_collections_by_attribute(
+        &self,
+        attr_name: &str,
+        attr_digest: &str,
+    ) -> PyResult<Vec<String>> {
+        self.inner
+            .find_collections_by_attribute(attr_name, attr_digest)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+            })
+    }
+
+    /// Get attribute array by digest.
+    ///
+    /// Returns the raw array for a given attribute, or None if not found.
+    fn get_attribute(
+        &mut self,
+        py: Python<'_>,
+        attr_name: &str,
+        attr_digest: &str,
+    ) -> PyResult<Option<Py<PyAny>>> {
+        // Find matching collections
+        let collections = self
+            .inner
+            .find_collections_by_attribute(attr_name, attr_digest)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+            })?;
+        if collections.is_empty() {
+            return Ok(None);
+        }
+
+        // Load the first matching collection and extract the attribute array
+        let collection = self.inner.get_collection(&collections[0]).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let lvl2 = collection.to_level2();
+
+        match attr_name {
+            "names" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.names)?.into())),
+            "lengths" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.lengths)?.into())),
+            "sequences" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.sequences)?.into())),
+            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Cannot retrieve attribute array for '{}'. \
+                 Only 'names', 'lengths', and 'sequences' have raw arrays.",
+                attr_name
+            ))),
+        }
+    }
+
+    /// Set brute-force attribute search limit (0 = unlimited).
+    fn set_attribute_search_limit(&mut self, limit: usize) {
+        self.inner.set_attribute_search_limit(limit);
+    }
+
+    /// Enable computation of ancillary digests.
+    fn enable_ancillary_digests(&mut self) {
+        self.inner.enable_ancillary_digests();
+    }
+
+    /// Disable computation of ancillary digests.
+    fn disable_ancillary_digests(&mut self) {
+        self.inner.disable_ancillary_digests();
+    }
+
+    /// Returns whether ancillary digests are enabled.
+    fn has_ancillary_digests(&self) -> bool {
+        self.inner.has_ancillary_digests()
+    }
+
+    /// Returns whether the on-disk attribute index is enabled.
+    fn has_attribute_index(&self) -> bool {
+        self.inner.has_attribute_index()
     }
 
     /// Write the store using its configured paths.

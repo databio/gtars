@@ -278,7 +278,6 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
     let mut names_digest = String::new();
     let mut sequences_digest = String::new();
     let mut lengths_digest = String::new();
-
     for line in reader.lines() {
         let line = line?;
 
@@ -336,6 +335,9 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
             names_digest: lvl1.names_digest,
             sequences_digest: lvl1.sequences_digest,
             lengths_digest: lvl1.lengths_digest,
+            name_length_pairs_digest: None,
+            sorted_name_length_pairs_digest: None,
+            sorted_sequences_digest: None,
             file_path: Some(file_path.as_ref().to_path_buf()),
         }
     };
@@ -410,7 +412,7 @@ mod tests {
 
     #[test]
     fn test_sequence_collection_from_fasta() {
-        let seqcol = SequenceCollection::from_fasta("../tests/data/fasta/base.fa")
+        let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
             .expect("Failed to load FASTA");
 
         assert_eq!(seqcol.sequences.len(), 3);
