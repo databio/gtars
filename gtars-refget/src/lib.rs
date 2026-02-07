@@ -99,6 +99,10 @@ pub mod store;
 #[cfg(feature = "filesystem")]
 pub mod seqcol;
 
+/// Alias management for human-readable sequence and collection names.
+#[cfg(feature = "filesystem")]
+pub mod alias;
+
 /// FAIR Headers Reference genome (FHR) metadata types and disk I/O.
 #[cfg(feature = "filesystem")]
 pub mod fhr_metadata;

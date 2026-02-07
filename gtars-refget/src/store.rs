@@ -43,7 +43,7 @@ use crate::digest::{
 use crate::digest::{
     SequenceEncoder, decode_string_from_bytes, decode_substring_from_bytes, encode_sequence,
 };
-use crate::fhr_metadata::{self, FhrMetadata};
+use crate::fhr_metadata::{self, FhrMetadata, key_to_digest_string};
 use crate::hashkeyable::HashKeyable;
 use anyhow::anyhow;
 use anyhow::{Context, Result};
@@ -59,9 +59,7 @@ use std::str;
 
 const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
 
-/// Generic alias store: namespace → { alias → digest_key }
-type AliasStore = HashMap<String, HashMap<String, [u8; 32]>>;
-
+use crate::alias::AliasManager;
 use crate::seqcol::{parse_rgci_line, DEFAULT_ATTRIBUTE_SEARCH_LIMIT};
 
 /// Enum storing whether sequences will be stored in Raw or Encoded form
@@ -115,10 +113,8 @@ pub struct RefgetStore {
     pub(crate) attribute_index: bool,
     /// Max collections for brute-force attribute search (0 = unlimited).
     pub(crate) attribute_search_limit: usize,
-    /// Sequence alias namespaces: namespace → {alias → sequence_digest}
-    sequence_aliases: AliasStore,
-    /// Collection alias namespaces: namespace → {alias → collection_digest}
-    collection_aliases: AliasStore,
+    /// Human-readable aliases for sequences and collections.
+    pub aliases: AliasManager,
     /// Whether FHR metadata support is enabled for this store.
     fhr_metadata_enabled: bool,
     /// FHR metadata for collections, keyed by collection digest.
@@ -157,126 +153,6 @@ struct StoreMetadata {
 
 fn default_true() -> bool {
     true
-}
-
-// =========================================================================
-// Alias helper functions (operate on any AliasStore)
-// =========================================================================
-
-/// Add an alias to an AliasStore.
-fn alias_add(store: &mut AliasStore, namespace: &str, alias: &str, digest: [u8; 32]) {
-    store
-        .entry(namespace.to_string())
-        .or_default()
-        .insert(alias.to_string(), digest);
-}
-
-/// Forward lookup: resolve alias → digest key.
-fn alias_resolve(store: &AliasStore, namespace: &str, alias: &str) -> Option<[u8; 32]> {
-    store.get(namespace).and_then(|ns| ns.get(alias)).copied()
-}
-
-/// Reverse lookup (scan): find all aliases pointing to a given digest.
-/// Returns Vec<(namespace, alias)>.
-fn alias_reverse_scan(store: &AliasStore, digest: &[u8; 32]) -> Vec<(String, String)> {
-    let mut results = Vec::new();
-    for (namespace, aliases) in store {
-        for (alias, d) in aliases {
-            if d == digest {
-                results.push((namespace.clone(), alias.clone()));
-            }
-        }
-    }
-    results
-}
-
-/// List all namespaces in an AliasStore.
-fn alias_namespaces(store: &AliasStore) -> Vec<String> {
-    store.keys().cloned().collect()
-}
-
-/// List all aliases in a namespace.
-fn alias_list(store: &AliasStore, namespace: &str) -> Option<Vec<String>> {
-    store
-        .get(namespace)
-        .map(|ns| ns.keys().cloned().collect())
-}
-
-/// Remove a single alias. Returns true if it existed.
-fn alias_remove(store: &mut AliasStore, namespace: &str, alias: &str) -> bool {
-    if let Some(ns) = store.get_mut(namespace) {
-        let removed = ns.remove(alias).is_some();
-        if ns.is_empty() {
-            store.remove(namespace);
-        }
-        removed
-    } else {
-        false
-    }
-}
-
-/// Convert a [u8; 32] key back to a digest string.
-fn key_to_digest_string(key: &[u8; 32]) -> String {
-    // Keys are padded with zeros; find the actual string length
-    let len = key.iter().position(|&b| b == 0).unwrap_or(32);
-    String::from_utf8_lossy(&key[..len]).to_string()
-}
-
-/// Load aliases from a TSV file into an AliasStore namespace.
-/// Format: alias\tdigest per line. Lines starting with '#' are comments.
-fn alias_load_tsv(store: &mut AliasStore, namespace: &str, path: &Path) -> Result<usize> {
-    let file = File::open(path)?;
-    let reader = BufReader::new(file);
-    let mut count = 0;
-    for line in reader.lines() {
-        let line = line?;
-        if line.starts_with('#') || line.trim().is_empty() {
-            continue;
-        }
-        let parts: Vec<&str> = line.splitn(2, '\t').collect();
-        if parts.len() == 2 {
-            let key = parts[1].to_key();
-            alias_add(store, namespace, parts[0], key);
-            count += 1;
-        }
-    }
-    Ok(count)
-}
-
-/// Load all alias TSV files from a directory into an AliasStore.
-fn load_aliases_from_dir(store: &mut AliasStore, dir: &Path) -> Result<()> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("tsv") {
-            let namespace = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .context("Invalid filename")?
-                .to_string();
-            alias_load_tsv(store, &namespace, &path)?;
-        }
-    }
-    Ok(())
-}
-
-/// Write all aliases in an AliasStore to TSV files in a directory.
-fn write_all_aliases(store: &AliasStore, dir: &Path) -> Result<()> {
-    if store.is_empty() {
-        return Ok(());
-    }
-    create_dir_all(dir)?;
-    for (namespace, aliases) in store {
-        let tsv_path = dir.join(format!("{}.tsv", namespace));
-        let mut file = File::create(&tsv_path)?;
-        for (alias, digest) in aliases {
-            writeln!(file, "{}\t{}", alias, key_to_digest_string(digest))?;
-        }
-    }
-    Ok(())
 }
 
 pub struct SubstringsFromRegions<'a, K>
@@ -404,8 +280,7 @@ impl RefgetStore {
             ancillary_digests: true,
             attribute_index: false,
             attribute_search_limit: DEFAULT_ATTRIBUTE_SEARCH_LIMIT,
-            sequence_aliases: HashMap::new(),
-            collection_aliases: HashMap::new(),
+            aliases: AliasManager::new(),
             fhr_metadata_enabled: false,
             fhr_metadata: HashMap::new(),
         }
@@ -1092,151 +967,105 @@ impl RefgetStore {
     }
 
     // =========================================================================
-    // Alias API
+    // Alias API (delegates to self.aliases, adds persistence)
     // =========================================================================
 
-    // --- Sequence aliases ---
-
-    /// Add a sequence alias: namespace/alias → sequence digest.
+    /// Add a sequence alias and persist to disk if applicable.
     pub fn add_sequence_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
-        let key = digest.to_key();
-        alias_add(&mut self.sequence_aliases, namespace, alias, key);
-        if self.persist_to_disk && self.local_path.is_some() {
-            self.write_alias_namespace("sequences", namespace)?;
-        }
+        self.aliases.add_sequence(namespace, alias, digest);
+        self.persist_alias_namespace("sequences", namespace);
         Ok(())
     }
 
-    /// Resolve a sequence alias to the sequence record.
-    pub fn get_sequence_by_alias(
-        &self,
-        namespace: &str,
-        alias: &str,
-    ) -> Option<&SequenceRecord> {
-        let digest = alias_resolve(&self.sequence_aliases, namespace, alias)?;
-        self.sequence_store.get(&digest)
+    /// Resolve a sequence alias and return the sequence record.
+    pub fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceRecord> {
+        let key = self.aliases.resolve_sequence(namespace, alias)?;
+        self.sequence_store.get(&key)
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
     pub fn get_aliases_for_sequence(&self, digest: &str) -> Vec<(String, String)> {
-        let key = digest.to_key();
-        alias_reverse_scan(&self.sequence_aliases, &key)
+        self.aliases.reverse_lookup_sequence(digest)
     }
 
     /// List all sequence alias namespaces.
     pub fn list_sequence_alias_namespaces(&self) -> Vec<String> {
-        alias_namespaces(&self.sequence_aliases)
+        self.aliases.sequence_namespaces()
     }
 
     /// List all aliases in a sequence alias namespace.
     pub fn list_sequence_aliases(&self, namespace: &str) -> Option<Vec<String>> {
-        alias_list(&self.sequence_aliases, namespace)
+        self.aliases.sequence_aliases(namespace)
     }
 
     /// Remove a single sequence alias. Returns true if it existed.
     pub fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> bool {
-        let removed = alias_remove(&mut self.sequence_aliases, namespace, alias);
-        if removed && self.persist_to_disk && self.local_path.is_some() {
-            let _ = self.write_alias_namespace("sequences", namespace);
+        let removed = self.aliases.remove_sequence(namespace, alias);
+        if removed {
+            self.persist_alias_namespace("sequences", namespace);
         }
         removed
     }
 
     /// Load sequence aliases from a TSV file into a namespace.
     pub fn load_sequence_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let count = alias_load_tsv(&mut self.sequence_aliases, namespace, Path::new(path))?;
-        if self.persist_to_disk && self.local_path.is_some() {
-            self.write_alias_namespace("sequences", namespace)?;
-        }
+        let count = self.aliases.load_sequence_tsv(namespace, Path::new(path))?;
+        self.persist_alias_namespace("sequences", namespace);
         Ok(count)
     }
 
-    // --- Collection aliases ---
-
-    /// Add a collection alias: namespace/alias → collection digest.
-    pub fn add_collection_alias(
-        &mut self,
-        namespace: &str,
-        alias: &str,
-        digest: &str,
-    ) -> Result<()> {
-        let key = digest.to_key();
-        alias_add(&mut self.collection_aliases, namespace, alias, key);
-        if self.persist_to_disk && self.local_path.is_some() {
-            self.write_alias_namespace("collections", namespace)?;
-        }
+    /// Add a collection alias and persist to disk if applicable.
+    pub fn add_collection_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
+        self.aliases.add_collection(namespace, alias, digest);
+        self.persist_alias_namespace("collections", namespace);
         Ok(())
     }
 
     /// Resolve a collection alias to the collection record.
-    pub fn get_collection_by_alias(
-        &self,
-        namespace: &str,
-        alias: &str,
-    ) -> Option<&SequenceCollectionRecord> {
-        let digest = alias_resolve(&self.collection_aliases, namespace, alias)?;
-        self.collections.get(&digest)
+    pub fn get_collection_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceCollectionRecord> {
+        let key = self.aliases.resolve_collection(namespace, alias)?;
+        self.collections.get(&key)
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.
     pub fn get_aliases_for_collection(&self, digest: &str) -> Vec<(String, String)> {
-        let key = digest.to_key();
-        alias_reverse_scan(&self.collection_aliases, &key)
+        self.aliases.reverse_lookup_collection(digest)
     }
 
     /// List all collection alias namespaces.
     pub fn list_collection_alias_namespaces(&self) -> Vec<String> {
-        alias_namespaces(&self.collection_aliases)
+        self.aliases.collection_namespaces()
     }
 
     /// List all aliases in a collection alias namespace.
     pub fn list_collection_aliases(&self, namespace: &str) -> Option<Vec<String>> {
-        alias_list(&self.collection_aliases, namespace)
+        self.aliases.collection_aliases(namespace)
     }
 
     /// Remove a single collection alias. Returns true if it existed.
     pub fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> bool {
-        let removed = alias_remove(&mut self.collection_aliases, namespace, alias);
-        if removed && self.persist_to_disk && self.local_path.is_some() {
-            let _ = self.write_alias_namespace("collections", namespace);
+        let removed = self.aliases.remove_collection(namespace, alias);
+        if removed {
+            self.persist_alias_namespace("collections", namespace);
         }
         removed
     }
 
     /// Load collection aliases from a TSV file into a namespace.
     pub fn load_collection_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let count = alias_load_tsv(&mut self.collection_aliases, namespace, Path::new(path))?;
-        if self.persist_to_disk && self.local_path.is_some() {
-            self.write_alias_namespace("collections", namespace)?;
-        }
+        let count = self.aliases.load_collection_tsv(namespace, Path::new(path))?;
+        self.persist_alias_namespace("collections", namespace);
         Ok(count)
     }
 
-    // --- Alias persistence ---
-
-    /// Write a single alias namespace to its TSV sidecar file on disk.
-    fn write_alias_namespace(&self, kind: &str, namespace: &str) -> Result<()> {
-        let local_path = self.local_path.as_ref().context("local_path not set")?;
-        let dir = local_path.join("aliases").join(kind);
-        create_dir_all(&dir)?;
-
-        let store = match kind {
-            "sequences" => &self.sequence_aliases,
-            "collections" => &self.collection_aliases,
-            _ => return Err(anyhow!("Unknown alias kind: {}", kind)),
-        };
-
-        let tsv_path = dir.join(format!("{}.tsv", namespace));
-        if let Some(ns) = store.get(namespace) {
-            let mut file = File::create(&tsv_path)?;
-            for (alias, digest) in ns {
-                writeln!(file, "{}\t{}", alias, key_to_digest_string(digest))?;
+    /// Write a single alias namespace to disk (if disk-backed).
+    fn persist_alias_namespace(&self, kind: &str, namespace: &str) {
+        if self.persist_to_disk {
+            if let Some(ref local_path) = self.local_path {
+                let aliases_dir = local_path.join("aliases");
+                let _ = self.aliases.write_namespace(&aliases_dir, kind, namespace);
             }
-        } else {
-            // Namespace was cleared — remove the file
-            let _ = fs::remove_file(&tsv_path);
         }
-        Ok(())
     }
 
     // =========================================================================
@@ -2231,11 +2060,7 @@ impl RefgetStore {
 
         // Load aliases from sidecar TSV files
         let aliases_dir = root_path.join("aliases");
-        load_aliases_from_dir(&mut store.sequence_aliases, &aliases_dir.join("sequences"))?;
-        load_aliases_from_dir(
-            &mut store.collection_aliases,
-            &aliases_dir.join("collections"),
-        )?;
+        store.aliases.load_from_dir(&aliases_dir)?;
 
         // Load FHR metadata sidecars (if enabled)
         store.fhr_metadata_enabled = metadata.fhr_metadata;
@@ -2733,8 +2558,7 @@ impl RefgetStore {
 
         // Write alias TSV sidecar files
         let aliases_dir = root_path.join("aliases");
-        write_all_aliases(&self.sequence_aliases, &aliases_dir.join("sequences"))?;
-        write_all_aliases(&self.collection_aliases, &aliases_dir.join("collections"))?;
+        self.aliases.write_to_dir(&aliases_dir)?;
 
         // Write FHR metadata sidecars
         if self.fhr_metadata_enabled {
@@ -4312,7 +4136,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Reload and verify aliases persist
         {
-            let mut store = RefgetStore::open_local(&store_path).unwrap();
+            let store = RefgetStore::open_local(&store_path).unwrap();
             assert!(store
                 .get_sequence_by_alias("ncbi", "NC_000001.11")
                 .is_some());
@@ -4402,7 +4226,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(store_path.join("aliases/sequences/ncbi.tsv").exists());
 
         // Reload and verify
-        let mut store2 = RefgetStore::open_local(&store_path).unwrap();
+        let store2 = RefgetStore::open_local(&store_path).unwrap();
         assert!(store2
             .get_sequence_by_alias("ncbi", "NC_000001.11")
             .is_some());

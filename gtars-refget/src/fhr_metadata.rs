@@ -134,7 +134,7 @@ pub struct FhrIdentifier {
 const SIDECAR_EXTENSION: &str = ".fhr.json";
 
 /// Convert a [u8; 32] key back to a digest string.
-fn key_to_digest_string(key: &[u8; 32]) -> String {
+pub(crate) fn key_to_digest_string(key: &[u8; 32]) -> String {
     let len = key.iter().position(|&b| b == 0).unwrap_or(32);
     String::from_utf8_lossy(&key[..len]).to_string()
 }
