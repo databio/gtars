@@ -11,7 +11,24 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::hashkeyable::HashKeyable;
+use crate::hashkeyable::{HashKeyable, key_to_digest_string};
+
+/// Identifies whether an alias targets a sequence or a collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AliasKind {
+    Sequence,
+    Collection,
+}
+
+impl AliasKind {
+    /// Returns the subdirectory name for this alias kind.
+    pub fn subdir(&self) -> &'static str {
+        match self {
+            Self::Sequence => "sequences",
+            Self::Collection => "collections",
+        }
+    }
+}
 
 /// Generic alias store: namespace → { alias → digest_key }
 type AliasStore = HashMap<String, HashMap<String, [u8; 32]>>;
@@ -83,11 +100,6 @@ fn alias_remove(store: &mut AliasStore, namespace: &str, alias: &str) -> bool {
     }
 }
 
-/// Convert a [u8; 32] key back to a digest string.
-fn key_to_digest_string(key: &[u8; 32]) -> String {
-    let len = key.iter().position(|&b| b == 0).unwrap_or(32);
-    String::from_utf8_lossy(&key[..len]).to_string()
-}
 
 /// Load aliases from a TSV file into an AliasStore namespace.
 /// Format: alias\tdigest per line. Lines starting with '#' are comments.
@@ -262,16 +274,15 @@ impl AliasManager {
     pub fn write_namespace(
         &self,
         aliases_dir: &Path,
-        kind: &str,
+        kind: AliasKind,
         namespace: &str,
     ) -> Result<()> {
-        let dir = aliases_dir.join(kind);
+        let dir = aliases_dir.join(kind.subdir());
         create_dir_all(&dir)?;
 
         let store = match kind {
-            "sequences" => &self.sequence_aliases,
-            "collections" => &self.collection_aliases,
-            _ => return Err(anyhow::anyhow!("Unknown alias kind: {}", kind)),
+            AliasKind::Sequence => &self.sequence_aliases,
+            AliasKind::Collection => &self.collection_aliases,
         };
 
         let tsv_path = dir.join(format!("{}.tsv", namespace));
@@ -285,6 +296,12 @@ impl AliasManager {
             let _ = fs::remove_file(&tsv_path);
         }
         Ok(())
+    }
+}
+
+impl Default for AliasManager {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -415,7 +432,7 @@ mod tests {
         mgr.add_sequence("ucsc", "chr1", "d2");
 
         // Write only ncbi namespace
-        mgr.write_namespace(&aliases_dir, "sequences", "ncbi").unwrap();
+        mgr.write_namespace(&aliases_dir, AliasKind::Sequence, "ncbi").unwrap();
 
         assert!(aliases_dir.join("sequences/ncbi.tsv").exists());
         // ucsc should NOT have been written

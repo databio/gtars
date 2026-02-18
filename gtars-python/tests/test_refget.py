@@ -834,25 +834,21 @@ GGGG
 # =========================================================================
 
 
-def test_fhr_metadata_disabled_by_default():
+def test_fhr_metadata_empty_by_default():
     from gtars.refget import RefgetStore, FhrMetadata
 
     store = RefgetStore.in_memory()
-    assert not store.has_fhr_metadata
     meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
+    # FHR metadata always works -- no enable step needed
     assert store.get_fhr_metadata(meta.digest) is None
-
-    fhr = FhrMetadata(genome="Test")
-    with pytest.raises(Exception):
-        store.set_fhr_metadata(meta.digest, fhr)
+    assert store.list_fhr_metadata() == []
 
 
 def test_fhr_metadata_set_get():
     from gtars.refget import RefgetStore, FhrMetadata
 
     store = RefgetStore.in_memory()
-    store.set_fhr_metadata_enabled(True)
     meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
     fhr = FhrMetadata(genome="Homo sapiens", version="GRCh38", masking="soft-masked")
@@ -869,7 +865,6 @@ def test_fhr_metadata_none_for_missing():
     from gtars.refget import RefgetStore
 
     store = RefgetStore.in_memory()
-    store.set_fhr_metadata_enabled(True)
     meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
     assert store.get_fhr_metadata(meta.digest) is None
 
@@ -913,7 +908,6 @@ def test_fhr_metadata_persistence(tmp_path):
 
     store_path = tmp_path / "store"
     store = RefgetStore.on_disk(str(store_path))
-    store.set_fhr_metadata_enabled(True)
     meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
 
     fhr = FhrMetadata(genome="Test", version="1.0")
@@ -925,9 +919,8 @@ def test_fhr_metadata_persistence(tmp_path):
     data = json.loads(fhr_path.read_text())
     assert data["genome"] == "Test"
 
-    # Reload — flag persisted in rgstore.json
+    # Reload -- FHR metadata always loaded
     store2 = RefgetStore.open_local(str(store_path))
-    assert store2.has_fhr_metadata
     retrieved = store2.get_fhr_metadata(meta.digest)
     assert retrieved is not None
     assert retrieved.genome == "Test"

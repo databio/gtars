@@ -4,51 +4,16 @@
 //! organizational clarity. They implement the GA4GH Sequence Collections
 //! specification endpoints (level 1/2 retrieval, comparison, attribute search).
 
-use crate::digest::{
-    CollectionLevel1, CollectionLevel2, SeqColComparison, SequenceCollectionMetadata,
-};
+use crate::digest::{CollectionLevel1, CollectionLevel2, SeqColComparison};
 use crate::hashkeyable::HashKeyable;
 use crate::store::RefgetStore;
 use anyhow::{anyhow, Result};
 
-/// Parse a single line from an RGCI (collection index) file.
-///
-/// RGCI format is tab-separated with 5+ columns:
-/// digest, n_sequences, names_digest, sequences_digest, lengths_digest,
-/// [name_length_pairs_digest, sorted_name_length_pairs_digest, sorted_sequences_digest]
-///
-/// Lines starting with '#' are treated as comments and return None.
-/// Lines with fewer than 5 columns return None.
-/// Columns 5-7 are optional ancillary digests (empty string = None).
-pub(crate) fn parse_rgci_line(line: &str) -> Option<SequenceCollectionMetadata> {
-    if line.starts_with('#') {
-        return None;
-    }
-    let parts: Vec<&str> = line.split('\t').collect();
-    if parts.len() < 5 {
-        return None;
-    }
-    // Parse optional ancillary digest columns (empty string -> None)
-    let opt_col = |i: usize| -> Option<String> {
-        parts.get(i).and_then(|s| {
-            if s.is_empty() { None } else { Some(s.to_string()) }
-        })
-    };
-    Some(SequenceCollectionMetadata {
-        digest: parts[0].to_string(),
-        n_sequences: parts[1].parse().ok()?,
-        names_digest: parts[2].to_string(),
-        sequences_digest: parts[3].to_string(),
-        lengths_digest: parts[4].to_string(),
-        name_length_pairs_digest: opt_col(5),
-        sorted_name_length_pairs_digest: opt_col(6),
-        sorted_sequences_digest: opt_col(7),
-        file_path: None,
-    })
-}
+/// Warn users when brute-force scanning more than this many collections.
+const ATTRIBUTE_SEARCH_WARN_THRESHOLD: usize = 10_000;
 
-/// Default limit for brute-force attribute search
-pub const DEFAULT_ATTRIBUTE_SEARCH_LIMIT: usize = 10_000;
+/// Error if brute-force scanning would exceed this many collections.
+const ATTRIBUTE_SEARCH_ERROR_THRESHOLD: usize = 100_000;
 
 impl RefgetStore {
     /// Enable computation and storage of ancillary digests (nlp, snlp, sorted_sequences).
@@ -69,12 +34,6 @@ impl RefgetStore {
     /// Returns whether the on-disk attribute index is enabled.
     pub fn has_attribute_index(&self) -> bool {
         self.attribute_index
-    }
-
-    /// Set the maximum number of collections for brute-force attribute search.
-    /// Set to 0 for unlimited.
-    pub fn set_attribute_search_limit(&mut self, limit: usize) {
-        self.attribute_search_limit = limit;
     }
 
     /// Get collection at level 1 representation (attribute digests with spec field names).
@@ -122,20 +81,29 @@ impl RefgetStore {
     }
 
     /// Brute-force scan of collection metadata.
-    /// Returns error if collection count exceeds attribute_search_limit (unless 0).
+    /// Warns at 10k collections, errors at 100k collections.
     fn find_collections_by_attribute_scan(
         &self,
         attr_name: &str,
         attr_digest: &str,
     ) -> Result<Vec<String>> {
         let count = self.collections.len();
-        if self.attribute_search_limit > 0 && count > self.attribute_search_limit {
+
+        if count > ATTRIBUTE_SEARCH_ERROR_THRESHOLD {
             return Err(anyhow!(
-                "Too many collections ({}) for brute-force search (limit: {}). \
-                 Use set_attribute_search_limit(0) for unlimited or enable attribute index.",
-                count,
-                self.attribute_search_limit
+                "Brute-force attribute search is limited to {} collections ({} in store). \
+                 Indexed attribute lookup is planned for a future release.",
+                ATTRIBUTE_SEARCH_ERROR_THRESHOLD,
+                count
             ));
+        }
+
+        if count > ATTRIBUTE_SEARCH_WARN_THRESHOLD {
+            eprintln!(
+                "Warning: brute-force attribute search scanning {} collections. \
+                 This may be slow.",
+                count
+            );
         }
 
         let mut results = Vec::new();
@@ -223,16 +191,31 @@ impl RefgetStore {
         Ok(Some(value))
     }
 
+    /// Enable indexed attribute lookup (not yet implemented).
+    ///
+    /// Note: The indexed lookup feature is planned for a future release.
+    /// Enabling this will cause `find_collections_by_attribute()` to return
+    /// a "not implemented" error until the feature is complete.
+    pub fn enable_attribute_index(&mut self) {
+        self.attribute_index = true;
+    }
+
+    /// Disable indexed attribute lookup, using brute-force scan instead.
+    pub fn disable_attribute_index(&mut self) {
+        self.attribute_index = false;
+    }
+
     /// Indexed lookup from on-disk reverse index.
-    /// Stub in Part 1; Part 2 replaces with real implementation.
+    /// Stub: not yet implemented. Planned for a future release.
     fn find_collections_by_attribute_indexed(
         &self,
         _attr_name: &str,
         _attr_digest: &str,
     ) -> Result<Vec<String>> {
         Err(anyhow!(
-            "Attribute index not available. \
-             Use enable_attribute_index() or fall back to brute-force search."
+            "Indexed attribute lookup is not yet implemented. \
+             This feature is planned for a future release. \
+             For now, use the brute-force scan by keeping attribute_index disabled."
         ))
     }
 }
@@ -413,27 +396,6 @@ mod tests {
         assert!(store
             .find_collections_by_attribute("unknown", "digest")
             .is_err());
-    }
-
-    #[test]
-    fn test_find_collections_by_attribute_limit() {
-        let mut store = RefgetStore::in_memory();
-        store.set_attribute_search_limit(0); // unlimited first
-
-        let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
-            .unwrap();
-
-        // Should work with limit=0 (unlimited)
-        assert!(store
-            .find_collections_by_attribute("names", &metadata.names_digest)
-            .is_ok());
-
-        // Now set limit very low - but we only have 1 collection so it should still work
-        store.set_attribute_search_limit(1);
-        assert!(store
-            .find_collections_by_attribute("names", &metadata.names_digest)
-            .is_ok());
     }
 
     #[test]

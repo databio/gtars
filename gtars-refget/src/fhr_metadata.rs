@@ -13,7 +13,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::hashkeyable::HashKeyable;
+use crate::hashkeyable::{HashKeyable, key_to_digest_string};
 
 // ============================================================================
 // Types
@@ -173,16 +173,10 @@ pub struct FhrIdentifier {
 
 const SIDECAR_EXTENSION: &str = ".fhr.json";
 
-/// Convert a [u8; 32] key back to a digest string.
-pub(crate) fn key_to_digest_string(key: &[u8; 32]) -> String {
-    let len = key.iter().position(|&b| b == 0).unwrap_or(32);
-    String::from_utf8_lossy(&key[..len]).to_string()
-}
-
 /// Load all FHR sidecar files from a collections directory.
 ///
 /// Scans for `*.fhr.json` files, parses each one, and returns a map
-/// keyed by collection digest. Malformed files are silently skipped.
+/// keyed by collection digest. Malformed files are skipped with a warning to stderr.
 pub fn load_sidecars(collections_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
     let mut map = HashMap::new();
     if !collections_dir.exists() {
@@ -190,7 +184,14 @@ pub fn load_sidecars(collections_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
     }
     let entries = match fs::read_dir(collections_dir) {
         Ok(e) => e,
-        Err(_) => return map,
+        Err(e) => {
+            eprintln!(
+                "Warning: could not read FHR sidecar directory {}: {}",
+                collections_dir.display(),
+                e
+            );
+            return map;
+        }
     };
     for entry in entries.flatten() {
         let path = entry.path();
@@ -198,9 +199,27 @@ pub fn load_sidecars(collections_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
             if name.ends_with(SIDECAR_EXTENSION) {
                 let digest_str = &name[..name.len() - SIDECAR_EXTENSION.len()];
                 let key = digest_str.to_key();
-                if let Ok(json) = fs::read_to_string(&path) {
-                    if let Ok(fhr) = serde_json::from_str::<FhrMetadata>(&json) {
-                        map.insert(key, fhr);
+                match fs::read_to_string(&path) {
+                    Ok(json) => {
+                        match serde_json::from_str::<FhrMetadata>(&json) {
+                            Ok(fhr) => {
+                                map.insert(key, fhr);
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "Warning: skipping malformed FHR sidecar {}: {}",
+                                    path.display(),
+                                    e
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: could not read FHR sidecar {}: {}",
+                            path.display(),
+                            e
+                        );
                     }
                 }
             }
@@ -497,5 +516,32 @@ mod tests {
         assert!(json.contains("voucherSpecimen"));
         assert!(json.contains("documentation"));
         assert!(json.contains("identifier"));
+    }
+
+    #[test]
+    fn test_load_sidecars_skips_malformed_json() {
+        let dir = tempdir().unwrap();
+        let bad_path = dir.path().join("baddigest.fhr.json");
+        fs::write(&bad_path, "{ not valid json }").unwrap();
+        let map = load_sidecars(dir.path());
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_load_sidecars_loads_valid_skips_invalid() {
+        let dir = tempdir().unwrap();
+
+        // Write a valid sidecar
+        let valid_fhr = FhrMetadata {
+            genome: Some("ValidGenome".to_string()),
+            ..Default::default()
+        };
+        write_sidecar(&dir.path().join("validdigest.fhr.json"), &valid_fhr).unwrap();
+
+        // Write an invalid sidecar
+        fs::write(dir.path().join("baddigest.fhr.json"), "not json at all").unwrap();
+
+        let map = load_sidecars(dir.path());
+        assert_eq!(map.len(), 1);
     }
 }

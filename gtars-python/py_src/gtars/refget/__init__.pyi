@@ -763,10 +763,6 @@ class RefgetStore:
         """
         ...
 
-    def set_attribute_search_limit(self, limit: int) -> None:
-        """Set brute-force attribute search limit (0 = unlimited)."""
-        ...
-
     def enable_ancillary_digests(self) -> None:
         """Enable computation of ancillary digests."""
         ...
@@ -781,6 +777,14 @@ class RefgetStore:
 
     def has_attribute_index(self) -> bool:
         """Returns whether the on-disk attribute index is enabled."""
+        ...
+
+    def enable_attribute_index(self) -> None:
+        """Enable indexed attribute lookup (not yet implemented)."""
+        ...
+
+    def disable_attribute_index(self) -> None:
+        """Disable indexed attribute lookup, using brute-force scan instead."""
         ...
 
     def write_store_to_directory(
@@ -925,19 +929,11 @@ class RefgetStore:
         ...
 
     # FHR metadata
-    def set_fhr_metadata_enabled(self, enabled: bool) -> None:
-        """Enable or disable FHR metadata support."""
-        ...
-    @property
-    def has_fhr_metadata(self) -> bool:
-        """Whether FHR metadata support is enabled."""
-        ...
-
     def set_fhr_metadata(self, collection_digest: str, metadata: FhrMetadata) -> None:
         """Set FHR metadata for a collection."""
         ...
     def get_fhr_metadata(self, collection_digest: str) -> Optional[FhrMetadata]:
-        """Get FHR metadata for a collection. Returns None if disabled or missing."""
+        """Get FHR metadata for a collection. Returns None if missing."""
         ...
     def remove_fhr_metadata(self, collection_digest: str) -> bool:
         """Remove FHR metadata for a collection."""

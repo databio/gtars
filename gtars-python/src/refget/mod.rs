@@ -2,6 +2,8 @@
 // It will allow computing ga4gh digests, creating sequence store objects,
 // and sequence collection objects from Python.
 
+use std::path::PathBuf;
+
 use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
@@ -529,37 +531,7 @@ impl PySequenceRecord {
     ///     >>> if sequence:
     ///     ...     print(f"First 50 bases: {sequence[:50]}")
     pub fn decode(&self) -> Option<String> {
-        // Convert PySequenceRecord to Rust SequenceRecord
-        let metadata = SequenceMetadata {
-            name: self.metadata.name.clone(),
-            description: self.metadata.description.clone(),
-            length: self.metadata.length,
-            sha512t24u: self.metadata.sha512t24u.clone(),
-            md5: self.metadata.md5.clone(),
-            alphabet: match self.metadata.alphabet {
-                PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
-                PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
-                PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
-                PyAlphabetType::Protein => AlphabetType::Protein,
-                PyAlphabetType::Ascii => AlphabetType::Ascii,
-                PyAlphabetType::Unknown => AlphabetType::Unknown,
-            },
-            fai: self.metadata.fai.as_ref().map(|fai| FaiMetadata {
-                offset: fai.offset,
-                line_bases: fai.line_bases,
-                line_bytes: fai.line_bytes,
-            }),
-        };
-
-        let rust_record = match &self.sequence {
-            None => SequenceRecord::Stub(metadata),
-            Some(seq) => SequenceRecord::Full {
-                metadata,
-                sequence: seq.clone(),
-            },
-        };
-
-        // Call the Rust decode method
+        let rust_record = SequenceRecord::from(self.clone());
         rust_record.decode()
     }
 }
@@ -632,55 +604,7 @@ impl PySequenceCollection {
     ///     >>> collection.write_fasta("output.fa")
     ///     >>> collection.write_fasta("output.fa", line_width=60)
     fn write_fasta(&self, file_path: &str, line_width: Option<usize>) -> PyResult<()> {
-        // Convert Python sequences back to Rust SequenceCollection
-        let rust_collection = SequenceCollection {
-            sequences: self
-                .sequences
-                .iter()
-                .map(|py_rec| {
-                    let metadata = SequenceMetadata {
-                        name: py_rec.metadata.name.clone(),
-                        description: py_rec.metadata.description.clone(),
-                        length: py_rec.metadata.length,
-                        sha512t24u: py_rec.metadata.sha512t24u.clone(),
-                        md5: py_rec.metadata.md5.clone(),
-                        alphabet: match &py_rec.metadata.alphabet {
-                            PyAlphabetType::Dna2bit => AlphabetType::Dna2bit,
-                            PyAlphabetType::Dna3bit => AlphabetType::Dna3bit,
-                            PyAlphabetType::DnaIupac => AlphabetType::DnaIupac,
-                            PyAlphabetType::Protein => AlphabetType::Protein,
-                            PyAlphabetType::Ascii => AlphabetType::Ascii,
-                            PyAlphabetType::Unknown => AlphabetType::Unknown,
-                        },
-                        fai: py_rec.metadata.fai.as_ref().map(|f| FaiMetadata {
-                            offset: f.offset,
-                            line_bases: f.line_bases,
-                            line_bytes: f.line_bytes,
-                        }),
-                    };
-
-                    match &py_rec.sequence {
-                        None => SequenceRecord::Stub(metadata),
-                        Some(seq) => SequenceRecord::Full {
-                            metadata,
-                            sequence: seq.clone(),
-                        },
-                    }
-                })
-                .collect(),
-            metadata: SequenceCollectionMetadata {
-                digest: self.digest.clone(),
-                n_sequences: self.sequences.len(),
-                sequences_digest: self.lvl1.sequences_digest.clone(),
-                names_digest: self.lvl1.names_digest.clone(),
-                lengths_digest: self.lvl1.lengths_digest.clone(),
-                name_length_pairs_digest: None,
-                sorted_name_length_pairs_digest: None,
-                sorted_sequences_digest: None,
-                file_path: None,
-            },
-        };
-
+        let rust_collection = SequenceCollection::from(self.clone());
         rust_collection
             .write_fasta(file_path, line_width)
             .map_err(|e| {
@@ -837,6 +761,32 @@ impl From<PySequenceRecord> for SequenceRecord {
         match value.sequence {
             Some(sequence) => SequenceRecord::Full { metadata, sequence },
             None => SequenceRecord::Stub(metadata),
+        }
+    }
+}
+
+// Conversion from Python PySequenceCollection to Rust SequenceCollection
+impl From<PySequenceCollection> for SequenceCollection {
+    fn from(value: PySequenceCollection) -> Self {
+        let n_sequences = value.sequences.len();
+        let sequences: Vec<SequenceRecord> = value
+            .sequences
+            .into_iter()
+            .map(SequenceRecord::from)
+            .collect();
+        SequenceCollection {
+            sequences,
+            metadata: SequenceCollectionMetadata {
+                digest: value.digest,
+                n_sequences,
+                sequences_digest: value.lvl1.sequences_digest,
+                names_digest: value.lvl1.names_digest,
+                lengths_digest: value.lvl1.lengths_digest,
+                name_length_pairs_digest: None,
+                sorted_name_length_pairs_digest: None,
+                sorted_sequences_digest: None,
+                file_path: value.file_path.map(PathBuf::from),
+            },
         }
     }
 }
@@ -1668,38 +1618,26 @@ impl PyRefgetStore {
         attr_name: &str,
         attr_digest: &str,
     ) -> PyResult<Option<Py<PyAny>>> {
-        // Find matching collections
-        let collections = self
+        let result = self
             .inner
-            .find_collections_by_attribute(attr_name, attr_digest)
+            .get_attribute(attr_name, attr_digest)
             .map_err(|e| {
-                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+                PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}", e))
             })?;
-        if collections.is_empty() {
-            return Ok(None);
+
+        match result {
+            None => Ok(None),
+            Some(value) => {
+                let json_str = serde_json::to_string(&value).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to serialize attribute value: {}",
+                        e
+                    ))
+                })?;
+                let py_obj = json_string_to_py(py, &json_str)?;
+                Ok(Some(py_obj))
+            }
         }
-
-        // Load the first matching collection and extract the attribute array
-        let collection = self.inner.get_collection(&collections[0]).map_err(|e| {
-            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
-        })?;
-        let lvl2 = collection.to_level2();
-
-        match attr_name {
-            "names" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.names)?.into())),
-            "lengths" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.lengths)?.into())),
-            "sequences" => Ok(Some(pyo3::types::PyList::new(py, &lvl2.sequences)?.into())),
-            _ => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
-                "Cannot retrieve attribute array for '{}'. \
-                 Only 'names', 'lengths', and 'sequences' have raw arrays.",
-                attr_name
-            ))),
-        }
-    }
-
-    /// Set brute-force attribute search limit (0 = unlimited).
-    fn set_attribute_search_limit(&mut self, limit: usize) {
-        self.inner.set_attribute_search_limit(limit);
     }
 
     /// Enable computation of ancillary digests.
@@ -1720,6 +1658,16 @@ impl PyRefgetStore {
     /// Returns whether the on-disk attribute index is enabled.
     fn has_attribute_index(&self) -> bool {
         self.inner.has_attribute_index()
+    }
+
+    /// Enable indexed attribute lookup (not yet implemented).
+    fn enable_attribute_index(&mut self) {
+        self.inner.enable_attribute_index();
+    }
+
+    /// Disable indexed attribute lookup, using brute-force scan instead.
+    fn disable_attribute_index(&mut self) {
+        self.inner.disable_attribute_index();
     }
 
     /// Write the store using its configured paths.
@@ -2098,8 +2046,10 @@ impl PyRefgetStore {
     }
 
     /// Remove a single sequence alias. Returns true if it existed.
-    fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> bool {
-        self.inner.remove_sequence_alias(namespace, alias)
+    fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> PyResult<bool> {
+        self.inner
+            .remove_sequence_alias(namespace, alias)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
     /// Load sequence aliases from a TSV file into a namespace.
@@ -2152,8 +2102,10 @@ impl PyRefgetStore {
     }
 
     /// Remove a single collection alias. Returns true if it existed.
-    fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> bool {
-        self.inner.remove_collection_alias(namespace, alias)
+    fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> PyResult<bool> {
+        self.inner
+            .remove_collection_alias(namespace, alias)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
     /// Load collection aliases from a TSV file into a namespace.
@@ -2167,17 +2119,6 @@ impl PyRefgetStore {
     // =========================================================================
     // FHR Metadata API
     // =========================================================================
-
-    /// Enable or disable FHR metadata support.
-    fn set_fhr_metadata_enabled(&mut self, enabled: bool) {
-        self.inner.set_fhr_metadata_enabled(enabled);
-    }
-
-    /// Returns whether FHR metadata support is enabled.
-    #[getter]
-    fn has_fhr_metadata(&self) -> bool {
-        self.inner.has_fhr_metadata()
-    }
 
     /// Set FHR metadata for a collection.
     #[pyo3(signature = (collection_digest, metadata))]

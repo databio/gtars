@@ -932,6 +932,42 @@ pub fn parse_rgsi_line(line: &str) -> Option<SequenceMetadata> {
     }
 }
 
+/// Parse a single line from an RGCI (collection index) file.
+///
+/// RGCI format is tab-separated with 5+ columns:
+/// digest, n_sequences, names_digest, sequences_digest, lengths_digest,
+/// [name_length_pairs_digest, sorted_name_length_pairs_digest, sorted_sequences_digest]
+///
+/// Lines starting with '#' are treated as comments and return None.
+/// Lines with fewer than 5 columns return None.
+/// Columns 5-7 are optional ancillary digests (empty string = None).
+pub fn parse_rgci_line(line: &str) -> Option<SequenceCollectionMetadata> {
+    if line.starts_with('#') {
+        return None;
+    }
+    let parts: Vec<&str> = line.split('\t').collect();
+    if parts.len() < 5 {
+        return None;
+    }
+    // Parse optional ancillary digest columns (empty string -> None)
+    let opt_col = |i: usize| -> Option<String> {
+        parts.get(i).and_then(|s| {
+            if s.is_empty() { None } else { Some(s.to_string()) }
+        })
+    };
+    Some(SequenceCollectionMetadata {
+        digest: parts[0].to_string(),
+        n_sequences: parts[1].parse().ok()?,
+        names_digest: parts[2].to_string(),
+        sequences_digest: parts[3].to_string(),
+        lengths_digest: parts[4].to_string(),
+        name_length_pairs_digest: opt_col(5),
+        sorted_name_length_pairs_digest: opt_col(6),
+        sorted_sequences_digest: opt_col(7),
+        file_path: None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

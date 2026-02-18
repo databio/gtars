@@ -37,5 +37,5 @@ pub use types::{
     ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
     ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1, SequenceCollection,
     SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
-    digest_sequence, digest_sequence_with_description, parse_rgsi_line,
+    digest_sequence, digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
 };
