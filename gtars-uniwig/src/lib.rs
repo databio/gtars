@@ -22,7 +22,7 @@ use self::utils::{
 };
 use self::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
-    write_to_wig_file,
+    write_to_wig_file, write_to_wig_file_variable,
 };
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::utils::cli::BBIWriteArgs;
@@ -59,6 +59,7 @@ pub fn uniwig_main(
     debug: bool,
     bam_shift: bool,
     bam_scale: f32,
+    wigstep: &str,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -155,18 +156,33 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &count_result.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(
-                                                        primary_start.0,
-                                                        smoothsize,
-                                                        1, //must shift wiggle starts and core by 1 since it is 1 based
-                                                    ),
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_start.0,
+                                                            smoothsize,
+                                                            0, // no shift needed - coordinates already 1-based from BED conversion
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_start.0,
+                                                            smoothsize,
+                                                            0, // no shift needed - coordinates already 1-based from BED conversion
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
                                             "bedGraph" => {
                                                 let file_name = format!(
@@ -266,18 +282,33 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "end", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &count_result.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(
-                                                        primary_end.0,
-                                                        smoothsize,
-                                                        0, // ends already 1 based, do not shift further
-                                                    ),
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_end.0,
+                                                            smoothsize,
+                                                            0,
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_end.0,
+                                                            smoothsize,
+                                                            0, // ends already 1 based, do not shift further
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
 
                                             "npy" => {
@@ -359,14 +390,25 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "core", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &core_results.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, 0, 1), //starts are 1 based must be shifted by 1
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &core_results.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(primary_start.0, 0, 0), // no shift - already 1-based
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &core_results.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(primary_start.0, 0, 0), // no shift - already 1-based
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
                                             "npy" => {
                                                 let file_name = format!(
@@ -1552,6 +1594,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1598,6 +1641,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1646,6 +1690,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1693,6 +1738,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1749,6 +1795,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1806,6 +1853,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1875,6 +1923,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -1949,6 +1998,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -2063,6 +2113,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -2176,6 +2227,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -2225,6 +2277,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -2270,6 +2323,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         // Generate wig output
@@ -2291,6 +2345,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         // Run npy_to_wig
