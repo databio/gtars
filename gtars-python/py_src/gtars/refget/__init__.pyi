@@ -13,7 +13,7 @@ and compiled via PyO3. This stub file provides the Python interface definition
 and structured documentation that tools can parse properly.
 """
 
-from typing import Any, Union, Optional, List, Type
+from typing import Any, Union, Optional, List, Iterator
 from enum import Enum
 from os import PathLike
 
@@ -31,27 +31,90 @@ class AlphabetType(Enum):
 
     def __str__(self) -> str: ...
 
-class SequenceMetadata:
+class FaiMetadata:
+    """FASTA index (FAI) metadata for a sequence.
+
+    Contains the information needed to quickly seek to a sequence
+    in a FASTA file, compatible with samtools faidx format.
+
+    Attributes:
+        offset: Byte offset of the first base in the FASTA file.
+        line_bases: Number of bases per line.
+        line_bytes: Number of bytes per line (including newline).
     """
-    Metadata for a biological sequence.
+
+    offset: int
+    line_bases: int
+    line_bytes: int
+
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
+class FaiRecord:
+    """A FASTA index record for a single sequence.
+
+    Represents one line of a .fai index file with sequence name,
+    length, and FAI metadata for random access.
+
+    Attributes:
+        name: Sequence name.
+        length: Sequence length in bases.
+        fai: FAI metadata (None for gzipped files).
     """
 
     name: str
     length: int
+    fai: Optional[FaiMetadata]
+
+    def __repr__(self) -> str: ...
+    def __str__(self) -> str: ...
+
+class SequenceMetadata:
+    """Metadata for a biological sequence.
+
+    Contains identifying information and computed digests for a sequence,
+    without the actual sequence data.
+
+    Attributes:
+        name: Sequence name (first word of FASTA header).
+        description: Description from FASTA header (text after first whitespace).
+        length: Length of the sequence in bases.
+        sha512t24u: GA4GH SHA-512/24u digest (32-char base64url).
+        md5: MD5 digest (32-char hex string).
+        alphabet: Detected alphabet type (DNA, protein, etc.).
+        fai: FASTA index metadata if available.
+    """
+
+    name: str
+    description: Optional[str]
+    length: int
     sha512t24u: str
     md5: str
     alphabet: AlphabetType
+    fai: Optional[FaiMetadata]
 
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
 class SequenceRecord:
-    """
-    A record representing a biological sequence, including its metadata and optional data.
+    """A record representing a biological sequence, including its metadata and optional data.
+
+    SequenceRecord can be either a "stub" (metadata only) or "full" (metadata + data).
+    Stubs are used for lazy-loading where sequence data is fetched on demand.
+
+    Attributes:
+        metadata: Sequence metadata (name, length, digests).
+        sequence: Raw sequence data if loaded, None for stubs.
+        is_loaded: Whether sequence data is loaded (True) or just metadata (False).
     """
 
     metadata: SequenceMetadata
-    sequence: Optional[bytes]  # Raw sequence bytes when loaded (Full), None when stub-only
+    sequence: Optional[bytes]
+
+    @property
+    def is_loaded(self) -> bool:
+        """Whether sequence data is loaded (true) or just metadata (false)."""
+        ...
 
     def decode(self) -> Optional[str]:
         """Decode and return the sequence data as a string.
@@ -80,8 +143,7 @@ class SeqColDigestLvl1:
     def __str__(self) -> str: ...
 
 class SequenceCollectionMetadata:
-    """
-    Metadata for a sequence collection.
+    """Metadata for a sequence collection.
 
     Contains the collection digest and level 1 digests for names, sequences, and lengths.
     This is a lightweight representation of a collection without the actual sequence list.
@@ -92,6 +154,9 @@ class SequenceCollectionMetadata:
         names_digest: Level 1 digest of the names array.
         sequences_digest: Level 1 digest of the sequences array.
         lengths_digest: Level 1 digest of the lengths array.
+        name_length_pairs_digest: Ancillary digest (if computed).
+        sorted_name_length_pairs_digest: Ancillary digest (if computed).
+        sorted_sequences_digest: Ancillary digest (if computed).
     """
 
     digest: str
@@ -107,45 +172,74 @@ class SequenceCollectionMetadata:
     def __str__(self) -> str: ...
 
 class SequenceCollection:
-    """
-    A collection of biological sequences.
+    """A collection of biological sequences (e.g., a genome assembly).
+
+    SequenceCollection represents a set of sequences with collection-level
+    digests following the GA4GH seqcol specification. Supports iteration,
+    indexing, and len().
+
+    Attributes:
+        sequences: List of sequence records.
+        digest: Collection-level SHA-512/24u digest (Level 2).
+        lvl1: Level 1 digests for names, lengths, sequences.
+        file_path: Source file path if loaded from FASTA.
+
+    Examples:
+        Iterate over sequences::
+
+            for seq in collection:
+                print(f"{seq.metadata.name}: {seq.metadata.length} bp")
+
+        Access by index::
+
+            first_seq = collection[0]
+            last_seq = collection[-1]
+
+        Get length::
+
+            n = len(collection)
     """
 
     sequences: List[SequenceRecord]
     digest: str
     lvl1: SeqColDigestLvl1
     file_path: Optional[str]
-    has_data: bool
 
-    def __repr__(self) -> str: ...
-    def __str__(self) -> str: ...
+    def write_fasta(self, file_path: str, line_width: Optional[int] = None) -> None:
+        """Write the collection to a FASTA file.
 
-class SequenceCollectionRecord:
-    """
-    A record representing a sequence collection, which may be a Stub or Full.
+        Args:
+            file_path: Path to the output FASTA file.
+            line_width: Number of bases per line (default: 70).
 
-    Stub records contain only metadata (digest, n_sequences, level 1 digests).
-    Full records contain metadata plus the list of SequenceRecord objects.
-    """
+        Raises:
+            IOError: If any sequence doesn't have data loaded.
 
-    metadata: SequenceCollectionMetadata
+        Example::
 
-    @property
-    def sequences(self) -> Optional[List[SequenceRecord]]:
-        """Get the sequences if loaded (Full), None if stub-only."""
+            collection = load_fasta("genome.fa")
+            collection.write_fasta("output.fa")
+            collection.write_fasta("output.fa", line_width=60)
+        """
         ...
 
-    def has_sequences(self) -> bool:
-        """Check if this record has sequences loaded (is Full, not Stub)."""
-        ...
-
+    def __len__(self) -> int: ...
+    def __getitem__(self, idx: int) -> SequenceRecord: ...
+    def __iter__(self) -> Iterator[SequenceRecord]: ...
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
 class RetrievedSequence:
-    """
-    Represents a retrieved sequence segment with its metadata.
-    Exposed from the Rust `PyRetrievedSequence` struct.
+    """Represents a retrieved sequence segment with its metadata.
+
+    Returned by methods that extract subsequences from specific regions,
+    such as substrings_from_regions().
+
+    Attributes:
+        sequence: The extracted sequence string.
+        chrom_name: Chromosome/sequence name (e.g., "chr1").
+        start: Start position (0-based, inclusive).
+        end: End position (0-based, exclusive).
     """
 
     sequence: str
@@ -160,8 +254,11 @@ class RetrievedSequence:
     def __str__(self) -> str: ...
 
 class StorageMode(Enum):
-    """
-    Defines how sequence data is stored in the Refget store.
+    """Defines how sequence data is stored in the Refget store.
+
+    Variants:
+        Raw: Store sequences as raw bytes (1 byte per base).
+        Encoded: Store sequences with 2-bit encoding (4 bases per byte).
     """
 
     Raw: int
@@ -206,6 +303,8 @@ class RefgetStore:
         cache_path: Local directory path where the store is located or cached.
             None for in-memory stores.
         remote_url: Remote URL of the store if loaded remotely, None otherwise.
+        quiet: Whether the store suppresses progress output.
+        storage_mode: Current storage mode (Raw or Encoded).
 
     Note:
         **Boolean evaluation**: RefgetStore follows Python container semantics,
@@ -230,9 +329,9 @@ class RefgetStore:
     Examples:
         Create a new store and import sequences::
 
-            from gtars.refget import RefgetStore, StorageMode
-            store = RefgetStore(StorageMode.Encoded)
-            store.import_fasta("genome.fa")
+            from gtars.refget import RefgetStore
+            store = RefgetStore.in_memory()
+            store.add_sequence_collection_from_fasta("genome.fa")
 
         Open an existing local store::
 
@@ -250,16 +349,26 @@ class RefgetStore:
     cache_path: Optional[str]
     remote_url: Optional[str]
 
-    def __init__(self, mode: StorageMode) -> None:
-        """Create a new empty RefgetStore.
+    @property
+    def quiet(self) -> bool:
+        """Whether the store is in quiet mode."""
+        ...
 
-        Args:
-            mode: Storage mode - StorageMode.Raw (uncompressed) or
-                StorageMode.Encoded (bit-packed, space-efficient).
+    @property
+    def storage_mode(self) -> StorageMode:
+        """Current storage mode (Raw or Encoded)."""
+        ...
+
+    @property
+    def is_persisting(self) -> bool:
+        """Whether the store is currently persisting to disk.
 
         Example::
 
-            store = RefgetStore(StorageMode.Encoded)
+            store = RefgetStore.in_memory()
+            print(store.is_persisting)  # False
+            store.enable_persistence("/data/store")
+            print(store.is_persisting)  # True
         """
         ...
 
@@ -276,7 +385,7 @@ class RefgetStore:
         Example::
 
             store = RefgetStore.in_memory()
-            store.import_fasta("genome.fa")
+            store.add_sequence_collection_from_fasta("genome.fa")
         """
         ...
 
@@ -296,7 +405,7 @@ class RefgetStore:
         Example::
 
             store = RefgetStore.on_disk("/data/my_store")
-            store.import_fasta("genome.fa")
+            store.add_sequence_collection_from_fasta("genome.fa")
             # Store is automatically persisted to disk
         """
         ...
@@ -380,6 +489,48 @@ class RefgetStore:
         """
         ...
 
+    def enable_encoding(self) -> None:
+        """Enable 2-bit encoding for space efficiency.
+
+        Re-encodes any existing Raw sequences in memory.
+
+        Example::
+
+            store = RefgetStore.in_memory()
+            store.disable_encoding()  # Switch to Raw
+            store.enable_encoding()   # Back to Encoded
+        """
+        ...
+
+    def disable_encoding(self) -> None:
+        """Disable encoding, use raw byte storage.
+
+        Decodes any existing Encoded sequences in memory.
+
+        Example::
+
+            store = RefgetStore.in_memory()
+            store.disable_encoding()  # Switch to Raw mode
+        """
+        ...
+
+    def set_quiet(self, quiet: bool) -> None:
+        """Set whether to suppress progress output.
+
+        When quiet is True, operations like add_sequence_collection_from_fasta
+        will not print progress messages.
+
+        Args:
+            quiet: Whether to suppress progress output.
+
+        Example::
+
+            store = RefgetStore.in_memory()
+            store.set_quiet(True)
+            store.add_sequence_collection_from_fasta("genome.fa")  # No output
+        """
+        ...
+
     def enable_persistence(self, path: Union[str, PathLike]) -> None:
         """Enable disk persistence for this store.
 
@@ -413,22 +564,57 @@ class RefgetStore:
         """
         ...
 
-    def import_fasta(self, file_path: Union[str, PathLike]) -> None:
-        """Import sequences from a FASTA file into the store.
+    def add_sequence_collection_from_fasta(
+        self, file_path: Union[str, PathLike], force: bool = False
+    ) -> tuple[SequenceCollectionMetadata, bool]:
+        """Add a sequence collection from a FASTA file.
 
-        Reads all sequences from a FASTA file and adds them to the store.
-        Computes GA4GH digests and creates a sequence collection.
+        Reads a FASTA file, digests the sequences, creates a SequenceCollection,
+        and adds it to the store along with all its sequences.
 
         Args:
-            file_path: Path to the FASTA file.
+            file_path: Path to the FASTA file to import.
+            force: If True, overwrite existing collections/sequences.
+                If False (default), skip duplicates.
+
+        Returns:
+            A tuple containing:
+                - SequenceCollectionMetadata: Metadata for the collection.
+                - bool: True if the collection was newly added, False if it already existed.
 
         Raises:
-            IOError: If the file cannot be read or parsed.
+            IOError: If the file cannot be read or processed.
 
         Example::
 
-            store = RefgetStore(StorageMode.Encoded)
-            store.import_fasta("genome.fa")
+            store = RefgetStore.in_memory()
+            metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
+            print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest}")
+        """
+        ...
+
+    def add_sequence_collection(
+        self, collection: SequenceCollection, force: bool = False
+    ) -> None:
+        """Add a pre-built SequenceCollection to the store.
+
+        Adds a SequenceCollection (created via ``digest_fasta()`` or programmatically)
+        directly to the store without reading from a FASTA file.
+
+        Args:
+            collection: A SequenceCollection to add.
+            force: If True, overwrite existing collections/sequences.
+                If False (default), skip duplicates.
+
+        Raises:
+            IOError: If the collection cannot be stored.
+
+        Example::
+
+            from gtars.refget import RefgetStore, digest_fasta
+            store = RefgetStore.in_memory()
+            collection = digest_fasta("genome.fa")
+            store.add_sequence_collection(collection)
         """
         ...
 
@@ -699,6 +885,40 @@ class RefgetStore:
         """
         ...
 
+    def write(self) -> None:
+        """Write the store using its configured paths.
+
+        Convenience method for disk-backed stores. Uses the store's own
+        local_path and seqdata_path_template.
+
+        Raises:
+            IOError: If the store cannot be written.
+        """
+        ...
+
+    def write_store_to_dir(
+        self,
+        root_path: Union[str, PathLike],
+        seqdata_path_template: Optional[str] = None,
+    ) -> None:
+        """Write the store to a directory on disk.
+
+        Persists the store with all sequences and metadata to disk using the
+        RefgetStore directory format.
+
+        Args:
+            root_path: Directory path to write the store to.
+            seqdata_path_template: Optional path template for sequence files (e.g.,
+                "sequences/%s2/%s.seq" where %s2 = first 2 chars of digest,
+                %s = full digest). Uses default if not specified.
+
+        Example::
+
+            store.write_store_to_dir("/data/my_store")
+            store.write_store_to_dir("/data/my_store", "sequences/%s2/%s.seq")
+        """
+        ...
+
     # =========================================================================
     # Seqcol Features
     # =========================================================================
@@ -787,59 +1007,64 @@ class RefgetStore:
         """Disable indexed attribute lookup, using brute-force scan instead."""
         ...
 
-    def write_store_to_directory(
-        self, root_path: Union[str, PathLike], seqdata_path_template: str
-    ) -> None:
-        """Write the store to a directory on disk.
-
-        Persists the store with all sequences and metadata to disk using the
-        RefgetStore directory format.
-
-        Args:
-            root_path: Directory path to write the store to.
-            seqdata_path_template: Path template for sequence files (e.g.,
-                "sequences/%s2/%s.seq" where %s2 = first 2 chars of digest,
-                %s = full digest).
-
-        Example::
-
-            store.write_store_to_directory(
-                "/data/my_store",
-                "sequences/%s2/%s.seq"
-            )
-        """
-        ...
-
     # =========================================================================
     # BED/FASTA Export
     # =========================================================================
 
-    def get_seqs_bed_file(
+    def export_fasta_from_regions(
         self,
         collection_digest: str,
         bed_file_path: Union[str, PathLike],
-        output_fasta_path: Union[str, PathLike],
+        output_file_path: Union[str, PathLike],
     ) -> None:
-        """Extract sequences for BED regions and write to FASTA.
+        """Export sequences from BED file regions to a FASTA file.
+
+        Reads a BED file defining genomic regions and exports the sequences
+        for those regions to a FASTA file.
 
         Args:
-            collection_digest: Collection digest to look up sequence names.
-            bed_file_path: Path to BED file with regions.
-            output_fasta_path: Path to write output FASTA file.
+            collection_digest: The collection's SHA-512/24u digest.
+            bed_file_path: Path to BED file defining regions.
+            output_file_path: Path to write the output FASTA file.
+
+        Raises:
+            IOError: If files cannot be read/written or sequences not found.
+
+        Example::
+
+            store.export_fasta_from_regions(
+                "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
+                "regions.bed",
+                "output.fa"
+            )
         """
         ...
 
-    def get_seqs_bed_file_to_vec(
+    def substrings_from_regions(
         self, collection_digest: str, bed_file_path: Union[str, PathLike]
     ) -> List[RetrievedSequence]:
-        """Extract sequences for BED regions and return as list.
+        """Get substrings for BED file regions as a list.
+
+        Reads a BED file and returns a list of sequences for each region.
 
         Args:
-            collection_digest: Collection digest to look up sequence names.
-            bed_file_path: Path to BED file with regions.
+            collection_digest: The collection's SHA-512/24u digest.
+            bed_file_path: Path to BED file defining regions.
 
         Returns:
             List of retrieved sequence segments.
+
+        Raises:
+            IOError: If files cannot be read or sequences not found.
+
+        Example::
+
+            sequences = store.substrings_from_regions(
+                "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
+                "regions.bed"
+            )
+            for seq in sequences:
+                print(f"{seq.chrom_name}:{seq.start}-{seq.end}")
         """
         ...
 
@@ -864,14 +1089,14 @@ class RefgetStore:
 
     def export_fasta_by_digests(
         self,
-        digests: List[str],
+        seq_digests: List[str],
         output_path: Union[str, PathLike],
         line_width: Optional[int] = None,
     ) -> None:
         """Export sequences by their digests to a FASTA file.
 
         Args:
-            digests: List of sequence digests to export.
+            seq_digests: List of sequence digests to export.
             output_path: Path to write FASTA file.
             line_width: Optional line width for wrapping sequences. If None,
                 uses default of 80.
@@ -945,6 +1170,8 @@ class RefgetStore:
         """Load FHR metadata from a JSON file and attach it to a collection."""
         ...
 
+    def __len__(self) -> int: ...
+    def __iter__(self) -> Iterator[SequenceMetadata]: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
@@ -1018,7 +1245,7 @@ def digest_fasta(fasta: Union[str, PathLike]) -> SequenceCollection:
     """
     ...
 
-def compute_fai(fasta: Union[str, PathLike]) -> List["FaiRecord"]:
+def compute_fai(fasta: Union[str, PathLike]) -> List[FaiRecord]:
     """Compute FASTA index (FAI) metadata for all sequences in a FASTA file.
 
     This function computes the FAI index metadata (offset, line_bases, line_bytes)
@@ -1039,7 +1266,7 @@ def compute_fai(fasta: Union[str, PathLike]) -> List["FaiRecord"]:
         from gtars.refget import compute_fai
         fai_records = compute_fai("genome.fa")
         for record in fai_records:
-        ...     print(f"{record.name}: {record.length} bp")
+            print(f"{record.name}: {record.length} bp")
     """
     ...
 
@@ -1063,7 +1290,7 @@ def load_fasta(fasta: Union[str, PathLike]) -> SequenceCollection:
         from gtars.refget import load_fasta
         collection = load_fasta("genome.fa")
         first_seq = collection[0]
-        print(f"Sequence: {first_seq.data[:50]}...")
+        print(f"Sequence: {first_seq.decode()[:50]}...")
     """
     ...
 

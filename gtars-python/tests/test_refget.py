@@ -969,3 +969,108 @@ def test_fhr_metadata_spec_fields():
     # seqcol_digest should NOT appear
     assert "seqcolDigest" not in d
     assert "seqcol_digest" not in d
+
+
+def test_add_sequence_collection_basic():
+    """Test adding a pre-built SequenceCollection to a store."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    # Build a collection using digest_fasta (no FASTA file write needed)
+    collection = digest_fasta(fasta_path)
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection(collection)
+
+    # Collection should appear in list_collections
+    collections = store.list_collections()
+    assert len(collections) == 1
+    assert collections[0].digest == collection.digest
+
+
+def test_add_sequence_collection_sequences_retrievable():
+    """Test that sequences from add_sequence_collection are retrievable by metadata.
+
+    digest_fasta() produces a collection with DIGEST_ONLY sequences (no raw data),
+    so the sequences are stored as Stubs and get_sequence returns metadata but
+    get_sequence(digest) returns None for unloaded Stubs. Verify metadata is present
+    via list_collections and collection digest lookup.
+    """
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection(collection)
+
+    # The collection metadata should be present and match
+    meta = store.get_collection_metadata(collection.digest)
+    assert meta is not None, "Collection metadata should be present in store"
+    assert meta.digest == collection.digest
+    assert meta.n_sequences == len(collection.sequences)
+
+    # Use load_fasta to get a collection with Full sequences, verify those ARE retrievable
+    from gtars.refget import load_fasta
+
+    full_collection = load_fasta(fasta_path)
+    store2 = RefgetStore.in_memory()
+    store2.add_sequence_collection(full_collection)
+
+    for seq_record in full_collection.sequences:
+        digest = seq_record.metadata.sha512t24u
+        retrieved = store2.get_sequence(digest)
+        assert retrieved is not None, f"Sequence {digest} should be retrievable from full collection"
+        assert retrieved.metadata.length == seq_record.metadata.length
+
+
+def test_add_sequence_collection_skip_duplicate():
+    """Test that add_sequence_collection skips duplicates by default."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+
+    # Add the same collection twice - should not raise
+    store.add_sequence_collection(collection)
+    store.add_sequence_collection(collection)
+
+    # Should still have exactly one collection
+    assert len(store.list_collections()) == 1
+
+
+def test_add_sequence_collection_force():
+    """Test that add_sequence_collection with force=True overwrites existing."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+
+    # Add once, then force-overwrite - should not raise
+    store.add_sequence_collection(collection)
+    store.add_sequence_collection(collection, force=True)
+
+    # Should still have exactly one collection
+    assert len(store.list_collections()) == 1
+
+
+def test_is_persisting_false_for_memory_store():
+    """Test that in-memory stores report is_persisting as False."""
+    store = RefgetStore.in_memory()
+    assert store.is_persisting is False
+
+
+def test_is_persisting_true_after_enable(tmp_path):
+    """Test that is_persisting becomes True after enable_persistence."""
+    store = RefgetStore.in_memory()
+    assert store.is_persisting is False
+
+    store.enable_persistence(str(tmp_path))
+    assert store.is_persisting is True
+
+
+def test_is_persisting_false_after_disable(tmp_path):
+    """Test that is_persisting becomes False after disable_persistence."""
+    store = RefgetStore.in_memory()
+    store.enable_persistence(str(tmp_path))
+    assert store.is_persisting is True
+
+    store.disable_persistence()
+    assert store.is_persisting is False

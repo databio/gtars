@@ -1133,6 +1133,21 @@ impl PyRefgetStore {
         self.inner.is_quiet()
     }
 
+    /// Returns whether the store is currently persisting to disk.
+    ///
+    /// Returns:
+    ///     bool: True if the store is writing sequences to disk.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> print(store.is_persisting)  # False
+    ///     >>> store.enable_persistence("/data/store")
+    ///     >>> print(store.is_persisting)  # True
+    #[getter]
+    fn is_persisting(&self) -> bool {
+        self.inner.is_persisting()
+    }
+
     /// Enable disk persistence for this store.
     ///
     /// Sets up the store to write sequences to disk. Any in-memory Full sequences
@@ -1237,6 +1252,39 @@ impl PyRefgetStore {
                     e
                 ))
             })
+    }
+
+    /// Add a pre-built SequenceCollection to the store.
+    ///
+    /// Adds a SequenceCollection (created via `digest_fasta()` or programmatically)
+    /// directly to the store without reading from a FASTA file.
+    ///
+    /// Args:
+    ///     collection (SequenceCollection): A SequenceCollection to add.
+    ///     force (bool, optional): If True, overwrite existing collections/sequences.
+    ///                            If False (default), skip duplicates.
+    ///
+    /// Raises:
+    ///     IOError: If the collection cannot be stored.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import RefgetStore, digest_fasta
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> collection = digest_fasta("genome.fa")
+    ///     >>> store.add_sequence_collection(collection)
+    #[pyo3(signature = (collection, force=false))]
+    fn add_sequence_collection(
+        &mut self,
+        collection: PySequenceCollection,
+        force: bool,
+    ) -> PyResult<()> {
+        let rust_collection = SequenceCollection::from(collection);
+        if force {
+            self.inner.add_sequence_collection_force(rust_collection)
+        } else {
+            self.inner.add_sequence_collection(rust_collection)
+        }
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
     /// Retrieve a sequence record by its digest (SHA-512/24u or MD5).
@@ -2204,8 +2252,8 @@ impl PyRefgetStore {
     ///     int: Total number of sequences in the store.
     ///
     /// Example:
-    ///     >>> store = RefgetStore(StorageMode.Encoded)
-    ///     >>> store.import_fasta("genome.fa")
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"Store contains {len(store)} sequences")
     fn __len__(&self) -> usize {
         self.inner.sequence_digests().count()
@@ -2220,8 +2268,8 @@ impl PyRefgetStore {
     ///     SequenceMetadata: Metadata for each sequence in the store.
     ///
     /// Example:
-    ///     >>> store = RefgetStore(StorageMode.Encoded)
-    ///     >>> store.import_fasta("genome.fa")
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
     fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
