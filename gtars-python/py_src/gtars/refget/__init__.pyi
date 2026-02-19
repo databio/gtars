@@ -760,50 +760,61 @@ class RefgetStore:
         """Get metadata for a sequence by digest (no data loaded).
 
         Use this for lightweight lookups when you don't need the actual sequence.
+        Automatically strips "SQ." prefix from digest if present.
 
         Args:
-            seq_digest: The sequence's SHA-512/24u digest.
+            seq_digest: The sequence's SHA-512/24u digest, optionally with "SQ." prefix.
 
         Returns:
             Sequence metadata if found, None otherwise.
         """
         ...
 
-    def get_sequence(self, digest: str) -> Optional[SequenceRecord]:
+    def get_sequence(self, digest: str) -> SequenceRecord:
         """Retrieve a sequence record by its digest (SHA-512/24u or MD5).
 
         Loads the sequence data if not already in memory. Supports lookup
-        by either SHA-512/24u (preferred) or MD5 digest.
+        by either SHA-512/24u (preferred) or MD5 digest. Automatically
+        strips "SQ." prefix if present (case-insensitive).
 
         Args:
-            digest: Sequence digest (SHA-512/24u base64url or MD5 hex string).
+            digest: Sequence digest (SHA-512/24u base64url or MD5 hex string),
+                optionally with "SQ." prefix.
 
         Returns:
-            The sequence record with data if found, None otherwise.
+            The sequence record with data.
+
+        Raises:
+            KeyError: If the sequence is not found.
 
         Example::
 
             record = store.get_sequence("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
-            if record:
-                print(f"Found: {record.metadata.name}")
-                print(f"Sequence: {record.decode()[:50]}...")
+            print(f"Found: {record.metadata.name}")
+            # Also works with SQ. prefix
+            record = store.get_sequence("SQ.aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
         """
         ...
 
     def get_sequence_by_name(
         self, collection_digest: str, sequence_name: str
-    ) -> Optional[SequenceRecord]:
+    ) -> SequenceRecord:
         """Retrieve a sequence by collection digest and sequence name.
 
         Looks up a sequence within a specific collection using its name
         (e.g., "chr1", "chrM"). Loads the sequence data if needed.
+        Automatically strips "SQ." prefix from collection digest if present.
 
         Args:
-            collection_digest: The collection's SHA-512/24u digest.
+            collection_digest: The collection's SHA-512/24u digest, optionally
+                with "SQ." prefix.
             sequence_name: Name of the sequence within that collection.
 
         Returns:
-            The sequence record with data if found, None otherwise.
+            The sequence record with data.
+
+        Raises:
+            KeyError: If the sequence is not found.
 
         Example::
 
@@ -811,8 +822,7 @@ class RefgetStore:
                 "uC_UorBNf3YUu1YIDainBhI94CedlNeH",
                 "chr1"
             )
-            if record:
-                print(f"Sequence: {record.decode()[:50]}...")
+            print(f"Sequence: {record.decode()[:50]}...")
         """
         ...
 
@@ -834,20 +844,24 @@ class RefgetStore:
         """
         ...
 
-    def get_substring(self, seq_digest: str, start: int, end: int) -> Optional[str]:
+    def get_substring(self, seq_digest: str, start: int, end: int) -> str:
         """Extract a substring from a sequence.
 
         Retrieves a specific region from a sequence using 0-based, half-open
         coordinates [start, end). Automatically loads sequence data if not
-        already cached (for lazy-loaded stores).
+        already cached (for lazy-loaded stores). Automatically strips "SQ."
+        prefix from digest if present.
 
         Args:
-            seq_digest: Sequence digest (SHA-512/24u).
+            seq_digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
             start: Start position (0-based, inclusive).
             end: End position (0-based, exclusive).
 
         Returns:
-            The substring sequence if found, None otherwise.
+            The substring sequence.
+
+        Raises:
+            KeyError: If the sequence is not found.
 
         Example::
 
