@@ -25,9 +25,10 @@ use gtars_refget::store::StorageMode;
 #[pyfunction]
 pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.cast::<PyString>() {
-        Ok(sha512t24u(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
+        let encoded = s.encode_utf8()?;
+        Ok(sha512t24u(encoded.as_bytes()))
     } else if let Ok(b) = readable.cast::<PyBytes>() {
-        Ok(sha512t24u(b.as_bytes())) // Borrowed, no copying
+        Ok(sha512t24u(b.as_bytes()))
     } else {
         Err(PyTypeError::new_err("Expected str or bytes"))
     }
@@ -40,9 +41,10 @@ pub fn sha512t24u_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
 #[pyfunction]
 pub fn md5_digest(readable: &Bound<'_, PyAny>) -> PyResult<String> {
     if let Ok(s) = readable.cast::<PyString>() {
-        Ok(md5(s.encode_utf8()?.as_bytes())) // Borrowed, no copying
+        let encoded = s.encode_utf8()?;
+        Ok(md5(encoded.as_bytes()))
     } else if let Ok(b) = readable.cast::<PyBytes>() {
-        Ok(md5(b.as_bytes())) // Borrowed, no copying
+        Ok(md5(b.as_bytes()))
     } else {
         Err(PyTypeError::new_err("Expected str or bytes"))
     }
