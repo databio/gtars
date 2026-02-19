@@ -21,6 +21,7 @@ on:
             - gtars-tokenizers
             - gtars-uniwig
             - gtars-wasm
+            - gtars-genomicdist
 
 permissions:
     contents: read
