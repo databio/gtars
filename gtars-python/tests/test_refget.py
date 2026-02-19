@@ -1074,3 +1074,29 @@ def test_is_persisting_false_after_disable(tmp_path):
 
     store.disable_persistence()
     assert store.is_persisting is False
+
+
+def test_refgetstore_compare_two_collections(tmp_path):
+    """Compare two sequence collections in a RefgetStore."""
+    from gtars.refget import RefgetStore
+
+    store = RefgetStore.in_memory()
+
+    # Add two different FASTAs
+    fasta1 = tmp_path / "a.fa"
+    fasta1.write_text(">chr1\nACGT\n>chr2\nTGCA\n")
+    fasta2 = tmp_path / "b.fa"
+    fasta2.write_text(">chr1\nACGT\n>chr3\nGGGG\n")
+
+    meta1, _ = store.add_sequence_collection_from_fasta(str(fasta1))
+    meta2, _ = store.add_sequence_collection_from_fasta(str(fasta2))
+
+    # Compare the two collections
+    comparison = store.compare(meta1.digest, meta2.digest)
+
+    # Verify comparison structure per seqcol spec
+    assert "digests" in comparison
+    assert "attributes" in comparison
+    assert "array_elements" in comparison
+    assert comparison["digests"]["a"] == meta1.digest
+    assert comparison["digests"]["b"] == meta2.digest
