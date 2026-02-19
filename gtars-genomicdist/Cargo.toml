@@ -17,6 +17,7 @@ bio = "3.0.0"
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
+rand = "0.8"
 rstest = "0.26.1"
 
 [features]

@@ -24,6 +24,7 @@
 
 pub mod bed_classifier;
 pub mod errors;
+pub mod interval_ranges;
 pub mod models;
 pub mod statistics;
 pub mod utils;
@@ -31,5 +32,6 @@ pub mod utils;
 // re-exports
 #[cfg(feature = "bedclassifier")]
 pub use bed_classifier::classify_bed;
+pub use interval_ranges::IntervalRanges;
 pub use statistics::GenomicIntervalSetStatistics;
 pub use statistics::{calc_dinucl_freq, calc_gc_content};
