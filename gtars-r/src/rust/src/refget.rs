@@ -1244,19 +1244,9 @@ fn retrieved_sequence_to_list(retrieved_sequence: RetrievedSequence) -> List {
 }
 
 fn hashmap_to_list(items: Vec<(String, i32)>) -> List {
-    let mut result = List::new(items.len());
-    for (i, (key, value)) in items.iter().enumerate() {
-        result.set_elt(i, Robj::from(*value)).ok();
-        if let Some(names) = result.get_names() {
-            // Set name - this is a simplified approach
-            let _ = names;
-        }
-    }
-    // Create named list properly
     let keys: Vec<&str> = items.iter().map(|(k, _)| k.as_str()).collect();
-    let values: Vec<i32> = items.iter().map(|(_, v)| *v).collect();
     let mut named_list = List::new(items.len());
-    for (i, (key, val)) in keys.iter().zip(values.iter()).enumerate() {
+    for (i, (_, val)) in items.iter().enumerate() {
         named_list.set_elt(i, Robj::from(*val)).ok();
     }
     let _ = named_list.set_names(keys);
