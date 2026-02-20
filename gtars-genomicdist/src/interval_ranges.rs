@@ -4,49 +4,25 @@
 //! setdiff, and pintersect. All operations use 0-based half-open coordinates
 //! (BED convention) and are strand-unaware.
 
-use std::cmp::Ordering;
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
-
-/// Natural chromosome sort order: chr1, chr2, ..., chr10, ..., chr22, chrX, chrY, chrM.
-/// Chromosomes with numeric suffixes sort numerically. Non-numeric suffixes (X, Y, M)
-/// sort after all numeric chromosomes, in X < Y < M order. Unrecognized chromosomes
-/// sort after everything, lexicographically among themselves.
-fn chrom_cmp(a: &str, b: &str) -> Ordering {
-    chrom_sort_key(a).cmp(&chrom_sort_key(b))
-}
-
-/// Returns (priority, numeric_value, suffix) for sorting.
-/// Priority 0 = numeric chrN, 1 = chrX/Y/M, 2 = everything else.
-fn chrom_sort_key(chr: &str) -> (u8, u32, String) {
-    let suffix = chr
-        .strip_prefix("chr")
-        .or_else(|| chr.strip_prefix("Chr"))
-        .unwrap_or(chr);
-
-    if let Ok(n) = suffix.parse::<u32>() {
-        (0, n, String::new())
-    } else {
-        match suffix {
-            "X" | "x" => (1, 0, String::new()),
-            "Y" | "y" => (1, 1, String::new()),
-            "M" | "m" | "MT" | "mt" => (1, 2, String::new()),
-            _ => (2, 0, chr.to_string()),
-        }
-    }
-}
 
 /// Interval set algebra operations on genomic region sets.
 ///
 /// Modeled after R's GenomicRanges/IRanges package. All functions return new
 /// `RegionSet` instances (immutable pattern) with 0-based half-open coordinates.
+///
+/// **Note:** All operations produce regions with `rest: None`. Metadata from
+/// the `rest` field of input regions is not preserved — operations like `reduce()`
+/// merge multiple regions, so there is no unambiguous `rest` to carry forward.
 pub trait IntervalRanges {
     /// Clamp regions to chromosome boundaries.
     ///
     /// Regions extending past chromosome ends are trimmed to `[0, chrom_size)`.
     /// Regions on chromosomes not present in `chrom_sizes` are dropped.
-    /// Empty regions (start >= end after clamping) are dropped.
+    /// Empty regions (start > end after clamping) are dropped; zero-width
+    /// regions where start == end are kept.
     fn trim(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet;
 
     /// Generate promoter regions relative to each region's start position.
@@ -66,12 +42,31 @@ pub trait IntervalRanges {
     /// Removes portions of `self` that overlap with `other`. Both inputs are
     /// reduced internally before subtraction. Operates per-chromosome with a
     /// sweep-line algorithm.
+    ///
+    /// # Example
+    /// ```text
+    /// A: chr1 100–200
+    /// B: chr1 120–140, chr1 160–180
+    /// setdiff(A, B): chr1 100–120, chr1 140–160, chr1 180–200
+    /// ```
     fn setdiff(&self, other: &RegionSet) -> RegionSet;
 
-    /// Pairwise intersection of two region sets of equal length.
+    /// Pairwise intersection of two region sets by index position.
     ///
     /// For each pair at the same index, computes `[max(a.start, b.start), min(a.end, b.end))`.
     /// Pairs with no overlap or mismatched chromosomes are dropped.
+    /// If the region sets differ in length, intersections are computed only up
+    /// to the length of the shorter set; excess regions are ignored.
+    ///
+    /// Note: this intersects by index position (1st with 1st, 2nd with 2nd, etc.),
+    /// **not** by genomic overlap across all regions.
+    ///
+    /// # Example
+    /// ```text
+    /// A: chr1 0–10, chr1 20–30
+    /// B: chr1 5–15, chr1 25–35
+    /// pintersect(A, B): chr1 5–10, chr1 25–30
+    /// ```
     fn pintersect(&self, other: &RegionSet) -> RegionSet;
 }
 
@@ -96,7 +91,9 @@ impl IntervalRanges for RegionSet {
                 }
             })
             .collect();
-        RegionSet::from(regions)
+        let mut rs = RegionSet::from(regions);
+        rs.is_sorted = self.is_sorted; // trim preserves order
+        rs
     }
 
     fn promoters(&self, upstream: u32, downstream: u32) -> RegionSet {
@@ -110,7 +107,9 @@ impl IntervalRanges for RegionSet {
                 rest: None,
             })
             .collect();
-        RegionSet::from(regions)
+        let mut rs = RegionSet::from(regions);
+        rs.is_sorted = self.is_sorted; // promoters preserves relative order
+        rs
     }
 
     fn reduce(&self) -> RegionSet {
@@ -118,13 +117,28 @@ impl IntervalRanges for RegionSet {
             return RegionSet::from(Vec::<Region>::new());
         }
 
-        let mut sorted = self.regions.clone();
-        sorted.sort_by(|a, b| chrom_cmp(&a.chr, &b.chr).then_with(|| a.start.cmp(&b.start)));
+        // If already sorted, iterate directly; otherwise clone and sort.
+        // Lexicographic chromosome order matches BED convention and RegionSet::sort().
+        let regions: &[Region] = if self.is_sorted {
+            &self.regions
+        } else {
+            // Caller didn't guarantee sorted input — must sort first.
+            // We use an unsafe-free approach: sort into a temporary Vec.
+            return {
+                let mut sorted = self.regions.clone();
+                sorted.sort_by(|a, b| {
+                    a.chr.cmp(&b.chr).then_with(|| a.start.cmp(&b.start))
+                });
+                let mut rs = RegionSet::from(sorted);
+                rs.is_sorted = true;
+                rs.reduce() // recurse once with sorted input
+            };
+        };
 
         let mut merged: Vec<Region> = Vec::new();
-        let mut current = sorted[0].clone();
+        let mut current = regions[0].clone();
 
-        for r in &sorted[1..] {
+        for r in &regions[1..] {
             if r.chr == current.chr && r.start <= current.end {
                 // Overlapping or adjacent -- extend
                 current.end = current.end.max(r.end);
@@ -145,7 +159,9 @@ impl IntervalRanges for RegionSet {
             rest: None,
         });
 
-        RegionSet::from(merged)
+        let mut result = RegionSet::from(merged);
+        result.is_sorted = true;
+        result
     }
 
     fn setdiff(&self, other: &RegionSet) -> RegionSet {
@@ -210,7 +226,9 @@ impl IntervalRanges for RegionSet {
             a_chr_start = a_chr_end;
         }
 
-        RegionSet::from(result)
+        let mut rs = RegionSet::from(result);
+        rs.is_sorted = true; // output preserves sorted order from reduce()
+        rs
     }
 
     fn pintersect(&self, other: &RegionSet) -> RegionSet {
@@ -263,7 +281,7 @@ mod tests {
         }
     }
 
-    fn make_regionset(regions: Vec<(& str, u32, u32)>) -> RegionSet {
+    fn make_regionset(regions: Vec<(&str, u32, u32)>) -> RegionSet {
         let regions: Vec<Region> = regions
             .into_iter()
             .map(|(chr, start, end)| make_region(chr, start, end))
@@ -403,10 +421,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_reduce_natural_chrom_order() {
-        // chr1, chr2, chr10 should sort numerically, not lexicographically
-        // Lexicographic would give: chr1, chr10, chr2 (wrong)
-        // Natural gives: chr1, chr2, chr10 (correct)
+    fn test_reduce_lexicographic_chrom_order() {
+        // BED convention uses lexicographic chromosome order
         let rs = make_regionset(vec![
             ("chr10", 0, 10),
             ("chr2", 0, 10),
@@ -418,16 +434,16 @@ mod tests {
         let reduced = rs.reduce();
         assert_eq!(reduced.regions.len(), 6);
         assert_eq!(reduced.regions[0].chr, "chr1");
-        assert_eq!(reduced.regions[1].chr, "chr2");
-        assert_eq!(reduced.regions[2].chr, "chr10");
-        assert_eq!(reduced.regions[3].chr, "chrX");
-        assert_eq!(reduced.regions[4].chr, "chrY");
-        assert_eq!(reduced.regions[5].chr, "chrM");
+        assert_eq!(reduced.regions[1].chr, "chr10");
+        assert_eq!(reduced.regions[2].chr, "chr2");
+        assert_eq!(reduced.regions[3].chr, "chrM");
+        assert_eq!(reduced.regions[4].chr, "chrX");
+        assert_eq!(reduced.regions[5].chr, "chrY");
     }
 
     #[rstest]
-    fn test_reduce_natural_order_merges_correctly() {
-        // Overlapping regions on chr2 and chr10 — make sure natural sort
+    fn test_reduce_lexicographic_order_merges_correctly() {
+        // Overlapping regions on chr2 and chr10 — lexicographic sort
         // groups them correctly before merging
         let rs = make_regionset(vec![
             ("chr10", 5, 15),
@@ -437,8 +453,8 @@ mod tests {
         ]);
         let reduced = rs.reduce();
         assert_eq!(reduced.regions.len(), 2);
-        assert_eq!(reduced.regions[0], make_region("chr2", 0, 20));
-        assert_eq!(reduced.regions[1], make_region("chr10", 0, 15));
+        assert_eq!(reduced.regions[0], make_region("chr10", 0, 15));
+        assert_eq!(reduced.regions[1], make_region("chr2", 0, 20));
     }
 
     #[rstest]

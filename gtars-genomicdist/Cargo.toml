@@ -9,6 +9,7 @@ repository = "https://github.com/databio/gtars"
 [dependencies]
 gtars-core = { path = "../gtars-core", version="0.5.5" }
 gtars-overlaprs = { path = "../gtars-overlaprs", version="0.5.1" }
+flate2 = { workspace = true }
 polars = { version = "0.51.0", optional = true, default-features = false }
 regex = "1.11.1"
 thiserror = { workspace = true }

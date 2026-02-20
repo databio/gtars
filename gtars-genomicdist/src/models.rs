@@ -308,6 +308,56 @@ impl TssIndex {
         }
         Ok(distances)
     }
+
+    /// Calculate signed distances from each region to its nearest feature.
+    ///
+    /// Like `calc_tss_distances` but returns signed distances where:
+    /// - Positive: nearest feature is downstream (right) of the query
+    /// - Negative: nearest feature is upstream (left) of the query
+    ///
+    /// Sign convention: `nearest_feature_midpoint - query_midpoint`
+    /// (matches R GenomicDistributions `calcFeatureDist()`).
+    pub fn calc_feature_distances(
+        &self,
+        rs: &RegionSet,
+    ) -> Result<Vec<i64>, GtarsGenomicDistError> {
+        let mut distances: Vec<i64> = Vec::with_capacity(rs.len());
+
+        for chromosome in rs.iter_chroms() {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
+                for region in rs.iter_chr_regions(chromosome.as_str()) {
+                    let target = region.mid_point() as i64;
+
+                    let distance = match chr_midpoints.binary_search(&(target as u32)) {
+                        Ok(_) => 0i64,
+                        Err(idx) => {
+                            // distance = feature_mid - query_mid
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| chr_midpoints[i] as i64 - target);
+                            let right =
+                                chr_midpoints.get(idx).map(|&v| v as i64 - target);
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => {
+                                    if l.unsigned_abs() <= r.unsigned_abs() {
+                                        l
+                                    } else {
+                                        r
+                                    }
+                                }
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(distance);
+                }
+            }
+        }
+        Ok(distances)
+    }
 }
 
 #[cfg(test)]
@@ -338,5 +388,26 @@ mod tests {
 
         assert_eq!(distances.len(), 9);
         assert_eq!(distances.iter().min(), Some(&2));
+    }
+
+    #[rstest]
+    fn test_calc_feature_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let tss_path = get_test_path("dummy_tss.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
+
+        let signed_distances = tss_index.calc_feature_distances(&region_set).unwrap();
+        let abs_distances = tss_index.calc_tss_distances(&region_set).unwrap();
+
+        // same number of results
+        assert_eq!(signed_distances.len(), abs_distances.len());
+        // absolute values should match calc_tss_distances
+        for (signed, abs) in signed_distances.iter().zip(abs_distances.iter()) {
+            assert_eq!(signed.unsigned_abs() as u32, *abs);
+        }
+        // should have both positive and negative distances
+        assert!(signed_distances.iter().any(|d| *d > 0));
+        assert!(signed_distances.iter().any(|d| *d < 0));
     }
 }
