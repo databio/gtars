@@ -1,0 +1,17 @@
+##description: synthetic GTF for testing GeneModel::from_gtf()
+##provider: test
+#!genome-build TestGenome
+chr1	test	gene	1001	5000	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr1	test	exon	1001	1500	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr1	test	exon	2001	2500	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr1	test	exon	4001	5000	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr1	test	five_prime_utr	1001	1100	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr1	test	three_prime_utr	4800	5000	.	+	.	gene_id "gene1"; gene_biotype "protein_coding";
+chr2	test	gene	3001	8000	.	-	.	gene_id "gene2"; gene_biotype "protein_coding";
+chr2	test	exon	3001	3800	.	-	.	gene_id "gene2"; gene_biotype "protein_coding";
+chr2	test	exon	6001	6500	.	-	.	gene_id "gene2"; gene_biotype "protein_coding";
+chr2	test	five_prime_utr	6300	6500	.	-	.	gene_id "gene2"; gene_biotype "protein_coding";
+chr2	test	three_prime_utr	3001	3200	.	-	.	gene_id "gene2"; gene_biotype "protein_coding";
+chr3	test	gene	501	2000	.	+	.	gene_id "gene3"; gene_biotype "lncRNA";
+chr3	test	exon	501	800	.	+	.	gene_id "gene3"; gene_biotype "lncRNA";
+chr3	test	exon	1501	2000	.	+	.	gene_id "gene3"; gene_biotype "lncRNA";

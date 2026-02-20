@@ -37,10 +37,26 @@ pub trait GenomicIntervalSetStatistics {
         self.region_distribution_with_bins(250)
     }
 
-    /// Compute Neighbor_distances
+    /// Compute distances between consecutive regions on each chromosome.
     ///
-    /// Returns a vector of vectors between the regions
+    /// For each pair of adjacent regions on the same chromosome, returns the
+    /// gap between them (downstream.start - upstream.end, clamped to 0 for overlaps).
+    /// Regions on chromosomes with fewer than 2 regions are skipped.
     fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
+
+    /// Compute the distance from each region to its nearest neighbor.
+    ///
+    /// For each region, takes the minimum of its upstream and downstream
+    /// neighbor distances. First and last regions on each chromosome use
+    /// their only neighbor's distance.
+    ///
+    /// Port of R GenomicDistributions `calcNearestNeighbors()`.
+    fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
+
+    /// Compute region widths (end - start for each region).
+    ///
+    /// Port of R GenomicDistributions `calcWidth()`.
+    fn calc_widths(&self) -> Vec<u32>;
 }
 
 impl GenomicIntervalSetStatistics for RegionSet {
@@ -159,6 +175,44 @@ impl GenomicIntervalSetStatistics for RegionSet {
         }
 
         Ok(distances)
+    }
+
+    fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
+        let mut nearest: Vec<u32> = vec![];
+
+        for chr in self.iter_chroms() {
+            let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+
+            if chr_regions.len() < 2 {
+                continue;
+            }
+
+            // compute neighbor distances for this chromosome
+            let distances: Vec<u32> = chr_regions
+                .windows(2)
+                .map(|w| {
+                    let d = w[1].start as i64 - w[0].end as i64;
+                    if d > 0 { d as u32 } else { 0 }
+                })
+                .collect();
+
+            // first region: only has right neighbor
+            nearest.push(distances[0]);
+
+            // middle regions: min of left and right neighbor distances
+            for pair in distances.windows(2) {
+                nearest.push(pair[0].min(pair[1]));
+            }
+
+            // last region: only has left neighbor
+            nearest.push(distances[distances.len() - 1]);
+        }
+
+        Ok(nearest)
+    }
+
+    fn calc_widths(&self) -> Vec<u32> {
+        self.regions.iter().map(|r| r.width()).collect()
     }
 }
 
@@ -300,6 +354,41 @@ mod tests {
 
         let distribution = region_set.calc_neighbor_distances().unwrap();
         assert_eq!(distribution.len(), 8);
+    }
+
+    #[rstest]
+    fn test_calc_nearest_neighbors() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let nearest = region_set.calc_nearest_neighbors().unwrap();
+        // 9 regions on chr1 → 9 nearest-neighbor distances (one per region)
+        assert_eq!(nearest.len(), 9);
+        // each nearest-neighbor distance should be ≤ the max of its neighbor distances
+        let neighbor_dists = region_set.calc_neighbor_distances().unwrap();
+        for i in 0..nearest.len() {
+            if i == 0 {
+                assert_eq!(nearest[i], neighbor_dists[0]);
+            } else if i == nearest.len() - 1 {
+                assert_eq!(nearest[i], neighbor_dists[neighbor_dists.len() - 1]);
+            } else {
+                assert_eq!(
+                    nearest[i],
+                    neighbor_dists[i - 1].min(neighbor_dists[i])
+                );
+            }
+        }
+    }
+
+    #[rstest]
+    fn test_calc_widths() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let widths = region_set.calc_widths();
+        assert_eq!(widths.len(), 9);
+        assert_eq!(*widths.iter().min().unwrap(), 2);
+        assert_eq!(*widths.iter().max().unwrap(), 9);
     }
 
     #[rstest]

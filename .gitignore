@@ -28,3 +28,10 @@ bin/
 tests/data/out/region_scoring_count.csv.gz
 /gtars-refget/tests/store_test/rgstore.json
 /gtars-refget/tests/store_test/sequences.rgsi
+
+# Large benchmark data and validation files
+tests/data/interval_ranges_benchmark/
+tests/data/partitions_benchmark/
+gtars-genomicdist/examples/benchmark_*.rs
+gtars-genomicdist/examples/partitions_demo.rs
+*.annotation.gtf.gz
