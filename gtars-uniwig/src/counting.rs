@@ -51,12 +51,9 @@ pub fn start_end_counts(
     let mut collected_end_sites: Vec<(i32, i32)> = Vec::new();
     let mut collected_counts: Vec<i32> = Vec::new();
     adjusted_start_site = starts_vector[0]; // get first coordinate position
+    let original_position = adjusted_start_site.0; // Store original cut position before adjustment
 
-    adjusted_start_site.0 -= smoothsize;
-
-    if adjusted_start_site.0 < 1 {
-        adjusted_start_site.0 = 1;
-    }
+    adjusted_start_site.0 = (original_position - smoothsize).max(1);
 
     //Initial count for inital adjusted site
     let current_score = adjusted_start_site.1;
@@ -64,7 +61,10 @@ pub fn start_end_counts(
     count += current_score;
 
     current_end_site = adjusted_start_site;
-    current_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+    // End site is based on original position, not clamped start
+    // If end site exceeds chrom_size, it will never be reached during iteration,
+    // so the count contribution remains until the chromosome ends
+    current_end_site.0 = original_position + smoothsize + 1;
 
     while coordinate_position < adjusted_start_site.0 {
         // Just skip until we reach the initial adjusted start position
@@ -75,14 +75,13 @@ pub fn start_end_counts(
     for coord in starts_vector.iter().skip(1) {
         // Skip the first item because we are already accounting for it above.
         coordinate_value = *coord;
+        let original_position = coordinate_value.0; // Store original cut position
         adjusted_start_site = coordinate_value;
-        adjusted_start_site.0 = coordinate_value.0 - smoothsize;
+        adjusted_start_site.0 = (original_position - smoothsize).max(1);
 
-        if adjusted_start_site.0 < 1 {
-            adjusted_start_site.0 = 1;
-        }
         let mut new_end_site = adjusted_start_site;
-        new_end_site.0 = adjusted_start_site.0 + 1 + smoothsize * 2;
+        // End site is based on original position, not clamped start
+        new_end_site.0 = original_position + smoothsize + 1;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site.0 == prev_coordinate_value {
@@ -129,7 +128,7 @@ pub fn start_end_counts(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site.0 == coordinate_position {
@@ -264,7 +263,7 @@ pub fn core_counts(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         while current_end_site.0 == coordinate_position {
             let most_recent_score = collected_counts.remove(0);
             count -= most_recent_score;
@@ -333,7 +332,9 @@ pub fn fixed_start_end_counts_bam(
 
     //adjusted_start_site = first_record.alignment_start().unwrap().unwrap().get() as i32; // get first coordinate position
 
-    adjusted_start_site -= smoothsize;
+    // Store original position before adjusting
+    let original_position = adjusted_start_site;
+    adjusted_start_site = (original_position - smoothsize).max(1);
 
     //SETUP OUTPUT FILE HERE BECAUSE WE NEED TO KNOW INITIAL VALUES
     let file = set_up_file_output(
@@ -348,12 +349,8 @@ pub fn fixed_start_end_counts_bam(
     let file = file.unwrap();
     let mut buf = BufWriter::new(file);
 
-    //current_end_site = adjusted_start_site;
-    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
-
-    if adjusted_start_site < 1 {
-        adjusted_start_site = 1;
-    }
+    // End site is based on original position, not clamped start
+    current_end_site = original_position + smoothsize + 1;
 
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
@@ -372,21 +369,16 @@ pub fn fixed_start_end_counts_bam(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        //adjusted_start_site = coordinate_value;
-        adjusted_start_site = coordinate_value - smoothsize;
+        // Store original position before adjusting
+        let original_position = coordinate_value;
+        adjusted_start_site = (original_position - smoothsize).max(1);
 
         let current_score = adjusted_start_site;
 
         count += current_score;
 
-        if adjusted_start_site < 1 {
-            adjusted_start_site = 1;
-        }
-
-        //let current_index = index;
-
-        //let mut new_end_site = adjusted_start_site;
-        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        // End site is based on original position, not clamped start
+        let new_end_site = original_position + smoothsize + 1;
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -446,7 +438,7 @@ pub fn fixed_start_end_counts_bam(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -612,7 +604,7 @@ pub fn fixed_core_counts_bam_to_bw(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -717,14 +709,12 @@ pub fn fixed_start_end_counts_bam_to_bw(
         }
     };
 
-    adjusted_start_site -= smoothsize;
+    // Store original position before adjusting
+    let original_position = adjusted_start_site;
+    adjusted_start_site = (original_position - smoothsize).max(1);
 
-    //current_end_site = adjusted_start_site;
-    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
-
-    if adjusted_start_site < 1 {
-        adjusted_start_site = 1;
-    }
+    // End site is based on original position, not clamped start
+    current_end_site = (original_position + smoothsize + 1).min(chrom_size);
 
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
@@ -746,21 +736,14 @@ pub fn fixed_start_end_counts_bam_to_bw(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        //adjusted_start_site = coordinate_value;
-        adjusted_start_site = coordinate_value - smoothsize;
-
-        //let current_score = adjusted_start_site;
+        // Store original position before adjusting
+        let original_position = coordinate_value;
+        adjusted_start_site = (original_position - smoothsize).max(1);
 
         count += 1;
 
-        if adjusted_start_site < 1 {
-            adjusted_start_site = 1;
-        }
-
-        //let current_index = index;
-
-        //let mut new_end_site = adjusted_start_site;
-        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        // End site is based on original position, not clamped start
+        let new_end_site = (original_position + smoothsize + 1).min(chrom_size);
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -811,7 +794,7 @@ pub fn fixed_start_end_counts_bam_to_bw(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -916,14 +899,12 @@ pub fn variable_start_end_counts_bam_to_bw(
         }
     };
 
-    adjusted_start_site -= smoothsize;
+    // Store original position before adjusting
+    let original_position = adjusted_start_site;
+    adjusted_start_site = (original_position - smoothsize).max(1);
 
-    //current_end_site = adjusted_start_site;
-    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
-
-    if adjusted_start_site < 1 {
-        adjusted_start_site = 1;
-    }
+    // End site is based on original position, not clamped start
+    current_end_site = (original_position + smoothsize + 1).min(chrom_size);
 
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
@@ -945,22 +926,16 @@ pub fn variable_start_end_counts_bam_to_bw(
 
         // coordinate_value = coord.unwrap().alignment_start().unwrap().unwrap().get() as i32;
 
-        // adjusted_start_site = coordinate_value;
-        adjusted_start_site = coordinate_value - smoothsize;
+        // Store original position before adjusting
+        let original_position = coordinate_value;
+        adjusted_start_site = (original_position - smoothsize).max(1);
 
-        //let current_score = adjusted_start_site;
         //eprintln!("coordinate_value {} adjusted start {}", coordinate_value, adjusted_start_site);
 
         count += 1;
 
-        if adjusted_start_site < 1 {
-            adjusted_start_site = 1;
-        }
-
-        //let current_index = index;
-
-        //let mut new_end_site = adjusted_start_site;
-        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        // End site is based on original position, not clamped start
+        let new_end_site = (original_position + smoothsize + 1).min(chrom_size);
         collected_end_sites.push(new_end_site);
 
         if adjusted_start_site == prev_coordinate_value {
@@ -1014,7 +989,7 @@ pub fn variable_start_end_counts_bam_to_bw(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -1171,7 +1146,7 @@ pub fn variable_core_counts_bam_to_bw(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {
@@ -1357,14 +1332,12 @@ pub fn variable_shifted_bam_to_bw(
 
     let shifted_pos = get_shifted_pos(&flags, start_site - 1, end_site); // we must shift the start position by -1 to convert bam/sam 1 based position to bedgraph 0 based pos
 
-    let mut adjusted_start_site = shifted_pos - smoothsize;
+    // Store original position before adjusting (shifted_pos is the actual cut position)
+    let original_position = shifted_pos;
+    let mut adjusted_start_site = (original_position - smoothsize).max(0); // 0-based for bedGraph
 
-    //current_end_site = adjusted_start_site;
-    current_end_site = adjusted_start_site + 1 + smoothsize * 2;
-
-    if adjusted_start_site < 0 {
-        adjusted_start_site = 0; // must ensure we start at 0 for bedGraph 0 position
-    }
+    // End site is based on original position, not clamped start
+    current_end_site = (original_position + smoothsize + 1).min(chrom_size);
 
     while coordinate_position < adjusted_start_site {
         // Just skip until we reach the initial adjusted start position
@@ -1382,13 +1355,12 @@ pub fn variable_shifted_bam_to_bw(
 
         let shifted_pos = get_shifted_pos(&flags, start_site - 1, end_site);
 
-        adjusted_start_site = shifted_pos - smoothsize;
+        // Store original position before adjusting
+        let original_position = shifted_pos;
+        adjusted_start_site = (original_position - smoothsize).max(0); // 0-based for bedGraph
 
-        if adjusted_start_site < 0 {
-            adjusted_start_site = 0;
-        }
-
-        let new_end_site = adjusted_start_site + 1 + smoothsize * 2;
+        // End site is based on original position, not clamped start
+        let new_end_site = (original_position + smoothsize + 1).min(chrom_size);
         //println!("adjusted start site for new coord: {}", adjusted_start_site);
         //println!("new endsite for new coord: {}", new_end_site);
 
@@ -1458,7 +1430,7 @@ pub fn variable_shifted_bam_to_bw(
         );
     }
 
-    while coordinate_position < chrom_size {
+    while coordinate_position <= chrom_size {
         // Apply a bound to push the final coordinates otherwise it will become truncated.
 
         while current_end_site == coordinate_position {

@@ -22,7 +22,7 @@ use self::utils::{
 };
 use self::writing::{
     write_bw_files, write_combined_files, write_to_bed_graph_file, write_to_npy_file,
-    write_to_wig_file,
+    write_to_wig_file, write_to_wig_file_variable,
 };
 use bigtools::beddata::BedParserStreamingIterator;
 use bigtools::utils::cli::BBIWriteArgs;
@@ -34,6 +34,7 @@ use gtars_core::utils::FileType;
 use noodles::bam;
 use noodles::bam::io::reader::Query;
 use noodles::bgzf::Reader;
+use noodles::sam::alignment::Record as SamRecord;
 use os_pipe::PipeWriter;
 use rayon::ThreadPool;
 use std::path::PathBuf;
@@ -59,6 +60,7 @@ pub fn uniwig_main(
     debug: bool,
     bam_shift: bool,
     bam_scale: f32,
+    wigstep: &str,
 ) -> Result<(), Box<dyn Error>> {
     // Must create a Rayon thread pool in which to run our iterators
     let pool = rayon::ThreadPoolBuilder::new()
@@ -155,18 +157,33 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "start", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &count_result.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(
-                                                        primary_start.0,
-                                                        smoothsize,
-                                                        1, //must shift wiggle starts and core by 1 since it is 1 based
-                                                    ),
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_start.0,
+                                                            smoothsize,
+                                                            0, // no shift needed - coordinates already 1-based from BED conversion
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_start.0,
+                                                            smoothsize,
+                                                            0, // no shift needed - coordinates already 1-based from BED conversion
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
                                             "bedGraph" => {
                                                 let file_name = format!(
@@ -266,18 +283,33 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "end", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &count_result.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(
-                                                        primary_end.0,
-                                                        smoothsize,
-                                                        0, // ends already 1 based, do not shift further
-                                                    ),
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_end.0,
+                                                            smoothsize,
+                                                            0,
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &count_result.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(
+                                                            primary_end.0,
+                                                            smoothsize,
+                                                            0, // ends already 1 based, do not shift further
+                                                        ),
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
 
                                             "npy" => {
@@ -359,14 +391,25 @@ pub fn uniwig_main(
                                                     "{}{}_{}.{}",
                                                     bwfileheader, chrom_name, "core", output_type
                                                 );
-                                                write_to_wig_file(
-                                                    &core_results.0,
-                                                    file_name.clone(),
-                                                    chrom_name.clone(),
-                                                    clamped_start_position(primary_start.0, 0, 1), //starts are 1 based must be shifted by 1
-                                                    stepsize,
-                                                    current_chrom_size,
-                                                );
+                                                if wigstep == "variable" {
+                                                    write_to_wig_file_variable(
+                                                        &core_results.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(primary_start.0, 0, 0), // no shift - already 1-based
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                } else {
+                                                    write_to_wig_file(
+                                                        &core_results.0,
+                                                        file_name.clone(),
+                                                        chrom_name.clone(),
+                                                        clamped_start_position(primary_start.0, 0, 0), // no shift - already 1-based
+                                                        stepsize,
+                                                        current_chrom_size,
+                                                    );
+                                                }
                                             }
                                             "npy" => {
                                                 let file_name = format!(
@@ -860,6 +903,109 @@ fn process_bam(
             }
         }
 
+        "wig" | "bedgraph" => {
+            // Process BAM reads for wig/bedGraph output.
+            // Collects BAM alignment positions into memory and uses the same
+            // start_end_counts algorithm as the BED path, so output is equivalent
+            // for reads at the same genomic positions.
+            let norm_output_type = if output_type == "bedgraph" { "bedGraph" } else { output_type };
+
+            for chromosome_string in final_chromosomes.iter() {
+                let current_chrom_size =
+                    *chrom_sizes.get(chromosome_string).unwrap() as i32;
+                let region = chromosome_string.parse().unwrap();
+
+                for selection in vec_count_type.iter() {
+                    let mut reader = bam::io::indexed_reader::Builder::default()
+                        .build_from_path(filepath)
+                        .unwrap();
+                    let header = reader.read_header().unwrap();
+                    let mut records = reader.query(&header, &region).map(Box::new).unwrap();
+
+                    // Collect positions from BAM records (score=1 per read)
+                    let mut positions: Vec<(i32, i32)> = Vec::new();
+                    for record in records.by_ref() {
+                        let record = record.unwrap();
+                        let pos: i32 = match *selection {
+                            "start" => record.alignment_start().unwrap().unwrap().get() as i32,
+                            "end" => SamRecord::alignment_end(&record).unwrap().unwrap().get() as i32,
+                            "core" => {
+                                eprintln!("Core counts for BAM non-BW output not yet implemented. Skipping.");
+                                break;
+                            }
+                            _ => break,
+                        };
+                        positions.push((pos, 1));
+                    }
+
+                    if positions.is_empty() || *selection == "core" {
+                        continue;
+                    }
+
+                    // Use same counting algorithm as BED path
+                    let mut count_result =
+                        start_end_counts(&positions, current_chrom_size, smoothsize, stepsize);
+                    let primary_start = positions[0];
+
+                    match norm_output_type {
+                        "wig" => {
+                            let file_name = format!(
+                                "{}{}_{}.{}",
+                                bwfileheader, chromosome_string, selection, norm_output_type
+                            );
+                            write_to_wig_file(
+                                &count_result.0,
+                                file_name,
+                                chromosome_string.clone(),
+                                clamped_start_position(primary_start.0, smoothsize, 0),
+                                stepsize,
+                                current_chrom_size,
+                            );
+                        }
+                        "bedGraph" => {
+                            let file_name = format!(
+                                "{}{}_{}.{}",
+                                bwfileheader, chromosome_string, selection, norm_output_type
+                            );
+                            let count_info = compress_counts(
+                                &mut count_result,
+                                clamped_start_position_zero_pos(primary_start.0, smoothsize),
+                            );
+                            write_to_bed_graph_file(
+                                &count_info,
+                                file_name,
+                                chromosome_string.clone(),
+                                current_chrom_size,
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Build chromosome vec for write_combined_files
+            let chromosome_vec: Vec<Chromosome> = final_chromosomes
+                .iter()
+                .map(|chrom_name| Chromosome {
+                    chrom: chrom_name.clone(),
+                    starts: vec![],
+                    ends: vec![],
+                })
+                .collect();
+
+            let norm_output_type = if output_type == "bedgraph" { "bedGraph" } else { output_type };
+            for location in vec_count_type.iter() {
+                if *location != "core" {
+                    write_combined_files(
+                        location,
+                        norm_output_type,
+                        bwfileheader,
+                        &chromosome_vec,
+                    );
+                }
+            }
+        }
+
         _ => {
 
             // todo combine files for non bw outputs
@@ -1296,6 +1442,14 @@ mod tests {
     }
 
     #[fixture]
+    fn path_to_dummy_bam_file() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tests/data/dummy.bam")
+    }
+
+    #[fixture]
     fn path_to_chrom_sizes_file() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .parent()
@@ -1552,6 +1706,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1598,6 +1753,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1646,6 +1802,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -1693,6 +1850,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1749,6 +1907,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1806,6 +1965,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
         Ok(())
@@ -1875,6 +2035,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -1949,6 +2110,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -2063,6 +2225,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         assert!(result.is_ok());
@@ -2133,6 +2296,162 @@ mod tests {
     }
 
     #[rstest]
+    fn test_uniwig_bam_wig_output(
+        path_to_dummy_bam_file: PathBuf,
+        path_to_dummy_chromsizes: PathBuf,
+        path_to_start_wig_output: PathBuf,
+    ) {
+        let chromsizerefpath = &path_to_dummy_chromsizes.to_string_lossy();
+        let combinedbedpath = &path_to_dummy_bam_file.to_string_lossy();
+        let test_output_path = path_to_start_wig_output.as_path();
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 1;
+        let output_type = "wig";
+        let filetype = "bam";
+        let num_threads: i32 = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start"];
+
+        let result = uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            false, // bam_shift=false to produce start/end/core outputs
+            1.0,
+            "fixed",
+        );
+        assert!(result.is_ok());
+
+        // Test _start.wig output
+        let path = PathBuf::from(&tempdir.path());
+        let mut final_start_file_path = path.into_os_string().into_string().unwrap();
+        final_start_file_path.push_str("/final/_start.wig");
+        let final_start_file_path = final_start_file_path.as_str();
+
+        let file1 = File::open(final_start_file_path).unwrap();
+        let file2 = File::open(test_output_path).unwrap();
+
+        let reader1 = BufReader::new(file1);
+        let reader2 = BufReader::new(file2);
+
+        let mut lines1 = reader1.lines();
+        let mut lines2 = reader2.lines();
+
+        loop {
+            let line1 = lines1.next().transpose().unwrap();
+            let line2 = lines2.next().transpose().unwrap();
+
+            match (line1, line2) {
+                (Some(line1), Some(line2)) => {
+                    assert_eq!(line1, line2);
+                }
+                (None, None) => {
+                    break; // Both files reached the end
+                }
+                _ => {
+                    panic!("FILES ARE NOT EQUAL!!!")
+                }
+            }
+        }
+    }
+
+    #[rstest]
+    fn test_uniwig_bam_bedgraph_output(
+        path_to_dummy_bam_file: PathBuf,
+        path_to_dummy_chromsizes: PathBuf,
+        path_to_start_bedgraph_output: PathBuf,
+    ) {
+        let chromsizerefpath = &path_to_dummy_chromsizes.to_string_lossy();
+        let combinedbedpath = &path_to_dummy_bam_file.to_string_lossy();
+        let test_output_path = path_to_start_bedgraph_output.as_path();
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+
+        let mut bwfileheader_path = path.into_os_string().into_string().unwrap();
+        bwfileheader_path.push_str("/final/");
+        let bwfileheader = bwfileheader_path.as_str();
+
+        let smoothsize: i32 = 1;
+        let output_type = "bedgraph";
+        let filetype = "bam";
+        let num_threads: i32 = 2;
+        let score = false;
+        let stepsize = 1;
+        let zoom = 0;
+        let vec_count_type = vec!["start"];
+
+        let result = uniwig_main(
+            vec_count_type,
+            smoothsize,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            output_type,
+            filetype,
+            num_threads,
+            score,
+            stepsize,
+            zoom,
+            false,
+            false, // bam_shift=false to produce start/end/core outputs
+            1.0,
+            "fixed",
+        );
+        assert!(result.is_ok());
+
+        // Test _start.bedGraph output
+        let path = PathBuf::from(&tempdir.path());
+        let mut final_start_file_path = path.into_os_string().into_string().unwrap();
+        final_start_file_path.push_str("/final/_start.bedGraph");
+        let final_start_file_path = final_start_file_path.as_str();
+
+        let file1 = File::open(final_start_file_path).unwrap();
+        let file2 = File::open(test_output_path).unwrap();
+
+        let reader1 = BufReader::new(file1);
+        let reader2 = BufReader::new(file2);
+
+        let mut lines1 = reader1.lines();
+        let mut lines2 = reader2.lines();
+
+        loop {
+            let line1 = lines1.next().transpose().unwrap();
+            let line2 = lines2.next().transpose().unwrap();
+
+            match (line1, line2) {
+                (Some(line1), Some(line2)) => {
+                    assert_eq!(line1, line2);
+                }
+                (None, None) => {
+                    break; // Both files reached the end
+                }
+                _ => {
+                    panic!("FILES ARE NOT EQUAL!!!")
+                }
+            }
+        }
+    }
+
+    #[rstest]
     fn test_process_narrowpeak(
         path_to_dummy_narrowpeak: PathBuf,
     ) -> Result<(), Box<dyn std::error::Error + 'static>> {
@@ -2176,6 +2495,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -2225,6 +2545,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         )
         .expect("Uniwig main failed!");
 
@@ -2270,6 +2591,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         // Generate wig output
@@ -2291,6 +2613,7 @@ mod tests {
             false,
             true,
             1.0,
+            "fixed",
         );
 
         // Run npy_to_wig
@@ -2339,5 +2662,68 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    /// Test smoothing near chromosome start (clamping behavior).
+    ///
+    /// A single read at position 3 with smoothsize=5 should produce coverage
+    /// at positions 1-8 (8 positions). The smoothing window extends from
+    /// position 3-5=-2 to 3+5=8, clamped to chromosome bounds: 1-8.
+    ///
+    /// Input: single read at BED 0-based position 2-3 (1-based position 3)
+    /// Smoothsize: 5
+    /// Expected window: 3±5 = -2 to 8, clamped to 1-8
+    #[rstest]
+    fn test_smoothing_clamp_at_chromosome_start() {
+        use std::io::Write;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let temp_path = tempdir.path();
+
+        // Create single-read BED file: chr1 2 3 (0-based, = position 3 in 1-based)
+        let bed_path = temp_path.join("single.bed");
+        let mut bed_file = File::create(&bed_path).unwrap();
+        writeln!(bed_file, "chr1\t2\t3").unwrap();
+
+        // Create chrom.sizes file
+        let chrom_path = temp_path.join("chrom.sizes");
+        let mut chrom_file = File::create(&chrom_path).unwrap();
+        writeln!(chrom_file, "chr1\t20").unwrap();
+
+        // Run uniwig
+        let output_path = temp_path.join("output");
+        std::fs::create_dir_all(&output_path).unwrap();
+        let output_header = format!("{}/", output_path.display());
+
+        uniwig_main(
+            vec!["start"],
+            5, // smoothsize
+            bed_path.to_str().unwrap(),
+            chrom_path.to_str().unwrap(),
+            &output_header,
+            "wig",
+            "bed",
+            1,
+            false,
+            1,
+            0,
+            false,
+            true,
+            1.0,
+            "fixed",
+        )
+        .expect("uniwig_main failed");
+
+        // Read output and count positions with value 1
+        let wig_path = output_path.join("_start.wig");
+        let content = std::fs::read_to_string(&wig_path).unwrap();
+        let ones_count = content.lines().filter(|line| *line == "1").count();
+
+        // Smoothing window 3±5 clamped to chromosome bounds = positions 1-8
+        assert_eq!(
+            ones_count, 8,
+            "Expected 8 positions with value 1 (window clamped to 1-8), got {}",
+            ones_count
+        );
     }
 }

@@ -117,4 +117,12 @@ pub fn create_uniwig_cli() -> Command {
                 .help("Print more verbose debug messages?")
                 .action(ArgAction::SetTrue),
         )
+        .arg(
+            Arg::new("wigstep")
+                .long("wigstep")
+                .short('w')
+                .default_value("fixed")
+                .help("Wig output step type: 'fixed' (every position) or 'variable' (non-zero only)")
+                .required(false),
+        )
 }

@@ -82,6 +82,10 @@ pub fn run_uniwig(matches: &ArgMatches) {
         .get_one::<i32>("zoom")
         .expect("requires integer value");
 
+    let wigstep = matches
+        .get_one::<String>("wigstep")
+        .expect("wigstep is required");
+
     uniwig_main(
         vec_count_type,
         *smoothsize,
@@ -97,6 +101,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
         *debug,
         *bam_shift,
         *bam_scale,
+        wigstep,
     )
     .expect("Uniwig failed.");
 }

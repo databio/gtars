@@ -362,10 +362,8 @@ pub fn npy_to_wig(npy_header: &Path, wig_header: &Path) -> Result<(), Box<dyn st
         // Check this inner key across all sorted outer dictionaries
         for outer_key in &sorted_outer_keys {
             let inner_dict = dictionary.get(outer_key).unwrap();
-            let mut value = *inner_dict.get(*target_inner_key).unwrap();
-            if *target_inner_key == "start" || *target_inner_key == "core" {
-                value += 1;
-            }
+            let value = *inner_dict.get(*target_inner_key).unwrap();
+            // No +1 offset needed - coordinates are already 1-based from BED conversion
             let step_value = inner_dict.get(step_key).unwrap();
             writeln!(
                 output_file,

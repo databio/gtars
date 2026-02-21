@@ -34,7 +34,8 @@ pub use encoder::{
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;
 pub use types::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
-    digest_sequence_with_description, parse_rgsi_line,
+    ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
+    ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1, SequenceCollection,
+    SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata, SequenceRecord,
+    digest_sequence, digest_sequence_with_description, parse_rgci_line, parse_rgsi_line,
 };

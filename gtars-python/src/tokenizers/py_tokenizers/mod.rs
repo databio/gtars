@@ -59,9 +59,8 @@ impl PyTokenizer {
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id())]
                 .into_py_any(py)?)
-            }
             // if a list of tokens is passed
-            else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
+            } else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
                 let ids: Vec<u32> = tokens
                     .iter()
                     .map(|token| {
@@ -88,9 +87,8 @@ impl PyTokenizer {
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())]
                 .into_py_any(py)?)
-            }
             // if a list of ids is passed
-            else if let Ok(ids) = ids.extract::<Vec<u32>>() {
+            } else if let Ok(ids) = ids.extract::<Vec<u32>>() {
                 let tokens: Vec<String> = ids
                     .iter()
                     .map(|&id| {
@@ -117,9 +115,8 @@ impl PyTokenizer {
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())
                     .into_py_any(py)?)
-            }
             // if a list of ids is passed
-            else if let Ok(ids) = id.extract::<Vec<u32>>() {
+            } else if let Ok(ids) = id.extract::<Vec<u32>>() {
                 let tokens: Vec<String> = ids
                     .iter()
                     .map(|&id| {
@@ -146,9 +143,8 @@ impl PyTokenizer {
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id());
                 Ok(id.into_py_any(py)?)
-            }
             // if a list of tokens is passed
-            else if let Ok(tokens) = region.extract::<Vec<String>>() {
+            } else if let Ok(tokens) = region.extract::<Vec<String>>() {
                 let ids: Vec<u32> = tokens
                     .iter()
                     .map(|token| {
