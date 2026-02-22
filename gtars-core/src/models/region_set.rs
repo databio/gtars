@@ -636,7 +636,6 @@ impl Display for RegionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Error;
 
     use pretty_assertions::assert_eq;
     use rstest::*;

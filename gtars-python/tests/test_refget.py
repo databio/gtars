@@ -3,6 +3,7 @@ from gtars.refget import (
     RefgetStore,
     StorageMode,
     digest_fasta,
+    digest_sequence,
     load_fasta,
     sha512t24u_digest,
     md5_digest,
@@ -729,3 +730,373 @@ GGGG
         store = RefgetStore.in_memory()
         assert "RefgetStore" in repr(store)
         assert "memory-only" in repr(store)
+
+    def test_add_standalone_sequence(self):
+        """Test adding a sequence without a collection."""
+        store = RefgetStore.in_memory()
+
+        # Nameless sequence
+        seq = digest_sequence(b"ACGTACGTACGT")
+        store.add_sequence(seq)
+        retrieved = store.get_sequence(seq.metadata.sha512t24u)
+        assert retrieved is not None
+        assert retrieved.metadata.length == 12
+
+        # Named sequence
+        seq2 = digest_sequence(b"TTTTAAAA", name="my_seq")
+        store.add_sequence(seq2)
+        retrieved2 = store.get_sequence(seq2.metadata.sha512t24u)
+        assert retrieved2 is not None
+
+        # Adding again should not error (skip duplicate)
+        store.add_sequence(seq)
+
+        # Force add should also work
+        store.add_sequence(seq, force=True)
+
+    def test_digest_sequence_name_optional(self):
+        """Test that digest_sequence works with and without name."""
+        # No name
+        seq1 = digest_sequence(b"ACGT")
+        assert seq1.metadata.length == 4
+        assert seq1.metadata.name == ""
+
+        # With name
+        seq2 = digest_sequence(b"ACGT", name="chr1")
+        assert seq2.metadata.name == "chr1"
+
+        # Same data should produce same digest regardless of name
+        assert seq1.metadata.sha512t24u == seq2.metadata.sha512t24u
+
+    def test_sequence_aliases(self):
+        """Test sequence alias add, forward lookup, reverse lookup, and remove."""
+        store = RefgetStore.in_memory()
+        seq = digest_sequence(b"ACGTACGT", name="chr1")
+        store.add_sequence(seq)
+
+        digest = seq.metadata.sha512t24u
+        store.add_sequence_alias("ncbi", "NC_000001.11", digest)
+        store.add_sequence_alias("ucsc", "chr1", digest)
+
+        # Forward lookup
+        found = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+        assert found is not None
+        assert found.metadata.name == "chr1"
+
+        # Reverse lookup
+        aliases = store.get_aliases_for_sequence(digest)
+        assert len(aliases) == 2
+        assert ("ncbi", "NC_000001.11") in aliases
+        assert ("ucsc", "chr1") in aliases
+
+        # List namespaces
+        ns = store.list_sequence_alias_namespaces()
+        assert "ncbi" in ns
+        assert "ucsc" in ns
+
+        # List aliases in namespace
+        alias_list = store.list_sequence_aliases("ncbi")
+        assert "NC_000001.11" in alias_list
+
+        # Remove alias
+        assert store.remove_sequence_alias("ncbi", "NC_000001.11")
+        assert store.get_sequence_by_alias("ncbi", "NC_000001.11") is None
+
+    def test_collection_aliases(self):
+        """Test collection alias add, forward lookup, and reverse lookup."""
+        store = RefgetStore.in_memory()
+        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        store.add_collection_alias("ucsc", "hg38", meta.digest)
+
+        coll = store.get_collection_by_alias("ucsc", "hg38")
+        assert coll is not None
+        assert coll.digest == meta.digest
+
+        aliases = store.get_aliases_for_collection(meta.digest)
+        assert ("ucsc", "hg38") in aliases
+
+    def test_alias_persistence(self, tmp_path):
+        """Test that aliases persist across store save/reload."""
+        store_path = tmp_path / "store"
+        store = RefgetStore.on_disk(str(store_path))
+        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        store.add_collection_alias("ucsc", "hg38", meta.digest)
+
+        # Reload
+        store2 = RefgetStore.open_local(str(store_path))
+        assert store2.get_collection_by_alias("ucsc", "hg38") is not None
+
+
+# =========================================================================
+# FHR Metadata Tests
+# =========================================================================
+
+
+def test_fhr_metadata_empty_by_default():
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store = RefgetStore.in_memory()
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    # FHR metadata always works -- no enable step needed
+    assert store.get_fhr_metadata(meta.digest) is None
+    assert store.list_fhr_metadata() == []
+
+
+def test_fhr_metadata_set_get():
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store = RefgetStore.in_memory()
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    fhr = FhrMetadata(genome="Homo sapiens", version="GRCh38", masking="soft-masked")
+    store.set_fhr_metadata(meta.digest, fhr)
+
+    retrieved = store.get_fhr_metadata(meta.digest)
+    assert retrieved is not None
+    assert retrieved.genome == "Homo sapiens"
+    assert retrieved.version == "GRCh38"
+    assert retrieved.masking == "soft-masked"
+
+
+def test_fhr_metadata_none_for_missing():
+    from gtars.refget import RefgetStore
+
+    store = RefgetStore.in_memory()
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+    assert store.get_fhr_metadata(meta.digest) is None
+
+
+def test_fhr_metadata_to_dict():
+    from gtars.refget import FhrMetadata
+
+    fhr = FhrMetadata(genome="Test", version="1.0")
+    d = fhr.to_dict()
+    assert d["genome"] == "Test"
+    assert d["version"] == "1.0"
+
+
+def test_fhr_metadata_from_json(tmp_path):
+    import json
+    from gtars.refget import FhrMetadata
+
+    fhr_file = tmp_path / "test.fhr.json"
+    fhr_file.write_text(
+        json.dumps(
+            {
+                "genome": "Homo sapiens",
+                "version": "GRCh38.p14",
+                "taxon": {
+                    "name": "Homo sapiens",
+                    "uri": "https://identifiers.org/taxonomy:9606",
+                },
+                "masking": "soft-masked",
+            }
+        )
+    )
+
+    fhr = FhrMetadata.from_json(str(fhr_file))
+    assert fhr.genome == "Homo sapiens"
+    assert fhr.version == "GRCh38.p14"
+
+
+def test_fhr_metadata_persistence(tmp_path):
+    import json
+    from gtars.refget import RefgetStore, FhrMetadata
+
+    store_path = tmp_path / "store"
+    store = RefgetStore.on_disk(str(store_path))
+    meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+    fhr = FhrMetadata(genome="Test", version="1.0")
+    store.set_fhr_metadata(meta.digest, fhr)
+
+    # Verify sidecar file was written
+    fhr_path = store_path / "collections" / f"{meta.digest}.fhr.json"
+    assert fhr_path.exists()
+    data = json.loads(fhr_path.read_text())
+    assert data["genome"] == "Test"
+
+    # Reload -- FHR metadata always loaded
+    store2 = RefgetStore.open_local(str(store_path))
+    retrieved = store2.get_fhr_metadata(meta.digest)
+    assert retrieved is not None
+    assert retrieved.genome == "Test"
+
+
+def test_fhr_metadata_spec_fields():
+    """Test creating FhrMetadata with all FHR 1.0 spec fields including new ones."""
+    import json
+    from gtars.refget import FhrMetadata
+
+    fhr = FhrMetadata(
+        genome="Bombas huntii",
+        version="0.0.1",
+        schemaVersion=1.0,
+        masking="soft-masked",
+        voucherSpecimen="Located in Freezer 33",
+        documentation="Built assembly from...",
+        identifier=["beetlebase:TC010103"],
+        scholarlyArticle="10.1371/journal.pntd.0008755",
+        funding="NIH R01",
+        vitalStats={
+            "L50": 42,
+            "N50": 1000000,
+            "totalBasePairs": 3000000000,
+            "readTechnology": "hifi",
+        },
+        accessionID={"name": "PBARC", "url": "https://example.com"},
+    )
+
+    assert fhr.genome == "Bombas huntii"
+    assert fhr.voucher_specimen == "Located in Freezer 33"
+    assert fhr.documentation == "Built assembly from..."
+    assert fhr.identifier == ["beetlebase:TC010103"]
+    assert fhr.scholarly_article == "10.1371/journal.pntd.0008755"
+    assert fhr.funding == "NIH R01"
+
+    # Round-trip through dict
+    d = fhr.to_dict()
+    assert d["voucherSpecimen"] == "Located in Freezer 33"
+    assert d["documentation"] == "Built assembly from..."
+    assert d["scholarlyArticle"] == "10.1371/journal.pntd.0008755"
+    assert d["funding"] == "NIH R01"
+    assert d["vitalStats"]["L50"] == 42
+    assert d["vitalStats"]["N50"] == 1000000
+    assert d["accessionID"]["name"] == "PBARC"
+    # seqcol_digest should NOT appear
+    assert "seqcolDigest" not in d
+    assert "seqcol_digest" not in d
+
+
+def test_add_sequence_collection_basic():
+    """Test adding a pre-built SequenceCollection to a store."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    # Build a collection using digest_fasta (no FASTA file write needed)
+    collection = digest_fasta(fasta_path)
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection(collection)
+
+    # Collection should appear in list_collections
+    collections = store.list_collections()
+    assert len(collections) == 1
+    assert collections[0].digest == collection.digest
+
+
+def test_add_sequence_collection_sequences_retrievable():
+    """Test that sequences from add_sequence_collection are retrievable by metadata.
+
+    digest_fasta() produces a collection with DIGEST_ONLY sequences (no raw data),
+    so the sequences are stored as Stubs and get_sequence returns metadata but
+    get_sequence(digest) returns None for unloaded Stubs. Verify metadata is present
+    via list_collections and collection digest lookup.
+    """
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection(collection)
+
+    # The collection metadata should be present and match
+    meta = store.get_collection_metadata(collection.digest)
+    assert meta is not None, "Collection metadata should be present in store"
+    assert meta.digest == collection.digest
+    assert meta.n_sequences == len(collection.sequences)
+
+    # Use load_fasta to get a collection with Full sequences, verify those ARE retrievable
+    from gtars.refget import load_fasta
+
+    full_collection = load_fasta(fasta_path)
+    store2 = RefgetStore.in_memory()
+    store2.add_sequence_collection(full_collection)
+
+    for seq_record in full_collection.sequences:
+        digest = seq_record.metadata.sha512t24u
+        retrieved = store2.get_sequence(digest)
+        assert retrieved is not None, f"Sequence {digest} should be retrievable from full collection"
+        assert retrieved.metadata.length == seq_record.metadata.length
+
+
+def test_add_sequence_collection_skip_duplicate():
+    """Test that add_sequence_collection skips duplicates by default."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+
+    # Add the same collection twice - should not raise
+    store.add_sequence_collection(collection)
+    store.add_sequence_collection(collection)
+
+    # Should still have exactly one collection
+    assert len(store.list_collections()) == 1
+
+
+def test_add_sequence_collection_force():
+    """Test that add_sequence_collection with force=True overwrites existing."""
+    fasta_path = "../tests/data/fasta/base.fa"
+
+    collection = digest_fasta(fasta_path)
+    store = RefgetStore.in_memory()
+
+    # Add once, then force-overwrite - should not raise
+    store.add_sequence_collection(collection)
+    store.add_sequence_collection(collection, force=True)
+
+    # Should still have exactly one collection
+    assert len(store.list_collections()) == 1
+
+
+def test_is_persisting_false_for_memory_store():
+    """Test that in-memory stores report is_persisting as False."""
+    store = RefgetStore.in_memory()
+    assert store.is_persisting is False
+
+
+def test_is_persisting_true_after_enable(tmp_path):
+    """Test that is_persisting becomes True after enable_persistence."""
+    store = RefgetStore.in_memory()
+    assert store.is_persisting is False
+
+    store.enable_persistence(str(tmp_path))
+    assert store.is_persisting is True
+
+
+def test_is_persisting_false_after_disable(tmp_path):
+    """Test that is_persisting becomes False after disable_persistence."""
+    store = RefgetStore.in_memory()
+    store.enable_persistence(str(tmp_path))
+    assert store.is_persisting is True
+
+    store.disable_persistence()
+    assert store.is_persisting is False
+
+
+def test_refgetstore_compare_two_collections(tmp_path):
+    """Compare two sequence collections in a RefgetStore."""
+    from gtars.refget import RefgetStore
+
+    store = RefgetStore.in_memory()
+
+    # Add two different FASTAs
+    fasta1 = tmp_path / "a.fa"
+    fasta1.write_text(">chr1\nACGT\n>chr2\nTGCA\n")
+    fasta2 = tmp_path / "b.fa"
+    fasta2.write_text(">chr1\nACGT\n>chr3\nGGGG\n")
+
+    meta1, _ = store.add_sequence_collection_from_fasta(str(fasta1))
+    meta2, _ = store.add_sequence_collection_from_fasta(str(fasta2))
+
+    # Compare the two collections
+    comparison = store.compare(meta1.digest, meta2.digest)
+
+    # Verify comparison structure per seqcol spec
+    assert "digests" in comparison
+    assert "attributes" in comparison
+    assert "array_elements" in comparison
+    assert comparison["digests"]["a"] == meta1.digest
+    assert comparison["digests"]["b"] == meta2.digest
