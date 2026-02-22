@@ -35,3 +35,7 @@ tests/data/partitions_benchmark/
 gtars-genomicdist/examples/benchmark_*.rs
 gtars-genomicdist/examples/partitions_demo.rs
 *.annotation.gtf.gz
+tests/data/fasta/sacCer3.fa
+tests/data/fasta/sacCer3.rgsi
+gtars-r/tests/explore_sacCer3.*
+gtars-r/tests/smoketest_sacCer3.R
