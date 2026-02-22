@@ -40,9 +40,6 @@ pub struct RegionSet {
     pub regions: Vec<Region>,
     pub header: Option<String>,
     pub path: Option<PathBuf>,
-    /// Whether regions are known to be sorted by (chr, start).
-    /// When true, operations like `reduce()` can skip the sort step.
-    pub is_sorted: bool,
 }
 
 pub struct RegionSetIterator<'a> {
@@ -183,7 +180,6 @@ impl TryFrom<&Path> for RegionSet {
                 false => Some(header),
             },
             path: Some(value.to_owned()),
-            is_sorted: false,
         };
         // This line needed for correct calculate identifier and to bigbed function
         rs.sort();
@@ -222,7 +218,6 @@ impl From<Vec<Region>> for RegionSet {
             regions,
             header: None,
             path: None,
-            is_sorted: false,
         }
     }
 }
@@ -253,7 +248,6 @@ impl From<&[u8]> for RegionSet {
             regions,
             header: None,
             path: None,
-            is_sorted: false,
         }
     }
 }
@@ -505,7 +499,6 @@ impl RegionSet {
     pub fn sort(&mut self) {
         self.regions
             .sort_by(|a, b| a.chr.cmp(&b.chr).then_with(|| a.start.cmp(&b.start)));
-        self.is_sorted = true;
     }
 
     ///

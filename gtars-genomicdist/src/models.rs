@@ -7,6 +7,21 @@ use std::{collections::HashMap, fmt::Debug};
 use std::fs::File;
 use std::path::Path;
 
+/// A `RegionSet` that is guaranteed to be sorted by (chr, start).
+///
+/// Created by moving a `RegionSet` into `SortedRegionSet::new()`, which
+/// sorts in place (no clone). Functions that require sorted input can
+/// accept this type instead of re-sorting every time.
+pub struct SortedRegionSet(pub RegionSet);
+
+impl SortedRegionSet {
+    /// Sort a RegionSet in place and wrap it. This is a move, not a clone.
+    pub fn new(mut rs: RegionSet) -> Self {
+        rs.sort();
+        Self(rs)
+    }
+}
+
 /// Statistics summary for regions on a single chromosome.
 ///
 /// Contains counts, bounds, and descriptive statistics for region lengths.

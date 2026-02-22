@@ -27,10 +27,5 @@ pub fn partition_genome_into_bins(chrom_sizes: &HashMap<String, u32>, n_bins: u3
         }
     }
 
-    RegionSet {
-        regions,
-        header: None,
-        path: None,
-        is_sorted: true, // bins are generated in chromosome order
-    }
+    RegionSet::from(regions)
 }

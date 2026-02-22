@@ -8,6 +8,8 @@ use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
 
+use crate::models::SortedRegionSet;
+
 /// Interval set algebra operations on genomic region sets.
 ///
 /// Modeled after R's GenomicRanges/IRanges package. All functions return new
@@ -91,9 +93,7 @@ impl IntervalRanges for RegionSet {
                 }
             })
             .collect();
-        let mut rs = RegionSet::from(regions);
-        rs.is_sorted = self.is_sorted; // trim preserves order
-        rs
+        RegionSet::from(regions)
     }
 
     fn promoters(&self, upstream: u32, downstream: u32) -> RegionSet {
@@ -107,9 +107,7 @@ impl IntervalRanges for RegionSet {
                 rest: None,
             })
             .collect();
-        let mut rs = RegionSet::from(regions);
-        rs.is_sorted = self.is_sorted; // promoters preserves relative order
-        rs
+        RegionSet::from(regions)
     }
 
     fn reduce(&self) -> RegionSet {
@@ -117,23 +115,9 @@ impl IntervalRanges for RegionSet {
             return RegionSet::from(Vec::<Region>::new());
         }
 
-        // If already sorted, iterate directly; otherwise clone and sort.
-        // Lexicographic chromosome order matches BED convention and RegionSet::sort().
-        let regions: &[Region] = if self.is_sorted {
-            &self.regions
-        } else {
-            // Caller didn't guarantee sorted input — must sort first.
-            // We use an unsafe-free approach: sort into a temporary Vec.
-            return {
-                let mut sorted = self.regions.clone();
-                sorted.sort_by(|a, b| {
-                    a.chr.cmp(&b.chr).then_with(|| a.start.cmp(&b.start))
-                });
-                let mut rs = RegionSet::from(sorted);
-                rs.is_sorted = true;
-                rs.reduce() // recurse once with sorted input
-            };
-        };
+        // Clone and sort via SortedRegionSet (moves, sorts in place — no double clone)
+        let sorted = SortedRegionSet::new(RegionSet::from(self.regions.clone()));
+        let regions = &sorted.0.regions;
 
         let mut merged: Vec<Region> = Vec::new();
         let mut current = regions[0].clone();
@@ -159,9 +143,7 @@ impl IntervalRanges for RegionSet {
             rest: None,
         });
 
-        let mut result = RegionSet::from(merged);
-        result.is_sorted = true;
-        result
+        RegionSet::from(merged)
     }
 
     fn setdiff(&self, other: &RegionSet) -> RegionSet {
@@ -226,9 +208,7 @@ impl IntervalRanges for RegionSet {
             a_chr_start = a_chr_end;
         }
 
-        let mut rs = RegionSet::from(result);
-        rs.is_sorted = true; // output preserves sorted order from reduce()
-        rs
+        RegionSet::from(result)
     }
 
     fn pintersect(&self, other: &RegionSet) -> RegionSet {

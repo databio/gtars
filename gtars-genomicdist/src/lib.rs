@@ -38,5 +38,6 @@ pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
 };
+pub use models::SortedRegionSet;
 pub use statistics::GenomicIntervalSetStatistics;
 pub use statistics::{calc_dinucl_freq, calc_gc_content};
