@@ -986,6 +986,20 @@ fn json_string_to_py(py: Python<'_>, json_str: &str) -> PyResult<Py<PyAny>> {
     Ok(result.into())
 }
 
+/// Strip "SQ." prefix from digest if present (case-insensitive).
+///
+/// This allows users to copy digests with the standard "SQ." prefix from
+/// APIs and documentation without the lookup failing silently.
+fn strip_sq_prefix(digest: &str) -> &str {
+    if digest.len() > 3 {
+        let prefix = &digest[..3];
+        if prefix.eq_ignore_ascii_case("SQ.") {
+            return &digest[3..];
+        }
+    }
+    digest
+}
+
 /// A global store for GA4GH refget sequences with lazy-loading support.
 ///
 /// RefgetStore provides content-addressable storage for reference genome
@@ -1293,35 +1307,50 @@ impl PyRefgetStore {
     ///
     /// Searches for a sequence by its GA4GH SHA-512/24u digest. If not found
     /// and the input looks like an MD5 digest (32 hex characters), tries MD5 lookup.
+    /// Automatically strips "SQ." prefix if present (case-insensitive).
     ///
     /// Args:
-    ///     digest: Sequence digest (SHA-512/24u).
+    ///     digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
     ///
     /// Returns:
-    ///     Optional[SequenceRecord]: The sequence record with data if found, None otherwise.
+    ///     SequenceRecord: The sequence record with data.
+    ///
+    /// Raises:
+    ///     KeyError: If the sequence is not found.
     ///
     /// Example:
     ///     >>> record = store.get_sequence("aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
-    ///     >>> if record:
-    ///     ...     print(f"Found: {record.metadata.name}")
-    fn get_sequence(&mut self, digest: &str) -> Option<PySequenceRecord> {
+    ///     >>> print(f"Found: {record.metadata.name}")
+    ///     >>> # Also works with SQ. prefix
+    ///     >>> record = store.get_sequence("SQ.aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
+    fn get_sequence(&mut self, digest: &str) -> PyResult<PySequenceRecord> {
+        let digest = strip_sq_prefix(digest);
         self.inner
             .get_sequence(digest.as_bytes())
-            .ok()
             .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    digest, e
+                ))
+            })
     }
 
     /// Retrieve a sequence by collection digest and sequence name.
     ///
     /// Looks up a sequence within a specific collection using its name
     /// (e.g., "chr1", "chrM"). Loads sequence data if needed.
+    /// Automatically strips "SQ." prefix from collection digest if present.
     ///
     /// Args:
-    ///     collection_digest: The collection's SHA-512/24u digest.
+    ///     collection_digest: The collection's SHA-512/24u digest, optionally with "SQ." prefix.
     ///     sequence_name: Name of the sequence within that collection.
     ///
     /// Returns:
-    ///     Optional[SequenceRecord]: The sequence record with data if found, None otherwise.
+    ///     SequenceRecord: The sequence record with data.
+    ///
+    /// Raises:
+    ///     KeyError: If the sequence is not found.
     ///
     /// Example:
     ///     >>> record = store.get_sequence_by_name(
@@ -1332,23 +1361,31 @@ impl PyRefgetStore {
         &mut self,
         collection_digest: &str,
         sequence_name: &str,
-    ) -> Option<PySequenceRecord> {
+    ) -> PyResult<PySequenceRecord> {
+        let collection_digest = strip_sq_prefix(collection_digest);
         self.inner
             .get_sequence_by_name(collection_digest, sequence_name)
-            .ok()
             .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence '{}' not found in collection {} ({})",
+                    sequence_name, collection_digest, e
+                ))
+            })
     }
 
     /// Get metadata for a single sequence by digest (no sequence data).
     ///
     /// Use this for lightweight lookups when you don't need the actual sequence.
+    /// Automatically strips "SQ." prefix from digest if present.
     ///
     /// Args:
-    ///     digest: Sequence digest (SHA-512/24u).
+    ///     digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
     ///
     /// Returns:
     ///     Optional[SequenceMetadata]: Sequence metadata if found, None otherwise.
     fn get_sequence_metadata(&self, digest: &str) -> Option<PySequenceMetadata> {
+        let digest = strip_sq_prefix(digest);
         self.inner
             .get_sequence_metadata(digest.as_bytes())
             .map(|meta| PySequenceMetadata::from(meta.clone()))
@@ -1359,21 +1396,33 @@ impl PyRefgetStore {
     /// Retrieves a specific region from a sequence using 0-based, half-open
     /// coordinates [start, end). Automatically loads sequence data if not
     /// already cached (for lazy-loaded stores).
+    /// Automatically strips "SQ." prefix from digest if present.
     ///
     /// Args:
-    ///     seq_digest: Sequence digest (SHA-512/24u).
+    ///     seq_digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
     ///     start: Start position (0-based, inclusive).
     ///     end: End position (0-based, exclusive).
     ///
     /// Returns:
-    ///     Optional[str]: The substring sequence if found, None otherwise.
+    ///     str: The substring sequence.
+    ///
+    /// Raises:
+    ///     KeyError: If the sequence is not found.
     ///
     /// Example:
     ///     >>> # Get first 1000 bases of chr1
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     ///     >>> print(f"First 50bp: {seq[:50]}")
-    fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> Option<String> {
-        self.inner.get_substring(seq_digest, start, end).ok()
+    fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.inner
+            .get_substring(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    seq_digest, e
+                ))
+            })
     }
 
     #[getter]
