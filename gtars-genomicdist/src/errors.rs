@@ -20,6 +20,8 @@ pub enum GtarsGenomicDistError {
     GCContentError(String, u32, u32, String),
     #[error("No TSS's found for region. Double-check your index!")]
     TSSContentError(String),
+    #[error("Signal matrix parse error: {0}")]
+    SignalMatrixError(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

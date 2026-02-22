@@ -27,6 +27,7 @@ pub mod errors;
 pub mod interval_ranges;
 pub mod models;
 pub mod partitions;
+pub mod signal;
 pub mod statistics;
 pub mod utils;
 
@@ -39,5 +40,6 @@ pub use partitions::{
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
 };
 pub use models::SortedRegionSet;
+pub use signal::{calc_summary_signal, ConditionStats, SignalMatrix, SignalSummaryResult};
 pub use statistics::GenomicIntervalSetStatistics;
 pub use statistics::{calc_dinucl_freq, calc_gc_content};
