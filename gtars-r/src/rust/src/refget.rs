@@ -13,22 +13,18 @@ use gtars_refget::store::{RefgetStore, RetrievedSequence, StorageMode};
 
 macro_rules! with_store {
     ($store_ptr:expr, $store:ident, $body:block) => {{
-        let store_raw_ptr = unsafe { $store_ptr.external_ptr_addr::<RefgetStore>() };
-        if store_raw_ptr.is_null() {
-            return Err("Invalid store pointer".into());
-        }
-        let $store = unsafe { &mut *store_raw_ptr };
+        let mut ext_ptr = <ExternalPtr<RefgetStore>>::try_from($store_ptr)
+            .map_err(|_| extendr_api::Error::Other("Invalid store pointer".into()))?;
+        let $store = &mut *ext_ptr;
         $body
     }};
 }
 
 macro_rules! with_store_ref {
     ($store_ptr:expr, $store:ident, $body:block) => {{
-        let store_raw_ptr = unsafe { $store_ptr.external_ptr_addr::<RefgetStore>() };
-        if store_raw_ptr.is_null() {
-            return Err("Invalid store pointer".into());
-        }
-        let $store = unsafe { &*store_raw_ptr };
+        let ext_ptr = <ExternalPtr<RefgetStore>>::try_from($store_ptr)
+            .map_err(|_| extendr_api::Error::Other("Invalid store pointer".into()))?;
+        let $store = &*ext_ptr;
         $body
     }};
 }
@@ -79,10 +75,9 @@ pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
 
     let mut store = RefgetStore::in_memory();
     store.set_encoding_mode(storage_mode);
-    let store = Box::new(store);
-    let ptr = unsafe { Robj::make_external_ptr(Box::into_raw(store), Robj::from(())) };
+    let ext_ptr = ExternalPtr::new(store);
 
-    Ok(ptr)
+    Ok(ext_ptr.into())
 }
 
 /// Create a disk-backed RefgetStore
@@ -92,10 +87,8 @@ pub fn refget_store_raw(mode: &str) -> extendr_api::Result<Robj> {
 pub fn on_disk_store(path: &str) -> extendr_api::Result<Robj> {
     match RefgetStore::on_disk(path) {
         Ok(store) => {
-            let boxed_store = Box::new(store);
-            let ptr =
-                unsafe { Robj::make_external_ptr(Box::into_raw(boxed_store), Robj::from(())) };
-            Ok(ptr)
+            let ext_ptr = ExternalPtr::new(store);
+            Ok(ext_ptr.into())
         }
         Err(e) => Err(format!("Error creating disk-backed store: {}", e).into()),
     }
@@ -108,10 +101,8 @@ pub fn on_disk_store(path: &str) -> extendr_api::Result<Robj> {
 pub fn open_local_store(root_path: &str) -> extendr_api::Result<Robj> {
     match RefgetStore::open_local(root_path) {
         Ok(store) => {
-            let boxed_store = Box::new(store);
-            let ptr =
-                unsafe { Robj::make_external_ptr(Box::into_raw(boxed_store), Robj::from(())) };
-            Ok(ptr)
+            let ext_ptr = ExternalPtr::new(store);
+            Ok(ext_ptr.into())
         }
         Err(e) => Err(format!("Error opening store from directory: {}", e).into()),
     }
@@ -125,10 +116,8 @@ pub fn open_local_store(root_path: &str) -> extendr_api::Result<Robj> {
 pub fn open_remote_store(cache_path: &str, remote_url: &str) -> extendr_api::Result<Robj> {
     match RefgetStore::open_remote(cache_path, remote_url.to_string()) {
         Ok(store) => {
-            let boxed_store = Box::new(store);
-            let ptr =
-                unsafe { Robj::make_external_ptr(Box::into_raw(boxed_store), Robj::from(())) };
-            Ok(ptr)
+            let ext_ptr = ExternalPtr::new(store);
+            Ok(ext_ptr.into())
         }
         Err(e) => Err(format!("Error opening remote store: {}", e).into()),
     }
