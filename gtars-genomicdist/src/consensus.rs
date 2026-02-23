@@ -151,4 +151,107 @@ mod tests {
         assert_eq!(result[0].count, 2); // chr1:0-15
         assert_eq!(result[1].count, 1); // chr1:20-30
     }
+
+    #[rstest]
+    fn test_consensus_three_sets_all_overlap() {
+        // 3 sets all overlap [0,10); union = [0,10), count=3
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 2, 8)]);
+        let c = make_regionset(vec![("chr1", 5, 10)]);
+        let result = consensus(&[a, b, c]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].chr, "chr1");
+        assert_eq!(result[0].start, 0);
+        assert_eq!(result[0].end, 10);
+        assert_eq!(result[0].count, 3);
+    }
+
+    #[rstest]
+    fn test_consensus_disjoint_sets() {
+        // A and B share no positions: two union regions, each count=1
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        let result = consensus(&[a, b]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].count, 1);
+        assert_eq!(result[1].count, 1);
+    }
+
+    #[rstest]
+    fn test_consensus_multi_chromosome() {
+        // A covers chr1+chr2, B covers only chr1
+        // chr1 region: count=2, chr2 region: count=1
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr2", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = consensus(&[a, b]);
+        assert_eq!(result.len(), 2);
+        // Output sorted by (chr, start): chr1 first, then chr2
+        let chr1 = result.iter().find(|r| r.chr == "chr1").unwrap();
+        let chr2 = result.iter().find(|r| r.chr == "chr2").unwrap();
+        assert_eq!(chr1.count, 2);
+        assert_eq!(chr2.count, 1);
+    }
+
+    #[rstest]
+    fn test_consensus_three_sets_partial() {
+        // A=[0,10), B=[5,15), C=[20,30)
+        // Union: [0,15), [20,30)
+        // [0,15) overlapped by A and B -> count=2
+        // [20,30) overlapped by C only -> count=1
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let c = make_regionset(vec![("chr1", 20, 30)]);
+        let result = consensus(&[a, b, c]);
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].start, 0);
+        assert_eq!(result[0].end, 15);
+        assert_eq!(result[0].count, 2);
+        assert_eq!(result[1].start, 20);
+        assert_eq!(result[1].end, 30);
+        assert_eq!(result[1].count, 1);
+    }
+
+    #[rstest]
+    fn test_consensus_empty_among_nonempty() {
+        // An empty set contributes 0 to all counts
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let empty = RegionSet::from(Vec::<Region>::new());
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = consensus(&[a, empty, b]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].count, 2); // only A and B, not empty
+    }
+
+    #[rstest]
+    fn test_consensus_adjacent_across_sets() {
+        // A=[0,10), B=[10,20) are adjacent
+        // Union via reduce: [0,20)
+        // Both A and B overlap [0,20) -> count=2
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 10, 20)]);
+        let result = consensus(&[a, b]);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].start, 0);
+        assert_eq!(result[0].end, 20);
+        assert_eq!(result[0].count, 2);
+    }
+
+    #[rstest]
+    fn test_consensus_verifies_coordinates() {
+        // Assert exact chr/start/end on output
+        let a = make_regionset(vec![("chr1", 100, 200), ("chr2", 300, 400)]);
+        let b = make_regionset(vec![("chr1", 150, 250)]);
+        let result = consensus(&[a, b]);
+        assert_eq!(result.len(), 2);
+        // chr1 union: [100,250), both overlap
+        assert_eq!(result[0].chr, "chr1");
+        assert_eq!(result[0].start, 100);
+        assert_eq!(result[0].end, 250);
+        assert_eq!(result[0].count, 2);
+        // chr2: [300,400), only A
+        assert_eq!(result[1].chr, "chr2");
+        assert_eq!(result[1].start, 300);
+        assert_eq!(result[1].end, 400);
+        assert_eq!(result[1].count, 1);
+    }
 }

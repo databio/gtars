@@ -902,6 +902,67 @@ mod tests {
         assert_eq!(result.regions.len(), 3);
     }
 
+    #[rstest]
+    fn test_concat_preserves_regions_and_order() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr1", 20, 30));
+        assert_eq!(result.regions[2], make_region("chr1", 5, 15));
+    }
+
+    #[rstest]
+    fn test_concat_both_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_concat_one_empty() {
+        let nonempty = make_regionset(vec![("chr1", 0, 10)]);
+        let empty = RegionSet::from(Vec::<Region>::new());
+        // empty + nonempty
+        let r1 = empty.concat(&nonempty);
+        assert_eq!(r1.regions.len(), 1);
+        assert_eq!(r1.regions[0], make_region("chr1", 0, 10));
+        // nonempty + empty
+        let r2 = nonempty.concat(&empty);
+        assert_eq!(r2.regions.len(), 1);
+        assert_eq!(r2.regions[0], make_region("chr1", 0, 10));
+    }
+
+    #[rstest]
+    fn test_concat_multi_chromosome() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr2", 50, 60)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr2", 50, 60));
+    }
+
+    #[rstest]
+    fn test_concat_does_not_merge_overlapping() {
+        let a = make_regionset(vec![("chr1", 0, 20)]);
+        let b = make_regionset(vec![("chr1", 10, 30)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 20));
+        assert_eq!(result.regions[1], make_region("chr1", 10, 30));
+    }
+
+    #[rstest]
+    fn test_concat_preserves_duplicates() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 0, 10)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], result.regions[1]);
+    }
+
     // ── union tests ─────────────────────────────────────────────────────
 
     #[rstest]
@@ -915,6 +976,94 @@ mod tests {
         let result = a.union(&b);
         assert_eq!(result.regions.len(), 1);
         assert_eq!(result.regions[0], make_region("chr1", 2, 12));
+    }
+
+    #[rstest]
+    fn test_union_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr1", 20, 30));
+    }
+
+    #[rstest]
+    fn test_union_overlapping() {
+        let a = make_regionset(vec![("chr1", 0, 15)]);
+        let b = make_regionset(vec![("chr1", 10, 25)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 25));
+    }
+
+    #[rstest]
+    fn test_union_adjacent() {
+        // [0,10) and [10,20) are adjacent; reduce merges them (10 <= 10)
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 10, 20)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 20));
+    }
+
+    #[rstest]
+    fn test_union_one_gap() {
+        // [0,10) and [11,20) have a 1bp gap at position 10 -- stay separate
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 11, 20)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr1", 11, 20));
+    }
+
+    #[rstest]
+    fn test_union_both_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_union_one_empty() {
+        let nonempty = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let empty = RegionSet::from(Vec::<Region>::new());
+        let result = nonempty.union(&empty);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr1", 20, 30));
+    }
+
+    #[rstest]
+    fn test_union_multi_chromosome() {
+        // chr1 and chr2 intervals never merge; output sorted lexicographically
+        let a = make_regionset(vec![("chr2", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 0, 10)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr2", 0, 10));
+    }
+
+    #[rstest]
+    fn test_union_contained() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 20, 50)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 100));
+    }
+
+    #[rstest]
+    fn test_union_identical() {
+        // union(A, A) = A (idempotent)
+        let a = make_regionset(vec![("chr1", 10, 20), ("chr1", 30, 40)]);
+        let result = a.union(&a);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 10, 20));
+        assert_eq!(result.regions[1], make_region("chr1", 30, 40));
     }
 
     // ── jaccard tests ───────────────────────────────────────────────────
@@ -950,6 +1099,83 @@ mod tests {
     fn test_jaccard_empty() {
         let a = RegionSet::from(Vec::<Region>::new());
         let b = RegionSet::from(Vec::<Region>::new());
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_partial_overlap_inline() {
+        // A=[0,10) 10bp, B=[5,15) 10bp, union=[0,15) 15bp, intersect=5bp
+        // J = 5/15 = 1/3
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let j = a.jaccard(&b);
+        assert!((j - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_contained() {
+        // A=[0,100) 100bp, B=[20,50) 30bp, union=[0,100) 100bp, intersect=30bp
+        // J = 30/100 = 0.3
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 20, 50)]);
+        let j = a.jaccard(&b);
+        assert!((j - 0.3).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_multi_chromosome() {
+        // A: chr1:[0,20) + chr2:[0,10) = 30bp
+        // B: chr1:[10,30) + chr2:[5,15) = 30bp
+        // union: chr1:[0,30) + chr2:[0,15) = 45bp
+        // intersect: 30+30-45 = 15bp  (chr1:[10,20)=10bp + chr2:[5,10)=5bp)
+        // J = 15/45 = 1/3
+        let a = make_regionset(vec![("chr1", 0, 20), ("chr2", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 10, 30), ("chr2", 5, 15)]);
+        let j = a.jaccard(&b);
+        assert!((j - 1.0 / 3.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_different_chromosomes() {
+        // Same coordinates but different chroms -> no shared positions
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr2", 0, 100)]);
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_symmetry() {
+        let a = make_regionset(vec![("chr1", 0, 15), ("chr1", 30, 50)]);
+        let b = make_regionset(vec![("chr1", 10, 40)]);
+        assert!((a.jaccard(&b) - b.jaccard(&a)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_overlapping_input() {
+        // A has self-overlapping regions; reduces to [0,25) = 25bp
+        // B = [5,20) = 15bp
+        // union = [0,25) = 25bp, intersect = 25+15-25 = 15bp
+        // J = 15/25 = 0.6
+        let a = make_regionset(vec![("chr1", 0, 15), ("chr1", 10, 25)]);
+        let b = make_regionset(vec![("chr1", 5, 20)]);
+        let j = a.jaccard(&b);
+        assert!((j - 0.6).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_one_empty() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = RegionSet::from(Vec::<Region>::new());
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_adjacent() {
+        // [0,10) covers positions 0-9, [10,20) covers 10-19: no shared positions
+        // union via reduce: [0,20) = 20bp, intersect = 10+10-20 = 0bp
+        // J = 0/20 = 0.0
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 10, 20)]);
         assert!((a.jaccard(&b)).abs() < 1e-10);
     }
 }
