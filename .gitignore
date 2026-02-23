@@ -46,3 +46,5 @@ gtars-r/tests/compare_genomicdist.*
 gtars-r/tests/tutorial_genomicdist.*
 gtars-r/tests/*.bed
 gtars-r/tests/*.html
+gtars-r/tests/export_reference_data.R
+gtars-r/tests/ref/

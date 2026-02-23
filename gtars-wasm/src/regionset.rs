@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::bed_classifier::classify_bed;
+use gtars_genomicdist::interval_ranges::IntervalRanges;
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
@@ -102,7 +103,7 @@ impl JsBedClassificationOutput {
 
 #[wasm_bindgen(js_name = "RegionSet")]
 pub struct JsRegionSet {
-    region_set: RegionSet,
+    pub(crate) region_set: RegionSet,
 }
 
 #[wasm_bindgen(js_class = "RegionSet")]
@@ -202,5 +203,65 @@ impl JsRegionSet {
             compliant_columns: output.compliant_columns,
             non_compliant_columns: output.non_compliant_columns,
         }
+    }
+
+    // ── Statistics methods ───────────────────────────────────────────
+
+    #[wasm_bindgen(js_name = "calcWidths")]
+    pub fn calc_widths(&self) -> Vec<u32> {
+        self.region_set.calc_widths()
+    }
+
+    #[wasm_bindgen(js_name = "calcNeighborDistances")]
+    pub fn calc_neighbor_distances(&self) -> Result<JsValue, JsValue> {
+        let distances = self
+            .region_set
+            .calc_neighbor_distances()
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        // Convert Vec<i64> to Vec<f64> to avoid BigInt in JS
+        let as_f64: Vec<f64> = distances.iter().map(|&d| d as f64).collect();
+        serde_wasm_bindgen::to_value(&as_f64).map_err(|e| e.into())
+    }
+
+    #[wasm_bindgen(js_name = "calcNearestNeighbors")]
+    pub fn calc_nearest_neighbors(&self) -> Result<JsValue, JsValue> {
+        let nearest = self
+            .region_set
+            .calc_nearest_neighbors()
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        serde_wasm_bindgen::to_value(&nearest).map_err(|e| e.into())
+    }
+
+    // ── Interval range methods ──────────────────────────────────────
+
+    #[wasm_bindgen(js_name = "trim")]
+    pub fn trim(&self, chrom_sizes: &JsValue) -> Result<JsRegionSet, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())?;
+        let trimmed = self.region_set.trim(&sizes);
+        Ok(JsRegionSet { region_set: trimmed })
+    }
+
+    #[wasm_bindgen(js_name = "promoters")]
+    pub fn promoters(&self, upstream: u32, downstream: u32) -> JsRegionSet {
+        let result = self.region_set.promoters(upstream, downstream);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "reduce")]
+    pub fn reduce(&self) -> JsRegionSet {
+        let result = self.region_set.reduce();
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "setdiff")]
+    pub fn setdiff(&self, other: &JsRegionSet) -> JsRegionSet {
+        let result = self.region_set.setdiff(&other.region_set);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "pintersect")]
+    pub fn pintersect(&self, other: &JsRegionSet) -> JsRegionSet {
+        let result = self.region_set.pintersect(&other.region_set);
+        JsRegionSet { region_set: result }
     }
 }
