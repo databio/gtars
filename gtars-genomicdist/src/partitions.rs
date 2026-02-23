@@ -16,22 +16,49 @@ use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, Overlapp
 
 use crate::errors::GtarsGenomicDistError;
 use crate::interval_ranges::IntervalRanges;
+use crate::models::{Strand, StrandedRegionSet};
 
-/// A gene model loaded from BED files.
+/// A gene model loaded from BED files or GTF.
 ///
 /// Contains the core annotations needed to build genomic partitions:
 /// gene boundaries, exon coordinates, and optionally UTR regions.
+/// Strand information is preserved so promoters can be computed
+/// correctly for minus-strand genes.
 pub struct GeneModel {
-    pub genes: RegionSet,
-    pub exons: RegionSet,
-    pub three_utr: Option<RegionSet>,
-    pub five_utr: Option<RegionSet>,
+    pub genes: StrandedRegionSet,
+    pub exons: StrandedRegionSet,
+    pub three_utr: Option<StrandedRegionSet>,
+    pub five_utr: Option<StrandedRegionSet>,
+}
+
+/// Extract strand from BED `rest` field (column 6 = 3rd tab-separated field in rest).
+/// Returns Unstranded for BED3 files or when strand is absent.
+fn strand_from_rest(rest: &Option<String>) -> Strand {
+    match rest {
+        Some(r) => {
+            let fields: Vec<&str> = r.split('\t').collect();
+            if fields.len() >= 3 {
+                Strand::from_char(fields[2].chars().next().unwrap_or('.'))
+            } else {
+                Strand::Unstranded
+            }
+        }
+        None => Strand::Unstranded,
+    }
+}
+
+/// Wrap a RegionSet with strands extracted from BED rest fields.
+fn stranded_from_regionset(rs: RegionSet) -> StrandedRegionSet {
+    let strands: Vec<Strand> = rs.regions.iter().map(|r| strand_from_rest(&r.rest)).collect();
+    StrandedRegionSet::new(rs, strands)
 }
 
 impl GeneModel {
     /// Load a gene model from individual BED files.
     ///
     /// `genes_path` and `exons_path` are required. UTR paths are optional.
+    /// Strand is extracted from BED column 6 if present; BED3 files get
+    /// `Strand::Unstranded` (preserving previous behavior).
     pub fn from_bed_files(
         genes_path: &str,
         exons_path: &str,
@@ -61,14 +88,14 @@ impl GeneModel {
         };
 
         Ok(GeneModel {
-            genes: genes.reduce(),
-            exons: exons.reduce(),
+            genes: stranded_from_regionset(genes).reduce(),
+            exons: stranded_from_regionset(exons).reduce(),
             three_utr: three_utr
-                .map(|rs| rs.reduce())
-                .filter(|rs| !rs.regions.is_empty()),
+                .map(|rs| stranded_from_regionset(rs).reduce())
+                .filter(|srs| !srs.is_empty()),
             five_utr: five_utr
-                .map(|rs| rs.reduce())
-                .filter(|rs| !rs.regions.is_empty()),
+                .map(|rs| stranded_from_regionset(rs).reduce())
+                .filter(|srs| !srs.is_empty()),
         })
     }
 
@@ -105,9 +132,13 @@ impl GeneModel {
         };
 
         let mut genes: Vec<Region> = Vec::new();
+        let mut gene_strands: Vec<Strand> = Vec::new();
         let mut exons: Vec<Region> = Vec::new();
+        let mut exon_strands: Vec<Strand> = Vec::new();
         let mut three_utr: Vec<Region> = Vec::new();
+        let mut three_utr_strands: Vec<Strand> = Vec::new();
         let mut five_utr: Vec<Region> = Vec::new();
+        let mut five_utr_strands: Vec<Strand> = Vec::new();
 
         // For classifying undifferentiated "UTR" features (GENCODE-style GTFs)
         struct PendingUtr {
@@ -167,11 +198,25 @@ impl GeneModel {
                 GtarsGenomicDistError::CustomError(format!("Parsing GTF end: {}", e))
             })?;
 
+            let strand = Strand::from_char(fields[6].chars().next().unwrap_or('.'));
+
             match feature_type {
-                "gene" => genes.push(Region { chr, start, end, rest: None }),
-                "exon" => exons.push(Region { chr, start, end, rest: None }),
-                "three_prime_utr" => three_utr.push(Region { chr, start, end, rest: None }),
-                "five_prime_utr" => five_utr.push(Region { chr, start, end, rest: None }),
+                "gene" => {
+                    genes.push(Region { chr, start, end, rest: None });
+                    gene_strands.push(strand);
+                }
+                "exon" => {
+                    exons.push(Region { chr, start, end, rest: None });
+                    exon_strands.push(strand);
+                }
+                "three_prime_utr" => {
+                    three_utr.push(Region { chr, start, end, rest: None });
+                    three_utr_strands.push(strand);
+                }
+                "five_prime_utr" => {
+                    five_utr.push(Region { chr, start, end, rest: None });
+                    five_utr_strands.push(strand);
+                }
                 "CDS" => {
                     if let Some(tid) = extract_gtf_transcript_id(fields[8]) {
                         let entry = cds_bounds.entry(tid).or_insert((u32::MAX, 0));
@@ -206,36 +251,39 @@ impl GeneModel {
                     end: utr.end,
                     rest: None,
                 };
+                let utr_strand = Strand::from_char(utr.strand);
                 let is_five_prime = match utr.strand {
                     '+' => utr_mid < cds_mid,
                     _ => utr_mid > cds_mid,
                 };
                 if is_five_prime {
                     five_utr.push(region);
+                    five_utr_strands.push(utr_strand);
                 } else {
                     three_utr.push(region);
+                    three_utr_strands.push(utr_strand);
                 }
             }
             // UTRs without matching CDS (non-coding transcripts) are skipped
         }
 
-        let genes_rs = RegionSet::from(genes).reduce();
-        let exons_rs = RegionSet::from(exons).reduce();
-        let three_utr_rs = RegionSet::from(three_utr);
-        let five_utr_rs = RegionSet::from(five_utr);
+        let genes_srs = StrandedRegionSet::new(RegionSet::from(genes), gene_strands).reduce();
+        let exons_srs = StrandedRegionSet::new(RegionSet::from(exons), exon_strands).reduce();
+        let three_utr_srs = StrandedRegionSet::new(RegionSet::from(three_utr), three_utr_strands);
+        let five_utr_srs = StrandedRegionSet::new(RegionSet::from(five_utr), five_utr_strands);
 
         Ok(GeneModel {
-            genes: genes_rs,
-            exons: exons_rs,
-            three_utr: if three_utr_rs.regions.is_empty() {
+            genes: genes_srs,
+            exons: exons_srs,
+            three_utr: if three_utr_srs.is_empty() {
                 None
             } else {
-                Some(three_utr_rs.reduce())
+                Some(three_utr_srs.reduce())
             },
-            five_utr: if five_utr_rs.regions.is_empty() {
+            five_utr: if five_utr_srs.is_empty() {
                 None
             } else {
-                Some(five_utr_rs.reduce())
+                Some(five_utr_srs.reduce())
             },
         })
     }
@@ -300,37 +348,48 @@ pub fn genome_partition_list(
     model: &GeneModel,
     core_prom_size: u32,
     prox_prom_size: u32,
+    chrom_sizes: Option<&HashMap<String, u32>>,
 ) -> PartitionList {
     let mut partitions: Vec<(String, RegionSet)> = Vec::new();
 
-    // 1. Core promoters
-    let core_promoters = model.genes.promoters(core_prom_size, 0).reduce();
+    // 1. Core promoters (strand-aware: minus-strand uses end, not start)
+    // When chrom_sizes are provided, trim promoters at chromosome boundaries
+    // before reduce to avoid promoter regions extending past chromosome ends.
+    let raw_core = model.genes.promoters(core_prom_size, 0);
+    let core_promoters = match chrom_sizes {
+        Some(sizes) => raw_core.trim(sizes).reduce(),
+        None => raw_core.reduce(),
+    };
     partitions.push(("promoterCore".to_string(), core_promoters.clone()));
 
     // 2. Proximal promoters (larger window minus core)
-    let prox_promoters = model
-        .genes
-        .promoters(prox_prom_size, 0)
-        .reduce()
-        .setdiff(&core_promoters);
+    let raw_prox = model.genes.promoters(prox_prom_size, 0);
+    let prox_promoters = match chrom_sizes {
+        Some(sizes) => raw_prox.trim(sizes).reduce(),
+        None => raw_prox.reduce(),
+    }
+    .setdiff(&core_promoters);
     partitions.push(("promoterProx".to_string(), prox_promoters));
 
     // UTR/exon/intron construction does NOT subtract promoters — R doesn't either.
     // Overlap with promoters is resolved by calcPartitions priority ordering.
-    let three_utr_reduced = model.three_utr.as_ref().map(|rs| rs.reduce());
-    let five_utr_reduced = model.five_utr.as_ref().map(|rs| rs.reduce());
+    //
+    // Strand-aware reduce/setdiff during construction, then drop strand via
+    // into_regionset() for the final PartitionList (overlap checking is positional).
+    let three_utr_reduced = model.three_utr.as_ref().map(|srs| srs.reduce());
+    let five_utr_reduced = model.five_utr.as_ref().map(|srs| srs.reduce());
 
     // 3. 3'UTR (if present)
     if let Some(ref three_utr) = three_utr_reduced {
-        partitions.push(("threeUTR".to_string(), three_utr.clone()));
+        partitions.push(("threeUTR".to_string(), three_utr.inner.clone()));
     }
 
     // 4. 5'UTR (if present, minus 3'UTR — R gives 3'UTR priority)
     if let Some(ref five_utr) = five_utr_reduced {
         let five_utr_part = if let Some(ref three_utr) = three_utr_reduced {
-            five_utr.setdiff(three_utr)
+            five_utr.setdiff(three_utr).into_regionset()
         } else {
-            five_utr.clone()
+            five_utr.inner.clone()
         };
         partitions.push(("fiveUTR".to_string(), five_utr_part));
     }
@@ -343,7 +402,7 @@ pub fn genome_partition_list(
     if let Some(ref five_utr) = five_utr_reduced {
         exon_part = exon_part.setdiff(five_utr);
     }
-    partitions.push(("exon".to_string(), exon_part));
+    partitions.push(("exon".to_string(), exon_part.into_regionset()));
 
     // 6. Introns (gene bodies minus UTRs and exons)
     let mut intron_part = model.genes.reduce();
@@ -354,7 +413,7 @@ pub fn genome_partition_list(
         intron_part = intron_part.setdiff(five_utr);
     }
     intron_part = intron_part.setdiff(&model.exons.reduce());
-    partitions.push(("intron".to_string(), intron_part));
+    partitions.push(("intron".to_string(), intron_part.into_regionset()));
 
     PartitionList { partitions }
 }
@@ -549,6 +608,10 @@ pub fn calc_expected_partitions(
 ///
 /// Table: [[obs, total-obs], [exp, total-exp]]
 /// Returns p-value using chi-square distribution with df=1.
+///
+/// NOTE: This uses a goodness-of-fit (O-E)²/E formula. R's chisq.test()
+/// computes a 2×2 test of independence and may apply Yates' continuity
+/// correction, so p-values will differ from GenomicDistributions.
 fn chi_square_2x2(obs: f64, exp: f64, total: f64) -> f64 {
     if total == 0.0 || exp == 0.0 || (total - exp) == 0.0 {
         return 1.0;
@@ -722,12 +785,12 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(model.genes.regions.len(), 6);
-        assert_eq!(model.exons.regions.len(), 19);
+        assert_eq!(model.genes.len(), 6);
+        assert_eq!(model.exons.len(), 19);
         assert!(model.three_utr.is_some());
         assert!(model.five_utr.is_some());
-        assert_eq!(model.three_utr.unwrap().regions.len(), 6);
-        assert_eq!(model.five_utr.unwrap().regions.len(), 6);
+        assert_eq!(model.three_utr.unwrap().len(), 6);
+        assert_eq!(model.five_utr.unwrap().len(), 6);
     }
 
     #[rstest]
@@ -739,7 +802,7 @@ mod tests {
             GeneModel::from_bed_files(genes.to_str().unwrap(), exons.to_str().unwrap(), None, None)
                 .unwrap();
 
-        assert_eq!(model.genes.regions.len(), 6);
+        assert_eq!(model.genes.len(), 6);
         assert!(model.three_utr.is_none());
         assert!(model.five_utr.is_none());
     }
@@ -749,7 +812,7 @@ mod tests {
     #[rstest]
     fn test_partition_list_has_all_categories() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         let names: Vec<&str> = pl.partitions.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
@@ -773,7 +836,7 @@ mod tests {
             GeneModel::from_bed_files(genes.to_str().unwrap(), exons.to_str().unwrap(), None, None)
                 .unwrap();
 
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
         let names: Vec<&str> = pl.partitions.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
@@ -784,7 +847,7 @@ mod tests {
     #[rstest]
     fn test_partition_mutual_exclusivity() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         // Check pairwise: no bp should belong to two partitions
         for i in 0..pl.partitions.len() {
@@ -820,13 +883,13 @@ mod tests {
         let genes = make_regionset(vec![("chr1", 5000, 10000)]);
         let exons = make_regionset(vec![("chr1", 5000, 5500), ("chr1", 9000, 10000)]);
         let model = GeneModel {
-            genes,
-            exons,
+            genes: StrandedRegionSet::unstranded(genes),
+            exons: StrandedRegionSet::unstranded(exons),
             three_utr: None,
             five_utr: None,
         };
 
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         let core = &pl.partitions[0].1;
         let prox = &pl.partitions[1].1;
@@ -852,12 +915,12 @@ mod tests {
         let genes = make_regionset(vec![("chr1", 100, 1000)]);
         let exons = make_regionset(vec![("chr1", 50, 150)]); // overlaps with promoter region
         let model = GeneModel {
-            genes,
-            exons,
+            genes: StrandedRegionSet::unstranded(genes),
+            exons: StrandedRegionSet::unstranded(exons),
             three_utr: None,
             five_utr: None,
         };
-        let pl = genome_partition_list(&model, 100, 200);
+        let pl = genome_partition_list(&model, 100, 200, None);
 
         // Query region spanning the promoter/exon boundary
         let query = make_regionset(vec![("chr1", 0, 120)]);
@@ -876,7 +939,7 @@ mod tests {
     #[rstest]
     fn test_priority_mode_intergenic() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         // Query in a region far from any gene
         let query = make_regionset(vec![("chr1", 50000, 50200)]);
@@ -894,7 +957,7 @@ mod tests {
     #[rstest]
     fn test_priority_mode_all_regions_accounted() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         let query_path = get_test_path("test_query_promoter_enriched.bed");
         let query = RegionSet::try_from(query_path.to_str().unwrap()).unwrap();
@@ -911,7 +974,7 @@ mod tests {
     #[rstest]
     fn test_bp_mode_total_consistent() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
 
         let query_path = get_test_path("test_query_promoter_enriched.bed");
         let query = RegionSet::try_from(query_path.to_str().unwrap()).unwrap();
@@ -932,12 +995,12 @@ mod tests {
         let genes = make_regionset(vec![("chr1", 1000, 5000)]);
         let exons = make_regionset(vec![("chr1", 1000, 2000)]);
         let model = GeneModel {
-            genes,
-            exons,
+            genes: StrandedRegionSet::unstranded(genes),
+            exons: StrandedRegionSet::unstranded(exons),
             three_utr: None,
             five_utr: None,
         };
-        let pl = genome_partition_list(&model, 100, 200);
+        let pl = genome_partition_list(&model, 100, 200, None);
 
         // Query straddles promoter and intergenic
         let query = make_regionset(vec![("chr1", 750, 950)]);
@@ -974,7 +1037,7 @@ mod tests {
     #[rstest]
     fn test_expected_partitions_enrichment_direction() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
         let chrom_sizes = test_chrom_sizes();
 
         // Promoter-enriched query
@@ -1008,7 +1071,7 @@ mod tests {
     #[rstest]
     fn test_expected_partitions_pvalues_valid() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
         let chrom_sizes = test_chrom_sizes();
 
         let query_path = get_test_path("test_query_promoter_enriched.bed");
@@ -1029,7 +1092,7 @@ mod tests {
     #[rstest]
     fn test_expected_partitions_all_partitions_present() {
         let model = load_test_model();
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
         let chrom_sizes = test_chrom_sizes();
 
         let query = make_regionset(vec![("chr1", 500, 600)]);
@@ -1067,13 +1130,13 @@ mod tests {
         let model = GeneModel::from_gtf(gtf.to_str().unwrap(), false, false).unwrap();
 
         // 3 genes total (gene1 on chr1, gene2 on chr2, gene3 on chr3)
-        assert_eq!(model.genes.regions.len(), 3);
+        assert_eq!(model.genes.len(), 3);
         // 7 exons total, but after reduce() some may merge — all are non-overlapping so 7
-        assert_eq!(model.exons.regions.len(), 7);
+        assert_eq!(model.exons.len(), 7);
         assert!(model.three_utr.is_some());
         assert!(model.five_utr.is_some());
-        assert_eq!(model.three_utr.as_ref().unwrap().regions.len(), 2);
-        assert_eq!(model.five_utr.as_ref().unwrap().regions.len(), 2);
+        assert_eq!(model.three_utr.as_ref().unwrap().len(), 2);
+        assert_eq!(model.five_utr.as_ref().unwrap().len(), 2);
     }
 
     #[rstest]
@@ -1084,6 +1147,7 @@ mod tests {
         // gene1: GTF start=1001 end=5000 → BED start=1000 end=5000
         let gene1 = model
             .genes
+            .inner
             .regions
             .iter()
             .find(|r| r.chr == "chr1")
@@ -1094,6 +1158,7 @@ mod tests {
         // gene2: GTF start=3001 end=8000 → BED start=3000 end=8000
         let gene2 = model
             .genes
+            .inner
             .regions
             .iter()
             .find(|r| r.chr == "chr2")
@@ -1108,16 +1173,17 @@ mod tests {
 
         // Without filter: 3 genes (protein_coding + lncRNA)
         let model_all = GeneModel::from_gtf(gtf.to_str().unwrap(), false, false).unwrap();
-        assert_eq!(model_all.genes.regions.len(), 3);
-        assert_eq!(model_all.exons.regions.len(), 7);
+        assert_eq!(model_all.genes.len(), 3);
+        assert_eq!(model_all.exons.len(), 7);
 
         // With filter: only 2 protein_coding genes, 5 exons
         let model_pc = GeneModel::from_gtf(gtf.to_str().unwrap(), true, false).unwrap();
-        assert_eq!(model_pc.genes.regions.len(), 2);
-        assert_eq!(model_pc.exons.regions.len(), 5);
+        assert_eq!(model_pc.genes.len(), 2);
+        assert_eq!(model_pc.exons.len(), 5);
         // lncRNA gene on chr3 should be gone
         assert!(model_pc
             .genes
+            .inner
             .regions
             .iter()
             .all(|r| r.chr != "chr3"));
@@ -1129,14 +1195,14 @@ mod tests {
 
         // Without conversion: chromosome names are "1", "X"
         let model_raw = GeneModel::from_gtf(gtf.to_str().unwrap(), false, false).unwrap();
-        assert!(model_raw.genes.regions.iter().any(|r| r.chr == "1"));
-        assert!(model_raw.genes.regions.iter().any(|r| r.chr == "X"));
+        assert!(model_raw.genes.inner.regions.iter().any(|r| r.chr == "1"));
+        assert!(model_raw.genes.inner.regions.iter().any(|r| r.chr == "X"));
 
         // With conversion: chromosome names become "chr1", "chrX"
         let model_ucsc = GeneModel::from_gtf(gtf.to_str().unwrap(), false, true).unwrap();
-        assert!(model_ucsc.genes.regions.iter().any(|r| r.chr == "chr1"));
-        assert!(model_ucsc.genes.regions.iter().any(|r| r.chr == "chrX"));
-        assert!(model_ucsc.genes.regions.iter().all(|r| r.chr.starts_with("chr")));
+        assert!(model_ucsc.genes.inner.regions.iter().any(|r| r.chr == "chr1"));
+        assert!(model_ucsc.genes.inner.regions.iter().any(|r| r.chr == "chrX"));
+        assert!(model_ucsc.genes.inner.regions.iter().all(|r| r.chr.starts_with("chr")));
     }
 
     #[rstest]
@@ -1155,7 +1221,7 @@ mod tests {
         let gtf = get_test_path("test_gene_model.gtf");
         let model = GeneModel::from_gtf(gtf.to_str().unwrap(), true, false).unwrap();
 
-        let pl = genome_partition_list(&model, 100, 2000);
+        let pl = genome_partition_list(&model, 100, 2000, None);
         let names: Vec<&str> = pl.partitions.iter().map(|(n, _)| n.as_str()).collect();
         assert_eq!(
             names,
@@ -1174,6 +1240,81 @@ mod tests {
         let result = calc_partitions(&query, &pl, false);
         let sum: u32 = result.counts.iter().map(|(_, c)| c).sum();
         assert_eq!(sum, 1);
+    }
+
+    #[rstest]
+    fn test_minus_strand_promoter_placement() {
+        // gene2 in test_gene_model.gtf: chr2, minus strand, GTF [3001,8000] → BED [3000,8000)
+        // Core promoter (100bp) should be at [8000, 8100) for minus strand,
+        // NOT [2900, 3000) which is what the old strand-unaware code produced.
+        let gtf = get_test_path("test_gene_model.gtf");
+        let model = GeneModel::from_gtf(gtf.to_str().unwrap(), true, false).unwrap();
+
+        let pl = genome_partition_list(&model, 100, 2000, None);
+        let core = &pl.partitions[0].1; // promoterCore
+
+        // Find the core promoter region on chr2
+        let chr2_core: Vec<&Region> = core
+            .regions
+            .iter()
+            .filter(|r| r.chr == "chr2")
+            .collect();
+        assert_eq!(chr2_core.len(), 1, "Should have one core promoter on chr2");
+        assert_eq!(chr2_core[0].start, 8000, "Minus-strand promoter should start at gene end");
+        assert_eq!(chr2_core[0].end, 8100, "Minus-strand promoter should be 100bp past gene end");
+    }
+
+    #[rstest]
+    fn test_plus_strand_promoter_placement() {
+        // gene1 in test_gene_model.gtf: chr1, plus strand, BED [1000,5000)
+        // Core promoter (100bp) should be at [900, 1000) — same as before
+        let gtf = get_test_path("test_gene_model.gtf");
+        let model = GeneModel::from_gtf(gtf.to_str().unwrap(), true, false).unwrap();
+
+        let pl = genome_partition_list(&model, 100, 2000, None);
+        let core = &pl.partitions[0].1;
+
+        let chr1_core: Vec<&Region> = core
+            .regions
+            .iter()
+            .filter(|r| r.chr == "chr1")
+            .collect();
+        assert_eq!(chr1_core.len(), 1);
+        assert_eq!(chr1_core[0].start, 900);
+        assert_eq!(chr1_core[0].end, 1000);
+    }
+
+    #[rstest]
+    fn test_stranded_gene_model_from_synthetic() {
+        // Build a GeneModel with explicit strand info and verify promoters
+        let genes = make_regionset(vec![
+            ("chr1", 1000, 5000),  // plus-strand
+            ("chr1", 6000, 9000),  // minus-strand
+        ]);
+        let strands = vec![Strand::Plus, Strand::Minus];
+        let exons = make_regionset(vec![
+            ("chr1", 1000, 1500),
+            ("chr1", 6000, 6500),
+        ]);
+        let exon_strands = vec![Strand::Plus, Strand::Minus];
+
+        let model = GeneModel {
+            genes: StrandedRegionSet::new(genes, strands),
+            exons: StrandedRegionSet::new(exons, exon_strands),
+            three_utr: None,
+            five_utr: None,
+        };
+
+        let pl = genome_partition_list(&model, 100, 2000, None);
+        let core = &pl.partitions[0].1;
+
+        // Should have 2 core promoters on chr1
+        assert_eq!(core.regions.len(), 2);
+        // Plus-strand: [900, 1000)
+        // Minus-strand: [9000, 9100)
+        let mut starts: Vec<u32> = core.regions.iter().map(|r| r.start).collect();
+        starts.sort();
+        assert_eq!(starts, vec![900, 9000]);
     }
 
     // ── Cross-validation vs R GenomicDistributions ─────────────────
@@ -1206,9 +1347,9 @@ mod tests {
     fn test_gtf_vs_r_all_features() {
         // Cross-validate against R's getGeneModelsFromGTF() output.
         //
-        // Reference BEDs generated by R with reduce(ignore.strand=TRUE)
-        // to match Rust's strand-agnostic reduce.
-        // R's default reduce() is strand-aware; ours is not.
+        // Reference BEDs were generated with reduce(ignore.strand=TRUE) —
+        // strand-unaware merge. Our reduce is now strand-aware, so we apply
+        // an additional unstranded reduce before comparing coordinates.
         let gtf = get_test_path("C_elegans_cropped_example.gtf.gz");
         let model = GeneModel::from_gtf(gtf.to_str().unwrap(), false, false).unwrap();
 
@@ -1217,15 +1358,16 @@ mod tests {
         let r_three_utr = load_reference_bed("ce_ref_three_utr_all.bed");
         let r_five_utr = load_reference_bed("ce_ref_five_utr_all.bed");
 
-        assert_eq!(sorted_coords(&model.genes), r_genes, "genes mismatch vs R");
-        assert_eq!(sorted_coords(&model.exons), r_exons, "exons mismatch vs R");
+        // Apply unstranded reduce to match the R reference
+        assert_eq!(sorted_coords(&model.genes.inner.reduce()), r_genes, "genes mismatch vs R");
+        assert_eq!(sorted_coords(&model.exons.inner.reduce()), r_exons, "exons mismatch vs R");
         assert_eq!(
-            sorted_coords(model.three_utr.as_ref().unwrap()),
+            sorted_coords(&model.three_utr.as_ref().unwrap().inner.reduce()),
             r_three_utr,
             "3'UTR mismatch vs R"
         );
         assert_eq!(
-            sorted_coords(model.five_utr.as_ref().unwrap()),
+            sorted_coords(&model.five_utr.as_ref().unwrap().inner.reduce()),
             r_five_utr,
             "5'UTR mismatch vs R"
         );
@@ -1243,22 +1385,22 @@ mod tests {
         let r_five_utr = load_reference_bed("ce_ref_five_utr_pc.bed");
 
         assert_eq!(
-            sorted_coords(&model.genes),
+            sorted_coords(&model.genes.inner.reduce()),
             r_genes,
             "protein_coding genes mismatch vs R"
         );
         assert_eq!(
-            sorted_coords(&model.exons),
+            sorted_coords(&model.exons.inner.reduce()),
             r_exons,
             "protein_coding exons mismatch vs R"
         );
         assert_eq!(
-            sorted_coords(model.three_utr.as_ref().unwrap()),
+            sorted_coords(&model.three_utr.as_ref().unwrap().inner.reduce()),
             r_three_utr,
             "protein_coding 3'UTR mismatch vs R"
         );
         assert_eq!(
-            sorted_coords(model.five_utr.as_ref().unwrap()),
+            sorted_coords(&model.five_utr.as_ref().unwrap().inner.reduce()),
             r_five_utr,
             "protein_coding 5'UTR mismatch vs R"
         );

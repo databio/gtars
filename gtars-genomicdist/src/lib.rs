@@ -39,7 +39,8 @@ pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
 };
-pub use models::SortedRegionSet;
+pub use models::{SortedRegionSet, Strand, StrandedRegionSet};
 pub use signal::{calc_summary_signal, ConditionStats, SignalMatrix, SignalSummaryResult};
 pub use statistics::GenomicIntervalSetStatistics;
-pub use statistics::{calc_dinucl_freq, calc_gc_content};
+pub use utils::chrom_karyotype_key;
+pub use statistics::{calc_dinucl_freq, calc_dinucl_freq_per_region, calc_gc_content, DINUCL_ORDER};

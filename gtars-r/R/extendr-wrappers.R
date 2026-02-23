@@ -10,7 +10,191 @@
 #' @useDynLib gtars, .registration = TRUE
 NULL
 
-`__init__` <- function() invisible(.Call(wrap____init__))
+`__init__` <- function() .Call(wrap____init__)
+
+#' Load a RegionSet from a BED/narrowPeak/gzip file
+#' @export
+#' @param bed_path Path to a BED, narrowPeak, or gzipped BED file
+load_regionset <- function(bed_path) .Call(wrap__r_load_regionset, bed_path)
+
+#' Create a RegionSet from R vectors (0-based half-open coordinates)
+#' @export
+#' @param chrs Character vector of chromosome names
+#' @param starts Integer vector of start positions (0-based)
+#' @param ends Integer vector of end positions (half-open)
+regionset_from_vectors <- function(chrs, starts, ends) .Call(wrap__r_regionset_from_vectors, chrs, starts, ends)
+
+#' Extract chr/start/end vectors from a RegionSet pointer
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_to_vectors <- function(rs_ptr) .Call(wrap__r_regionset_to_vectors, rs_ptr)
+
+#' Get the number of regions in a RegionSet
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_length <- function(rs_ptr) .Call(wrap__r_regionset_length, rs_ptr)
+
+#' Calculate region widths (end - start)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_widths <- function(rs_ptr) .Call(wrap__r_calc_widths, rs_ptr)
+
+#' Calculate distances between consecutive regions on each chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_neighbor_distances <- function(rs_ptr) .Call(wrap__r_calc_neighbor_distances, rs_ptr)
+
+#' Calculate distance from each region to its nearest neighbor
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_nearest_neighbors <- function(rs_ptr) .Call(wrap__r_calc_nearest_neighbors, rs_ptr)
+
+#' Calculate per-chromosome statistics
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics, rs_ptr)
+
+#' Calculate region distribution across chromosome bins
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param n_bins Number of bins (default 250)
+r_region_distribution <- function(rs_ptr, n_bins) .Call(wrap__r_region_distribution, rs_ptr, n_bins)
+
+#' Load a genome assembly from a FASTA file
+#' @export
+#' @param fasta_path Path to a FASTA file
+load_genome_assembly <- function(fasta_path) .Call(wrap__r_load_genome_assembly, fasta_path)
+
+#' Calculate GC content for each region
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wrap__r_calc_gc_content, rs_ptr, assembly_ptr, ignore_unk_chroms)
+
+#' Calculate per-region dinucleotide frequencies (percentages)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr)
+
+#' Trim regions to chromosome boundaries
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+r_trim <- function(rs_ptr, chrom_names, chrom_sizes) .Call(wrap__r_trim, rs_ptr, chrom_names, chrom_sizes)
+
+#' Generate promoter regions relative to each region's start
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param upstream Bases upstream of start
+#' @param downstream Bases downstream of start
+r_promoters <- function(rs_ptr, upstream, downstream) .Call(wrap__r_promoters, rs_ptr, upstream, downstream)
+
+#' Merge overlapping and adjacent intervals per chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_reduce <- function(rs_ptr) .Call(wrap__r_reduce, rs_ptr)
+
+#' Set difference: remove portions of A that overlap with B
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_setdiff <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_setdiff, rs_ptr_a, rs_ptr_b)
+
+#' Pairwise intersection by index position
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_pintersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_pintersect, rs_ptr_a, rs_ptr_b)
+
+#' Build a PartitionList from RegionSet pointers (genes, exons, optional UTRs)
+#' @export
+#' @param genes_ptr External pointer to genes RegionSet
+#' @param exons_ptr External pointer to exons RegionSet
+#' @param three_utr_ptr External pointer to 3'UTR RegionSet (or NULL)
+#' @param five_utr_ptr External pointer to 5'UTR RegionSet (or NULL)
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions <- function(genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions, genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from RegionSet pointers with strand information
+#' @export
+#' @param genes_chrs Gene chromosome names
+#' @param genes_starts Gene start positions (0-based)
+#' @param genes_ends Gene end positions (half-open)
+#' @param genes_strands Gene strand strings ("+", "-", "*")
+#' @param exons_chrs Exon chromosome names
+#' @param exons_starts Exon start positions (0-based)
+#' @param exons_ends Exon end positions (half-open)
+#' @param exons_strands Exon strand strings
+#' @param three_utr_chrs 3'UTR chrs (empty vector if absent)
+#' @param three_utr_starts 3'UTR starts
+#' @param three_utr_ends 3'UTR ends
+#' @param three_utr_strands 3'UTR strands
+#' @param five_utr_chrs 5'UTR chrs (empty vector if absent)
+#' @param five_utr_starts 5'UTR starts
+#' @param five_utr_ends 5'UTR ends
+#' @param five_utr_strands 5'UTR strands
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions_stranded <- function(genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions_stranded, genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from a GTF file
+#' @export
+#' @param gtf_path Path to a GTF or GTF.gz file
+#' @param filter_protein_coding Keep only protein-coding genes
+#' @param convert_ensembl_ucsc Prepend "chr" to bare chromosome names
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_gtf <- function(gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_gtf, gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Assign regions to genomic partitions
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_partitions <- function(rs_ptr, partition_ptr, bp_proportion) .Call(wrap__r_calc_partitions, rs_ptr, partition_ptr, bp_proportion)
+
+#' Calculate observed vs expected partition enrichment
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion) .Call(wrap__r_calc_expected_partitions, rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion)
+
+#' Calculate summary signal (overlap query with signal matrix)
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param signal_region_ids Character vector of region IDs (chr_start_end format)
+#' @param condition_names Character vector of condition/column names
+#' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
+#' @param n_regions Number of signal regions
+#' @param n_conditions Number of conditions
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions)
+
+#' Calculate absolute distance from each query region to nearest feature midpoint.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_tss_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_tss_distances, query_ptr, features_ptr)
+
+#' Calculate signed distance from each query region to nearest feature.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_feature_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_feature_distances, query_ptr, features_ptr)
 
 #' Write tokens to a gtok file
 #' @export
@@ -21,7 +205,7 @@ read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok,
 #' @export
 #' @param filename A string representing the path to the gtok file.
 #' @param tokens The tokens to write.
-write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
+write_tokens_to_gtok <- function(filename, tokens) .Call(wrap__r_write_tokens_to_gtok, filename, tokens)
 
 #' Create an IGD database from a directory of bed files
 #' @param output_path String path where the IGD database will be saved
@@ -33,10 +217,6 @@ r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_creat
 #' @param database_path A string representing the path to the database igd file.
 #' @param query_path A string representing the path to the query bed file.
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
-
-# =========================================================================
-# Digest Functions
-# =========================================================================
 
 #' Create sha512t24u digest
 #' @export
@@ -51,10 +231,6 @@ md5_digest <- function(readable) .Call(wrap__md5_digest, readable)
 #' Digest fasta file
 #' @param fasta A filepath string to a fasta file.
 digest_fasta_raw <- function(fasta) .Call(wrap__digest_fasta_raw, fasta)
-
-# =========================================================================
-# Store Constructors
-# =========================================================================
 
 #' Create an in-memory RefgetStore
 #' @param mode Storage mode: "raw" or "encoded"
@@ -76,10 +252,6 @@ open_local_store <- function(root_path) .Call(wrap__open_local_store, root_path)
 #' @param remote_url Base URL of the remote refget store
 open_remote_store <- function(cache_path, remote_url) .Call(wrap__open_remote_store, cache_path, remote_url)
 
-# =========================================================================
-# Encoding Mode
-# =========================================================================
-
 #' Enable 2-bit encoding for space efficiency
 #' @param store_ptr External pointer to RefgetStore
 enable_encoding_store <- function(store_ptr) .Call(wrap__enable_encoding_store, store_ptr)
@@ -92,10 +264,6 @@ disable_encoding_store <- function(store_ptr) .Call(wrap__disable_encoding_store
 #' @param store_ptr External pointer to RefgetStore
 get_storage_mode_store <- function(store_ptr) .Call(wrap__get_storage_mode_store, store_ptr)
 
-# =========================================================================
-# Quiet Mode
-# =========================================================================
-
 #' Set quiet mode
 #' @param store_ptr External pointer to RefgetStore
 #' @param quiet Whether to suppress output
@@ -104,10 +272,6 @@ set_quiet_store <- function(store_ptr, quiet) .Call(wrap__set_quiet_store, store
 #' Get quiet mode status
 #' @param store_ptr External pointer to RefgetStore
 get_quiet_store <- function(store_ptr) .Call(wrap__get_quiet_store, store_ptr)
-
-# =========================================================================
-# Persistence
-# =========================================================================
 
 #' Check if store is persisting to disk
 #' @param store_ptr External pointer to RefgetStore
@@ -122,10 +286,6 @@ enable_persistence_store <- function(store_ptr, path) .Call(wrap__enable_persist
 #' @param store_ptr External pointer to RefgetStore
 disable_persistence_store <- function(store_ptr) .Call(wrap__disable_persistence_store, store_ptr)
 
-# =========================================================================
-# Path Accessors
-# =========================================================================
-
 #' Get cache path
 #' @param store_ptr External pointer to RefgetStore
 get_cache_path_store <- function(store_ptr) .Call(wrap__get_cache_path_store, store_ptr)
@@ -134,13 +294,10 @@ get_cache_path_store <- function(store_ptr) .Call(wrap__get_cache_path_store, st
 #' @param store_ptr External pointer to RefgetStore
 get_remote_url_store <- function(store_ptr) .Call(wrap__get_remote_url_store, store_ptr)
 
-# =========================================================================
-# Adding Sequences/Collections
-# =========================================================================
-
 #' Import FASTA file into store
 #' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
+#' @param force Whether to overwrite existing sequences/collections
 import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_store, store_ptr, file_path)
 
 #' Add a FASTA file with force option
@@ -149,13 +306,9 @@ import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_st
 #' @param force Whether to overwrite existing sequences/collections
 add_fasta_store <- function(store_ptr, file_path, force) .Call(wrap__add_fasta_store, store_ptr, file_path, force)
 
-# =========================================================================
-# Sequence Retrieval
-# =========================================================================
-
-#' Get sequence by digest from store
+#' Get sequence by digest from store (supports SHA512t24u or MD5)
 #' @param store_ptr External pointer to RefgetStore
-#' @param digest Sequence digest
+#' @param digest Sequence digest (SHA512t24u or MD5)
 get_sequence_store <- function(store_ptr, digest) .Call(wrap__get_sequence_store, store_ptr, digest)
 
 #' Get sequence by collection and name
@@ -164,7 +317,7 @@ get_sequence_store <- function(store_ptr, digest) .Call(wrap__get_sequence_store
 #' @param sequence_name Sequence name
 get_sequence_by_name_store <- function(store_ptr, collection_digest, sequence_name) .Call(wrap__get_sequence_by_name_store, store_ptr, collection_digest, sequence_name)
 
-#' Get sequence metadata
+#' Get sequence metadata (no sequence data)
 #' @param store_ptr External pointer to RefgetStore
 #' @param digest Sequence digest
 get_sequence_metadata_store <- function(store_ptr, digest) .Call(wrap__get_sequence_metadata_store, store_ptr, digest)
@@ -175,10 +328,6 @@ get_sequence_metadata_store <- function(store_ptr, digest) .Call(wrap__get_seque
 #' @param start Start position
 #' @param end End position
 get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
-
-# =========================================================================
-# Collection Operations
-# =========================================================================
 
 #' List all collections in the store
 #' @param store_ptr External pointer to RefgetStore
@@ -215,16 +364,12 @@ iter_sequences_store <- function(store_ptr) .Call(wrap__iter_sequences_store, st
 #' @param store_ptr External pointer to RefgetStore
 stats_store <- function(store_ptr) .Call(wrap__stats_store, store_ptr)
 
-# =========================================================================
-# Seqcol Spec Operations
-# =========================================================================
-
-#' Get level 1 representation for a collection
+#' Get level 1 representation (attribute digests) for a collection
 #' @param store_ptr External pointer to RefgetStore
 #' @param digest Collection digest
 get_collection_level1_store <- function(store_ptr, digest) .Call(wrap__get_collection_level1_store, store_ptr, digest)
 
-#' Get level 2 representation for a collection
+#' Get level 2 representation (full arrays) for a collection
 #' @param store_ptr External pointer to RefgetStore
 #' @param digest Collection digest
 get_collection_level2_store <- function(store_ptr, digest) .Call(wrap__get_collection_level2_store, store_ptr, digest)
@@ -237,8 +382,8 @@ compare_store <- function(store_ptr, digest_a, digest_b) .Call(wrap__compare_sto
 
 #' Find collections by attribute digest
 #' @param store_ptr External pointer to RefgetStore
-#' @param attr_name Attribute name
-#' @param attr_digest Attribute digest
+#' @param attr_name Attribute name (names, lengths, sequences, etc.)
+#' @param attr_digest The digest to search for
 find_collections_by_attribute_store <- function(store_ptr, attr_name, attr_digest) .Call(wrap__find_collections_by_attribute_store, store_ptr, attr_name, attr_digest)
 
 #' Get attribute array by digest
@@ -271,14 +416,10 @@ disable_attribute_index_store <- function(store_ptr) .Call(wrap__disable_attribu
 #' @param store_ptr External pointer to RefgetStore
 has_attribute_index_store <- function(store_ptr) .Call(wrap__has_attribute_index_store, store_ptr)
 
-# =========================================================================
-# Write/Export Operations
-# =========================================================================
-
 #' Write store to directory
 #' @param store_ptr External pointer to RefgetStore
 #' @param root_path Path to write store
-#' @param seqdata_path_template Path template name
+#' @param seqdata_path_template Path template name (optional, pass empty string for default)
 write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_template) .Call(wrap__write_store_to_directory_store, store_ptr, root_path, seqdata_path_template)
 
 #' Write store using configured paths
@@ -289,15 +430,15 @@ write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
 #' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Collection digest
 #' @param output_path Output FASTA file path
-#' @param sequence_names Optional vector of sequence names to export
-#' @param line_width Bases per line
+#' @param sequence_names Optional vector of sequence names to export (NULL for all)
+#' @param line_width Bases per line (default 80)
 export_fasta_store <- function(store_ptr, collection_digest, output_path, sequence_names, line_width) .Call(wrap__export_fasta_store, store_ptr, collection_digest, output_path, sequence_names, line_width)
 
 #' Export sequences by their digests to FASTA
 #' @param store_ptr External pointer to RefgetStore
 #' @param seq_digests Vector of sequence digests
 #' @param output_path Output FASTA file path
-#' @param line_width Bases per line
+#' @param line_width Bases per line (default 80)
 export_fasta_by_digests_store <- function(store_ptr, seq_digests, output_path, line_width) .Call(wrap__export_fasta_by_digests_store, store_ptr, seq_digests, output_path, line_width)
 
 #' Extract BED file sequences from store as FASTA
@@ -312,10 +453,6 @@ get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path,
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_vec_store, store_ptr, collection_digest, bed_file_path)
-
-# =========================================================================
-# Sequence Alias Operations
-# =========================================================================
 
 #' Add a sequence alias
 #' @param store_ptr External pointer to RefgetStore
@@ -356,10 +493,6 @@ remove_sequence_alias_store <- function(store_ptr, namespace, alias) .Call(wrap_
 #' @param path Path to TSV file
 load_sequence_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__load_sequence_aliases_store, store_ptr, namespace, path)
 
-# =========================================================================
-# Collection Alias Operations
-# =========================================================================
-
 #' Add a collection alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
@@ -398,10 +531,6 @@ remove_collection_alias_store <- function(store_ptr, namespace, alias) .Call(wra
 #' @param namespace Namespace to load into
 #' @param path Path to TSV file
 load_collection_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__load_collection_aliases_store, store_ptr, namespace, path)
-
-# =========================================================================
-# FHR Metadata Operations
-# =========================================================================
 
 #' Set FHR metadata for a collection
 #' @param store_ptr External pointer to RefgetStore

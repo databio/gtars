@@ -22,6 +22,75 @@ impl SortedRegionSet {
     }
 }
 
+/// Genomic strand orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Strand {
+    Plus,
+    Minus,
+    Unstranded,
+}
+
+impl Strand {
+    pub fn from_char(c: char) -> Self {
+        match c {
+            '+' => Strand::Plus,
+            '-' => Strand::Minus,
+            _ => Strand::Unstranded,
+        }
+    }
+}
+
+/// A `RegionSet` paired with a parallel `Vec<Strand>`.
+///
+/// Follows the `SortedRegionSet` wrapper pattern: wraps a `RegionSet` and
+/// adds strand information without modifying `Region` itself (which lives
+/// in gtars-core). Strand-aware operations (promoters, reduce, setdiff)
+/// are implemented as methods on this type.
+pub struct StrandedRegionSet {
+    pub inner: RegionSet,
+    pub strands: Vec<Strand>,
+}
+
+impl StrandedRegionSet {
+    /// Create a new StrandedRegionSet from a RegionSet and parallel strand vector.
+    ///
+    /// # Panics
+    /// Panics if `strands.len() != rs.regions.len()`.
+    pub fn new(rs: RegionSet, strands: Vec<Strand>) -> Self {
+        assert_eq!(
+            rs.regions.len(),
+            strands.len(),
+            "StrandedRegionSet: regions and strands must have the same length"
+        );
+        StrandedRegionSet {
+            inner: rs,
+            strands,
+        }
+    }
+
+    /// Wrap a RegionSet with all-Unstranded. Preserves existing behavior.
+    pub fn unstranded(rs: RegionSet) -> Self {
+        let n = rs.regions.len();
+        StrandedRegionSet {
+            strands: vec![Strand::Unstranded; n],
+            inner: rs,
+        }
+    }
+
+    /// Consume into the inner RegionSet, dropping strand information.
+    pub fn into_regionset(self) -> RegionSet {
+        self.inner
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.regions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.regions.is_empty()
+    }
+}
+
 /// Statistics summary for regions on a single chromosome.
 ///
 /// Contains counts, bounds, and descriptive statistics for region lengths.
@@ -146,7 +215,7 @@ impl GenomeAssembly {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Dinucleotide {
     Aa,
     Ac,
@@ -319,6 +388,11 @@ impl TssIndex {
                     };
                     distances.push(min_distance);
                 }
+            } else {
+                // No features on this chromosome — push u32::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(u32::MAX);
+                }
             }
         }
         Ok(distances)
@@ -368,6 +442,11 @@ impl TssIndex {
                         }
                     };
                     distances.push(distance);
+                }
+            } else {
+                // No features on this chromosome — push i64::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(i64::MAX);
                 }
             }
         }

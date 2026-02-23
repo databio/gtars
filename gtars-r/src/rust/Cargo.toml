@@ -14,5 +14,6 @@ gtars-core = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-io = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-igd = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-refget = { git = "https://github.com/databio/gtars", branch = "dev" }
+gtars-genomicdist = { git = "https://github.com/databio/gtars", branch = "dev" }
 gtars-tokenizers = { git = "https://github.com/databio/gtars", branch = "dev", features = ["huggingface"] }
 serde_json = "1.0"

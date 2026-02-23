@@ -39,3 +39,10 @@ tests/data/fasta/sacCer3.fa
 tests/data/fasta/sacCer3.rgsi
 gtars-r/tests/explore_sacCer3.*
 gtars-r/tests/smoketest_sacCer3.R
+gtars-r/tests/hg19.fa
+gtars-r/tests/hg19.fa.gz
+gtars-r/tests/benchmark_genomicdist.*
+gtars-r/tests/compare_genomicdist.*
+gtars-r/tests/tutorial_genomicdist.*
+gtars-r/tests/*.bed
+gtars-r/tests/*.html

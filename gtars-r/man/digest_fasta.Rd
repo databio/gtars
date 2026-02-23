@@ -17,7 +17,7 @@ digest a fasta file given a filepath
 }
 \examples{
 \dontrun{
-fasta_path <- '../../gtars/tests/data/fasta/base.fa'
+fasta_path <- 'tests/data/fasta/base.fa'
 result <- gtars::digest_fasta(fasta_path)
 }
 

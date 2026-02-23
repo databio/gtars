@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{refget_store_raw}
 \alias{refget_store_raw}
-\title{Create a RefgetStore}
+\title{Create an in-memory RefgetStore}
 \usage{
 refget_store_raw(mode)
 }
@@ -10,5 +10,5 @@ refget_store_raw(mode)
 \item{mode}{Storage mode: "raw" or "encoded"}
 }
 \description{
-Create a RefgetStore
+Create an in-memory RefgetStore
 }

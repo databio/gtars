@@ -40,15 +40,16 @@ pub trait GenomicIntervalSetStatistics {
     /// Compute distances between consecutive regions on each chromosome.
     ///
     /// For each pair of adjacent regions on the same chromosome, returns the
-    /// gap between them (downstream.start - upstream.end, clamped to 0 for overlaps).
+    /// signed gap: `next.start - current.end`. Positive values indicate a gap,
+    /// negative values indicate overlapping regions, zero means adjacent/abutting.
     /// Regions on chromosomes with fewer than 2 regions are skipped.
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
+    fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError>;
 
     /// Compute the distance from each region to its nearest neighbor.
     ///
-    /// For each region, takes the minimum of its upstream and downstream
-    /// neighbor distances. First and last regions on each chromosome use
-    /// their only neighbor's distance.
+    /// For each region, takes the minimum absolute distance to its upstream
+    /// and downstream neighbors. First and last regions on each chromosome
+    /// use their only neighbor's distance. Overlapping neighbors have distance 0.
     ///
     /// Port of R GenomicDistributions `calcNearestNeighbors()`.
     fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
@@ -152,25 +153,19 @@ impl GenomicIntervalSetStatistics for RegionSet {
         plot_results
     }
 
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
-        let mut distances: Vec<u32> = vec![];
+    fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError> {
+        let mut distances: Vec<i64> = vec![];
 
         for chr in self.iter_chroms() {
             let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
 
-            // if there is only one region on the chromosome, skip it, can't calculate distance between one region
             if chr_regions.len() < 2 {
                 continue;
             }
 
             for window in chr_regions.windows(2) {
-                let distance: f32 = window[1].start as f32 - window[0].end as f32;
-                let absolute_dist: u32 = if distance > 0f32 {
-                    distance as u32
-                } else {
-                    0u32
-                };
-                distances.push(absolute_dist);
+                let distance = window[1].start as i64 - window[0].end as i64;
+                distances.push(distance);
             }
         }
 
@@ -187,7 +182,8 @@ impl GenomicIntervalSetStatistics for RegionSet {
                 continue;
             }
 
-            // compute neighbor distances for this chromosome
+            // compute absolute neighbor distances for this chromosome
+            // overlapping regions get distance 0
             let distances: Vec<u32> = chr_regions
                 .windows(2)
                 .map(|w| {
@@ -306,6 +302,62 @@ pub fn calc_dinucl_freq(
     Ok(dinucl_freqs)
 }
 
+/// Canonical ordering of dinucleotides, matching GenomicDistributions' column order.
+pub const DINUCL_ORDER: [Dinucleotide; 16] = [
+    Dinucleotide::Aa, Dinucleotide::Ac, Dinucleotide::Ag, Dinucleotide::At,
+    Dinucleotide::Ca, Dinucleotide::Cc, Dinucleotide::Cg, Dinucleotide::Ct,
+    Dinucleotide::Ga, Dinucleotide::Gc, Dinucleotide::Gg, Dinucleotide::Gt,
+    Dinucleotide::Ta, Dinucleotide::Tc, Dinucleotide::Tg, Dinucleotide::Tt,
+];
+
+/// Per-region dinucleotide frequencies as percentages.
+///
+/// Returns a tuple of (region_labels, frequency_matrix) where:
+/// - `region_labels` is `chr_start_end` for each region
+/// - `frequency_matrix` is a `Vec<[f64; 16]>` — one row per region, columns
+///   in [`DINUCL_ORDER`] order, values are percentages (0–100).
+///
+/// This matches the output format of R's GenomicDistributions::calcDinuclFreq.
+pub fn calc_dinucl_freq_per_region(
+    region_set: &RegionSet,
+    genome: &GenomeAssembly,
+) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut matrix: Vec<[f64; 16]> = Vec::new();
+
+    for chr in region_set.iter_chroms() {
+        for region in region_set.iter_chr_regions(chr) {
+            let seq = genome.seq_from_region(region)?;
+            let mut counts = [0u64; 16];
+            let mut total: u64 = 0;
+
+            for window in seq.windows(2) {
+                if let Some(dinucl) = Dinucleotide::from_bytes(window) {
+                    let idx = DINUCL_ORDER.iter().position(|d| *d == dinucl).unwrap();
+                    counts[idx] += 1;
+                    total += 1;
+                }
+            }
+
+            let freqs: [f64; 16] = if total > 0 {
+                let mut f = [0.0f64; 16];
+                for (i, &c) in counts.iter().enumerate() {
+                    f[i] = (c as f64 / total as f64) * 100.0;
+                }
+                f
+            } else {
+                [0.0; 16]
+            };
+
+            labels.push(format!("{}_{}_{}",
+                region.chr, region.start, region.end));
+            matrix.push(freqs);
+        }
+    }
+
+    Ok((labels, matrix))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -365,16 +417,21 @@ mod tests {
         // 9 regions on chr1 → 9 nearest-neighbor distances (one per region)
         assert_eq!(nearest.len(), 9);
         // each nearest-neighbor distance should be ≤ the max of its neighbor distances
+        // neighbor_dists are signed (i64), nearest are absolute (u32)
         let neighbor_dists = region_set.calc_neighbor_distances().unwrap();
+        let abs_dists: Vec<u32> = neighbor_dists
+            .iter()
+            .map(|&d| if d > 0 { d as u32 } else { 0 })
+            .collect();
         for i in 0..nearest.len() {
             if i == 0 {
-                assert_eq!(nearest[i], neighbor_dists[0]);
+                assert_eq!(nearest[i], abs_dists[0]);
             } else if i == nearest.len() - 1 {
-                assert_eq!(nearest[i], neighbor_dists[neighbor_dists.len() - 1]);
+                assert_eq!(nearest[i], abs_dists[abs_dists.len() - 1]);
             } else {
                 assert_eq!(
                     nearest[i],
-                    neighbor_dists[i - 1].min(neighbor_dists[i])
+                    abs_dists[i - 1].min(abs_dists[i])
                 );
             }
         }
