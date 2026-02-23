@@ -48,3 +48,4 @@ gtars-r/tests/*.bed
 gtars-r/tests/*.html
 gtars-r/tests/export_reference_data.R
 gtars-r/tests/ref/
+gtars-r/tests/smoketest_set_operations.*

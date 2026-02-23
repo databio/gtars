@@ -313,6 +313,66 @@ gtars_pintersect <- function(a, b) {
   .Call(wrap__r_pintersect, a, b)
 }
 
+#' Combine two region sets without merging
+#'
+#' @param a A GRanges object, file path, or RegionSet pointer
+#' @param b A GRanges object, file path, or RegionSet pointer
+#' @return A RegionSet pointer with all regions from both sets
+#'
+#' @export
+gtars_concat <- function(a, b) {
+  a <- .ensure_regionset(a)
+  b <- .ensure_regionset(b)
+  .Call(wrap__r_concat, a, b)
+}
+
+#' Merge two region sets into a non-overlapping set
+#'
+#' @param a A GRanges object, file path, or RegionSet pointer
+#' @param b A GRanges object, file path, or RegionSet pointer
+#' @return A RegionSet pointer with merged regions
+#'
+#' @export
+gtars_union <- function(a, b) {
+  a <- .ensure_regionset(a)
+  b <- .ensure_regionset(b)
+  .Call(wrap__r_union, a, b)
+}
+
+#' Nucleotide-level Jaccard similarity
+#'
+#' @description Computes |intersection| / |union| in base pairs between two
+#'   region sets. Both sets are reduced (merged) before comparison.
+#'
+#' @param a A GRanges object, file path, or RegionSet pointer
+#' @param b A GRanges object, file path, or RegionSet pointer
+#' @return Numeric value between 0 and 1
+#'
+#' @export
+gtars_jaccard <- function(a, b) {
+  a <- .ensure_regionset(a)
+  b <- .ensure_regionset(b)
+  .Call(wrap__r_jaccard, a, b)
+}
+
+#' Compute consensus regions from multiple region sets
+#'
+#' @description Given a list of region sets, computes the union of all regions
+#'   and annotates each union region with the number of input sets that overlap
+#'   it. Useful for finding regions present in k-of-n replicates.
+#'
+#' @param sets A list of GRanges objects, file paths, or RegionSet pointers
+#' @return A data.frame with chr, start, end, count columns (0-based half-open)
+#'
+#' @export
+gtars_consensus <- function(sets) {
+  sets <- lapply(sets, .ensure_regionset)
+  result <- .Call(wrap__r_consensus, sets)
+  data.frame(chr = result$chr, start = result$start,
+             end = result$end, count = result$count,
+             stringsAsFactors = FALSE)
+}
+
 # =========================================================================
 # Partitions
 # =========================================================================

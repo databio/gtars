@@ -6,7 +6,7 @@ use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
-    genome_partition_list, calc_expected_partitions, calc_partitions,
+    consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
     GenomicIntervalSetStatistics, GeneModel, IntervalRanges, PartitionList, SignalMatrix,
     Strand, StrandedRegionSet, DINUCL_ORDER,
 };
@@ -391,6 +391,67 @@ pub fn r_pintersect(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<Robj>
         .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
     let result = ext_a.pintersect(&*ext_b);
     Ok(ExternalPtr::new(result).into())
+}
+
+/// Combine two region sets without merging
+/// @export
+/// @param rs_ptr_a External pointer to RegionSet A
+/// @param rs_ptr_b External pointer to RegionSet B
+#[extendr(r_name = "r_concat")]
+pub fn r_concat(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<Robj> {
+    let ext_a = <ExternalPtr<RegionSet>>::try_from(rs_ptr_a)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (a)".into()))?;
+    let ext_b = <ExternalPtr<RegionSet>>::try_from(rs_ptr_b)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
+    let result = ext_a.concat(&*ext_b);
+    Ok(ExternalPtr::new(result).into())
+}
+
+/// Merge two region sets into a minimal non-overlapping set
+/// @export
+/// @param rs_ptr_a External pointer to RegionSet A
+/// @param rs_ptr_b External pointer to RegionSet B
+#[extendr(r_name = "r_union")]
+pub fn r_union(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<Robj> {
+    let ext_a = <ExternalPtr<RegionSet>>::try_from(rs_ptr_a)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (a)".into()))?;
+    let ext_b = <ExternalPtr<RegionSet>>::try_from(rs_ptr_b)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
+    let result = ext_a.union(&*ext_b);
+    Ok(ExternalPtr::new(result).into())
+}
+
+/// Nucleotide-level Jaccard similarity between two region sets
+/// @export
+/// @param rs_ptr_a External pointer to RegionSet A
+/// @param rs_ptr_b External pointer to RegionSet B
+#[extendr(r_name = "r_jaccard")]
+pub fn r_jaccard(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<f64> {
+    let ext_a = <ExternalPtr<RegionSet>>::try_from(rs_ptr_a)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (a)".into()))?;
+    let ext_b = <ExternalPtr<RegionSet>>::try_from(rs_ptr_b)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
+    Ok(ext_a.jaccard(&*ext_b))
+}
+
+/// Compute consensus regions from a list of RegionSet pointers
+/// @export
+/// @param rs_list An R list of external pointers to RegionSets
+#[extendr(r_name = "r_consensus")]
+pub fn r_consensus(rs_list: List) -> extendr_api::Result<List> {
+    let mut sets: Vec<RegionSet> = Vec::with_capacity(rs_list.len());
+    for (i, item) in rs_list.values().enumerate() {
+        let ext = <ExternalPtr<RegionSet>>::try_from(item).map_err(|_| {
+            extendr_api::Error::Other(format!("Invalid RegionSet pointer at index {}", i + 1))
+        })?;
+        sets.push((*ext).clone());
+    }
+    let result = consensus(&sets);
+    let chrs: Vec<String> = result.iter().map(|r| r.chr.clone()).collect();
+    let starts: Vec<i32> = result.iter().map(|r| r.start as i32).collect();
+    let ends: Vec<i32> = result.iter().map(|r| r.end as i32).collect();
+    let counts: Vec<i32> = result.iter().map(|r| r.count as i32).collect();
+    Ok(list!(chr = chrs, start = starts, end = ends, count = counts))
 }
 
 // =========================================================================
@@ -834,6 +895,10 @@ extendr_module! {
     fn r_reduce;
     fn r_setdiff;
     fn r_pintersect;
+    fn r_concat;
+    fn r_union;
+    fn r_jaccard;
+    fn r_consensus;
     // Partitions
     fn r_partition_list_from_regions;
     fn r_partition_list_from_regions_stranded;

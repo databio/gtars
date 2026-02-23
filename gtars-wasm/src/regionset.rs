@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::bed_classifier::classify_bed;
+use gtars_genomicdist::consensus;
 use gtars_genomicdist::interval_ranges::IntervalRanges;
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
@@ -263,5 +264,73 @@ impl JsRegionSet {
     pub fn pintersect(&self, other: &JsRegionSet) -> JsRegionSet {
         let result = self.region_set.pintersect(&other.region_set);
         JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "concat")]
+    pub fn concat(&self, other: &JsRegionSet) -> JsRegionSet {
+        let result = self.region_set.concat(&other.region_set);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "union")]
+    pub fn union(&self, other: &JsRegionSet) -> JsRegionSet {
+        let result = self.region_set.union(&other.region_set);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "jaccard")]
+    pub fn jaccard(&self, other: &JsRegionSet) -> f64 {
+        self.region_set.jaccard(&other.region_set)
+    }
+}
+
+/// Builder for computing consensus regions from multiple RegionSet objects.
+///
+/// Usage from JS:
+/// ```js
+/// const cb = new ConsensusBuilder();
+/// cb.add(rs1);
+/// cb.add(rs2);
+/// cb.add(rs3);
+/// const result = cb.compute(); // [{chr, start, end, count}, ...]
+/// ```
+#[wasm_bindgen(js_name = "ConsensusBuilder")]
+pub struct JsConsensusBuilder {
+    sets: Vec<RegionSet>,
+}
+
+#[wasm_bindgen(js_class = "ConsensusBuilder")]
+impl JsConsensusBuilder {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        JsConsensusBuilder { sets: Vec::new() }
+    }
+
+    pub fn add(&mut self, set: &JsRegionSet) {
+        self.sets.push(set.region_set.clone());
+    }
+
+    pub fn compute(&self) -> Result<JsValue, JsValue> {
+        let result = consensus::consensus(&self.sets);
+
+        #[derive(serde::Serialize)]
+        struct JsConsensusRegion {
+            chr: String,
+            start: u32,
+            end: u32,
+            count: u32,
+        }
+
+        let js_result: Vec<JsConsensusRegion> = result
+            .into_iter()
+            .map(|r| JsConsensusRegion {
+                chr: r.chr,
+                start: r.start,
+                end: r.end,
+                count: r.count,
+            })
+            .collect();
+
+        serde_wasm_bindgen::to_value(&js_result).map_err(|e| e.into())
     }
 }

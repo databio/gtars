@@ -70,6 +70,23 @@ pub trait IntervalRanges {
     /// pintersect(A, B): chr1 5–10, chr1 25–30
     /// ```
     fn pintersect(&self, other: &RegionSet) -> RegionSet;
+
+    /// Combine two region sets without merging overlapping intervals.
+    ///
+    /// Clones regions from both sets into a single `RegionSet`. No sorting,
+    /// deduplication, or merging is performed.
+    fn concat(&self, other: &RegionSet) -> RegionSet;
+
+    /// Merge two region sets into a minimal non-overlapping set.
+    ///
+    /// Equivalent to `self.concat(other).reduce()`.
+    fn union(&self, other: &RegionSet) -> RegionSet;
+
+    /// Nucleotide-level Jaccard similarity between two region sets.
+    ///
+    /// Computes `|intersection| / |union|` in base pairs, where both sets are
+    /// reduced first. Returns 0.0 if the union has zero base pairs.
+    fn jaccard(&self, other: &RegionSet) -> f64;
 }
 
 impl IntervalRanges for RegionSet {
@@ -235,6 +252,27 @@ impl IntervalRanges for RegionSet {
             })
             .collect();
         RegionSet::from(regions)
+    }
+
+    fn concat(&self, other: &RegionSet) -> RegionSet {
+        let mut regions = self.regions.clone();
+        regions.extend(other.regions.iter().cloned());
+        RegionSet::from(regions)
+    }
+
+    fn union(&self, other: &RegionSet) -> RegionSet {
+        self.concat(other).reduce()
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let union_bp = self.union(other).nucleotides_length();
+        if union_bp == 0 {
+            return 0.0;
+        }
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / union_bp as f64
     }
 }
 
@@ -852,5 +890,66 @@ mod tests {
         let result = a.setdiff(&b);
         assert_eq!(result.len(), 1);
         assert_eq!(result.inner.regions[0], make_region("chr1", 0, 100));
+    }
+
+    // ── concat tests ────────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_concat() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 3);
+    }
+
+    // ── union tests ─────────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_union_from_bed_files() {
+        // dummy.bed reduces to chr1:2-12, dummy_b.bed has chr1:3-5, chr1:8-10
+        // All fall within chr1:2-12, so union = chr1:2-12
+        let path_a = get_test_path("dummy.bed");
+        let path_b = get_test_path("dummy_b.bed");
+        let a = RegionSet::try_from(path_a.to_str().unwrap()).unwrap();
+        let b = RegionSet::try_from(path_b.to_str().unwrap()).unwrap();
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 2, 12));
+    }
+
+    // ── jaccard tests ───────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_jaccard() {
+        // dummy.bed reduces to chr1:2-12 (10bp)
+        // dummy_b.bed reduces to chr1:3-5 + chr1:8-10 (4bp)
+        // Union = chr1:2-12 (10bp). Intersection = 10 + 4 - 10 = 4bp.
+        // Jaccard = 4/10 = 0.4
+        let path_a = get_test_path("dummy.bed");
+        let path_b = get_test_path("dummy_b.bed");
+        let a = RegionSet::try_from(path_a.to_str().unwrap()).unwrap();
+        let b = RegionSet::try_from(path_b.to_str().unwrap()).unwrap();
+        let j = a.jaccard(&b);
+        assert!((j - 0.4).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.jaccard(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        assert!((a.jaccard(&b)).abs() < 1e-10);
     }
 }

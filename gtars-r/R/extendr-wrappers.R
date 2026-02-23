@@ -109,6 +109,29 @@ r_setdiff <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_setdiff, rs_ptr_a, rs_pt
 #' @param rs_ptr_b External pointer to RegionSet B
 r_pintersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_pintersect, rs_ptr_a, rs_ptr_b)
 
+#' Combine two region sets without merging
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_concat <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_concat, rs_ptr_a, rs_ptr_b)
+
+#' Merge two region sets into a minimal non-overlapping set
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_union <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_union, rs_ptr_a, rs_ptr_b)
+
+#' Nucleotide-level Jaccard similarity between two region sets
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_jaccard <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_jaccard, rs_ptr_a, rs_ptr_b)
+
+#' Compute consensus regions from a list of RegionSet pointers
+#' @export
+#' @param rs_list An R list of external pointers to RegionSets
+r_consensus <- function(rs_list) .Call(wrap__r_consensus, rs_list)
+
 #' Build a PartitionList from RegionSet pointers (genes, exons, optional UTRs)
 #' @export
 #' @param genes_ptr External pointer to genes RegionSet

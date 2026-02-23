@@ -23,6 +23,7 @@
 //! ```
 
 pub mod bed_classifier;
+pub mod consensus;
 pub mod errors;
 pub mod interval_ranges;
 pub mod models;
@@ -34,6 +35,7 @@ pub mod utils;
 // re-exports
 #[cfg(feature = "bedclassifier")]
 pub use bed_classifier::classify_bed;
+pub use consensus::{ConsensusRegion, consensus};
 pub use interval_ranges::IntervalRanges;
 pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
