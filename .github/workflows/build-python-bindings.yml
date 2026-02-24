@@ -35,8 +35,9 @@ jobs:
           args: --release --out dist --find-interpreter
           sccache: 'true'
           manylinux: manylinux_2_28
+          docker-options: -e OPENSSL_NO_VENDOR=1
           before-script-linux: |
-            yum install -y openssl-devel cmake gcc make sqlite-devel
+            yum install -y openssl-devel cmake gcc make sqlite-devel perl-IPC-Cmd
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
