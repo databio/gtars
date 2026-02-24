@@ -36,8 +36,7 @@ jobs:
           sccache: 'true'
           manylinux: manylinux_2_28
           before-script-linux: |
-            apt-get update
-            apt-get install --yes --upgrade build-essential cmake protobuf-compiler libssl-dev glibc-source musl-tools libsqlite3-dev
+            yum install -y openssl-devel cmake gcc make sqlite-devel
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
