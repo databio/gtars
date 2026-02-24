@@ -1,0 +1,9 @@
+##description: synthetic Ensembl-style GTF (no chr prefix) for testing convert_ensembl_ucsc
+##provider: test
+1	test	gene	1001	5000	.	+	.	gene_id "ENSG00000001"; gene_biotype "protein_coding";
+1	test	exon	1001	1500	.	+	.	gene_id "ENSG00000001"; gene_biotype "protein_coding";
+1	test	exon	2001	2500	.	+	.	gene_id "ENSG00000001"; gene_biotype "protein_coding";
+1	test	five_prime_utr	1001	1100	.	+	.	gene_id "ENSG00000001"; gene_biotype "protein_coding";
+1	test	three_prime_utr	4800	5000	.	+	.	gene_id "ENSG00000001"; gene_biotype "protein_coding";
+X	test	gene	2001	4000	.	-	.	gene_id "ENSG00000002"; gene_biotype "protein_coding";
+X	test	exon	2001	2800	.	-	.	gene_id "ENSG00000002"; gene_biotype "protein_coding";

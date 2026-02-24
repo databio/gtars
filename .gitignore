@@ -28,3 +28,25 @@ bin/
 tests/data/out/region_scoring_count.csv.gz
 /gtars-refget/tests/store_test/rgstore.json
 /gtars-refget/tests/store_test/sequences.rgsi
+
+# Large benchmark data and validation files
+tests/data/interval_ranges_benchmark/
+tests/data/partitions_benchmark/
+gtars-genomicdist/examples/benchmark_*.rs
+gtars-genomicdist/examples/partitions_demo.rs
+gtars-genomicdist/tests/
+*.annotation.gtf.gz
+tests/data/fasta/sacCer3.fa
+tests/data/fasta/sacCer3.rgsi
+gtars-r/tests/explore_sacCer3.*
+gtars-r/tests/smoketest_sacCer3.R
+gtars-r/tests/hg19.fa
+gtars-r/tests/hg19.fa.gz
+gtars-r/tests/benchmark_genomicdist.*
+gtars-r/tests/compare_genomicdist.*
+gtars-r/tests/tutorial_genomicdist.*
+gtars-r/tests/*.bed
+gtars-r/tests/*.html
+gtars-r/tests/export_reference_data.R
+gtars-r/tests/ref/
+gtars-r/tests/smoketest_set_operations.*

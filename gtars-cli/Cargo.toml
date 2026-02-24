@@ -25,7 +25,12 @@ gtars-igd = { path = "../gtars-igd", optional=true, version="0.5.1" }
 gtars-uniwig = { path = "../gtars-uniwig", optional=true, version="0.7.0" }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.1" }
 gtars-bbcache = { path = "../gtars-bbcache", optional=true, version="0.5.3" }
+gtars-genomicdist = { path = "../gtars-genomicdist", optional=true, version="0.5.3" }
 gtars-core = { path = "../gtars-core", version="0.5.5", features=["bigbed", "http"] }
+
+# serialization
+serde = { workspace = true }
+serde_json = "1"
 
 [[bin]]
 name = "gtars"
@@ -39,3 +44,4 @@ bbcache = ["dep:gtars-bbcache"]
 igd = ["dep:gtars-igd"]
 fragsplit = ["dep:gtars-fragsplit"]
 overlaprs = ["dep:gtars-overlaprs"]
+genomicdist = ["dep:gtars-genomicdist"]

@@ -214,12 +214,10 @@ impl TryFrom<PathBuf> for RegionSet {
 
 impl From<Vec<Region>> for RegionSet {
     fn from(regions: Vec<Region>) -> Self {
-        let path = None;
-
         RegionSet {
             regions,
             header: None,
-            path,
+            path: None,
         }
     }
 }

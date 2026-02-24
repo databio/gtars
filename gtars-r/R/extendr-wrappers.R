@@ -12,6 +12,213 @@ NULL
 
 `__init__` <- function() .Call(wrap____init__)
 
+#' Load a RegionSet from a BED/narrowPeak/gzip file
+#' @export
+#' @param bed_path Path to a BED, narrowPeak, or gzipped BED file
+load_regionset <- function(bed_path) .Call(wrap__r_load_regionset, bed_path)
+
+#' Create a RegionSet from R vectors (0-based half-open coordinates)
+#' @export
+#' @param chrs Character vector of chromosome names
+#' @param starts Integer vector of start positions (0-based)
+#' @param ends Integer vector of end positions (half-open)
+regionset_from_vectors <- function(chrs, starts, ends) .Call(wrap__r_regionset_from_vectors, chrs, starts, ends)
+
+#' Extract chr/start/end vectors from a RegionSet pointer
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_to_vectors <- function(rs_ptr) .Call(wrap__r_regionset_to_vectors, rs_ptr)
+
+#' Get the number of regions in a RegionSet
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_length <- function(rs_ptr) .Call(wrap__r_regionset_length, rs_ptr)
+
+#' Calculate region widths (end - start)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_widths <- function(rs_ptr) .Call(wrap__r_calc_widths, rs_ptr)
+
+#' Calculate distances between consecutive regions on each chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_neighbor_distances <- function(rs_ptr) .Call(wrap__r_calc_neighbor_distances, rs_ptr)
+
+#' Calculate distance from each region to its nearest neighbor
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_nearest_neighbors <- function(rs_ptr) .Call(wrap__r_calc_nearest_neighbors, rs_ptr)
+
+#' Calculate per-chromosome statistics
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics, rs_ptr)
+
+#' Calculate region distribution across chromosome bins
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param n_bins Number of bins (default 250)
+r_region_distribution <- function(rs_ptr, n_bins) .Call(wrap__r_region_distribution, rs_ptr, n_bins)
+
+#' Load a genome assembly from a FASTA file
+#' @export
+#' @param fasta_path Path to a FASTA file
+load_genome_assembly <- function(fasta_path) .Call(wrap__r_load_genome_assembly, fasta_path)
+
+#' Calculate GC content for each region
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wrap__r_calc_gc_content, rs_ptr, assembly_ptr, ignore_unk_chroms)
+
+#' Calculate per-region dinucleotide frequencies (percentages)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr)
+
+#' Trim regions to chromosome boundaries
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+r_trim <- function(rs_ptr, chrom_names, chrom_sizes) .Call(wrap__r_trim, rs_ptr, chrom_names, chrom_sizes)
+
+#' Generate promoter regions relative to each region's start
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param upstream Bases upstream of start
+#' @param downstream Bases downstream of start
+r_promoters <- function(rs_ptr, upstream, downstream) .Call(wrap__r_promoters, rs_ptr, upstream, downstream)
+
+#' Merge overlapping and adjacent intervals per chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_reduce <- function(rs_ptr) .Call(wrap__r_reduce, rs_ptr)
+
+#' Set difference: remove portions of A that overlap with B
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_setdiff <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_setdiff, rs_ptr_a, rs_ptr_b)
+
+#' Pairwise intersection by index position
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_pintersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_pintersect, rs_ptr_a, rs_ptr_b)
+
+#' Combine two region sets without merging
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_concat <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_concat, rs_ptr_a, rs_ptr_b)
+
+#' Merge two region sets into a minimal non-overlapping set
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_union <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_union, rs_ptr_a, rs_ptr_b)
+
+#' Nucleotide-level Jaccard similarity between two region sets
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_jaccard <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_jaccard, rs_ptr_a, rs_ptr_b)
+
+#' Compute consensus regions from a list of RegionSet pointers
+#' @export
+#' @param rs_list An R list of external pointers to RegionSets
+r_consensus <- function(rs_list) .Call(wrap__r_consensus, rs_list)
+
+#' Build a PartitionList from RegionSet pointers (genes, exons, optional UTRs)
+#' @export
+#' @param genes_ptr External pointer to genes RegionSet
+#' @param exons_ptr External pointer to exons RegionSet
+#' @param three_utr_ptr External pointer to 3'UTR RegionSet (or NULL)
+#' @param five_utr_ptr External pointer to 5'UTR RegionSet (or NULL)
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions <- function(genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions, genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from RegionSet pointers with strand information
+#' @export
+#' @param genes_chrs Gene chromosome names
+#' @param genes_starts Gene start positions (0-based)
+#' @param genes_ends Gene end positions (half-open)
+#' @param genes_strands Gene strand strings ("+", "-", "*")
+#' @param exons_chrs Exon chromosome names
+#' @param exons_starts Exon start positions (0-based)
+#' @param exons_ends Exon end positions (half-open)
+#' @param exons_strands Exon strand strings
+#' @param three_utr_chrs 3'UTR chrs (empty vector if absent)
+#' @param three_utr_starts 3'UTR starts
+#' @param three_utr_ends 3'UTR ends
+#' @param three_utr_strands 3'UTR strands
+#' @param five_utr_chrs 5'UTR chrs (empty vector if absent)
+#' @param five_utr_starts 5'UTR starts
+#' @param five_utr_ends 5'UTR ends
+#' @param five_utr_strands 5'UTR strands
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions_stranded <- function(genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions_stranded, genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from a GTF file
+#' @export
+#' @param gtf_path Path to a GTF or GTF.gz file
+#' @param filter_protein_coding Keep only protein-coding genes
+#' @param convert_ensembl_ucsc Prepend "chr" to bare chromosome names
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_gtf <- function(gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_gtf, gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Assign regions to genomic partitions
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_partitions <- function(rs_ptr, partition_ptr, bp_proportion) .Call(wrap__r_calc_partitions, rs_ptr, partition_ptr, bp_proportion)
+
+#' Calculate observed vs expected partition enrichment
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion) .Call(wrap__r_calc_expected_partitions, rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion)
+
+#' Calculate summary signal (overlap query with signal matrix)
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param signal_region_ids Character vector of region IDs (chr_start_end format)
+#' @param condition_names Character vector of condition/column names
+#' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
+#' @param n_regions Number of signal regions
+#' @param n_conditions Number of conditions
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions)
+
+#' Calculate absolute distance from each query region to nearest feature midpoint.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_tss_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_tss_distances, query_ptr, features_ptr)
+
+#' Calculate signed distance from each query region to nearest feature.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_feature_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_feature_distances, query_ptr, features_ptr)
+
 #' Write tokens to a gtok file
 #' @export
 #' @param filename A string representing the path to the gtok file.

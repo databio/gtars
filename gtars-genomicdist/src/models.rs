@@ -1,16 +1,99 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
 use gtars_core::models::{Region, RegionSet};
-// use gtars_overlaprs::Overlapper;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
-// use num_traits::{PrimInt, Unsigned};
 use std::fs::File;
 use std::path::Path;
+
+/// A `RegionSet` that is guaranteed to be sorted by (chr, start).
+///
+/// Created by moving a `RegionSet` into `SortedRegionSet::new()`, which
+/// sorts in place (no clone). Functions that require sorted input can
+/// accept this type instead of re-sorting every time.
+pub struct SortedRegionSet(pub RegionSet);
+
+impl SortedRegionSet {
+    /// Sort a RegionSet in place and wrap it. This is a move, not a clone.
+    pub fn new(mut rs: RegionSet) -> Self {
+        rs.sort();
+        Self(rs)
+    }
+}
+
+/// Genomic strand orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Strand {
+    Plus,
+    Minus,
+    Unstranded,
+}
+
+impl Strand {
+    pub fn from_char(c: char) -> Self {
+        match c {
+            '+' => Strand::Plus,
+            '-' => Strand::Minus,
+            _ => Strand::Unstranded,
+        }
+    }
+}
+
+/// A `RegionSet` paired with a parallel `Vec<Strand>`.
+///
+/// Follows the `SortedRegionSet` wrapper pattern: wraps a `RegionSet` and
+/// adds strand information without modifying `Region` itself (which lives
+/// in gtars-core). Strand-aware operations (promoters, reduce, setdiff)
+/// are implemented as methods on this type.
+pub struct StrandedRegionSet {
+    pub inner: RegionSet,
+    pub strands: Vec<Strand>,
+}
+
+impl StrandedRegionSet {
+    /// Create a new StrandedRegionSet from a RegionSet and parallel strand vector.
+    ///
+    /// # Panics
+    /// Panics if `strands.len() != rs.regions.len()`.
+    pub fn new(rs: RegionSet, strands: Vec<Strand>) -> Self {
+        assert_eq!(
+            rs.regions.len(),
+            strands.len(),
+            "StrandedRegionSet: regions and strands must have the same length"
+        );
+        StrandedRegionSet {
+            inner: rs,
+            strands,
+        }
+    }
+
+    /// Wrap a RegionSet with all-Unstranded. Preserves existing behavior.
+    pub fn unstranded(rs: RegionSet) -> Self {
+        let n = rs.regions.len();
+        StrandedRegionSet {
+            strands: vec![Strand::Unstranded; n],
+            inner: rs,
+        }
+    }
+
+    /// Consume into the inner RegionSet, dropping strand information.
+    pub fn into_regionset(self) -> RegionSet {
+        self.inner
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.regions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.regions.is_empty()
+    }
+}
 
 /// Statistics summary for regions on a single chromosome.
 ///
 /// Contains counts, bounds, and descriptive statistics for region lengths.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromosomeStatistics {
     /// Chromosome name
     pub chromosome: String,
@@ -33,7 +116,7 @@ pub struct ChromosomeStatistics {
 /// A genomic bin with a count of overlapping regions.
 ///
 /// Used to represent distribution of regions across fixed-size windows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegionBin {
     /// Chromosome name
     pub chr: String,
@@ -131,7 +214,7 @@ impl GenomeAssembly {
     }
 }
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Dinucleotide {
     Aa,
     Ac,
@@ -304,6 +387,66 @@ impl TssIndex {
                     };
                     distances.push(min_distance);
                 }
+            } else {
+                // No features on this chromosome — push u32::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(u32::MAX);
+                }
+            }
+        }
+        Ok(distances)
+    }
+
+    /// Calculate signed distances from each region to its nearest feature.
+    ///
+    /// Like `calc_tss_distances` but returns signed distances where:
+    /// - Positive: nearest feature is downstream (right) of the query
+    /// - Negative: nearest feature is upstream (left) of the query
+    ///
+    /// Sign convention: `nearest_feature_midpoint - query_midpoint`
+    /// (matches R GenomicDistributions `calcFeatureDist()`).
+    pub fn calc_feature_distances(
+        &self,
+        rs: &RegionSet,
+    ) -> Result<Vec<i64>, GtarsGenomicDistError> {
+        let mut distances: Vec<i64> = Vec::with_capacity(rs.len());
+
+        for chromosome in rs.iter_chroms() {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
+                for region in rs.iter_chr_regions(chromosome.as_str()) {
+                    let target = region.mid_point() as i64;
+
+                    let distance = match chr_midpoints.binary_search(&(target as u32)) {
+                        Ok(_) => 0i64,
+                        Err(idx) => {
+                            // distance = feature_mid - query_mid
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| chr_midpoints[i] as i64 - target);
+                            let right =
+                                chr_midpoints.get(idx).map(|&v| v as i64 - target);
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => {
+                                    if l.unsigned_abs() <= r.unsigned_abs() {
+                                        l
+                                    } else {
+                                        r
+                                    }
+                                }
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(distance);
+                }
+            } else {
+                // No features on this chromosome — push i64::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(i64::MAX);
+                }
             }
         }
         Ok(distances)
@@ -338,5 +481,26 @@ mod tests {
 
         assert_eq!(distances.len(), 9);
         assert_eq!(distances.iter().min(), Some(&2));
+    }
+
+    #[rstest]
+    fn test_calc_feature_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let tss_path = get_test_path("dummy_tss.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
+
+        let signed_distances = tss_index.calc_feature_distances(&region_set).unwrap();
+        let abs_distances = tss_index.calc_tss_distances(&region_set).unwrap();
+
+        // same number of results
+        assert_eq!(signed_distances.len(), abs_distances.len());
+        // absolute values should match calc_tss_distances
+        for (signed, abs) in signed_distances.iter().zip(abs_distances.iter()) {
+            assert_eq!(signed.unsigned_abs() as u32, *abs);
+        }
+        // should have both positive and negative distances
+        assert!(signed_distances.iter().any(|d| *d > 0));
+        assert!(signed_distances.iter().any(|d| *d < 0));
     }
 }

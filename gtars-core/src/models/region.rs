@@ -48,9 +48,15 @@ impl Region {
         format!("{:x}", chrom_hash)
     }
 
+    /// Calculate the midpoint of this region: `start + width / 2`.
     ///
-    /// Calculate mid point
-    ///
+    /// NOTE: R's GenomicDistributions computes midpoints using banker's
+    /// rounding in 1-based coordinates: `start + round((end - start) / 2)`.
+    /// For regions with width ≡ 2 (mod 4), this picks the left-of-center
+    /// base while our formula picks right-of-center, causing a ±1 bp
+    /// difference in ~2.6% of feature distance calculations. This is a
+    /// known discrepancy; to match GD exactly, change the formula to:
+    /// `if w % 4 == 2 { start + w/2 - 1 } else { start + w/2 }`.
     pub fn mid_point(&self) -> u32 {
         self.start + self.width() / 2
     }
