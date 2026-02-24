@@ -8,7 +8,7 @@ name = "gtars"
 crate-type = ["staticlib"]
 
 [dependencies]
-extendr-api = { git = "https://github.com/extendr/extendr", branch = "main" }
+extendr-api = { git = "https://github.com/extendr/extendr", rev = "51bc14714d771cc670caa011f01187ff8cb0c36a" }
 anyhow = "1.0.82"
 gtars-core = { path = "../../../gtars-core" }
 gtars-io = { path = "../../../gtars-io" }
