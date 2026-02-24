@@ -1,6 +1,6 @@
 [package]
 name = "gtars-js"
-version = "0.6.1"
+version = "0.7.0"
 authors = ["Nathan LeRoy <NLeRoy917@gmail.com>"]
 edition = "2024"
 

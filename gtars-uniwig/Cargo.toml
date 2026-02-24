@@ -1,6 +1,6 @@
 [package]
 name = "gtars-uniwig"
-version = "0.5.0"
+version = "0.7.0"
 edition = "2024"
 description = "Rust implementation of uniwig: a tool for computing coverage from BED files over genomic intervals"
 license = "MIT"
@@ -24,4 +24,4 @@ flate2 = { workspace = true }
 indicatif = { workspace = true }
 
 # our code
-gtars-core = { path = "../gtars-core", version="0.5.0" }
+gtars-core = { path = "../gtars-core", version="0.5.5" }
