@@ -1,17 +1,62 @@
-name: Release All
-
+name: Publish
 on:
-  push:
-    tags:
-      - 'v*'
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      crates:
+        description: 'Publish to crates.io'
+        type: choice
+        default: 'all'
+        options:
+          - all
+          - none
+          - gtars
+          - gtars-bbcache
+          - gtars-cli
+          - gtars-core
+          - gtars-fragsplit
+          - gtars-genomicdist
+          - gtars-igd
+          - gtars-io
+          - gtars-overlaprs
+          - gtars-python
+          - gtars-refget
+          - gtars-scoring
+          - gtars-tokenizers
+          - gtars-uniwig
+      python:
+        description: 'Publish Python bindings'
+        type: boolean
+        default: true
+      cli:
+        description: 'Publish CLI binaries'
+        type: boolean
+        default: true
+      wasm:
+        description: 'Publish WASM to NPM'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
   id-token: write
 
 jobs:
-  publish-rust-crates:
+  publish-single-crate:
+    if: ${{ inputs.crates != 'none' && inputs.crates != 'all' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Publish ${{ inputs.crates }} to crates.io
+        run: cargo publish -p ${{ inputs.crates }} --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  publish-all-crates:
+    if: ${{ inputs.crates == 'all' || inputs.crates == '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -100,21 +145,39 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-python:
-    needs: publish-rust-crates
+    if: ${{ inputs.python != false }}
+    needs: publish-all-crates
     uses: ./.github/workflows/build-python-bindings.yml
     secrets: inherit
 
   publish-cli:
-    needs: publish-rust-crates
+    if: ${{ inputs.cli != false }}
+    needs: publish-all-crates
     uses: ./.github/workflows/build-binaries.yml
     secrets: inherit
 
   publish-wasm:
-    needs: publish-rust-crates
-    uses: ./.github/workflows/build-wasm-bindings.yml
-    secrets: inherit
+    if: ${{ always() && inputs.wasm != false && (needs.publish-all-crates.result == 'success' || needs.publish-all-crates.result == 'skipped') }}
+    needs: publish-all-crates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Update npm
+        run: npm install -g npm@latest
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      - name: Build and publish WASM to NPM
+        run: |
+          wasm-pack build --release --target web gtars-wasm
+          jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
+          npm publish --provenance --access public gtars-wasm/pkg/
 
   create-tags:
+    if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
     needs: [publish-python, publish-cli, publish-wasm]
     runs-on: ubuntu-latest
     steps:
