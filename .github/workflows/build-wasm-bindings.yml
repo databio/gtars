@@ -45,4 +45,9 @@ jobs:
                 echo "=== npm whoami (expect failure) ==="
                 npm whoami 2>&1 || true
             - name: Publish to NPM
-              run: npm publish --provenance --access public gtars-wasm/pkg/
+              run: |
+                # setup-node injects a short-lived token that expires during
+                # the WASM build. Clear it so npm does a fresh OIDC exchange.
+                unset NODE_AUTH_TOKEN
+                sed -i '/_authToken/d' "$NPM_CONFIG_USERCONFIG"
+                npm publish --provenance --access public gtars-wasm/pkg/
