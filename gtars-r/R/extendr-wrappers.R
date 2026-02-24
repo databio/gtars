@@ -10,7 +10,7 @@
 #' @useDynLib gtars, .registration = TRUE
 NULL
 
-`__init__` <- function() invisible(.Call(wrap____init__))
+`__init__` <- function() .Call(wrap____init__)
 
 #' Write tokens to a gtok file
 #' @export
@@ -21,7 +21,7 @@ read_tokens_from_gtok <- function(filename) .Call(wrap__r_read_tokens_from_gtok,
 #' @export
 #' @param filename A string representing the path to the gtok file.
 #' @param tokens The tokens to write.
-write_tokens_to_gtok <- function(filename, tokens) invisible(.Call(wrap__r_write_tokens_to_gtok, filename, tokens))
+write_tokens_to_gtok <- function(filename, tokens) .Call(wrap__r_write_tokens_to_gtok, filename, tokens)
 
 #' Create an IGD database from a directory of bed files
 #' @param output_path String path where the IGD database will be saved
@@ -48,43 +48,214 @@ md5_digest <- function(readable) .Call(wrap__md5_digest, readable)
 #' @param fasta A filepath string to a fasta file.
 digest_fasta_raw <- function(fasta) .Call(wrap__digest_fasta_raw, fasta)
 
-#' Create a RefgetStore
+#' Create an in-memory RefgetStore
 #' @param mode Storage mode: "raw" or "encoded"
 refget_store_raw <- function(mode) .Call(wrap__refget_store_raw, mode)
+
+#' Create a disk-backed RefgetStore
+#' @export
+#' @param path Path for storing sequences and metadata
+on_disk_store <- function(path) .Call(wrap__on_disk_store, path)
+
+#' Open store from local directory
+#' @export
+#' @param root_path Path to read store from
+open_local_store <- function(root_path) .Call(wrap__open_local_store, root_path)
+
+#' Open a remote RefgetStore with local caching
+#' @export
+#' @param cache_path Local directory to cache downloaded metadata and sequences
+#' @param remote_url Base URL of the remote refget store
+open_remote_store <- function(cache_path, remote_url) .Call(wrap__open_remote_store, cache_path, remote_url)
+
+#' Enable 2-bit encoding for space efficiency
+#' @param store_ptr External pointer to RefgetStore
+enable_encoding_store <- function(store_ptr) .Call(wrap__enable_encoding_store, store_ptr)
+
+#' Disable encoding, use raw byte storage
+#' @param store_ptr External pointer to RefgetStore
+disable_encoding_store <- function(store_ptr) .Call(wrap__disable_encoding_store, store_ptr)
+
+#' Get current storage mode
+#' @param store_ptr External pointer to RefgetStore
+get_storage_mode_store <- function(store_ptr) .Call(wrap__get_storage_mode_store, store_ptr)
+
+#' Set quiet mode
+#' @param store_ptr External pointer to RefgetStore
+#' @param quiet Whether to suppress output
+set_quiet_store <- function(store_ptr, quiet) .Call(wrap__set_quiet_store, store_ptr, quiet)
+
+#' Get quiet mode status
+#' @param store_ptr External pointer to RefgetStore
+get_quiet_store <- function(store_ptr) .Call(wrap__get_quiet_store, store_ptr)
+
+#' Check if store is persisting to disk
+#' @param store_ptr External pointer to RefgetStore
+is_persisting_store <- function(store_ptr) .Call(wrap__is_persisting_store, store_ptr)
+
+#' Enable disk persistence
+#' @param store_ptr External pointer to RefgetStore
+#' @param path Directory for storing sequences and metadata
+enable_persistence_store <- function(store_ptr, path) .Call(wrap__enable_persistence_store, store_ptr, path)
+
+#' Disable disk persistence
+#' @param store_ptr External pointer to RefgetStore
+disable_persistence_store <- function(store_ptr) .Call(wrap__disable_persistence_store, store_ptr)
+
+#' Get cache path
+#' @param store_ptr External pointer to RefgetStore
+get_cache_path_store <- function(store_ptr) .Call(wrap__get_cache_path_store, store_ptr)
+
+#' Get remote URL
+#' @param store_ptr External pointer to RefgetStore
+get_remote_url_store <- function(store_ptr) .Call(wrap__get_remote_url_store, store_ptr)
 
 #' Import FASTA file into store
 #' @param store_ptr External pointer to RefgetStore
 #' @param file_path Path to FASTA file
+#' @param force Whether to overwrite existing sequences/collections
 import_fasta_store <- function(store_ptr, file_path) .Call(wrap__import_fasta_store, store_ptr, file_path)
 
-#' Get sequence by ID from store
+#' Add a FASTA file with force option
 #' @param store_ptr External pointer to RefgetStore
-#' @param digest Sequence digest
-get_sequence_by_id_store <- function(store_ptr, digest) .Call(wrap__get_sequence_by_id_store, store_ptr, digest)
+#' @param file_path Path to FASTA file
+#' @param force Whether to overwrite existing sequences/collections
+add_fasta_store <- function(store_ptr, file_path, force) .Call(wrap__add_fasta_store, store_ptr, file_path, force)
+
+#' Get sequence by digest from store (supports SHA512t24u or MD5)
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Sequence digest (SHA512t24u or MD5)
+get_sequence_store <- function(store_ptr, digest) .Call(wrap__get_sequence_store, store_ptr, digest)
 
 #' Get sequence by collection and name
 #' @param store_ptr External pointer to RefgetStore
 #' @param collection_digest Sequence collection digest
 #' @param sequence_name Sequence name
-get_sequence_by_collection_and_name_store <- function(store_ptr, collection_digest, sequence_name) .Call(wrap__get_sequence_by_collection_and_name_store, store_ptr, collection_digest, sequence_name)
+get_sequence_by_name_store <- function(store_ptr, collection_digest, sequence_name) .Call(wrap__get_sequence_by_name_store, store_ptr, collection_digest, sequence_name)
+
+#' Get sequence metadata (no sequence data)
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Sequence digest
+get_sequence_metadata_store <- function(store_ptr, digest) .Call(wrap__get_sequence_metadata_store, store_ptr, digest)
 
 #' Get substring from sequence
-#' @param store_ptr External pointer to RefgetStore  
+#' @param store_ptr External pointer to RefgetStore
 #' @param seq_digest Sequence digest
 #' @param start Start position
 #' @param end End position
 get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
 
+#' List all collections in the store
+#' @param store_ptr External pointer to RefgetStore
+list_collections_store <- function(store_ptr) .Call(wrap__list_collections_store, store_ptr)
+
+#' List all sequences in the store
+#' @param store_ptr External pointer to RefgetStore
+list_sequences_store <- function(store_ptr) .Call(wrap__list_sequences_store, store_ptr)
+
+#' Get a collection with all sequences loaded
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+get_collection_store <- function(store_ptr, digest) .Call(wrap__get_collection_store, store_ptr, digest)
+
+#' Get collection metadata
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+get_collection_metadata_store <- function(store_ptr, digest) .Call(wrap__get_collection_metadata_store, store_ptr, digest)
+
+#' Check if collection is fully loaded
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+is_collection_loaded_store <- function(store_ptr, digest) .Call(wrap__is_collection_loaded_store, store_ptr, digest)
+
+#' Iterate over all collections with sequences loaded
+#' @param store_ptr External pointer to RefgetStore
+iter_collections_store <- function(store_ptr) .Call(wrap__iter_collections_store, store_ptr)
+
+#' Iterate over all sequences with data loaded
+#' @param store_ptr External pointer to RefgetStore
+iter_sequences_store <- function(store_ptr) .Call(wrap__iter_sequences_store, store_ptr)
+
+#' Get store statistics
+#' @param store_ptr External pointer to RefgetStore
+stats_store <- function(store_ptr) .Call(wrap__stats_store, store_ptr)
+
+#' Get level 1 representation (attribute digests) for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+get_collection_level1_store <- function(store_ptr, digest) .Call(wrap__get_collection_level1_store, store_ptr, digest)
+
+#' Get level 2 representation (full arrays) for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+get_collection_level2_store <- function(store_ptr, digest) .Call(wrap__get_collection_level2_store, store_ptr, digest)
+
+#' Compare two collections
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest_a First collection digest
+#' @param digest_b Second collection digest
+compare_store <- function(store_ptr, digest_a, digest_b) .Call(wrap__compare_store, store_ptr, digest_a, digest_b)
+
+#' Find collections by attribute digest
+#' @param store_ptr External pointer to RefgetStore
+#' @param attr_name Attribute name (names, lengths, sequences, etc.)
+#' @param attr_digest The digest to search for
+find_collections_by_attribute_store <- function(store_ptr, attr_name, attr_digest) .Call(wrap__find_collections_by_attribute_store, store_ptr, attr_name, attr_digest)
+
+#' Get attribute array by digest
+#' @param store_ptr External pointer to RefgetStore
+#' @param attr_name Attribute name
+#' @param attr_digest Attribute digest
+get_attribute_store <- function(store_ptr, attr_name, attr_digest) .Call(wrap__get_attribute_store, store_ptr, attr_name, attr_digest)
+
+#' Enable ancillary digest computation
+#' @param store_ptr External pointer to RefgetStore
+enable_ancillary_digests_store <- function(store_ptr) .Call(wrap__enable_ancillary_digests_store, store_ptr)
+
+#' Disable ancillary digest computation
+#' @param store_ptr External pointer to RefgetStore
+disable_ancillary_digests_store <- function(store_ptr) .Call(wrap__disable_ancillary_digests_store, store_ptr)
+
+#' Check if ancillary digests are enabled
+#' @param store_ptr External pointer to RefgetStore
+has_ancillary_digests_store <- function(store_ptr) .Call(wrap__has_ancillary_digests_store, store_ptr)
+
+#' Enable attribute index
+#' @param store_ptr External pointer to RefgetStore
+enable_attribute_index_store <- function(store_ptr) .Call(wrap__enable_attribute_index_store, store_ptr)
+
+#' Disable attribute index
+#' @param store_ptr External pointer to RefgetStore
+disable_attribute_index_store <- function(store_ptr) .Call(wrap__disable_attribute_index_store, store_ptr)
+
+#' Check if attribute index is enabled
+#' @param store_ptr External pointer to RefgetStore
+has_attribute_index_store <- function(store_ptr) .Call(wrap__has_attribute_index_store, store_ptr)
+
 #' Write store to directory
 #' @param store_ptr External pointer to RefgetStore
 #' @param root_path Path to write store
-#' @param seqdata_path_template Path template name
+#' @param seqdata_path_template Path template name (optional, pass empty string for default)
 write_store_to_directory_store <- function(store_ptr, root_path, seqdata_path_template) .Call(wrap__write_store_to_directory_store, store_ptr, root_path, seqdata_path_template)
 
-#' Load store from directory
-#' @export  
-#' @param root_path Path to read store from
-load_from_directory_store <- function(root_path) .Call(wrap__load_from_directory_store, root_path)
+#' Write store using configured paths
+#' @param store_ptr External pointer to RefgetStore
+write_store <- function(store_ptr) .Call(wrap__write_store, store_ptr)
+
+#' Export sequences from a collection to FASTA
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Collection digest
+#' @param output_path Output FASTA file path
+#' @param sequence_names Optional vector of sequence names to export (NULL for all)
+#' @param line_width Bases per line (default 80)
+export_fasta_store <- function(store_ptr, collection_digest, output_path, sequence_names, line_width) .Call(wrap__export_fasta_store, store_ptr, collection_digest, output_path, sequence_names, line_width)
+
+#' Export sequences by their digests to FASTA
+#' @param store_ptr External pointer to RefgetStore
+#' @param seq_digests Vector of sequence digests
+#' @param output_path Output FASTA file path
+#' @param line_width Bases per line (default 80)
+export_fasta_by_digests_store <- function(store_ptr, seq_digests, output_path, line_width) .Call(wrap__export_fasta_by_digests_store, store_ptr, seq_digests, output_path, line_width)
 
 #' Extract BED file sequences from store as FASTA
 #' @param store_ptr External pointer to RefgetStore
@@ -98,6 +269,110 @@ get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path,
 #' @param collection_digest Sequence collection digest
 #' @param bed_file_path Path to BED file
 get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_vec_store, store_ptr, collection_digest, bed_file_path)
+
+#' Add a sequence alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Alias namespace
+#' @param alias Alias name
+#' @param digest Sequence digest
+add_sequence_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_sequence_alias_store, store_ptr, namespace, alias, digest)
+
+#' Get sequence by alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Alias namespace
+#' @param alias Alias name
+get_sequence_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_sequence_by_alias_store, store_ptr, namespace, alias)
+
+#' Get all aliases for a sequence
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Sequence digest
+get_aliases_for_sequence_store <- function(store_ptr, digest) .Call(wrap__get_aliases_for_sequence_store, store_ptr, digest)
+
+#' List all sequence alias namespaces
+#' @param store_ptr External pointer to RefgetStore
+list_sequence_alias_namespaces_store <- function(store_ptr) .Call(wrap__list_sequence_alias_namespaces_store, store_ptr)
+
+#' List all aliases in a sequence namespace
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace name
+list_sequence_aliases_store <- function(store_ptr, namespace) .Call(wrap__list_sequence_aliases_store, store_ptr, namespace)
+
+#' Remove a sequence alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace name
+#' @param alias Alias name
+remove_sequence_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__remove_sequence_alias_store, store_ptr, namespace, alias)
+
+#' Load sequence aliases from TSV file
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace to load into
+#' @param path Path to TSV file
+load_sequence_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__load_sequence_aliases_store, store_ptr, namespace, path)
+
+#' Add a collection alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Alias namespace
+#' @param alias Alias name
+#' @param digest Collection digest
+add_collection_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_collection_alias_store, store_ptr, namespace, alias, digest)
+
+#' Get collection by alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Alias namespace
+#' @param alias Alias name
+get_collection_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_collection_by_alias_store, store_ptr, namespace, alias)
+
+#' Get all aliases for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Collection digest
+get_aliases_for_collection_store <- function(store_ptr, digest) .Call(wrap__get_aliases_for_collection_store, store_ptr, digest)
+
+#' List all collection alias namespaces
+#' @param store_ptr External pointer to RefgetStore
+list_collection_alias_namespaces_store <- function(store_ptr) .Call(wrap__list_collection_alias_namespaces_store, store_ptr)
+
+#' List all aliases in a collection namespace
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace name
+list_collection_aliases_store <- function(store_ptr, namespace) .Call(wrap__list_collection_aliases_store, store_ptr, namespace)
+
+#' Remove a collection alias
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace name
+#' @param alias Alias name
+remove_collection_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__remove_collection_alias_store, store_ptr, namespace, alias)
+
+#' Load collection aliases from TSV file
+#' @param store_ptr External pointer to RefgetStore
+#' @param namespace Namespace to load into
+#' @param path Path to TSV file
+load_collection_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__load_collection_aliases_store, store_ptr, namespace, path)
+
+#' Set FHR metadata for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Collection digest
+#' @param metadata_json JSON string with FHR metadata
+set_fhr_metadata_store <- function(store_ptr, collection_digest, metadata_json) .Call(wrap__set_fhr_metadata_store, store_ptr, collection_digest, metadata_json)
+
+#' Get FHR metadata for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Collection digest
+get_fhr_metadata_store <- function(store_ptr, collection_digest) .Call(wrap__get_fhr_metadata_store, store_ptr, collection_digest)
+
+#' Remove FHR metadata for a collection
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Collection digest
+remove_fhr_metadata_store <- function(store_ptr, collection_digest) .Call(wrap__remove_fhr_metadata_store, store_ptr, collection_digest)
+
+#' List all collection digests with FHR metadata
+#' @param store_ptr External pointer to RefgetStore
+list_fhr_metadata_store <- function(store_ptr) .Call(wrap__list_fhr_metadata_store, store_ptr)
+
+#' Load FHR metadata from JSON file
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Collection digest
+#' @param path Path to JSON file
+load_fhr_metadata_store <- function(store_ptr, collection_digest, path) .Call(wrap__load_fhr_metadata_store, store_ptr, collection_digest, path)
 
 
 # nolint end
