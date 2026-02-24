@@ -39,6 +39,8 @@ jobs:
           before-script-linux: |
             sudo apt-get update
             sudo apt-get install --yes --upgrade build-essential cmake protobuf-compiler libssl-dev glibc-source musl-tools libsqlite3-dev
+        env:
+          OPENSSL_NO_VENDOR: 1
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:

@@ -102,14 +102,17 @@ jobs:
   publish-python:
     needs: publish-rust-crates
     uses: ./.github/workflows/build-python-bindings.yml
+    secrets: inherit
 
   publish-cli:
     needs: publish-rust-crates
     uses: ./.github/workflows/build-binaries.yml
+    secrets: inherit
 
   publish-wasm:
     needs: publish-rust-crates
     uses: ./.github/workflows/build-wasm-bindings.yml
+    secrets: inherit
 
   create-tags:
     needs: [publish-python, publish-cli, publish-wasm]
