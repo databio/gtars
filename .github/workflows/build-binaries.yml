@@ -46,7 +46,7 @@ jobs:
         with:
           command: build
           target: ${{ matrix.platform.target }}
-          args: "--release"
+          args: "--release -p gtars-cli"
           strip: true
       - name: Publish artifacts and release
         uses: houseabsolute/actions-rust-release@v0
