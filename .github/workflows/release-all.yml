@@ -1,0 +1,132 @@
+name: Release All
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  publish-rust-crates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      # Wave 1: leaf crates
+      - name: Publish gtars-core
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-core --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+
+      - name: Publish gtars-io
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-io --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+
+      # Wave 2: depend on wave 1
+      - name: Publish gtars-overlaprs
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-overlaprs --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-refget
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-refget --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-tokenizers
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-tokenizers --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-igd
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-igd --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-uniwig
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-uniwig --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-fragsplit
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-fragsplit --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-scoring
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-scoring --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-genomicdist
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-genomicdist --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-bbcache
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-bbcache --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+
+      # Wave 3: aggregators
+      - name: Publish gtars
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+
+      - name: Publish gtars-cli
+        continue-on-error: true
+        run: cargo publish --dry-run -p gtars-cli --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  # TODO: uncomment after dry-run test passes
+  # publish-python:
+  #   needs: publish-rust-crates
+  #   uses: ./.github/workflows/build-python-bindings.yml
+  #
+  # publish-cli:
+  #   needs: publish-rust-crates
+  #   uses: ./.github/workflows/build-binaries.yml
+  #
+  # publish-wasm:
+  #   needs: publish-rust-crates
+  #   uses: ./.github/workflows/build-wasm-bindings.yml
+  #
+  # create-tags:
+  #   needs: [publish-python, publish-cli, publish-wasm]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - name: Extract version from tag
+  #       id: version
+  #       run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+  #     - name: Create component tags
+  #       env:
+  #         GH_TOKEN: ${{ github.token }}
+  #       run: |
+  #         VERSION="${{ steps.version.outputs.version }}"
+  #         for prefix in py cli wasm; do
+  #           TAG="${prefix}-${VERSION}"
+  #           git tag "$TAG"
+  #           git push origin "$TAG"
+  #         done

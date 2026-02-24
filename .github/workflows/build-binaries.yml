@@ -2,9 +2,10 @@ name: Build and publish CLI binaries
 
 on:
   workflow_dispatch:
+  workflow_call:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release:
@@ -50,5 +51,5 @@ jobs:
       - name: Publish artifacts and release
         uses: houseabsolute/actions-rust-release@v0
         with:
-          executable-name: ubi
+          executable-name: gtars
           target: ${{ matrix.platform.target }}
