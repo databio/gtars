@@ -15,27 +15,34 @@ jobs:
             - uses: actions/setup-node@v4
               with:
                 node-version: '20.x'
+                registry-url: 'https://registry.npmjs.org'
             - name: Update npm
               run: npm install -g npm@latest
-            - name: Configure npm registry (without auth token)
-              run: echo "registry=https://registry.npmjs.org/" > ~/.npmrc
             - name: Install wasm-pack
               run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
             - name: Build bindings and prepare for publish (rename package)
               run: |
                 wasm-pack build --release --target web gtars-wasm
                 jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
-            - name: Debug npm config
+            - name: Debug OIDC and npm config
               run: |
                 echo "=== npm version ==="
                 npm --version
                 echo "=== node version ==="
                 node --version
-                echo "=== npmrc ==="
-                cat ~/.npmrc 2>/dev/null || echo "(no .npmrc)"
-                echo "=== NODE_AUTH_TOKEN set? ==="
-                echo "${NODE_AUTH_TOKEN:+YES (set)}${NODE_AUTH_TOKEN:-NO (unset)}"
+                echo "=== OIDC env vars ==="
+                echo "ACTIONS_ID_TOKEN_REQUEST_URL set? ${ACTIONS_ID_TOKEN_REQUEST_URL:+YES}${ACTIONS_ID_TOKEN_REQUEST_URL:-NO}"
+                echo "ACTIONS_ID_TOKEN_REQUEST_TOKEN set? ${ACTIONS_ID_TOKEN_REQUEST_TOKEN:+YES}${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-NO}"
+                echo "=== NODE_AUTH_TOKEN ==="
+                echo "set? ${NODE_AUTH_TOKEN:+YES}${NODE_AUTH_TOKEN:-NO}"
+                echo "length: ${#NODE_AUTH_TOKEN}"
+                echo "=== all npmrc files ==="
+                cat ~/.npmrc 2>/dev/null || echo "(no ~/.npmrc)"
+                cat .npmrc 2>/dev/null || echo "(no ./.npmrc)"
+                cat gtars-wasm/pkg/.npmrc 2>/dev/null || echo "(no pkg/.npmrc)"
                 echo "=== npm config ==="
                 npm config list
+                echo "=== npm whoami (expect failure) ==="
+                npm whoami 2>&1 || true
             - name: Publish to NPM
               run: npm publish --provenance --access public gtars-wasm/pkg/
