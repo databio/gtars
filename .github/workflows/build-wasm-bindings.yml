@@ -2,13 +2,6 @@ name: Build WASM bindings (test only)
 
 on:
   workflow_dispatch:
-<<<<<<< Updated upstream
-
-permissions:
-  id-token: write
-  contents: read
-=======
->>>>>>> Stashed changes
 
 jobs:
     build:
@@ -21,22 +14,3 @@ jobs:
               run: |
                 wasm-pack build --release --target web gtars-wasm
                 jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
-<<<<<<< Updated upstream
-            - uses: actions/setup-node@v4
-              with:
-                node-version: '20.x'
-                registry-url: 'https://registry.npmjs.org'
-            - name: Update npm
-              run: npm install -g npm@latest
-            - name: Publish to NPM
-              run: |
-                # Get fresh OIDC token and use it instead of the stale
-                # token that setup-node injects as NODE_AUTH_TOKEN
-                OIDC_TOKEN=$(curl -sS \
-                  -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-                  "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm" | jq -r '.value')
-                export NODE_AUTH_TOKEN="$OIDC_TOKEN"
-                echo "OIDC token length: ${#NODE_AUTH_TOKEN}"
-                npm publish --provenance --access public gtars-wasm/pkg/
-=======
->>>>>>> Stashed changes

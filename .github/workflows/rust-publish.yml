@@ -1,33 +1,30 @@
-name: Publish Rust Crates
+name: Publish
 on:
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
-<<<<<<< Updated upstream
-      crate:
-        description: 'Crate to publish (gtars-uniwig, gtars-core, gtars, etc.)'
-        required: true
+      crates:
+        description: 'Publish to crates.io'
         type: choice
+        default: 'all'
         options:
-            - gtars
-            - gtars-bbcache
-            - gtars-cli
-            - gtars-core
-            - gtars-fragsplit
-            - gtars-igd
-            - gtars-io
-            - gtars-overlaprs
-            - gtars-python
-            - gtars-refget
-            - gtars-scoring
-            - gtars-tokenizers
-            - gtars-uniwig
-            - gtars-wasm
-            - gtars-genomicdist
-=======
-      rust:
-        description: 'Publish Rust crates'
-        type: boolean
-        default: true
+          - all
+          - none
+          - gtars
+          - gtars-bbcache
+          - gtars-cli
+          - gtars-core
+          - gtars-fragsplit
+          - gtars-genomicdist
+          - gtars-igd
+          - gtars-io
+          - gtars-overlaprs
+          - gtars-python
+          - gtars-refget
+          - gtars-scoring
+          - gtars-tokenizers
+          - gtars-uniwig
       python:
         description: 'Publish Python bindings'
         type: boolean
@@ -40,27 +37,31 @@ on:
         description: 'Publish WASM to NPM'
         type: boolean
         default: true
->>>>>>> Stashed changes
 
 permissions:
-    contents: read
-    id-token: write
+  contents: write
+  id-token: write
 
 jobs:
-<<<<<<< Updated upstream
-  publish:
-=======
-  publish-rust-crates:
-    if: ${{ inputs.rust != false }}
->>>>>>> Stashed changes
+  publish-single-crate:
+    if: ${{ inputs.crates != 'none' && inputs.crates != 'all' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
-<<<<<<< Updated upstream
-      - name: Publish to crates.io
-=======
+      - name: Publish ${{ inputs.crates }} to crates.io
+        run: cargo publish -p ${{ inputs.crates }} --locked
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+
+  publish-all-crates:
+    if: ${{ inputs.crates == 'all' || inputs.crates == '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
 
       # Wave 1: leaf crates
       - name: Publish gtars-core
@@ -145,19 +146,19 @@ jobs:
 
   publish-python:
     if: ${{ inputs.python != false }}
-    needs: publish-rust-crates
+    needs: publish-all-crates
     uses: ./.github/workflows/build-python-bindings.yml
     secrets: inherit
 
   publish-cli:
     if: ${{ inputs.cli != false }}
-    needs: publish-rust-crates
+    needs: publish-all-crates
     uses: ./.github/workflows/build-binaries.yml
     secrets: inherit
 
   publish-wasm:
-    if: ${{ always() && inputs.wasm != false && (needs.publish-rust-crates.result == 'success' || needs.publish-rust-crates.result == 'skipped') }}
-    needs: publish-rust-crates
+    if: ${{ always() && inputs.wasm != false && (needs.publish-all-crates.result == 'success' || needs.publish-all-crates.result == 'skipped') }}
+    needs: publish-all-crates
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -176,7 +177,7 @@ jobs:
           npm publish --provenance --access public gtars-wasm/pkg/
 
   create-tags:
-    if: ${{ always() && inputs.rust != false }}
+    if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
     needs: [publish-python, publish-cli, publish-wasm]
     runs-on: ubuntu-latest
     steps:
@@ -187,8 +188,10 @@ jobs:
       - name: Create component tags
         env:
           GH_TOKEN: ${{ github.token }}
->>>>>>> Stashed changes
         run: |
-            cargo publish -p ${{ github.event.inputs.crate }} --locked
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          VERSION="${{ steps.version.outputs.version }}"
+          for prefix in py cli wasm; do
+            TAG="${prefix}-${VERSION}"
+            git tag "$TAG"
+            git push origin "$TAG"
+          done
