@@ -1,9 +1,8 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
 use gtars_core::models::{Region, RegionSet};
-// use gtars_overlaprs::Overlapper;
+use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
-// use num_traits::{PrimInt, Unsigned};
 use std::fs::File;
 use std::path::Path;
 
@@ -94,7 +93,7 @@ impl StrandedRegionSet {
 /// Statistics summary for regions on a single chromosome.
 ///
 /// Contains counts, bounds, and descriptive statistics for region lengths.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromosomeStatistics {
     /// Chromosome name
     pub chromosome: String,
@@ -117,7 +116,7 @@ pub struct ChromosomeStatistics {
 /// A genomic bin with a count of overlapping regions.
 ///
 /// Used to represent distribution of regions across fixed-size windows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegionBin {
     /// Chromosome name
     pub chr: String,

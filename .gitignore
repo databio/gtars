@@ -34,6 +34,7 @@ tests/data/interval_ranges_benchmark/
 tests/data/partitions_benchmark/
 gtars-genomicdist/examples/benchmark_*.rs
 gtars-genomicdist/examples/partitions_demo.rs
+gtars-genomicdist/tests/
 *.annotation.gtf.gz
 tests/data/fasta/sacCer3.fa
 tests/data/fasta/sacCer3.rgsi

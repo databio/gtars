@@ -14,6 +14,8 @@ use flate2::read::MultiGzDecoder;
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, OverlapperType};
 
+use serde::{Deserialize, Serialize};
+
 use crate::errors::GtarsGenomicDistError;
 use crate::interval_ranges::IntervalRanges;
 use crate::models::{Strand, StrandedRegionSet};
@@ -308,6 +310,7 @@ pub struct PartitionList {
 }
 
 /// Result of classifying query regions into partitions.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PartitionResult {
     /// (partition_name, count) pairs. Includes "intergenic" as the remainder.
     pub counts: Vec<(String, u32)>,
@@ -316,7 +319,7 @@ pub struct PartitionResult {
 }
 
 /// A single row in the expected partition analysis.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpectedPartitionRow {
     pub partition: String,
     pub observed: f64,
@@ -326,6 +329,7 @@ pub struct ExpectedPartitionRow {
 }
 
 /// Result of observed vs expected partition enrichment analysis.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExpectedPartitionResult {
     pub rows: Vec<ExpectedPartitionRow>,
 }
