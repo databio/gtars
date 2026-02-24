@@ -14,7 +14,7 @@ jobs:
             - uses: actions/checkout@v4
             - uses: actions/setup-node@v4
               with:
-                node-version: '20.x'
+                node-version: '24.x'
                 registry-url: 'https://registry.npmjs.org'
             - name: Update npm
               run: npm install -g npm@latest
@@ -23,9 +23,9 @@ jobs:
             - name: Build bindings and prepare for publish (rename package)
               run: |
                 wasm-pack build --release --target web gtars-wasm
-                jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
+                jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"} | .publishConfig = {"access": "public", "provenance": true}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
             - name: Publish to NPM
               run: |
                 npm publish --provenance --access public gtars-wasm/pkg/
-            
-            
+              env:
+                NPM_CONFIG_PROVENANCE: true
