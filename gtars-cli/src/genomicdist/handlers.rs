@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use clap::ArgMatches;
 use serde::Serialize;
 
-use gtars_core::models::RegionSet;
+use gtars_core::models::{Region, RegionSet};
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::models::{ChromosomeStatistics, RegionBin, TssIndex};
+use gtars_genomicdist::models::{ChromosomeStatistics, RegionBin, Strand, TssIndex};
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
     GeneModel, ExpectedPartitionResult, PartitionResult,
@@ -47,7 +47,7 @@ struct Scalars {
 struct Distributions {
     widths: Vec<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    tss_distances: Option<Vec<u32>>,
+    tss_distances: Option<Vec<i64>>,
     neighbor_distances: Vec<i64>,
     nearest_neighbors: Vec<u32>,
     region_distribution: Vec<RegionBin>,
@@ -69,6 +69,16 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         .unwrap()
         .parse()
         .context("--bins must be a positive integer")?;
+    let promoter_upstream: u32 = matches
+        .get_one::<String>("promoter-upstream")
+        .unwrap()
+        .parse()
+        .context("--promoter-upstream must be a positive integer")?;
+    let promoter_downstream: u32 = matches
+        .get_one::<String>("promoter-downstream")
+        .unwrap()
+        .parse()
+        .context("--promoter-downstream must be a positive integer")?;
 
     // Load BED file
     let rs = RegionSet::try_from(bed_path.as_str())
@@ -118,23 +128,35 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         }
     };
 
-    // --- TSS distances ---
-    let tss_distances: Option<Vec<u32>> = if let Some(tss_p) = tss_path {
+    // --- TSS distances (signed: negative = upstream, positive = downstream) ---
+    let tss_distances: Option<Vec<i64>> = if let Some(tss_p) = tss_path {
         // Explicit TSS BED file takes priority
         let tss_index = TssIndex::try_from(tss_p.as_str())
             .map_err(|e| anyhow::anyhow!("Failed to load TSS BED file: {}", e))?;
         Some(
             tss_index
-                .calc_tss_distances(&rs)
+                .calc_feature_distances(&rs)
                 .map_err(|e| anyhow::anyhow!("Failed to compute TSS distances: {}", e))?,
         )
     } else if let Some(ref model) = gene_model {
-        // Use gene starts from GTF as TSS
-        let tss_index = TssIndex::try_from(model.genes.inner.clone())
+        // Extract actual TSS positions from gene model using strand:
+        // Plus/Unstranded → gene start, Minus → gene end
+        let tss_regions: Vec<Region> = model.genes.inner.regions.iter()
+            .zip(model.genes.strands.iter())
+            .map(|(r, strand)| {
+                let tss_pos = match strand {
+                    Strand::Minus => r.end.saturating_sub(1),
+                    _ => r.start,
+                };
+                Region { chr: r.chr.clone(), start: tss_pos, end: tss_pos + 1, rest: None }
+            })
+            .collect();
+        let tss_rs = RegionSet { regions: tss_regions, header: None, path: None };
+        let tss_index = TssIndex::try_from(tss_rs)
             .map_err(|e| anyhow::anyhow!("Failed to build TSS index from GTF genes: {}", e))?;
         Some(
             tss_index
-                .calc_tss_distances(&rs)
+                .calc_feature_distances(&rs)
                 .map_err(|e| anyhow::anyhow!("Failed to compute TSS distances: {}", e))?,
         )
     } else {
@@ -144,8 +166,9 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         None
     };
 
+    // Median of absolute distances (for the scalar summary)
     let median_tss_dist = tss_distances.as_ref().map(|dists| {
-        let mut sorted: Vec<f64> = dists.iter().map(|&d| d as f64).collect();
+        let mut sorted: Vec<f64> = dists.iter().map(|&d| (d as f64).abs()).collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let n = sorted.len();
         if n == 0 {
@@ -159,13 +182,13 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
 
     // --- Partitions ---
     let partitions: Option<PartitionResult> = gene_model.as_ref().map(|model| {
-        let partition_list = genome_partition_list(model, 100, 2000, chrom_sizes.as_ref());
+        let partition_list = genome_partition_list(model, promoter_upstream, promoter_downstream, chrom_sizes.as_ref());
         calc_partitions(&rs, &partition_list, false)
     });
 
     let expected_partitions: Option<ExpectedPartitionResult> = match (&gene_model, &chrom_sizes) {
         (Some(model), Some(cs)) => {
-            let partition_list = genome_partition_list(model, 100, 2000, Some(cs));
+            let partition_list = genome_partition_list(model, promoter_upstream, promoter_downstream, Some(cs));
             Some(calc_expected_partitions(&rs, &partition_list, cs, false))
         }
         (Some(_), None) => {

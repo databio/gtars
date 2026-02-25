@@ -44,6 +44,20 @@ pub fn create_genomicdist_cli() -> Command {
                 .help("Path to open signal matrix TSV (enables cell-type open chromatin enrichment)"),
         )
         .arg(
+            Arg::new("promoter-upstream")
+                .long("promoter-upstream")
+                .required(false)
+                .default_value("200")
+                .help("Upstream distance (bp) from TSS to define promoter regions"),
+        )
+        .arg(
+            Arg::new("promoter-downstream")
+                .long("promoter-downstream")
+                .required(false)
+                .default_value("2000")
+                .help("Downstream distance (bp) from TSS to define promoter regions"),
+        )
+        .arg(
             Arg::new("compact")
                 .long("compact")
                 .action(clap::ArgAction::SetTrue)
