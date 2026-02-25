@@ -43,4 +43,10 @@ pub fn create_genomicdist_cli() -> Command {
                 .required(false)
                 .help("Path to open signal matrix TSV (enables cell-type open chromatin enrichment)"),
         )
+        .arg(
+            Arg::new("compact")
+                .long("compact")
+                .action(clap::ArgAction::SetTrue)
+                .help("Compact JSON output (default: pretty-printed)"),
+        )
 }

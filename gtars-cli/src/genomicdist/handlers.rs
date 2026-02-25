@@ -215,8 +215,13 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         open_signal,
     };
 
-    let json = serde_json::to_string_pretty(&output)
-        .context("Failed to serialize output to JSON")?;
+    let compact = matches.get_flag("compact");
+    let json = if compact {
+        serde_json::to_string(&output)
+    } else {
+        serde_json::to_string_pretty(&output)
+    }
+    .context("Failed to serialize output to JSON")?;
 
     match output_path {
         Some(p) => {
