@@ -14,6 +14,7 @@ use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
     GeneModel, ExpectedPartitionResult, PartitionResult,
     calc_expected_partitions, calc_partitions, genome_partition_list,
+    SignalMatrix, calc_summary_signal, ConditionStats,
 };
 
 #[derive(Serialize)]
@@ -24,6 +25,14 @@ struct GenomicDistOutput {
     distributions: Distributions,
     #[serde(skip_serializing_if = "Option::is_none")]
     expected_partitions: Option<ExpectedPartitionResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    open_signal: Option<OpenSignalOutput>,
+}
+
+#[derive(Serialize)]
+struct OpenSignalOutput {
+    condition_names: Vec<String>,
+    matrix_stats: Vec<ConditionStats>,
 }
 
 #[derive(Serialize)]
@@ -54,6 +63,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     let tss_path = matches.get_one::<String>("tss");
     let chrom_sizes_path = matches.get_one::<String>("chrom-sizes");
     let output_path = matches.get_one::<String>("output");
+    let signal_matrix_path = matches.get_one::<String>("signal-matrix");
     let n_bins: u32 = matches
         .get_one::<String>("bins")
         .unwrap()
@@ -90,11 +100,16 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         widths.iter().map(|&w| w as f64).sum::<f64>() / widths.len() as f64
     };
 
-    // --- Optional: load gene model from GTF ---
+    // --- Optional: load gene model from GTF or bincode ---
     let gene_model: Option<GeneModel> = match gtf_path {
         Some(p) => {
-            let model = GeneModel::from_gtf(p.as_str(), true, true)
-                .map_err(|e| anyhow::anyhow!("Failed to load GTF: {}", e))?;
+            let model = if p.ends_with(".bin") {
+                GeneModel::load_bin(p)
+                    .map_err(|e| anyhow::anyhow!("Failed to load gene model bincode: {}", e))?
+            } else {
+                GeneModel::from_gtf(p.as_str(), true, true)
+                    .map_err(|e| anyhow::anyhow!("Failed to load GTF: {}", e))?
+            };
             Some(model)
         }
         None => {
@@ -160,6 +175,26 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         _ => None,
     };
 
+    // --- Optional: open chromatin signal enrichment ---
+    let open_signal: Option<OpenSignalOutput> = match signal_matrix_path {
+        Some(p) => {
+            let sm = if p.ends_with(".bin") {
+                SignalMatrix::load_bin(p)
+                    .map_err(|e| anyhow::anyhow!("Failed to load signal matrix bincode: {}", e))?
+            } else {
+                SignalMatrix::from_tsv(p)
+                    .map_err(|e| anyhow::anyhow!("Failed to load signal matrix: {}", e))?
+            };
+            let result = calc_summary_signal(&rs, &sm)
+                .map_err(|e| anyhow::anyhow!("Failed to compute signal summary: {}", e))?;
+            Some(OpenSignalOutput {
+                condition_names: result.condition_names,
+                matrix_stats: result.matrix_stats,
+            })
+        }
+        None => None,
+    };
+
     // --- Build output ---
     let output = GenomicDistOutput {
         scalars: Scalars {
@@ -177,6 +212,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
             chromosome_stats,
         },
         expected_partitions,
+        open_signal,
     };
 
     let json = serde_json::to_string_pretty(&output)

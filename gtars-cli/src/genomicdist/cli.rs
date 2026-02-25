@@ -37,4 +37,10 @@ pub fn create_genomicdist_cli() -> Command {
                 .default_value("250")
                 .help("Number of bins for region distribution"),
         )
+        .arg(
+            Arg::new("signal-matrix")
+                .long("signal-matrix")
+                .required(false)
+                .help("Path to open signal matrix TSV (enables cell-type open chromatin enrichment)"),
+        )
 }

@@ -3,8 +3,11 @@
 //! This module provides functionality to classify BED files according to their format
 //! and compliance with UCSC and ENCODE specifications.
 
+#[cfg(feature = "bedclassifier")]
 use crate::errors::BedClassifierError;
+#[cfg(feature = "bedclassifier")]
 use gtars_core::models::RegionSet;
+#[cfg(feature = "bedclassifier")]
 use regex::Regex;
 use std::fmt::{self, Display};
 
@@ -359,6 +362,7 @@ pub fn classify_bed(region_set: &RegionSet) -> Result<BedClassificationOutput, B
 }
 
 #[cfg(test)]
+#[cfg(feature = "bedclassifier")]
 mod tests {
     use super::*;
 

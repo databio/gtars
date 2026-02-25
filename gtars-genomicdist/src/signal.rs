@@ -6,29 +6,43 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::path::Path;
+
+use flate2::read::MultiGzDecoder;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::traits::{Interval, Overlapper};
 use gtars_overlaprs::AIList;
 
+use serde::Serialize;
+
 use crate::errors::GtarsGenomicDistError;
+
+/// Magic bytes for the packed signal matrix format: "SIGM" = 0x5349474D.
+const SIGM_MAGIC: u32 = 0x5349474D;
+/// Current version of the packed signal matrix format.
+const SIGM_VERSION: u32 = 1;
 
 /// A matrix of signal values across genomic regions and conditions.
 ///
 /// Rows are genomic regions, columns are conditions (e.g. cell types).
 /// Loaded from a TSV file where the first column is `chr_start_end`.
+/// Values are stored as a flat row-major `Vec<f64>` for cache-friendly access
+/// and fast binary serialization (one allocation instead of N inner Vecs).
 pub struct SignalMatrix {
     /// The genomic regions corresponding to each row
     pub regions: RegionSet,
     /// Condition/cell-type names (column headers, excluding first column)
     pub condition_names: Vec<String>,
-    /// Signal values: outer vec = rows, inner vec = conditions (same order as condition_names)
-    pub values: Vec<Vec<f64>>,
+    /// Number of conditions (columns)
+    pub n_conditions: usize,
+    /// Signal values: flat row-major array, row i condition j = values[i * n_conditions + j]
+    pub values: Vec<f64>,
 }
 
 /// Result of [`calc_summary_signal`].
+#[derive(Serialize)]
 pub struct SignalSummaryResult {
     /// Per-query-region signal summaries.
     /// Each entry: (query region label as `chr_start_end`, max signal per condition).
@@ -40,7 +54,7 @@ pub struct SignalSummaryResult {
 }
 
 /// Tukey boxplot statistics for a single condition (matches R's `boxplot.stats`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ConditionStats {
     pub condition: String,
     pub lower_whisker: f64,
@@ -58,7 +72,12 @@ impl SignalMatrix {
     /// splits into more than 3 parts on `_` are skipped.
     pub fn from_tsv<P: AsRef<Path>>(path: P) -> Result<Self, GtarsGenomicDistError> {
         let file = File::open(path.as_ref())?;
-        let reader = BufReader::new(file);
+        let reader: Box<dyn BufRead> =
+            if path.as_ref().to_string_lossy().ends_with(".gz") {
+                Box::new(BufReader::new(MultiGzDecoder::new(file)))
+            } else {
+                Box::new(BufReader::new(file))
+            };
         let mut lines = reader.lines();
 
         // Header line
@@ -127,7 +146,7 @@ impl SignalMatrix {
                 end,
                 rest: None,
             });
-            values.push(row_values);
+            values.extend_from_slice(&row_values);
         }
 
         if regions.is_empty() {
@@ -139,6 +158,201 @@ impl SignalMatrix {
         Ok(SignalMatrix {
             regions: RegionSet::from(regions),
             condition_names,
+            n_conditions,
+            values,
+        })
+    }
+
+    /// Serialize this signal matrix to a packed binary file.
+    ///
+    /// Format: header (16 bytes), string intern table, condition names,
+    /// column-oriented region arrays, flat row-major f64 values.
+    pub fn save_bin<P: AsRef<Path>>(&self, path: P) -> Result<(), GtarsGenomicDistError> {
+        let n_regions = self.regions.regions.len();
+        let n_conditions = self.n_conditions;
+
+        // Build string intern table from chromosome names
+        let mut intern_map: HashMap<&str, u16> = HashMap::new();
+        let mut intern_table: Vec<&str> = Vec::new();
+        for region in &self.regions.regions {
+            if !intern_map.contains_key(region.chr.as_str()) {
+                let id = intern_table.len() as u16;
+                intern_map.insert(&region.chr, id);
+                intern_table.push(&region.chr);
+            }
+        }
+        // Also intern condition names
+        for name in &self.condition_names {
+            if !intern_map.contains_key(name.as_str()) {
+                let id = intern_table.len() as u16;
+                intern_map.insert(name, id);
+                intern_table.push(name);
+            }
+        }
+
+        let mut buf: Vec<u8> = Vec::new();
+
+        // Header (16 bytes)
+        buf.extend_from_slice(&SIGM_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&SIGM_VERSION.to_le_bytes());
+        buf.extend_from_slice(&(n_regions as u32).to_le_bytes());
+        buf.extend_from_slice(&(n_conditions as u32).to_le_bytes());
+
+        // String intern table
+        buf.extend_from_slice(&(intern_table.len() as u32).to_le_bytes());
+        for s in &intern_table {
+            buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+            buf.extend_from_slice(s.as_bytes());
+        }
+
+        // Condition names (as intern IDs)
+        buf.extend_from_slice(&(n_conditions as u32).to_le_bytes());
+        for name in &self.condition_names {
+            buf.extend_from_slice(&intern_map[name.as_str()].to_le_bytes());
+        }
+
+        // Regions — column-oriented
+        // chr_ids
+        for region in &self.regions.regions {
+            buf.extend_from_slice(&intern_map[region.chr.as_str()].to_le_bytes());
+        }
+        // starts
+        for region in &self.regions.regions {
+            buf.extend_from_slice(&region.start.to_le_bytes());
+        }
+        // ends
+        for region in &self.regions.regions {
+            buf.extend_from_slice(&region.end.to_le_bytes());
+        }
+
+        // Values — flat row-major f64 array
+        // Write as raw bytes for maximum speed
+        let values_bytes = unsafe {
+            std::slice::from_raw_parts(
+                self.values.as_ptr() as *const u8,
+                self.values.len() * std::mem::size_of::<f64>(),
+            )
+        };
+        buf.extend_from_slice(values_bytes);
+
+        let mut file = File::create(path)?;
+        file.write_all(&buf)?;
+        Ok(())
+    }
+
+    /// Deserialize a signal matrix from a packed binary file.
+    ///
+    /// Validates the magic number and version, then reads the intern table,
+    /// condition names, column-oriented regions, and flat f64 values.
+    #[allow(unused_assignments)] // pos is incremented by read_bytes! macro on final read
+    pub fn load_bin<P: AsRef<Path>>(path: P) -> Result<Self, GtarsGenomicDistError> {
+        let data = std::fs::read(path.as_ref())?;
+        let mut pos = 0usize;
+
+        let err = |msg: &str| GtarsGenomicDistError::SignalMatrixError(msg.to_string());
+
+        // Helper to read bytes
+        macro_rules! read_bytes {
+            ($n:expr) => {{
+                if pos + $n > data.len() {
+                    return Err(err("Unexpected end of file"));
+                }
+                let slice = &data[pos..pos + $n];
+                pos += $n;
+                slice
+            }};
+        }
+        macro_rules! read_u32 {
+            () => {{
+                u32::from_le_bytes(read_bytes!(4).try_into().unwrap())
+            }};
+        }
+        macro_rules! read_u16 {
+            () => {{
+                u16::from_le_bytes(read_bytes!(2).try_into().unwrap())
+            }};
+        }
+
+        // Header
+        let magic = read_u32!();
+        if magic != SIGM_MAGIC {
+            return Err(err(
+                "Invalid signal matrix file format — regenerate with 'gtars prep'",
+            ));
+        }
+        let version = read_u32!();
+        if version != SIGM_VERSION {
+            return Err(err(&format!(
+                "Unsupported signal matrix format version {}",
+                version
+            )));
+        }
+        let n_regions = read_u32!() as usize;
+        let n_conditions = read_u32!() as usize;
+
+        // String intern table
+        let n_strings = read_u32!() as usize;
+        let mut intern_table: Vec<String> = Vec::with_capacity(n_strings);
+        for _ in 0..n_strings {
+            let len = read_u32!() as usize;
+            let bytes = read_bytes!(len);
+            intern_table.push(
+                String::from_utf8(bytes.to_vec())
+                    .map_err(|e| err(&format!("Invalid UTF-8 in intern table: {}", e)))?,
+            );
+        }
+
+        // Condition names
+        let n_names = read_u32!() as usize;
+        if n_names != n_conditions {
+            return Err(err("Condition name count mismatch"));
+        }
+        let mut condition_names = Vec::with_capacity(n_conditions);
+        for _ in 0..n_conditions {
+            let id = read_u16!() as usize;
+            condition_names.push(intern_table[id].clone());
+        }
+
+        // Regions — column-oriented
+        let mut chr_ids = Vec::with_capacity(n_regions);
+        for _ in 0..n_regions {
+            chr_ids.push(read_u16!() as usize);
+        }
+
+        let starts_bytes = read_bytes!(n_regions * 4);
+        let ends_bytes = read_bytes!(n_regions * 4);
+
+        let mut regions = Vec::with_capacity(n_regions);
+        for i in 0..n_regions {
+            let start =
+                u32::from_le_bytes(starts_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
+            let end =
+                u32::from_le_bytes(ends_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
+            regions.push(Region {
+                chr: intern_table[chr_ids[i]].clone(),
+                start,
+                end,
+                rest: None,
+            });
+        }
+
+        // Values — flat row-major f64 array (one big memcpy)
+        let n_values = n_regions * n_conditions;
+        let values_bytes = read_bytes!(n_values * 8);
+        let mut values = vec![0.0f64; n_values];
+        // Safety: copying raw bytes into properly sized Vec<f64>
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                values_bytes.as_ptr(),
+                values.as_mut_ptr() as *mut u8,
+                n_values * 8,
+            );
+        }
+
+        Ok(SignalMatrix {
+            regions: RegionSet::from(regions),
+            condition_names,
+            n_conditions,
             values,
         })
     }
@@ -183,7 +397,9 @@ pub fn calc_summary_signal(
             let mut max_vals: Option<Vec<f64>> = None;
 
             for hit in ailist.find_iter(query_region.start, query_region.end) {
-                let signal_values = &signal_matrix.values[hit.val];
+                let row_start = hit.val * n_conditions;
+                let signal_values =
+                    &signal_matrix.values[row_start..row_start + n_conditions];
                 match &mut max_vals {
                     Some(existing) => {
                         for (ci, val) in signal_values.iter().enumerate() {
@@ -193,7 +409,7 @@ pub fn calc_summary_signal(
                         }
                     }
                     None => {
-                        max_vals = Some(signal_values.clone());
+                        max_vals = Some(signal_values.to_vec());
                     }
                 }
             }
@@ -334,9 +550,10 @@ mod tests {
         let sm = SignalMatrix::from_tsv(f.path()).unwrap();
 
         assert_eq!(sm.condition_names, vec!["cond_A", "cond_B", "cond_C"]);
-        assert_eq!(sm.values.len(), 4);
+        assert_eq!(sm.n_conditions, 3);
+        assert_eq!(sm.values.len(), 4 * 3); // 4 rows × 3 conditions
         assert_eq!(sm.regions.len(), 4);
-        assert!((sm.values[0][0] - 0.5).abs() < 1e-9);
+        assert!((sm.values[0] - 0.5).abs() < 1e-9); // row 0, cond 0
     }
 
     #[rstest]
@@ -349,7 +566,7 @@ mod tests {
         f.flush().unwrap();
 
         let sm = SignalMatrix::from_tsv(f.path()).unwrap();
-        assert_eq!(sm.values.len(), 1);
+        assert_eq!(sm.values.len(), 1); // 1 row × 1 condition
     }
 
     #[rstest]
@@ -472,5 +689,47 @@ mod tests {
         assert!((fivenum_median(&[1.0, 2.0, 3.0, 4.0]) - 2.5).abs() < 1e-9);
         assert!((fivenum_median(&[5.0]) - 5.0).abs() < 1e-9);
         assert!((fivenum_median(&[]) - 0.0).abs() < 1e-9);
+    }
+
+    #[rstest]
+    fn test_signal_matrix_packed_round_trip() {
+        let f = write_test_signal_matrix();
+        let sm = SignalMatrix::from_tsv(f.path()).unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("signal.bin");
+
+        sm.save_bin(&bin_path).unwrap();
+        let loaded = SignalMatrix::load_bin(&bin_path).unwrap();
+
+        assert_eq!(sm.condition_names, loaded.condition_names);
+        assert_eq!(sm.n_conditions, loaded.n_conditions);
+        assert_eq!(sm.values.len(), loaded.values.len());
+        assert_eq!(sm.regions.len(), loaded.regions.len());
+        // Check all values match
+        for (a, b) in sm.values.iter().zip(loaded.values.iter()) {
+            assert!((a - b).abs() < 1e-9);
+        }
+        // Check all regions match
+        for (a, b) in sm.regions.regions.iter().zip(loaded.regions.regions.iter()) {
+            assert_eq!(a.chr, b.chr);
+            assert_eq!(a.start, b.start);
+            assert_eq!(a.end, b.end);
+        }
+    }
+
+    #[rstest]
+    fn test_signal_matrix_rejects_old_bincode() {
+        // A file that doesn't start with SIGM magic should be rejected
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("old.bin");
+        std::fs::write(&bin_path, b"not a valid signal matrix file").unwrap();
+
+        let result = SignalMatrix::load_bin(&bin_path);
+        let msg = match result {
+            Err(e) => format!("{}", e),
+            Ok(_) => panic!("Expected error loading invalid file"),
+        };
+        assert!(msg.contains("regenerate"), "Error should mention regeneration: {}", msg);
     }
 }

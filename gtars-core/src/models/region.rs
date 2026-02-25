@@ -5,6 +5,7 @@ use std::fmt::{self, Display};
 /// Region struct, representation of one Region in RegionSet files
 ///
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Region {
     pub chr: String,
     pub start: u32,
