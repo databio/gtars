@@ -850,15 +850,15 @@ pub fn add_sequence_alias_store(
 /// @param namespace Alias namespace
 /// @param alias Alias name
 #[extendr]
-pub fn get_sequence_by_alias_store(
+pub fn get_sequence_metadata_by_alias_store(
     store_ptr: Robj,
     namespace: &str,
     alias: &str,
 ) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
         Ok(store
-            .get_sequence_by_alias(namespace, alias)
-            .map(|r| record_to_list(r.clone()).into())
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| metadata_to_list(m.clone()).into())
             .unwrap_or_else(|| Robj::from(())))
     })
 }
@@ -968,15 +968,15 @@ pub fn add_collection_alias_store(
 /// @param namespace Alias namespace
 /// @param alias Alias name
 #[extendr]
-pub fn get_collection_by_alias_store(
+pub fn get_collection_metadata_by_alias_store(
     store_ptr: Robj,
     namespace: &str,
     alias: &str,
 ) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
         Ok(store
-            .get_collection_by_alias(namespace, alias)
-            .map(|r| collection_metadata_to_list(r.metadata().clone()).into())
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| collection_metadata_to_list(m.clone()).into())
             .unwrap_or_else(|| Robj::from(())))
     })
 }
@@ -1381,7 +1381,7 @@ extendr_module! {
 
     // Sequence aliases
     fn add_sequence_alias_store;
-    fn get_sequence_by_alias_store;
+    fn get_sequence_metadata_by_alias_store;
     fn get_aliases_for_sequence_store;
     fn list_sequence_alias_namespaces_store;
     fn list_sequence_aliases_store;
@@ -1390,7 +1390,7 @@ extendr_module! {
 
     // Collection aliases
     fn add_collection_alias_store;
-    fn get_collection_by_alias_store;
+    fn get_collection_metadata_by_alias_store;
     fn get_aliases_for_collection_store;
     fn list_collection_alias_namespaces_store;
     fn list_collection_aliases_store;

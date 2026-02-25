@@ -275,8 +275,8 @@ test_that("sequence alias operations work", {
   expect_true("my_alias" %in% aliases)
 
   # Get by alias
-  seq_by_alias <- get_sequence_by_alias(store, "test_ns", "my_alias")
-  expect_s4_class(seq_by_alias, "SequenceRecord")
+  seq_by_alias <- get_sequence_metadata_by_alias(store, "test_ns", "my_alias")
+  expect_s4_class(seq_by_alias, "SequenceMetadata")
 
   # Get aliases for sequence
   aliases_for_seq <- get_aliases_for_sequence(store, seq_digest)
@@ -308,7 +308,7 @@ test_that("collection alias operations work", {
   expect_true("test_ns" %in% namespaces)
 
   # Get by alias
-  coll_by_alias <- get_collection_by_alias(store, "test_ns", "my_collection")
+  coll_by_alias <- get_collection_metadata_by_alias(store, "test_ns", "my_collection")
   expect_s4_class(coll_by_alias, "SequenceCollectionMetadata")
 
   # Remove alias

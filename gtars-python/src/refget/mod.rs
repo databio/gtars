@@ -2118,15 +2118,31 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a sequence alias to the sequence record.
-    fn get_sequence_by_alias(
+    /// Resolve a sequence alias to sequence metadata (no data loading).
+    fn get_sequence_metadata_by_alias(
         &self,
         namespace: &str,
         alias: &str,
-    ) -> Option<PySequenceRecord> {
+    ) -> Option<PySequenceMetadata> {
+        self.inner
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceMetadata::from(m.clone()))
+    }
+
+    /// Resolve a sequence alias and return the loaded sequence record.
+    fn get_sequence_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> PyResult<PySequenceRecord> {
         self.inner
             .get_sequence_by_alias(namespace, alias)
-            .map(|r| PySequenceRecord::from(r.clone()))
+            .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence alias not found: {}/{} ({})", namespace, alias, e
+                ))
+            })
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -2174,15 +2190,31 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a collection alias to the collection metadata.
-    fn get_collection_by_alias(
+    /// Resolve a collection alias to collection metadata (no data loading).
+    fn get_collection_metadata_by_alias(
         &self,
         namespace: &str,
         alias: &str,
     ) -> Option<PySequenceCollectionMetadata> {
         self.inner
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceCollectionMetadata::from(m.clone()))
+    }
+
+    /// Resolve a collection alias and return the loaded collection.
+    fn get_collection_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> PyResult<PySequenceCollection> {
+        self.inner
             .get_collection_by_alias(namespace, alias)
-            .map(|r| PySequenceCollectionMetadata::from(r.metadata().clone()))
+            .map(|collection| PySequenceCollection::from(collection))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Collection alias not found: {}/{} ({})", namespace, alias, e
+                ))
+            })
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.

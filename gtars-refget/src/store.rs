@@ -1017,10 +1017,22 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Resolve a sequence alias and return the sequence record.
-    pub fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceRecord> {
+    /// Resolve a sequence alias to sequence metadata (no data loading).
+    pub fn get_sequence_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceMetadata> {
         let key = self.aliases.resolve_sequence(namespace, alias)?;
+        self.sequence_store.get(&key).map(|rec| rec.metadata())
+    }
+
+    /// Resolve a sequence alias and return the loaded sequence record.
+    ///
+    /// This resolves the alias to a digest, then loads the sequence data
+    /// (from disk or remote) just like `get_sequence()`.
+    pub fn get_sequence_by_alias(&mut self, namespace: &str, alias: &str) -> Result<&SequenceRecord> {
+        let key = self.aliases.resolve_sequence(namespace, alias)
+            .ok_or_else(|| anyhow!("Sequence alias not found: {}/{}", namespace, alias))?;
+        self.ensure_sequence_loaded(&key)?;
         self.sequence_store.get(&key)
+            .ok_or_else(|| anyhow!("Sequence not found after loading alias {}/{}", namespace, alias))
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -1061,10 +1073,21 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Resolve a collection alias to the collection record.
-    pub fn get_collection_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceCollectionRecord> {
+    /// Resolve a collection alias to collection metadata (no data loading).
+    pub fn get_collection_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<&SequenceCollectionMetadata> {
         let key = self.aliases.resolve_collection(namespace, alias)?;
-        self.collections.get(&key)
+        self.collections.get(&key).map(|rec| rec.metadata())
+    }
+
+    /// Resolve a collection alias and return the loaded collection.
+    ///
+    /// This resolves the alias to a digest, then loads the collection
+    /// just like `get_collection()`.
+    pub fn get_collection_by_alias(&mut self, namespace: &str, alias: &str) -> Result<SequenceCollection> {
+        let key = self.aliases.resolve_collection(namespace, alias)
+            .ok_or_else(|| anyhow!("Collection alias not found: {}/{}", namespace, alias))?;
+        let digest_str = key_to_digest_string(&key);
+        self.get_collection(&digest_str)
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.
@@ -4096,9 +4119,9 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .add_sequence_alias("ucsc", "chr1", &digest)
             .unwrap();
 
-        // Forward lookup
-        let found = store.get_sequence_by_alias("ncbi", "NC_000001.11").unwrap();
-        assert_eq!(found.metadata().name, "chr1");
+        // Forward lookup (metadata)
+        let found = store.get_sequence_metadata_by_alias("ncbi", "NC_000001.11").unwrap();
+        assert_eq!(found.name, "chr1");
 
         // Reverse lookup
         let aliases = store.get_aliases_for_sequence(&digest);
@@ -4133,9 +4156,9 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .add_collection_alias("gencode", "GRCh38.p14", &meta.digest)
             .unwrap();
 
-        // Forward lookup
-        let coll = store.get_collection_by_alias("ucsc", "hg38").unwrap();
-        assert_eq!(coll.metadata().digest, meta.digest);
+        // Forward lookup (metadata)
+        let coll = store.get_collection_metadata_by_alias("ucsc", "hg38").unwrap();
+        assert_eq!(coll.digest, meta.digest);
 
         // Reverse lookup
         let aliases = store.get_aliases_for_collection(&meta.digest);
@@ -4155,12 +4178,12 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .add_sequence_alias("ncbi", "NC_000001.11", &digest)
             .unwrap();
         assert!(store
-            .get_sequence_by_alias("ncbi", "NC_000001.11")
+            .get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
             .is_some());
 
         assert!(store.remove_sequence_alias("ncbi", "NC_000001.11").unwrap());
         assert!(store
-            .get_sequence_by_alias("ncbi", "NC_000001.11")
+            .get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
             .is_none());
 
         // Namespace should be cleaned up when empty
@@ -4197,9 +4220,9 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         {
             let store = RefgetStore::open_local(&store_path).unwrap();
             assert!(store
-                .get_sequence_by_alias("ncbi", "NC_000001.11")
+                .get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
                 .is_some());
-            assert!(store.get_collection_by_alias("ucsc", "hg38").is_some());
+            assert!(store.get_collection_metadata_by_alias("ucsc", "hg38").is_some());
 
             // Verify TSV files exist
             assert!(store_path.join("aliases/sequences/ncbi.tsv").exists());
@@ -4228,7 +4251,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .unwrap();
         assert_eq!(count, 1);
         assert!(store
-            .get_sequence_by_alias("ncbi", "NC_000001.11")
+            .get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
             .is_some());
     }
 
@@ -4287,8 +4310,86 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Reload and verify
         let store2 = RefgetStore::open_local(&store_path).unwrap();
         assert!(store2
-            .get_sequence_by_alias("ncbi", "NC_000001.11")
+            .get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
             .is_some());
+    }
+
+    #[test]
+    fn test_get_sequence_metadata_by_alias() {
+        use crate::collection::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGT");
+        store.add_sequence_record(record.clone(), false).unwrap();
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_alias("ncbi", "NC_000001.11", &digest).unwrap();
+
+        // Metadata lookup returns SequenceMetadata, not full record
+        let meta = store.get_sequence_metadata_by_alias("ncbi", "NC_000001.11").unwrap();
+        assert_eq!(meta.name, "chr1");
+        assert_eq!(meta.length, 4);
+    }
+
+    #[test]
+    fn test_get_sequence_by_alias_loads_data() {
+        use crate::collection::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGT");
+        store.add_sequence_record(record.clone(), false).unwrap();
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_alias("ncbi", "NC_000001.11", &digest).unwrap();
+
+        // Auto-loading lookup returns full SequenceRecord
+        let rec = store.get_sequence_by_alias("ncbi", "NC_000001.11").unwrap();
+        assert_eq!(rec.metadata().name, "chr1");
+    }
+
+    #[test]
+    fn test_get_collection_metadata_by_alias() {
+        let temp = tempdir().unwrap();
+        let fasta_path = copy_test_fasta(temp.path(), "base.fa");
+
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+
+        store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
+
+        // Metadata lookup returns SequenceCollectionMetadata
+        let coll_meta = store.get_collection_metadata_by_alias("ucsc", "hg38").unwrap();
+        assert_eq!(coll_meta.digest, meta.digest);
+    }
+
+    #[test]
+    fn test_get_collection_by_alias_loads() {
+        let temp = tempdir().unwrap();
+        let fasta_path = copy_test_fasta(temp.path(), "base.fa");
+
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+
+        store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
+
+        // Auto-loading lookup returns full SequenceCollection
+        let coll = store.get_collection_by_alias("ucsc", "hg38").unwrap();
+        assert_eq!(coll.metadata.digest, meta.digest);
+        assert!(!coll.sequences.is_empty());
+    }
+
+    #[test]
+    fn test_get_sequence_by_alias_not_found() {
+        let store = RefgetStore::in_memory();
+        // Should return None for metadata variant
+        assert!(store.get_sequence_metadata_by_alias("ncbi", "nonexistent").is_none());
+    }
+
+    #[test]
+    fn test_get_sequence_by_alias_error_not_found() {
+        let mut store = RefgetStore::in_memory();
+        // Should return Err for auto-loading variant
+        assert!(store.get_sequence_by_alias("ncbi", "nonexistent").is_err());
     }
 
     // =========================================================================

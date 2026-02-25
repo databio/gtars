@@ -1125,8 +1125,15 @@ class RefgetStore:
     def add_sequence_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a sequence alias: namespace/alias maps to sequence digest."""
         ...
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
-        """Resolve a sequence alias to the sequence record."""
+    def get_sequence_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceMetadata]:
+        """Resolve a sequence alias to sequence metadata (no data loading)."""
+        ...
+    def get_sequence_by_alias(self, namespace: str, alias: str) -> SequenceRecord:
+        """Resolve a sequence alias and return the loaded sequence record.
+
+        Raises:
+            KeyError: If the alias is not found.
+        """
         ...
     def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this sequence digest."""
@@ -1148,8 +1155,15 @@ class RefgetStore:
     def add_collection_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a collection alias: namespace/alias maps to collection digest."""
         ...
-    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
-        """Resolve a collection alias to the collection metadata."""
+    def get_collection_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
+        """Resolve a collection alias to collection metadata (no data loading)."""
+        ...
+    def get_collection_by_alias(self, namespace: str, alias: str) -> SequenceCollection:
+        """Resolve a collection alias and return the loaded collection.
+
+        Raises:
+            KeyError: If the alias is not found.
+        """
         ...
     def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this collection digest."""
