@@ -198,22 +198,23 @@ def test_decode_tokens():
     assert isinstance(decoded, list)
     assert decoded == ["chr9:3526071-3526165"]
 
+
 # @pytest.mark.skip(reason="Needs to be fixed")
-# def test_special_tokens_mask():
-#     cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
-#     tokenizer = Tokenizer(cfg_path)
+def test_special_tokens_mask():
+    cfg_path = os.path.join(TEST_DATA_DIR, "tokenizers", "peaks.scored.bed")
+    tokenizer = Tokenizer(cfg_path)
 
-#     tokens = ["<pad>", "chr9:3526071-3526165", "<unk>"]
-#     special_tokens_mask = tokenizer.get_special_tokens_mask(tokens)
+    tokens = ["<pad>", "chr9:3526071-3526165", "<unk>"]
+    special_tokens_mask = tokenizer.get_special_tokens_mask(tokens)
 
-#     assert special_tokens_mask is not None
-#     assert isinstance(special_tokens_mask, list)
-#     assert len(special_tokens_mask) == 3
-#     assert special_tokens_mask == [
-#         1,
-#         0,
-#         1,
-#     ]  # Assuming <pad> and <unk> are special tokens
+    assert special_tokens_mask is not None
+    assert isinstance(special_tokens_mask, list)
+    assert len(special_tokens_mask) == 3
+    assert special_tokens_mask == [
+        1,
+        0,
+        1,
+    ]  # Assuming <pad> and <unk> are special tokens
 
 
 def test_tokenizer_call_magic_method():

@@ -1,297 +1,523 @@
-use crate::alphabet::AlphabetType;
-use crate::digest::{canonicalize_json, sha512t24u};
-use crate::fasta::{digest_fasta, read_fasta_refget_file};
-use anyhow::Result;
-use serde::{Deserialize, Serialize};
-use std::fmt::Display;
-use std::io::Write;
-use std::path::{Path, PathBuf};
+//! Extended SequenceCollection with filesystem operations.
+//!
+//! This module adds file I/O and caching methods to the core types
+//! defined in `crate::digest::types`.
 
+use anyhow::Result;
+use std::io::Write;
+use std::path::Path;
+
+use crate::fasta::digest_fasta;
 use crate::utils::PathExtension;
 
-/// A single Sequence Collection, which may or may not hold data.
-#[derive(Clone, Debug)]
-pub struct SequenceCollection {
-    /// Vector of SequenceRecords, which contain metadata (name, length, digests, alphabet)
-    /// and optionally the actual sequence data.
-    pub sequences: Vec<SequenceRecord>,
+// Re-export core types from digest::types for backward compatibility
+pub use crate::digest::types::{
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
+    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
+    digest_sequence_with_description, parse_rgsi_line,
+};
 
-    /// The SHA512t24u collection digest identifier as a string.
-    pub digest: String,
+/// Shared implementation for writing RGSI (Refget Sequence Index) files.
+fn write_rgsi_impl<P: AsRef<Path>>(
+    file_path: P,
+    metadata: &SequenceCollectionMetadata,
+    sequences: Option<&[SequenceRecord]>,
+) -> Result<()> {
+    let file_path = file_path.as_ref();
+    let mut file = std::fs::File::create(file_path)?;
 
-    /// Level 1 digest components. Contains separate digests for
-    /// sequences, names, and lengths arrays.
-    pub lvl1: SeqColDigestLvl1,
+    // Write collection digest headers
+    writeln!(file, "##seqcol_digest={}", metadata.digest)?;
+    writeln!(file, "##names_digest={}", metadata.names_digest)?;
+    writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
+    writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
+    writeln!(
+        file,
+        "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
+    )?;
 
-    /// Optional path to the source file from which this collection was loaded.
-    /// Used for caching and reference purposes.
-    pub file_path: Option<PathBuf>,
-
-    /// Flag indicating whether sequence data is actually loaded in memory.
-    /// When false, only metadata is available.
-    pub has_data: bool,
-}
-
-/// A struct representing the first level of digests for a refget sequence collection.
-#[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct SeqColDigestLvl1 {
-    pub sequences_digest: String,
-    pub names_digest: String,
-    pub lengths_digest: String,
-}
-
-impl SeqColDigestLvl1 {
-    /// Compute collection digest from lvl1 digests
-    pub fn to_digest(&self) -> String {
-        // Create JSON object with the lvl1 digest strings
-        let mut lvl1_object = serde_json::Map::new();
-        lvl1_object.insert(
-            "names".to_string(),
-            serde_json::Value::String(self.names_digest.clone()),
-        );
-        lvl1_object.insert(
-            "sequences".to_string(),
-            serde_json::Value::String(self.sequences_digest.clone()),
-        );
-
-        let lvl1_json = serde_json::Value::Object(lvl1_object);
-
-        // Canonicalize the JSON object and compute collection digest
-        let lvl1_canonical = canonicalize_json(&lvl1_json);
-        let digest = sha512t24u(lvl1_canonical.as_bytes());
-        println!("lvl1 digest: {}", digest);
-        digest
+    // Write sequence metadata if available
+    if let Some(seqs) = sequences {
+        for seq_record in seqs {
+            let seq_meta = seq_record.metadata();
+            writeln!(
+                file,
+                "{}\t{}\t{}\t{}\t{}\t{}",
+                seq_meta.name,
+                seq_meta.length,
+                seq_meta.alphabet,
+                seq_meta.sha512t24u,
+                seq_meta.md5,
+                seq_meta.description.as_deref().unwrap_or("")
+            )?;
+        }
     }
+    Ok(())
+}
 
-    /// Compute lvl1 digests from a collection of SequenceMetadata
-    pub fn from_metadata(metadata_vec: &[&SequenceMetadata]) -> Self {
-        use serde_json::Value;
+// ============================================================================
+// Extensions to SequenceMetadata for filesystem operations
+// ============================================================================
 
-        // Extract arrays for each field
-        let sequences: Vec<String> = metadata_vec
-            .iter()
-            .map(|md| format!("SQ.{}", md.sha512t24u))
-            .collect();
-        let names: Vec<&str> = metadata_vec.iter().map(|md| md.name.as_str()).collect();
-        let lengths: Vec<usize> = metadata_vec.iter().map(|md| md.length).collect();
+/// Extension trait for SequenceMetadata with filesystem-dependent methods.
+pub trait SequenceMetadataExt {
+    fn disk_size(&self, mode: &crate::store::StorageMode) -> usize;
+}
 
-        // Convert to JSON Values and canonicalize
-        let sequences_json = Value::Array(
-            sequences
-                .iter()
-                .map(|s| Value::String(s.to_string()))
-                .collect(),
-        );
-        let names_json = Value::Array(names.iter().map(|s| Value::String(s.to_string())).collect());
-        let lengths_json = Value::Array(
-            lengths
-                .iter()
-                .map(|l| Value::Number(serde_json::Number::from(*l)))
-                .collect(),
-        );
-
-        // Canonicalize to JCS format
-        let sequences_canonical = canonicalize_json(&sequences_json);
-        let names_canonical = canonicalize_json(&names_json);
-        let lengths_canonical = canonicalize_json(&lengths_json);
-
-        // Hash the canonicalized arrays
-        SeqColDigestLvl1 {
-            sequences_digest: sha512t24u(sequences_canonical.as_bytes()),
-            names_digest: sha512t24u(names_canonical.as_bytes()),
-            lengths_digest: sha512t24u(lengths_canonical.as_bytes()),
+impl SequenceMetadataExt for SequenceMetadata {
+    /// Calculate the disk size in bytes for this sequence.
+    fn disk_size(&self, mode: &crate::store::StorageMode) -> usize {
+        match mode {
+            crate::store::StorageMode::Raw => self.length,
+            crate::store::StorageMode::Encoded => {
+                let bits_per_symbol = self.alphabet.bits_per_symbol();
+                let total_bits = self.length * bits_per_symbol;
+                total_bits.div_ceil(8)
+            }
         }
     }
 }
 
-/// A representation of a single sequence that includes metadata and optionally data.
-/// Combines sequence metadata with optional raw/encoded data
-#[derive(Clone, Debug)]
-pub struct SequenceRecord {
-    pub metadata: SequenceMetadata,
-    pub data: Option<Vec<u8>>,
+// ============================================================================
+// Extensions to SequenceRecord for filesystem operations
+// ============================================================================
+
+/// Extension trait for SequenceRecord with filesystem-dependent methods.
+pub trait SequenceRecordExt {
+    fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()>;
 }
 
-use std::fs::{self, File};
-/// Metadata for a single sequence, including its name, length, digests, and alphabet type.
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct SequenceMetadata {
-    pub name: String,
-    pub length: usize,
-    pub sha512t24u: String,
-    pub md5: String,
-    pub alphabet: AlphabetType,
-}
+impl SequenceRecordExt for SequenceRecord {
+    /// Write a single sequence to a file.
+    fn to_file<P: AsRef<Path>>(&self, path: P) -> Result<()> {
+        use std::fs::{self, File};
+        use std::io::Write;
 
-impl SequenceRecord {
-    /// Utility function to write a single sequence to a file
-    pub fn to_file<P: AsRef<Path>>(&self, path: P) -> anyhow::Result<()> {
+        let data = match self {
+            SequenceRecord::Stub(_) => {
+                return Err(anyhow::anyhow!(
+                    "Cannot write file: sequence data not loaded"
+                ));
+            }
+            SequenceRecord::Full { sequence, .. } => sequence,
+        };
+
         // Create parent directories if they don't exist
         if let Some(parent) = path.as_ref().parent() {
             fs::create_dir_all(parent)?;
         }
 
         let mut file = File::create(path)?;
-        if let Some(data) = &self.data {
-            file.write_all(data)?;
-        }
+        file.write_all(data)?;
         Ok(())
     }
 }
 
-impl SequenceCollection {
+// ============================================================================
+// Extensions to SequenceCollectionRecord for filesystem operations
+// ============================================================================
+
+/// Extension trait for SequenceCollectionRecord with filesystem-dependent methods.
+pub trait SequenceCollectionRecordExt {
+    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
+}
+
+impl SequenceCollectionRecordExt for SequenceCollectionRecord {
+    /// Write the collection to an RGSI file.
+    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        write_rgsi_impl(file_path, self.metadata(), self.sequences())
+    }
+}
+
+// ============================================================================
+// Extensions to SequenceCollection for filesystem operations
+// ============================================================================
+
+/// Extension trait for SequenceCollection with filesystem-dependent methods.
+pub trait SequenceCollectionExt {
+    fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
+    fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
+    fn from_path_no_cache<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
+    fn from_path_with_cache<P: AsRef<Path>>(
+        file_path: P,
+        read_cache: bool,
+        write_cache: bool,
+    ) -> Result<SequenceCollection>;
+    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()>;
+    fn write_rgsi(&self) -> Result<()>;
+    fn to_record(&self) -> SequenceCollectionRecord;
+    fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()>;
+}
+
+impl SequenceCollectionExt for SequenceCollection {
     /// Default behavior: read and write cache
-    pub fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<Self> {
+    fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
         Self::from_path_with_cache(file_path, true, true)
     }
 
-    pub fn from_farg<P: AsRef<Path>>(file_path: P) -> Result<Self> {
-        let farg_file_path = file_path.as_ref().replace_exts_with("farg");
-        println!("From_farg - Reading from file: {:?}", file_path.as_ref());
-        println!("Farg file path: {:?}", farg_file_path);
+    fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
+        let rgsi_file_path = file_path.as_ref().replace_exts_with("rgsi");
 
-        if farg_file_path.exists() {
-            println!("Reading from existing farg file: {:?}", farg_file_path);
-            read_fasta_refget_file(&farg_file_path)
+        if rgsi_file_path.exists() {
+            read_rgsi_file(&rgsi_file_path)
         } else {
             Err(anyhow::anyhow!(
-                "FARG file does not exist at {:?}",
-                farg_file_path
+                "RGSI file does not exist at {:?}",
+                rgsi_file_path
             ))
-        }
-    }
-
-    /// Create a SequenceCollection from a vector of SequenceRecords.
-    pub fn from_records(records: Vec<SequenceRecord>) -> Self {
-        // Compute lvl1 digests from the metadata
-        let metadata_refs: Vec<&SequenceMetadata> = records.iter().map(|r| &r.metadata).collect();
-        let lvl1 = SeqColDigestLvl1::from_metadata(&metadata_refs);
-
-        // Compute collection digest from lvl1 digests
-        let collection_digest = lvl1.to_digest();
-
-        SequenceCollection {
-            sequences: records,
-            digest: collection_digest,
-            lvl1,
-            file_path: None,
-            has_data: true,
         }
     }
 
     /// No caching at all
-    pub fn from_path_no_cache<P: AsRef<Path>>(file_path: P) -> Result<Self> {
+    fn from_path_no_cache<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
         Self::from_path_with_cache(file_path, false, false)
     }
 
-    pub fn from_path_with_cache<P: AsRef<Path>>(
+    fn from_path_with_cache<P: AsRef<Path>>(
         file_path: P,
         read_cache: bool,
         write_cache: bool,
-    ) -> Result<Self> {
-        // If the farg file exists, just use that.
+    ) -> Result<SequenceCollection> {
         let fa_file_path = file_path.as_ref();
-        let farg_file_path = fa_file_path.replace_exts_with("farg");
-        println!(
-            "from path with cache: reading from file: {:?}",
-            file_path.as_ref()
-        );
-        println!("Farg file path: {:?}", farg_file_path);
-        // Check if the file already exists
-        if read_cache && farg_file_path.exists() {
-            println!("Reading from existing farg file: {:?}", farg_file_path);
-            // Read the existing farg file
-            let seqcol = read_fasta_refget_file(&farg_file_path)?;
+        let rgsi_file_path = fa_file_path.replace_exts_with("rgsi");
 
-            // seqcol is already a SequenceCollection, just return it
-            return Ok(seqcol);
+        // Check if the cache file exists and is valid
+        if read_cache && rgsi_file_path.exists() {
+            let seqcol = read_rgsi_file(&rgsi_file_path)?;
+            if !seqcol.sequences.is_empty() {
+                return Ok(seqcol);
+            }
+            // Cache is empty/stale - fall through to re-digest
+            let _ = std::fs::remove_file(&rgsi_file_path);
         }
-        println!("Computing digests...: {:?}", farg_file_path);
 
-        // If the farg file does not exist, compute the digests
-        // Digest the fasta file (your function)
+        // Digest the fasta file
         let seqcol: SequenceCollection = digest_fasta(file_path.as_ref())?;
 
-        // Write the SequenceCollection to the FARG file
-        if write_cache && !farg_file_path.exists() {
-            seqcol.to_farg()?;
-            println!("Farg file written to {:?}", farg_file_path);
-        } else {
-            println!(
-                "Farg file already exists, not writing: {:?}",
-                farg_file_path
-            );
+        // Write the SequenceCollection to the RGSI file
+        if write_cache && !rgsi_file_path.exists() {
+            seqcol.write_rgsi()?;
         }
         Ok(seqcol)
     }
 
-    /// Write the SequenceCollection to a FASTA refget (FARG) file
-    /// * `file_path` - The path to the FARG file to be written.
-    pub fn to_farg_path<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
-        // Write the FARGI file
-        let file_path = file_path.as_ref();
-        println!("Writing farg file: {:?}", file_path);
-        let mut file = std::fs::File::create(file_path)?;
-
-        // Write header with digest metadata
-        writeln!(file, "##seqcol_digest={}", self.digest)?;
-        writeln!(file, "##names_digest={}", self.lvl1.names_digest)?;
-        writeln!(file, "##sequences_digest={}", self.lvl1.sequences_digest)?;
-        writeln!(file, "##lengths_digest={}", self.lvl1.lengths_digest)?;
-        writeln!(file, "#name\tlength\talphabet\tsha512t24u\tmd5")?;
-
-        // Write sequence data
-        for result_sr in &self.sequences {
-            let result = result_sr.metadata.clone();
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}\t{}",
-                result.name, result.length, result.alphabet, result.sha512t24u, result.md5
-            )?;
-        }
-        Ok(())
+    /// Write the SequenceCollection to an RGSI file.
+    fn write_collection_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        write_rgsi_impl(file_path, &self.metadata, Some(&self.sequences))
     }
 
-    /// Write the SeqColDigest to a FARG file, using the file path stored in the struct.
-    pub fn to_farg(&self) -> Result<()> {
-        if let Some(ref file_path) = self.file_path {
-            let farg_file_path = file_path.replace_exts_with("farg");
-            self.to_farg_path(farg_file_path)
+    /// Write the SequenceCollection to an RGSI file using the stored file path.
+    fn write_rgsi(&self) -> Result<()> {
+        if let Some(file_path) = &self.metadata.file_path {
+            let rgsi_file_path = file_path.replace_exts_with("rgsi");
+            self.write_collection_rgsi(rgsi_file_path)
         } else {
             Err(anyhow::anyhow!(
-                "No file path specified for FARG output. Use `to_farg_path` to specify a file path."
+                "No file path specified for RGSI output. Use `write_collection_rgsi` to specify a file path."
             ))
         }
     }
-}
 
-impl Display for SequenceCollection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "SequenceCollection with {} sequences, digest: {}",
-            self.sequences.len(),
-            self.digest
-        )?;
-        write!(f, "\nFirst 3 sequences:")?;
-        for seqrec in self.sequences.iter().take(3) {
-            write!(f, "\n- {}", seqrec)?;
+    /// Convert to a SequenceCollectionRecord for storage.
+    fn to_record(&self) -> SequenceCollectionRecord {
+        SequenceCollectionRecord::from(self.clone())
+    }
+
+    /// Write the SequenceCollection to a FASTA file.
+    fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()> {
+        use std::fs::File;
+
+        let line_width = line_width.unwrap_or(70);
+        let mut output_file = File::create(file_path)?;
+
+        for record in &self.sequences {
+            if !record.is_loaded() {
+                return Err(anyhow::anyhow!(
+                    "Cannot write FASTA: sequence '{}' does not have data loaded",
+                    record.metadata().name
+                ));
+            }
+
+            let decoded_sequence = record.decode().ok_or_else(|| {
+                anyhow::anyhow!("Failed to decode sequence '{}'", record.metadata().name)
+            })?;
+
+            // Write FASTA header
+            let metadata = record.metadata();
+            let header = match &metadata.description {
+                Some(desc) => format!(">{} {}", metadata.name, desc),
+                None => format!(">{}", metadata.name),
+            };
+            writeln!(output_file, "{}", header)?;
+
+            // Write sequence with line wrapping
+            for chunk in decoded_sequence.as_bytes().chunks(line_width) {
+                output_file.write_all(chunk)?;
+                output_file.write_all(b"\n")?;
+            }
         }
+
         Ok(())
     }
 }
 
-impl Display for SequenceRecord {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "SequenceRecord: {} (length: {}, alphabet: {}, ga4gh: {:02x?}, md5: {:02x?})",
-            &self.metadata.name,
-            &self.metadata.length,
-            &self.metadata.alphabet,
-            &self.metadata.sha512t24u,
-            &self.metadata.md5
-        )?;
-        Ok(())
+// ============================================================================
+// RGSI File I/O
+// ============================================================================
+
+/// Read an RGSI file and return a SequenceCollection.
+pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection> {
+    use std::io::BufRead;
+
+    let file = std::fs::File::open(&file_path)?;
+    let reader = std::io::BufReader::new(file);
+    let mut results = Vec::new();
+
+    // Variables to store header metadata
+    let mut seqcol_digest = String::new();
+    let mut names_digest = String::new();
+    let mut sequences_digest = String::new();
+    let mut lengths_digest = String::new();
+    for line in reader.lines() {
+        let line = line?;
+
+        // Parse header metadata lines
+        if line.starts_with("##") {
+            if let Some(stripped) = line.strip_prefix("##") {
+                if let Some((key, value)) = stripped.split_once('=') {
+                    match key {
+                        "seqcol_digest" => seqcol_digest = value.to_string(),
+                        "names_digest" => names_digest = value.to_string(),
+                        "sequences_digest" => sequences_digest = value.to_string(),
+                        "lengths_digest" => lengths_digest = value.to_string(),
+                        _ => {} // Ignore unknown metadata keys
+                    }
+                }
+            }
+            continue;
+        }
+
+        // Skip other comment lines
+        if line.starts_with('#') {
+            continue;
+        }
+
+        // Parse sequence data line
+        if let Some(metadata) = parse_rgsi_line(&line) {
+            results.push(SequenceRecord::Stub(metadata));
+        }
+    }
+
+    // Build collection metadata
+    let collection_metadata = if sequences_digest.is_empty()
+        || names_digest.is_empty()
+        || lengths_digest.is_empty()
+    {
+        // Compute from sequence records
+        SequenceCollectionMetadata::from_sequences(&results, Some(file_path.as_ref().to_path_buf()))
+    } else {
+        // Use digests from file header
+        let lvl1 = SeqColDigestLvl1 {
+            sequences_digest,
+            names_digest,
+            lengths_digest,
+        };
+
+        let digest = if seqcol_digest.is_empty() {
+            lvl1.to_digest()
+        } else {
+            seqcol_digest
+        };
+
+        SequenceCollectionMetadata {
+            digest,
+            n_sequences: results.len(),
+            names_digest: lvl1.names_digest,
+            sequences_digest: lvl1.sequences_digest,
+            lengths_digest: lvl1.lengths_digest,
+            name_length_pairs_digest: None,
+            sorted_name_length_pairs_digest: None,
+            sorted_sequences_digest: None,
+            file_path: Some(file_path.as_ref().to_path_buf()),
+        }
+    };
+
+    Ok(SequenceCollection {
+        metadata: collection_metadata,
+        sequences: results,
+    })
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::digest::encode_sequence;
+    use crate::digest::{AlphabetType, lookup_alphabet};
+    use crate::fasta::{digest_fasta, load_fasta};
+
+    #[test]
+    fn test_decode_returns_none_when_no_data() {
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        for seq_record in &seqcol.sequences {
+            assert!(!seq_record.is_loaded());
+            assert_eq!(seq_record.decode(), None);
+        }
+    }
+
+    #[test]
+    fn test_decode_with_loaded_data() {
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        let expected_sequences = vec![("chrX", "TTGGGGAA"), ("chr1", "GGAA"), ("chr2", "GCGC")];
+
+        for (seq_record, (expected_name, expected_seq)) in
+            seqcol.sequences.iter().zip(expected_sequences.iter())
+        {
+            assert_eq!(seq_record.metadata().name, *expected_name);
+            assert!(seq_record.is_loaded());
+            let decoded = seq_record.decode().expect("decode() should return Some");
+            assert_eq!(decoded, *expected_seq);
+        }
+    }
+
+    #[test]
+    fn test_decode_handles_encoded_data() {
+        let sequence = b"ACGT";
+        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord::Full {
+            metadata: SequenceMetadata {
+                name: "test_seq".to_string(),
+                description: None,
+                length: 4,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+                fai: None,
+            },
+            sequence: encoded_data,
+        };
+
+        let decoded = record.decode().expect("Should decode encoded data");
+        assert_eq!(decoded, "ACGT");
+    }
+
+    #[test]
+    fn test_sequence_collection_from_fasta() {
+        let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
+            .expect("Failed to load FASTA");
+
+        assert_eq!(seqcol.sequences.len(), 3);
+        assert!(!seqcol.metadata.digest.is_empty());
+    }
+
+    #[test]
+    fn test_sequence_collection_write_and_read_rgsi() {
+        use tempfile::tempdir;
+
+        let seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let rgsi_path = dir.path().join("test.rgsi");
+
+        seqcol
+            .write_collection_rgsi(&rgsi_path)
+            .expect("Failed to write RGSI");
+
+        let loaded = read_rgsi_file(&rgsi_path).expect("Failed to read RGSI");
+
+        assert_eq!(loaded.metadata.digest, seqcol.metadata.digest);
+        assert_eq!(loaded.sequences.len(), seqcol.sequences.len());
+    }
+
+    #[test]
+    fn test_sequence_collection_write_fasta() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let fasta_path = dir.path().join("output.fa");
+
+        seqcol
+            .write_fasta(&fasta_path, None)
+            .expect("Failed to write FASTA");
+
+        let content = fs::read_to_string(&fasta_path).expect("Failed to read file");
+        assert!(content.contains(">chrX"));
+        assert!(content.contains("TTGGGGAA"));
+    }
+
+    #[test]
+    fn test_digest_sequence_basic() {
+        let seq = digest_sequence("test_seq", b"ACGTACGT");
+        assert_eq!(seq.metadata().name, "test_seq");
+        assert_eq!(seq.metadata().length, 8);
+        assert!(!seq.metadata().sha512t24u.is_empty());
+        assert!(seq.is_loaded());
+        assert_eq!(seq.sequence().unwrap(), b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_digest_sequence_matches_fasta_digest() {
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+        let fasta_seq = &seqcol.sequences[0]; // chrX: TTGGGGAA
+
+        let prog_seq = digest_sequence("chrX", b"TTGGGGAA");
+
+        assert_eq!(
+            prog_seq.metadata().sha512t24u,
+            fasta_seq.metadata().sha512t24u
+        );
+        assert_eq!(prog_seq.metadata().md5, fasta_seq.metadata().md5);
+    }
+
+    #[test]
+    fn test_sequence_metadata_disk_size() {
+        use crate::store::StorageMode;
+
+        let metadata = SequenceMetadata {
+            name: "test".to_string(),
+            description: None,
+            length: 1000,
+            sha512t24u: "test".to_string(),
+            md5: "test".to_string(),
+            alphabet: AlphabetType::Dna2bit,
+            fai: None,
+        };
+
+        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
+        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
+    }
+
+    #[test]
+    fn test_sequence_record_to_file() {
+        use std::fs;
+        use tempfile::tempdir;
+
+        let seqcol =
+            load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        let dir = tempdir().expect("Failed to create temp dir");
+        let file_path = dir.path().join("test_seq.txt");
+
+        seqcol.sequences[0]
+            .to_file(&file_path)
+            .expect("Failed to write file");
+
+        let content = fs::read(&file_path).expect("Failed to read file");
+        assert!(!content.is_empty());
     }
 }

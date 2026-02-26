@@ -11,12 +11,15 @@ impl<T: AsRef<Path>> PathExtension for T {
         let path = self.as_ref();
         if let Some(file_name) = path.file_name() {
             let file_name_str = file_name.to_string_lossy();
-            // Find the first dot to get the base name without any extensions
-            let base_name = if let Some(dot_pos) = file_name_str.find('.') {
-                &file_name_str[..dot_pos]
-            } else {
-                &file_name_str
-            };
+
+            // Strip only known FASTA extensions, preserving dots in the base name
+            // Check longest extensions first (.fa.gz, .fasta.gz) before shorter ones
+            let known_extensions = [".fa.gz", ".fasta.gz", ".fa", ".fasta"];
+
+            let base_name = known_extensions
+                .iter()
+                .find_map(|ext| file_name_str.strip_suffix(ext))
+                .unwrap_or(&file_name_str);
 
             if let Some(parent) = path.parent() {
                 parent.join(format!("{}.{}", base_name, new_extension))

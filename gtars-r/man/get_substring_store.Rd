@@ -7,7 +7,7 @@
 get_substring_store(store_ptr, seq_digest, start, end)
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{seq_digest}{Sequence digest}
 

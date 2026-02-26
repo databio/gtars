@@ -7,11 +7,11 @@
 write_store_to_directory_store(store_ptr, root_path, seqdata_path_template)
 }
 \arguments{
-\item{store_ptr}{External pointer to GlobalRefgetStore}
+\item{store_ptr}{External pointer to RefgetStore}
 
 \item{root_path}{Path to write store}
 
-\item{seqdata_path_template}{Path template name}
+\item{seqdata_path_template}{Path template name (optional, pass empty string for default)}
 }
 \description{
 Write store to directory

@@ -22,19 +22,19 @@ pub fn run_bbcache(matches: &ArgMatches) {
         .expect("Failed to create the bedbase client");
 
     match subcmd {
-        gtars_bbcache::consts::BBCACHE_INSPECTBED => {
+        super::cli::BBCACHE_INSPECTBED => {
             let bed_resources = bbc.list_beds().unwrap();
             let n = bed_resources.len();
             print_resources(bed_resources);
             println!("Number of BED files: {}", n);
         }
-        gtars_bbcache::consts::BBCACHE_INSPECTBEDSET => {
+        super::cli::BBCACHE_INSPECTBEDSET => {
             let bedset_resources = bbc.list_bedsets().unwrap();
             let n = bedset_resources.len();
             print_resources(bedset_resources);
             println!("Number of BED sets: {}", n);
         }
-        gtars_bbcache::consts::BBCACHE_SEEK => {
+        super::cli::BBCACHE_SEEK => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -42,7 +42,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
             let path = bbc.seek(bed_id).expect("Failed to seek BED file in cache");
             println!("{}", path.display());
         }
-        gtars_bbcache::consts::BBCACHE_CACHEBED => {
+        super::cli::BBCACHE_CACHEBED => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -80,7 +80,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
                     .expect("Failed to load BED file from BEDbase");
             }
         }
-        gtars_bbcache::consts::BBCACHE_CACHEBEDSET => {
+        super::cli::BBCACHE_CACHEBEDSET => {
             let bedset_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");
@@ -106,7 +106,7 @@ pub fn run_bbcache(matches: &ArgMatches) {
                     .expect("Failed to load BED file from BEDbase");
             }
         }
-        gtars_bbcache::consts::BBCACHE_REMOVE => {
+        super::cli::BBCACHE_REMOVE => {
             let bed_id = matches
                 .get_one::<String>("identifier")
                 .expect("BED file identifier is required");

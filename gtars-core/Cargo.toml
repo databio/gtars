@@ -1,7 +1,7 @@
 [package]
 name = "gtars-core"
-version = "0.5.1"
-edition = "2021"
+version = "0.5.5"
+edition = "2024"
 description = "Core library for gtars: tools for high performance genomic interval analysis"
 license = "MIT"
 repository = "https://github.com/databio/gtars"
@@ -9,12 +9,15 @@ repository = "https://github.com/databio/gtars"
 [dependencies]
 md-5 = "0.10.6"
 num-traits = "0.2.19"
-reqwest = { version = "0.12.23", features = ["blocking"], optional=true }
+ureq = {version = "3.1.4", optional=true}
 tokio = "1.47.1"
 bigtools = { version = "0.5.6", optional = true }
+polars = {version = "0.51.0", optional = true, default-features = false, features = ["csv"] }
 
 anyhow = { workspace = true }
+thiserror = { workspace = true }
 flate2 = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
@@ -24,4 +27,6 @@ tempfile = "3.21.0"
 [features]
 default = []
 bigbed = ["dep:bigtools"]
-http = ["dep:reqwest"]
+http = ["dep:ureq"]
+dataframe = ["dep:polars"]
+serde = ["dep:serde"]

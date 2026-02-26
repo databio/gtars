@@ -2,7 +2,7 @@
 [![crates.io](https://img.shields.io/crates/v/gtars?&logo=rust)](https://crates.io/crates/gtars)
 
 <h1 align="center">
-<img src="docs/gtars_logo_new_with_words.png" alt="gtars logo" height="100px">
+<img src="https://raw.githubusercontent.com/databio/gtars/master/gtars_logo.png" alt="gtars logo" height="100px">
 </h1>
 
 
@@ -27,28 +27,28 @@ This repository is a work in progress, and still in early development. This repo
 
 ## Installation
 
-`gtars` is available in multiple forms to support different environments. Choose the installation method that best fits your needs:
+To install `gtars`, you must first [install the rust toolchain](https://www.rust-lang.org/tools/install).
 
-### Quick Install
+### Command-line interface
+
+You may build the cli binary locally by navigating to `gtars-cli` and using `cargo build --release`. This will create a binary in `target/release/gtars` at the top level of the workspace. You can then add this to your path, or run it directly.
 
 #### Python Package (Recommended for most users)
 ```bash
 pip install gtars
 ```
 
-#### Command Line Interface (CLI)
-```bash
-cargo install gtars-cli --all-features
+We feature-gate binary dependencies maximize compatibility and minimize install size. You can specify features during installation like so:
+
+```
+cargo install --path gtars-cli gtars-cli --features "uniwig tokenizers"
 ```
 
-### Detailed Installation Options
+Finally, you can download precompiled binaries from the [releases page](https://github.com/databio/gtars/releases).
 
-#### Prerequisites
-- For CLI installation: [Rust toolchain](https://www.rust-lang.org/tools/install)
-- For Python: pip (comes with Python)
+### Python bindings
 
-#### 1. Python Package
-The easiest way to use gtars is through the Python package:
+You can install the Python bindings via pip. First, ensure you have a recent version of pip installed. Then run:
 
 ```bash
 pip install gtars
@@ -60,46 +60,10 @@ from gtars.tokenizers import Tokenizer
 tokenizer = Tokenizer.from_pretrained("databio/atacformer-base-hg38")
 ```
 
-#### 2. Command Line Interface (CLI)
-Install the CLI tool using cargo:
+### Dev Python bindings
 
-```bash
-# Basic installation
-cargo install gtars-cli
 
-# With specific features
-cargo install gtars-cli --features "uniwig tokenizers"
 
-# With all features
-cargo install gtars-cli --all-features
-```
-
-Verify installation:
-```bash
-gtars --help
-```
-
-#### 3. Rust Library
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-gtars = { version = "0.5.0", features = ["uniwig", "tokenizers"] }
-```
-
-#### 4. JavaScript/WebAssembly
-```bash
-npm install @databio/gtars-js
-```
-
-Example usage:
-```javascript
-import { Overlapper } from '@databio/gtars-js';
-const overlapper = new Overlapper(universe, 'ailist');
-```
-
-#### 5. Precompiled Binaries
-Download ready-to-use binaries from the [releases page](https://github.com/databio/gtars/releases).
 
 ## Usage
 

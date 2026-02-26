@@ -18,15 +18,13 @@ pub struct PyBatchEncoding {
 #[pymethods]
 impl PyBatchEncoding {
     fn __getitem__(&self, key: &str) -> PyResult<Py<PyAny>> {
-        Python::attach(|py| {
-            match key {
-                "input_ids" => Ok(self.input_ids.clone_ref(py)),
-                "attention_mask" => Ok(self.attention_mask.clone_ref(py)),
-                _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
-                    "Invalid key: {}",
-                    key
-                ))),
-            }    
+        Python::attach(|py| match key {
+            "input_ids" => Ok(self.input_ids.clone_ref(py)),
+            "attention_mask" => Ok(self.attention_mask.clone_ref(py)),
+            _ => Err(pyo3::exceptions::PyKeyError::new_err(format!(
+                "Invalid key: {}",
+                key
+            ))),
         })
     }
 

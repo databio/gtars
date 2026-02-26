@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use pyo3::exceptions::{PyRuntimeError, PyValueError};
-use pyo3::{prelude::*, IntoPyObjectExt};
 use pyo3::types::{PyDict, PyType};
+use pyo3::{prelude::*, IntoPyObjectExt};
 
 use anyhow::Result;
 
@@ -58,11 +58,9 @@ impl PyTokenizer {
                     .tokenizer
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id())]
-                    .into_py_any(py)?
-                )
-            }
+                .into_py_any(py)?)
             // if a list of tokens is passed
-            else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
+            } else if let Ok(tokens) = tokens.extract::<Vec<String>>() {
                 let ids: Vec<u32> = tokens
                     .iter()
                     .map(|token| {
@@ -89,9 +87,8 @@ impl PyTokenizer {
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())]
                 .into_py_any(py)?)
-            }
             // if a list of ids is passed
-            else if let Ok(ids) = ids.extract::<Vec<u32>>() {
+            } else if let Ok(ids) = ids.extract::<Vec<u32>>() {
                 let tokens: Vec<String> = ids
                     .iter()
                     .map(|&id| {
@@ -118,9 +115,8 @@ impl PyTokenizer {
                     .convert_id_to_token(id)
                     .unwrap_or(self.get_unk_token())
                     .into_py_any(py)?)
-            }
             // if a list of ids is passed
-            else if let Ok(ids) = id.extract::<Vec<u32>>() {
+            } else if let Ok(ids) = id.extract::<Vec<u32>>() {
                 let tokens: Vec<String> = ids
                     .iter()
                     .map(|&id| {
@@ -147,9 +143,8 @@ impl PyTokenizer {
                     .convert_token_to_id(&token)
                     .unwrap_or(self.get_unk_token_id());
                 Ok(id.into_py_any(py)?)
-            }
             // if a list of tokens is passed
-            else if let Ok(tokens) = region.extract::<Vec<String>>() {
+            } else if let Ok(tokens) = region.extract::<Vec<String>>() {
                 let ids: Vec<u32> = tokens
                     .iter()
                     .map(|token| {
@@ -256,6 +251,10 @@ impl PyTokenizer {
             dict.set_item("sep_token", special_tokens.sep.clone())?;
             Ok(dict.into())
         })
+    }
+
+    fn get_special_tokens_mask(&self, tokens: Vec<String>) -> Vec<bool> {
+        self.inner().get_special_tokens_mask(&tokens)
     }
 
     fn get_vocab(&self) -> HashMap<String, u32> {

@@ -2,117 +2,172 @@
 
 //! This module provides functions managing and retrieving sequences from a sequence collection.
 //!
-//! # Functions
+//! # Module Structure
 //!
-//! The module includes the following main components:
+//! The library is organized into two main parts:
 //!
-//! * `alphabet.rs` - Defines various sequence alphabets (e.g., DNA, protein, ASCII).
-//! * `collection.rs` - Contains the `SequenceCollection` struct and methods for managing sequence collections.
-//! * `digest.rs` - Implements functions for calculating and verifying sha512t24u and other digests.
-//! * `encoder.rs` - Contains functions for encoding sequences into compact representations.
-//! * `fasta.rs` - Provides functions for reading and writing FASTA files.
-//! * `store.rs` - Implements a sequence store that allows for efficient storage and retrieval of sequences indexed by sha512t24u digest.
-pub mod alphabet;
-pub mod collection;
+//! ## Core (WASM-compatible)
+//!
+//! The `digest` module contains all WASM-compatible code:
+//! - `digest::algorithms` - Hash functions (sha512t24u, md5, canonicalize_json)
+//! - `digest::alphabet` - Sequence alphabets and encoding tables
+//! - `digest::encoder` - Sequence bit-packing
+//! - `digest::types` - Core data structures (SequenceRecord, SequenceCollection)
+//! - `digest::fasta` - Bytes-based FASTA parsing
+//! - `digest::stream` - Streaming FASTA hasher for chunk-by-chunk processing
+//!
+//! ## Filesystem (requires `filesystem` feature)
+//!
+//! - `fasta` - File-based FASTA parsing (wraps digest::fasta with file I/O)
+//! - `collection` - Extended SequenceCollection with filesystem operations
+//! - `store` - RefgetStore for persistent sequence storage
+//!
+//! # Feature Flags
+//!
+//! - `filesystem` (default): Enables file-based operations
+//! - Without `filesystem`: Only WASM-compatible code in `digest` module
+
+// ============================================================================
+// Core WASM-compatible module
+// ============================================================================
+
+/// Core digest and encoding functionality - WASM-safe.
+/// All code in this module works without filesystem access.
 pub mod digest;
-pub mod encoder;
+
+// Re-export commonly used items from digest at crate root for convenience
+pub use digest::{
+    ASCII_ALPHABET,
+    // Alphabet
+    Alphabet,
+    AlphabetGuesser,
+    AlphabetType,
+    DNA_2BIT_ALPHABET,
+    DNA_3BIT_ALPHABET,
+    DNA_IUPAC_ALPHABET,
+    FaiMetadata,
+    // Streaming
+    FastaStreamHasher,
+    PROTEIN_ALPHABET,
+    ParseOptions,
+    SeqColDigestLvl1,
+    SequenceCollection,
+    SequenceCollectionMetadata,
+    SequenceCollectionRecord,
+    SequenceEncoder,
+    SequenceMetadata,
+    // Types
+    SequenceRecord,
+    canonicalize_json,
+    decode_string_from_bytes,
+    decode_substring_from_bytes,
+    // Fasta (bytes-based, WASM-compatible)
+    digest_fasta_bytes,
+    digest_sequence,
+    digest_sequence_with_description,
+    // Encoder
+    encode_sequence,
+    guess_alphabet,
+    load_fasta_bytes,
+    lookup_alphabet,
+    md5,
+    parse_fasta_header,
+    parse_rgsi_line,
+    // Algorithms
+    sha512t24u,
+};
+
+// ============================================================================
+// Filesystem-dependent modules (require `filesystem` feature)
+// ============================================================================
+
+/// File-based FASTA operations.
+/// Wraps the WASM-compatible digest::fasta with filesystem I/O.
+#[cfg(feature = "filesystem")]
 pub mod fasta;
+
+/// Extended SequenceCollection with filesystem operations.
+/// Adds methods for RGSI file I/O, caching, and file-based construction.
+#[cfg(feature = "filesystem")]
+pub mod collection;
+
+/// Persistent sequence storage (RefgetStore).
+#[cfg(feature = "filesystem")]
 pub mod store;
 
-// Used internally to make it easy to convert types to a 32-byte key for hash tables
+/// Seqcol spec operations (comparison, level-based retrieval, attribute search).
+#[cfg(feature = "filesystem")]
+pub mod seqcol;
+
+/// Alias management for human-readable sequence and collection names.
+#[cfg(feature = "filesystem")]
+pub mod alias;
+
+/// FAIR Headers Reference genome (FHR) metadata types and disk I/O.
+#[cfg(feature = "filesystem")]
+pub mod fhr_metadata;
+
+// Internal modules for filesystem operations
+#[cfg(feature = "filesystem")]
 mod hashkeyable;
+#[cfg(feature = "filesystem")]
 mod utils;
 
-#[cfg(test)]
+// Re-export filesystem functions at crate root for backward compatibility
+#[cfg(feature = "filesystem")]
+pub use collection::{
+    SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt,
+    read_rgsi_file,
+};
+#[cfg(feature = "filesystem")]
+pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
+#[cfg(feature = "filesystem")]
+pub use fhr_metadata::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(all(test, feature = "filesystem"))]
 mod tests {
     use super::*;
 
-    // #[test]
-    // fn test_sequence_retrieval_performance() {
-    //     // Create a new sequence store
-    //     let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-
-    //     // Add a variety of sequences
-    //     let sequences = vec![
-    //         ("seq1", b"ACGTACGT".to_vec()),
-    //         ("seq2", b"TGCATGCA".to_vec()),
-    //         ("seq3", b"NNNNRRYY".to_vec()),
-    //         ("seq4", b"ACTGACTG".to_vec()),
-    //     ];
-
-    //     // Add sequences to store
-    //     for (name, seq) in &sequences {
-    //         println!("Add sequence with name: {}", name);
-    //         store.add_sequence(name, seq, None);
-    //         let retrieved = store.get_sequence(&name).unwrap();
-    //         println!("Retrieved sequence: {:?}", retrieved);
-    //     }
-    //     println!("{}", store);
-
-    //     // Test retrieving subsequences in a loop
-    //     for _ in 0..1000 {
-    //         for (name, seq) in &sequences {
-    //             // Get the sha512t24u digest
-    //             let sha512_digest = sha512t24u(seq);
-    //             let md5_digest = md5(seq);
-
-    //             // Try retrieving by all three methods
-    //             for key in &[&sha512_digest, &md5_digest, *name] {
-    //                 // Get full sequence
-    //                 // println!("Getting full sequence for: {}", key);
-    //                 let stored_sequence = store.get_sequence(key).unwrap();
-    //                 // println!("Stored sequence: {:?}", stored_sequence);
-    //                 assert_eq!(stored_sequence.len(), seq.len());
-
-    //                 // Get various substrings
-    //                 for start in 0..seq.len() {
-    //                     for end in (start + 1)..=seq.len() {
-    //                         let substring = store.get_substring(key, start, end).unwrap();
-    //                         assert_eq!(substring.len(), end - start);
-    //                     }
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
     use std::time::Instant;
-    use store::GlobalRefgetStore;
-    use store::StorageMode;
+    use store::RefgetStore;
     use tempfile::tempdir;
+
     #[test]
     #[ignore]
     fn test_loading_large_fasta_file() {
         // Path to a large FASTA file
-        // let fasta_path = "GRCh38_full_analysis_set_plus_decoy_hla.fa";
         let fasta_path =
             std::env::var("FASTA_PATH").expect("FASTA_PATH environment variable not set");
-        // let fasta_path = "../tests/data/subset.fa.gz";
-        // let fasta_path = "../tests/data/fasta/base.fa.gz";
         println!("Loading large FASTA file: {}", &fasta_path);
 
         // Create a new sequence store, and dd sequences to the store
         println!("Adding sequences from FASTA file...");
         let start = Instant::now();
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        store.import_fasta(&fasta_path).unwrap();
+        let mut store = RefgetStore::in_memory();
+        store
+            .add_sequence_collection_from_fasta(&fasta_path)
+            .unwrap();
         let duration = start.elapsed();
-        println!("⏱️  Time taken to load: {:.2?}", duration);
+        println!("Time taken to load: {:.2?}", duration);
 
-        let mut store2 = GlobalRefgetStore::new(StorageMode::Raw);
-        store2.import_fasta(&fasta_path).unwrap();
+        let mut store2 = RefgetStore::in_memory();
+        store2.disable_encoding(); // Switch to Raw mode
+        store2
+            .add_sequence_collection_from_fasta(&fasta_path)
+            .unwrap();
 
         // Get list of sequences
-        let sequences = store.list_sequence_digests();
+        let sequences: Vec<_> = store.sequence_digests().collect();
         assert!(!sequences.is_empty(), "No sequences found in the store");
 
         // Look up the first sequence by digest
         println!("Look up a sequence by digest...");
         let digest = &sequences[0];
         let digest_str = String::from_utf8(digest.to_vec()).expect("Invalid ASCII data");
-        // let seq = store.get_sequence(name);
-        // assert!(seq.is_some(), "Failed to retrieve sequence with name: {}", name);
-        // println!("Retrieved sequence: {:?}", seq.unwrap());
 
         // Test retrieval of a substring
         println!("Retrieving a substring of sequence named: {:?}", digest_str);
@@ -120,7 +175,7 @@ mod tests {
         let end_basic = 3;
         let substring = store.get_substring(digest, start_basic, end_basic);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
@@ -131,13 +186,13 @@ mod tests {
         let end = 148 * 70 + 70;
         let substring2 = store.get_substring(digest, start, end);
         assert!(
-            substring2.is_some(),
+            substring2.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
 
         let substring3 = store2.get_substring(digest, start, end);
-        assert!(substring2 == substring3);
+        assert_eq!(substring2.as_ref().unwrap(), substring3.as_ref().unwrap());
         println!("Retrieved substring: {:?}", substring2.unwrap());
         println!("Retrieved substring: {:?}", substring3.unwrap());
     }
@@ -147,19 +202,16 @@ mod tests {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
         let temp_path = temp_dir.path();
         // Create a new sequence store
-        let mut store = GlobalRefgetStore::new(StorageMode::Encoded);
-        // let fasta_path = "../tests/data/subset.fa.gz";
+        let mut store = RefgetStore::in_memory();
         let fasta_path = "../tests/data/fasta/base.fa.gz";
         let temp_fasta = temp_path.join("base.fa.gz");
         std::fs::copy(fasta_path, &temp_fasta).expect("Failed to copy base.fa.gz to tempdir");
 
         // Add sequences to the store
-        store.import_fasta(temp_fasta).unwrap();
+        store
+            .add_sequence_collection_from_fasta(temp_fasta)
+            .unwrap();
         println!("Listing sequences in the store...");
-        // let sequences = store.list_sequence_digests();
-        // let digest = &sequences[0];
-        // let digest_str = String::from_utf8(digest.to_vec()).expect("Invalid ASCII data");
-        // let digest = "Ya6Rs7DHhDeg7YaOSg1EoNi3U_nQ9SvO";  // from subset.fa.gz
         let digest = "iYtREV555dUFKg2_agSJW6suquUyPpMw"; // from base.fa.gz
         let digest_str = String::from_utf8(digest.as_bytes().to_vec()).expect("Invalid ASCII data");
 
@@ -169,25 +221,23 @@ mod tests {
         let end = start + 5;
         let substring = store.get_substring(digest, start, end);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!("Retrieved substring: {:?}", substring.clone().unwrap());
-        assert!(substring.unwrap() == "GGGGA");
-        // assert!(substring.unwrap() == "CCTAACCCTAACCCTAACCCTAACCCTAACCCCTAACCCCTAACCCTAACCCTAACCCTAACCCTAACCC");
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
+        assert_eq!(substring.unwrap(), "GGGGA");
 
         println!("Retrieving a substring of sequence named: {:?}", digest_str);
         let start = 3;
         let end = start + 2;
         let substring = store.get_substring(digest, start, end);
         assert!(
-            substring.is_some(),
+            substring.is_ok(),
             "Failed to retrieve substring with name: {:?}",
             digest_str
         );
-        println!("Retrieved substring: {:?}", substring.clone().unwrap());
-        assert!(substring.unwrap() == "GG");
-        // assert!(substring.unwrap() == "TCTGACCTGAGGAGAACTGTGCTCCGCCTTCAGAGTACCACCGAAATCTGTGCAGAGGACAACGCAGCTC");
+        println!("Retrieved substring: {:?}", substring.as_ref().unwrap());
+        assert_eq!(substring.unwrap(), "GG");
     }
 }

@@ -1,7 +1,100 @@
+use crate::errors::GtarsGenomicDistError;
+use bio::io::fasta;
+use gtars_core::models::{Region, RegionSet};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, fmt::Debug};
+use std::fs::File;
+use std::path::Path;
+
+/// A `RegionSet` that is guaranteed to be sorted by (chr, start).
+///
+/// Created by moving a `RegionSet` into `SortedRegionSet::new()`, which
+/// sorts in place (no clone). Functions that require sorted input can
+/// accept this type instead of re-sorting every time.
+pub struct SortedRegionSet(pub RegionSet);
+
+impl SortedRegionSet {
+    /// Sort a RegionSet in place and wrap it. This is a move, not a clone.
+    pub fn new(mut rs: RegionSet) -> Self {
+        rs.sort();
+        Self(rs)
+    }
+}
+
+/// Genomic strand orientation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum Strand {
+    Plus,
+    Minus,
+    Unstranded,
+}
+
+impl Strand {
+    pub fn from_char(c: char) -> Self {
+        match c {
+            '+' => Strand::Plus,
+            '-' => Strand::Minus,
+            _ => Strand::Unstranded,
+        }
+    }
+}
+
+/// A `RegionSet` paired with a parallel `Vec<Strand>`.
+///
+/// Follows the `SortedRegionSet` wrapper pattern: wraps a `RegionSet` and
+/// adds strand information without modifying `Region` itself (which lives
+/// in gtars-core). Strand-aware operations (promoters, reduce, setdiff)
+/// are implemented as methods on this type.
+#[derive(Serialize, Deserialize)]
+pub struct StrandedRegionSet {
+    pub inner: RegionSet,
+    pub strands: Vec<Strand>,
+}
+
+impl StrandedRegionSet {
+    /// Create a new StrandedRegionSet from a RegionSet and parallel strand vector.
+    ///
+    /// # Panics
+    /// Panics if `strands.len() != rs.regions.len()`.
+    pub fn new(rs: RegionSet, strands: Vec<Strand>) -> Self {
+        assert_eq!(
+            rs.regions.len(),
+            strands.len(),
+            "StrandedRegionSet: regions and strands must have the same length"
+        );
+        StrandedRegionSet {
+            inner: rs,
+            strands,
+        }
+    }
+
+    /// Wrap a RegionSet with all-Unstranded. Preserves existing behavior.
+    pub fn unstranded(rs: RegionSet) -> Self {
+        let n = rs.regions.len();
+        StrandedRegionSet {
+            strands: vec![Strand::Unstranded; n],
+            inner: rs,
+        }
+    }
+
+    /// Consume into the inner RegionSet, dropping strand information.
+    pub fn into_regionset(self) -> RegionSet {
+        self.inner
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.regions.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.regions.is_empty()
+    }
+}
+
 /// Statistics summary for regions on a single chromosome.
 ///
 /// Contains counts, bounds, and descriptive statistics for region lengths.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChromosomeStatistics {
     /// Chromosome name
     pub chromosome: String,
@@ -24,7 +117,7 @@ pub struct ChromosomeStatistics {
 /// A genomic bin with a count of overlapping regions.
 ///
 /// Used to represent distribution of regions across fixed-size windows.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RegionBin {
     /// Chromosome name
     pub chr: String,
@@ -34,4 +127,381 @@ pub struct RegionBin {
     pub end: u32,
     /// Number of regions overlapping this bin
     pub n: u32,
+    /// Rid: needed for plot to have correct order
+    pub rid: u32,
+}
+
+pub struct GenomeAssembly {
+    seq_map: HashMap<String, Vec<u8>>,
+}
+
+impl TryFrom<&str> for GenomeAssembly {
+    type Error = GtarsGenomicDistError;
+
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
+        GenomeAssembly::try_from(Path::new(value))
+    }
+}
+
+impl TryFrom<String> for GenomeAssembly {
+    type Error = GtarsGenomicDistError;
+
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
+        // println!("Converting String to Path: {}", value);
+        GenomeAssembly::try_from(Path::new(&value))
+    }
+}
+
+impl TryFrom<&Path> for GenomeAssembly {
+    type Error = GtarsGenomicDistError;
+
+    ///
+    /// Create a new [GenomeAssembly] from fasta file
+    ///
+    fn try_from(value: &Path) -> Result<GenomeAssembly, GtarsGenomicDistError> {
+        let file = File::open(value)?;
+        let genome = fasta::Reader::new(file);
+
+        let records = genome.records();
+
+        // store the genome in a hashmap
+        let mut seq_map: HashMap<String, Vec<u8>> = HashMap::new();
+        for record in records {
+            match record {
+                Ok(record) => {
+                    seq_map.insert(record.id().to_string(), record.seq().to_owned());
+                }
+                Err(e) => {
+                    return Err(GtarsGenomicDistError::CustomError(format!(
+                        "Error reading genome file: {}",
+                        e
+                    )));
+                }
+            }
+        }
+
+        Ok(GenomeAssembly { seq_map })
+    }
+}
+
+impl GenomeAssembly {
+    pub fn seq_from_region<'a>(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
+        let chr = &coords.chr;
+        let start = coords.start as usize;
+        let end = coords.end as usize;
+
+        if let Some(seq) = self.seq_map.get(chr) {
+            if end <= seq.len() && start <= end {
+                Ok(&seq[start..end])
+            } else {
+                Err(GtarsGenomicDistError::CustomError(format!(
+                    "Invalid range: start={}, end={} for chromosome {} with length {}",
+                    start,
+                    end,
+                    chr,
+                    seq.len()
+                )))
+            }
+        } else {
+            Err(GtarsGenomicDistError::CustomError(format!(
+                "Unknown chromosome found in region set: {}",
+                chr
+            )))
+        }
+    }
+
+    pub fn contains_chr(&self, chr: &str) -> bool {
+        self.seq_map.contains_key(chr)
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+pub enum Dinucleotide {
+    Aa,
+    Ac,
+    Ag,
+    At,
+    Ca,
+    Cc,
+    Cg,
+    Ct,
+    Ga,
+    Gc,
+    Gg,
+    Gt,
+    Ta,
+    Tc,
+    Tg,
+    Tt,
+}
+
+impl Dinucleotide {
+    pub fn from_bytes(bytes: &[u8]) -> Option<Dinucleotide> {
+        if bytes.len() != 2 {
+            return None;
+        }
+        // Normalize to uppercase for case-insensitive matching
+        let normalized = [bytes[0].to_ascii_uppercase(), bytes[1].to_ascii_uppercase()];
+        match &normalized {
+            b"AA" => Some(Dinucleotide::Aa),
+            b"AC" => Some(Dinucleotide::Ac),
+            b"AG" => Some(Dinucleotide::Ag),
+            b"AT" => Some(Dinucleotide::At),
+            b"CA" => Some(Dinucleotide::Ca),
+            b"CC" => Some(Dinucleotide::Cc),
+            b"CG" => Some(Dinucleotide::Cg),
+            b"CT" => Some(Dinucleotide::Ct),
+            b"GA" => Some(Dinucleotide::Ga),
+            b"GC" => Some(Dinucleotide::Gc),
+            b"GG" => Some(Dinucleotide::Gg),
+            b"GT" => Some(Dinucleotide::Gt),
+            b"TA" => Some(Dinucleotide::Ta),
+            b"TC" => Some(Dinucleotide::Tc),
+            b"TG" => Some(Dinucleotide::Tg),
+            b"TT" => Some(Dinucleotide::Tt),
+            _ => None,
+        }
+    }
+
+    pub fn to_string(&self) -> Result<String, GtarsGenomicDistError> {
+        match self {
+            Dinucleotide::Aa => Ok("Aa".to_string()),
+            Dinucleotide::Ac => Ok("Ac".to_string()),
+            Dinucleotide::Ag => Ok("Ag".to_string()),
+            Dinucleotide::At => Ok("At".to_string()),
+            Dinucleotide::Ca => Ok("Ca".to_string()),
+            Dinucleotide::Cc => Ok("Cc".to_string()),
+            Dinucleotide::Cg => Ok("Cg".to_string()),
+            Dinucleotide::Ct => Ok("Ct".to_string()),
+            Dinucleotide::Ga => Ok("Ga".to_string()),
+            Dinucleotide::Gc => Ok("Gc".to_string()),
+            Dinucleotide::Gg => Ok("Gg".to_string()),
+            Dinucleotide::Gt => Ok("Gt".to_string()),
+            Dinucleotide::Ta => Ok("Ta".to_string()),
+            Dinucleotide::Tc => Ok("Tc".to_string()),
+            Dinucleotide::Tg => Ok("Tg".to_string()),
+            Dinucleotide::Tt => Ok("Tt".to_string()),
+        }
+    }
+}
+
+///
+/// Struct to hold Tss information (RegionSet with additionally indexing) that is initialized from
+/// RegionSet or BED file that holds tss regions
+///
+pub struct TssIndex {
+    pub region_set: RegionSet,
+    pub mid_points: HashMap<String, Vec<u32>>,
+}
+
+impl TryFrom<RegionSet> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: RegionSet) -> Result<Self, GtarsGenomicDistError> {
+        let mut mid_points = value.calc_mid_points();
+
+        for points in mid_points.values_mut() {
+            points.sort_unstable();
+        }
+
+        Ok(TssIndex {
+            region_set: value,
+            mid_points,
+        })
+    }
+}
+
+impl TryFrom<&Path> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &Path) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TryFrom<&str> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TryFrom<String> for TssIndex {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
+        let region_set = match RegionSet::try_from(value) {
+            Ok(region_set) => region_set,
+            Err(_e) => {
+                return Err(GtarsGenomicDistError::TSSContentError(String::from(
+                    "Unable to open Tss file",
+                )));
+            }
+        };
+        TssIndex::try_from(region_set)
+    }
+}
+
+impl TssIndex {
+    ///
+    /// Calculate the distance from each region to the nearest TSS mid-point.
+    ///
+    /// Uses binary search for O(R * log M) complexity instead of O(R * M),
+    /// where R is the number of regions and M is the number of TSS midpoints.
+    ///
+    pub fn calc_tss_distances(&self, rs: &RegionSet) -> Result<Vec<u32>, GtarsGenomicDistError> {
+        let mut distances: Vec<u32> = Vec::with_capacity(rs.len());
+
+        for chromosome in rs.iter_chroms() {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
+                for region in rs.iter_chr_regions(chromosome.as_str()) {
+                    let target = region.mid_point();
+
+                    let min_distance = match chr_midpoints.binary_search(&target) {
+                        Ok(_) => 0,
+                        Err(idx) => {
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| target.abs_diff(chr_midpoints[i]));
+                            let right = chr_midpoints.get(idx).map(|&v| target.abs_diff(v));
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => l.min(r),
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(min_distance);
+                }
+            } else {
+                // No features on this chromosome — push u32::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(u32::MAX);
+                }
+            }
+        }
+        Ok(distances)
+    }
+
+    /// Calculate signed distances from each region to its nearest feature.
+    ///
+    /// Like `calc_tss_distances` but returns signed distances where:
+    /// - Positive: nearest feature is downstream (right) of the query
+    /// - Negative: nearest feature is upstream (left) of the query
+    ///
+    /// Sign convention: `nearest_feature_midpoint - query_midpoint`
+    /// (matches R GenomicDistributions `calcFeatureDist()`).
+    pub fn calc_feature_distances(
+        &self,
+        rs: &RegionSet,
+    ) -> Result<Vec<i64>, GtarsGenomicDistError> {
+        let mut distances: Vec<i64> = Vec::with_capacity(rs.len());
+
+        for chromosome in rs.iter_chroms() {
+            if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
+                for region in rs.iter_chr_regions(chromosome.as_str()) {
+                    let target = region.mid_point() as i64;
+
+                    let distance = match chr_midpoints.binary_search(&(target as u32)) {
+                        Ok(_) => 0i64,
+                        Err(idx) => {
+                            // distance = feature_mid - query_mid
+                            let left = idx
+                                .checked_sub(1)
+                                .map(|i| chr_midpoints[i] as i64 - target);
+                            let right =
+                                chr_midpoints.get(idx).map(|&v| v as i64 - target);
+
+                            match (left, right) {
+                                (Some(l), Some(r)) => {
+                                    if l.unsigned_abs() <= r.unsigned_abs() {
+                                        l
+                                    } else {
+                                        r
+                                    }
+                                }
+                                (Some(l), None) => l,
+                                (None, Some(r)) => r,
+                                (None, None) => continue,
+                            }
+                        }
+                    };
+                    distances.push(distance);
+                }
+            } else {
+                // No features on this chromosome — push i64::MAX for each region
+                for _ in rs.iter_chr_regions(chromosome.as_str()) {
+                    distances.push(i64::MAX);
+                }
+            }
+        }
+        Ok(distances)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Error;
+    use std::path::PathBuf;
+
+    use pretty_assertions::assert_eq;
+    use rstest::*;
+
+    fn get_test_path(file_name: &str) -> Result<PathBuf, Error> {
+        let file_path: PathBuf = std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/regionset")
+            .join(file_name);
+        Ok(file_path)
+    }
+
+    #[rstest]
+    fn test_calc_tss_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let tss_path = get_test_path("dummy_tss.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
+
+        let distances = tss_index.calc_tss_distances(&region_set).unwrap();
+
+        assert_eq!(distances.len(), 9);
+        assert_eq!(distances.iter().min(), Some(&2));
+    }
+
+    #[rstest]
+    fn test_calc_feature_distances() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let tss_path = get_test_path("dummy_tss.bed").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
+
+        let signed_distances = tss_index.calc_feature_distances(&region_set).unwrap();
+        let abs_distances = tss_index.calc_tss_distances(&region_set).unwrap();
+
+        // same number of results
+        assert_eq!(signed_distances.len(), abs_distances.len());
+        // absolute values should match calc_tss_distances
+        for (signed, abs) in signed_distances.iter().zip(abs_distances.iter()) {
+            assert_eq!(signed.unsigned_abs() as u32, *abs);
+        }
+        // should have both positive and negative distances
+        assert!(signed_distances.iter().any(|d| *d > 0));
+        assert!(signed_distances.iter().any(|d| *d < 0));
+    }
 }

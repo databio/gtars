@@ -27,9 +27,20 @@ pub fn partition_genome_into_bins(chrom_sizes: &HashMap<String, u32>, n_bins: u3
         }
     }
 
-    RegionSet {
-        regions,
-        header: None,
-        path: None,
+    RegionSet::from(regions)
+}
+
+/// Returns a sort key that orders chromosome names karyotypically:
+/// numeric (1, 2, …, 22) → X → Y → M/MT → everything else alphabetically.
+pub fn chrom_karyotype_key(chr: &str) -> (u8, u32, String) {
+    let bare = chr.strip_prefix("chr").unwrap_or(chr);
+    match bare {
+        "X" => (1, 0, String::new()),
+        "Y" => (2, 0, String::new()),
+        "M" | "MT" => (3, 0, String::new()),
+        _ => match bare.parse::<u32>() {
+            Ok(n) => (0, n, String::new()),
+            Err(_) => (4, 0, bare.to_string()),
+        },
     }
 }

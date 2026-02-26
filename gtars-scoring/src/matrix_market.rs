@@ -3,8 +3,8 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 
 use anyhow::Result;
-use flate2::write::GzEncoder;
 use flate2::Compression;
+use flate2::write::GzEncoder;
 
 /// Write sparse barcode counts directly to Matrix Market format
 ///
@@ -51,8 +51,17 @@ pub fn write_sparse_counts_to_mtx(
     let mtx_file = File::create(&mtx_path)?;
     let mut mtx_writer = BufWriter::new(GzEncoder::new(mtx_file, Compression::default()));
 
-    writeln!(mtx_writer, "%%MatrixMarket matrix coordinate integer general")?;
-    writeln!(mtx_writer, "{} {} {}", barcodes.len(), num_peaks, triplets.len())?;
+    writeln!(
+        mtx_writer,
+        "%%MatrixMarket matrix coordinate integer general"
+    )?;
+    writeln!(
+        mtx_writer,
+        "{} {} {}",
+        barcodes.len(),
+        num_peaks,
+        triplets.len()
+    )?;
 
     // Write sorted triplets (1-indexed as per Matrix Market standard!)
     for (row_idx, col_idx, value) in triplets {

@@ -7,10 +7,10 @@ use anyhow::{Context, Ok, Result, anyhow};
 use biocrs::biocache::BioCache;
 use biocrs::models::{NewResource, Resource};
 
-use reqwest::blocking::get;
 use std::fs::{File, create_dir_all, read_dir, remove_dir, remove_file};
 use std::io::{BufRead, BufReader, Error, ErrorKind, Write};
 use std::path::{Path, PathBuf};
+use ureq::get;
 
 use super::consts::{
     DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
@@ -192,7 +192,7 @@ impl BBClient {
 
         if bedfile_path.exists() {
             println!("Loading cached BED file from {:?}", bedfile_path.display());
-            return RegionSet::try_from(bedfile_path);
+            return Ok(RegionSet::try_from(bedfile_path)?);
         }
 
         let region_set = RegionSet::try_from(bed_id)
@@ -367,7 +367,12 @@ impl BBClient {
     fn download_bedset_data(&self, bedset_id: &str) -> Result<Vec<String>> {
         let bedset_url = format!("{}/v1/bedset/{}/bedfiles", self.bedbase_api, bedset_id);
 
-        let response = get(&bedset_url)?.text()?;
+        let response = get(&bedset_url)
+            .call()
+            .map_err(|e| anyhow!("Failed to GET {}: {}", bedset_url, e))?
+            .body_mut()
+            .read_to_string()
+            .map_err(|e| anyhow!("Failed to read response body for {}: {}", bedset_url, e))?;
 
         let json: serde_json::Value = serde_json::from_str(&response)?;
 

@@ -1,4 +1,4 @@
-use pyo3::exceptions::PyIndexError;
+use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
@@ -59,8 +59,10 @@ impl PyRegionSet {
     ///     RegionSet object
     fn py_new(path: &Bound<'_, PyAny>) -> PyResult<Self> {
         let path = path.to_string();
+        let regionset =
+            RegionSet::try_from(path).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(Self {
-            regionset: RegionSet::try_from(path)?,
+            regionset,
             curr: 0,
             identifier: None,
         })
@@ -98,14 +100,15 @@ impl PyRegionSet {
 
     #[getter]
     fn get_path(&self) -> PyResult<String> {
-        Ok(self
+        let path = self
             .regionset
             .path
-            .clone()
-            .unwrap()
+            .as_ref()
+            .ok_or_else(|| PyValueError::new_err("RegionSet has no associated path"))?;
+        let path_str = path
             .to_str()
-            .unwrap()
-            .to_string())
+            .ok_or_else(|| PyValueError::new_err("Path contains invalid UTF-8 characters"))?;
+        Ok(path_str.to_string())
     }
 
     #[getter]
@@ -178,23 +181,32 @@ impl PyRegionSet {
         chrom_size: &Bound<'_, PyAny>,
     ) -> PyResult<()> {
         self.regionset
-            .to_bigbed(out_path.to_string(), chrom_size.to_string())?;
+            .to_bigbed(out_path.to_string(), chrom_size.to_string())
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
 
     fn to_bed(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.regionset.to_bed(path.to_string())?;
+        self.regionset
+            .to_bed(path.to_string())
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
 
     fn to_bed_gz(&self, path: &Bound<'_, PyAny>) -> PyResult<()> {
-        self.regionset.to_bed_gz(path.to_string())?;
+        self.regionset
+            .to_bed_gz(path.to_string())
+            .map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
         Ok(())
     }
 
     fn sort(&mut self) -> PyResult<()> {
         self.regionset.sort();
         Ok(())
+    }
+
+    fn region_widths(&self) -> Vec<u32> {
+        self.regionset.region_widths()
     }
 
     fn mean_region_width(&self) -> f64 {
@@ -209,7 +221,7 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    fn calculate_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
+    fn chromosome_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
         let mut result: HashMap<String, PyChromosomeStatistics> = HashMap::new();
         let stats: HashMap<String, ChromosomeStatistics> = self.regionset.chromosome_statistics();
 

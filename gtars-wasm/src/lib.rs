@@ -1,10 +1,17 @@
 mod models;
 mod overlaprs;
+mod partitions;
+mod refget;
 mod regionset;
+mod signal;
 mod tokenizers;
+mod tss;
 mod utils;
 
 use wasm_bindgen::prelude::*;
+
+// Re-export refget functions at the top level
+pub use refget::*;
 
 #[wasm_bindgen]
 pub fn greet(name: &str) {

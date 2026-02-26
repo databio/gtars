@@ -16,6 +16,18 @@ mod fragsplit;
 #[cfg(feature = "scoring")]
 mod scoring;
 
+#[cfg(feature = "genomicdist")]
+mod genomicdist;
+
+#[cfg(feature = "genomicdist")]
+mod ranges;
+
+#[cfg(feature = "genomicdist")]
+mod consensus;
+
+#[cfg(feature = "genomicdist")]
+mod prep;
+
 #[cfg(feature = "scatrs")]
 mod scatrs;
 
@@ -53,6 +65,18 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "scoring")]
     let cmd = cmd.subcommand(scoring::cli::create_scoring_cli());
+
+    #[cfg(feature = "genomicdist")]
+    let cmd = cmd.subcommand(genomicdist::cli::create_genomicdist_cli());
+
+    #[cfg(feature = "genomicdist")]
+    let cmd = cmd.subcommand(ranges::cli::create_ranges_cli());
+
+    #[cfg(feature = "genomicdist")]
+    let cmd = cmd.subcommand(consensus::cli::create_consensus_cli());
+
+    #[cfg(feature = "genomicdist")]
+    let cmd = cmd.subcommand(prep::cli::create_prep_cli());
 
     #[cfg(feature = "scatrs")]
     let cmd = cmd.subcommand(scatrs::cli::create_scatrs_cli());
@@ -118,6 +142,38 @@ fn main() -> Result<()> {
         #[cfg(feature = "scoring")]
         Some((scoring::cli::FSCORING_CMD, matches)) => {
             scoring::handlers::run_scoring(matches)?;
+        }
+
+        //
+        // GENOMIC DISTRIBUTIONS
+        //
+        #[cfg(feature = "genomicdist")]
+        Some((genomicdist::cli::GENOMICDIST_CMD, matches)) => {
+            genomicdist::handlers::run_genomicdist(matches)?;
+        }
+
+        //
+        // INTERVAL RANGES
+        //
+        #[cfg(feature = "genomicdist")]
+        Some((ranges::cli::RANGES_CMD, matches)) => {
+            ranges::handlers::run_ranges(matches)?;
+        }
+
+        //
+        // CONSENSUS
+        //
+        #[cfg(feature = "genomicdist")]
+        Some((consensus::cli::CONSENSUS_CMD, matches)) => {
+            consensus::handlers::run_consensus(matches)?;
+        }
+
+        //
+        // PREP (bincode serialization)
+        //
+        #[cfg(feature = "genomicdist")]
+        Some((prep::cli::PREP_CMD, matches)) => {
+            prep::handlers::run_prep(matches)?;
         }
 
         //

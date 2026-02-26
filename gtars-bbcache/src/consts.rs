@@ -27,29 +27,6 @@ pub const BBCLIENT_CACHE_ENV: &str = "BBCLIENT_CACHE";
 /// ```
 pub const BEDBASE_API_ENV: &str = "BEDBASE_API";
 
-// Command-line interface command names
-
-/// Main bbcache command name.
-pub const BBCACHE_CMD: &str = "bbcache";
-
-/// Subcommand for caching a BED file.
-pub const BBCACHE_CACHEBED: &str = "cache-bed";
-
-/// Subcommand for caching a BED set.
-pub const BBCACHE_CACHEBEDSET: &str = "cache-bedset";
-
-/// Subcommand for seeking (locating) a cached resource.
-pub const BBCACHE_SEEK: &str = "seek";
-
-/// Subcommand for inspecting cached BED files.
-pub const BBCACHE_INSPECTBED: &str = "inspect-bedfiles";
-
-/// Subcommand for inspecting cached BED sets.
-pub const BBCACHE_INSPECTBEDSET: &str = "inspect-bedsets";
-
-/// Subcommand for removing cached resources.
-pub const BBCACHE_REMOVE: &str = "rm";
-
 // Directory structure constants
 
 /// Default subdirectory name for storing individual BED files.

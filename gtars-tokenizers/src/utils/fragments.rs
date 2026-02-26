@@ -75,7 +75,7 @@ where
         }
 
         let (barcode, token_ids) = parse_fragment_line(&line, i, tokenizer)?;
-        res.entry(barcode).or_insert_with(Vec::new).extend(token_ids);
+        res.entry(barcode).or_default().extend(token_ids);
     }
 
     Ok(res)
@@ -101,7 +101,7 @@ where
         }
 
         let (barcode, token_ids) = parse_fragment_line(&line, i, tokenizer)?;
-        let counts = res.entry(barcode).or_insert_with(HashMap::new);
+        let counts = res.entry(barcode).or_default();
 
         for token_id in token_ids {
             *counts.entry(token_id).or_insert(0) += 1;
@@ -143,13 +143,13 @@ mod tests {
         let counts = result.unwrap();
 
         // Verify we got barcodes
-        assert!(counts.len() > 0);
+        assert!(!counts.is_empty());
 
         // Verify counts are sparse HashMaps
-        for (barcode, peak_counts) in counts.iter() {
-            assert!(peak_counts.len() > 0);  // Each cell has some peaks
-            for (&peak_id, &count) in peak_counts.iter() {
-                assert!(count > 0);  // No zeros stored
+        for (_barcode, peak_counts) in counts.iter() {
+            assert!(!peak_counts.is_empty()); // Each cell has some peaks
+            for (&_peak_id, &count) in peak_counts.iter() {
+                assert!(count > 0); // No zeros stored
             }
         }
     }
