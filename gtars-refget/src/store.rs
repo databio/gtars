@@ -114,6 +114,9 @@ pub struct RefgetStore {
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
     fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
+    /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
+    /// Populated by ensure_decoded(), read by sequence_bytes().
+    decoded_cache: HashMap<[u8; 32], Vec<u8>>,
 }
 
 /// Metadata for the entire store.
@@ -312,6 +315,7 @@ impl RefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
+            decoded_cache: HashMap::new(),
         }
     }
 
@@ -1252,6 +1256,50 @@ impl RefgetStore {
                 String::from_utf8_lossy(seq_digest.as_ref())
             )
         })
+    }
+
+    /// Ensure a sequence is loaded and decoded into the decoded cache.
+    ///
+    /// Takes `&mut self` — intended for serial setup phases before parallel access.
+    /// After calling this, `sequence_bytes()` will return the decoded bytes.
+    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        if self.decoded_cache.contains_key(&actual_key) {
+            return Ok(());
+        }
+
+        self.ensure_sequence_loaded(&actual_key)?;
+
+        let record = self
+            .sequence_store
+            .get(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        let decoded = record
+            .decode()
+            .ok_or_else(|| anyhow!("Failed to decode sequence"))?;
+
+        self.decoded_cache.insert(actual_key, decoded.into_bytes());
+        Ok(())
+    }
+
+    /// Get decoded sequence bytes from the cache.
+    ///
+    /// Takes `&self` — safe for parallel access (e.g., from rayon workers).
+    /// Returns `None` if the sequence has not been decoded via `ensure_decoded()`.
+    pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        self.decoded_cache.get(&actual_key).map(|v| v.as_slice())
     }
 
     /// Get a sequence by collection digest and name, loading data if needed.
@@ -4097,6 +4145,58 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         let retrieved = store.get_sequence(digest.as_bytes()).unwrap();
         assert_eq!(retrieved.metadata().length, 4);
+    }
+
+    // =========================================================================
+    // Decoded cache tests
+    // =========================================================================
+
+    #[test]
+    fn test_ensure_decoded_then_sequence_bytes() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGTACGT");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+
+        let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
+        assert_eq!(bytes, b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_sequence_bytes_returns_none_before_ensure_decoded() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGT");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+
+        // Not yet decoded — should return None
+        assert!(store.sequence_bytes(digest.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn test_ensure_decoded_is_idempotent() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"GATTACA");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+
+        // Call ensure_decoded multiple times
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+
+        let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
+        assert_eq!(bytes, b"GATTACA");
     }
 
     // =========================================================================
