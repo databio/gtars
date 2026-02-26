@@ -5,7 +5,7 @@ use gtars_refget::collection::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fhr_metadata::FhrMetadata;
-use gtars_refget::store::{RefgetStore, RetrievedSequence, StorageMode};
+use gtars_refget::store::{FastaImportOptions, RefgetStore, RetrievedSequence, StorageMode};
 
 // =========================================================================
 // Helper macro for extracting store from external pointer
@@ -254,7 +254,7 @@ pub fn get_remote_url_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Result<()> {
     with_store!(store_ptr, store, {
         store
-            .add_sequence_collection_from_fasta(file_path)
+            .add_sequence_collection_from_fasta(file_path, FastaImportOptions::new())
             .map(|_| ())
             .map_err(|e| format!("Error importing FASTA: {}", e).into())
     })
@@ -267,11 +267,8 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
 #[extendr]
 pub fn add_fasta_store(store_ptr: Robj, file_path: &str, force: bool) -> extendr_api::Result<List> {
     with_store!(store_ptr, store, {
-        let result = if force {
-            store.add_sequence_collection_from_fasta_force(file_path)
-        } else {
-            store.add_sequence_collection_from_fasta(file_path)
-        };
+        let opts = FastaImportOptions::new().force(force);
+        let result = store.add_sequence_collection_from_fasta(file_path, opts);
         result
             .map(|(metadata, was_new)| {
                 list!(

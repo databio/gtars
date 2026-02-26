@@ -64,6 +64,33 @@ fn make_fai(
     }
 }
 
+/// Extract namespaced aliases from a FASTA header.
+///
+/// Scans all tokens (whitespace-separated) in the full header line for
+/// patterns matching `{namespace}:{value}` where namespace is in the
+/// provided list.
+///
+/// # Arguments
+/// * `header` - Full header text (after '>'), including name and description
+/// * `namespaces` - List of namespace prefixes to match (e.g. ["ncbi", "refseq"])
+///
+/// # Returns
+/// Vec of (namespace, alias_value) tuples found in the header.
+pub fn extract_aliases_from_header(header: &str, namespaces: &[&str]) -> Vec<(String, String)> {
+    if namespaces.is_empty() {
+        return Vec::new();
+    }
+    let mut aliases = Vec::new();
+    for token in header.split_whitespace() {
+        if let Some((prefix, value)) = token.split_once(':') {
+            if namespaces.contains(&prefix) {
+                aliases.push((prefix.to_string(), value.to_string()));
+            }
+        }
+    }
+    aliases
+}
+
 /// Configuration for FASTA parsing to avoid unnecessary work.
 #[derive(Clone, Copy)]
 pub struct ParseOptions {
@@ -495,6 +522,33 @@ mod tests {
         assert_eq!(collection.sequences.len(), 1);
         assert_eq!(collection.sequences[0].metadata().name, "chr1");
         assert_eq!(collection.sequences[0].metadata().length, 4);
+    }
+
+    #[test]
+    fn test_extract_aliases_from_header() {
+        let aliases = extract_aliases_from_header(
+            "chr1 ncbi:NC_000001.11 refseq:NC_000001.11 some text",
+            &["ncbi", "refseq"],
+        );
+        assert_eq!(aliases.len(), 2);
+        assert!(aliases.contains(&("ncbi".to_string(), "NC_000001.11".to_string())));
+        assert!(aliases.contains(&("refseq".to_string(), "NC_000001.11".to_string())));
+
+        // Unmatched namespace ignored
+        let aliases = extract_aliases_from_header("chr1 foo:bar", &["ncbi"]);
+        assert!(aliases.is_empty());
+
+        // Empty namespaces = no extraction
+        let aliases = extract_aliases_from_header("chr1 ncbi:NC_000001.11", &[]);
+        assert!(aliases.is_empty());
+
+        // Name itself can be a namespaced ID
+        let aliases = extract_aliases_from_header("ncbi:NC_000001.11 description", &["ncbi"]);
+        assert_eq!(aliases.len(), 1);
+        assert_eq!(
+            aliases[0],
+            ("ncbi".to_string(), "NC_000001.11".to_string())
+        );
     }
 
     #[test]
