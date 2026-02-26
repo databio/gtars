@@ -721,7 +721,6 @@ pub fn r_calc_summary_signal(
     n_conditions: i32,
 ) -> extendr_api::Result<List> {
     with_regionset!(rs_ptr, rs, {
-        let n_reg = n_regions as usize;
         let n_cond = n_conditions as usize;
 
         // Parse region IDs into RegionSet
@@ -745,20 +744,11 @@ pub fn r_calc_summary_signal(
             })
             .collect();
 
-        // Reshape flat values into Vec<Vec<f64>> (row-major)
-        let mut values: Vec<Vec<f64>> = Vec::with_capacity(n_reg);
-        for i in 0..n_reg {
-            let row_start = i * n_cond;
-            let row_end = row_start + n_cond;
-            if row_end <= values_flat.len() {
-                values.push(values_flat[row_start..row_end].to_vec());
-            }
-        }
-
         let signal_matrix = SignalMatrix {
             regions: RegionSet::from(regions),
             condition_names: condition_names.clone(),
-            values,
+            n_conditions: n_cond,
+            values: values_flat,
         };
 
         let result = calc_summary_signal(rs, &signal_matrix)
