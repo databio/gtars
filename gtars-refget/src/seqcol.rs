@@ -222,7 +222,7 @@ impl RefgetStore {
 
 #[cfg(test)]
 mod tests {
-    use crate::store::RefgetStore;
+    use crate::store::{FastaImportOptions, RefgetStore};
     use std::path::PathBuf;
 
     /// Copy a test FASTA to a temp directory to avoid writing RGSI cache files
@@ -241,7 +241,7 @@ mod tests {
         assert!(store.has_ancillary_digests());
 
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         // Ancillary digests should be present
@@ -263,7 +263,7 @@ mod tests {
         assert!(!store.has_ancillary_digests());
 
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         // Ancillary digests should NOT be present
@@ -276,7 +276,7 @@ mod tests {
     fn test_collection_level1() {
         let mut store = RefgetStore::in_memory();
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         let lvl1 = store.get_collection_level1(&metadata.digest).unwrap();
@@ -292,7 +292,7 @@ mod tests {
     fn test_collection_level2() {
         let mut store = RefgetStore::in_memory();
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         let lvl2 = store.get_collection_level2(&metadata.digest).unwrap();
@@ -314,10 +314,10 @@ mod tests {
     fn test_compare_collections() {
         let mut store = RefgetStore::in_memory();
         let (meta_a, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
         let (meta_b, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa", FastaImportOptions::new())
             .unwrap();
 
         // Self-compare: identical digests, all elements same order
@@ -340,11 +340,11 @@ mod tests {
     fn test_compare_mixed_ancillary() {
         let mut store = RefgetStore::in_memory();
         let (meta_a, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
         store.disable_ancillary_digests();
         let (meta_b, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa", FastaImportOptions::new())
             .unwrap();
 
         let result = store.compare(&meta_a.digest, &meta_b.digest).unwrap();
@@ -357,7 +357,7 @@ mod tests {
     fn test_find_collections_by_attribute() {
         let mut store = RefgetStore::in_memory();
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         // Search by names digest should find our collection
@@ -402,7 +402,7 @@ mod tests {
     fn test_get_attribute() {
         let mut store = RefgetStore::in_memory();
         let (metadata, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         // Get names array
@@ -435,7 +435,7 @@ mod tests {
         {
             let mut store = RefgetStore::on_disk(dir_path).unwrap();
             store
-                .add_sequence_collection_from_fasta(&temp_fasta)
+                .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
                 .unwrap();
             store.write().unwrap();
         }
@@ -473,7 +473,7 @@ mod tests {
         for (fa_name, bundle) in fixture.as_object().unwrap() {
             let fasta_path = format!("../tests/data/fasta/{}", fa_name);
             let (meta, _) = store
-                .add_sequence_collection_from_fasta(&fasta_path)
+                .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
                 .unwrap_or_else(|e| panic!("{}: {}", fa_name, e));
 
             let lvl1 = bundle["level1"].as_object().unwrap();
@@ -513,7 +513,7 @@ mod tests {
             assert!(store.has_ancillary_digests());
             assert!(!store.has_attribute_index());
             store
-                .add_sequence_collection_from_fasta(&temp_fasta)
+                .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
                 .unwrap();
             store.write().unwrap();
         }

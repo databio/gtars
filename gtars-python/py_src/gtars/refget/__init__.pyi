@@ -565,7 +565,10 @@ class RefgetStore:
         ...
 
     def add_sequence_collection_from_fasta(
-        self, file_path: Union[str, PathLike], force: bool = False
+        self,
+        file_path: Union[str, PathLike],
+        force: bool = False,
+        namespaces: Optional[List[str]] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -576,6 +579,9 @@ class RefgetStore:
             file_path: Path to the FASTA file to import.
             force: If True, overwrite existing collections/sequences.
                 If False (default), skip duplicates.
+            namespaces: Optional list of namespace prefixes to extract aliases from
+                FASTA headers. For example, ["ncbi", "refseq"] will scan headers
+                for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
 
         Returns:
             A tuple containing:
@@ -590,6 +596,11 @@ class RefgetStore:
             store = RefgetStore.in_memory()
             metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
             print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest}")
+
+            # Extract aliases from FASTA headers
+            metadata, was_new = store.add_sequence_collection_from_fasta(
+                "genome.fa", namespaces=["ncbi", "refseq"]
+            )
         """
         ...
 

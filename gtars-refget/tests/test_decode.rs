@@ -6,7 +6,7 @@
 //! Note: Unit tests for the decode() method itself (including edge cases,
 //! different alphabets, encoding schemes) are in src/collection.rs
 
-use gtars_refget::store::RefgetStore;
+use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -31,7 +31,7 @@ fn test_decode_workflow_encoded() {
     // Create an encoded (bit-packed) store (default mode)
     let mut store = RefgetStore::in_memory();
     store
-        .add_sequence_collection_from_fasta(fasta_path)
+        .add_sequence_collection_from_fasta(fasta_path, FastaImportOptions::new())
         .expect("Failed to import FASTA");
 
     // Get the collection digest
@@ -76,7 +76,7 @@ fn test_decode_workflow_raw() {
     let mut store = RefgetStore::in_memory();
     store.disable_encoding(); // Switch to Raw mode
     store
-        .add_sequence_collection_from_fasta(fasta_path)
+        .add_sequence_collection_from_fasta(fasta_path, FastaImportOptions::new())
         .expect("Failed to import FASTA");
 
     // Get the collection digest

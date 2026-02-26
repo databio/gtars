@@ -1100,3 +1100,44 @@ def test_refgetstore_compare_two_collections(tmp_path):
     assert "array_elements" in comparison
     assert comparison["digests"]["a"] == meta1.digest
     assert comparison["digests"]["b"] == meta2.digest
+
+
+def test_fasta_namespace_alias_extraction(tmp_path):
+    """Test that namespace aliases are extracted from FASTA headers during loading."""
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(
+        ">chr1 ncbi:NC_000001.11 refseq:NC_000001.11\nACGT\n"
+        ">chr2 ncbi:NC_000002.12\nTGCA\n"
+    )
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection_from_fasta(str(fasta), namespaces=["ncbi", "refseq"])
+
+    # Verify aliases were registered and can be resolved
+    seq = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    assert seq is not None
+    assert seq.name == "chr1"
+
+    seq = store.get_sequence_by_alias("refseq", "NC_000001.11")
+    assert seq is not None
+    assert seq.name == "chr1"
+
+    seq = store.get_sequence_by_alias("ncbi", "NC_000002.12")
+    assert seq is not None
+    assert seq.name == "chr2"
+
+    # Non-existent alias should return None
+    seq = store.get_sequence_by_alias("ncbi", "NC_999999.1")
+    assert seq is None
+
+
+def test_fasta_no_namespaces_no_aliases(tmp_path):
+    """Test that no aliases are registered when namespaces is not provided."""
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1 ncbi:NC_000001.11\nACGT\n")
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection_from_fasta(str(fasta))
+
+    seq = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    assert seq is None
