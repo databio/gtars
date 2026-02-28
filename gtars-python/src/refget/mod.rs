@@ -14,8 +14,7 @@ use gtars_refget::collection::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::RefgetStore;
-use gtars_refget::store::StorageMode;
+use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -1247,19 +1246,23 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
+        namespaces: Option<Vec<String>>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
-        let result = if force {
-            self.inner
-                .add_sequence_collection_from_fasta_force(file_path)
-        } else {
-            self.inner.add_sequence_collection_from_fasta(file_path)
-        };
+        let ns_refs: Vec<&str> = namespaces
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        let opts = FastaImportOptions::new()
+            .force(force)
+            .namespaces(&ns_refs);
+        let result = self.inner
+            .add_sequence_collection_from_fasta(file_path, opts);
         result
             .map(|(metadata, was_new)| (PySequenceCollectionMetadata::from(metadata), was_new))
             .map_err(|e| {
@@ -2118,15 +2121,31 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a sequence alias to the sequence record.
-    fn get_sequence_by_alias(
+    /// Resolve a sequence alias to sequence metadata (no data loading).
+    fn get_sequence_metadata_by_alias(
         &self,
         namespace: &str,
         alias: &str,
-    ) -> Option<PySequenceRecord> {
+    ) -> Option<PySequenceMetadata> {
+        self.inner
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceMetadata::from(m.clone()))
+    }
+
+    /// Resolve a sequence alias and return the loaded sequence record.
+    fn get_sequence_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> PyResult<PySequenceRecord> {
         self.inner
             .get_sequence_by_alias(namespace, alias)
-            .map(|r| PySequenceRecord::from(r.clone()))
+            .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence alias not found: {}/{} ({})", namespace, alias, e
+                ))
+            })
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -2174,15 +2193,31 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a collection alias to the collection metadata.
-    fn get_collection_by_alias(
+    /// Resolve a collection alias to collection metadata (no data loading).
+    fn get_collection_metadata_by_alias(
         &self,
         namespace: &str,
         alias: &str,
     ) -> Option<PySequenceCollectionMetadata> {
         self.inner
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceCollectionMetadata::from(m.clone()))
+    }
+
+    /// Resolve a collection alias and return the loaded collection.
+    fn get_collection_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> PyResult<PySequenceCollection> {
+        self.inner
             .get_collection_by_alias(namespace, alias)
-            .map(|r| PySequenceCollectionMetadata::from(r.metadata().clone()))
+            .map(|collection| PySequenceCollection::from(collection))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Collection alias not found: {}/{} ({})", namespace, alias, e
+                ))
+            })
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.

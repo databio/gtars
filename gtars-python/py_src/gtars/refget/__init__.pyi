@@ -565,7 +565,10 @@ class RefgetStore:
         ...
 
     def add_sequence_collection_from_fasta(
-        self, file_path: Union[str, PathLike], force: bool = False
+        self,
+        file_path: Union[str, PathLike],
+        force: bool = False,
+        namespaces: Optional[List[str]] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -576,6 +579,9 @@ class RefgetStore:
             file_path: Path to the FASTA file to import.
             force: If True, overwrite existing collections/sequences.
                 If False (default), skip duplicates.
+            namespaces: Optional list of namespace prefixes to extract aliases from
+                FASTA headers. For example, ["ncbi", "refseq"] will scan headers
+                for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
 
         Returns:
             A tuple containing:
@@ -590,6 +596,11 @@ class RefgetStore:
             store = RefgetStore.in_memory()
             metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
             print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest}")
+
+            # Extract aliases from FASTA headers
+            metadata, was_new = store.add_sequence_collection_from_fasta(
+                "genome.fa", namespaces=["ncbi", "refseq"]
+            )
         """
         ...
 
@@ -1125,8 +1136,15 @@ class RefgetStore:
     def add_sequence_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a sequence alias: namespace/alias maps to sequence digest."""
         ...
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
-        """Resolve a sequence alias to the sequence record."""
+    def get_sequence_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceMetadata]:
+        """Resolve a sequence alias to sequence metadata (no data loading)."""
+        ...
+    def get_sequence_by_alias(self, namespace: str, alias: str) -> SequenceRecord:
+        """Resolve a sequence alias and return the loaded sequence record.
+
+        Raises:
+            KeyError: If the alias is not found.
+        """
         ...
     def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this sequence digest."""
@@ -1148,8 +1166,15 @@ class RefgetStore:
     def add_collection_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a collection alias: namespace/alias maps to collection digest."""
         ...
-    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
-        """Resolve a collection alias to the collection metadata."""
+    def get_collection_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
+        """Resolve a collection alias to collection metadata (no data loading)."""
+        ...
+    def get_collection_by_alias(self, namespace: str, alias: str) -> SequenceCollection:
+        """Resolve a collection alias and return the loaded collection.
+
+        Raises:
+            KeyError: If the alias is not found.
+        """
         ...
     def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this collection digest."""

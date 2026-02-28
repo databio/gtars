@@ -484,11 +484,11 @@ get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_fil
 #' @param digest Sequence digest
 add_sequence_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_sequence_alias_store, store_ptr, namespace, alias, digest)
 
-#' Get sequence by alias
+#' Get sequence metadata by alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name
-get_sequence_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_sequence_by_alias_store, store_ptr, namespace, alias)
+get_sequence_metadata_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_sequence_metadata_by_alias_store, store_ptr, namespace, alias)
 
 #' Get all aliases for a sequence
 #' @param store_ptr External pointer to RefgetStore
@@ -523,11 +523,11 @@ load_sequence_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__
 #' @param digest Collection digest
 add_collection_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_collection_alias_store, store_ptr, namespace, alias, digest)
 
-#' Get collection by alias
+#' Get collection metadata by alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name
-get_collection_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_collection_by_alias_store, store_ptr, namespace, alias)
+get_collection_metadata_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_collection_metadata_by_alias_store, store_ptr, namespace, alias)
 
 #' Get all aliases for a collection
 #' @param store_ptr External pointer to RefgetStore

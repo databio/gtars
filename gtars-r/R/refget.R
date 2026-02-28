@@ -675,10 +675,10 @@ setMethod('add_sequence_alias', 'RefgetStore', function(store, namespace, alias,
 })
 
 #' @export
-setGeneric('get_sequence_by_alias', function(store, namespace, alias) standardGeneric('get_sequence_by_alias'))
-setMethod('get_sequence_by_alias', 'RefgetStore', function(store, namespace, alias) {
-  result <- .Call(wrap__get_sequence_by_alias_store, store@ptr, namespace, alias)
-  convert_to_sequence_record(result)
+setGeneric('get_sequence_metadata_by_alias', function(store, namespace, alias) standardGeneric('get_sequence_metadata_by_alias'))
+setMethod('get_sequence_metadata_by_alias', 'RefgetStore', function(store, namespace, alias) {
+  result <- .Call(wrap__get_sequence_metadata_by_alias_store, store@ptr, namespace, alias)
+  convert_to_sequence_metadata(result)
 })
 
 #' @export
@@ -723,9 +723,9 @@ setMethod('add_collection_alias', 'RefgetStore', function(store, namespace, alia
 })
 
 #' @export
-setGeneric('get_collection_by_alias', function(store, namespace, alias) standardGeneric('get_collection_by_alias'))
-setMethod('get_collection_by_alias', 'RefgetStore', function(store, namespace, alias) {
-  result <- .Call(wrap__get_collection_by_alias_store, store@ptr, namespace, alias)
+setGeneric('get_collection_metadata_by_alias', function(store, namespace, alias) standardGeneric('get_collection_metadata_by_alias'))
+setMethod('get_collection_metadata_by_alias', 'RefgetStore', function(store, namespace, alias) {
+  result <- .Call(wrap__get_collection_metadata_by_alias_store, store@ptr, namespace, alias)
   convert_to_collection_metadata(result)
 })
 
