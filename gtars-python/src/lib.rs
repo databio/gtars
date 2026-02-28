@@ -17,6 +17,8 @@ mod tokenizers;
 mod utils;
 #[cfg(feature = "lola")]
 mod lola;
+#[cfg(feature = "vrs")]
+mod vrs;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -69,6 +71,13 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         let lola_module = pyo3::wrap_pymodule!(lola::lola);
         m.add_wrapped(lola_module)?;
         sys_modules.set_item("gtars.lola", m.getattr("lola")?)?;
+    }
+
+    #[cfg(feature = "vrs")]
+    {
+        let vrs_module = pyo3::wrap_pymodule!(vrs::vrs);
+        m.add_wrapped(vrs_module)?;
+        sys_modules.set_item("gtars.vrs", m.getattr("vrs")?)?;
     }
 
     // add constants
