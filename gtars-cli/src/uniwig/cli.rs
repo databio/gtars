@@ -15,7 +15,7 @@ pub fn create_uniwig_cli() -> Command {
                 .long("file")
                 .short('f')
                 .help("Path to the combined bed file we want to transform or a sorted bam file")
-                .required(true),
+                .required(false),
         )
         .arg(
             Arg::new("filetype")
@@ -60,15 +60,15 @@ pub fn create_uniwig_cli() -> Command {
             Arg::new("fileheader")
                 .long("fileheader")
                 .short('l')
-                .help("Name of the file")
-                .required(true),
+                .help("Name of the file (required for batch mode)")
+                .required(false),
         )
         .arg(
             Arg::new("outputtype")
                 .long("outputtype")
                 .short('y')
                 .help("Output as wiggle or npy")
-                .required(true),
+                .default_value("wig"),
         )
         .arg(
             Arg::new("counttype")
@@ -124,5 +124,25 @@ pub fn create_uniwig_cli() -> Command {
                 .default_value("fixed")
                 .help("Wig output step type: 'fixed' (every position) or 'variable' (non-zero only)")
                 .required(false),
+        )
+        .arg(
+            Arg::new("streaming")
+                .long("streaming")
+                .help("Use the streaming processor (O(smooth_size) memory, BED only)")
+                .action(ArgAction::SetTrue),
+        )
+        .arg(
+            Arg::new("dense")
+                .long("dense")
+                .help("Streaming: max gap width to fill with zeros. 0=sparse (default), -1=fully dense, N=fill gaps<=N")
+                .value_parser(clap::value_parser!(i64))
+                .default_value("100")
+                .required(false),
+        )
+        .arg(
+            Arg::new("stdout")
+                .long("stdout")
+                .help("Write output to stdout instead of files")
+                .action(ArgAction::SetTrue),
         )
 }
