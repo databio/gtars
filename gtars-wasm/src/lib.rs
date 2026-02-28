@@ -1,3 +1,4 @@
+mod bed_stream;
 mod models;
 mod overlaprs;
 mod partitions;
@@ -10,7 +11,8 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 
-// Re-export refget functions at the top level
+// Re-export functions at the top level
+pub use bed_stream::*;
 pub use refget::*;
 
 #[wasm_bindgen]
