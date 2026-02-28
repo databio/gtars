@@ -2370,6 +2370,45 @@ impl PyRefgetStore {
             index: 0,
         })
     }
+
+    /// Compute GA4GH VRS Allele identifiers for variants in a VCF file.
+    ///
+    /// Reads the VCF, normalizes each variant against the reference sequence
+    /// (from this store), and computes VRS digests.
+    ///
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection (genome assembly).
+    ///     vcf_path (str): Path to a plain-text VCF file.
+    ///
+    /// Returns:
+    ///     list[dict]: Each dict has keys: chrom, pos, ref, alt, vrs_id.
+    fn compute_vrs_ids<'py>(
+        &mut self,
+        py: Python<'py>,
+        collection_digest: &str,
+        vcf_path: &str,
+    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+        let results = gtars_vrs::vcf::compute_vrs_ids_from_vcf(
+            &mut self.inner,
+            collection_digest,
+            vcf_path,
+        )
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("VRS computation failed: {}", e))
+        })?;
+
+        let mut py_results = Vec::with_capacity(results.len());
+        for r in &results {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("chrom", &r.chrom)?;
+            dict.set_item("pos", r.pos)?;
+            dict.set_item("ref", &r.ref_allele)?;
+            dict.set_item("alt", &r.alt_allele)?;
+            dict.set_item("vrs_id", &r.vrs_id)?;
+            py_results.push(dict);
+        }
+        Ok(py_results)
+    }
 }
 
 /// Iterator for RefgetStore that yields SequenceMetadata.

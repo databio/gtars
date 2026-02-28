@@ -20,3 +20,4 @@ gtars-genomicdist = {path = "../gtars-genomicdist" }
 gtars-refget = { path = "../gtars-refget" }
 gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
 gtars-io = { path = "../gtars-io" }
+gtars-vrs = { path = "../gtars-vrs" }

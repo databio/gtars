@@ -16,6 +16,7 @@ members = [
     "gtars-igd",
     "gtars-fragsplit",
     "gtars-scoring",
+    "gtars-vrs",
     "gtars",
 ]
 

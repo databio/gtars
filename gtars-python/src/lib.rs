@@ -6,6 +6,7 @@ mod models;
 mod refget;
 mod tokenizers;
 mod utils;
+mod vrs;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -16,12 +17,14 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let models_module = pyo3::wrap_pymodule!(models::models);
     let utils_module = pyo3::wrap_pymodule!(utils::utils);
     let gd_module = pyo3::wrap_pymodule!(genomic_distributions::genomic_distributions);
+    let vrs_module = pyo3::wrap_pymodule!(vrs::vrs);
 
     m.add_wrapped(refget_module)?;
     m.add_wrapped(tokenize_module)?;
     m.add_wrapped(models_module)?;
     m.add_wrapped(utils_module)?;
     m.add_wrapped(gd_module)?;
+    m.add_wrapped(vrs_module)?;
 
     let sys = PyModule::import(py, "sys")?;
     let binding = sys.getattr("modules")?;
@@ -36,6 +39,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         "gtars.genomic_distributions",
         m.getattr("genomic_distributions")?,
     )?;
+    sys_modules.set_item("gtars.vrs", m.getattr("vrs")?)?;
 
     // add constants
     m.add("__version__", VERSION)?;
