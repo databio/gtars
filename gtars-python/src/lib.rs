@@ -15,6 +15,8 @@ mod refget;
 mod tokenizers;
 #[cfg(any(feature = "utils", feature = "tokenizers"))]
 mod utils;
+#[cfg(feature = "vrs")]
+mod vrs;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -60,6 +62,13 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
             "gtars.genomic_distributions",
             m.getattr("genomic_distributions")?,
         )?;
+    }
+
+    #[cfg(feature = "vrs")]
+    {
+        let vrs_module = pyo3::wrap_pymodule!(vrs::vrs);
+        m.add_wrapped(vrs_module)?;
+        sys_modules.set_item("gtars.vrs", m.getattr("vrs")?)?;
     }
 
     // add constants
