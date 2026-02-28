@@ -2374,7 +2374,7 @@ impl RefgetStore {
             {
                 meta.digest.clone()
             } else {
-                String::from_utf8_lossy(collection_digest).to_string()
+                key_to_digest_string(collection_digest)
             };
 
             let relative_path = format!("collections/{}.rgsi", digest_str);
@@ -2408,8 +2408,8 @@ impl RefgetStore {
             if loaded_digest != *collection_digest {
                 return Err(anyhow!(
                     "Collection digest mismatch: expected {}, got {}",
-                    String::from_utf8_lossy(collection_digest),
-                    String::from_utf8_lossy(&loaded_digest)
+                    key_to_digest_string(collection_digest),
+                    key_to_digest_string(&loaded_digest)
                 ));
             }
 

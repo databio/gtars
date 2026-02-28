@@ -23,6 +23,7 @@ bin/
 /.idea/gtars.iml
 /gtars/tests/data/test1.bw
 
+.claude/
 .DS_Store
 .Rhistory
 tests/data/out/region_scoring_count.csv.gz

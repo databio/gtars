@@ -36,9 +36,11 @@ use std::io::Cursor;
 /// such as bed file.
 ///
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionSet {
     pub regions: Vec<Region>,
     pub header: Option<String>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub path: Option<PathBuf>,
 }
 

@@ -17,6 +17,7 @@ polars = {version = "0.51.0", optional = true, default-features = false, feature
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 flate2 = { workspace = true }
+serde = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
@@ -28,3 +29,4 @@ default = []
 bigbed = ["dep:bigtools"]
 http = ["dep:ureq"]
 dataframe = ["dep:polars"]
+serde = ["dep:serde"]

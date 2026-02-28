@@ -25,6 +25,9 @@ mod ranges;
 #[cfg(feature = "genomicdist")]
 mod consensus;
 
+#[cfg(feature = "genomicdist")]
+mod prep;
+
 use anyhow::Result;
 use clap::Command;
 
@@ -68,6 +71,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "genomicdist")]
     let cmd = cmd.subcommand(consensus::cli::create_consensus_cli());
+
+    #[cfg(feature = "genomicdist")]
+    let cmd = cmd.subcommand(prep::cli::create_prep_cli());
 
     cmd
 }
@@ -154,6 +160,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "genomicdist")]
         Some((consensus::cli::CONSENSUS_CMD, matches)) => {
             consensus::handlers::run_consensus(matches)?;
+        }
+
+        //
+        // PREP (bincode serialization)
+        //
+        #[cfg(feature = "genomicdist")]
+        Some((prep::cli::PREP_CMD, matches)) => {
+            prep::handlers::run_prep(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),
