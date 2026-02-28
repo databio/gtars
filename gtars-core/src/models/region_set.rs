@@ -68,11 +68,6 @@ impl TryFrom<&Path> for RegionSet {
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
                     Err(_) => {
-                        // Extract bbid from the path (e.g., the file stem)
-                        let bbid = path.to_str().ok_or_else(|| {
-                            RegionSetError::InvalidBedbaseIdentifier(format!("{:?}", path))
-                        })?;
-
                         return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
 
                         // // This code should be disabled, because it potentially breaks bedboss pipeline

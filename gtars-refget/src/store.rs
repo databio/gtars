@@ -76,7 +76,6 @@ pub struct RetrievedSequence {
     pub end: u32,
 }
 
-/// Global store handling cross-collection sequence management
 /// Options for importing a FASTA file into a RefgetStore.
 pub struct FastaImportOptions<'a> {
     force: bool,
@@ -93,21 +92,26 @@ impl<'a> Default for FastaImportOptions<'a> {
 }
 
 impl<'a> FastaImportOptions<'a> {
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    #[must_use]
     pub fn force(mut self, yes: bool) -> Self {
         self.force = yes;
         self
     }
 
+    #[must_use]
     pub fn namespaces(mut self, ns: &'a [&'a str]) -> Self {
         self.namespaces = ns;
         self
     }
 }
 
+/// Global store handling cross-collection sequence management.
+///
 /// Holds a global sequence_store, which holds all sequences (across collections) so that
 /// sequences are deduplicated.
 /// This allows lookup by sequence digest directly (bypassing collection information).
@@ -1278,8 +1282,12 @@ impl RefgetStore {
 
     /// Ensure a sequence is loaded and decoded into the decoded cache.
     ///
-    /// Takes `&mut self` — intended for serial setup phases before parallel access.
-    /// After calling this, `sequence_bytes()` will return the decoded bytes.
+    /// Call this during a serial setup phase to populate the cache.
+    /// Once populated, use `sequence_bytes()` for read-only access
+    /// (e.g., from multiple rayon workers sharing `&RefgetStore`).
+    ///
+    /// Note: decoded sequences are cached indefinitely. For large genomes,
+    /// use `clear_decoded_cache()` to reclaim memory when done.
     pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -1306,9 +1314,15 @@ impl RefgetStore {
         Ok(())
     }
 
+    /// Clear the decoded sequence cache to reclaim memory.
+    pub fn clear_decoded_cache(&mut self) {
+        self.decoded_cache.clear();
+    }
+
     /// Get decoded sequence bytes from the cache.
     ///
-    /// Takes `&self` — safe for parallel access (e.g., from rayon workers).
+    /// Takes `&self` — safe for concurrent read access from multiple threads
+    /// sharing a `&RefgetStore` reference (e.g., via `Arc` or scoped threads).
     /// Returns `None` if the sequence has not been decoded via `ensure_decoded()`.
     pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
         let digest_key = seq_digest.to_key();
@@ -4471,7 +4485,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
 
         let mut store = RefgetStore::in_memory();
-        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
 
         store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
 
@@ -4486,7 +4500,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
 
         let mut store = RefgetStore::in_memory();
-        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
 
         store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
 
@@ -4749,19 +4763,19 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Verify aliases were registered
         let result = store.get_sequence_by_alias("ncbi", "NC_000001.11");
-        assert!(result.is_some(), "ncbi alias for chr1 should be found");
+        assert!(result.is_ok(), "ncbi alias for chr1 should be found");
         assert_eq!(result.unwrap().metadata().name, "chr1");
 
         let result = store.get_sequence_by_alias("refseq", "NC_000001.11");
-        assert!(result.is_some(), "refseq alias for chr1 should be found");
+        assert!(result.is_ok(), "refseq alias for chr1 should be found");
 
         let result = store.get_sequence_by_alias("ncbi", "NC_000002.12");
-        assert!(result.is_some(), "ncbi alias for chr2 should be found");
+        assert!(result.is_ok(), "ncbi alias for chr2 should be found");
         assert_eq!(result.unwrap().metadata().name, "chr2");
 
-        // Non-existent alias should return None
+        // Non-existent alias should return Err
         let result = store.get_sequence_by_alias("ncbi", "NC_999999.1");
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 
     #[test]
@@ -4781,6 +4795,6 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // No aliases should be registered when namespaces is empty
         let result = store.get_sequence_by_alias("ncbi", "NC_000001.11");
-        assert!(result.is_none());
+        assert!(result.is_err());
     }
 }

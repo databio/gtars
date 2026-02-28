@@ -1169,9 +1169,9 @@ def test_fasta_namespace_alias_extraction(tmp_path):
     assert seq is not None
     assert seq.name == "chr2"
 
-    # Non-existent alias should return None
-    seq = store.get_sequence_by_alias("ncbi", "NC_999999.1")
-    assert seq is None
+    # Non-existent alias should raise KeyError
+    with pytest.raises(KeyError):
+        store.get_sequence_by_alias("ncbi", "NC_999999.1")
 
 
 def test_fasta_no_namespaces_no_aliases(tmp_path):
@@ -1182,5 +1182,5 @@ def test_fasta_no_namespaces_no_aliases(tmp_path):
     store = RefgetStore.in_memory()
     store.add_sequence_collection_from_fasta(str(fasta))
 
-    seq = store.get_sequence_by_alias("ncbi", "NC_000001.11")
-    assert seq is None
+    with pytest.raises(KeyError):
+        store.get_sequence_by_alias("ncbi", "NC_000001.11")
