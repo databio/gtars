@@ -1,5 +1,5 @@
 mod encoding;
-mod py_tokenizers;
+pub(crate) mod py_tokenizers;
 mod universe;
 mod utils;
 

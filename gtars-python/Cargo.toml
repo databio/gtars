@@ -15,6 +15,7 @@ pyo3 = { version = "0.27.1", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
 # our code
+gtars-bm25 = { path = "../gtars-bm25" }
 gtars-core = { path = "../gtars-core", features=["bigbed", "http"] }
 gtars-genomicdist = {path = "../gtars-genomicdist" }
 gtars-refget = { path = "../gtars-refget" }
