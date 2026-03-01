@@ -1,7 +1,7 @@
 use pyo3::prelude::*;
 
 use anyhow::Result;
-use gtars_bm25::{BM25Builder, SparseVector};
+use gtars_bm25::{Bm25Builder, SparseVector};
 use gtars_tokenizers::{Tokenizer, create_tokenize_core_from_universe, config::TokenizerType};
 
 use crate::tokenizers::py_tokenizers::PyTokenizer;
@@ -40,7 +40,7 @@ impl PySparseVector {
 
 #[pyclass(name = "Bm25", module = "gtars.bm25", subclass)]
 pub struct PyBm25 {
-    inner: gtars_bm25::BM25,
+    inner: gtars_bm25::Bm25,
 }
 
 #[pymethods]
@@ -48,7 +48,7 @@ impl PyBm25 {
     #[new]
     #[pyo3(signature = (tokenizer, k=1.0, b=0.75, avg_doc_length=1000.0))]
     fn new(tokenizer: &Bound<'_, PyAny>, k: f32, b: f32, avg_doc_length: f32) -> Result<Self> {
-        let mut builder = BM25Builder::default()
+        let mut builder = Bm25Builder::default()
             .with_k(k)
             .with_b(b)
             .with_avg_doc_length(avg_doc_length);

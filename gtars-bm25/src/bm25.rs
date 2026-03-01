@@ -6,31 +6,31 @@ use gtars_tokenizers::Tokenizer;
 
 use crate::sparse_vector::SparseVector;
 
-pub struct BM25 {
+pub struct Bm25 {
     avg_doc_length: f32,
     b: f32,
     k: f32,
     tokenizer: Tokenizer,
 }
 
-pub struct BM25Builder {
+pub struct Bm25Builder {
     b: f32,
     k: f32,
     avg_doc_length: f32,
     tokenizer: Option<Tokenizer>,
 }
 
-impl BM25Builder {
+impl Bm25Builder {
     /// Build the BM25 model from the builder.
     ///
     /// # Panics
     /// Panics if no tokenizer/vocabulary has been provided.
-    pub fn build(self) -> BM25 {
+    pub fn build(self) -> Bm25 {
         let tokenizer = self
             .tokenizer
             .expect("A tokenizer or vocabulary must be provided via with_tokenizer() or with_vocab()");
 
-        BM25 {
+        Bm25 {
             avg_doc_length: self.avg_doc_length,
             b: self.b,
             k: self.k,
@@ -74,7 +74,7 @@ impl BM25Builder {
     }
 }
 
-impl Default for BM25Builder {
+impl Default for Bm25Builder {
     fn default() -> Self {
         Self {
             b: 0.75,
@@ -85,10 +85,10 @@ impl Default for BM25Builder {
     }
 }
 
-impl BM25 {
-    /// Create a new BM25Builder.
-    pub fn builder() -> BM25Builder {
-        BM25Builder::default()
+impl Bm25 {
+    /// Create a new Bm25Builder.
+    pub fn builder() -> Bm25Builder {
+        Bm25Builder::default()
     }
 
     /// Tokenize a set of regions into token IDs.
@@ -166,5 +166,167 @@ impl BM25 {
         }
 
         SparseVector::new(indices, values)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::*;
+
+    #[fixture]
+    fn peaks_path() -> String {
+        "../tests/data/tokenizers/peaks.bed".to_string()
+    }
+
+    #[fixture]
+    fn bm25(peaks_path: String) -> Bm25 {
+        Bm25::builder()
+            .with_vocab(&peaks_path)
+            .with_k(1.5)
+            .with_b(0.75)
+            .with_avg_doc_length(1_000.0)
+            .build()
+    }
+
+    #[rstest]
+    fn test_builder_defaults() {
+        let builder = Bm25Builder::default();
+        assert_eq!(builder.k, 1.0);
+        assert_eq!(builder.b, 0.75);
+        assert_eq!(builder.avg_doc_length, 1_000.0);
+    }
+
+    #[rstest]
+    fn test_builder_custom_params(peaks_path: String) {
+        let model = Bm25::builder()
+            .with_vocab(&peaks_path)
+            .with_k(2.0)
+            .with_b(0.5)
+            .with_avg_doc_length(500.0)
+            .build();
+
+        assert_eq!(model.k(), 2.0);
+        assert_eq!(model.b(), 0.5);
+        assert_eq!(model.avg_doc_length(), 500.0);
+    }
+
+    #[rstest]
+    fn test_vocab_size(bm25: Bm25) {
+        // peaks.bed has 25 regions + 7 special tokens
+        assert!(bm25.vocab_size() > 25);
+    }
+
+    #[rstest]
+    fn test_tokenize_overlapping_regions(bm25: Bm25) {
+        // query a region that overlaps the first entry in peaks.bed: chr17 7915738 7915777
+        let regions = vec![Region {
+            chr: "chr17".to_string(),
+            start: 7915700,
+            end: 7915800,
+            rest: None,
+        }];
+
+        let token_ids = bm25.tokenize(&regions);
+        assert!(!token_ids.is_empty(), "should find overlapping tokens");
+    }
+
+    #[rstest]
+    fn test_tokenize_no_overlap(bm25: Bm25) {
+        // query a region on a chromosome with no vocab entries
+        let regions = vec![Region {
+            chr: "chrZ".to_string(),
+            start: 0,
+            end: 100,
+            rest: None,
+        }];
+
+        let token_ids = bm25.tokenize(&regions);
+        assert!(token_ids.is_empty(), "should find no tokens for non-existent chrom");
+    }
+
+    #[rstest]
+    fn test_embed_produces_sparse_vector(bm25: Bm25) {
+        let regions = vec![Region {
+            chr: "chr17".to_string(),
+            start: 7915700,
+            end: 7915800,
+            rest: None,
+        }];
+
+        let sv = bm25.embed(&regions);
+        assert!(!sv.is_empty());
+        assert_eq!(sv.indices.len(), sv.values.len());
+    }
+
+    #[rstest]
+    fn test_embed_empty_input(bm25: Bm25) {
+        let regions: Vec<Region> = vec![];
+        let sv = bm25.embed(&regions);
+        assert!(sv.is_empty());
+    }
+
+    #[rstest]
+    fn test_embed_no_overlap_returns_empty(bm25: Bm25) {
+        let regions = vec![Region {
+            chr: "chrZ".to_string(),
+            start: 0,
+            end: 100,
+            rest: None,
+        }];
+
+        let sv = bm25.embed(&regions);
+        assert!(sv.is_empty());
+    }
+
+    #[rstest]
+    fn test_embed_values_are_positive(bm25: Bm25) {
+        // query multiple overlapping regions
+        let regions = vec![
+            Region { chr: "chr17".to_string(), start: 7915700, end: 7915800, rest: None },
+            Region { chr: "chr6".to_string(), start: 157381091, end: 157381200, rest: None },
+        ];
+
+        let sv = bm25.embed(&regions);
+        for val in &sv.values {
+            assert!(*val > 0.0, "Bm25 TF scores should be positive");
+        }
+    }
+
+    #[rstest]
+    fn test_embed_repeated_regions_increase_tf(bm25: Bm25) {
+        let region = Region {
+            chr: "chr17".to_string(),
+            start: 7915700,
+            end: 7915800,
+            rest: None,
+        };
+
+        let sv_single = bm25.embed(&[region.clone()]);
+        let sv_repeated = bm25.embed(&[region.clone(), region.clone(), region]);
+
+        // with repeated regions, the tf score should be higher (but sublinear due to saturation)
+        assert!(!sv_single.is_empty());
+        assert!(!sv_repeated.is_empty());
+
+        let val_single = sv_single.values[0];
+        let val_repeated = sv_repeated.values[0];
+        assert!(val_repeated > val_single, "repeated terms should have higher TF score");
+    }
+
+    #[rstest]
+    fn test_with_tokenizer(peaks_path: String) {
+        let tokenizer = Tokenizer::from_bed(&peaks_path).unwrap();
+        let model = Bm25::builder()
+            .with_tokenizer(tokenizer)
+            .build();
+
+        assert!(model.vocab_size() > 0);
+    }
+
+    #[rstest]
+    #[should_panic(expected = "A tokenizer or vocabulary must be provided")]
+    fn test_builder_panics_without_tokenizer() {
+        Bm25Builder::default().build();
     }
 }

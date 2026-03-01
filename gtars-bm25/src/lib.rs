@@ -6,5 +6,5 @@
 pub mod bm25;
 pub mod sparse_vector;
 
-pub use bm25::{BM25, BM25Builder};
+pub use bm25::{Bm25, Bm25Builder};
 pub use sparse_vector::SparseVector;
