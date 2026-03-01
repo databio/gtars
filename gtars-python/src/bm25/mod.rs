@@ -2,7 +2,9 @@ use pyo3::prelude::*;
 
 use anyhow::Result;
 use gtars_bm25::{BM25Builder, SparseVector};
+use gtars_tokenizers::{Tokenizer, create_tokenize_core_from_universe, config::TokenizerType};
 
+use crate::tokenizers::py_tokenizers::PyTokenizer;
 use crate::utils::extract_regions_from_py_any;
 
 #[pyclass(name = "SparseVector", module = "gtars.bm25")]
@@ -51,14 +53,21 @@ impl PyBm25 {
             .with_b(b)
             .with_avg_doc_length(avg_doc_length);
 
-        // Accept either a string path or a Tokenizer object
         if let Ok(path) = tokenizer.extract::<String>() {
+            // Accept a string path to a BED/BED.GZ/TOML file
             builder = builder.with_vocab(&path);
+        } else if let Ok(py_tok) = tokenizer.cast::<PyTokenizer>() {
+            // Accept an existing Tokenizer object — rebuild from its universe
+            let borrowed = py_tok.borrow();
+            let inner_tok = borrowed.inner();
+            let universe = inner_tok.get_universe().clone();
+            let special_tokens = inner_tok.get_special_tokens().clone();
+            let core = create_tokenize_core_from_universe(&universe, TokenizerType::AIList);
+            let tok = Tokenizer::new(core, universe, special_tokens);
+            builder = builder.with_tokenizer(tok);
         } else {
-            // Try to use an existing Tokenizer's vocab path
-            // The Tokenizer is opaque from Python, so we need to accept a path
             return Err(anyhow::anyhow!(
-                "tokenizer must be a string path to a BED file, BED.GZ file, or TOML config"
+                "tokenizer must be a string path (BED, BED.GZ, TOML) or a Tokenizer object"
             ));
         }
 
