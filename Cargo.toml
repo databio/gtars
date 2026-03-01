@@ -5,7 +5,7 @@ members = [
     "gtars-python",
     "gtars-genomicdist",
     "gtars-wasm",
-    "gtars-r/src/rust",
+    # "gtars-r/src/rust",
     "gtars-core",
     "gtars-refget",
     "gtars-uniwig",
@@ -16,7 +16,8 @@ members = [
     "gtars-igd",
     "gtars-fragsplit",
     "gtars-scoring",
-    "gtars", "gtars-bm25",
+    "gtars-bm25",
+    "gtars", 
 ]
 
 [workspace.dependencies]

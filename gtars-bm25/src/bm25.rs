@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::collections::HashMap;
 
 use gtars_core::models::region::Region;
 use gtars_tokenizers::Tokenizer;
@@ -95,9 +96,13 @@ impl BM25 {
     /// This performs the overlap query against the vocabulary and returns
     /// the token IDs of all overlapping vocabulary regions.
     pub fn tokenize(&self, regions: &[Region]) -> Vec<u32> {
+        let unk_id = self.tokenizer.get_unk_token_id();
         self.tokenizer
             .encode(regions)
             .unwrap_or_default()
+            // filter OOV tokens (those that don't overlap any vocab region) by removing the unk_id
+            .into_iter().filter(|&id| id != unk_id)
+            .collect()
     }
 
     /// Returns a reference to the internal tokenizer.
@@ -130,23 +135,24 @@ impl BM25 {
     /// This tokenizes the regions and computes BM25-like term frequency
     /// scores for each token. The indices are token IDs and the values
     /// are the BM25 term-frequency component scores.
+    /// Formula from: https://en.wikipedia.org/wiki/Okapi_BM25
     pub fn embed(&self, regions: &[Region]) -> SparseVector {
-        // Step 1: tokenize to get token IDs
+        // tokenize to get token IDs
         let token_ids = self.tokenize(regions);
 
         if token_ids.is_empty() {
             return SparseVector::empty();
         }
 
-        // Step 2: count term frequencies
-        let mut tf_map: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+        // count term frequencies
+        let mut tf_map: HashMap<u32, u32> = HashMap::new();
         for id in &token_ids {
             *tf_map.entry(*id).or_insert(0) += 1;
         }
 
         let doc_length = token_ids.len() as f32;
 
-        // Step 3: compute BM25 term-frequency scores
+        // compute bm25 term-frequency scores
         let mut indices: Vec<u32> = Vec::with_capacity(tf_map.len());
         let mut values: Vec<f32> = Vec::with_capacity(tf_map.len());
 
