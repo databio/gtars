@@ -28,3 +28,4 @@ bin/
 tests/data/out/region_scoring_count.csv.gz
 /gtars-refget/tests/store_test/rgstore.json
 /gtars-refget/tests/store_test/sequences.rgsi
+libgtars.dylib.dSYM/
