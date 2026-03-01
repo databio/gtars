@@ -5,5 +5,5 @@ edition = "2024"
 description = "BM25 sparse embedding implementation for genomic intervals and information retrieval"
 
 [dependencies]
-gtars-overlaprs ={ path = "../gtars-overlaprs", version="0.5.1"}
 gtars-core = { path = "../gtars-core", version="0.5.2" }
+gtars-tokenizers = { path = "../gtars-tokenizers" }
