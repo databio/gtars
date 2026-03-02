@@ -527,7 +527,7 @@ impl PySequenceRecord {
     ///     Optional[str]: The decoded sequence string if data is loaded, None otherwise.
     ///
     /// Example:
-    ///     >>> record = store.get_sequence_by_collection_and_name(digest, "chr1")
+    ///     >>> record = store.get_sequence_by_name(digest, "chr1")
     ///     >>> sequence = record.decode()
     ///     >>> if sequence:
     ///     ...     print(f"First 50 bases: {sequence[:50]}")
@@ -614,6 +614,46 @@ impl PySequenceCollection {
                     e
                 ))
             })
+    }
+
+    /// Write the collection to an RGSI file.
+    ///
+    /// The RGSI file is a TSV index containing collection-level digest headers
+    /// and per-sequence metadata (name, length, alphabet, sha512t24u, md5, description).
+    ///
+    /// Args:
+    ///     file_path (str): Path to the output .rgsi file
+    ///
+    /// Raises:
+    ///     IOError: If the file cannot be written
+    ///
+    /// Example:
+    ///     >>> collection = digest_fasta("genome.fa")
+    ///     >>> collection.write_rgsi("genome.rgsi")
+    fn write_rgsi(&self, file_path: &str) -> PyResult<()> {
+        let rust_collection = SequenceCollection::from(self.clone());
+        rust_collection
+            .write_collection_rgsi(file_path)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Failed to write RGSI: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Get the collection metadata including all digests.
+    ///
+    /// Returns:
+    ///     SequenceCollectionMetadata: Full metadata with digest, n_sequences,
+    ///         and all level 1 digests (including ancillary digests).
+    #[getter]
+    fn metadata(&self) -> PySequenceCollectionMetadata {
+        let mut rust_collection = SequenceCollection::from(self.clone());
+        rust_collection
+            .metadata
+            .compute_ancillary_digests(&rust_collection.sequences);
+        PySequenceCollectionMetadata::from(rust_collection.metadata)
     }
 
     /// Iterate over sequences in the collection.
@@ -1035,6 +1075,33 @@ pub struct PyRefgetStore {
 
 #[pymethods]
 impl PyRefgetStore {
+    /// Check whether a valid RefgetStore exists at the given path.
+    ///
+    /// Returns True if the path contains a store manifest file,
+    /// indicating the store has been initialized. Returns False if the
+    /// path does not exist or does not contain a store.
+    ///
+    /// This avoids hardcoding knowledge of the store's internal file format
+    /// (e.g., "rgstore.json") in calling code.
+    ///
+    /// Args:
+    ///     path (str or Path): Path to the store directory.
+    ///
+    /// Returns:
+    ///     bool: True if a store exists at the path, False otherwise.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import RefgetStore
+    ///     >>> RefgetStore.store_exists("/data/hg38_store")
+    ///     True
+    ///     >>> RefgetStore.store_exists("/tmp/empty")
+    ///     False
+    #[classmethod]
+    fn store_exists(_cls: &Bound<'_, PyType>, path: &Bound<'_, PyAny>) -> bool {
+        let path = path.to_string();
+        RefgetStore::store_exists(path)
+    }
+
     /// Create a disk-backed RefgetStore.
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
@@ -1501,6 +1568,35 @@ impl PyRefgetStore {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading collection: {}", e))
         })?;
         Ok(PySequenceCollection::from(collection))
+    }
+
+    /// Remove a collection from the store.
+    ///
+    /// Removes the collection record, its name lookup, FHR metadata, and any
+    /// collection aliases pointing to it. Optionally removes orphaned sequences
+    /// (sequences no longer referenced by any remaining collection).
+    ///
+    /// Args:
+    ///     digest: The collection's SHA-512/24u digest string.
+    ///     remove_orphan_sequences: If True, also remove sequences that are no
+    ///         longer referenced by any remaining collection. Default: False.
+    ///
+    /// Returns:
+    ///     bool: True if the collection was found and removed, False if not found.
+    ///
+    /// Example:
+    ///     >>> removed = store.remove_collection("abc123")
+    ///     >>> removed_with_cleanup = store.remove_collection("abc123", remove_orphan_sequences=True)
+    #[pyo3(signature = (digest, remove_orphan_sequences=false))]
+    fn remove_collection(&mut self, digest: &str, remove_orphan_sequences: bool) -> PyResult<bool> {
+        self.inner
+            .remove_collection(digest, remove_orphan_sequences)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error removing collection: {}",
+                    e
+                ))
+            })
     }
 
     /// Get metadata for a collection by digest.
@@ -2137,15 +2233,11 @@ impl PyRefgetStore {
         &mut self,
         namespace: &str,
         alias: &str,
-    ) -> PyResult<PySequenceRecord> {
+    ) -> Option<PySequenceRecord> {
         self.inner
             .get_sequence_by_alias(namespace, alias)
+            .ok()
             .map(|record| PySequenceRecord::from(record.clone()))
-            .map_err(|e| {
-                pyo3::exceptions::PyKeyError::new_err(format!(
-                    "Sequence alias not found: {}/{} ({})", namespace, alias, e
-                ))
-            })
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -2209,15 +2301,11 @@ impl PyRefgetStore {
         &mut self,
         namespace: &str,
         alias: &str,
-    ) -> PyResult<PySequenceCollection> {
+    ) -> Option<PySequenceCollection> {
         self.inner
             .get_collection_by_alias(namespace, alias)
+            .ok()
             .map(|collection| PySequenceCollection::from(collection))
-            .map_err(|e| {
-                pyo3::exceptions::PyKeyError::new_err(format!(
-                    "Collection alias not found: {}/{} ({})", namespace, alias, e
-                ))
-            })
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.
