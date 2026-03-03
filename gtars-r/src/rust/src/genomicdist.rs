@@ -717,7 +717,7 @@ pub fn r_calc_summary_signal(
     signal_region_ids: Vec<String>,
     condition_names: Vec<String>,
     values_flat: Vec<f64>,
-    n_regions: i32,
+    _n_regions: i32,
     n_conditions: i32,
 ) -> extendr_api::Result<List> {
     with_regionset!(rs_ptr, rs, {
