@@ -1593,7 +1593,7 @@ impl PyRefgetStore {
     ///     >>> print(f"Store has {stats['n_sequences']} sequences")
     ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
     fn stats(&self) -> std::collections::HashMap<String, String> {
-        let extended_stats = self.inner.stats_extended();
+        let extended_stats = self.inner.stats();
         let mut stats = std::collections::HashMap::new();
         stats.insert(
             "n_sequences".to_string(),
@@ -2295,7 +2295,7 @@ impl PyRefgetStore {
     }
 
     fn __repr__(&self) -> String {
-        let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
+        let stats = self.inner.stats();
         let persist_str = if self.inner.is_persisting() {
             "persist=on"
         } else {
@@ -2321,8 +2321,8 @@ impl PyRefgetStore {
         };
 
         format!(
-            "RefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {}, {}, {})",
-            n_sequences, n_collections_loaded, mode_str, persist_str, quiet_str, location
+            "RefgetStore(n_sequences={}, n_sequences_loaded={}, n_collections={}, n_collections_loaded={}, mode={}, {}, {}, {})",
+            stats.n_sequences, stats.n_sequences_loaded, stats.n_collections, stats.n_collections_loaded, stats.storage_mode, persist_str, quiet_str, location
         )
     }
 

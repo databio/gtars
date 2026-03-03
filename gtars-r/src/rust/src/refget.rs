@@ -460,7 +460,7 @@ pub fn iter_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 #[extendr]
 pub fn stats_store(store_ptr: Robj) -> extendr_api::Result<List> {
     with_store_ref!(store_ptr, store, {
-        let stats = store.stats_extended();
+        let stats = store.stats();
         Ok(list!(
             n_sequences = stats.n_sequences as i32,
             n_sequences_loaded = stats.n_sequences_loaded as i32,

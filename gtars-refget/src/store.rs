@@ -2563,22 +2563,8 @@ impl RefgetStore {
     ///
     /// Note: n_collections_loaded only reflects collections currently loaded in memory.
     /// For remote stores, collections are loaded on-demand when accessed.
-    pub fn stats(&self) -> (usize, usize, &'static str) {
-        let n_sequences = self.sequence_store.len();
-        let n_collections_loaded = self
-            .collections
-            .values()
-            .filter(|record| record.has_sequences())
-            .count();
-        let mode_str = match self.mode {
-            StorageMode::Raw => "Raw",
-            StorageMode::Encoded => "Encoded",
-        };
-        (n_sequences, n_collections_loaded, mode_str)
-    }
-
-    /// Extended statistics including stub/loaded breakdown for collections
-    pub fn stats_extended(&self) -> StoreStats {
+    /// Statistics including stub/loaded breakdown for sequences and collections
+    pub fn stats(&self) -> StoreStats {
         let n_sequences = self.sequence_store.len();
         let n_sequences_loaded = self
             .sequence_store
@@ -2607,7 +2593,7 @@ impl RefgetStore {
     }
 }
 
-/// Extended statistics for a RefgetStore
+/// Statistics for a RefgetStore
 #[derive(Debug, Clone)]
 pub struct StoreStats {
     /// Total number of sequences (Stub + Full)
@@ -3792,8 +3778,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             "Collection should be loaded (Full)"
         );
 
-        // Test stats_extended returns collection counts
-        let stats = store.stats_extended();
+        // Test stats returns collection counts
+        let stats = store.stats();
         assert_eq!(stats.n_collections, 1, "Should have 1 collection total");
         assert_eq!(
             stats.n_collections_loaded, 1,
@@ -3838,7 +3824,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         );
 
         // VERIFY: stats shows 0 collections loaded
-        let stats_before = loaded_store.stats_extended();
+        let stats_before = loaded_store.stats();
         assert_eq!(
             stats_before.n_collections, 1,
             "Should have 1 collection total"
@@ -3863,7 +3849,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         );
 
         // VERIFY: stats now shows 1 collection loaded
-        let stats_after = loaded_store.stats_extended();
+        let stats_after = loaded_store.stats();
         assert_eq!(
             stats_after.n_collections_loaded, 1,
             "Should have 1 collection loaded after access"
@@ -3896,7 +3882,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(!loaded_store.is_collection_loaded(&digest));
 
         // Before loading - no sequences loaded
-        let stats_before = loaded_store.stats_extended();
+        let stats_before = loaded_store.stats();
         assert_eq!(
             stats_before.n_sequences_loaded, 0,
             "No sequences should be loaded initially"
@@ -3911,7 +3897,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert_eq!(collection.sequences.len(), 3);
 
         // After get_collection - collection is loaded but sequences are still stubs (lazy loading)
-        let stats_after = loaded_store.stats_extended();
+        let stats_after = loaded_store.stats();
         assert_eq!(
             stats_after.n_sequences_loaded, 0,
             "Sequences not loaded until explicitly fetched"
@@ -4017,7 +4003,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(result2.is_ok(), "Second get should also succeed");
 
         // Store state should be unchanged after second get
-        assert_eq!(loaded_store.stats_extended().n_collections_loaded, 1);
+        assert_eq!(loaded_store.stats().n_collections_loaded, 1);
 
         println!("✓ get_collection idempotent test passed");
     }
