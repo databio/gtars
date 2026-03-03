@@ -777,10 +777,11 @@ impl RefgetStore {
         }
 
         // --- Channel message types ---
-        enum DecompressMsg {
-            Header { name: String, description: Option<String>, raw_header: String },
-            SeqLine(Vec<u8>),
-            Done,
+        struct DecompressedSequence {
+            name: String,
+            description: Option<String>,
+            raw_header: String,
+            raw_bytes: Vec<u8>,
         }
 
         struct DigestedSequence {
@@ -790,135 +791,78 @@ impl RefgetStore {
         }
 
         // --- Set up channels ---
-        let (decompress_tx, decompress_rx) = bounded::<DecompressMsg>(64);
+        // bounded(1): at most 2 sequences in flight (one being processed, one buffered)
+        let (decompress_tx, decompress_rx) = bounded::<DecompressedSequence>(1);
         let (digest_tx, digest_rx) = bounded::<DigestedSequence>(1);
 
         let file_path_buf = file_path.as_ref().to_path_buf();
         let namespaces: Vec<String> = opts.namespaces.iter().map(|s| s.to_string()).collect();
         let ns_for_digest = namespaces.clone();
 
-        // --- Thread 1: Decompress ---
+        // --- Thread 1: Decompress (using seq_io for efficient buffered FASTA parsing) ---
         let decompress_handle = std::thread::spawn(move || -> Result<()> {
             let file_reader = get_dynamic_reader(&file_path_buf)?;
-            let mut reader = std::io::BufReader::new(file_reader);
-            let mut line = String::new();
+            let mut fasta_reader = seq_io::fasta::Reader::new(file_reader);
 
-            loop {
-                line.clear();
-                let bytes_read = reader.read_line(&mut line)?;
-                if bytes_read == 0 {
-                    let _ = decompress_tx.send(DecompressMsg::Done);
-                    break;
+            while let Some(record) = fasta_reader.next() {
+                let record = record?;
+                let header = std::str::from_utf8(record.head())?;
+                let (name, description) = crate::fasta::parse_fasta_header(header);
+
+                // Collect and uppercase all sequence bytes
+                let mut raw_bytes = Vec::new();
+                for seq_line in record.seq_lines() {
+                    raw_bytes.extend(seq_line.iter().map(|b| b.to_ascii_uppercase()));
                 }
 
-                if line.starts_with('>') {
-                    let trimmed = line[1..].trim_end();
-                    let (name, description) = crate::fasta::parse_fasta_header(trimmed);
-                    decompress_tx.send(DecompressMsg::Header {
-                        name,
-                        description,
-                        raw_header: trimmed.to_string(),
-                    }).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
-                } else {
-                    let trimmed = line.trim_end();
-                    if !trimmed.is_empty() {
-                        let upper: Vec<u8> = trimmed.bytes().map(|b| b.to_ascii_uppercase()).collect();
-                        decompress_tx.send(DecompressMsg::SeqLine(upper))
-                            .map_err(|_| anyhow!("Digest thread stopped receiving"))?;
-                    }
-                }
+                decompress_tx.send(DecompressedSequence {
+                    name,
+                    description,
+                    raw_header: header.to_string(),
+                    raw_bytes,
+                }).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
             }
             Ok(())
         });
 
-        // --- Thread 2: Digest ---
+        // --- Thread 2: Digest (receives complete sequences) ---
         let digest_handle = std::thread::spawn(move || -> Result<()> {
-            let mut sha512_hasher = Sha512::new();
-            let mut md5_hasher = Md5::new();
-            let mut alphabet_guesser = crate::digest::AlphabetGuesser::new();
-            let mut raw_bytes: Vec<u8> = Vec::new();
-            let mut current_name: Option<String> = None;
-            let mut current_description: Option<String> = None;
-            let mut current_aliases: Vec<(String, String)> = Vec::new();
-            let mut length: usize = 0;
-
             let ns_refs: Vec<&str> = ns_for_digest.iter().map(|s| s.as_str()).collect();
 
-            for msg in decompress_rx {
-                match msg {
-                    DecompressMsg::Header { name, description, raw_header } => {
-                        // Finalize previous sequence if any
-                        if let Some(prev_name) = current_name.take() {
-                            let sha512 = base64_url::encode(
-                                &sha512_hasher.finalize_reset()[0..24],
-                            );
-                            let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                            let alphabet = alphabet_guesser.guess();
-                            alphabet_guesser = crate::digest::AlphabetGuesser::new();
+            for seq in decompress_rx {
+                let mut sha512_hasher = Sha512::new();
+                sha512_hasher.update(&seq.raw_bytes);
+                let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
 
-                            let metadata = SequenceMetadata {
-                                name: prev_name,
-                                description: current_description.take(),
-                                length,
-                                sha512t24u: sha512,
-                                md5,
-                                alphabet,
-                                fai: None, // Not computed in pipeline
-                            };
+                let mut md5_hasher = Md5::new();
+                md5_hasher.update(&seq.raw_bytes);
+                let md5 = format!("{:x}", md5_hasher.finalize());
 
-                            digest_tx.send(DigestedSequence {
-                                metadata,
-                                raw_bytes: std::mem::take(&mut raw_bytes),
-                                aliases: std::mem::take(&mut current_aliases),
-                            }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
-                        }
+                let mut guesser = crate::digest::AlphabetGuesser::new();
+                guesser.update(&seq.raw_bytes);
+                let alphabet = guesser.guess();
 
-                        // Extract aliases from header
-                        if !ns_refs.is_empty() {
-                            current_aliases = crate::digest::fasta::extract_aliases_from_header(
-                                &raw_header, &ns_refs,
-                            );
-                        }
+                let metadata = SequenceMetadata {
+                    name: seq.name,
+                    description: seq.description,
+                    length: seq.raw_bytes.len(),
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
+                    fai: None,
+                };
 
-                        current_name = Some(name);
-                        current_description = description;
-                        length = 0;
-                    }
-                    DecompressMsg::SeqLine(bytes) => {
-                        length += bytes.len();
-                        sha512_hasher.update(&bytes);
-                        md5_hasher.update(&bytes);
-                        alphabet_guesser.update(&bytes);
-                        raw_bytes.extend_from_slice(&bytes);
-                    }
-                    DecompressMsg::Done => {
-                        // Finalize last sequence
-                        if let Some(prev_name) = current_name.take() {
-                            let sha512 = base64_url::encode(
-                                &sha512_hasher.finalize_reset()[0..24],
-                            );
-                            let md5 = format!("{:x}", md5_hasher.finalize_reset());
-                            let alphabet = alphabet_guesser.guess();
+                let aliases = if !ns_refs.is_empty() {
+                    crate::digest::fasta::extract_aliases_from_header(&seq.raw_header, &ns_refs)
+                } else {
+                    vec![]
+                };
 
-                            let metadata = SequenceMetadata {
-                                name: prev_name,
-                                description: current_description.take(),
-                                length,
-                                sha512t24u: sha512,
-                                md5,
-                                alphabet,
-                                fai: None,
-                            };
-
-                            digest_tx.send(DigestedSequence {
-                                metadata,
-                                raw_bytes: std::mem::take(&mut raw_bytes),
-                                aliases: std::mem::take(&mut current_aliases),
-                            }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
-                        }
-                        break;
-                    }
-                }
+                digest_tx.send(DigestedSequence {
+                    metadata,
+                    raw_bytes: seq.raw_bytes,
+                    aliases,
+                }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
             }
             drop(digest_tx);
             Ok(())
