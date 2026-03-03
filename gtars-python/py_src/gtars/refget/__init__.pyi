@@ -934,7 +934,6 @@ class RefgetStore:
                 - 'n_collections': Total number of collections (Stub + Full)
                 - 'n_collections_loaded': Number of collections with sequences loaded (Full)
                 - 'storage_mode': Storage mode ('Raw' or 'Encoded')
-                - 'total_disk_size': Total size of all files on disk in bytes
 
         Note:
             n_collections_loaded only reflects collections fully loaded in memory.

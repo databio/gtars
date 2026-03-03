@@ -77,9 +77,12 @@ pub struct RetrievedSequence {
 }
 
 /// Options for importing a FASTA file into a RefgetStore.
+#[derive(Clone, Copy)]
 pub struct FastaImportOptions<'a> {
     force: bool,
     namespaces: &'a [&'a str],
+    /// Number of threads for parallel encoding. None = use all available CPUs.
+    threads: Option<usize>,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -87,6 +90,7 @@ impl<'a> Default for FastaImportOptions<'a> {
         Self {
             force: false,
             namespaces: &[],
+            threads: None,
         }
     }
 }
@@ -106,6 +110,12 @@ impl<'a> FastaImportOptions<'a> {
     #[must_use]
     pub fn namespaces(mut self, ns: &'a [&'a str]) -> Self {
         self.namespaces = ns;
+        self
+    }
+
+    #[must_use]
+    pub fn threads(mut self, n: Option<usize>) -> Self {
+        self.threads = n;
         self
     }
 }
@@ -725,50 +735,248 @@ impl RefgetStore {
 
     /// Add a sequence collection from a FASTA file.
     ///
-    /// Uses `FastaImportOptions` to control import behavior (force overwrite,
-    /// namespace alias extraction, etc.).
+    /// Uses a 3-thread pipeline that decompresses once, overlaps digest and
+    /// encode work, and holds at most 2 sequences in memory at a time.
     ///
-    /// # Arguments
-    /// * `file_path` - Path to the FASTA file
-    /// * `opts` - Import options (use `FastaImportOptions::new()` for defaults)
+    /// Pipeline:
+    /// - Thread 1 (Decompress): reads FASTA lines, sends to Thread 2
+    /// - Thread 2 (Digest): SHA512 + MD5 + alphabet, sends (metadata, raw_bytes) to Thread 3
+    /// - Thread 3 (main): encodes + accumulates results
     ///
-    /// # Returns
-    /// A tuple of (SequenceCollectionMetadata, was_new) where was_new indicates
-    /// whether the collection was newly added (true) or already existed (false).
-    ///
-    /// # Notes
-    /// Loading sequence data requires 2 passes through the FASTA file:
-    /// 1. First pass digests and guesses the alphabet to produce SequenceMetadata
-    /// 2. Second pass encodes the sequences based on the detected alphabet
+    /// After the pipeline finishes, computes collection metadata, registers the
+    /// collection, and inserts all sequences.
     pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(
         &mut self,
         file_path: P,
         opts: FastaImportOptions<'_>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
-        // Print start message
+        use crossbeam_channel::bounded;
+        use md5::Md5;
+        use sha2::{Digest, Sha512};
+
         if !self.quiet {
             println!("Processing {}...", file_path.as_ref().display());
         }
 
-        // Phase 1: Digest computation (skip RGSI caching for in-memory stores)
-        let digest_start = Instant::now();
+        let pipeline_start = Instant::now();
+
+        // Check for RGSI cache
         let use_cache = self.local_path.is_some();
-        let mut seqcol = SequenceCollection::from_path_with_cache(&file_path, use_cache, use_cache)?;
-        if self.ancillary_digests {
-            seqcol
-                .metadata
-                .compute_ancillary_digests(&seqcol.sequences);
+        use crate::utils::PathExtension;
+        let rgsi_path = file_path.as_ref().replace_exts_with("rgsi");
+        let have_rgsi = use_cache && rgsi_path.exists();
+
+        if have_rgsi {
+            // Fast path: load cached metadata, only need to decompress once for encoding
+            match self.add_fasta_with_cached_metadata(&file_path, &rgsi_path, opts, pipeline_start) {
+                Ok(result) => return Ok(result),
+                Err(_) => {
+                    // Cache was stale/empty, fall through to pipeline
+                }
+            }
         }
-        let digest_elapsed = digest_start.elapsed();
 
-        // Extract the collection digest key (cheap: copies 32 bytes)
-        let coll_key = seqcol.metadata.digest.to_key();
-        let coll_digest_display = seqcol.metadata.digest.clone(); // For print messages
+        // --- Channel message types ---
+        enum DecompressMsg {
+            Header { name: String, description: Option<String>, raw_header: String },
+            SeqLine(Vec<u8>),
+            Done,
+        }
 
-        // Get metadata before consuming seqcol (metadata is small, this is cheap)
-        let metadata = seqcol.metadata.clone();
+        struct DigestedSequence {
+            metadata: SequenceMetadata,
+            raw_bytes: Vec<u8>,
+            aliases: Vec<(String, String)>,
+        }
 
-        // Check if collection already exists and skip if not forcing
+        // --- Set up channels ---
+        let (decompress_tx, decompress_rx) = bounded::<DecompressMsg>(64);
+        let (digest_tx, digest_rx) = bounded::<DigestedSequence>(1);
+
+        let file_path_buf = file_path.as_ref().to_path_buf();
+        let namespaces: Vec<String> = opts.namespaces.iter().map(|s| s.to_string()).collect();
+        let ns_for_digest = namespaces.clone();
+
+        // --- Thread 1: Decompress ---
+        let decompress_handle = std::thread::spawn(move || -> Result<()> {
+            let file_reader = get_dynamic_reader(&file_path_buf)?;
+            let mut reader = std::io::BufReader::new(file_reader);
+            let mut line = String::new();
+
+            loop {
+                line.clear();
+                let bytes_read = reader.read_line(&mut line)?;
+                if bytes_read == 0 {
+                    let _ = decompress_tx.send(DecompressMsg::Done);
+                    break;
+                }
+
+                if line.starts_with('>') {
+                    let trimmed = line[1..].trim_end();
+                    let (name, description) = crate::fasta::parse_fasta_header(trimmed);
+                    decompress_tx.send(DecompressMsg::Header {
+                        name,
+                        description,
+                        raw_header: trimmed.to_string(),
+                    }).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
+                } else {
+                    let trimmed = line.trim_end();
+                    if !trimmed.is_empty() {
+                        let upper: Vec<u8> = trimmed.bytes().map(|b| b.to_ascii_uppercase()).collect();
+                        decompress_tx.send(DecompressMsg::SeqLine(upper))
+                            .map_err(|_| anyhow!("Digest thread stopped receiving"))?;
+                    }
+                }
+            }
+            Ok(())
+        });
+
+        // --- Thread 2: Digest ---
+        let digest_handle = std::thread::spawn(move || -> Result<()> {
+            let mut sha512_hasher = Sha512::new();
+            let mut md5_hasher = Md5::new();
+            let mut alphabet_guesser = crate::digest::AlphabetGuesser::new();
+            let mut raw_bytes: Vec<u8> = Vec::new();
+            let mut current_name: Option<String> = None;
+            let mut current_description: Option<String> = None;
+            let mut current_aliases: Vec<(String, String)> = Vec::new();
+            let mut length: usize = 0;
+
+            let ns_refs: Vec<&str> = ns_for_digest.iter().map(|s| s.as_str()).collect();
+
+            for msg in decompress_rx {
+                match msg {
+                    DecompressMsg::Header { name, description, raw_header } => {
+                        // Finalize previous sequence if any
+                        if let Some(prev_name) = current_name.take() {
+                            let sha512 = base64_url::encode(
+                                &sha512_hasher.finalize_reset()[0..24],
+                            );
+                            let md5 = format!("{:x}", md5_hasher.finalize_reset());
+                            let alphabet = alphabet_guesser.guess();
+                            alphabet_guesser = crate::digest::AlphabetGuesser::new();
+
+                            let metadata = SequenceMetadata {
+                                name: prev_name,
+                                description: current_description.take(),
+                                length,
+                                sha512t24u: sha512,
+                                md5,
+                                alphabet,
+                                fai: None, // Not computed in pipeline
+                            };
+
+                            digest_tx.send(DigestedSequence {
+                                metadata,
+                                raw_bytes: std::mem::take(&mut raw_bytes),
+                                aliases: std::mem::take(&mut current_aliases),
+                            }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                        }
+
+                        // Extract aliases from header
+                        if !ns_refs.is_empty() {
+                            current_aliases = crate::digest::fasta::extract_aliases_from_header(
+                                &raw_header, &ns_refs,
+                            );
+                        }
+
+                        current_name = Some(name);
+                        current_description = description;
+                        length = 0;
+                    }
+                    DecompressMsg::SeqLine(bytes) => {
+                        length += bytes.len();
+                        sha512_hasher.update(&bytes);
+                        md5_hasher.update(&bytes);
+                        alphabet_guesser.update(&bytes);
+                        raw_bytes.extend_from_slice(&bytes);
+                    }
+                    DecompressMsg::Done => {
+                        // Finalize last sequence
+                        if let Some(prev_name) = current_name.take() {
+                            let sha512 = base64_url::encode(
+                                &sha512_hasher.finalize_reset()[0..24],
+                            );
+                            let md5 = format!("{:x}", md5_hasher.finalize_reset());
+                            let alphabet = alphabet_guesser.guess();
+
+                            let metadata = SequenceMetadata {
+                                name: prev_name,
+                                description: current_description.take(),
+                                length,
+                                sha512t24u: sha512,
+                                md5,
+                                alphabet,
+                                fai: None,
+                            };
+
+                            digest_tx.send(DigestedSequence {
+                                metadata,
+                                raw_bytes: std::mem::take(&mut raw_bytes),
+                                aliases: std::mem::take(&mut current_aliases),
+                            }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                        }
+                        break;
+                    }
+                }
+            }
+            drop(digest_tx);
+            Ok(())
+        });
+
+        // --- Thread 3 (main thread): Encode + accumulate ---
+        let mode = self.mode;
+        let mut sequence_results: Vec<(SequenceMetadata, Vec<u8>)> = Vec::new();
+        let mut all_aliases: Vec<(String, String, String)> = Vec::new(); // (namespace, alias, sha512t24u)
+
+        for digested in digest_rx {
+            let sequence_data = match mode {
+                StorageMode::Encoded => {
+                    let mut encoder = SequenceEncoder::new(digested.metadata.alphabet, digested.metadata.length);
+                    encoder.update(&digested.raw_bytes);
+                    encoder.finalize()
+                }
+                StorageMode::Raw => digested.raw_bytes,
+            };
+
+            // Collect aliases for later registration
+            for (ns, alias_value) in &digested.aliases {
+                all_aliases.push((ns.clone(), alias_value.clone(), digested.metadata.sha512t24u.clone()));
+            }
+
+            sequence_results.push((digested.metadata, sequence_data));
+        }
+
+        // Join threads and propagate errors
+        decompress_handle.join()
+            .map_err(|e| anyhow!("Decompress thread panicked: {:?}", e))??;
+        digest_handle.join()
+            .map_err(|e| anyhow!("Digest thread panicked: {:?}", e))??;
+
+        let pipeline_elapsed = pipeline_start.elapsed();
+
+        // --- Post-pipeline: compute collection metadata, register, insert ---
+        let seq_count = sequence_results.len();
+
+        // Build SequenceCollection metadata from digested results
+        let stub_records: Vec<SequenceRecord> = sequence_results
+            .iter()
+            .map(|(meta, _)| SequenceRecord::Stub(meta.clone()))
+            .collect();
+
+        let mut seqcol_metadata = SequenceCollectionMetadata::from_sequences(
+            &stub_records,
+            Some(file_path.as_ref().to_path_buf()),
+        );
+        if self.ancillary_digests {
+            seqcol_metadata.compute_ancillary_digests(&stub_records);
+        }
+
+        let coll_key = seqcol_metadata.digest.to_key();
+        let coll_digest_display = seqcol_metadata.digest.clone();
+        let metadata = seqcol_metadata.clone();
+
+        // Check if collection already exists
         if !opts.force && self.collections.contains_key(&coll_key) {
             if !self.quiet {
                 println!("Skipped {} (already exists)", coll_digest_display);
@@ -776,8 +984,88 @@ impl RefgetStore {
             return Ok((metadata, false));
         }
 
-        // Build the seqmeta lookup from sequence metadata BEFORE consuming seqcol.
-        // This only clones SequenceMetadata (small: name, length, digests), not sequence bytes.
+        // Write RGSI cache for next time
+        if use_cache {
+            let seqcol_for_cache = SequenceCollection {
+                metadata: seqcol_metadata.clone(),
+                sequences: stub_records.clone(),
+            };
+            let _ = seqcol_for_cache.write_collection_rgsi(&rgsi_path);
+        }
+
+        // Register the collection
+        let seqcol = SequenceCollection {
+            metadata: seqcol_metadata,
+            sequences: stub_records,
+        };
+        self.add_sequence_collection_internal(seqcol, opts.force)?;
+
+        // Register aliases
+        for (ns, alias_value, sha512t24u) in &all_aliases {
+            self.add_sequence_alias(ns, alias_value, sha512t24u)?;
+        }
+
+        // Insert sequences
+        let insert_start = Instant::now();
+        for (meta, data) in sequence_results {
+            self.add_sequence(
+                SequenceRecord::Full {
+                    metadata: meta,
+                    sequence: data,
+                },
+                coll_key,
+                true,
+            )?;
+        }
+        let insert_elapsed = insert_start.elapsed();
+
+        if !self.quiet {
+            println!(
+                "Added {} ({} seqs) in {:.1}s [pipeline: {:.1}s + insert: {:.1}s]",
+                coll_digest_display,
+                seq_count,
+                pipeline_elapsed.as_secs_f64() + insert_elapsed.as_secs_f64(),
+                pipeline_elapsed.as_secs_f64(),
+                insert_elapsed.as_secs_f64()
+            );
+        }
+
+        Ok((metadata, true))
+    }
+
+    /// Fast path when RGSI cache exists: skip digesting, only decompress for encoding.
+    /// Returns None if the cache is empty/stale, signaling the caller to use the pipeline.
+    fn add_fasta_with_cached_metadata<P: AsRef<Path>>(
+        &mut self,
+        file_path: P,
+        rgsi_path: &Path,
+        opts: FastaImportOptions<'_>,
+        start_time: Instant,
+    ) -> Result<(SequenceCollectionMetadata, bool)> {
+        let mut seqcol = crate::collection::read_rgsi_file(rgsi_path)?;
+
+        // If cache is empty/stale, delete it and fall through to pipeline
+        if seqcol.sequences.is_empty() {
+            let _ = std::fs::remove_file(rgsi_path);
+            // Can't call pipeline from here since it's a separate method,
+            // so return an error that the caller handles
+            return Err(anyhow!("Empty RGSI cache"));
+        }
+        if self.ancillary_digests {
+            seqcol.metadata.compute_ancillary_digests(&seqcol.sequences);
+        }
+
+        let coll_key = seqcol.metadata.digest.to_key();
+        let coll_digest_display = seqcol.metadata.digest.clone();
+        let metadata = seqcol.metadata.clone();
+
+        if !opts.force && self.collections.contains_key(&coll_key) {
+            if !self.quiet {
+                println!("Skipped {} (already exists)", coll_digest_display);
+            }
+            return Ok((metadata, false));
+        }
+
         let seqmeta_hashmap: HashMap<String, SequenceMetadata> = seqcol
             .sequences
             .iter()
@@ -787,28 +1075,21 @@ impl RefgetStore {
             })
             .collect();
 
-        // Register the collection -- this CONSUMES seqcol, no clone needed
         self.add_sequence_collection_internal(seqcol, opts.force)?;
 
+        // Decompress and encode sequences
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
-
-        // Phase 2: Load/encode sequences
-        let encode_start = Instant::now();
-
         let mut seq_count = 0;
+
         while let Some(record) = fasta_reader.next() {
             let record = record?;
             let header = std::str::from_utf8(record.head())?;
-            // Parse header to get name (first word) - same logic as digest_fasta
-            let (name, _description) = crate::fasta::parse_fasta_header(header);
+            let (name, _) = crate::fasta::parse_fasta_header(header);
 
-            // Extract and register namespaced aliases from the header
             if !opts.namespaces.is_empty() {
-                let aliases =
-                    crate::digest::fasta::extract_aliases_from_header(header, opts.namespaces);
+                let aliases = crate::digest::fasta::extract_aliases_from_header(header, opts.namespaces);
                 for (ns, alias_value) in aliases {
-                    // We need the digest for this sequence - look it up from seqmeta
                     if let Some(meta) = seqmeta_hashmap.get(&name) {
                         self.add_sequence_alias(&ns, &alias_value, &meta.sha512t24u)?;
                     }
@@ -817,77 +1098,42 @@ impl RefgetStore {
 
             let dr = seqmeta_hashmap
                 .get(&name)
-                .ok_or_else(|| {
-                    let available_keys: Vec<_> = seqmeta_hashmap.keys().collect();
-                    let total = available_keys.len();
-                    let sample: Vec<_> = available_keys.iter().take(3).collect();
-                    anyhow::anyhow!(
-                        "Sequence '{}' not found in metadata. Available ({} total): {:?}{}",
-                        name,
-                        total,
-                        sample,
-                        if total > 3 { " ..." } else { "" }
-                    )
-                })?
+                .ok_or_else(|| anyhow!("Sequence '{}' not found in cached metadata", name))?
                 .clone();
 
             seq_count += 1;
 
-            match self.mode {
-                StorageMode::Raw => {
-                    let mut raw_sequence = Vec::with_capacity(dr.length);
-                    // For raw, just extend with the line content.
-                    for seq_line in record.seq_lines() {
-                        raw_sequence.extend(seq_line);
-                    }
-
-                    // Always replace Stubs with Full sequences from FASTA
-                    self.add_sequence(
-                        SequenceRecord::Full {
-                            metadata: dr,
-                            sequence: raw_sequence,
-                        },
-                        coll_key,
-                        true, // Always replace Stubs with Full
-                    )?;
-                }
+            let sequence_data = match self.mode {
                 StorageMode::Encoded => {
-                    // Create a SequenceEncoder to handle the encoding of the sequence.
                     let mut encoder = SequenceEncoder::new(dr.alphabet, dr.length);
                     for seq_line in record.seq_lines() {
                         encoder.update(seq_line);
                     }
-                    let encoded_sequence = encoder.finalize();
-
-                    // Always replace Stubs with Full sequences from FASTA
-                    self.add_sequence(
-                        SequenceRecord::Full {
-                            metadata: dr,
-                            sequence: encoded_sequence,
-                        },
-                        coll_key,
-                        true, // Always replace Stubs with Full
-                    )?;
+                    encoder.finalize()
                 }
-            }
+                StorageMode::Raw => {
+                    let mut raw = Vec::with_capacity(dr.length);
+                    for seq_line in record.seq_lines() {
+                        raw.extend(seq_line);
+                    }
+                    raw
+                }
+            };
+
+            self.add_sequence(
+                SequenceRecord::Full { metadata: dr, sequence: sequence_data },
+                coll_key,
+                true,
+            )?;
         }
 
-        let encode_elapsed = encode_start.elapsed();
-
-        // Print summary with timing breakdown
+        let elapsed = start_time.elapsed();
         if !self.quiet {
             println!(
-                "Added {} ({} seqs) in {:.1}s [{:.1}s digest + {:.1}s encode]",
-                coll_digest_display,
-                seq_count,
-                digest_elapsed.as_secs_f64() + encode_elapsed.as_secs_f64(),
-                digest_elapsed.as_secs_f64(),
-                encode_elapsed.as_secs_f64()
+                "Added {} ({} seqs) in {:.1}s [cached metadata]",
+                coll_digest_display, seq_count, elapsed.as_secs_f64()
             );
         }
-
-        // Note: If persist_to_disk=true, sequences were already written to disk
-        // and replaced with stubs by add_sequence_record()
 
         Ok((metadata, true))
     }
@@ -2804,14 +3050,12 @@ impl RefgetStore {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
-        let total_disk_size = self.actual_disk_usage();
         StoreStats {
             n_sequences,
             n_sequences_loaded,
             n_collections,
             n_collections_loaded,
             storage_mode: mode_str.to_string(),
-            total_disk_size,
         }
     }
 }
@@ -2829,8 +3073,6 @@ pub struct StoreStats {
     pub n_collections_loaded: usize,
     /// Storage mode (Raw or Encoded)
     pub storage_mode: String,
-    /// Actual disk usage in bytes (all files in store directory)
-    pub total_disk_size: usize,
 }
 
 /// Format bytes into human-readable size (KB, MB, GB, etc.)

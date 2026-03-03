@@ -1102,6 +1102,22 @@ impl PyRefgetStore {
         RefgetStore::store_exists(path)
     }
 
+    /// Check if this store exists on disk.
+    ///
+    /// Returns True if the store has a local path and the store metadata file exists there.
+    /// Returns False for memory-only stores or if the store directory is missing.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.on_disk("/data/hg38_store")
+    ///     >>> store.exists()
+    ///     True
+    fn exists(&self) -> bool {
+        match self.inner.local_path() {
+            Some(path) => RefgetStore::store_exists(path),
+            None => false,
+        }
+    }
+
     /// Create a disk-backed RefgetStore.
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
@@ -1313,12 +1329,13 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false, namespaces=None))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None, threads=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
         namespaces: Option<Vec<String>>,
+        threads: Option<usize>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let ns_refs: Vec<&str> = namespaces
@@ -1327,7 +1344,8 @@ impl PyRefgetStore {
             .unwrap_or_default();
         let opts = FastaImportOptions::new()
             .force(force)
-            .namespaces(&ns_refs);
+            .namespaces(&ns_refs)
+            .threads(threads);
         let result = self.inner
             .add_sequence_collection_from_fasta(file_path, opts);
         result
@@ -1711,10 +1729,6 @@ impl PyRefgetStore {
             extended_stats.n_collections_loaded.to_string(),
         );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
-        stats.insert(
-            "total_disk_size".to_string(),
-            extended_stats.total_disk_size.to_string(),
-        );
         stats
     }
 
