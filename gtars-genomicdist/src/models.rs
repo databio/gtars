@@ -22,7 +22,7 @@ impl SortedRegionSet {
 }
 
 /// Genomic strand orientation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Strand {
     Plus,
     Minus,
@@ -45,6 +45,7 @@ impl Strand {
 /// adds strand information without modifying `Region` itself (which lives
 /// in gtars-core). Strand-aware operations (promoters, reduce, setdiff)
 /// are implemented as methods on this type.
+#[derive(Serialize, Deserialize)]
 pub struct StrandedRegionSet {
     pub inner: RegionSet,
     pub strands: Vec<Strand>,

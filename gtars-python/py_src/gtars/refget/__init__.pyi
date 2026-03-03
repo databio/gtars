@@ -390,6 +390,31 @@ class RefgetStore:
         ...
 
     @classmethod
+    def store_exists(cls, path: Union[str, PathLike]) -> bool:
+        """Check whether a valid RefgetStore exists at the given path.
+
+        Returns True if the path contains a store manifest file,
+        indicating the store has been initialized. Returns False if the
+        path does not exist or does not contain a store.
+
+        This avoids hardcoding knowledge of the store's internal file
+        format in calling code.
+
+        Args:
+            path: Path to the store directory.
+
+        Returns:
+            True if a store exists at the path, False otherwise.
+
+        Example::
+
+            from gtars.refget import RefgetStore
+            RefgetStore.store_exists("/data/hg38_store")  # True
+            RefgetStore.store_exists("/tmp/empty")  # False
+        """
+        ...
+
+    @classmethod
     def on_disk(cls, cache_path: Union[str, PathLike]) -> "RefgetStore":
         """Create or load a disk-backed RefgetStore.
 
@@ -565,7 +590,10 @@ class RefgetStore:
         ...
 
     def add_sequence_collection_from_fasta(
-        self, file_path: Union[str, PathLike], force: bool = False
+        self,
+        file_path: Union[str, PathLike],
+        force: bool = False,
+        namespaces: Optional[List[str]] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -576,6 +604,9 @@ class RefgetStore:
             file_path: Path to the FASTA file to import.
             force: If True, overwrite existing collections/sequences.
                 If False (default), skip duplicates.
+            namespaces: Optional list of namespace prefixes to extract aliases from
+                FASTA headers. For example, ["ncbi", "refseq"] will scan headers
+                for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
 
         Returns:
             A tuple containing:
@@ -590,6 +621,11 @@ class RefgetStore:
             store = RefgetStore.in_memory()
             metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
             print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest}")
+
+            # Extract aliases from FASTA headers
+            metadata, was_new = store.add_sequence_collection_from_fasta(
+                "genome.fa", namespaces=["ncbi", "refseq"]
+            )
         """
         ...
 
@@ -658,6 +694,19 @@ class RefgetStore:
 
             for meta in store.list_collections():
                 print(f"Collection {meta.digest}: {meta.n_sequences} sequences")
+        """
+        ...
+
+    def remove_collection(self, digest: str, remove_orphan_sequences: bool = False) -> bool:
+        """Remove a collection from the store.
+
+        Args:
+            digest: The collection's SHA-512/24u digest string.
+            remove_orphan_sequences: If True, also remove sequences no longer
+                referenced by any remaining collection. Default: False.
+
+        Returns:
+            True if the collection was found and removed, False if not found.
         """
         ...
 
@@ -1128,11 +1177,10 @@ class RefgetStore:
     def get_sequence_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceMetadata]:
         """Resolve a sequence alias to sequence metadata (no data loading)."""
         ...
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> SequenceRecord:
+    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
         """Resolve a sequence alias and return the loaded sequence record.
 
-        Raises:
-            KeyError: If the alias is not found.
+        Returns None if the alias is not found.
         """
         ...
     def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
@@ -1158,11 +1206,10 @@ class RefgetStore:
     def get_collection_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
         """Resolve a collection alias to collection metadata (no data loading)."""
         ...
-    def get_collection_by_alias(self, namespace: str, alias: str) -> SequenceCollection:
+    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollection]:
         """Resolve a collection alias and return the loaded collection.
 
-        Raises:
-            KeyError: If the alias is not found.
+        Returns None if the alias is not found.
         """
         ...
     def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:

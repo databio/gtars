@@ -31,6 +31,7 @@ gtars-core = { path = "../gtars-core", version="0.5.5", features=["bigbed", "htt
 # serialization
 serde = { workspace = true }
 serde_json = "1"
+bincode = { workspace = true }
 
 [[bin]]
 name = "gtars"

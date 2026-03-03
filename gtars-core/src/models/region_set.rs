@@ -36,9 +36,11 @@ use std::io::Cursor;
 /// such as bed file.
 ///
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionSet {
     pub regions: Vec<Region>,
     pub header: Option<String>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub path: Option<PathBuf>,
 }
 
@@ -68,11 +70,6 @@ impl TryFrom<&Path> for RegionSet {
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
                     Err(_) => {
-                        // Extract bbid from the path (e.g., the file stem)
-                        let bbid = path.to_str().ok_or_else(|| {
-                            RegionSetError::InvalidBedbaseIdentifier(format!("{:?}", path))
-                        })?;
-
                         return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
 
                         // // This code should be disabled, because it potentially breaks bedboss pipeline

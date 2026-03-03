@@ -76,7 +76,42 @@ pub struct RetrievedSequence {
     pub end: u32,
 }
 
-/// Global store handling cross-collection sequence management
+/// Options for importing a FASTA file into a RefgetStore.
+pub struct FastaImportOptions<'a> {
+    force: bool,
+    namespaces: &'a [&'a str],
+}
+
+impl<'a> Default for FastaImportOptions<'a> {
+    fn default() -> Self {
+        Self {
+            force: false,
+            namespaces: &[],
+        }
+    }
+}
+
+impl<'a> FastaImportOptions<'a> {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn force(mut self, yes: bool) -> Self {
+        self.force = yes;
+        self
+    }
+
+    #[must_use]
+    pub fn namespaces(mut self, ns: &'a [&'a str]) -> Self {
+        self.namespaces = ns;
+        self
+    }
+}
+
+/// Global store handling cross-collection sequence management.
+///
 /// Holds a global sequence_store, which holds all sequences (across collections) so that
 /// sequences are deduplicated.
 /// This allows lookup by sequence digest directly (bypassing collection information).
@@ -114,6 +149,9 @@ pub struct RefgetStore {
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
     fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
+    /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
+    /// Populated by ensure_decoded(), read by sequence_bytes().
+    decoded_cache: HashMap<[u8; 32], Vec<u8>>,
 }
 
 /// Metadata for the entire store.
@@ -312,6 +350,7 @@ impl RefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
+            decoded_cache: HashMap::new(),
         }
     }
 
@@ -331,6 +370,30 @@ impl RefgetStore {
         self.quiet
     }
 
+    /// Check whether a valid RefgetStore exists at the given path.
+    ///
+    /// Returns `true` if the path contains an `rgstore.json` manifest file,
+    /// indicating the store has been initialized. Returns `false` if the
+    /// path does not exist or does not contain a store manifest.
+    ///
+    /// This is useful for callers who need to decide between `on_disk()`
+    /// (create-or-load) and `open_local()` (load existing only).
+    ///
+    /// # Arguments
+    /// * `path` - Path to the store directory
+    ///
+    /// # Example
+    /// ```ignore
+    /// if RefgetStore::store_exists("/data/store") {
+    ///     let store = RefgetStore::open_local("/data/store")?;
+    /// } else {
+    ///     let store = RefgetStore::on_disk("/data/store")?;
+    /// }
+    /// ```
+    pub fn store_exists<P: AsRef<Path>>(path: P) -> bool {
+        path.as_ref().join("rgstore.json").exists()
+    }
+
     /// Create a disk-backed RefgetStore
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
@@ -346,7 +409,7 @@ impl RefgetStore {
     /// # Example
     /// ```ignore
     /// let store = RefgetStore::on_disk("/data/store")?;
-    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
     /// ```
     pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
         let cache_path = cache_path.as_ref();
@@ -383,7 +446,7 @@ impl RefgetStore {
     /// # Example
     /// ```ignore
     /// let store = RefgetStore::in_memory();
-    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
     /// ```
     pub fn in_memory() -> Self {
         Self::new(StorageMode::Encoded)
@@ -662,11 +725,12 @@ impl RefgetStore {
 
     /// Add a sequence collection from a FASTA file.
     ///
-    /// Skips sequences and collections that already exist in the store.
-    /// Use `add_sequence_collection_from_fasta_force()` to overwrite existing data.
+    /// Uses `FastaImportOptions` to control import behavior (force overwrite,
+    /// namespace alias extraction, etc.).
     ///
     /// # Arguments
     /// * `file_path` - Path to the FASTA file
+    /// * `opts` - Import options (use `FastaImportOptions::new()` for defaults)
     ///
     /// # Returns
     /// A tuple of (SequenceCollectionMetadata, was_new) where was_new indicates
@@ -679,34 +743,7 @@ impl RefgetStore {
     pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(
         &mut self,
         file_path: P,
-    ) -> Result<(SequenceCollectionMetadata, bool)> {
-        self.add_sequence_collection_from_fasta_internal(file_path, false)
-    }
-
-    /// Add a sequence collection from a FASTA file, overwriting existing data.
-    ///
-    /// Forces overwrite of collections and sequences that already exist in the store.
-    /// Use `add_sequence_collection_from_fasta()` to skip duplicates (safer default).
-    ///
-    /// # Arguments
-    /// * `file_path` - Path to the FASTA file
-    ///
-    /// # Returns
-    /// A tuple of (SequenceCollectionMetadata, was_new) where was_new is always true
-    /// since force mode always overwrites.
-    pub fn add_sequence_collection_from_fasta_force<P: AsRef<Path>>(
-        &mut self,
-        file_path: P,
-    ) -> Result<(SequenceCollectionMetadata, bool)> {
-        self.add_sequence_collection_from_fasta_internal(file_path, true)
-    }
-
-    /// Internal implementation for adding a sequence collection from FASTA.
-    /// Returns (SequenceCollectionMetadata, was_new) where was_new indicates if the collection was added.
-    fn add_sequence_collection_from_fasta_internal<P: AsRef<Path>>(
-        &mut self,
-        file_path: P,
-        force: bool,
+        opts: FastaImportOptions<'_>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         // Print start message
         if !self.quiet {
@@ -732,7 +769,7 @@ impl RefgetStore {
         let metadata = seqcol.metadata.clone();
 
         // Check if collection already exists and skip if not forcing
-        if !force && self.collections.contains_key(&coll_key) {
+        if !opts.force && self.collections.contains_key(&coll_key) {
             if !self.quiet {
                 println!("Skipped {} (already exists)", coll_digest_display);
             }
@@ -751,7 +788,7 @@ impl RefgetStore {
             .collect();
 
         // Register the collection -- this CONSUMES seqcol, no clone needed
-        self.add_sequence_collection_internal(seqcol, force)?;
+        self.add_sequence_collection_internal(seqcol, opts.force)?;
 
         let file_reader = get_dynamic_reader(file_path.as_ref())?;
         let mut fasta_reader = Reader::new(file_reader);
@@ -765,6 +802,19 @@ impl RefgetStore {
             let header = std::str::from_utf8(record.head())?;
             // Parse header to get name (first word) - same logic as digest_fasta
             let (name, _description) = crate::fasta::parse_fasta_header(header);
+
+            // Extract and register namespaced aliases from the header
+            if !opts.namespaces.is_empty() {
+                let aliases =
+                    crate::digest::fasta::extract_aliases_from_header(header, opts.namespaces);
+                for (ns, alias_value) in aliases {
+                    // We need the digest for this sequence - look it up from seqmeta
+                    if let Some(meta) = seqmeta_hashmap.get(&name) {
+                        self.add_sequence_alias(&ns, &alias_value, &meta.sha512t24u)?;
+                    }
+                }
+            }
+
             let dr = seqmeta_hashmap
                 .get(&name)
                 .ok_or_else(|| {
@@ -882,7 +932,7 @@ impl RefgetStore {
     /// # Examples
     /// ```ignore
     /// let store = RefgetStore::on_disk("store");
-    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
     /// let disk_size = store.total_disk_size();
     /// println!("Sequences use {} bytes on disk", disk_size);
     /// ```
@@ -1004,6 +1054,125 @@ impl RefgetStore {
             metadata,
             sequences,
         })
+    }
+
+    /// Remove a collection from the store.
+    ///
+    /// Removes the collection record, its name lookup, FHR metadata, and any
+    /// collection aliases pointing to it. Optionally removes orphaned sequences
+    /// (sequences no longer referenced by any remaining collection).
+    ///
+    /// If the store is disk-backed, deletes the collection's `.rgsi` and
+    /// `.fhr.json` files, optionally deletes orphaned sequence files, and
+    /// rewrites the index files.
+    ///
+    /// # Arguments
+    /// * `digest` - The collection digest string to remove
+    /// * `remove_orphan_sequences` - If true, also remove sequences that are no
+    ///   longer referenced by any remaining collection
+    ///
+    /// # Returns
+    /// * `Ok(true)` if the collection was found and removed
+    /// * `Ok(false)` if the collection was not found
+    pub fn remove_collection(
+        &mut self,
+        digest: &str,
+        remove_orphan_sequences: bool,
+    ) -> Result<bool> {
+        let key = digest.to_key();
+
+        // Check if collection exists; if not, return Ok(false)
+        if self.collections.remove(&key).is_none() {
+            return Ok(false);
+        }
+
+        // Collect the set of sequence digests referenced by this collection
+        let orphan_candidates: Vec<[u8; 32]> = self
+            .name_lookup
+            .get(&key)
+            .map(|name_map| name_map.values().cloned().collect())
+            .unwrap_or_default();
+
+        // Remove from name_lookup
+        self.name_lookup.remove(&key);
+
+        // Remove from fhr_metadata
+        self.fhr_metadata.remove(&key);
+
+        // Remove collection aliases pointing to this digest
+        let alias_pairs = self.aliases.reverse_lookup_collection(digest);
+        let affected_namespaces: std::collections::HashSet<String> = alias_pairs
+            .iter()
+            .map(|(ns, _)| ns.clone())
+            .collect();
+        for (ns, alias) in &alias_pairs {
+            self.aliases.remove_collection(ns, alias);
+        }
+        // Persist affected alias namespaces
+        for ns in &affected_namespaces {
+            self.persist_alias_namespace(AliasKind::Collection, ns)?;
+        }
+
+        // Handle orphan sequence removal
+        if remove_orphan_sequences && !orphan_candidates.is_empty() {
+            // Build the set of all sequence digests still referenced by remaining collections
+            let mut still_referenced: std::collections::HashSet<[u8; 32]> =
+                std::collections::HashSet::new();
+            for name_map in self.name_lookup.values() {
+                for seq_key in name_map.values() {
+                    still_referenced.insert(*seq_key);
+                }
+            }
+
+            // Find orphaned sequences
+            let orphans: Vec<[u8; 32]> = orphan_candidates
+                .into_iter()
+                .filter(|k| !still_referenced.contains(k))
+                .collect();
+
+            // Remove orphaned sequences from in-memory stores
+            for orphan_key in &orphans {
+                self.sequence_store.remove(orphan_key);
+                self.md5_lookup.retain(|_, v| v != orphan_key);
+                self.decoded_cache.remove(orphan_key);
+            }
+
+            // Delete orphaned sequence files from disk
+            if self.persist_to_disk {
+                if let (Some(local_path), Some(template)) =
+                    (&self.local_path, &self.seqdata_path_template)
+                {
+                    for orphan_key in &orphans {
+                        let orphan_digest = key_to_digest_string(orphan_key);
+                        let seq_file_path = Self::expand_template(&orphan_digest, template);
+                        let full_path = local_path.join(&seq_file_path);
+                        let _ = fs::remove_file(&full_path);
+                        // Clean up empty parent directories
+                        if let Some(parent) = full_path.parent() {
+                            let _ = fs::remove_dir(parent); // Only succeeds if empty
+                        }
+                    }
+                }
+            }
+        }
+
+        // Persist disk changes: delete collection files and rewrite index files
+        if self.persist_to_disk {
+            if let Some(local_path) = &self.local_path {
+                // Delete the collection's .rgsi file
+                let rgsi_path = local_path.join(format!("collections/{}.rgsi", digest));
+                let _ = fs::remove_file(&rgsi_path);
+
+                // Delete the collection's .fhr.json sidecar file (if exists)
+                let fhr_path = local_path.join(format!("collections/{}.fhr.json", digest));
+                let _ = fs::remove_file(&fhr_path);
+            }
+
+            // Rewrite index files
+            self.write_index_files()?;
+        }
+
+        Ok(true)
     }
 
     // =========================================================================
@@ -1252,6 +1421,60 @@ impl RefgetStore {
                 String::from_utf8_lossy(seq_digest.as_ref())
             )
         })
+    }
+
+    /// Ensure a sequence is loaded and decoded into the decoded cache.
+    ///
+    /// Call this during a serial setup phase to populate the cache.
+    /// Once populated, use `sequence_bytes()` for read-only access
+    /// (e.g., from multiple rayon workers sharing `&RefgetStore`).
+    ///
+    /// Note: decoded sequences are cached indefinitely. For large genomes,
+    /// use `clear_decoded_cache()` to reclaim memory when done.
+    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        if self.decoded_cache.contains_key(&actual_key) {
+            return Ok(());
+        }
+
+        self.ensure_sequence_loaded(&actual_key)?;
+
+        let record = self
+            .sequence_store
+            .get(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        let decoded = record
+            .decode()
+            .ok_or_else(|| anyhow!("Failed to decode sequence"))?;
+
+        self.decoded_cache.insert(actual_key, decoded.into_bytes());
+        Ok(())
+    }
+
+    /// Clear the decoded sequence cache to reclaim memory.
+    pub fn clear_decoded_cache(&mut self) {
+        self.decoded_cache.clear();
+    }
+
+    /// Get decoded sequence bytes from the cache.
+    ///
+    /// Takes `&self` — safe for concurrent read access from multiple threads
+    /// sharing a `&RefgetStore` reference (e.g., via `Arc` or scoped threads).
+    /// Returns `None` if the sequence has not been decoded via `ensure_decoded()`.
+    pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        self.decoded_cache.get(&actual_key).map(|v| v.as_slice())
     }
 
     /// Get a sequence by collection digest and name, loading data if needed.
@@ -2294,7 +2517,7 @@ impl RefgetStore {
             {
                 meta.digest.clone()
             } else {
-                String::from_utf8_lossy(collection_digest).to_string()
+                key_to_digest_string(collection_digest)
             };
 
             let relative_path = format!("collections/{}.rgsi", digest_str);
@@ -2328,8 +2551,8 @@ impl RefgetStore {
             if loaded_digest != *collection_digest {
                 return Err(anyhow!(
                     "Collection digest mismatch: expected {}, got {}",
-                    String::from_utf8_lossy(collection_digest),
-                    String::from_utf8_lossy(&loaded_digest)
+                    key_to_digest_string(collection_digest),
+                    key_to_digest_string(&loaded_digest)
                 ));
             }
 
@@ -2465,7 +2688,7 @@ impl RefgetStore {
     /// # Example
     /// ```ignore
     /// let store = RefgetStore::on_disk("/data/store")?;
-    /// store.add_sequence_collection_from_fasta("genome.fa")?;
+    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
     /// store.write()?;  // Updates index files
     /// ```
     pub fn write(&self) -> Result<()> {
@@ -2761,7 +2984,7 @@ mod tests {
 
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta_path)
+            .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
         let collections: Vec<_> = store.collections.keys().cloned().collect();
@@ -2807,7 +3030,7 @@ mod tests {
             let mut store = RefgetStore::in_memory();
             store.disable_encoding();
             store
-                .add_sequence_collection_from_fasta(&temp_fasta_path)
+                .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
                 .unwrap();
 
             // Verify raw (ASCII)
@@ -2833,7 +3056,7 @@ mod tests {
         {
             let mut store = RefgetStore::in_memory();
             store
-                .add_sequence_collection_from_fasta(&temp_fasta_path)
+                .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
                 .unwrap();
 
             // Verify encoded
@@ -2876,7 +3099,7 @@ GGGGAAAA
         // --- 2. Initialize RefgetStore and import FASTA ---
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta_path)
+            .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
         let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
@@ -2981,7 +3204,7 @@ chr2\t0\t4
         // --- 2. Initialize RefgetStore and import FASTA ---
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta_path)
+            .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
         let collections: Vec<_> = store.collections.keys().cloned().collect();
@@ -3145,7 +3368,7 @@ chr2\t0\t4
         let mut store = RefgetStore::in_memory();
 
         // Import the FASTA file
-        store.add_sequence_collection_from_fasta(temp_fa).unwrap();
+        store.add_sequence_collection_from_fasta(temp_fa, FastaImportOptions::new()).unwrap();
 
         // Check that the store has sequences
         assert!(!store.sequence_store.is_empty());
@@ -3167,9 +3390,9 @@ chr2\t0\t4
         let mut store = RefgetStore::in_memory();
 
         // Import a FASTA file into the store
-        // store.add_sequence_collection_from_fasta("../tests/data/subset.fa.gz").unwrap();
+        // store.add_sequence_collection_from_fasta("../tests/data/subset.fa.gz", FastaImportOptions::new()).unwrap();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Get the sequence keys for verification (assuming we know the test file contains 3 sequences)
@@ -3342,7 +3565,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         // Import into store
         let mut store1 = RefgetStore::in_memory();
         store1
-            .add_sequence_collection_from_fasta(&temp_fasta_path)
+            .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .unwrap();
 
         // Get original digests
@@ -3363,7 +3586,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         // Re-import the exported FASTA
         let mut store2 = RefgetStore::in_memory();
         store2
-            .add_sequence_collection_from_fasta(&exported_path)
+            .add_sequence_collection_from_fasta(&exported_path, FastaImportOptions::new())
             .unwrap();
 
         // Verify digests match (same sequences)
@@ -3458,7 +3681,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
         {
             let mut store = RefgetStore::on_disk(&store_path).unwrap();
             store
-                .add_sequence_collection_from_fasta(&fasta_path)
+                .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
                 .unwrap();
             let collections: Vec<_> = store.collections.keys().cloned().collect();
             assert_eq!(collections.len(), 1, "Should have exactly one collection");
@@ -3513,7 +3736,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Import FASTA - headers will be split into name (first word) and description (rest)
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta_path)
+            .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
             .expect("Should parse FASTA headers correctly");
 
         // Verify the sequences were loaded
@@ -3609,7 +3832,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Load FASTA file into the store
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // BEFORE calling write_store_to_dir, verify collection RGSI files exist
@@ -3641,7 +3864,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     fn test_disk_size_calculation() {
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz", FastaImportOptions::new())
             .unwrap();
 
         let disk_size = store.total_disk_size();
@@ -3664,7 +3887,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
 
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Index files should exist immediately (using new names)
@@ -3693,7 +3916,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
 
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
         store.write().unwrap(); // Should succeed
 
@@ -3710,7 +3933,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut store1 = RefgetStore::on_disk(&cache_path).unwrap();
         assert_eq!(store1.mode, StorageMode::Encoded);
         store1
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Load existing store - should preserve Encoded mode
@@ -3728,7 +3951,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         store3.disable_encoding(); // Switch to Raw
         assert_eq!(store3.mode, StorageMode::Raw);
         store3
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Load and verify Raw mode is persisted
@@ -3758,7 +3981,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Add a FASTA file
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Test list_collections
@@ -3800,7 +4023,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Create and populate the store
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
         let digest = store.list_collections()[0].digest.clone();
 
@@ -3870,7 +4093,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Create and populate the store
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
         let digest = store.list_collections()[0].digest.clone();
         drop(store);
@@ -3936,7 +4159,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Create and populate the store
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
 
         // Get a sequence digest from the sequence_store
@@ -3987,7 +4210,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Create and populate the store
         let mut store = RefgetStore::on_disk(&cache_path).unwrap();
         store
-            .add_sequence_collection_from_fasta(&temp_fasta)
+            .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
         let digest = store.list_collections()[0].digest.clone();
         drop(store);
@@ -4058,7 +4281,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Before fix: Failed with "Sequence 'chr1' not found in metadata. Available (0 total): []"
         // After fix: Detects empty cache, deletes it, re-digests FASTA
-        let result = store.add_sequence_collection_from_fasta(&fasta_path);
+        let result = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new());
         assert!(
             result.is_ok(),
             "Should handle stale cache: {:?}",
@@ -4083,6 +4306,58 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         let retrieved = store.get_sequence(digest.as_bytes()).unwrap();
         assert_eq!(retrieved.metadata().length, 4);
+    }
+
+    // =========================================================================
+    // Decoded cache tests
+    // =========================================================================
+
+    #[test]
+    fn test_ensure_decoded_then_sequence_bytes() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGTACGT");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+
+        let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
+        assert_eq!(bytes, b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_sequence_bytes_returns_none_before_ensure_decoded() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"ACGT");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+
+        // Not yet decoded — should return None
+        assert!(store.sequence_bytes(digest.as_bytes()).is_none());
+    }
+
+    #[test]
+    fn test_ensure_decoded_is_idempotent() {
+        use crate::digest::digest_sequence;
+
+        let mut store = RefgetStore::in_memory();
+        let record = digest_sequence("chr1", b"GATTACA");
+        let digest = record.metadata().sha512t24u.clone();
+
+        store.add_sequence_record(record, false).unwrap();
+
+        // Call ensure_decoded multiple times
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+
+        let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
+        assert_eq!(bytes, b"GATTACA");
     }
 
     // =========================================================================
@@ -4132,7 +4407,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         let mut store = RefgetStore::in_memory();
         let (meta, _) = store
-            .add_sequence_collection_from_fasta(&fasta_path)
+            .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
             .unwrap();
 
         store
@@ -4189,7 +4464,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         {
             let mut store = RefgetStore::on_disk(&store_path).unwrap();
             let (meta, _) = store
-                .add_sequence_collection_from_fasta(&fasta_path)
+                .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
                 .unwrap();
             digest = meta.digest.clone();
             seq_digest = store.list_sequences()[0].sha512t24u.clone();
@@ -4339,7 +4614,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
 
         let mut store = RefgetStore::in_memory();
-        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
 
         store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
 
@@ -4354,7 +4629,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
 
         let mut store = RefgetStore::in_memory();
-        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path).unwrap();
+        let (meta, _) = store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
 
         store.add_collection_alias("ucsc", "hg38", &meta.digest).unwrap();
 
@@ -4387,7 +4662,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut store = RefgetStore::in_memory();
 
         let (meta, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         // FHR metadata always works -- no enable step needed
@@ -4399,7 +4674,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     fn test_fhr_metadata_set_get() {
         let mut store = RefgetStore::in_memory();
         let (meta, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         let mut fhr = FhrMetadata::default();
@@ -4425,7 +4700,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     fn test_fhr_metadata_remove() {
         let mut store = RefgetStore::in_memory();
         let (meta, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
 
         let fhr = FhrMetadata {
@@ -4448,7 +4723,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         {
             let mut store = RefgetStore::on_disk(&store_path).unwrap();
             let (meta, _) = store
-                .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+                .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
                 .unwrap();
             digest = meta.digest.clone();
 
@@ -4476,7 +4751,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         assert!(store.list_fhr_metadata().is_empty());
 
         let (meta, _) = store
-            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
             .unwrap();
         let fhr = FhrMetadata {
             genome: Some("Test".to_string()),
@@ -4507,8 +4782,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::write(&fasta2, ">seq2\nCCCC\n").unwrap();
 
         let mut store = RefgetStore::in_memory();
-        let (meta1, _) = store.add_sequence_collection_from_fasta(&fasta1).unwrap();
-        let (meta2, _) = store.add_sequence_collection_from_fasta(&fasta2).unwrap();
+        let (meta1, _) = store.add_sequence_collection_from_fasta(&fasta1, FastaImportOptions::new()).unwrap();
+        let (meta2, _) = store.add_sequence_collection_from_fasta(&fasta2, FastaImportOptions::new()).unwrap();
         store.write_store_to_dir(&store_path, None).unwrap();
 
         // Both RGSI files should exist after write
@@ -4551,7 +4826,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         fs::write(&fasta, ">seq1\nATGC\n>seq2\nGGGG\n").unwrap();
 
         let mut store = RefgetStore::in_memory();
-        store.add_sequence_collection_from_fasta(&fasta).unwrap();
+        store.add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new()).unwrap();
         store.write_store_to_dir(&store_path, None).unwrap();
 
         // Collect sequence digests before dropping the in-memory store
@@ -4598,5 +4873,281 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             unloaded_digest, *digest_to_delete,
             "The Stub that failed to load should be the one whose file was deleted"
         );
+    }
+
+    #[test]
+    fn test_fasta_load_with_namespace_aliases() {
+        let dir = tempdir().unwrap();
+        let fasta = dir.path().join("test.fa");
+        fs::write(
+            &fasta,
+            ">chr1 ncbi:NC_000001.11 refseq:NC_000001.11\nACGT\n>chr2 ncbi:NC_000002.12\nTGCA\n",
+        )
+        .unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ncbi", "refseq"]))
+            .unwrap();
+
+        // Verify aliases were registered
+        let result = store.get_sequence_by_alias("ncbi", "NC_000001.11");
+        assert!(result.is_ok(), "ncbi alias for chr1 should be found");
+        assert_eq!(result.unwrap().metadata().name, "chr1");
+
+        let result = store.get_sequence_by_alias("refseq", "NC_000001.11");
+        assert!(result.is_ok(), "refseq alias for chr1 should be found");
+
+        let result = store.get_sequence_by_alias("ncbi", "NC_000002.12");
+        assert!(result.is_ok(), "ncbi alias for chr2 should be found");
+        assert_eq!(result.unwrap().metadata().name, "chr2");
+
+        // Non-existent alias should return Err
+        let result = store.get_sequence_by_alias("ncbi", "NC_999999.1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_fasta_load_without_namespaces_no_aliases() {
+        let dir = tempdir().unwrap();
+        let fasta = dir.path().join("test.fa");
+        fs::write(
+            &fasta,
+            ">chr1 ncbi:NC_000001.11\nACGT\n",
+        )
+        .unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+
+        // No aliases should be registered when namespaces is empty
+        let result = store.get_sequence_by_alias("ncbi", "NC_000001.11");
+        assert!(result.is_err());
+    }
+
+    // =========================================================================
+    // remove_collection tests
+    // =========================================================================
+
+    /// Helper: create an in-memory store with one collection from a FASTA string.
+    /// Returns (store, collection_digest_string).
+    fn store_with_one_collection(fasta_content: &str) -> (RefgetStore, String) {
+        let dir = tempdir().unwrap();
+        let fasta = dir.path().join("test.fa");
+        fs::write(&fasta, fasta_content).unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        (store, meta.digest)
+    }
+
+    #[test]
+    fn test_remove_existing_collection() {
+        let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
+
+        assert_eq!(store.list_collections().len(), 1);
+
+        let result = store.remove_collection(&digest, false).unwrap();
+        assert!(result, "remove_collection should return true for existing collection");
+        assert_eq!(store.list_collections().len(), 0);
+        assert!(store.get_collection(&digest).is_err());
+    }
+
+    #[test]
+    fn test_remove_nonexistent_collection() {
+        let (mut store, _digest) = store_with_one_collection(">chr1\nACGT\n");
+
+        let result = store.remove_collection("nonexistent_digest_value", false).unwrap();
+        assert!(!result, "remove_collection should return false for nonexistent collection");
+        // Store should be unchanged
+        assert_eq!(store.list_collections().len(), 1);
+    }
+
+    #[test]
+    fn test_remove_without_orphan_cleanup_keeps_sequences() {
+        let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
+
+        assert_eq!(store.list_sequences().len(), 2);
+
+        store.remove_collection(&digest, false).unwrap();
+
+        // Sequences should still be present
+        assert_eq!(store.list_sequences().len(), 2);
+    }
+
+    #[test]
+    fn test_remove_with_orphan_cleanup_removes_sequences() {
+        let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
+
+        assert_eq!(store.list_sequences().len(), 2);
+
+        store.remove_collection(&digest, true).unwrap();
+
+        // Sequences should be removed (they are orphans since no other collection refs them)
+        assert_eq!(store.list_sequences().len(), 0);
+    }
+
+    #[test]
+    fn test_remove_with_orphan_cleanup_retains_shared_sequences() {
+        // Two collections sharing the same sequence (chr1 = ACGT in both)
+        let dir = tempdir().unwrap();
+        let fasta1 = dir.path().join("a.fa");
+        let fasta2 = dir.path().join("b.fa");
+        fs::write(&fasta1, ">chr1\nACGT\n>chr2\nTTTT\n").unwrap();
+        fs::write(&fasta2, ">chr1\nACGT\n>chr3\nGGGG\n").unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        let (meta1, _) = store
+            .add_sequence_collection_from_fasta(&fasta1, FastaImportOptions::new())
+            .unwrap();
+        let (meta2, _) = store
+            .add_sequence_collection_from_fasta(&fasta2, FastaImportOptions::new())
+            .unwrap();
+
+        assert_eq!(store.list_collections().len(), 2);
+        // chr1 (ACGT) is shared, chr2 (TTTT) and chr3 (GGGG) are unique
+        assert_eq!(store.list_sequences().len(), 3);
+
+        // Remove first collection with orphan cleanup
+        store.remove_collection(&meta1.digest, true).unwrap();
+
+        assert_eq!(store.list_collections().len(), 1);
+        // chr1 (ACGT) is still referenced by collection 2, chr2 (TTTT) is orphaned
+        // So we should have 2 sequences remaining: chr1 and chr3
+        assert_eq!(store.list_sequences().len(), 2);
+
+        // The remaining collection should still work
+        let coll = store.get_collection(&meta2.digest).unwrap();
+        assert_eq!(coll.sequences.len(), 2);
+    }
+
+    #[test]
+    fn test_remove_collection_on_disk() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        let fasta = dir.path().join("test.fa");
+        fs::write(&fasta, ">chr1\nACGT\n>chr2\nTTTT\n").unwrap();
+
+        let mut store = RefgetStore::on_disk(&store_path).unwrap();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+
+        let digest = meta.digest.clone();
+
+        // Verify files exist on disk before removal
+        let rgsi_path = store_path.join(format!("collections/{}.rgsi", digest));
+        assert!(rgsi_path.exists(), "Collection .rgsi file should exist on disk");
+        let rgci_path = store_path.join("collections.rgci");
+        assert!(rgci_path.exists(), "collections.rgci should exist");
+
+        // Remove the collection
+        let result = store.remove_collection(&digest, false).unwrap();
+        assert!(result);
+
+        // Verify the .rgsi file is deleted
+        assert!(!rgsi_path.exists(), "Collection .rgsi file should be deleted");
+
+        // Verify the collections.rgci no longer lists the collection
+        let rgci_content = fs::read_to_string(&rgci_path).unwrap();
+        assert!(!rgci_content.contains(&digest), "collections.rgci should not contain removed collection");
+
+        // Index files should still be valid (rewritten correctly)
+        assert!(store_path.join("sequences.rgsi").exists());
+        assert!(store_path.join("rgstore.json").exists());
+    }
+
+    #[test]
+    fn test_remove_collection_on_disk_with_orphan_sequences() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        let fasta = dir.path().join("test.fa");
+        fs::write(&fasta, ">chr1\nACGT\n").unwrap();
+
+        let mut store = RefgetStore::on_disk(&store_path).unwrap();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+
+        let digest = meta.digest.clone();
+
+        // Get the sequence digest to verify its file path
+        let seq_digest = sha512t24u(b"ACGT");
+        let seq_file = store_path.join(format!("sequences/{}/{}.seq", &seq_digest[..2], seq_digest));
+        assert!(seq_file.exists(), "Sequence file should exist on disk");
+
+        // Remove with orphan cleanup
+        store.remove_collection(&digest, true).unwrap();
+
+        // Sequence file should be deleted
+        assert!(!seq_file.exists(), "Orphaned sequence file should be deleted");
+
+        // sequences.rgsi should be empty (just header)
+        let rgsi_content = fs::read_to_string(store_path.join("sequences.rgsi")).unwrap();
+        let non_comment_lines: Vec<_> = rgsi_content.lines().filter(|l| !l.starts_with('#')).collect();
+        assert!(non_comment_lines.is_empty(), "sequences.rgsi should have no data lines after removing all sequences");
+    }
+
+    #[test]
+    fn test_remove_collection_cleans_up_aliases() {
+        let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n");
+
+        // Add a collection alias
+        store.aliases.add_collection("ucsc", "hg38", &digest);
+
+        // Verify alias exists
+        assert!(store.aliases.resolve_collection("ucsc", "hg38").is_some());
+
+        store.remove_collection(&digest, false).unwrap();
+
+        // Alias should be gone
+        assert!(store.aliases.resolve_collection("ucsc", "hg38").is_none());
+    }
+
+    #[test]
+    fn test_remove_collection_cleans_up_fhr_metadata() {
+        let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n");
+
+        // Add FHR metadata
+        let fhr = FhrMetadata::default();
+        store.set_fhr_metadata(&digest, fhr).unwrap();
+        assert!(store.get_fhr_metadata(&digest).is_some());
+
+        store.remove_collection(&digest, false).unwrap();
+
+        // FHR metadata should be gone
+        assert!(store.get_fhr_metadata(&digest).is_none());
+    }
+
+    #[test]
+    fn test_store_exists() {
+        let dir = tempdir().unwrap();
+        let path = dir.path();
+
+        // Empty directory: no store
+        assert!(!RefgetStore::store_exists(path));
+
+        // Create a store and add data so rgstore.json is written on write()
+        let mut store = RefgetStore::on_disk(path).unwrap();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">seq1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta_path.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+        store.write().unwrap();
+
+        assert!(RefgetStore::store_exists(path));
+
+        // Nonexistent path: no store
+        assert!(!RefgetStore::store_exists("/nonexistent/path/to/store"));
     }
 }
