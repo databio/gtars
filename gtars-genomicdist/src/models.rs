@@ -45,7 +45,7 @@ impl Strand {
 /// adds strand information without modifying `Region` itself (which lives
 /// in gtars-core). Strand-aware operations (promoters, reduce, setdiff)
 /// are implemented as methods on this type.
-#[derive(Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StrandedRegionSet {
     pub inner: RegionSet,
     pub strands: Vec<Strand>,

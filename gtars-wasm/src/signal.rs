@@ -82,16 +82,12 @@ impl JsSignalMatrix {
             });
         }
 
-        // Reshape flat values into row-major Vec<Vec<f64>>
-        let row_values: Vec<Vec<f64>> = (0..n_r)
-            .map(|i| values[i * n_c..(i + 1) * n_c].to_vec())
-            .collect();
-
         Ok(JsSignalMatrix {
             matrix: SignalMatrix {
                 regions: RegionSet::from(regions),
                 condition_names: cond_names,
-                values: row_values,
+                n_conditions: n_c,
+                values: values.to_vec(),
             },
         })
     }

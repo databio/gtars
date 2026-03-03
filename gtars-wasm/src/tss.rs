@@ -7,7 +7,13 @@ use crate::regionset::JsRegionSet;
 
 #[wasm_bindgen(js_name = "TssIndex")]
 pub struct JsTssIndex {
-    index: TssIndex,
+    pub(crate) index: TssIndex,
+}
+
+impl JsTssIndex {
+    pub(crate) fn from_inner(index: TssIndex) -> Self {
+        JsTssIndex { index }
+    }
 }
 
 #[wasm_bindgen(js_class = "TssIndex")]

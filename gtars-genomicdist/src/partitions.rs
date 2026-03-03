@@ -8,9 +8,7 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
-
+use std::io::{BufRead, BufReader};
 use flate2::read::MultiGzDecoder;
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, OverlapperType};
@@ -19,15 +17,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::GtarsGenomicDistError;
 
-/// Magic bytes for the packed gene model format: "GMDL" = 0x474D444C.
-const GMDL_MAGIC: u32 = 0x474D444C;
-/// Current version of the packed gene model format.
-const GMDL_VERSION: u32 = 1;
-
-/// Flag bit: has three_utr component.
-const FLAG_HAS_THREE_UTR: u32 = 1;
-/// Flag bit: has five_utr component.
-const FLAG_HAS_FIVE_UTR: u32 = 2;
 use crate::interval_ranges::IntervalRanges;
 use crate::models::{Strand, StrandedRegionSet};
 
@@ -37,6 +26,7 @@ use crate::models::{Strand, StrandedRegionSet};
 /// gene boundaries, exon coordinates, and optionally UTR regions.
 /// Strand information is preserved so promoters can be computed
 /// correctly for minus-strand genes.
+#[derive(Clone)]
 pub struct GeneModel {
     pub genes: StrandedRegionSet,
     pub exons: StrandedRegionSet,
@@ -301,239 +291,6 @@ impl GeneModel {
         })
     }
 
-    /// Serialize this gene model to a packed binary file.
-    ///
-    /// Format: header (16 bytes), string intern table, then column-oriented
-    /// arrays for each StrandedRegionSet component (genes, exons, optionally
-    /// three_utr and five_utr).
-    pub fn save_bin<P: AsRef<Path>>(&self, path: P) -> Result<(), GtarsGenomicDistError> {
-        let mut buf: Vec<u8> = Vec::new();
-
-        // Build string intern table from all chromosome names
-        let mut intern_map: HashMap<String, u16> = HashMap::new();
-        let mut intern_table: Vec<String> = Vec::new();
-
-        let all_components: Vec<&StrandedRegionSet> = [
-            Some(&self.genes),
-            Some(&self.exons),
-            self.three_utr.as_ref(),
-            self.five_utr.as_ref(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect();
-
-        for srs in &all_components {
-            for r in &srs.inner.regions {
-                if !intern_map.contains_key(&r.chr) {
-                    let id = intern_table.len() as u16;
-                    intern_map.insert(r.chr.clone(), id);
-                    intern_table.push(r.chr.clone());
-                }
-            }
-        }
-
-        // Compute flags
-        let mut flags: u32 = 0;
-        if self.three_utr.is_some() {
-            flags |= FLAG_HAS_THREE_UTR;
-        }
-        if self.five_utr.is_some() {
-            flags |= FLAG_HAS_FIVE_UTR;
-        }
-
-        // Count components
-        let n_components: u32 = 2 + self.three_utr.is_some() as u32 + self.five_utr.is_some() as u32;
-
-        // Header (16 bytes)
-        buf.extend_from_slice(&GMDL_MAGIC.to_le_bytes());
-        buf.extend_from_slice(&GMDL_VERSION.to_le_bytes());
-        buf.extend_from_slice(&n_components.to_le_bytes());
-        buf.extend_from_slice(&flags.to_le_bytes());
-
-        // String intern table
-        buf.extend_from_slice(&(intern_table.len() as u32).to_le_bytes());
-        for s in &intern_table {
-            let bytes = s.as_bytes();
-            buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
-            buf.extend_from_slice(bytes);
-        }
-
-        // Write each StrandedRegionSet component
-        let write_srs = |srs: &StrandedRegionSet, buf: &mut Vec<u8>, intern_map: &HashMap<String, u16>| {
-            let n = srs.inner.regions.len() as u32;
-            buf.extend_from_slice(&n.to_le_bytes());
-            // chr_ids
-            for r in &srs.inner.regions {
-                buf.extend_from_slice(&intern_map[&r.chr].to_le_bytes());
-            }
-            // starts
-            for r in &srs.inner.regions {
-                buf.extend_from_slice(&r.start.to_le_bytes());
-            }
-            // ends
-            for r in &srs.inner.regions {
-                buf.extend_from_slice(&r.end.to_le_bytes());
-            }
-            // strands
-            for s in &srs.strands {
-                buf.push(match s {
-                    Strand::Plus => 0,
-                    Strand::Minus => 1,
-                    Strand::Unstranded => 2,
-                });
-            }
-        };
-
-        write_srs(&self.genes, &mut buf, &intern_map);
-        write_srs(&self.exons, &mut buf, &intern_map);
-        if let Some(ref srs) = self.three_utr {
-            write_srs(srs, &mut buf, &intern_map);
-        }
-        if let Some(ref srs) = self.five_utr {
-            write_srs(srs, &mut buf, &intern_map);
-        }
-
-        let mut file = File::create(path)?;
-        file.write_all(&buf)?;
-        Ok(())
-    }
-
-    /// Deserialize a gene model from a packed binary file.
-    ///
-    /// Validates the magic number and version, reads the intern table,
-    /// then reconstructs each StrandedRegionSet from column-oriented arrays.
-    pub fn load_bin<P: AsRef<Path>>(path: P) -> Result<Self, GtarsGenomicDistError> {
-        let data = std::fs::read(path.as_ref())?;
-        let mut pos = 0usize;
-
-        let err = |msg: &str| GtarsGenomicDistError::CustomError(msg.to_string());
-
-        macro_rules! read_bytes {
-            ($n:expr) => {{
-                if pos + $n > data.len() {
-                    return Err(err("Unexpected end of gene model file"));
-                }
-                let slice = &data[pos..pos + $n];
-                pos += $n;
-                slice
-            }};
-        }
-        macro_rules! read_u32 {
-            () => {{
-                u32::from_le_bytes(read_bytes!(4).try_into().unwrap())
-            }};
-        }
-        // Header
-        let magic = read_u32!();
-        if magic != GMDL_MAGIC {
-            return Err(err(
-                "Invalid gene model file format — regenerate with 'gtars prep'",
-            ));
-        }
-        let version = read_u32!();
-        if version != GMDL_VERSION {
-            return Err(err(&format!(
-                "Unsupported gene model format version {}",
-                version
-            )));
-        }
-        let _n_components = read_u32!();
-        let flags = read_u32!();
-        let has_three_utr = flags & FLAG_HAS_THREE_UTR != 0;
-        let has_five_utr = flags & FLAG_HAS_FIVE_UTR != 0;
-
-        // String intern table
-        let n_strings = read_u32!() as usize;
-        let mut intern_table: Vec<String> = Vec::with_capacity(n_strings);
-        for _ in 0..n_strings {
-            let len = read_u32!() as usize;
-            let bytes = read_bytes!(len);
-            intern_table.push(
-                String::from_utf8(bytes.to_vec())
-                    .map_err(|e| err(&format!("Invalid UTF-8 in intern table: {}", e)))?,
-            );
-        }
-
-        // Read a StrandedRegionSet component
-        let read_srs = |data: &[u8], pos: &mut usize| -> Result<StrandedRegionSet, GtarsGenomicDistError> {
-            // Re-define macros locally isn't possible, so inline the reads
-            let n = {
-                if *pos + 4 > data.len() { return Err(err("Unexpected end of file")); }
-                let v = u32::from_le_bytes(data[*pos..*pos + 4].try_into().unwrap()) as usize;
-                *pos += 4;
-                v
-            };
-
-            let mut chr_ids = Vec::with_capacity(n);
-            for _ in 0..n {
-                if *pos + 2 > data.len() { return Err(err("Unexpected end of file")); }
-                chr_ids.push(u16::from_le_bytes(data[*pos..*pos + 2].try_into().unwrap()) as usize);
-                *pos += 2;
-            }
-
-            let starts_bytes = {
-                let size = n * 4;
-                if *pos + size > data.len() { return Err(err("Unexpected end of file")); }
-                let s = &data[*pos..*pos + size];
-                *pos += size;
-                s
-            };
-            let ends_bytes = {
-                let size = n * 4;
-                if *pos + size > data.len() { return Err(err("Unexpected end of file")); }
-                let s = &data[*pos..*pos + size];
-                *pos += size;
-                s
-            };
-            let strand_bytes = {
-                if *pos + n > data.len() { return Err(err("Unexpected end of file")); }
-                let s = &data[*pos..*pos + n];
-                *pos += n;
-                s
-            };
-
-            let mut regions = Vec::with_capacity(n);
-            let mut strands = Vec::with_capacity(n);
-            for i in 0..n {
-                let start = u32::from_le_bytes(starts_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
-                let end = u32::from_le_bytes(ends_bytes[i * 4..(i + 1) * 4].try_into().unwrap());
-                regions.push(Region {
-                    chr: intern_table[chr_ids[i]].clone(),
-                    start,
-                    end,
-                    rest: None,
-                });
-                strands.push(match strand_bytes[i] {
-                    0 => Strand::Plus,
-                    1 => Strand::Minus,
-                    _ => Strand::Unstranded,
-                });
-            }
-
-            Ok(StrandedRegionSet::new(RegionSet::from(regions), strands))
-        };
-
-        let genes = read_srs(&data, &mut pos)?;
-        let exons = read_srs(&data, &mut pos)?;
-        let three_utr = if has_three_utr {
-            Some(read_srs(&data, &mut pos)?)
-        } else {
-            None
-        };
-        let five_utr = if has_five_utr {
-            Some(read_srs(&data, &mut pos)?)
-        } else {
-            None
-        };
-
-        Ok(GeneModel {
-            genes,
-            exons,
-            three_utr,
-            five_utr,
-        })
-    }
 }
 
 /// Extract `transcript_id` from a GTF attributes string (column 9).
@@ -1687,11 +1444,16 @@ mod tests {
         )
         .unwrap();
 
+        // Round-trip through GDA format
+        let ann = crate::asset::GenomicDistAnnotation { gene_model: model };
+
         let dir = tempfile::tempdir().unwrap();
         let bin_path = dir.path().join("model.bin");
+        ann.save_bin(&bin_path).unwrap();
+        let loaded = crate::asset::GenomicDistAnnotation::load_bin(&bin_path).unwrap();
 
-        model.save_bin(&bin_path).unwrap();
-        let loaded = GeneModel::load_bin(&bin_path).unwrap();
+        let model = &ann.gene_model;
+        let loaded = &loaded.gene_model;
 
         assert_eq!(model.genes.inner.regions.len(), loaded.genes.inner.regions.len());
         assert_eq!(model.exons.inner.regions.len(), loaded.exons.inner.regions.len());
@@ -1718,7 +1480,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_gene_model_packed_round_trip_without_utrs() {
+    fn test_gda_round_trip_without_utrs() {
         let genes = get_test_path("test_genes.bed");
         let exons = get_test_path("test_exons.bed");
 
@@ -1726,28 +1488,29 @@ mod tests {
             GeneModel::from_bed_files(genes.to_str().unwrap(), exons.to_str().unwrap(), None, None)
                 .unwrap();
 
+        let ann = crate::asset::GenomicDistAnnotation { gene_model: model };
+
         let dir = tempfile::tempdir().unwrap();
         let bin_path = dir.path().join("model.bin");
+        ann.save_bin(&bin_path).unwrap();
+        let loaded = crate::asset::GenomicDistAnnotation::load_bin(&bin_path).unwrap();
 
-        model.save_bin(&bin_path).unwrap();
-        let loaded = GeneModel::load_bin(&bin_path).unwrap();
-
-        assert_eq!(model.genes.inner.regions.len(), loaded.genes.inner.regions.len());
-        assert!(loaded.three_utr.is_none());
-        assert!(loaded.five_utr.is_none());
+        assert_eq!(ann.gene_model.genes.inner.regions.len(), loaded.gene_model.genes.inner.regions.len());
+        assert!(loaded.gene_model.three_utr.is_none());
+        assert!(loaded.gene_model.five_utr.is_none());
     }
 
     #[rstest]
-    fn test_gene_model_rejects_old_bincode() {
+    fn test_gda_rejects_invalid_file() {
         let dir = tempfile::tempdir().unwrap();
         let bin_path = dir.path().join("old.bin");
-        std::fs::write(&bin_path, b"not a valid gene model file").unwrap();
+        std::fs::write(&bin_path, b"not a valid GDA file").unwrap();
 
-        let result = GeneModel::load_bin(&bin_path);
+        let result = crate::asset::GenomicDistAnnotation::load_bin(&bin_path);
         let msg = match result {
             Err(e) => format!("{}", e),
             Ok(_) => panic!("Expected error loading invalid file"),
         };
-        assert!(msg.contains("regenerate"), "Error should mention regeneration: {}", msg);
+        assert!(msg.contains("GDA"), "Error should mention GDA: {}", msg);
     }
 }

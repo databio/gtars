@@ -4,7 +4,7 @@ use std::time::Instant;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use gtars_genomicdist::{GeneModel, SignalMatrix};
+use gtars_genomicdist::{GenomicDistAnnotation, SignalMatrix};
 
 /// Derive the default output path: strip `.gz` then append `.bin`.
 fn default_output_path(input: &str) -> String {
@@ -28,15 +28,18 @@ pub fn run_prep(matches: &ArgMatches) -> Result<()> {
 
         eprintln!("Parsing GTF: {}", gtf);
         let start = Instant::now();
-        let model = GeneModel::from_gtf(gtf.as_str(), true, true)
-            .map_err(|e| anyhow::anyhow!("Failed to parse GTF: {}", e))?;
-        eprintln!("  parsed in {:.1}s", start.elapsed().as_secs_f64());
+        let ann = GenomicDistAnnotation::from_gtf(gtf)
+            .map_err(|e| anyhow::anyhow!("Failed to build GDA: {}", e))?;
+        eprintln!(
+            "  parsed in {:.1}s ({} genes)",
+            start.elapsed().as_secs_f64(),
+            ann.gene_model.genes.len(),
+        );
 
-        eprintln!("Saving bincode: {}", out);
+        eprintln!("Saving GDA: {}", out);
         let start = Instant::now();
-        model
-            .save_bin(Path::new(&out))
-            .map_err(|e| anyhow::anyhow!("Failed to save bincode: {}", e))?;
+        ann.save_bin(Path::new(&out))
+            .map_err(|e| anyhow::anyhow!("Failed to save GDA: {}", e))?;
 
         let size = std::fs::metadata(&out)
             .map(|m| m.len())

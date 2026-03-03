@@ -22,6 +22,7 @@
 //! let distribution = regions.region_distribution();
 //! ```
 
+pub mod asset;
 pub mod bed_classifier;
 pub mod consensus;
 pub mod errors;
@@ -33,6 +34,7 @@ pub mod statistics;
 pub mod utils;
 
 // re-exports
+pub use asset::GenomicDistAnnotation;
 #[cfg(feature = "bedclassifier")]
 pub use bed_classifier::classify_bed;
 pub use consensus::{ConsensusRegion, consensus};

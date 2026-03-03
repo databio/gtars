@@ -12,7 +12,7 @@ use gtars_core::utils::get_chrom_sizes;
 use gtars_genomicdist::models::{ChromosomeStatistics, RegionBin, Strand, TssIndex};
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
-    GeneModel, ExpectedPartitionResult, PartitionResult,
+    GeneModel, GenomicDistAnnotation, ExpectedPartitionResult, PartitionResult,
     calc_expected_partitions, calc_partitions, genome_partition_list,
     SignalMatrix, calc_summary_signal, ConditionStats,
 };
@@ -84,8 +84,8 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     let rs = RegionSet::try_from(bed_path.as_str())
         .map_err(|e| anyhow::anyhow!("Failed to load BED file: {}", e))?;
 
-    // Optionally load chrom sizes
-    let chrom_sizes: Option<HashMap<String, u32>> = chrom_sizes_path.map(|p| get_chrom_sizes(p));
+    // Optionally load chrom sizes from explicit flag
+    let explicit_chrom_sizes: Option<HashMap<String, u32>> = chrom_sizes_path.map(|p| get_chrom_sizes(p));
 
     // --- Unconditional computations ---
     let widths = rs.calc_widths();
@@ -110,23 +110,26 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         widths.iter().map(|&w| w as f64).sum::<f64>() / widths.len() as f64
     };
 
-    // --- Optional: load gene model from GTF or bincode ---
+    // --- Optional: load gene model from GTF or GDA binary ---
     let gene_model: Option<GeneModel> = match gtf_path {
         Some(p) => {
-            let model = if p.ends_with(".bin") {
-                GeneModel::load_bin(p)
-                    .map_err(|e| anyhow::anyhow!("Failed to load gene model bincode: {}", e))?
+            if p.ends_with(".bin") {
+                let ann = GenomicDistAnnotation::load_bin(p)
+                    .map_err(|e| anyhow::anyhow!("Failed to load GDA binary: {}", e))?;
+                Some(ann.gene_model)
             } else {
-                GeneModel::from_gtf(p.as_str(), true, true)
-                    .map_err(|e| anyhow::anyhow!("Failed to load GTF: {}", e))?
-            };
-            Some(model)
+                let model = GeneModel::from_gtf(p.as_str(), true, true)
+                    .map_err(|e| anyhow::anyhow!("Failed to load GTF: {}", e))?;
+                Some(model)
+            }
         }
         None => {
             eprintln!("No --gtf provided, skipping partitions.");
             None
         }
     };
+
+    let chrom_sizes: Option<HashMap<String, u32>> = explicit_chrom_sizes;
 
     // --- TSS distances (signed: negative = upstream, positive = downstream) ---
     let tss_distances: Option<Vec<i64>> = if let Some(tss_p) = tss_path {

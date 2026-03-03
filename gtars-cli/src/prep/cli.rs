@@ -4,12 +4,12 @@ pub const PREP_CMD: &str = "prep";
 
 pub fn create_prep_cli() -> Command {
     Command::new(PREP_CMD)
-        .about("Pre-serialize GTF gene models or signal matrices to bincode for fast loading.")
+        .about("Pre-serialize GTF gene models or signal matrices to binary for fast loading.")
         .arg(
             Arg::new("gtf")
                 .long("gtf")
                 .required(false)
-                .help("Path to GTF/GTF.gz gene model to serialize"),
+                .help("Path to GTF/GTF.gz gene model to serialize to GDA binary"),
         )
         .arg(
             Arg::new("signal-matrix")

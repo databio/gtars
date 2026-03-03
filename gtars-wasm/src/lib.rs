@@ -1,3 +1,4 @@
+mod asset;
 mod models;
 mod overlaprs;
 mod partitions;

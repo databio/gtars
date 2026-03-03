@@ -75,6 +75,26 @@ Using bindings, you can call some `gtars` functions from within Python.
 
 To see the available tools you can use from the CLI run `gtars --help`. To see the help for a specific tool, run `gtars <tool> --help`.
 
+#### Genomic distributions with local reference files
+
+Pre-compile a GTF gene model to binary for fast repeated loading:
+
+```bash
+gtars prep --gtf genes.gtf.gz -o genes.gda.bin
+```
+
+Then compute genomic distributions for a BED file:
+
+```bash
+gtars genomicdist \
+  --bed query.bed \
+  --gtf genes.gda.bin \
+  --chrom-sizes hg38.chrom.sizes \
+  --signal-matrix open_signal_matrix.bin
+```
+
+All reference file flags (`--gtf`, `--chrom-sizes`, `--signal-matrix`) accept local file paths. The `--gtf` flag accepts either a raw `.gtf`/`.gtf.gz` or a pre-compiled `.bin`. Omit any optional flag to skip that analysis.
+
 ### 3. As a rust library
 
 You can link `gtars` as a library in your rust project. To do so, add the following to your `Cargo.toml` file:

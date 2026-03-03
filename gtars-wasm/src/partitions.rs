@@ -14,7 +14,13 @@ use crate::regionset::JsRegionSet;
 
 #[wasm_bindgen(js_name = "GeneModel")]
 pub struct JsGeneModel {
-    model: GeneModel,
+    pub(crate) model: GeneModel,
+}
+
+impl JsGeneModel {
+    pub(crate) fn from_inner(model: GeneModel) -> Self {
+        JsGeneModel { model }
+    }
 }
 
 /// Parse a JS array of region tuples into a StrandedRegionSet.
@@ -116,6 +122,12 @@ impl JsGeneModel {
 #[wasm_bindgen(js_name = "PartitionList")]
 pub struct JsPartitionList {
     pub(crate) partition_list: PartitionList,
+}
+
+impl JsPartitionList {
+    pub(crate) fn from_inner(partition_list: PartitionList) -> Self {
+        JsPartitionList { partition_list }
+    }
 }
 
 #[wasm_bindgen(js_class = "PartitionList")]
