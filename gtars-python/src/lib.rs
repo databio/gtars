@@ -1,3 +1,7 @@
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 

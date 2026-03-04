@@ -754,6 +754,7 @@ impl RefgetStore {
         use md5::Md5;
         use sha2::{Digest, Sha512};
 
+
         if !self.quiet {
             println!("Processing {}...", file_path.as_ref().display());
         }
@@ -868,9 +869,13 @@ impl RefgetStore {
             Ok(())
         });
 
-        // --- Thread 3 (main thread): Encode + accumulate ---
+        // --- Thread 3 (main thread): Encode + stream to disk ---
+        // Write each encoded sequence to disk immediately instead of accumulating
+        // all encoded bytes. This keeps peak memory at ~one chromosome instead of
+        // ~one entire genome, preventing glibc malloc arena fragmentation that
+        // causes monotonic RSS growth across hundreds of genomes.
         let mode = self.mode;
-        let mut sequence_results: Vec<(SequenceMetadata, Vec<u8>)> = Vec::new();
+        let mut sequence_metadata: Vec<SequenceMetadata> = Vec::new();
         let mut all_aliases: Vec<(String, String, String)> = Vec::new(); // (namespace, alias, sha512t24u)
 
         for digested in digest_rx {
@@ -888,7 +893,16 @@ impl RefgetStore {
                 all_aliases.push((ns.clone(), alias_value.clone(), digested.metadata.sha512t24u.clone()));
             }
 
-            sequence_results.push((digested.metadata, sequence_data));
+            // Write to disk immediately, store as Stub — encoded bytes are dropped
+            self.add_sequence_record(
+                SequenceRecord::Full {
+                    metadata: digested.metadata.clone(),
+                    sequence: sequence_data,
+                },
+                true,
+            )?;
+
+            sequence_metadata.push(digested.metadata);
         }
 
         // Join threads and propagate errors
@@ -899,13 +913,13 @@ impl RefgetStore {
 
         let pipeline_elapsed = pipeline_start.elapsed();
 
-        // --- Post-pipeline: compute collection metadata, register, insert ---
-        let seq_count = sequence_results.len();
+        // --- Post-pipeline: compute collection metadata, register ---
+        let seq_count = sequence_metadata.len();
 
-        // Build SequenceCollection metadata from digested results
-        let stub_records: Vec<SequenceRecord> = sequence_results
+        // Build collection metadata from lightweight metadata vec
+        let stub_records: Vec<SequenceRecord> = sequence_metadata
             .iter()
-            .map(|(meta, _)| SequenceRecord::Stub(meta.clone()))
+            .map(|meta| SequenceRecord::Stub(meta.clone()))
             .collect();
 
         let mut seqcol_metadata = SequenceCollectionMetadata::from_sequences(
@@ -949,28 +963,20 @@ impl RefgetStore {
             self.add_sequence_alias(ns, alias_value, sha512t24u)?;
         }
 
-        // Insert sequences
-        let insert_start = Instant::now();
-        for (meta, data) in sequence_results {
-            self.add_sequence(
-                SequenceRecord::Full {
-                    metadata: meta,
-                    sequence: data,
-                },
-                coll_key,
-                true,
-            )?;
+        // Populate name_lookup for already-written sequences
+        for meta in &sequence_metadata {
+            self.name_lookup
+                .entry(coll_key)
+                .or_default()
+                .insert(meta.name.clone(), meta.sha512t24u.to_key());
         }
-        let insert_elapsed = insert_start.elapsed();
 
         if !self.quiet {
             println!(
-                "Added {} ({} seqs) in {:.1}s [pipeline: {:.1}s + insert: {:.1}s]",
+                "Added {} ({} seqs) in {:.1}s",
                 coll_digest_display,
                 seq_count,
-                pipeline_elapsed.as_secs_f64() + insert_elapsed.as_secs_f64(),
                 pipeline_elapsed.as_secs_f64(),
-                insert_elapsed.as_secs_f64()
             );
         }
 
