@@ -1,0 +1,384 @@
+---
+title: "gtars-sc vs Seurat: PBMC 3k Comparison"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+params:
+  data_dir: NULL
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+library(gtars)
+has_seurat <- requireNamespace("Seurat", quietly = TRUE)
+if (has_seurat) library(Seurat)
+```
+
+# Overview
+
+This document runs the full single-cell RNA preprocessing pipeline on the
+**PBMC 3k** dataset using both **gtars-sc** (Rust) and **Seurat** (R),
+comparing timings, metric agreement, and output overlap at each step.
+
+```{r resolve-data}
+data_dir <- params$data_dir
+
+if (is.null(data_dir)) {
+  # Try known local path (gtars-sc test data)
+  candidate <- file.path(
+    system.file(package = "gtars"),
+    "..", "..", "src", "rust", "..", "..", "..",
+    "gtars-sc", "tests", "data", "pbmc3k",
+    "filtered_gene_bc_matrices", "hg19"
+  )
+  candidate <- normalizePath(candidate, mustWork = FALSE)
+  if (!dir.exists(candidate)) {
+    # Try the repo-relative path
+    candidate <- normalizePath(
+      "../../src/rust/../../../gtars-sc/tests/data/pbmc3k/filtered_gene_bc_matrices/hg19",
+      mustWork = FALSE
+    )
+  }
+  if (dir.exists(candidate)) {
+    data_dir <- candidate
+  } else {
+    # Download from 10X
+    data_dir <- file.path(tempdir(), "pbmc3k_10x")
+    if (!dir.exists(data_dir)) {
+      dir.create(data_dir, recursive = TRUE)
+      url <- "https://cf.10xgenomics.com/samples/cell/pbmc3k/pbmc3k_filtered_gene_bc_matrices.tar.gz"
+      tar_file <- file.path(tempdir(), "pbmc3k.tar.gz")
+      cat("Downloading PBMC 3k dataset...\n")
+      download.file(url, tar_file, quiet = TRUE)
+      untar(tar_file, exdir = data_dir)
+    }
+    sub <- file.path(data_dir, "filtered_gene_bc_matrices", "hg19")
+    if (dir.exists(sub)) data_dir <- sub
+  }
+}
+
+cat("Data directory:", data_dir, "\n")
+stopifnot(dir.exists(data_dir))
+```
+
+```{r timing-setup}
+timings <- data.frame(
+  step = character(),
+  gtars_sec = numeric(),
+  seurat_sec = numeric(),
+  stringsAsFactors = FALSE
+)
+
+time_it <- function(expr) {
+  t <- system.time(expr)
+  t[["elapsed"]]
+}
+
+fmt_time <- function(secs) {
+  if (secs < 1) sprintf("%.0f ms", secs * 1000) else sprintf("%.2f s", secs)
+}
+```
+
+`r if (!has_seurat) "**Note:** Seurat is not installed. Only gtars-sc results will be shown. Install Seurat for the full comparison."`
+
+---
+
+# Step 1: Read 10X
+
+```{r read-10x}
+t_gtars <- time_it({ fm <- sc_read_10x(data_dir) })
+info <- sc_feature_matrix_info(fm)
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu_data <- Read10X(data.dir = data_dir)
+    seu <- CreateSeuratObject(counts = seu_data, project = "pbmc3k")
+  })
+  cat(sprintf("Seurat: %d genes x %d cells\n", nrow(seu), ncol(seu)))
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars:  %d genes x %d cells (%s nnz)\n",
+            info$n_features, info$n_cells, format(info$nnz, big.mark = ",")))
+timings[nrow(timings) + 1, ] <- list("Read 10X", t_gtars, t_seurat)
+```
+
+---
+
+# Step 2: QC Metrics
+
+```{r qc-metrics}
+t_gtars <- time_it({ qc <- sc_compute_rna_qc(fm) })
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
+  })
+} else {
+  t_seurat <- NA
+}
+
+timings[nrow(timings) + 1, ] <- list("QC metrics", t_gtars, t_seurat)
+```
+
+```{r qc-summary}
+cat(sprintf("gtars  — median nFeatures: %.0f, median pct_mt: %.2f%%\n",
+            median(qc$n_features), median(qc$pct_mt)))
+if (has_seurat) {
+  cat(sprintf("Seurat — median nFeatures: %.0f, median pct_mt: %.2f%%\n",
+              median(seu$nFeature_RNA), median(seu$percent.mt)))
+}
+```
+
+```{r qc-plots, fig.width=10, fig.height=4}
+par(mfrow = c(1, 3))
+hist(qc$n_features, breaks = 50, main = "nFeatures (gtars)", xlab = "Features per cell", col = "steelblue")
+hist(qc$n_counts, breaks = 50, main = "nCounts (gtars)", xlab = "Total counts", col = "steelblue")
+hist(qc$pct_mt, breaks = 50, main = "% MT (gtars)", xlab = "Mitochondrial %", col = "steelblue")
+```
+
+---
+
+# Step 3: Filter Genes (min_cells = 3)
+
+```{r filter-genes}
+t_gtars <- time_it({ fm_fg <- sc_filter_genes(fm, min_cells = 3L) })
+info_fg <- sc_feature_matrix_info(fm_fg)
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- CreateSeuratObject(counts = seu_data, project = "pbmc3k", min.cells = 3)
+    seu[["percent.mt"]] <- PercentageFeatureSet(seu, pattern = "^MT-")
+  })
+  cat(sprintf("Seurat: %d genes\n", nrow(seu)))
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars:  %d -> %d genes\n", info$n_features, info_fg$n_features))
+timings[nrow(timings) + 1, ] <- list("Filter genes", t_gtars, t_seurat)
+```
+
+---
+
+# Step 4: Filter Cells (min_features = 200, max_pct_mt = 5%)
+
+```{r filter-cells}
+t_gtars <- time_it({
+  fm_fc <- sc_filter_cells(fm_fg, min_features = 200L, max_pct_mt = 5.0)
+})
+info_fc <- sc_feature_matrix_info(fm_fc)
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- subset(seu, subset = nFeature_RNA > 200 & percent.mt < 5)
+  })
+  cat(sprintf("Seurat: %d cells\n", ncol(seu)))
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars:  %d -> %d cells\n", info_fg$n_cells, info_fc$n_cells))
+timings[nrow(timings) + 1, ] <- list("Filter cells", t_gtars, t_seurat)
+```
+
+---
+
+# Step 5: Find Variable Features (n = 2000, on counts)
+
+HVG selection runs on **raw counts** before normalization, matching Seurat's VST behavior.
+
+```{r hvg}
+t_gtars <- time_it({ hvg_gtars <- sc_find_variable_features(fm_fc, n_features = 2000L) })
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- FindVariableFeatures(seu, selection.method = "vst", nfeatures = 2000)
+  })
+  hvg_seurat <- VariableFeatures(seu)
+  overlap <- length(intersect(hvg_gtars, hvg_seurat))
+  cat(sprintf("HVG overlap: %d / 2000 (%.1f%%)\n", overlap, overlap / 2000 * 100))
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars top 10 HVGs: %s\n", paste(head(hvg_gtars, 10), collapse = ", ")))
+timings[nrow(timings) + 1, ] <- list("Find HVGs", t_gtars, t_seurat)
+```
+
+```{r hvg-venn, fig.width=6, fig.height=4, eval=has_seurat}
+# Simple overlap visualization
+n_gtars_only <- length(setdiff(hvg_gtars, hvg_seurat))
+n_seurat_only <- length(setdiff(hvg_seurat, hvg_gtars))
+n_shared <- length(intersect(hvg_gtars, hvg_seurat))
+
+barplot(c("gtars only" = n_gtars_only, "Shared" = n_shared, "Seurat only" = n_seurat_only),
+        col = c("steelblue", "mediumpurple", "coral"),
+        main = "HVG Overlap (n=2000 each)",
+        ylab = "Number of genes")
+```
+
+---
+
+# Step 6: Log Normalize
+
+```{r normalize}
+t_gtars <- time_it({ fm_norm <- sc_log_normalize(fm_fc, scale_factor = 10000) })
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- NormalizeData(seu, normalization.method = "LogNormalize", scale.factor = 10000)
+  })
+} else {
+  t_seurat <- NA
+}
+
+timings[nrow(timings) + 1, ] <- list("Normalize", t_gtars, t_seurat)
+```
+
+---
+
+# Step 7: Scale Data
+
+```{r scale}
+t_gtars <- time_it({ scaled_gtars <- sc_scale_data(fm_norm, hvg_gtars, clip_value = 10.0) })
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- ScaleData(seu, features = hvg_seurat)
+  })
+  cat(sprintf("Seurat scaled: %d x %d\n",
+              nrow(GetAssayData(seu, layer = "scale.data")),
+              ncol(GetAssayData(seu, layer = "scale.data"))))
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars  scaled: %d x %d\n", nrow(scaled_gtars), ncol(scaled_gtars)))
+timings[nrow(timings) + 1, ] <- list("Scale", t_gtars, t_seurat)
+```
+
+---
+
+# Step 8: PCA (50 PCs)
+
+```{r pca}
+t_gtars <- time_it({ pca_gtars <- sc_run_pca(scaled_gtars, n_pcs = 50L) })
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- RunPCA(seu, features = hvg_seurat, npcs = 50, verbose = FALSE)
+  })
+} else {
+  t_seurat <- NA
+}
+
+cat(sprintf("gtars embeddings: %d cells x %d PCs\n",
+            nrow(pca_gtars$embeddings), ncol(pca_gtars$embeddings)))
+timings[nrow(timings) + 1, ] <- list("PCA", t_gtars, t_seurat)
+```
+
+## Variance Explained
+
+```{r variance-explained, fig.width=8, fig.height=4}
+ve_gtars <- pca_gtars$variance_explained
+
+if (has_seurat) {
+  seu_sdev <- Stdev(seu, reduction = "pca")
+  ve_seurat <- seu_sdev^2 / sum(seu_sdev^2)
+
+  plot(seq_along(ve_gtars), ve_gtars * 100, type = "b", pch = 16, col = "steelblue",
+       xlab = "PC", ylab = "% Variance Explained", main = "Variance Explained per PC",
+       ylim = range(c(ve_gtars, ve_seurat) * 100))
+  lines(seq_along(ve_seurat), ve_seurat * 100, type = "b", pch = 17, col = "coral")
+  legend("topright", c("gtars-sc", "Seurat"), col = c("steelblue", "coral"),
+         pch = c(16, 17), lty = 1)
+} else {
+  plot(seq_along(ve_gtars), ve_gtars * 100, type = "b", pch = 16, col = "steelblue",
+       xlab = "PC", ylab = "% Variance Explained", main = "Variance Explained per PC (gtars-sc)")
+}
+```
+
+```{r embedding-correlation, eval=has_seurat}
+shared_cells <- intersect(rownames(pca_gtars$embeddings), colnames(seu))
+if (length(shared_cells) > 0) {
+  gtars_emb <- pca_gtars$embeddings[shared_cells, , drop = FALSE]
+  seurat_emb <- Embeddings(seu, "pca")[shared_cells, , drop = FALSE]
+  n_compare <- min(ncol(gtars_emb), ncol(seurat_emb))
+  cors <- sapply(seq_len(n_compare), function(i) abs(cor(gtars_emb[, i], seurat_emb[, i])))
+
+  cat(sprintf("Shared cells: %d\n", length(shared_cells)))
+  cat(sprintf("Mean |cor| across %d PCs: %.4f\n", n_compare, mean(cors)))
+  cat(sprintf("PC1 |cor|: %.4f, PC2 |cor|: %.4f, PC3 |cor|: %.4f\n", cors[1], cors[2], cors[3]))
+}
+```
+
+```{r embedding-cor-plot, fig.width=8, fig.height=4, eval=has_seurat}
+if (exists("cors")) {
+  barplot(cors, names.arg = paste0("PC", seq_along(cors)),
+          col = ifelse(cors > 0.9, "steelblue", ifelse(cors > 0.7, "orange", "coral")),
+          main = "Embedding Correlation (|r|) per PC",
+          ylab = "|Pearson r|", las = 2, cex.names = 0.7)
+  abline(h = 0.9, lty = 2, col = "grey50")
+}
+```
+
+---
+
+# Timing Summary
+
+```{r timing-table}
+timings$speedup <- ifelse(
+  is.na(timings$seurat_sec) | timings$gtars_sec < 0.001,
+  NA,
+  timings$seurat_sec / pmax(timings$gtars_sec, 0.001)
+)
+timings$gtars_fmt <- sapply(timings$gtars_sec, fmt_time)
+timings$seurat_fmt <- ifelse(is.na(timings$seurat_sec), "—", sapply(timings$seurat_sec, fmt_time))
+timings$speedup_fmt <- ifelse(is.na(timings$speedup), "—", sprintf("%.1fx", timings$speedup))
+
+knitr::kable(
+  timings[, c("step", "gtars_fmt", "seurat_fmt", "speedup_fmt")],
+  col.names = c("Step", "gtars-sc", "Seurat", "Speedup"),
+  align = c("l", "r", "r", "r"),
+  caption = "Step-by-step timing comparison"
+)
+```
+
+```{r timing-totals}
+total_gtars <- sum(timings$gtars_sec)
+total_seurat <- sum(timings$seurat_sec, na.rm = TRUE)
+cat(sprintf("Total gtars-sc: %s\n", fmt_time(total_gtars)))
+if (!all(is.na(timings$seurat_sec))) {
+  cat(sprintf("Total Seurat:   %s\n", fmt_time(total_seurat)))
+  cat(sprintf("Overall speedup: %.1fx\n", total_seurat / max(total_gtars, 0.001)))
+}
+```
+
+```{r timing-barplot, fig.width=8, fig.height=5}
+if (!all(is.na(timings$seurat_sec))) {
+  mat <- rbind(gtars = timings$gtars_sec, Seurat = timings$seurat_sec)
+  colnames(mat) <- timings$step
+  barplot(mat, beside = TRUE, col = c("steelblue", "coral"),
+          main = "Timing Comparison by Step", ylab = "Seconds", las = 2,
+          cex.names = 0.8)
+  legend("topright", c("gtars-sc", "Seurat"), fill = c("steelblue", "coral"))
+} else {
+  barplot(timings$gtars_sec, names.arg = timings$step,
+          col = "steelblue", main = "gtars-sc Timing by Step",
+          ylab = "Seconds", las = 2, cex.names = 0.8)
+}
+```
+
+---
+
+# Session Info
+
+```{r session-info}
+sessionInfo()
+```

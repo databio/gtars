@@ -16,6 +16,7 @@ members = [
     "gtars-igd",
     "gtars-fragsplit",
     "gtars-scoring",
+    "gtars-sc",
     "gtars",
 ]
 
@@ -29,3 +30,8 @@ indicatif = "0.18.0"
 serde_json = "1.0.135"
 bincode = "1.3.3"
 byteorder = "1.5.0"
+sprs = "0.11"
+ndarray = "0.15.6"
+faer = "0.24"
+rayon = "1.11.0"
+rand = "0.9"

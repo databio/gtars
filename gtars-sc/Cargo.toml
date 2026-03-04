@@ -1,0 +1,28 @@
+[package]
+name = "gtars-sc"
+version = "0.1.0"
+edition = "2024"
+description = "Single-cell analysis pipelines (RNA + ATAC) for the gtars ecosystem"
+license = "MIT"
+
+[dependencies]
+sprs = { workspace = true }
+ndarray = { workspace = true }
+faer = { version = "0.24", default-features = false, features = ["std"] }
+rayon = { workspace = true, optional = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+flate2 = { workspace = true }
+rand = { workspace = true }
+getrandom = { version = "0.3", optional = true }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
+tempfile = "3.21.0"
+
+[features]
+default = ["parallel", "rna"]
+parallel = ["dep:rayon", "sprs/multi_thread", "faer/rayon"]
+rna = []
+wasm = ["getrandom/wasm_js"]

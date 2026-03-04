@@ -203,7 +203,7 @@ r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom
 #' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
 #' @param n_regions Number of signal regions
 #' @param n_conditions Number of conditions
-r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions)
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions)
 
 #' Calculate absolute distance from each query region to nearest feature midpoint.
 #' Returns NA for regions on chromosomes without features.
@@ -580,6 +580,73 @@ list_fhr_metadata_store <- function(store_ptr) .Call(wrap__list_fhr_metadata_sto
 #' @param collection_digest Collection digest
 #' @param path Path to JSON file
 load_fhr_metadata_store <- function(store_ptr, collection_digest, path) .Call(wrap__load_fhr_metadata_store, store_ptr, collection_digest, path)
+
+#' Read a 10X Chromium directory (matrix.mtx.gz, features.tsv.gz, barcodes.tsv.gz)
+#' @export
+#' @param dir Path to the 10X directory
+sc_read_10x <- function(dir) .Call(wrap__r_sc_read_10x, dir)
+
+#' Get FeatureMatrix dimensions and metadata
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+sc_feature_matrix_info <- function(ptr) .Call(wrap__r_sc_feature_matrix_info, ptr)
+
+#' Compute per-cell RNA QC metrics (n_features, n_counts, pct_mt)
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+sc_compute_rna_qc <- function(ptr) .Call(wrap__r_sc_compute_rna_qc, ptr)
+
+#' Filter genes appearing in fewer than min_cells cells
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param min_cells Minimum number of cells a gene must appear in
+sc_filter_genes <- function(ptr, min_cells) .Call(wrap__r_sc_filter_genes, ptr, min_cells)
+
+#' Filter cells by minimum features and maximum mitochondrial percentage
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param min_features Minimum number of features per cell
+#' @param max_pct_mt Maximum mitochondrial percentage
+sc_filter_cells <- function(ptr, min_features, max_pct_mt) .Call(wrap__r_sc_filter_cells, ptr, min_features, max_pct_mt)
+
+#' Log-normalize count data: log1p(count / total * scale_factor)
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param scale_factor Scale factor (default 10000)
+sc_log_normalize <- function(ptr, scale_factor) .Call(wrap__r_sc_log_normalize, ptr, scale_factor)
+
+#' Find highly variable features using variance-stabilizing transform
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param n_features Number of variable features to select
+sc_find_variable_features <- function(ptr, n_features) .Call(wrap__r_sc_find_variable_features, ptr, n_features)
+
+#' Scale data: subset to features, center, scale, optionally clip
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param features Character vector of feature names to scale
+#' @param clip_value Maximum absolute value to clip to (use NA or NULL to skip)
+sc_scale_data <- function(ptr, features, clip_value) .Call(wrap__r_sc_scale_data, ptr, features, clip_value)
+
+#' Run PCA via truncated SVD on a scaled matrix
+#' @export
+#' @param matrix_data Flat numeric vector (column-major) of scaled data
+#' @param nrow Number of rows (features)
+#' @param ncol Number of columns (cells)
+#' @param n_pcs Number of principal components
+sc_run_pca <- function(matrix_data, nrow, ncol, n_pcs) .Call(wrap__r_sc_run_pca, matrix_data, nrow, ncol, n_pcs)
+
+#' Run the full RNA preprocessing pipeline
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param min_features Minimum features per cell (default 200)
+#' @param min_cells Minimum cells per gene (default 3)
+#' @param max_pct_mt Maximum mitochondrial percentage (default 5.0)
+#' @param scale_factor Normalization scale factor (default 10000)
+#' @param n_variable_features Number of HVGs (default 2000)
+#' @param n_pcs Number of PCs (default 50)
+#' @param clip_value Clip value for scaling (default 10.0, NA to skip)
+sc_run_rna_pipeline <- function(ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value) .Call(wrap__r_sc_run_rna_pipeline, ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value)
 
 
 # nolint end

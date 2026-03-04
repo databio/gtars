@@ -9,7 +9,7 @@ r_calc_summary_signal(
   signal_region_ids,
   condition_names,
   values_flat,
-  n_regions,
+  `_n_regions`,
   n_conditions
 )
 }
@@ -22,9 +22,9 @@ r_calc_summary_signal(
 
 \item{values_flat}{Numeric vector of signal values (row-major, length = n_regions * n_conditions)}
 
-\item{n_regions}{Number of signal regions}
-
 \item{n_conditions}{Number of conditions}
+
+\item{n_regions}{Number of signal regions}
 }
 \description{
 Calculate summary signal (overlap query with signal matrix)

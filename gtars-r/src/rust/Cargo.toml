@@ -17,4 +17,6 @@ gtars-igd = { path = "../../../gtars-igd" }
 gtars-refget = { path = "../../../gtars-refget" }
 gtars-genomicdist = { path = "../../../gtars-genomicdist" }
 gtars-tokenizers = { path = "../../../gtars-tokenizers", features = ["huggingface"] }
+gtars-sc = { path = "../../../gtars-sc" }
+ndarray = "0.15.6"
 serde_json = "1.0"
