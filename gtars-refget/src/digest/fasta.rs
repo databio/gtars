@@ -334,8 +334,8 @@ pub fn digest_fasta_bytes(content: &[u8]) -> Result<SequenceCollection> {
 
     let results = if is_gzipped {
         // Decompress gzip content
-        use flate2::read::GzDecoder;
-        let decoder = GzDecoder::new(content);
+        use flate2::read::MultiGzDecoder;
+        let decoder = MultiGzDecoder::new(content);
         let reader = std::io::BufReader::new(decoder);
         parse_fasta_reader(reader, ParseOptions::DIGEST_ONLY)?
     } else {
@@ -384,8 +384,8 @@ pub fn load_fasta_bytes(content: &[u8]) -> Result<SequenceCollection> {
 
     let results = if is_gzipped {
         // Decompress gzip content
-        use flate2::read::GzDecoder;
-        let decoder = GzDecoder::new(content);
+        use flate2::read::MultiGzDecoder;
+        let decoder = MultiGzDecoder::new(content);
         let reader = std::io::BufReader::new(decoder);
         parse_fasta_reader(reader, ParseOptions::FULL)?
     } else {

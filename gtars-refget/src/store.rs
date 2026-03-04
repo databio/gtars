@@ -49,7 +49,7 @@ use anyhow::anyhow;
 use anyhow::{Context, Result};
 use chrono::Utc;
 use flate2::Compression;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
 use gtars_core::utils::{get_dynamic_reader, get_file_info, parse_bedlike_file};
 use serde::{Deserialize, Serialize};
@@ -1822,7 +1822,7 @@ impl RefgetStore {
         let opened_bed_file = File::open(path)?;
 
         let reader: Box<dyn Read> = match is_gzipped {
-            true => Box::new(GzDecoder::new(BufReader::new(opened_bed_file))),
+            true => Box::new(MultiGzDecoder::new(BufReader::new(opened_bed_file))),
             false => Box::new(opened_bed_file),
         };
         let reader = BufReader::new(reader);
