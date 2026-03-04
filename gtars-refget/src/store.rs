@@ -1658,6 +1658,18 @@ impl RefgetStore {
         self.decoded_cache.clear();
     }
 
+    /// Clear sequence data from the store to free memory.
+    ///
+    /// Removes all sequence records and decoded cache. Metadata is
+    /// preserved: collections, name lookups, MD5 lookups, aliases,
+    /// and FHR metadata remain intact.
+    ///
+    /// For on-disk stores, data on disk is unaffected.
+    pub fn clear(&mut self) {
+        self.sequence_store.clear();
+        self.decoded_cache.clear();
+    }
+
     /// Get decoded sequence bytes from the cache.
     ///
     /// Takes `&self` — safe for concurrent read access from multiple threads
@@ -5341,5 +5353,47 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
         // Nonexistent path: no store
         assert!(!RefgetStore::store_exists("/nonexistent/path/to/store"));
+    }
+
+    #[test]
+    fn test_clear() {
+        let dir = tempdir().unwrap();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">seq1\nACGT\n>seq2\nTGCA\n").unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta_path.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+
+        // Verify sequences and collections exist
+        assert_eq!(store.sequence_digests().count(), 2);
+        assert_eq!(store.collections.len(), 1);
+        let name_count = store.name_lookup.len();
+
+        // Clear
+        store.clear();
+
+        // Sequences gone
+        assert_eq!(store.sequence_digests().count(), 0);
+
+        // Metadata preserved
+        assert_eq!(store.collections.len(), 1);
+        assert_eq!(store.name_lookup.len(), name_count);
+
+        // Store is still usable — add a different FASTA
+        let fasta2 = dir.path().join("test2.fa");
+        fs::write(&fasta2, ">seq3\nGGGG\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta2.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+        assert_eq!(store.sequence_digests().count(), 1);
+        assert_eq!(store.collections.len(), 2);
     }
 }

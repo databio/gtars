@@ -2447,6 +2447,19 @@ impl PyRefgetStore {
         self.inner.sequence_digests().count()
     }
 
+    /// Clear sequence data from the store to free memory.
+    ///
+    /// Removes all sequence records and decoded cache while preserving
+    /// metadata (collections, name lookups, aliases).
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    ///     >>> store.clear()  # frees sequence data, keeps metadata
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+
     /// Iterate over all sequences in the store.
     ///
     /// Allows using `for sequence in store:` in Python to iterate over all
