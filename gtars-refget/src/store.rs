@@ -48,7 +48,6 @@
 //! - `disable_encoding()` - Use raw bytes
 
 use crate::digest::lookup_alphabet;
-use seq_io::fasta::{Reader, Record};
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
@@ -74,7 +73,7 @@ use chrono::Utc;
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
 use flate2::write::GzEncoder;
-use gtars_core::utils::{get_dynamic_reader, get_file_info, parse_bedlike_file};
+use gtars_core::utils::{get_file_info, parse_bedlike_file};
 use serde::{Deserialize, Serialize};
 use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
@@ -707,11 +706,14 @@ impl ReadonlyRefgetStore {
 
     /// Add a sequence collection from a FASTA file.
     ///
-    /// Uses a 3-thread pipeline that decompresses once, overlaps digest and
-    /// encode work, and holds at most 2 sequences in memory at a time.
+    /// Uses a 3-thread pipeline for sequences under 500 MB (full throughput)
+    /// and inline processing for larger sequences (reduced memory, same correctness).
+    /// For typical genomes (human, mouse), all sequences use the fast pipeline path.
+    /// For giant genomes (newt, lungfish), large chromosomes are processed inline
+    /// by Thread 1 with only encoded bytes (~25% size) flowing through the channels.
     ///
     /// Pipeline:
-    /// - Thread 1 (Decompress): reads FASTA lines, sends to Thread 2
+    /// - Thread 1 (Read): reads FASTA with streaming reader, sends to Thread 2
     /// - Thread 2 (Digest): SHA512 + MD5 + alphabet, sends (metadata, raw_bytes) to Thread 3
     /// - Thread 3 (main): encodes + accumulates results
     ///
@@ -750,6 +752,12 @@ impl ReadonlyRefgetStore {
         }
 
         // --- Channel message types ---
+
+        /// Threshold above which Thread 1 processes sequences inline
+        /// (hash + encode) to avoid holding multiple giant copies in the pipeline.
+        /// Below this, the full 3-thread pipeline runs at maximum throughput.
+        const LARGE_SEQ_THRESHOLD: usize = 500 * 1024 * 1024; // 500 MB
+
         struct DecompressedSequence {
             name: String,
             description: Option<String>,
@@ -763,79 +771,155 @@ impl ReadonlyRefgetStore {
             aliases: Vec<(String, String)>,
         }
 
+        /// A sequence that Thread 1 has already hashed + encoded inline.
+        /// Only the encoded bytes (~25% of raw) flow through the channels.
+        struct ReadySequence {
+            metadata: SequenceMetadata,
+            sequence_data: Vec<u8>,
+            aliases: Vec<(String, String)>,
+        }
+
+        /// Thread 1 → Thread 2
+        enum ToDigest {
+            NeedsWork(DecompressedSequence),
+            AlreadyDone(ReadySequence),
+        }
+
+        /// Thread 2 → Thread 3
+        enum ToEncode {
+            NeedsWork(DigestedSequence),
+            AlreadyDone(ReadySequence),
+        }
+
         // --- Set up channels ---
-        // bounded(1): at most 2 sequences in flight (one being processed, one buffered)
-        let (decompress_tx, decompress_rx) = bounded::<DecompressedSequence>(1);
-        let (digest_tx, digest_rx) = bounded::<DigestedSequence>(1);
+        // bounded(1): message-level flow control.
+        // For large sequences (>500 MB), Thread 1 processes inline and sends only
+        // encoded bytes, so channel messages are ~25% of raw size.
+        let (decompress_tx, decompress_rx) = bounded::<ToDigest>(1);
+        let (digest_tx, digest_rx) = bounded::<ToEncode>(1);
 
         let file_path_buf = file_path.as_ref().to_path_buf();
         let namespaces: Vec<String> = opts.namespaces.iter().map(|s| s.to_string()).collect();
         let ns_for_digest = namespaces.clone();
 
-        // --- Thread 1: Decompress (using seq_io for efficient buffered FASTA parsing) ---
+        // --- Thread 1: Read FASTA with streaming reader + adaptive inline processing ---
+        let mode_for_t1 = self.mode;
         let decompress_handle = std::thread::spawn(move || -> Result<()> {
-            let file_reader = get_dynamic_reader(&file_path_buf)?;
-            let mut fasta_reader = seq_io::fasta::Reader::new(file_reader);
+            use sha2::{Digest, Sha512};
+            use md5::Md5;
 
-            while let Some(record) = fasta_reader.next() {
-                let record = record?;
-                let header = std::str::from_utf8(record.head())?;
-                let (name, description) = crate::fasta::parse_fasta_header(header);
+            let mut fasta_reader = crate::fasta::FastaReader::from_path(&file_path_buf)?;
 
-                // Collect and uppercase all sequence bytes
-                let mut raw_bytes = Vec::new();
-                for seq_line in record.seq_lines() {
-                    raw_bytes.extend(seq_line.iter().map(|b| b.to_ascii_uppercase()));
+            while let Some(record) = fasta_reader.next_record()? {
+                if record.raw_bytes.len() > LARGE_SEQ_THRESHOLD {
+                    // --- Large sequence: hash + encode inline, send only encoded bytes ---
+                    let crate::fasta::FastaRecord { name, description, raw_header, raw_bytes } = record;
+
+                    let mut sha512_hasher = Sha512::new();
+                    sha512_hasher.update(&raw_bytes);
+                    let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
+
+                    let mut md5_hasher = Md5::new();
+                    md5_hasher.update(&raw_bytes);
+                    let md5 = format!("{:x}", md5_hasher.finalize());
+
+                    let mut guesser = crate::digest::AlphabetGuesser::new();
+                    guesser.update(&raw_bytes);
+                    let alphabet = guesser.guess();
+
+                    let length = raw_bytes.len();
+                    let sequence_data = match mode_for_t1 {
+                        StorageMode::Encoded => {
+                            let mut encoder = SequenceEncoder::new(alphabet, length);
+                            encoder.update(&raw_bytes);
+                            drop(raw_bytes); // free ~2 GB immediately
+                            encoder.finalize()
+                        }
+                        StorageMode::Raw => raw_bytes,
+                    };
+
+                    let metadata = SequenceMetadata {
+                        name,
+                        description,
+                        length,
+                        sha512t24u: sha512,
+                        md5,
+                        alphabet,
+                        fai: None,
+                    };
+
+                    let aliases = if !namespaces.is_empty() {
+                        let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
+                        crate::digest::fasta::extract_aliases_from_header(&raw_header, &ns_refs)
+                    } else {
+                        vec![]
+                    };
+
+                    decompress_tx.send(ToDigest::AlreadyDone(ReadySequence {
+                        metadata,
+                        sequence_data,
+                        aliases,
+                    })).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
+                } else {
+                    // --- Normal path: send raw_bytes through pipeline ---
+                    decompress_tx.send(ToDigest::NeedsWork(DecompressedSequence {
+                        name: record.name,
+                        description: record.description,
+                        raw_header: record.raw_header,
+                        raw_bytes: record.raw_bytes,
+                    })).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
                 }
-
-                decompress_tx.send(DecompressedSequence {
-                    name,
-                    description,
-                    raw_header: header.to_string(),
-                    raw_bytes,
-                }).map_err(|_| anyhow!("Digest thread stopped receiving"))?;
             }
             Ok(())
         });
 
-        // --- Thread 2: Digest (receives complete sequences) ---
+        // --- Thread 2: Digest (receives complete sequences or passes through pre-processed) ---
         let digest_handle = std::thread::spawn(move || -> Result<()> {
             let ns_refs: Vec<&str> = ns_for_digest.iter().map(|s| s.as_str()).collect();
 
-            for seq in decompress_rx {
-                let mut sha512_hasher = Sha512::new();
-                sha512_hasher.update(&seq.raw_bytes);
-                let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
+            for msg in decompress_rx {
+                match msg {
+                    ToDigest::NeedsWork(seq) => {
+                        let mut sha512_hasher = Sha512::new();
+                        sha512_hasher.update(&seq.raw_bytes);
+                        let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
 
-                let mut md5_hasher = Md5::new();
-                md5_hasher.update(&seq.raw_bytes);
-                let md5 = format!("{:x}", md5_hasher.finalize());
+                        let mut md5_hasher = Md5::new();
+                        md5_hasher.update(&seq.raw_bytes);
+                        let md5 = format!("{:x}", md5_hasher.finalize());
 
-                let mut guesser = crate::digest::AlphabetGuesser::new();
-                guesser.update(&seq.raw_bytes);
-                let alphabet = guesser.guess();
+                        let mut guesser = crate::digest::AlphabetGuesser::new();
+                        guesser.update(&seq.raw_bytes);
+                        let alphabet = guesser.guess();
 
-                let metadata = SequenceMetadata {
-                    name: seq.name,
-                    description: seq.description,
-                    length: seq.raw_bytes.len(),
-                    sha512t24u: sha512,
-                    md5,
-                    alphabet,
-                    fai: None,
-                };
+                        let metadata = SequenceMetadata {
+                            name: seq.name,
+                            description: seq.description,
+                            length: seq.raw_bytes.len(),
+                            sha512t24u: sha512,
+                            md5,
+                            alphabet,
+                            fai: None,
+                        };
 
-                let aliases = if !ns_refs.is_empty() {
-                    crate::digest::fasta::extract_aliases_from_header(&seq.raw_header, &ns_refs)
-                } else {
-                    vec![]
-                };
+                        let aliases = if !ns_refs.is_empty() {
+                            crate::digest::fasta::extract_aliases_from_header(&seq.raw_header, &ns_refs)
+                        } else {
+                            vec![]
+                        };
 
-                digest_tx.send(DigestedSequence {
-                    metadata,
-                    raw_bytes: seq.raw_bytes,
-                    aliases,
-                }).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                        digest_tx.send(ToEncode::NeedsWork(DigestedSequence {
+                            metadata,
+                            raw_bytes: seq.raw_bytes,
+                            aliases,
+                        })).map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                    }
+                    ToDigest::AlreadyDone(ready) => {
+                        // Large sequence — Thread 1 already did the work, just forward
+                        digest_tx.send(ToEncode::AlreadyDone(ready))
+                            .map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                    }
+                }
             }
             drop(digest_tx);
             Ok(())
@@ -850,31 +934,53 @@ impl ReadonlyRefgetStore {
         let mut sequence_metadata: Vec<SequenceMetadata> = Vec::new();
         let mut all_aliases: Vec<(String, String, String)> = Vec::new(); // (namespace, alias, sha512t24u)
 
-        for digested in digest_rx {
-            let sequence_data = match mode {
-                StorageMode::Encoded => {
-                    let mut encoder = SequenceEncoder::new(digested.metadata.alphabet, digested.metadata.length);
-                    encoder.update(&digested.raw_bytes);
-                    encoder.finalize()
+        for msg in digest_rx {
+            match msg {
+                ToEncode::NeedsWork(digested) => {
+                    let metadata = digested.metadata;
+                    let aliases = digested.aliases;
+                    let raw_bytes = digested.raw_bytes;
+
+                    let sequence_data = match mode {
+                        StorageMode::Encoded => {
+                            let mut encoder = SequenceEncoder::new(metadata.alphabet, metadata.length);
+                            encoder.update(&raw_bytes);
+                            drop(raw_bytes); // free before writing to disk
+                            encoder.finalize()
+                        }
+                        StorageMode::Raw => raw_bytes,
+                    };
+
+                    for (ns, alias_value) in &aliases {
+                        all_aliases.push((ns.clone(), alias_value.clone(), metadata.sha512t24u.clone()));
+                    }
+
+                    self.add_sequence_record(
+                        SequenceRecord::Full {
+                            metadata: metadata.clone(),
+                            sequence: sequence_data,
+                        },
+                        true,
+                    )?;
+
+                    sequence_metadata.push(metadata);
                 }
-                StorageMode::Raw => digested.raw_bytes,
-            };
+                ToEncode::AlreadyDone(ready) => {
+                    for (ns, alias_value) in &ready.aliases {
+                        all_aliases.push((ns.clone(), alias_value.clone(), ready.metadata.sha512t24u.clone()));
+                    }
 
-            // Collect aliases for later registration
-            for (ns, alias_value) in &digested.aliases {
-                all_aliases.push((ns.clone(), alias_value.clone(), digested.metadata.sha512t24u.clone()));
+                    self.add_sequence_record(
+                        SequenceRecord::Full {
+                            metadata: ready.metadata.clone(),
+                            sequence: ready.sequence_data,
+                        },
+                        true,
+                    )?;
+
+                    sequence_metadata.push(ready.metadata);
+                }
             }
-
-            // Write to disk immediately, store as Stub — encoded bytes are dropped
-            self.add_sequence_record(
-                SequenceRecord::Full {
-                    metadata: digested.metadata.clone(),
-                    sequence: sequence_data,
-                },
-                true,
-            )?;
-
-            sequence_metadata.push(digested.metadata);
         }
 
         // Join threads and propagate errors
@@ -1000,17 +1106,14 @@ impl ReadonlyRefgetStore {
         self.add_sequence_collection_internal(seqcol, opts.force)?;
 
         // Decompress and encode sequences
-        let file_reader = get_dynamic_reader(file_path.as_ref())?;
-        let mut fasta_reader = Reader::new(file_reader);
+        let mut fasta_reader = crate::fasta::FastaReader::from_path(file_path.as_ref())?;
         let mut seq_count = 0;
 
-        while let Some(record) = fasta_reader.next() {
-            let record = record?;
-            let header = std::str::from_utf8(record.head())?;
-            let (name, _) = crate::fasta::parse_fasta_header(header);
+        while let Some(record) = fasta_reader.next_record()? {
+            let (name, _) = crate::fasta::parse_fasta_header(&record.raw_header);
 
             if !opts.namespaces.is_empty() {
-                let aliases = crate::digest::fasta::extract_aliases_from_header(header, opts.namespaces);
+                let aliases = crate::digest::fasta::extract_aliases_from_header(&record.raw_header, opts.namespaces);
                 for (ns, alias_value) in aliases {
                     if let Some(meta) = seqmeta_hashmap.get(&name) {
                         self.add_sequence_alias(&ns, &alias_value, &meta.sha512t24u)?;
@@ -1028,18 +1131,10 @@ impl ReadonlyRefgetStore {
             let sequence_data = match self.mode {
                 StorageMode::Encoded => {
                     let mut encoder = SequenceEncoder::new(dr.alphabet, dr.length);
-                    for seq_line in record.seq_lines() {
-                        encoder.update(seq_line);
-                    }
+                    encoder.update(&record.raw_bytes);
                     encoder.finalize()
                 }
-                StorageMode::Raw => {
-                    let mut raw = Vec::with_capacity(dr.length);
-                    for seq_line in record.seq_lines() {
-                        raw.extend(seq_line);
-                    }
-                    raw
-                }
+                StorageMode::Raw => record.raw_bytes,
             };
 
             self.add_sequence(

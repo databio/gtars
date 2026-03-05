@@ -12,7 +12,6 @@ filesystem = ["memmap2", "gtars-core", "crossbeam-channel"]  # File-based operat
 http = ["ureq"]  # HTTP client for remote fetching (not WASM-compatible)
 
 [dependencies]
-seq_io = "0.3.2"
 sha2 = "0.10.7"
 md-5 = "0.10.5"
 base64-url = "2.0.0"
