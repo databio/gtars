@@ -6,7 +6,7 @@
 use std::time::Instant;
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
-use gtars_vrs::vcf::compute_vrs_ids_from_vcf;
+use gtars_vrs::vcf::compute_vrs_ids_streaming;
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
@@ -28,39 +28,33 @@ fn main() {
     eprintln!("Loaded in {:.1}s", load_time.as_secs_f64());
 
     // Print collection info
-    let collections: Vec<_> = store.list_collections();
+    let paged = store.list_collections(0, 10, &[]).expect("Failed to list collections");
+    let collections = &paged.results;
     assert!(!collections.is_empty(), "No collections found in store");
     let collection_digest = &collections[0].digest;
     eprintln!(
         "Collection: {} ({} sequences)",
         collection_digest, collections[0].n_sequences
     );
-    for meta in store.sequence_metadata() {
-        eprintln!("  {} (len={})", meta.name, meta.length);
-    }
 
-    // Step 2: Compute VRS IDs from VCF
+    // Step 2: Stream VRS IDs from VCF directly to stdout
     eprintln!("\nProcessing VCF: {}", vcf_path);
-    let t1 = Instant::now();
-    let results =
-        compute_vrs_ids_from_vcf(&mut store, collection_digest, vcf_path)
-            .expect("Failed to compute VRS IDs");
-    let vrs_time = t1.elapsed();
-
-    // Step 3: Print results
     println!("chrom\tpos\tref\talt\tvrs_id");
-    for r in &results {
+    let t1 = Instant::now();
+    let count = compute_vrs_ids_streaming(&mut store, collection_digest, vcf_path, |r| {
         println!(
             "{}\t{}\t{}\t{}\t{}",
             r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
         );
-    }
+    })
+    .expect("Failed to compute VRS IDs");
+    let vrs_time = t1.elapsed();
 
     eprintln!(
         "\nComputed {} VRS IDs in {:.3}s ({:.0} variants/sec)",
-        results.len(),
+        count,
         vrs_time.as_secs_f64(),
-        results.len() as f64 / vrs_time.as_secs_f64()
+        count as f64 / vrs_time.as_secs_f64()
     );
     eprintln!("Total time: {:.1}s", t0.elapsed().as_secs_f64());
 }
