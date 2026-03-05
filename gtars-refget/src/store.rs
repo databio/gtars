@@ -119,8 +119,6 @@ pub struct RetrievedSequence {
 pub struct FastaImportOptions<'a> {
     force: bool,
     namespaces: &'a [&'a str],
-    /// Number of threads for parallel encoding. None = use all available CPUs.
-    threads: Option<usize>,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -128,7 +126,6 @@ impl<'a> Default for FastaImportOptions<'a> {
         Self {
             force: false,
             namespaces: &[],
-            threads: None,
         }
     }
 }
@@ -151,11 +148,6 @@ impl<'a> FastaImportOptions<'a> {
         self
     }
 
-    #[must_use]
-    pub fn threads(mut self, n: Option<usize>) -> Self {
-        self.threads = n;
-        self
-    }
 }
 
 /// Global store handling cross-collection sequence management.

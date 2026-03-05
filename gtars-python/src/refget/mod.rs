@@ -1329,13 +1329,12 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false, namespaces=None, threads=None))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
         namespaces: Option<Vec<String>>,
-        threads: Option<usize>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let ns_refs: Vec<&str> = namespaces
@@ -1344,8 +1343,7 @@ impl PyRefgetStore {
             .unwrap_or_default();
         let opts = FastaImportOptions::new()
             .force(force)
-            .namespaces(&ns_refs)
-            .threads(threads);
+            .namespaces(&ns_refs);
         let result = self.inner
             .add_sequence_collection_from_fasta(file_path, opts);
         result
