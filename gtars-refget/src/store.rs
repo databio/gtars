@@ -1000,6 +1000,7 @@ impl ReadonlyRefgetStore {
         let pipeline_elapsed = pipeline_start.elapsed();
 
         // --- Post-pipeline: compute collection metadata, register ---
+        let metadata_start = std::time::Instant::now();
         let seq_count = sequence_metadata.len();
 
         // Build collection metadata from lightweight metadata vec
@@ -1019,6 +1020,7 @@ impl ReadonlyRefgetStore {
         let coll_key = seqcol_metadata.digest.to_key();
         let coll_digest_display = seqcol_metadata.digest.clone();
         let metadata = seqcol_metadata.clone();
+        let metadata_elapsed = metadata_start.elapsed();
 
         // Check if collection already exists
         if !opts.force && self.collections.contains_key(&coll_key) {
@@ -1027,6 +1029,8 @@ impl ReadonlyRefgetStore {
             }
             return Ok((metadata, false));
         }
+
+        let index_start = std::time::Instant::now();
 
         // Write RGSI cache for next time
         if use_cache {
@@ -1056,13 +1060,18 @@ impl ReadonlyRefgetStore {
                 .or_default()
                 .insert(meta.name.clone(), meta.sha512t24u.to_key());
         }
+        let index_elapsed = index_start.elapsed();
 
         if !self.quiet {
+            let total = pipeline_elapsed + metadata_elapsed + index_elapsed;
             println!(
-                "Added {} ({} seqs) in {:.1}s",
+                "Added {} {} seqs in {:.1}s ({:.1} proc | {:.1} meta | {:.1} index)",
                 coll_digest_display,
                 seq_count,
+                total.as_secs_f64(),
                 pipeline_elapsed.as_secs_f64(),
+                metadata_elapsed.as_secs_f64(),
+                index_elapsed.as_secs_f64(),
             );
         }
 
@@ -1087,20 +1096,20 @@ impl ReadonlyRefgetStore {
             // so return an error that the caller handles
             return Err(anyhow!("Empty RGSI cache"));
         }
-        if self.ancillary_digests {
-            seqcol.metadata.compute_ancillary_digests(&seqcol.sequences);
-        }
-
         let coll_key = seqcol.metadata.digest.to_key();
         let coll_digest_display = seqcol.metadata.digest.clone();
-        let metadata = seqcol.metadata.clone();
 
         if !opts.force && self.collections.contains_key(&coll_key) {
             if !self.quiet {
                 println!("Skipped {} (already exists)", coll_digest_display);
             }
-            return Ok((metadata, false));
+            return Ok((seqcol.metadata.clone(), false));
         }
+
+        if self.ancillary_digests {
+            seqcol.metadata.compute_ancillary_digests(&seqcol.sequences);
+        }
+        let metadata = seqcol.metadata.clone();
 
         let seqmeta_hashmap: HashMap<String, SequenceMetadata> = seqcol
             .sequences
