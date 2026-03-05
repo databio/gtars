@@ -803,6 +803,7 @@ impl ReadonlyRefgetStore {
         let ns_for_digest = namespaces.clone();
 
         // --- Thread 1: Read FASTA with streaming reader + adaptive inline processing ---
+        let quiet = self.quiet;
         let mode_for_t1 = self.mode;
         let decompress_handle = std::thread::spawn(move || -> Result<()> {
             use sha2::{Digest, Sha512};
@@ -813,6 +814,13 @@ impl ReadonlyRefgetStore {
             while let Some(record) = fasta_reader.next_record()? {
                 if record.raw_bytes.len() > LARGE_SEQ_THRESHOLD {
                     // --- Large sequence: hash + encode inline, send only encoded bytes ---
+                    if !quiet {
+                        println!(
+                            "  Large sequence '{}' ({} MB) — processing inline to reduce memory",
+                            record.name,
+                            record.raw_bytes.len() / (1024 * 1024),
+                        );
+                    }
                     let crate::fasta::FastaRecord { name, description, raw_header, raw_bytes } = record;
 
                     let mut sha512_hasher = Sha512::new();

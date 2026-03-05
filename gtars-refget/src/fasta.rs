@@ -53,6 +53,7 @@ pub struct FastaReader {
     line_buf: Vec<u8>,
     raw_bytes: Vec<u8>,
     current_header: Option<(String, Option<String>, String)>,
+    at_line_start: bool,
     done: bool,
 }
 
@@ -69,23 +70,64 @@ impl FastaReader {
             line_buf: Vec::new(),
             raw_bytes: Vec::new(),
             current_header: None,
+            at_line_start: true,
             done: false,
         })
     }
 
     /// Read the next FASTA record. Returns None at EOF.
+    ///
+    /// Processes the BufReader's internal buffer in bulk rather than
+    /// line-by-line, scanning for `\n>` header boundaries. Sequence bytes
+    /// are appended via `extend_from_slice` (memcpy) + `make_ascii_uppercase`
+    /// (auto-vectorizable) instead of byte-by-byte iterator mapping.
     pub fn next_record(&mut self) -> Result<Option<FastaRecord>> {
         if self.done {
             return Ok(None);
         }
-        loop {
-            self.line_buf.clear();
-            let n = self.reader.read_until(b'\n', &mut self.line_buf)?;
-            let at_eof = n == 0;
-            let at_header = !at_eof && self.line_buf.first() == Some(&b'>');
 
-            // Emit previous record when we hit a new header or EOF
-            if (at_eof || at_header) && self.current_header.is_some() {
+        // If no current header, read one
+        if self.current_header.is_none() {
+            self.read_header_line()?;
+            if self.current_header.is_none() {
+                self.done = true;
+                return Ok(None);
+            }
+        }
+
+        // Read sequence data in bulk until next header or EOF
+        loop {
+            let buf = self.reader.fill_buf()?;
+            if buf.is_empty() {
+                // EOF — emit final record
+                self.done = true;
+                let (name, description, raw_header) = self.current_header.take().unwrap();
+                let prev_len = self.raw_bytes.len();
+                return Ok(Some(FastaRecord {
+                    name,
+                    description,
+                    raw_header,
+                    raw_bytes: std::mem::replace(
+                        &mut self.raw_bytes,
+                        Vec::with_capacity(prev_len.min(256 * 1024 * 1024)),
+                    ),
+                }));
+            }
+
+            // Scan buffer for header boundary (\n> or > at line start)
+            let header_pos = find_header_in_buf(buf, self.at_line_start);
+            let process_end = header_pos.unwrap_or(buf.len());
+
+            // Append sequence bytes (skip newlines, uppercase) in bulk
+            if process_end > 0 {
+                Self::append_sequence_chunk(&mut self.raw_bytes, &buf[..process_end]);
+                self.at_line_start = buf[process_end - 1] == b'\n';
+            }
+
+            self.reader.consume(process_end);
+
+            if header_pos.is_some() {
+                // Emit current record
                 let (name, description, raw_header) = self.current_header.take().unwrap();
                 let prev_len = self.raw_bytes.len();
                 let record = FastaRecord {
@@ -94,32 +136,54 @@ impl FastaReader {
                     raw_header,
                     raw_bytes: std::mem::replace(
                         &mut self.raw_bytes,
-                        Vec::with_capacity(prev_len.min(256 * 1024 * 1024)), // cap at 256 MB
+                        Vec::with_capacity(prev_len.min(256 * 1024 * 1024)),
                     ),
                 };
-
-                // If we're at a new header, parse it before returning
-                if at_header {
-                    self.parse_header_line()?;
-                }
-                if at_eof {
-                    self.done = true;
-                }
+                // Read the next header line (starts at '>' now)
+                self.read_header_line()?;
                 return Ok(Some(record));
             }
-
-            if at_eof {
-                self.done = true;
-                return Ok(None);
-            }
-
-            if at_header {
-                self.parse_header_line()?;
-            } else {
-                let line = self.line_buf.trim_ascii_end();
-                self.raw_bytes.extend(line.iter().map(|b| b.to_ascii_uppercase()));
-            }
         }
+    }
+
+    /// Append sequence bytes from a buffer chunk, skipping newlines and uppercasing.
+    /// Uses extend_from_slice (memcpy) + make_ascii_uppercase (auto-vectorizable)
+    /// instead of byte-by-byte iterator mapping.
+    fn append_sequence_chunk(dest: &mut Vec<u8>, src: &[u8]) {
+        let mut pos = 0;
+        while pos < src.len() {
+            // Skip newlines / carriage returns
+            while pos < src.len() && (src[pos] == b'\n' || src[pos] == b'\r') {
+                pos += 1;
+            }
+            if pos >= src.len() {
+                break;
+            }
+            // Find end of non-newline chunk
+            let start = pos;
+            while pos < src.len() && src[pos] != b'\n' && src[pos] != b'\r' {
+                pos += 1;
+            }
+            // Bulk copy + uppercase
+            let dest_start = dest.len();
+            dest.extend_from_slice(&src[start..pos]);
+            dest[dest_start..].make_ascii_uppercase();
+        }
+    }
+
+    /// Read a FASTA header line from the current position.
+    fn read_header_line(&mut self) -> Result<()> {
+        self.line_buf.clear();
+        let n = self.reader.read_until(b'\n', &mut self.line_buf)?;
+        if n == 0 {
+            return Ok(());
+        }
+        if self.line_buf[0] != b'>' {
+            return Err(anyhow::anyhow!("Expected FASTA header starting with '>'"));
+        }
+        self.parse_header_line()?;
+        self.at_line_start = true;
+        Ok(())
     }
 
     fn parse_header_line(&mut self) -> Result<()> {
@@ -132,6 +196,28 @@ impl FastaReader {
         self.raw_bytes.clear();
         Ok(())
     }
+}
+
+/// Find '>' at the start of a line within a buffer.
+/// Returns the byte offset of '>' if found.
+fn find_header_in_buf(buf: &[u8], at_line_start: bool) -> Option<usize> {
+    if at_line_start && !buf.is_empty() && buf[0] == b'>' {
+        return Some(0);
+    }
+    let mut pos = 0;
+    while pos < buf.len() {
+        match buf[pos..].iter().position(|&b| b == b'\n') {
+            Some(i) => {
+                let nl = pos + i;
+                if nl + 1 < buf.len() && buf[nl + 1] == b'>' {
+                    return Some(nl + 1);
+                }
+                pos = nl + 1;
+            }
+            None => break,
+        }
+    }
+    None
 }
 
 /// A lightweight record containing only FAI (FASTA index) metadata for a sequence.
