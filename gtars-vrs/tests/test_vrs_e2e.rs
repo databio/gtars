@@ -57,13 +57,9 @@ fn test_vcf_to_vrs_ids_end_to_end() {
                 meta.name, meta.length, meta.sha512t24u
             );
         }
-        let digests: Vec<_> = store
-            .list_collections()
-            .iter()
-            .map(|c| c.digest.clone())
-            .collect();
-        assert_eq!(digests.len(), 1);
-        digests[0].clone()
+        let paged = store.list_collections(0, 10, &[]).unwrap();
+        assert_eq!(paged.results.len(), 1);
+        paged.results[0].digest.clone()
     };
 
     // Run VRS ID computation
