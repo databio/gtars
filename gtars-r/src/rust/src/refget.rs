@@ -369,8 +369,10 @@ pub fn get_substring_store(
 #[extendr]
 pub fn list_collections_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
-        let collections: Vec<Robj> = store
-            .list_collections()
+        let paged = store
+            .list_collections(0, usize::MAX, &[])
+            .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
+        let collections: Vec<Robj> = paged.results
             .into_iter()
             .map(|meta| collection_metadata_to_list(meta).into())
             .collect();
@@ -537,7 +539,7 @@ pub fn compare_store(
         store
             .compare(digest_a, digest_b)
             .map(|comparison| {
-                let digests = list!(a = comparison.digests.a, b = comparison.digests.b);
+                let digests = list!(a = comparison.digests.a, b = comparison.digests.b.unwrap_or_default());
                 let attributes = list!(
                     a_only = comparison.attributes.a_only,
                     b_only = comparison.attributes.b_only,

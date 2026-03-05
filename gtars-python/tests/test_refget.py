@@ -499,8 +499,9 @@ GGGG
         result = digest_fasta(fasta_path)
         expected_digest = result.digest
 
-        # Test list_collections - now returns metadata objects
-        collections = store.list_collections()
+        # Test list_collections - now returns paginated dict
+        result = store.list_collections()
+        collections = result["results"]
         assert len(collections) == 1
         assert collections[0].digest == expected_digest
 
@@ -636,7 +637,7 @@ GGGG
         store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get the collection digest
-        collections = store.list_collections()
+        collections = store.list_collections()["results"]
         assert len(collections) == 1
         digest = collections[0].digest
 
@@ -1025,7 +1026,7 @@ def test_add_sequence_collection_basic():
     store.add_sequence_collection(collection)
 
     # Collection should appear in list_collections
-    collections = store.list_collections()
+    collections = store.list_collections()["results"]
     assert len(collections) == 1
     assert collections[0].digest == collection.digest
 
@@ -1076,7 +1077,7 @@ def test_add_sequence_collection_skip_duplicate():
     store.add_sequence_collection(collection)
 
     # Should still have exactly one collection
-    assert len(store.list_collections()) == 1
+    assert len(store.list_collections()["results"]) == 1
 
 
 def test_add_sequence_collection_force():
@@ -1091,7 +1092,7 @@ def test_add_sequence_collection_force():
     store.add_sequence_collection(collection, force=True)
 
     # Should still have exactly one collection
-    assert len(store.list_collections()) == 1
+    assert len(store.list_collections()["results"]) == 1
 
 
 def test_is_persisting_false_for_memory_store():

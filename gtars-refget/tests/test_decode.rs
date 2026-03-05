@@ -35,9 +35,9 @@ fn test_decode_workflow_encoded() {
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections = store.list_collections();
-    assert!(!collections.is_empty(), "No collections found");
-    let collection_digest = collections[0].digest.clone();
+    let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+    assert!(!collections.results.is_empty(), "No collections found");
+    let collection_digest = collections.results[0].digest.clone();
 
     // Expected sequences
     let expected = vec![
@@ -80,9 +80,9 @@ fn test_decode_workflow_raw() {
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections = store.list_collections();
-    assert!(!collections.is_empty(), "No collections found");
-    let collection_digest = collections[0].digest.clone();
+    let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+    assert!(!collections.results.is_empty(), "No collections found");
+    let collection_digest = collections.results[0].digest.clone();
 
     // Verify sequences decode correctly with raw storage
     let record = store

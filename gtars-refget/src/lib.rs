@@ -123,6 +123,10 @@ pub use collection::{
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 #[cfg(feature = "filesystem")]
 pub use fhr_metadata::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
+#[cfg(feature = "filesystem")]
+pub use seqcol::SeqColService;
+#[cfg(feature = "filesystem")]
+pub use store::{PagedResult, Pagination};
 
 // ============================================================================
 // Tests

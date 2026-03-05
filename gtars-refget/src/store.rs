@@ -3,6 +3,29 @@
 //! A store for managing reference genome sequences with support for both
 //! in-memory and disk-backed storage.
 //!
+//! ## Two-Type Design
+//!
+//! - **`RefgetStore`** (wrapper): User-facing type with `&mut self` read methods
+//!   that automatically lazy-load data on first access. Use for CLI and scripts.
+//! - **`ReadonlyRefgetStore`** (inner): All reads are `&self`. Suitable for
+//!   `Arc<ReadonlyRefgetStore>` in servers. Requires explicit preloading.
+//!
+//! ## Usage Patterns
+//!
+//! ### CLI / Scripts (lazy loading)
+//! ```ignore
+//! let mut store = RefgetStore::open_remote(cache, url)?;
+//! let coll = store.get_collection("abc123")?;  // auto-loads
+//! ```
+//!
+//! ### Server (concurrent reads)
+//! ```ignore
+//! let mut store = RefgetStore::open_remote(cache, url)?;
+//! store.load_all_collections()?;
+//! let store = Arc::new(store.into_readonly());
+//! // Multiple threads can now call store.get_collection() concurrently
+//! ```
+//!
 //! ## Store Creation Patterns
 //!
 //! ### New stores (empty)
@@ -10,8 +33,8 @@
 //! - `on_disk(path)` - Sequences written to disk immediately, only metadata in RAM
 //!
 //! ### Loading existing stores
-//! - `load_local(path)` - Load from local directory (lazy-loads sequences)
-//! - `load_remote(path, url)` - Load from URL, caches to local directory
+//! - `open_local(path)` - Load from local directory (collections/sequences are stubs)
+//! - `open_remote(path, url)` - Load from URL, caches to local directory
 //!
 //! ## Runtime Configuration
 //!
@@ -60,6 +83,21 @@ use std::str;
 const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
 
 use crate::alias::{AliasKind, AliasManager};
+use crate::seqcol::metadata_matches_attribute;
+
+/// Paginated result container matching the seqcol spec response format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PagedResult<T> {
+    pub results: Vec<T>,
+    pub pagination: Pagination,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pagination {
+    pub page: usize,
+    pub page_size: usize,
+    pub total: usize,
+}
 
 /// Enum storing whether sequences will be stored in Raw or Encoded form
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
@@ -127,7 +165,7 @@ impl<'a> FastaImportOptions<'a> {
 /// This allows lookup by sequence digest directly (bypassing collection information).
 /// The RefgetStore also holds a collections hashmap, to provide lookup by collection+name
 #[derive(Debug)]
-pub struct RefgetStore {
+pub struct ReadonlyRefgetStore {
     /// SHA512t24u digest -> SequenceRecord (metadata + optional data)
     sequence_store: HashMap<[u8; 32], SequenceRecord>,
     /// MD5 digest -> SHA512t24u digest lookup
@@ -199,7 +237,7 @@ pub struct SubstringsFromRegions<'a, K>
 where
     K: AsRef<[u8]>,
 {
-    store: &'a mut RefgetStore,
+    store: &'a ReadonlyRefgetStore,
     reader: BufReader<Box<dyn Read>>,
     collection_digest: K,
     previous_parsed_chr: String,
@@ -339,13 +377,13 @@ fn write_fasta_record(
     Ok(())
 }
 
-impl RefgetStore {
-    /// Generic constructor. Creates a new, empty `RefgetStore`.
-    /// This is a private helper - use `on_disk()` or `in_memory()` instead.
-    fn new(mode: StorageMode) -> Self {
+impl ReadonlyRefgetStore {
+    /// Generic constructor. Creates a new, empty `ReadonlyRefgetStore`.
+    /// Internal only - users should go through RefgetStore.
+    pub(crate) fn new(mode: StorageMode) -> Self {
         let name_lookup = HashMap::new();
 
-        RefgetStore {
+        ReadonlyRefgetStore {
             sequence_store: HashMap::new(),
             md5_lookup: HashMap::new(),
             name_lookup,
@@ -402,64 +440,6 @@ impl RefgetStore {
     /// ```
     pub fn store_exists<P: AsRef<Path>>(path: P) -> bool {
         path.as_ref().join("rgstore.json").exists()
-    }
-
-    /// Create a disk-backed RefgetStore
-    ///
-    /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
-    /// Only metadata is kept in memory.
-    ///
-    /// # Arguments
-    /// * `cache_path` - Directory for storing sequences and metadata
-    /// * `mode` - Storage mode (Raw or Encoded)
-    ///
-    /// # Returns
-    /// Result with a configured disk-backed store
-    ///
-    /// # Example
-    /// ```ignore
-    /// let store = RefgetStore::on_disk("/data/store")?;
-    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
-    /// ```
-    pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
-        let cache_path = cache_path.as_ref();
-        let index_path = cache_path.join("rgstore.json");
-
-        if index_path.exists() {
-            // Load existing store
-            Self::open_local(cache_path)
-        } else {
-            // Create new store with default Encoded mode
-            let mode = StorageMode::Encoded;
-            create_dir_all(cache_path)?;
-
-            // Use private new() helper
-            let mut store = Self::new(mode);
-            store.local_path = Some(cache_path.to_path_buf());
-            store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
-            store.persist_to_disk = true; // Always true for on_disk
-
-            // Create directory structure
-            create_dir_all(cache_path.join("sequences"))?;
-            create_dir_all(cache_path.join("collections"))?;
-
-            Ok(store)
-        }
-    }
-
-    /// Create an in-memory RefgetStore
-    ///
-    /// All sequences kept in RAM for fast access.
-    /// Defaults to Encoded storage mode (2-bit packing for space efficiency).
-    /// Use set_encoding_mode() to change storage mode after creation.
-    ///
-    /// # Example
-    /// ```ignore
-    /// let store = RefgetStore::in_memory();
-    /// store.add_sequence_collection_from_fasta("genome.fa", FastaImportOptions::new())?;
-    /// ```
-    pub fn in_memory() -> Self {
-        Self::new(StorageMode::Encoded)
     }
 
     /// Change the storage mode, re-encoding/decoding existing sequences as needed.
@@ -1173,25 +1153,73 @@ impl RefgetStore {
     // Collection API
     // =========================================================================
 
-    /// List all collections in the store (metadata only, no sequence data).
+    /// List collections with pagination and optional attribute filtering.
     ///
-    /// Returns metadata for all collections without loading sequence data.
-    /// Use this for browsing/inventory operations.
+    /// Filters use AND logic: a collection must match ALL provided filters.
+    /// Results are sorted by digest for stable pagination ordering.
+    ///
+    /// # Arguments
+    /// * `page` - 0-indexed page number
+    /// * `page_size` - number of results per page
+    /// * `filters` - attribute filters as (attr_name, attr_digest) pairs with AND logic
+    ///
+    /// # Returns
+    /// `PagedResult<SequenceCollectionMetadata>` with results and pagination info.
     ///
     /// # Example
     /// ```ignore
-    /// for meta in store.list_collections() {
+    /// // Get first page of all collections
+    /// let result = store.list_collections(0, 100, &[])?;
+    /// for meta in &result.results {
     ///     println!("{}: {} sequences", meta.digest, meta.n_sequences);
     /// }
+    /// println!("Total: {}", result.pagination.total);
+    ///
+    /// // Filter by names digest
+    /// let result = store.list_collections(0, 100, &[("names", "abc123")])?;
     /// ```
-    pub fn list_collections(&self) -> Vec<SequenceCollectionMetadata> {
-        let mut result: Vec<_> = self
-            .collections
-            .values()
-            .map(|record| record.metadata().clone())
-            .collect();
-        result.sort_by(|a, b| a.digest.cmp(&b.digest));
-        result
+    pub fn list_collections(
+        &self,
+        page: usize,
+        page_size: usize,
+        filters: &[(&str, &str)],
+    ) -> Result<PagedResult<SequenceCollectionMetadata>> {
+        // 1. Collect all metadata, apply filters
+        let mut filtered: Vec<SequenceCollectionMetadata> = Vec::new();
+        for record in self.collections.values() {
+            let meta = record.metadata();
+            let mut passes = true;
+            for &(attr_name, attr_digest) in filters {
+                if !metadata_matches_attribute(meta, attr_name, attr_digest)? {
+                    passes = false;
+                    break;
+                }
+            }
+            if passes {
+                filtered.push(meta.clone());
+            }
+        }
+
+        // 2. Sort by digest for stable pagination
+        filtered.sort_by(|a, b| a.digest.cmp(&b.digest));
+
+        // 3. Paginate
+        let total = filtered.len();
+        let start = page * page_size;
+        let results = if start < total {
+            filtered.into_iter().skip(start).take(page_size).collect()
+        } else {
+            Vec::new()
+        };
+
+        Ok(PagedResult {
+            results,
+            pagination: Pagination {
+                page,
+                page_size,
+                total,
+            },
+        })
     }
 
     /// Get metadata for a single collection by digest (no sequence data).
@@ -1217,22 +1245,23 @@ impl RefgetStore {
     ///     println!("{}: {}", seq.metadata().name, seq.decode()?);
     /// }
     /// ```
-    pub fn get_collection(&mut self, collection_digest: &str) -> Result<SequenceCollection> {
+    pub fn get_collection(&self, collection_digest: &str) -> Result<SequenceCollection> {
         let key = collection_digest.to_key();
-        self.ensure_collection_loaded(&key)?;
 
-        // Get all sequence digests for this collection
+        // Require that the collection has been preloaded
+        if !self.name_lookup.contains_key(&key) {
+            return Err(anyhow!(
+                "Collection not loaded: {}. Call load_collection() or load_all_collections() first.",
+                collection_digest
+            ));
+        }
+
         let seq_digests: Vec<[u8; 32]> = self
             .name_lookup
             .get(&key)
             .map(|name_map| name_map.values().cloned().collect())
             .unwrap_or_default();
 
-        // NOTE: We do NOT load sequence data here - that would be too slow for remote stores
-        // with hundreds of sequences. Sequences are returned as Stubs with metadata.
-        // Call decode() on individual sequences to load their data on demand.
-
-        // Get collection metadata
         let metadata = self
             .collections
             .get(&key)
@@ -1240,7 +1269,6 @@ impl RefgetStore {
             .metadata()
             .clone();
 
-        // Build sequences list from sequence_store (as Stubs with metadata only)
         let sequences: Vec<SequenceRecord> = seq_digests
             .iter()
             .filter_map(|seq_key| self.sequence_store.get(seq_key).cloned())
@@ -1392,12 +1420,11 @@ impl RefgetStore {
     ///
     /// This resolves the alias to a digest, then loads the sequence data
     /// (from disk or remote) just like `get_sequence()`.
-    pub fn get_sequence_by_alias(&mut self, namespace: &str, alias: &str) -> Result<&SequenceRecord> {
+    pub fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Result<&SequenceRecord> {
         let key = self.aliases.resolve_sequence(namespace, alias)
             .ok_or_else(|| anyhow!("Sequence alias not found: {}/{}", namespace, alias))?;
-        self.ensure_sequence_loaded(&key)?;
         self.sequence_store.get(&key)
-            .ok_or_else(|| anyhow!("Sequence not found after loading alias {}/{}", namespace, alias))
+            .ok_or_else(|| anyhow!("Sequence not found for alias {}/{}", namespace, alias))
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -1448,7 +1475,7 @@ impl RefgetStore {
     ///
     /// This resolves the alias to a digest, then loads the collection
     /// just like `get_collection()`.
-    pub fn get_collection_by_alias(&mut self, namespace: &str, alias: &str) -> Result<SequenceCollection> {
+    pub fn get_collection_by_alias(&self, namespace: &str, alias: &str) -> Result<SequenceCollection> {
         let key = self.aliases.resolve_collection(namespace, alias)
             .ok_or_else(|| anyhow!("Collection alias not found: {}/{}", namespace, alias))?;
         let digest_str = key_to_digest_string(&key);
@@ -1602,7 +1629,7 @@ impl RefgetStore {
     /// let seq = store.get_sequence("abc123")?;
     /// println!("{}: {}", seq.metadata().name, seq.decode()?);
     /// ```
-    pub fn get_sequence<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<&SequenceRecord> {
+    pub fn get_sequence<K: AsRef<[u8]>>(&self, seq_digest: K) -> Result<&SequenceRecord> {
         let digest_key = seq_digest.to_key();
         // Try MD5 lookup first, fallback to using digest directly (SHA512t24u)
         let actual_key = self
@@ -1610,7 +1637,6 @@ impl RefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        self.ensure_sequence_loaded(&actual_key)?;
         self.sequence_store.get(&actual_key).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
@@ -1639,15 +1665,14 @@ impl RefgetStore {
             return Ok(());
         }
 
-        self.ensure_sequence_loaded(&actual_key)?;
-
+        // No longer calls ensure_sequence_loaded -- sequence must already be Full
         let record = self
             .sequence_store
             .get(&actual_key)
             .ok_or_else(|| anyhow!("Sequence not found"))?;
         let decoded = record
             .decode()
-            .ok_or_else(|| anyhow!("Failed to decode sequence"))?;
+            .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
 
         self.decoded_cache.insert(actual_key, decoded.into_bytes());
         Ok(())
@@ -1693,32 +1718,74 @@ impl RefgetStore {
     /// println!("{}", seq.decode()?);
     /// ```
     pub fn get_sequence_by_name<K: AsRef<[u8]>>(
-        &mut self,
+        &self,
         collection_digest: K,
         sequence_name: &str,
     ) -> Result<&SequenceRecord> {
         let collection_key = collection_digest.to_key();
-        self.ensure_collection_loaded(&collection_key)?;
 
-        let digest_key = if let Some(name_map) = self.name_lookup.get(&collection_key) {
-            name_map
-                .get(sequence_name)
-                .cloned()
-                .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?
-        } else {
+        if !self.name_lookup.contains_key(&collection_key) {
             return Err(anyhow!(
-                "Collection not found: {}",
-                String::from_utf8_lossy(collection_digest.as_ref())
+                "Collection not loaded. Call load_collection() or load_all_collections() first."
             ));
-        };
+        }
 
-        self.ensure_sequence_loaded(&digest_key)?;
-        self.sequence_store.get(&digest_key).ok_or_else(|| {
-            anyhow!(
-                "Sequence record not found for '{}' after loading",
-                sequence_name
-            )
-        })
+        let digest_key = self.name_lookup.get(&collection_key)
+            .and_then(|name_map| name_map.get(sequence_name).cloned())
+            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
+
+        // Do NOT call ensure_sequence_loaded -- require preloading
+        let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
+            anyhow!("Sequence record not found for '{}'. Call load_sequence() first.", sequence_name)
+        })?;
+
+        Ok(record)
+    }
+
+    /// Eagerly load all Stub collections to Full.
+    ///
+    /// After this call, every collection's name_lookup is populated and all
+    /// sequence metadata stubs are registered. Read methods like
+    /// `get_collection()`, `get_collection_level2()`, `compare()`,
+    /// `get_attribute()`, and `get_sequence_by_name()` can then be called
+    /// with `&self`.
+    ///
+    /// For the seqcol API use case, this is sufficient -- sequence BYTES
+    /// are not needed (only names, lengths, digest strings).
+    pub fn load_all_collections(&mut self) -> Result<()> {
+        let keys: Vec<[u8; 32]> = self.collections.keys().cloned().collect();
+        for key in keys {
+            self.ensure_collection_loaded(&key)?;
+        }
+        Ok(())
+    }
+
+    /// Eagerly load all Stub sequences to Full (fetches actual byte data).
+    ///
+    /// After this call, `get_substring()`, `export_fasta()`, and
+    /// `sequence_bytes()` (after `ensure_decoded`) can work with `&self`.
+    /// For large stores with many sequences, prefer loading specific
+    /// sequences via `load_sequence()` instead.
+    pub fn load_all_sequences(&mut self) -> Result<()> {
+        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
+        for key in keys {
+            self.ensure_sequence_loaded(&key)?;
+        }
+        Ok(())
+    }
+
+    /// Load a single collection by digest (Stub -> Full).
+    /// After this, get_collection() works with &self for this digest.
+    pub fn load_collection(&mut self, digest: &str) -> Result<()> {
+        let key = digest.to_key();
+        self.ensure_collection_loaded(&key)
+    }
+
+    /// Load a single sequence's byte data by digest (Stub -> Full).
+    /// After this, get_substring() works with &self for this digest.
+    pub fn load_sequence(&mut self, digest: &str) -> Result<()> {
+        let key = digest.to_key();
+        self.ensure_sequence_loaded(&key)
     }
 
     /// Iterate over all collections with their sequences loaded.
@@ -1734,8 +1801,7 @@ impl RefgetStore {
     /// ```
     ///
     /// Note: For browsing without loading data, use `list_collections()` instead.
-    pub fn iter_collections(&mut self) -> impl Iterator<Item = SequenceCollection> {
-        // Collect digests first to avoid borrow issues
+    pub fn iter_collections(&self) -> impl Iterator<Item = SequenceCollection> + '_ {
         let mut digests: Vec<String> = self
             .collections
             .values()
@@ -1743,15 +1809,9 @@ impl RefgetStore {
             .collect();
         digests.sort();
 
-        // Load each collection in sorted order
-        let mut collections = Vec::new();
-        for digest in &digests {
-            match self.get_collection(digest) {
-                Ok(collection) => collections.push(collection),
-                Err(e) => eprintln!("Warning: failed to load collection {}: {}", digest, e),
-            }
-        }
-        collections.into_iter()
+        digests.into_iter().filter_map(move |digest| {
+            self.get_collection(&digest).ok()
+        })
     }
 
     /// Iterate over all sequences with their data loaded.
@@ -1767,19 +1827,7 @@ impl RefgetStore {
     /// ```
     ///
     /// Note: For browsing without loading data, use `list_sequences()` instead.
-    pub fn iter_sequences(&mut self) -> impl Iterator<Item = SequenceRecord> {
-        // Collect keys first to avoid borrow issues
-        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
-
-        // Load each sequence
-        for key in &keys {
-            if let Err(e) = self.ensure_sequence_loaded(key) {
-                let digest_str = key_to_digest_string(key);
-                eprintln!("Warning: failed to load sequence {}: {}", digest_str, e);
-            }
-        }
-
-        // Return cloned records sorted by digest
+    pub fn iter_sequences(&self) -> impl Iterator<Item = SequenceRecord> + '_ {
         let mut records: Vec<_> = self.sequence_store.values().cloned().collect();
         records.sort_by(|a, b| a.metadata().sha512t24u.cmp(&b.metadata().sha512t24u));
         records.into_iter()
@@ -1829,7 +1877,7 @@ impl RefgetStore {
     /// }
     /// ```
     pub fn substrings_from_regions<'a, K: AsRef<[u8]>>(
-        &'a mut self,
+        &'a self,
         collection_digest: K,
         bed_file_path: &str,
     ) -> Result<SubstringsFromRegions<'a, K>> {
@@ -1878,7 +1926,7 @@ impl RefgetStore {
     /// )?;
     /// ```
     pub fn export_fasta_from_regions<K: AsRef<[u8]>>(
-        &mut self,
+        &self,
         collection_digest: K,
         bed_file_path: &str,
         output_file_path: &str,
@@ -1900,9 +1948,6 @@ impl RefgetStore {
 
         // Pre-fetch all sequence metadata from the collection to avoid borrowing issues
         let collection_key = collection_digest.as_ref().to_key();
-
-        // Ensure collection is loaded (populates name_lookup for lazy-loaded stores)
-        self.ensure_collection_loaded(&collection_key)?;
 
         let name_to_metadata: HashMap<String, SequenceMetadata> = self
             .name_lookup
@@ -1971,15 +2016,12 @@ impl RefgetStore {
     ///
     /// The substring if the sequence is found, or an error if not found or invalid range
     pub fn get_substring<K: AsRef<[u8]>>(
-        &mut self,
+        &self,
         sha512_digest: K,
         start: usize,
         end: usize,
     ) -> Result<String> {
         let digest_key = sha512_digest.to_key();
-
-        // Ensure the sequence data is loaded
-        self.ensure_sequence_loaded(&digest_key)?;
 
         let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
             anyhow!(
@@ -2028,7 +2070,7 @@ impl RefgetStore {
     /// # Returns
     /// Result indicating success or error
     pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
-        &mut self,
+        &self,
         collection_digest: K,
         output_path: P,
         sequence_names: Option<Vec<&str>>,
@@ -2037,9 +2079,6 @@ impl RefgetStore {
         let line_width = line_width.unwrap_or(80);
         let output_path = output_path.as_ref();
         let collection_key = collection_digest.as_ref().to_key();
-
-        // Ensure collection is loaded (populates name_lookup for lazy-loaded stores)
-        self.ensure_collection_loaded(&collection_key)?;
 
         // Get the name map for this collection and build a map of name -> digest
         let name_to_digest: HashMap<String, [u8; 32]> = self
@@ -2081,10 +2120,7 @@ impl RefgetStore {
                 .get(&seq_name)
                 .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", seq_name))?;
 
-            // Ensure sequence is loaded
-            self.ensure_sequence_loaded(seq_digest)?;
-
-            // Get the sequence record
+            // Get the sequence record (must be preloaded)
             let record = self
                 .sequence_store
                 .get(seq_digest)
@@ -2093,7 +2129,7 @@ impl RefgetStore {
             // Get the sequence data
             let (metadata, sequence_data) = match record {
                 SequenceRecord::Stub(_) => {
-                    return Err(anyhow!("Sequence data not loaded for '{}'", seq_name));
+                    return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
                 SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
             };
@@ -2118,7 +2154,7 @@ impl RefgetStore {
     /// # Returns
     /// Result indicating success or error
     pub fn export_fasta_by_digests<P: AsRef<Path>>(
-        &mut self,
+        &self,
         seq_digests: Vec<&str>,
         output_path: P,
         line_width: Option<usize>,
@@ -2142,10 +2178,7 @@ impl RefgetStore {
         for digest_str in seq_digests {
             let digest_key = digest_str.as_bytes().to_key();
 
-            // Ensure sequence is loaded
-            self.ensure_sequence_loaded(&digest_key)?;
-
-            // Get the sequence record
+            // Get the sequence record (must be preloaded)
             let record = self
                 .sequence_store
                 .get(&digest_key)
@@ -2439,16 +2472,8 @@ impl RefgetStore {
         }
     }
 
-    /// Open a local RefgetStore from a directory.
-    ///
-    /// This loads only lightweight metadata and stubs. Collections and sequences
-    /// remain as stubs until explicitly loaded with load_collection()/load_sequence().
-    ///
-    /// # Arguments
-    /// * `path` - Path to the store directory
-    ///
-    /// Expects: rgstore.json, sequences.rgsi, collections.rgci, collections/*.rgsi
-    pub fn open_local<P: AsRef<Path>>(path: P) -> Result<Self> {
+    /// Open a local store (internal). Users should use RefgetStore::open_local().
+    pub(crate) fn open_local<P: AsRef<Path>>(path: P) -> Result<Self> {
         let root_path = path.as_ref();
 
         // Read rgstore.json index file
@@ -2469,7 +2494,7 @@ impl RefgetStore {
         }
 
         // Create a new empty store with the correct mode
-        let mut store = RefgetStore::new(metadata.mode);
+        let mut store = ReadonlyRefgetStore::new(metadata.mode);
         store.local_path = Some(root_path.to_path_buf());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
         store.persist_to_disk = true; // Local stores always use disk
@@ -2508,7 +2533,7 @@ impl RefgetStore {
     }
 
     /// Parse RGSI lines from a reader and load as Stub sequence records.
-    fn load_sequences_from_reader<R: BufRead>(store: &mut RefgetStore, reader: R) -> Result<()> {
+    fn load_sequences_from_reader<R: BufRead>(store: &mut ReadonlyRefgetStore, reader: R) -> Result<()> {
         for line in reader.lines() {
             let line = line?;
 
@@ -2536,7 +2561,7 @@ impl RefgetStore {
     }
 
     /// Load sequence metadata from a sequence index file (sequences.rgsi)
-    fn load_sequences_from_index(store: &mut RefgetStore, index_path: &Path) -> Result<()> {
+    fn load_sequences_from_index(store: &mut ReadonlyRefgetStore, index_path: &Path) -> Result<()> {
         let file = std::fs::File::open(index_path)?;
         let reader = std::io::BufReader::new(file);
         Self::load_sequences_from_reader(store, reader)
@@ -2544,7 +2569,7 @@ impl RefgetStore {
 
     /// Parse RGCI lines from a reader and load as Stub collection records.
     fn load_collection_stubs_from_reader<R: BufRead>(
-        store: &mut RefgetStore,
+        store: &mut ReadonlyRefgetStore,
         reader: R,
     ) -> Result<()> {
         for line in reader.lines() {
@@ -2565,7 +2590,7 @@ impl RefgetStore {
     }
 
     /// Load collection stubs from collections.rgci index file (new format)
-    fn load_collection_stubs_from_rgci(store: &mut RefgetStore, index_path: &Path) -> Result<()> {
+    fn load_collection_stubs_from_rgci(store: &mut ReadonlyRefgetStore, index_path: &Path) -> Result<()> {
         let file = std::fs::File::open(index_path)?;
         let reader = std::io::BufReader::new(file);
         Self::load_collection_stubs_from_reader(store, reader)
@@ -2575,7 +2600,7 @@ impl RefgetStore {
     ///
     /// Reads all .rgsi files in the directory and loads them as Full collections.
     fn load_collections_from_directory(
-        store: &mut RefgetStore,
+        store: &mut ReadonlyRefgetStore,
         collections_dir: &Path,
     ) -> Result<()> {
         if !collections_dir.exists() {
@@ -2608,19 +2633,8 @@ impl RefgetStore {
         Ok(())
     }
 
-    /// Open a remote RefgetStore with local caching.
-    ///
-    /// This loads only lightweight metadata and stubs from the remote URL.
-    /// Data is fetched on-demand when load_collection()/load_sequence() is called.
-    ///
-    /// # Arguments
-    /// * `cache_path` - Local directory for caching fetched data
-    /// * `remote_url` - URL of the remote store
-    ///
-    /// # Notes
-    /// By default, persistence is enabled (sequences are cached to disk).
-    /// Call `disable_persistence()` after loading to keep only in memory.
-    pub fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
+    /// Open a remote store (internal). Users should use RefgetStore::open_remote().
+    pub(crate) fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
         cache_path: P,
         remote_url: S,
     ) -> Result<Self> {
@@ -2652,7 +2666,7 @@ impl RefgetStore {
         }
 
         // Create a new empty store with the correct mode
-        let mut store = RefgetStore::new(metadata.mode);
+        let mut store = ReadonlyRefgetStore::new(metadata.mode);
         store.local_path = Some(cache_path.to_path_buf());
         store.remote_source = Some(remote_url.clone());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
@@ -3055,11 +3069,11 @@ fn format_bytes(bytes: usize) -> String {
     }
 }
 
-impl Display for RefgetStore {
+impl Display for ReadonlyRefgetStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         let total_size = self.total_disk_size();
         let size_str = format_bytes(total_size);
-        writeln!(f, "RefgetStore object:")?;
+        writeln!(f, "ReadonlyRefgetStore object:")?;
         writeln!(f, "  Mode: {:?}", self.mode)?;
         writeln!(f, "  Disk size: {} ({} bytes)", size_str, total_size)?;
         writeln!(f, ">Sequences (n={}):", self.sequence_store.len())?;
@@ -3129,6 +3143,392 @@ impl Display for RefgetStore {
     }
 }
 
+// =========================================================================
+// RefgetStore: User-facing wrapper with lazy-loading read methods
+// =========================================================================
+
+/// User-facing store with lazy-loading read methods.
+///
+/// Wraps `ReadonlyRefgetStore` and provides `&mut self` read methods that
+/// automatically load data on first access. Use `into_readonly()` to convert
+/// to an immutable store suitable for `Arc<ReadonlyRefgetStore>` in servers.
+///
+/// ## Usage Patterns
+///
+/// ### CLI / Scripts (lazy loading)
+/// ```ignore
+/// let mut store = RefgetStore::open_remote(cache, url)?;
+/// let coll = store.get_collection("abc")?;  // auto-loads
+/// ```
+///
+/// ### Server (concurrent reads)
+/// ```ignore
+/// let mut store = RefgetStore::open_remote(cache, url)?;
+/// store.load_all_collections()?;
+/// let store = Arc::new(store.into_readonly());
+/// // Multiple threads can now call store.get_collection() concurrently
+/// ```
+#[derive(Debug)]
+pub struct RefgetStore {
+    inner: ReadonlyRefgetStore,
+}
+
+impl std::ops::Deref for RefgetStore {
+    type Target = ReadonlyRefgetStore;
+    fn deref(&self) -> &ReadonlyRefgetStore {
+        &self.inner
+    }
+}
+
+impl Display for RefgetStore {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl RefgetStore {
+    // =====================================================================
+    // Constructors
+    // =====================================================================
+
+    /// Check whether a valid RefgetStore exists at the given path.
+    pub fn store_exists<P: AsRef<Path>>(path: P) -> bool {
+        ReadonlyRefgetStore::store_exists(path)
+    }
+
+    /// Create a disk-backed RefgetStore.
+    ///
+    /// If the path already contains an rgstore.json, it opens the existing store.
+    /// Otherwise, creates a new store with Encoded storage mode.
+    pub fn on_disk<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        let index_path = cache_path.join("rgstore.json");
+
+        if index_path.exists() {
+            Self::open_local(cache_path)
+        } else {
+            let mode = StorageMode::Encoded;
+            create_dir_all(cache_path)?;
+            let mut inner = ReadonlyRefgetStore::new(mode);
+            inner.local_path = Some(cache_path.to_path_buf());
+            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+            inner.persist_to_disk = true;
+            create_dir_all(cache_path.join("sequences"))?;
+            create_dir_all(cache_path.join("collections"))?;
+            Ok(Self { inner })
+        }
+    }
+
+    /// Create an in-memory RefgetStore.
+    pub fn in_memory() -> Self {
+        Self {
+            inner: ReadonlyRefgetStore::new(StorageMode::Encoded),
+        }
+    }
+
+    /// Open a local RefgetStore from a directory.
+    pub fn open_local<P: AsRef<Path>>(path: P) -> Result<Self> {
+        Ok(Self {
+            inner: ReadonlyRefgetStore::open_local(path)?,
+        })
+    }
+
+    /// Open a remote RefgetStore with local caching.
+    pub fn open_remote<P: AsRef<Path>, S: AsRef<str>>(
+        cache_path: P,
+        remote_url: S,
+    ) -> Result<Self> {
+        Ok(Self {
+            inner: ReadonlyRefgetStore::open_remote(cache_path, remote_url)?,
+        })
+    }
+
+    /// Convert to a ReadonlyRefgetStore for concurrent read access.
+    ///
+    /// Call `load_all_collections()` (and optionally `load_all_sequences()`)
+    /// before converting. After conversion, all read methods use `&self`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let mut store = RefgetStore::open_remote(cache, url)?;
+    /// store.load_all_collections()?;
+    /// let store = Arc::new(store.into_readonly());
+    /// // Now usable from multiple threads
+    /// ```
+    pub fn into_readonly(self) -> ReadonlyRefgetStore {
+        self.inner
+    }
+
+    // =====================================================================
+    // Preload methods (delegate to inner)
+    // =====================================================================
+
+    /// Preload all collections (delegates to inner).
+    pub fn load_all_collections(&mut self) -> Result<()> {
+        self.inner.load_all_collections()
+    }
+
+    /// Preload all sequences (delegates to inner).
+    pub fn load_all_sequences(&mut self) -> Result<()> {
+        self.inner.load_all_sequences()
+    }
+
+    /// Load a single collection by digest.
+    pub fn load_collection(&mut self, digest: &str) -> Result<()> {
+        self.inner.load_collection(digest)
+    }
+
+    /// Load a single sequence by digest.
+    pub fn load_sequence(&mut self, digest: &str) -> Result<()> {
+        self.inner.load_sequence(digest)
+    }
+
+    // =====================================================================
+    // Lazy-loading read methods (shadow ReadonlyRefgetStore's &self versions)
+    // =====================================================================
+
+    /// Lazy-loading get_collection. Loads on first access.
+    pub fn get_collection(&mut self, digest: &str) -> Result<SequenceCollection> {
+        if let Ok(coll) = self.inner.get_collection(digest) {
+            return Ok(coll);
+        }
+        self.inner.load_collection(digest)?;
+        self.inner.get_collection(digest)
+    }
+
+    /// Lazy-loading get_collection_level2.
+    pub fn get_collection_level2(&mut self, digest: &str) -> Result<crate::digest::CollectionLevel2> {
+        if let Ok(lvl2) = self.inner.get_collection_level2(digest) {
+            return Ok(lvl2);
+        }
+        self.inner.load_collection(digest)?;
+        self.inner.get_collection_level2(digest)
+    }
+
+    /// Lazy-loading compare. Loads both collections if needed.
+    pub fn compare(&mut self, digest_a: &str, digest_b: &str) -> Result<crate::digest::SeqColComparison> {
+        if !self.inner.is_collection_loaded(digest_a) {
+            self.inner.load_collection(digest_a)?;
+        }
+        if !self.inner.is_collection_loaded(digest_b) {
+            self.inner.load_collection(digest_b)?;
+        }
+        self.inner.compare(digest_a, digest_b)
+    }
+
+    /// Lazy-loading get_attribute.
+    pub fn get_attribute(
+        &mut self,
+        attr_name: &str,
+        attr_digest: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        let collections = self.inner.find_collections_by_attribute(attr_name, attr_digest)?;
+        if collections.is_empty() {
+            return Ok(None);
+        }
+        if !self.inner.is_collection_loaded(&collections[0]) {
+            self.inner.load_collection(&collections[0])?;
+        }
+        self.inner.get_attribute(attr_name, attr_digest)
+    }
+
+    /// Lazy-loading get_collection_by_alias.
+    pub fn get_collection_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> Result<SequenceCollection> {
+        if let Some(meta) = self.inner.get_collection_metadata_by_alias(namespace, alias) {
+            let digest = meta.digest.clone();
+            if !self.inner.is_collection_loaded(&digest) {
+                self.inner.load_collection(&digest)?;
+            }
+            return self.inner.get_collection_by_alias(namespace, alias);
+        }
+        Err(anyhow!("Collection alias not found: {}:{}", namespace, alias))
+    }
+
+    // =====================================================================
+    // Write/mutation methods (delegate to inner)
+    // =====================================================================
+
+    /// Set whether to suppress progress output.
+    pub fn set_quiet(&mut self, quiet: bool) {
+        self.inner.set_quiet(quiet);
+    }
+
+    /// Change the storage mode.
+    pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
+        self.inner.set_encoding_mode(new_mode);
+    }
+
+    /// Enable 2-bit encoding for space efficiency.
+    pub fn enable_encoding(&mut self) {
+        self.inner.enable_encoding();
+    }
+
+    /// Disable encoding, use raw byte storage.
+    pub fn disable_encoding(&mut self) {
+        self.inner.disable_encoding();
+    }
+
+    /// Enable disk persistence for this store.
+    pub fn enable_persistence<P: AsRef<Path>>(&mut self, path: P) -> Result<()> {
+        self.inner.enable_persistence(path)
+    }
+
+    /// Disable disk persistence for this store.
+    pub fn disable_persistence(&mut self) {
+        self.inner.disable_persistence();
+    }
+
+    /// Add a sequence to the store.
+    pub fn add_sequence<T: Into<Option<[u8; 32]>>>(
+        &mut self,
+        sequence_record: SequenceRecord,
+        collection_digest: T,
+        force: bool,
+    ) -> Result<()> {
+        self.inner.add_sequence(sequence_record, collection_digest, force)
+    }
+
+    /// Add a collection and all sequences in it to the store.
+    pub fn add_sequence_collection(&mut self, collection: SequenceCollection) -> Result<()> {
+        self.inner.add_sequence_collection(collection)
+    }
+
+    /// Add a collection, overwriting existing data.
+    pub fn add_sequence_collection_force(&mut self, collection: SequenceCollection) -> Result<()> {
+        self.inner.add_sequence_collection_force(collection)
+    }
+
+    /// Add a sequence collection from a FASTA file.
+    pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(
+        &mut self,
+        file_path: P,
+        opts: FastaImportOptions<'_>,
+    ) -> Result<(SequenceCollectionMetadata, bool)> {
+        self.inner.add_sequence_collection_from_fasta(file_path, opts)
+    }
+
+    /// Add a SequenceRecord directly to the store.
+    pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
+        self.inner.add_sequence_record(sr, force)
+    }
+
+    /// Remove a collection from the store.
+    pub fn remove_collection(&mut self, digest: &str, remove_orphan_sequences: bool) -> Result<bool> {
+        self.inner.remove_collection(digest, remove_orphan_sequences)
+    }
+
+    /// Ensure a sequence is decoded into the decoded cache.
+    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        self.inner.ensure_decoded(seq_digest)
+    }
+
+    /// Clear the decoded sequence cache.
+    pub fn clear_decoded_cache(&mut self) {
+        self.inner.clear_decoded_cache();
+    }
+
+    /// Clear in-memory sequence data and decoded cache, preserving metadata.
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    // --- Alias write methods ---
+
+    /// Add a sequence alias.
+    pub fn add_sequence_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
+        self.inner.add_sequence_alias(namespace, alias, digest)
+    }
+
+    /// Remove a single sequence alias.
+    pub fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
+        self.inner.remove_sequence_alias(namespace, alias)
+    }
+
+    /// Load sequence aliases from a TSV file.
+    pub fn load_sequence_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
+        self.inner.load_sequence_aliases(namespace, path)
+    }
+
+    /// Add a collection alias.
+    pub fn add_collection_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
+        self.inner.add_collection_alias(namespace, alias, digest)
+    }
+
+    /// Remove a single collection alias.
+    pub fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
+        self.inner.remove_collection_alias(namespace, alias)
+    }
+
+    /// Load collection aliases from a TSV file.
+    pub fn load_collection_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
+        self.inner.load_collection_aliases(namespace, path)
+    }
+
+    // --- FHR metadata write methods ---
+
+    /// Set FHR metadata for a collection.
+    pub fn set_fhr_metadata(&mut self, collection_digest: &str, metadata: FhrMetadata) -> Result<()> {
+        self.inner.set_fhr_metadata(collection_digest, metadata)
+    }
+
+    /// Remove FHR metadata for a collection.
+    pub fn remove_fhr_metadata(&mut self, collection_digest: &str) -> bool {
+        self.inner.remove_fhr_metadata(collection_digest)
+    }
+
+    /// Load FHR metadata from a JSON file.
+    pub fn load_fhr_metadata(&mut self, collection_digest: &str, path: &str) -> Result<()> {
+        self.inner.load_fhr_metadata(collection_digest, path)
+    }
+
+    // --- Seqcol config methods ---
+
+    /// Enable computation of ancillary digests.
+    pub fn enable_ancillary_digests(&mut self) {
+        self.inner.enable_ancillary_digests();
+    }
+
+    /// Disable computation of ancillary digests.
+    pub fn disable_ancillary_digests(&mut self) {
+        self.inner.disable_ancillary_digests();
+    }
+
+    /// Enable indexed attribute lookup.
+    pub fn enable_attribute_index(&mut self) {
+        self.inner.enable_attribute_index();
+    }
+
+    /// Disable indexed attribute lookup.
+    pub fn disable_attribute_index(&mut self) {
+        self.inner.disable_attribute_index();
+    }
+
+    // --- Write methods ---
+
+    /// Write the store using its configured paths.
+    pub fn write(&self) -> Result<()> {
+        self.inner.write()
+    }
+
+    /// Write the store to a directory.
+    pub fn write_store_to_dir<P: AsRef<Path>>(
+        &self,
+        root_path: P,
+        seqdata_path_template: Option<&str>,
+    ) -> Result<()> {
+        self.inner.write_store_to_dir(root_path, seqdata_path_template)
+    }
+
+    /// Write all sequence metadata to an RGSI file.
+    pub fn write_sequences_rgsi<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
+        self.inner.write_sequences_rgsi(file_path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3160,7 +3560,7 @@ mod tests {
     fn test_expand_template_with_s2() {
         let digest = "ABCDEFghijklmnop";
         let template = "sequences/%s2/%s.seq";
-        let result = RefgetStore::expand_template(digest, template);
+        let result = ReadonlyRefgetStore::expand_template(digest, template);
         assert_eq!(result, PathBuf::from("sequences/AB/ABCDEFghijklmnop.seq"));
     }
 
@@ -3168,7 +3568,7 @@ mod tests {
     fn test_expand_template_with_s4() {
         let digest = "ABCDEFghijklmnop";
         let template = "sequences/%s2/%s4/%s.seq";
-        let result = RefgetStore::expand_template(digest, template);
+        let result = ReadonlyRefgetStore::expand_template(digest, template);
         assert_eq!(result, PathBuf::from("sequences/AB/ABCD/ABCDEFghijklmnop.seq"));
     }
 
@@ -3176,7 +3576,7 @@ mod tests {
     fn test_expand_template_full_digest_only() {
         let digest = "ABCDEFghijklmnop";
         let template = "sequences/%s.seq";
-        let result = RefgetStore::expand_template(digest, template);
+        let result = ReadonlyRefgetStore::expand_template(digest, template);
         assert_eq!(result, PathBuf::from("sequences/ABCDEFghijklmnop.seq"));
     }
 
@@ -3683,6 +4083,10 @@ chr2\t0\t4
         // Verify collections are preserved
         assert_eq!(loaded_store.collections.len(), store.collections.len());
 
+        // Preload collections and sequences for read access
+        loaded_store.load_all_collections().unwrap();
+        loaded_store.load_all_sequences().unwrap();
+
         // Test sequence retrieval functionality
         for (digest, original_record) in &store.sequence_store {
             let loaded_record = loaded_store.get_sequence(*digest).unwrap();
@@ -3712,7 +4116,7 @@ chr2\t0\t4
     #[test]
     fn test_export_fasta_all_sequences() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
+        let (store, collection_digest) = setup_export_test_store(temp_dir.path());
 
         let output_path = temp_dir.path().join("exported_all.fa");
         store
@@ -3733,7 +4137,7 @@ chr2\t0\t4
     #[test]
     fn test_export_fasta_subset_sequences() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
+        let (store, collection_digest) = setup_export_test_store(temp_dir.path());
 
         let output_path = temp_dir.path().join("exported_subset.fa");
         store
@@ -3819,7 +4223,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
     #[test]
     fn test_export_fasta_by_digests() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let (mut store, _) = setup_export_test_store(temp_dir.path());
+        let (store, _) = setup_export_test_store(temp_dir.path());
 
         let digests: Vec<String> = store
             .sequence_store
@@ -3842,7 +4246,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
     #[test]
     fn test_export_fasta_error_handling() {
         let temp_dir = tempdir().expect("Failed to create temporary directory");
-        let (mut store, collection_digest) = setup_export_test_store(temp_dir.path());
+        let (store, collection_digest) = setup_export_test_store(temp_dir.path());
 
         let output_path = temp_dir.path().join("should_fail.fa");
 
@@ -3901,7 +4305,11 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGGAAAACCCC
             "Collection should be Stub after loading from disk"
         );
 
-        // This should work (was failing before fix due to missing ensure_collection_loaded call)
+        // Preload collections and sequences before reading
+        loaded_store.load_all_collections().unwrap();
+        loaded_store.load_all_sequences().unwrap();
+
+        // This should work after preloading
         let output_path = temp_path.join("exported.fa");
         loaded_store
             .export_fasta(&collection_digest, &output_path, None, Some(80))
@@ -4189,9 +4597,9 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .unwrap();
 
         // Test list_collections
-        let collections = store.list_collections();
-        assert_eq!(collections.len(), 1, "Should have 1 collection");
-        let digest = collections[0].digest.clone();
+        let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+        assert_eq!(collections.results.len(), 1, "Should have 1 collection");
+        let digest = collections.results[0].digest.clone();
 
         // Test get_collection_metadata
         let meta = store.get_collection_metadata(&digest);
@@ -4218,8 +4626,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     }
 
     #[test]
-    fn test_collection_stub_lazy_loading() {
-        // Test that collections load as Stubs and upgrade to Full on-demand
+    fn test_collection_explicit_loading() {
+        // Test that collections load as Stubs and must be explicitly loaded
         let temp_dir = tempdir().unwrap();
         let temp_fasta = copy_test_fasta(temp_dir.path(), "base.fa.gz");
         let cache_path = temp_dir.path().join("store");
@@ -4229,7 +4637,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         store
             .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
-        let digest = store.list_collections()[0].digest.clone();
+        let digest = store.list_collections(0, usize::MAX, &[]).unwrap().results[0].digest.clone();
 
         // Drop the store and reload from disk
         drop(store);
@@ -4261,35 +4669,45 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             "Should have 0 collections loaded initially"
         );
 
-        // TRIGGER: Access a sequence by name - this should trigger lazy loading
+        // VERIFY: Reading without loading returns an error
+        let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
+        assert!(
+            seq.is_err(),
+            "Should get error when reading without loading first"
+        );
+
+        // Explicitly load the collection
+        loaded_store.load_collection(&digest).unwrap();
+
+        // Now reading should work
         let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
         assert!(
             seq.is_ok(),
-            "Should be able to retrieve sequence after lazy load"
+            "Should be able to retrieve sequence after explicit load"
         );
         assert_eq!(seq.unwrap().metadata().name, "chr1");
 
         // VERIFY: Collection is now Full (loaded into memory)
         assert!(
             loaded_store.is_collection_loaded(&digest),
-            "Collection should be Full after accessing a sequence"
+            "Collection should be Full after explicit load"
         );
 
         // VERIFY: stats now shows 1 collection loaded
         let stats_after = loaded_store.stats();
         assert_eq!(
             stats_after.n_collections_loaded, 1,
-            "Should have 1 collection loaded after access"
+            "Should have 1 collection loaded after explicit load"
         );
 
-        println!("✓ Collection stub lazy loading test passed");
+        println!("✓ Collection explicit loading test passed");
     }
 
     // Note: open_local is tested in test_disk_persistence which is more comprehensive
 
     #[test]
     fn test_get_collection() {
-        // Test the get_collection method (returns collection with sequence metadata, lazy loading)
+        // Test get_collection with lazy loading (RefgetStore auto-loads)
         let temp_dir = tempdir().unwrap();
         let temp_fasta = copy_test_fasta(temp_dir.path(), "base.fa.gz");
         let cache_path = temp_dir.path().join("store");
@@ -4299,7 +4717,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         store
             .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
-        let digest = store.list_collections()[0].digest.clone();
+        let digest = store.list_collections(0, usize::MAX, &[]).unwrap().results[0].digest.clone();
         drop(store);
 
         // Reload and test get_collection
@@ -4308,14 +4726,21 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         // Before loading - collection is a Stub
         assert!(!loaded_store.is_collection_loaded(&digest));
 
-        // Before loading - no sequences loaded
-        let stats_before = loaded_store.stats();
-        assert_eq!(
-            stats_before.n_sequences_loaded, 0,
-            "No sequences should be loaded initially"
+        // RefgetStore lazy-loads: get_collection succeeds without explicit preloading
+        let collection = loaded_store.get_collection(&digest).unwrap();
+        assert!(!collection.sequences.is_empty());
+
+        // Test ReadonlyRefgetStore: get_collection FAILS without preloading
+        let readonly_store = RefgetStore::open_local(&cache_path).unwrap().into_readonly();
+        assert!(
+            readonly_store.get_collection(&digest).is_err(),
+            "ReadonlyRefgetStore::get_collection should fail without preloading"
         );
 
-        // Get the collection (loads metadata only, sequences are lazy)
+        // Explicitly load collections
+        loaded_store.load_all_collections().unwrap();
+
+        // Now get_collection should also work (already loaded)
         let collection = loaded_store.get_collection(&digest).unwrap();
         assert!(
             !collection.sequences.is_empty(),
@@ -4323,7 +4748,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         );
         assert_eq!(collection.sequences.len(), 3);
 
-        // After get_collection - collection is loaded but sequences are still stubs (lazy loading)
+        // After load_all_collections - collection is loaded but sequences are still stubs
         let stats_after = loaded_store.stats();
         assert_eq!(
             stats_after.n_sequences_loaded, 0,
@@ -4338,16 +4763,17 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         for record in loaded_store.sequence_store.values() {
             assert!(
                 !record.is_loaded(),
-                "Sequences should be stubs after get_collection"
+                "Sequences should be stubs after load_all_collections"
             );
         }
 
-        // Now explicitly load a sequence
+        // Now explicitly load sequences and verify
         let seq_digest = collection.sequences[0].metadata().sha512t24u.clone();
+        loaded_store.load_sequence(&seq_digest).unwrap();
         let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
         assert!(
             loaded_seq.is_loaded(),
-            "Sequence should be loaded after get_sequence"
+            "Sequence should be loaded after load_sequence"
         );
 
         println!("✓ get_collection test passed");
@@ -4355,7 +4781,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
     #[test]
     fn test_get_sequence() {
-        // Test the get_sequence method (loads sequence on demand)
+        // Test the get_sequence method with explicit preloading
         let temp_dir = tempdir().unwrap();
         let temp_fasta = copy_test_fasta(temp_dir.path(), "base.fa.gz");
         let cache_path = temp_dir.path().join("store");
@@ -4387,14 +4813,24 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .unwrap();
         assert!(
             !seq_before.is_loaded(),
-            "Sequence should not have data before get_sequence"
+            "Sequence should not have data before loading"
         );
 
-        // Get the sequence (loads data on demand)
+        // get_sequence returns Stub without data (not an error)
+        let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
+        assert!(
+            !loaded_seq.is_loaded(),
+            "Sequence should be Stub before load_sequence"
+        );
+
+        // Explicitly load the sequence
+        loaded_store.load_sequence(&seq_digest).unwrap();
+
+        // Now it should be Full
         let loaded_seq = loaded_store.get_sequence(&seq_digest).unwrap();
         assert!(
             loaded_seq.is_loaded(),
-            "Sequence should have data after get_sequence"
+            "Sequence should have data after load_sequence"
         );
         assert!(
             loaded_seq.sequence().is_some(),
@@ -4406,7 +4842,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
     #[test]
     fn test_get_collection_idempotent() {
-        // Test that calling get_collection twice is safe (idempotent)
+        // Test that calling get_collection twice is safe (idempotent) after loading
         let temp_dir = tempdir().unwrap();
         let temp_fasta = copy_test_fasta(temp_dir.path(), "base.fa.gz");
         let cache_path = temp_dir.path().join("store");
@@ -4416,11 +4852,12 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         store
             .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
             .unwrap();
-        let digest = store.list_collections()[0].digest.clone();
+        let digest = store.list_collections(0, usize::MAX, &[]).unwrap().results[0].digest.clone();
         drop(store);
 
         // Reload and test idempotent loading
         let mut loaded_store = RefgetStore::open_local(&cache_path).unwrap();
+        loaded_store.load_all_collections().unwrap();
 
         // Get twice - both should succeed
         let result1 = loaded_store.get_collection(&digest);
@@ -4437,24 +4874,24 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
     #[test]
     fn test_sanitize_relative_path_rejects_traversal() {
-        assert!(RefgetStore::sanitize_relative_path("../etc/passwd").is_err());
-        assert!(RefgetStore::sanitize_relative_path("foo/../bar").is_err());
-        assert!(RefgetStore::sanitize_relative_path("foo/../../bar").is_err());
-        assert!(RefgetStore::sanitize_relative_path("..").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("../etc/passwd").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../bar").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../../bar").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("..").is_err());
     }
 
     #[test]
     fn test_sanitize_relative_path_rejects_absolute() {
-        assert!(RefgetStore::sanitize_relative_path("/etc/passwd").is_err());
-        assert!(RefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("/etc/passwd").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
     }
 
     #[test]
     fn test_sanitize_relative_path_accepts_valid() {
-        assert!(RefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
-        assert!(RefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
-        assert!(RefgetStore::sanitize_relative_path("rgstore.json").is_ok());
-        assert!(RefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("rgstore.json").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
     }
 
     #[test]
@@ -4852,8 +5289,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
 
     #[test]
     fn test_get_sequence_by_alias_error_not_found() {
-        let mut store = RefgetStore::in_memory();
-        // Should return Err for auto-loading variant
+        let store = RefgetStore::in_memory();
+        // Should return Err when alias not found
         assert!(store.get_sequence_by_alias("ncbi", "nonexistent").is_err());
     }
 
@@ -5007,22 +5444,27 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             "Both stubs should be indexed even though one RGSI is missing"
         );
 
-        // iter_collections should return only the collection whose RGSI still exists,
-        // without panicking. The missing one produces a warning on stderr.
+        // load_all_collections will fail on the missing RGSI
+        let result = loaded.load_all_collections();
+        assert!(result.is_err(), "load_all_collections should fail when an RGSI is missing");
+
+        // Load just the surviving collection individually
+        loaded.load_collection(&meta2.digest).unwrap();
+
+        // iter_collections should return only the loaded collection
         let collections: Vec<_> = loaded.iter_collections().collect();
         assert_eq!(
             collections.len(),
             1,
-            "Only one collection should load; the missing RGSI should produce a warning and be skipped"
+            "Only the successfully loaded collection should be returned"
         );
         assert_eq!(collections[0].metadata.digest, meta2.digest);
     }
 
     #[test]
-    fn test_iter_sequences_warns_on_missing_seq_file() {
+    fn test_iter_sequences_returns_stubs_for_unloaded() {
         // Create a store with two sequences, write to disk, delete one sequence
-        // data file, then verify iter_sequences does not panic and that the
-        // surviving sequence is fully loaded while the missing one remains a Stub.
+        // data file, then verify iter_sequences returns Stubs for unloaded sequences.
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
 
@@ -5055,28 +5497,28 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut loaded = RefgetStore::open_local(&store_path).unwrap();
         assert_eq!(loaded.sequence_store.len(), 2, "Both stubs should be indexed");
 
-        // iter_sequences should not panic even when one file is missing.
-        // All records (including the unloaded Stub) are returned; the warning is
-        // emitted to stderr. Verify that exactly one record is fully loaded.
+        // iter_sequences returns all records (Stubs for unloaded sequences)
         let sequences: Vec<_> = loaded.iter_sequences().collect();
         assert_eq!(sequences.len(), 2, "Both stubs are returned by the iterator");
         let loaded_count = sequences.iter().filter(|r| r.is_loaded()).count();
         assert_eq!(
             loaded_count,
-            1,
-            "Only one sequence should be fully loaded; the missing file produces a warning"
+            0,
+            "No sequences should be loaded without explicit load_all_sequences"
         );
-        let unloaded_digest = sequences
-            .iter()
-            .find(|r| !r.is_loaded())
-            .unwrap()
-            .metadata()
-            .sha512t24u
-            .clone();
-        assert_eq!(
-            unloaded_digest, *digest_to_delete,
-            "The Stub that failed to load should be the one whose file was deleted"
-        );
+
+        // load_all_sequences should fail because one file is missing
+        let result = loaded.load_all_sequences();
+        assert!(result.is_err(), "load_all_sequences should fail when a sequence file is missing");
+
+        // Load the surviving sequence individually
+        let surviving_digest = &seq_digests[1];
+        loaded.load_sequence(surviving_digest).unwrap();
+
+        // Now iter_sequences should show one loaded, one stub
+        let sequences: Vec<_> = loaded.iter_sequences().collect();
+        let loaded_count = sequences.iter().filter(|r| r.is_loaded()).count();
+        assert_eq!(loaded_count, 1, "Only one sequence should be fully loaded");
     }
 
     #[test]
@@ -5153,11 +5595,11 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     fn test_remove_existing_collection() {
         let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
 
-        assert_eq!(store.list_collections().len(), 1);
+        assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 1);
 
         let result = store.remove_collection(&digest, false).unwrap();
         assert!(result, "remove_collection should return true for existing collection");
-        assert_eq!(store.list_collections().len(), 0);
+        assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 0);
         assert!(store.get_collection(&digest).is_err());
     }
 
@@ -5168,7 +5610,7 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let result = store.remove_collection("nonexistent_digest_value", false).unwrap();
         assert!(!result, "remove_collection should return false for nonexistent collection");
         // Store should be unchanged
-        assert_eq!(store.list_collections().len(), 1);
+        assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 1);
     }
 
     #[test]
@@ -5212,14 +5654,14 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .add_sequence_collection_from_fasta(&fasta2, FastaImportOptions::new())
             .unwrap();
 
-        assert_eq!(store.list_collections().len(), 2);
+        assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 2);
         // chr1 (ACGT) is shared, chr2 (TTTT) and chr3 (GGGG) are unique
         assert_eq!(store.list_sequences().len(), 3);
 
         // Remove first collection with orphan cleanup
         store.remove_collection(&meta1.digest, true).unwrap();
 
-        assert_eq!(store.list_collections().len(), 1);
+        assert_eq!(store.list_collections(0, usize::MAX, &[]).unwrap().results.len(), 1);
         // chr1 (ACGT) is still referenced by collection 2, chr2 (TTTT) is orphaned
         // So we should have 2 sequences remaining: chr1 and chr3
         assert_eq!(store.list_sequences().len(), 2);
@@ -5303,15 +5745,15 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n");
 
         // Add a collection alias
-        store.aliases.add_collection("ucsc", "hg38", &digest);
+        store.add_collection_alias("ucsc", "hg38", &digest).unwrap();
 
         // Verify alias exists
-        assert!(store.aliases.resolve_collection("ucsc", "hg38").is_some());
+        assert!(store.get_collection_metadata_by_alias("ucsc", "hg38").is_some());
 
         store.remove_collection(&digest, false).unwrap();
 
         // Alias should be gone
-        assert!(store.aliases.resolve_collection("ucsc", "hg38").is_none());
+        assert!(store.get_collection_metadata_by_alias("ucsc", "hg38").is_none());
     }
 
     #[test]
