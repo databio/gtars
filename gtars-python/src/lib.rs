@@ -5,41 +5,62 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+#[cfg(feature = "genomic_distributions")]
 mod genomic_distributions;
+#[cfg(feature = "models")]
 mod models;
+#[cfg(feature = "refget")]
 mod refget;
+#[cfg(feature = "tokenizers")]
 mod tokenizers;
+#[cfg(any(feature = "utils", feature = "tokenizers"))]
 mod utils;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[pymodule]
 fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
-    let refget_module = pyo3::wrap_pymodule!(refget::refget);
-    let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
-    let models_module = pyo3::wrap_pymodule!(models::models);
-    let utils_module = pyo3::wrap_pymodule!(utils::utils);
-    let gd_module = pyo3::wrap_pymodule!(genomic_distributions::genomic_distributions);
-
-    m.add_wrapped(refget_module)?;
-    m.add_wrapped(tokenize_module)?;
-    m.add_wrapped(models_module)?;
-    m.add_wrapped(utils_module)?;
-    m.add_wrapped(gd_module)?;
-
     let sys = PyModule::import(py, "sys")?;
     let binding = sys.getattr("modules")?;
     let sys_modules: &Bound<'_, PyDict> = binding.cast()?;
 
-    // set names of submodules
-    sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
-    sys_modules.set_item("gtars.tokenizers", m.getattr("tokenizers")?)?;
-    sys_modules.set_item("gtars.models", m.getattr("models")?)?;
-    sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
-    sys_modules.set_item(
-        "gtars.genomic_distributions",
-        m.getattr("genomic_distributions")?,
-    )?;
+    #[cfg(feature = "refget")]
+    {
+        let refget_module = pyo3::wrap_pymodule!(refget::refget);
+        m.add_wrapped(refget_module)?;
+        sys_modules.set_item("gtars.refget", m.getattr("refget")?)?;
+    }
+
+    #[cfg(feature = "tokenizers")]
+    {
+        let tokenize_module = pyo3::wrap_pymodule!(tokenizers::tokenizers);
+        m.add_wrapped(tokenize_module)?;
+        sys_modules.set_item("gtars.tokenizers", m.getattr("tokenizers")?)?;
+    }
+
+    #[cfg(feature = "models")]
+    {
+        let models_module = pyo3::wrap_pymodule!(models::models);
+        m.add_wrapped(models_module)?;
+        sys_modules.set_item("gtars.models", m.getattr("models")?)?;
+    }
+
+    #[cfg(feature = "utils")]
+    {
+        let utils_module = pyo3::wrap_pymodule!(utils::utils);
+        m.add_wrapped(utils_module)?;
+        sys_modules.set_item("gtars.utils", m.getattr("utils")?)?;
+    }
+
+    #[cfg(feature = "genomic_distributions")]
+    {
+        let gd_module = pyo3::wrap_pymodule!(genomic_distributions::genomic_distributions);
+        m.add_wrapped(gd_module)?;
+        sys_modules.set_item(
+            "gtars.genomic_distributions",
+            m.getattr("genomic_distributions")?,
+        )?;
+    }
 
     // add constants
     m.add("__version__", VERSION)?;
