@@ -7,12 +7,12 @@
 calcWidth(query)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 }
 \value{
 Numeric vector of widths
 }
 \description{
-Calculates the width (end - start) of each region.
-Port of GenomicDistributions::calcWidth.
+Drop-in replacement for GenomicDistributions::calcWidth.
+Delegates to \code{\link{widths}}.
 }

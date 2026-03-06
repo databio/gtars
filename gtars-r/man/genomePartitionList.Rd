@@ -15,23 +15,22 @@ genomePartitionList(
 )
 }
 \arguments{
-\item{genesGR}{GRanges, file path, or RegionSet pointer for gene boundaries}
+\item{genesGR}{GRanges, file path, data.frame, or RegionSet for gene boundaries}
 
-\item{exonsGR}{GRanges, file path, or RegionSet pointer for exon boundaries}
+\item{exonsGR}{GRanges, file path, data.frame, or RegionSet for exon boundaries}
 
-\item{threeUTRGR}{GRanges, file path, or RegionSet pointer for 3'UTR regions
+\item{threeUTRGR}{GRanges, file path, data.frame, or RegionSet for 3'UTR regions
 (NULL to omit)}
 
-\item{fiveUTRGR}{GRanges, file path, or RegionSet pointer for 5'UTR regions
+\item{fiveUTRGR}{GRanges, file path, data.frame, or RegionSet for 5'UTR regions
 (NULL to omit)}
 
 \item{corePromSize}{Core promoter size in bp (default 100)}
 
 \item{proxPromSize}{Proximal promoter size in bp (default 2000)}
 
-\item{chromSizes}{Optional named numeric vector of chromosome sizes
-(e.g., from GenomeInfoDb::seqlengths). When provided, promoter regions
-are trimmed at chromosome boundaries before merging.}
+\item{chromSizes}{Optional named numeric vector of chromosome sizes.
+When provided, promoter regions are trimmed at chromosome boundaries.}
 }
 \value{
 An external pointer to a PartitionList
@@ -39,5 +38,5 @@ An external pointer to a PartitionList
 \description{
 Builds genomic partitions (promoter core, promoter proximal,
 3'UTR, 5'UTR, exon, intron) from gene model components.
-Port of GenomicDistributions::genomePartitionList.
+Drop-in replacement for GenomicDistributions::genomePartitionList.
 }

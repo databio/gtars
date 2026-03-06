@@ -7,7 +7,7 @@
 calcGCContent(query, ref, ignoreUnkChroms = FALSE)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{ref}{A GenomeAssembly pointer (from loadGenomeAssembly)}
 
@@ -19,10 +19,5 @@ Numeric vector of GC content values (0 to 1)
 }
 \description{
 Calculates GC content (proportion of G and C bases) for each
-region. Port of GenomicDistributions::calcGCContent.
-}
-\details{
-Unlike the original GenomicDistributions which accepts a BSgenome
-object, this function requires a GenomeAssembly loaded from a FASTA file
-via \code{\link{loadGenomeAssembly}}.
+region. Drop-in replacement for GenomicDistributions::calcGCContent.
 }

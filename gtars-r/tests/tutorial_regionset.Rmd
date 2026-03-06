@@ -1,0 +1,276 @@
+---
+title: "RegionSet S4 Class"
+subtitle: "gtars genomic interval analysis with Rust-backed S4 objects"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment = "#>")
+```
+
+# Overview
+
+gtars provides a `RegionSet` S4 class that wraps Rust-backed genomic interval
+data. It supports:
+
+- Construction from BED files, GRanges, or data.frames
+- Strand support: preserved from GRanges and data.frames, round-trips correctly
+- Statistics: `widths()`, `neighborDistances()`, `nearestNeighbors()`
+- Interval operations: `reduce()`, `union()`, `setdiff()`, `trim()`, etc.
+- Drop-in compatibility with GenomicDistributions plotting functions
+
+```{r load}
+library(gtars)
+```
+
+# Creating a RegionSet
+
+## From a BED file
+
+```{r from-file}
+data_dir <- normalizePath(file.path("..", "..", "tests", "data", "regionset"))
+rs <- RegionSet(file.path(data_dir, "dummy.bed"))
+rs
+```
+
+## From a data.frame
+
+Data.frames use 0-based half-open (BED) coordinates.
+
+```{r from-df}
+df <- data.frame(
+  chr   = c("chr1", "chr1", "chr2"),
+  start = c(100L, 500L, 0L),
+  end   = c(200L, 600L, 300L)
+)
+rs_df <- RegionSet(df)
+rs_df
+```
+
+## From GRanges
+
+GRanges coordinates (1-based closed) are automatically converted.
+
+```{r from-granges, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
+library(GenomicRanges)
+gr <- GRanges(
+  seqnames = c("chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(101, 501, 1), end = c(200, 600, 300))
+)
+rs_gr <- RegionSet(gr)
+rs_gr
+
+# Round-trip back to GRanges
+as_granges(rs_gr)
+```
+
+# Strand support
+
+RegionSet carries strand information as `"+"`, `"-"`, or `"*"` (unstranded).
+
+## From a stranded data.frame
+
+```{r strand-df}
+df_stranded <- data.frame(
+  chr    = c("chr1", "chr1", "chr2"),
+  start  = c(100L, 500L, 0L),
+  end    = c(200L, 600L, 300L),
+  strand = c("+", "-", "+")
+)
+rs_stranded <- RegionSet(df_stranded)
+rs_stranded
+```
+
+## From stranded GRanges
+
+Strand is automatically extracted from GRanges objects.
+
+```{r strand-granges, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
+gr_stranded <- GRanges(
+  seqnames = c("chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(101, 501, 1), end = c(200, 600, 300)),
+  strand = c("+", "-", "+")
+)
+rs_from_gr <- RegionSet(gr_stranded)
+rs_from_gr
+
+# Round-trip preserves strand
+as_granges(rs_from_gr)
+```
+
+## Strand in as.data.frame
+
+The strand column is always included in the data.frame output.
+
+```{r strand-as-df}
+as.data.frame(rs_stranded)
+```
+
+## Strand through operations
+
+Positional operations (`promoters`, `concat`, `pintersect`) preserve strand.
+Merge operations (`reduce`, `union`, `setdiff`, `trim`) reset strand to `"*"`
+because they create new regions.
+
+```{r strand-ops}
+# promoters preserves strand
+as.data.frame(promoters(rs_stranded, upstream = 50L, downstream = 10L))
+
+# concat preserves strand from both inputs
+rs_plus <- RegionSet(data.frame(
+  chr = "chr3", start = 0L, end = 50L, strand = "+"
+))
+as.data.frame(concat(rs_stranded, rs_plus))
+
+# reduce loses strand (regions are merged)
+as.data.frame(reduce(rs_stranded))
+```
+
+## BED files
+
+BED files loaded via file path default to `"*"` (unstranded). Strand is shown
+in the display only when at least one region has `"+"` or `"-"`.
+
+```{r strand-file}
+rs_file <- RegionSet(file.path(data_dir, "dummy.bed"))
+rs_file
+```
+
+# Basic methods
+
+```{r basic}
+length(rs_df)
+as.data.frame(rs_df)
+```
+
+# Statistics
+
+## Region widths
+
+```{r widths}
+widths(rs)
+
+# GenomicDistributions drop-in:
+calcWidth(rs)
+```
+
+## Neighbor distances
+
+```{r neighbors}
+neighborDistances(rs)
+nearestNeighbors(rs)
+```
+
+## Chromosome statistics
+
+```{r chrom-stats}
+chromosomeStatistics(rs_df)
+```
+
+# Interval operations
+
+## reduce — merge overlapping regions
+
+```{r reduce}
+rs
+reduce(rs)
+as.data.frame(reduce(rs))
+```
+
+## union, setdiff
+
+```{r set-ops}
+a <- RegionSet(data.frame(
+  chr = "chr1", start = c(0L, 20L), end = c(10L, 30L)
+))
+b <- RegionSet(data.frame(
+  chr = "chr1", start = 5L, end = 25L
+))
+
+as.data.frame(union(a, b))
+as.data.frame(setdiff(a, b))
+```
+
+## concat — combine without merging
+
+```{r concat}
+ab <- concat(a, b)
+length(ab)
+as.data.frame(ab)
+```
+
+## trim — clip to chromosome boundaries
+
+```{r trim}
+chrom_sizes <- c(chr1 = 8L)
+as.data.frame(rs)
+as.data.frame(trim(rs, chromSizes = chrom_sizes))
+```
+
+## promoters
+
+```{r promoters}
+as.data.frame(promoters(a, upstream = 50L, downstream = 10L))
+```
+
+# Jaccard similarity
+
+```{r jaccard}
+jaccard(a, b)
+jaccard(a, a)  # self-similarity
+
+# Disjoint sets
+c <- RegionSet(data.frame(chr = "chr2", start = 100L, end = 200L))
+jaccard(a, c)
+```
+
+# Consensus regions
+
+Find regions present in k-of-n input sets.
+
+```{r consensus}
+consensus(list(a, b))
+consensus(list(a, b, c))
+```
+
+# Mixed input types
+
+All methods accept GRanges, file paths, data.frames, or RegionSet objects.
+At least one argument must be a RegionSet for binary BiocGenerics methods
+(`union`, `setdiff`).
+
+```{r mixed}
+# widths on a data.frame directly
+widths(data.frame(chr = "chr1", start = c(0L, 100L), end = c(50L, 200L)))
+
+# jaccard with mixed types
+jaccard(
+  data.frame(chr = "chr1", start = 0L, end = 100L),
+  data.frame(chr = "chr1", start = 50L, end = 150L)
+)
+
+# concat file path + data.frame
+rs_file <- RegionSet(file.path(data_dir, "dummy.bed"))
+rs_mixed <- concat(rs_file, data.frame(chr = "chr2", start = 0L, end = 100L))
+as.data.frame(rs_mixed)
+```
+
+# Drop-in for GenomicDistributions
+
+The `calc*` functions accept GRanges directly, so existing GenomicDistributions
+scripts work by swapping `library(GenomicDistributions)` for `library(gtars)`.
+
+```{r drop-in, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
+# Existing workflow — unchanged:
+calcWidth(gr)
+calcNeighborDist(gr)
+calcNearestNeighbors(gr)
+```
+
+Multi-object functions like `calcPartitions`, `calcGCContent`, etc. also
+accept both GRanges and RegionSet.

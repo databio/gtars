@@ -7,12 +7,12 @@
 calcNearestNeighbors(query)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 }
 \value{
 Numeric vector of nearest neighbor distances
 }
 \description{
-Computes the distance from each region to its nearest neighbor.
-Port of GenomicDistributions::calcNearestNeighbors.
+Drop-in replacement for GenomicDistributions::calcNearestNeighbors.
+Delegates to \code{\link{nearestNeighbors}}.
 }

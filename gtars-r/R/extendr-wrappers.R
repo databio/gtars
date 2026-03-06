@@ -219,6 +219,49 @@ r_calc_tss_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_tss
 #' @param features_ptr External pointer to features RegionSet
 r_calc_feature_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_feature_distances, query_ptr, features_ptr)
 
+#' Load a GDA binary file and return a GenomicDistAnnotation pointer.
+#'
+#' The returned pointer gives access to the gene model, partition list,
+#' and TSS index contained in the pre-compiled binary.
+#' @export
+#' @param path Path to a .bin GDA file (produced by `gtars prep`)
+load_gda_bin <- function(path) .Call(wrap__r_load_gda_bin, path)
+
+#' Extract the gene model from a GDA annotation pointer.
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+gda_gene_model <- function(gda_ptr) .Call(wrap__r_gda_gene_model, gda_ptr)
+
+#' Build a PartitionList from a GDA annotation pointer.
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+gda_partition_list <- function(gda_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_gda_partition_list, gda_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Derive a TssIndex from a GDA annotation (using strand-aware TSS positions).
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+gda_tss_index <- function(gda_ptr) .Call(wrap__r_gda_tss_index, gda_ptr)
+
+#' Load a SignalMatrix from a packed binary file.
+#' @export
+#' @param path Path to a .bin signal matrix file (produced by `gtars prep`)
+load_signal_matrix_bin <- function(path) .Call(wrap__r_load_signal_matrix_bin, path)
+
+#' Load a SignalMatrix from a TSV file.
+#' @export
+#' @param path Path to a TSV signal matrix file
+load_signal_matrix_tsv <- function(path) .Call(wrap__r_load_signal_matrix_tsv, path)
+
+#' Calculate summary signal from a SignalMatrix pointer.
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param sm_ptr External pointer to a SignalMatrix
+r_calc_summary_signal_from_matrix <- function(rs_ptr, sm_ptr) .Call(wrap__r_calc_summary_signal_from_matrix, rs_ptr, sm_ptr)
+
 #' Write tokens to a gtok file
 #' @export
 #' @param filename A string representing the path to the gtok file.

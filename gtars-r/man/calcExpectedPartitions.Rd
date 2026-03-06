@@ -7,12 +7,11 @@
 calcExpectedPartitions(query, partitionList, genomeSize, bpProportion = FALSE)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{partitionList}{A PartitionList pointer}
 
-\item{genomeSize}{A named numeric vector of chromosome sizes
-(e.g., from GenomeInfoDb::seqlengths). Required.}
+\item{genomeSize}{A named numeric vector of chromosome sizes}
 
 \item{bpProportion}{If TRUE, count base pairs; if FALSE, count regions
 (default FALSE)}
@@ -22,5 +21,6 @@ A data.frame with partition, observed, expected, log10OE, pvalue columns
 }
 \description{
 Computes observed vs expected partition overlaps with
-chi-square p-values. Port of GenomicDistributions::calcExpectedPartitions.
+chi-square p-values. Drop-in replacement for
+GenomicDistributions::calcExpectedPartitions.
 }

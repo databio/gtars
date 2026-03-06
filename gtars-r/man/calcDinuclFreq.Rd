@@ -7,16 +7,16 @@
 calcDinuclFreq(query, ref)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{ref}{A GenomeAssembly pointer (from loadGenomeAssembly)}
 }
 \value{
 A data.frame with a \code{region} column and 16 dinucleotide
-columns (AA, AC, ..., TT) containing frequency percentages.
-Compatible with \code{GenomicDistributions::plotDinuclFreq}.
+columns containing frequency percentages.
 }
 \description{
 Calculates the frequency of all 16 dinucleotides for each
-region as percentages. Port of GenomicDistributions::calcDinuclFreq.
+region as percentages. Drop-in replacement for
+GenomicDistributions::calcDinuclFreq.
 }

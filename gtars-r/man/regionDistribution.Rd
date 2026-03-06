@@ -7,16 +7,14 @@
 regionDistribution(query, nBins = 250L)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{nBins}{Number of bins (default 250)}
 }
 \value{
-A data.table with chr (factor, karyotype-ordered), start, end,
-N, regionID, and withinGroupID columns — compatible with plotChromBins.
+A data.table compatible with plotChromBins
 }
 \description{
-Partitions the genome into fixed-size windows and counts
-region overlaps per bin. Output is compatible with
-GenomicDistributions::plotChromBins.
+Drop-in replacement for GenomicDistributions::calcChromBins.
+Delegates to \code{\link{distribution}}.
 }

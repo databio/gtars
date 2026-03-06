@@ -24,9 +24,7 @@ partitionListFromGTF(
 
 \item{proxPromSize}{Proximal promoter size in bp (default 2000)}
 
-\item{chromSizes}{Optional named numeric vector of chromosome sizes
-(e.g., from GenomeInfoDb::seqlengths). When provided, promoter regions
-are trimmed at chromosome boundaries before merging.}
+\item{chromSizes}{Optional named numeric vector of chromosome sizes.}
 }
 \value{
 An external pointer to a PartitionList

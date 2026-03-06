@@ -7,12 +7,12 @@
 calcNeighborDist(query)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 }
 \value{
 Numeric vector of distances
 }
 \description{
-Computes distances between consecutive regions on each chromosome.
-Port of GenomicDistributions::calcNeighborDist.
+Drop-in replacement for GenomicDistributions::calcNeighborDist.
+Delegates to \code{\link{neighborDistances}}.
 }

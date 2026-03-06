@@ -7,7 +7,7 @@
 calcPartitions(query, partitionList, bpProportion = FALSE)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{partitionList}{A PartitionList pointer (from genomePartitionList or
 partitionListFromGTF)}
@@ -20,5 +20,5 @@ A data.frame with partition and Freq columns, plus a total attribute
 }
 \description{
 Classifies query regions into genomic partitions.
-Port of GenomicDistributions::calcPartitions.
+Drop-in replacement for GenomicDistributions::calcPartitions.
 }

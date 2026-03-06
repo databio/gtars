@@ -7,16 +7,15 @@
 calcFeatureDist(query, features)
 }
 \arguments{
-\item{query}{A GRanges object, file path, or RegionSet pointer}
+\item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
-\item{features}{A GRanges object, file path, or RegionSet pointer of
-feature locations (e.g., TSS sites)}
+\item{features}{A GRanges object, file path, data.frame, or RegionSet}
 }
 \value{
 Numeric vector of signed distances
 }
 \description{
 Calculates the signed distance from each query region to its
-nearest feature. Positive = feature is downstream, negative = upstream.
-Port of GenomicDistributions::calcFeatureDist.
+nearest feature. Drop-in replacement for
+GenomicDistributions::calcFeatureDist.
 }
