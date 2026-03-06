@@ -197,6 +197,22 @@ where
     pub fn get_chr_overlapper(&self, chr: &str) -> Option<&dyn Overlapper<I, T>> {
         self.index_maps.get(chr).map(|b| b.as_ref())
     }
+
+    /// Query a single chromosome + coordinate range for overlapping intervals.
+    ///
+    /// Returns an iterator over all intervals that overlap with `[start, end)` on the
+    /// given chromosome. Returns an empty iterator if the chromosome is not in the index.
+    pub fn find_overlaps_for_region<'a>(
+        &'a self,
+        chr: &str,
+        start: I,
+        end: I,
+    ) -> Box<dyn Iterator<Item = &'a Interval<I, T>> + 'a> {
+        match self.index_maps.get(chr) {
+            Some(lapper) => lapper.find_iter(start, end),
+            None => Box::new(std::iter::empty()),
+        }
+    }
 }
 
 /// A trait for converting region-based data into a [`MultiChromOverlapper`].

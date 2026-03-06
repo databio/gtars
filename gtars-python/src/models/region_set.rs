@@ -448,6 +448,27 @@ impl PyRegionSet {
         self.regionset.find_overlaps(&other.regionset)
     }
 
+    fn intersect(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.intersect(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn subtract(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.subtract(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn closest(&self, other: &PyRegionSet) -> PyResult<Vec<(usize, usize, i64)>> {
+        let result = self.regionset.closest(&other.regionset);
+        Ok(result)
+    }
+
+    #[pyo3(signature = (max_gap = 0))]
+    fn cluster(&self, max_gap: u32) -> PyResult<Vec<u32>> {
+        let assignments = self.regionset.cluster(max_gap);
+        Ok(assignments)
+    }
+
     fn chromosome_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
         let mut result: HashMap<String, PyChromosomeStatistics> = HashMap::new();
         let stats: HashMap<String, ChromosomeStatistics> = self.regionset.chromosome_statistics();

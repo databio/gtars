@@ -7,6 +7,8 @@
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
+use gtars_overlaprs::OverlapperType;
+use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
 
 use crate::models::{SortedRegionSet, Strand, StrandedRegionSet};
 
@@ -87,6 +89,36 @@ pub trait IntervalRanges {
     /// Computes `|intersection| / |union|` in base pairs, where both sets are
     /// reduced first. Returns 0.0 if the union has zero base pairs.
     fn jaccard(&self, other: &RegionSet) -> f64;
+
+    /// All-vs-all genomic intersection.
+    ///
+    /// For each pair of overlapping regions between `self` and `other`,
+    /// compute intersection coordinates `[max(a.start, b.start), min(a.end, b.end))`.
+    /// Returns a `RegionSet` of all intersection fragments.
+    ///
+    /// Unlike `pintersect` (which pairs by index position), this finds ALL
+    /// overlapping pairs across the two sets using an AIList index.
+    fn intersect(&self, other: &RegionSet) -> RegionSet;
+
+    /// Genomic subtraction (alias for `setdiff`).
+    ///
+    /// Remove portions of `self` that overlap with `other`.
+    /// Both inputs are reduced before subtraction.
+    fn subtract(&self, other: &RegionSet) -> RegionSet;
+
+    /// Find the nearest region in `other` for each region in `self`.
+    ///
+    /// Returns a list of `(self_index, other_index, distance)` tuples.
+    /// Distance is 0 for overlapping regions. Regions on chromosomes
+    /// absent in `other` are omitted from results.
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)>;
+
+    /// Cluster nearby regions.
+    ///
+    /// Assign a cluster ID to each region. Regions within `max_gap`
+    /// distance on the same chromosome are assigned the same cluster.
+    /// Returns cluster IDs in original region order.
+    fn cluster(&self, max_gap: u32) -> Vec<u32>;
 }
 
 impl IntervalRanges for RegionSet {
@@ -273,6 +305,138 @@ impl IntervalRanges for RegionSet {
         }
         let intersection_bp = a_bp + b_bp - union_bp;
         intersection_bp as f64 / union_bp as f64
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        if self.regions.is_empty() || other.regions.is_empty() {
+            return RegionSet::from(Vec::<Region>::new());
+        }
+
+        let index = other.clone().into_multi_chrom_overlapper(OverlapperType::AIList);
+        let mut result: Vec<Region> = Vec::new();
+
+        for a in &self.regions {
+            for hit in index.find_overlaps_for_region(&a.chr, a.start, a.end) {
+                let start = a.start.max(hit.start);
+                let end = a.end.min(hit.end);
+                if start < end {
+                    result.push(Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    });
+                }
+            }
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn subtract(&self, other: &RegionSet) -> RegionSet {
+        self.setdiff(other)
+    }
+
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+        if other.regions.is_empty() {
+            return Vec::new();
+        }
+
+        // Group other by chromosome, keeping original indices, sorted by start
+        let mut other_by_chr: HashMap<String, Vec<(usize, &Region)>> = HashMap::new();
+        for (idx, r) in other.regions.iter().enumerate() {
+            other_by_chr
+                .entry(r.chr.clone())
+                .or_default()
+                .push((idx, r));
+        }
+        for v in other_by_chr.values_mut() {
+            v.sort_by_key(|(_, r)| r.start);
+        }
+
+        let mut result: Vec<(usize, usize, i64)> = Vec::new();
+
+        for (self_idx, a) in self.regions.iter().enumerate() {
+            let Some(candidates) = other_by_chr.get(&a.chr) else {
+                continue; // skip regions on chromosomes absent in other
+            };
+
+            // Binary search for insertion point based on a.start
+            let ins = candidates
+                .binary_search_by_key(&a.start, |(_, r)| r.start)
+                .unwrap_or_else(|x| x);
+
+            let mut best_other_idx = 0usize;
+            let mut best_dist = i64::MAX;
+
+            // Check candidates around the insertion point
+            let check_range_start = if ins >= 2 { ins - 2 } else { 0 };
+            let check_range_end = (ins + 2).min(candidates.len());
+
+            for &(other_idx, b) in &candidates[check_range_start..check_range_end] {
+                let dist = if a.start < b.end && b.start < a.end {
+                    // Overlapping
+                    0i64
+                } else if b.end <= a.start {
+                    // b is upstream
+                    (a.start as i64) - (b.end as i64)
+                } else {
+                    // b is downstream
+                    (b.start as i64) - (a.end as i64)
+                };
+
+                if dist.abs() < best_dist.abs() {
+                    best_dist = dist;
+                    best_other_idx = other_idx;
+                }
+            }
+
+            result.push((self_idx, best_other_idx, best_dist));
+        }
+
+        result
+    }
+
+    fn cluster(&self, max_gap: u32) -> Vec<u32> {
+        if self.regions.is_empty() {
+            return Vec::new();
+        }
+
+        let n = self.regions.len();
+        let mut result = vec![0u32; n];
+
+        // Create sorted indices
+        let mut sorted_indices: Vec<usize> = (0..n).collect();
+        sorted_indices.sort_by(|&i, &j| {
+            self.regions[i]
+                .chr
+                .cmp(&self.regions[j].chr)
+                .then(self.regions[i].start.cmp(&self.regions[j].start))
+                .then(self.regions[i].end.cmp(&self.regions[j].end))
+        });
+
+        let mut cluster_id: u32 = 0;
+        let mut cluster_end = self.regions[sorted_indices[0]].end;
+        let mut current_chr = &self.regions[sorted_indices[0]].chr;
+        result[sorted_indices[0]] = cluster_id;
+
+        for &idx in &sorted_indices[1..] {
+            let r = &self.regions[idx];
+            if r.chr != *current_chr
+                || r.start > cluster_end.saturating_add(max_gap)
+            {
+                // New cluster
+                cluster_id += 1;
+                cluster_end = r.end;
+                current_chr = &r.chr;
+            } else {
+                // Same cluster - extend end
+                cluster_end = cluster_end.max(r.end);
+            }
+            result[idx] = cluster_id;
+        }
+
+        result
     }
 }
 
@@ -1177,5 +1341,208 @@ mod tests {
         let a = make_regionset(vec![("chr1", 0, 10)]);
         let b = make_regionset(vec![("chr1", 10, 20)]);
         assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    // ── intersect tests ────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_intersect_overlapping() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 150, 250)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 150, 200));
+    }
+
+    #[rstest]
+    fn test_intersect_no_overlap() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 300, 400)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_intersect_one_vs_multiple() {
+        // One region in self overlaps multiple in other
+        let a = make_regionset(vec![("chr1", 100, 300)]);
+        let b = make_regionset(vec![
+            ("chr1", 120, 150),
+            ("chr1", 200, 250),
+            ("chr1", 400, 500),
+        ]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 2);
+        let mut sorted: Vec<_> = result.regions.clone();
+        sorted.sort_by_key(|r| (r.start, r.end));
+        assert_eq!(sorted[0], make_region("chr1", 120, 150));
+        assert_eq!(sorted[1], make_region("chr1", 200, 250));
+    }
+
+    #[rstest]
+    fn test_intersect_multi_chrom() {
+        let a = make_regionset(vec![("chr1", 100, 200), ("chr2", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 150, 250), ("chr2", 150, 250)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 150, 200));
+        assert_eq!(result.regions[1], make_region("chr2", 150, 200));
+    }
+
+    #[rstest]
+    fn test_intersect_empty_inputs() {
+        let empty = RegionSet::from(Vec::<Region>::new());
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        assert_eq!(a.intersect(&empty).regions.len(), 0);
+        assert_eq!(empty.intersect(&a).regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_intersect_contained() {
+        // b fully inside a
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 30, 70)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 30, 70));
+    }
+
+    // ── subtract tests (alias) ─────────────────────────────────────────
+
+    #[rstest]
+    fn test_subtract_same_as_setdiff() {
+        let a = make_regionset(vec![("chr1", 0, 20)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let setdiff_result = a.setdiff(&b);
+        let subtract_result = a.subtract(&b);
+        assert_eq!(setdiff_result.regions, subtract_result.regions);
+    }
+
+    // ── closest tests ──────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_closest_overlapping() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 150, 250)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 0));
+    }
+
+    #[rstest]
+    fn test_closest_upstream() {
+        let a = make_regionset(vec![("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 100, 150)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 50)); // distance = 200 - 150 = 50
+    }
+
+    #[rstest]
+    fn test_closest_downstream() {
+        let a = make_regionset(vec![("chr1", 100, 150)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 50)); // distance = 200 - 150 = 50
+    }
+
+    #[rstest]
+    fn test_closest_choose_nearer() {
+        let a = make_regionset(vec![("chr1", 100, 110)]);
+        let b = make_regionset(vec![("chr1", 50, 60), ("chr1", 115, 120)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        // distance to (50,60) = 100-60 = 40, distance to (115,120) = 115-110 = 5
+        assert_eq!(result[0].1, 1); // closer is index 1
+        assert_eq!(result[0].2, 5);
+    }
+
+    #[rstest]
+    fn test_closest_multi_chrom_no_cross() {
+        let a = make_regionset(vec![("chr1", 100, 200), ("chr2", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 300, 400)]);
+        let result = a.closest(&b);
+        // chr2 region has no candidates in b, should be omitted
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].0, 0); // only the chr1 region
+    }
+
+    #[rstest]
+    fn test_closest_absent_chrom_omitted() {
+        let a = make_regionset(vec![("chr2", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 0);
+    }
+
+    // ── cluster tests ──────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_cluster_non_overlapping_separate() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30), ("chr1", 40, 50)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids.len(), 3);
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+    }
+
+    #[rstest]
+    fn test_cluster_overlapping_same() {
+        let a = make_regionset(vec![("chr1", 0, 15), ("chr1", 10, 25)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids[0], ids[1]);
+    }
+
+    #[rstest]
+    fn test_cluster_adjacent_same() {
+        // end == start of next => gap is 0 => same cluster with max_gap=0
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 10, 20)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids[0], ids[1]);
+    }
+
+    #[rstest]
+    fn test_cluster_within_max_gap() {
+        // gap of 5bp, with max_gap=5 they should cluster
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 15, 25)]);
+        let ids = a.cluster(5);
+        assert_eq!(ids[0], ids[1]);
+    }
+
+    #[rstest]
+    fn test_cluster_multi_chrom() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr2", 0, 10)]);
+        let ids = a.cluster(0);
+        assert_ne!(ids[0], ids[1]);
+    }
+
+    #[rstest]
+    fn test_cluster_single_region() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids, vec![0]);
+    }
+
+    #[rstest]
+    fn test_cluster_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let ids = a.cluster(0);
+        assert!(ids.is_empty());
+    }
+
+    #[rstest]
+    fn test_cluster_original_order() {
+        // Regions given out of sorted order; cluster IDs should map back to original indices
+        let a = make_regionset(vec![
+            ("chr1", 100, 110), // idx 0 -> after sort: second
+            ("chr1", 0, 10),    // idx 1 -> after sort: first
+        ]);
+        let ids = a.cluster(0);
+        assert_eq!(ids.len(), 2);
+        // They're on separate clusters. idx 1 (chr1:0-10) should get cluster 0,
+        // idx 0 (chr1:100-110) should get cluster 1
+        assert_eq!(ids[0], 1); // original idx 0 maps to cluster 1
+        assert_eq!(ids[1], 0); // original idx 1 maps to cluster 0
     }
 }

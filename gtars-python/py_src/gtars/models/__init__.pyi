@@ -249,6 +249,48 @@ class RegionSet:
         """
         ...
 
+    def intersect(self, other: "RegionSet") -> "RegionSet":
+        """
+        All-vs-all genomic intersection.
+
+        For each pair of overlapping regions between self and other,
+        compute intersection coordinates [max(a.start, b.start), min(a.end, b.end)].
+        Returns a RegionSet of all intersection fragments.
+
+        Unlike pintersect (which pairs by index position), this finds ALL
+        overlapping pairs across the two sets.
+        """
+        ...
+
+    def subtract(self, other: "RegionSet") -> "RegionSet":
+        """
+        Genomic subtraction (alias for setdiff).
+
+        Remove portions of self that overlap with other.
+        Both inputs are reduced before subtraction.
+        """
+        ...
+
+    def closest(self, other: "RegionSet") -> List[tuple]:
+        """
+        Find nearest region in other for each region in self.
+
+        Returns list of (self_index, other_index, distance) tuples.
+        Distance is 0 for overlapping regions.
+        Regions on chromosomes absent in other are omitted.
+        """
+        ...
+
+    def cluster(self, max_gap: int = 0) -> List[int]:
+        """
+        Cluster nearby regions.
+
+        Assign a cluster ID to each region. Regions within max_gap
+        distance on the same chromosome are assigned the same cluster.
+        Returns cluster IDs in original region order.
+        """
+        ...
+
     def chromosome_statistics(self) -> Dict[str, ChromosomeStatistics]:
         """
         Get a dictionary of ChromosomeStatistics for each chromosome in the RegionSet
