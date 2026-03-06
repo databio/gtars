@@ -126,7 +126,7 @@ pub use fhr_metadata::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVital
 #[cfg(feature = "filesystem")]
 pub use seqcol::SeqColService;
 #[cfg(feature = "filesystem")]
-pub use store::{PagedResult, Pagination};
+pub use store::{AvailableAliases, PagedResult, Pagination, PullResult, SyncStrategy};
 
 // ============================================================================
 // Tests

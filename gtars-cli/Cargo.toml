@@ -1,6 +1,6 @@
 [package]
 name = "gtars-cli"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 description = "Performance critical tools for genomic interval analysis. This is the CLI"
 homepage = "https://github.com/databio/gtars"
@@ -22,10 +22,10 @@ anyhow = { workspace = true }
 gtars-scoring = { path = "../gtars-scoring", optional=true, version="0.5.1" }
 gtars-fragsplit = { path = "../gtars-fragsplit", optional=true, version="0.5.0" }
 gtars-igd = { path = "../gtars-igd", optional=true, version="0.5.1" }
-gtars-uniwig = { path = "../gtars-uniwig", optional=true, version="0.7.0" }
+gtars-uniwig = { path = "../gtars-uniwig", optional=true, version="0.8.0" }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true, version="0.5.1" }
 gtars-bbcache = { path = "../gtars-bbcache", optional=true, version="0.5.3" }
-gtars-genomicdist = { path = "../gtars-genomicdist", optional=true, version="0.5.3" }
+gtars-genomicdist = { path = "../gtars-genomicdist", optional=true, version="0.6.0" }
 gtars-core = { path = "../gtars-core", version="0.5.5", features=["bigbed", "http"] }
 
 # serialization

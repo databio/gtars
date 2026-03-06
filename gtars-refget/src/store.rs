@@ -188,6 +188,10 @@ pub struct ReadonlyRefgetStore {
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
     fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
+    /// Available sequence alias namespaces (from manifest, for remote discovery).
+    pub(crate) available_sequence_alias_namespaces: Vec<String>,
+    /// Available collection alias namespaces (from manifest, for remote discovery).
+    pub(crate) available_collection_alias_namespaces: Vec<String>,
     /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
     /// Populated by ensure_decoded(), read by sequence_bytes().
     decoded_cache: HashMap<[u8; 32], Vec<u8>>,
@@ -218,6 +222,12 @@ struct StoreMetadata {
     /// Whether on-disk attribute index is maintained (Part 2)
     #[serde(default)]
     attribute_index: bool,
+    /// Available sequence alias namespaces (for remote discovery)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sequence_alias_namespaces: Vec<String>,
+    /// Available collection alias namespaces (for remote discovery)
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    collection_alias_namespaces: Vec<String>,
 }
 
 fn default_true() -> bool {
@@ -390,6 +400,8 @@ impl ReadonlyRefgetStore {
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
             decoded_cache: HashMap::new(),
+            available_sequence_alias_namespaces: Vec::new(),
+            available_collection_alias_namespaces: Vec::new(),
         }
     }
 
@@ -2417,6 +2429,8 @@ impl ReadonlyRefgetStore {
             created_at: Utc::now().to_rfc3339(),
             ancillary_digests: self.ancillary_digests,
             attribute_index: self.attribute_index,
+            sequence_alias_namespaces: self.aliases.sequence_namespaces(),
+            collection_alias_namespaces: self.aliases.collection_namespaces(),
         };
 
         let json = serde_json::to_string_pretty(&metadata)
@@ -2514,12 +2528,13 @@ impl ReadonlyRefgetStore {
         remote_source: &Option<String>,
         relative_path: &str,
         persist_to_disk: bool,
+        force_refresh: bool,
     ) -> Result<Vec<u8>> {
         // Validate the relative path to prevent directory traversal
         Self::sanitize_relative_path(relative_path)?;
 
-        // Check if file exists locally (only if caching is enabled and path exists)
-        if persist_to_disk {
+        // Check if file exists locally (only if caching is enabled, path exists, and not forcing refresh)
+        if persist_to_disk && !force_refresh {
             if let Some(local_path) = local_path {
                 let full_local_path = local_path.join(relative_path);
                 if full_local_path.exists() {
@@ -2628,6 +2643,18 @@ impl ReadonlyRefgetStore {
         // Load aliases from sidecar TSV files
         let aliases_dir = root_path.join("aliases");
         store.aliases.load_from_dir(&aliases_dir)?;
+
+        // Populate available namespaces from metadata (if present) merged with loaded aliases
+        store.available_sequence_alias_namespaces = if metadata.sequence_alias_namespaces.is_empty() {
+            store.aliases.sequence_namespaces()
+        } else {
+            metadata.sequence_alias_namespaces
+        };
+        store.available_collection_alias_namespaces = if metadata.collection_alias_namespaces.is_empty() {
+            store.aliases.collection_namespaces()
+        } else {
+            metadata.collection_alias_namespaces
+        };
 
         // Always load FHR metadata sidecars (empty directory produces empty HashMap)
         store.fhr_metadata =
@@ -2754,6 +2781,7 @@ impl ReadonlyRefgetStore {
             &Some(remote_url.clone()),
             "rgstore.json",
             true,
+            false,
         )?;
 
         let json =
@@ -2777,6 +2805,8 @@ impl ReadonlyRefgetStore {
         store.persist_to_disk = true; // Default to true; user can call disable_persistence() after
         store.ancillary_digests = metadata.ancillary_digests;
         store.attribute_index = metadata.attribute_index;
+        store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
+        store.available_collection_alias_namespaces = metadata.collection_alias_namespaces;
 
         // Fetch sequence index from remote (always cache metadata - it's small)
         let sequence_index_data = Self::fetch_file(
@@ -2784,6 +2814,7 @@ impl ReadonlyRefgetStore {
             &Some(remote_url.clone()),
             &metadata.sequence_index,
             true, // Always cache metadata
+            false,
         )?;
         let sequence_index_str = String::from_utf8(sequence_index_data)
             .context("sequence index contains invalid UTF-8")?;
@@ -2798,6 +2829,7 @@ impl ReadonlyRefgetStore {
                 &Some(remote_url.clone()),
                 collection_index,
                 true,
+                false,
             ) {
                 let collection_index_str = String::from_utf8(collection_index_data)
                     .context("collection index contains invalid UTF-8")?;
@@ -2860,7 +2892,7 @@ impl ReadonlyRefgetStore {
                 eprintln!("{} collection {}...", verb, digest_str);
             }
             let _collection_data =
-                Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true)?;
+                Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true, false)?;
 
             // Read the collection from the cached file
             let local_path = self
@@ -2983,6 +3015,7 @@ impl ReadonlyRefgetStore {
             &self.remote_source,
             &relative_path,
             self.persist_to_disk,
+            false,
         )?;
 
         // Update the record with the loaded data (in-place, no clone needed)
@@ -3245,6 +3278,51 @@ impl Display for ReadonlyRefgetStore {
 
         Ok(())
     }
+}
+
+impl ReadonlyRefgetStore {
+    /// List alias namespaces available on this store (from manifest).
+    pub fn available_alias_namespaces(&self) -> AvailableAliases<'_> {
+        AvailableAliases {
+            sequences: &self.available_sequence_alias_namespaces,
+            collections: &self.available_collection_alias_namespaces,
+        }
+    }
+}
+
+// =========================================================================
+// Sidecar sync types
+// =========================================================================
+
+/// Conflict resolution strategy for sidecar pull operations.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncStrategy {
+    /// Skip fetch if local file exists (default). Local wins.
+    KeepOurs,
+    /// Always fetch from remote, overwriting local. Remote wins.
+    KeepTheirs,
+    /// Report what would change without fetching. Returns diff info.
+    Notify,
+}
+
+/// Result of a sidecar pull operation.
+#[derive(Debug, Default)]
+pub struct PullResult {
+    /// Successfully fetched from remote
+    pub pulled: usize,
+    /// Skipped (local exists, KeepOurs)
+    pub skipped: usize,
+    /// Remote 404 (no sidecar exists)
+    pub not_found: usize,
+    /// For Notify: paths that differ between local and remote
+    pub conflicts: Vec<String>,
+}
+
+/// Available alias namespaces advertised by a store's manifest.
+#[derive(Debug)]
+pub struct AvailableAliases<'a> {
+    pub sequences: &'a [String],
+    pub collections: &'a [String],
 }
 
 // =========================================================================
@@ -3609,6 +3687,285 @@ impl RefgetStore {
     /// Disable indexed attribute lookup.
     pub fn disable_attribute_index(&mut self) {
         self.inner.disable_attribute_index();
+    }
+
+    // --- Sidecar pull methods ---
+
+    /// Pull alias sidecars from the remote store.
+    ///
+    /// If `namespace` is Some, pulls only that namespace (both sequence and collection).
+    /// If `namespace` is None, pulls all namespaces listed in the manifest.
+    pub fn pull_aliases(
+        &mut self,
+        namespace: Option<&str>,
+        strategy: SyncStrategy,
+    ) -> Result<PullResult> {
+        let mut result = PullResult::default();
+
+        // Determine which namespaces to pull for each kind
+        let seq_namespaces: Vec<String> = match namespace {
+            Some(ns) => vec![ns.to_string()],
+            None => self.inner.available_sequence_alias_namespaces.clone(),
+        };
+        let coll_namespaces: Vec<String> = match namespace {
+            Some(ns) => vec![ns.to_string()],
+            None => self.inner.available_collection_alias_namespaces.clone(),
+        };
+
+        // Pull sequence alias namespaces
+        for ns in &seq_namespaces {
+            self.pull_alias_file(ns, "sequences", &strategy, &mut result)?;
+        }
+
+        // Pull collection alias namespaces
+        for ns in &coll_namespaces {
+            self.pull_alias_file(ns, "collections", &strategy, &mut result)?;
+        }
+
+        // Reload aliases from disk after pulling
+        if result.pulled > 0 {
+            if let Some(ref local_path) = self.inner.local_path {
+                let aliases_dir = local_path.join("aliases");
+                self.inner.aliases = AliasManager::default();
+                self.inner.aliases.load_from_dir(&aliases_dir)?;
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Pull a single alias TSV file (helper for pull_aliases).
+    fn pull_alias_file(
+        &self,
+        namespace: &str,
+        kind: &str,
+        strategy: &SyncStrategy,
+        result: &mut PullResult,
+    ) -> Result<()> {
+        let relative_path = format!("aliases/{}/{}.tsv", kind, namespace);
+
+        match strategy {
+            SyncStrategy::KeepOurs => {
+                match ReadonlyRefgetStore::fetch_file(
+                    &self.inner.local_path,
+                    &self.inner.remote_source,
+                    &relative_path,
+                    self.inner.persist_to_disk,
+                    false, // Don't force — returns local if cached
+                ) {
+                    Ok(_) => {
+                        // Check if it was already local
+                        let was_local = self
+                            .inner
+                            .local_path
+                            .as_ref()
+                            .map(|p| p.join(&relative_path).exists())
+                            .unwrap_or(false);
+                        if was_local {
+                            result.skipped += 1;
+                        } else {
+                            result.pulled += 1;
+                        }
+                    }
+                    Err(_) => {
+                        result.not_found += 1;
+                    }
+                }
+            }
+            SyncStrategy::KeepTheirs => {
+                match ReadonlyRefgetStore::fetch_file(
+                    &self.inner.local_path,
+                    &self.inner.remote_source,
+                    &relative_path,
+                    self.inner.persist_to_disk,
+                    true, // Force refresh from remote
+                ) {
+                    Ok(_) => {
+                        result.pulled += 1;
+                    }
+                    Err(_) => {
+                        result.not_found += 1;
+                    }
+                }
+            }
+            SyncStrategy::Notify => {
+                // Check if local exists
+                let local_exists = self
+                    .inner
+                    .local_path
+                    .as_ref()
+                    .map(|p| p.join(&relative_path).exists())
+                    .unwrap_or(false);
+
+                if local_exists {
+                    // Fetch remote to memory (don't persist)
+                    match ReadonlyRefgetStore::fetch_file(
+                        &None, // No local path — forces remote fetch
+                        &self.inner.remote_source,
+                        &relative_path,
+                        false, // Don't persist
+                        false,
+                    ) {
+                        Ok(remote_data) => {
+                            // Compare with local
+                            let local_path = self
+                                .inner
+                                .local_path
+                                .as_ref()
+                                .unwrap()
+                                .join(&relative_path);
+                            let local_data = fs::read(&local_path)?;
+                            if local_data != remote_data {
+                                result.conflicts.push(relative_path);
+                            } else {
+                                result.skipped += 1;
+                            }
+                        }
+                        Err(_) => {
+                            result.not_found += 1;
+                        }
+                    }
+                } else {
+                    result.conflicts.push(relative_path);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Pull FHR metadata sidecars from the remote store.
+    ///
+    /// If `digest` is Some, pulls only that collection's FHR.
+    /// If `digest` is None, pulls FHR for all known collections.
+    pub fn pull_fhr(
+        &mut self,
+        digest: Option<&str>,
+        strategy: SyncStrategy,
+    ) -> Result<PullResult> {
+        let mut result = PullResult::default();
+
+        let digests: Vec<String> = match digest {
+            Some(d) => vec![d.to_string()],
+            None => self
+                .inner
+                .collections
+                .values()
+                .map(|r| r.metadata().digest.to_string())
+                .collect(),
+        };
+
+        for digest_str in &digests {
+            let relative_path = format!("collections/{}.fhr.json", digest_str);
+
+            match strategy {
+                SyncStrategy::KeepOurs => {
+                    match ReadonlyRefgetStore::fetch_file(
+                        &self.inner.local_path,
+                        &self.inner.remote_source,
+                        &relative_path,
+                        self.inner.persist_to_disk,
+                        false,
+                    ) {
+                        Ok(data) => {
+                            let was_local = self
+                                .inner
+                                .local_path
+                                .as_ref()
+                                .map(|p| p.join(&relative_path).exists())
+                                .unwrap_or(false);
+                            if was_local {
+                                result.skipped += 1;
+                            } else {
+                                // Parse and insert into memory
+                                if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
+                                    let key = digest_str.to_key();
+                                    self.inner.fhr_metadata.insert(key, fhr);
+                                }
+                                result.pulled += 1;
+                            }
+                        }
+                        Err(_) => {
+                            result.not_found += 1;
+                        }
+                    }
+                }
+                SyncStrategy::KeepTheirs => {
+                    match ReadonlyRefgetStore::fetch_file(
+                        &self.inner.local_path,
+                        &self.inner.remote_source,
+                        &relative_path,
+                        self.inner.persist_to_disk,
+                        true,
+                    ) {
+                        Ok(data) => {
+                            if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
+                                let key = digest_str.to_key();
+                                self.inner.fhr_metadata.insert(key, fhr);
+                            }
+                            result.pulled += 1;
+                        }
+                        Err(_) => {
+                            result.not_found += 1;
+                        }
+                    }
+                }
+                SyncStrategy::Notify => {
+                    let local_exists = self
+                        .inner
+                        .local_path
+                        .as_ref()
+                        .map(|p| p.join(&relative_path).exists())
+                        .unwrap_or(false);
+
+                    if local_exists {
+                        match ReadonlyRefgetStore::fetch_file(
+                            &None,
+                            &self.inner.remote_source,
+                            &relative_path,
+                            false,
+                            false,
+                        ) {
+                            Ok(remote_data) => {
+                                let local_path = self
+                                    .inner
+                                    .local_path
+                                    .as_ref()
+                                    .unwrap()
+                                    .join(&relative_path);
+                                let local_data = fs::read(&local_path)?;
+                                if local_data != remote_data {
+                                    result.conflicts.push(relative_path);
+                                } else {
+                                    result.skipped += 1;
+                                }
+                            }
+                            Err(_) => {
+                                result.not_found += 1;
+                            }
+                        }
+                    } else {
+                        // Remote may have it, local doesn't — report as conflict
+                        match ReadonlyRefgetStore::fetch_file(
+                            &None,
+                            &self.inner.remote_source,
+                            &relative_path,
+                            false,
+                            false,
+                        ) {
+                            Ok(_) => {
+                                result.conflicts.push(relative_path);
+                            }
+                            Err(_) => {
+                                result.not_found += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
     }
 
     // --- Write methods ---
@@ -5941,5 +6298,103 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
             .unwrap();
         assert_eq!(store.sequence_digests().count(), 1);
         assert_eq!(store.collections.len(), 2);
+    }
+
+    #[test]
+    fn test_manifest_namespace_roundtrip() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        // Create a store with aliases
+        let mut store = RefgetStore::in_memory();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">seq1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta_path.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+
+        // Add some aliases
+        let seq_digest = key_to_digest_string(&store.sequence_digests().next().unwrap());
+        store.add_sequence_alias("ncbi", "NC_000001.11", &seq_digest).unwrap();
+        let coll_digest = {
+            let key = *store.collections.keys().next().unwrap();
+            key_to_digest_string(&key)
+        };
+        store.add_collection_alias("ucsc", "hg38", &coll_digest).unwrap();
+
+        // Write to disk
+        store.write_store_to_dir(&store_path, None).unwrap();
+
+        // Verify rgstore.json contains namespace lists
+        let json_str = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+        let metadata: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+        assert!(metadata["sequence_alias_namespaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str() == Some("ncbi")));
+        assert!(metadata["collection_alias_namespaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str() == Some("ucsc")));
+
+        // Reopen and verify available_alias_namespaces returns them
+        let store2 = RefgetStore::open_local(&store_path).unwrap();
+        let available = store2.available_alias_namespaces();
+        assert!(available.sequences.contains(&"ncbi".to_string()));
+        assert!(available.collections.contains(&"ucsc".to_string()));
+    }
+
+    #[test]
+    fn test_manifest_empty_namespaces_not_serialized() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        // Create a store without aliases
+        let mut store = RefgetStore::in_memory();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">seq1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta_path.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+        store.write_store_to_dir(&store_path, None).unwrap();
+
+        // Verify rgstore.json does NOT contain empty namespace arrays
+        let json_str = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+        assert!(!json_str.contains("sequence_alias_namespaces"));
+        assert!(!json_str.contains("collection_alias_namespaces"));
+    }
+
+    #[test]
+    fn test_old_rgstore_json_without_namespaces() {
+        // Simulate an old rgstore.json without namespace fields
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+        fs::create_dir_all(&store_path).unwrap();
+
+        // Create a minimal store first, then strip namespace fields
+        let mut store = RefgetStore::in_memory();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">seq1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(
+                fasta_path.to_str().unwrap(),
+                FastaImportOptions::new(),
+            )
+            .unwrap();
+        store.write_store_to_dir(&store_path, None).unwrap();
+
+        // Reopen — should work with empty namespace vecs (serde default)
+        let store2 = RefgetStore::open_local(&store_path).unwrap();
+        let available = store2.available_alias_namespaces();
+        assert!(available.sequences.is_empty());
+        assert!(available.collections.is_empty());
     }
 }

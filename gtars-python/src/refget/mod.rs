@@ -14,7 +14,7 @@ use gtars_refget::collection::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode};
+use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -2491,6 +2491,58 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
     }
 
+    /// Return available alias namespaces from the store manifest.
+    ///
+    /// Returns:
+    ///     dict: {'sequences': [...], 'collections': [...]}
+    fn available_alias_namespaces(&self) -> PyResult<PyObject> {
+        let aliases = self.inner.available_alias_namespaces();
+        Python::with_gil(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            let seq_list: Vec<&str> = aliases.sequences.iter().map(|s| s.as_str()).collect();
+            let coll_list: Vec<&str> = aliases.collections.iter().map(|s| s.as_str()).collect();
+            dict.set_item("sequences", seq_list)?;
+            dict.set_item("collections", coll_list)?;
+            Ok(dict.into())
+        })
+    }
+
+    /// Pull alias sidecars from the remote store.
+    ///
+    /// Args:
+    ///     namespace: Optional namespace to pull. If None, pulls all advertised namespaces.
+    ///     strategy: 'keep-ours' (default), 'keep-theirs', or 'notify'.
+    ///
+    /// Returns:
+    ///     dict: {pulled, skipped, not_found, conflicts}
+    #[pyo3(signature = (namespace=None, strategy="keep-ours"))]
+    fn pull_aliases(&mut self, namespace: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+        let sync_strategy = parse_sync_strategy(strategy)?;
+        let result = self
+            .inner
+            .pull_aliases(namespace, sync_strategy)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        pull_result_to_pyobject(result)
+    }
+
+    /// Pull FHR metadata sidecars from the remote store.
+    ///
+    /// Args:
+    ///     digest: Optional collection digest. If None, pulls FHR for all known collections.
+    ///     strategy: 'keep-ours' (default), 'keep-theirs', or 'notify'.
+    ///
+    /// Returns:
+    ///     dict: {pulled, skipped, not_found, conflicts}
+    #[pyo3(signature = (digest=None, strategy="keep-ours"))]
+    fn pull_fhr(&mut self, digest: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+        let sync_strategy = parse_sync_strategy(strategy)?;
+        let result = self
+            .inner
+            .pull_fhr(digest, sync_strategy)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        pull_result_to_pyobject(result)
+    }
+
     /// Convert to a ReadonlyRefgetStore for concurrent read access.
     ///
     /// After calling this, the original store is replaced with an empty in-memory
@@ -3000,6 +3052,31 @@ impl PyReadonlyRefgetStore {
     fn __len__(&self) -> usize {
         self.store.sequence_digests().count()
     }
+}
+
+/// Parse a strategy string into a SyncStrategy enum.
+fn parse_sync_strategy(strategy: &str) -> PyResult<SyncStrategy> {
+    match strategy {
+        "keep-ours" => Ok(SyncStrategy::KeepOurs),
+        "keep-theirs" => Ok(SyncStrategy::KeepTheirs),
+        "notify" => Ok(SyncStrategy::Notify),
+        other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Unknown sync strategy '{}'. Use 'keep-ours', 'keep-theirs', or 'notify'.",
+            other
+        ))),
+    }
+}
+
+/// Convert a PullResult into a Python dict.
+fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<PyObject> {
+    Python::with_gil(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("pulled", result.pulled)?;
+        dict.set_item("skipped", result.skipped)?;
+        dict.set_item("not_found", result.not_found)?;
+        dict.set_item("conflicts", result.conflicts)?;
+        Ok(dict.into())
+    })
 }
 
 // This represents the Python module to be created
