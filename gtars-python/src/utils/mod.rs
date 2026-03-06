@@ -57,18 +57,21 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
     Ok(RegionSet::from(regions))
 }
 
+#[cfg(feature = "utils")]
 #[pyfunction]
 pub fn write_tokens_to_gtok(filename: &str, tokens: Vec<u32>) -> PyResult<()> {
     gtars_io::write_tokens_to_gtok(filename, &tokens)?;
     Ok(())
 }
 
+#[cfg(feature = "utils")]
 #[pyfunction]
 pub fn read_tokens_from_gtok(filename: &str) -> PyResult<Vec<u32>> {
     let tokens = gtars_io::read_tokens_from_gtok(filename)?;
     Ok(tokens)
 }
 
+#[cfg(feature = "utils")]
 #[pyfunction]
 pub fn read_tokens_from_gtok_as_strings(filename: &str) -> PyResult<Vec<String>> {
     let tokens = gtars_io::read_tokens_from_gtok(filename)?;
@@ -76,6 +79,7 @@ pub fn read_tokens_from_gtok_as_strings(filename: &str) -> PyResult<Vec<String>>
     Ok(tokens)
 }
 
+#[cfg(feature = "utils")]
 #[pymodule]
 pub fn utils(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_wrapped(wrap_pyfunction!(write_tokens_to_gtok))?;

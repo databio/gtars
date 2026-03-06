@@ -8,15 +8,24 @@ edition = "2024"
 name = "gtars"
 crate-type = ["cdylib"]
 
+[features]
+default = ["refget", "tokenizers", "genomic_distributions", "models", "utils"]
+refget = ["dep:gtars-refget"]
+tokenizers = ["dep:gtars-tokenizers", "dep:gtars-core"]
+genomic_distributions = ["dep:gtars-genomicdist"]
+models = ["dep:gtars-core", "dep:gtars-genomicdist"]
+utils = ["dep:gtars-core", "dep:gtars-io"]
+
 [dependencies]
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 pyo3 = { version = "0.27.1", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
+tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }
 
-# our code
-gtars-core = { path = "../gtars-core", features=["bigbed", "http"] }
-gtars-genomicdist = {path = "../gtars-genomicdist" }
-gtars-refget = { path = "../gtars-refget" }
-gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"] }
-gtars-io = { path = "../gtars-io" }
+# our code (optional, behind feature flags)
+gtars-core = { path = "../gtars-core", features=["bigbed", "http"], optional = true }
+gtars-genomicdist = { path = "../gtars-genomicdist", optional = true }
+gtars-refget = { path = "../gtars-refget", optional = true }
+gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true }
+gtars-io = { path = "../gtars-io", optional = true }

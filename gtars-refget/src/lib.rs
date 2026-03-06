@@ -123,6 +123,10 @@ pub use collection::{
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 #[cfg(feature = "filesystem")]
 pub use fhr_metadata::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
+#[cfg(feature = "filesystem")]
+pub use seqcol::SeqColService;
+#[cfg(feature = "filesystem")]
+pub use store::{PagedResult, Pagination};
 
 // ============================================================================
 // Tests
@@ -133,7 +137,7 @@ mod tests {
     use super::*;
 
     use std::time::Instant;
-    use store::RefgetStore;
+    use store::{FastaImportOptions, RefgetStore};
     use tempfile::tempdir;
 
     #[test]
@@ -149,7 +153,7 @@ mod tests {
         let start = Instant::now();
         let mut store = RefgetStore::in_memory();
         store
-            .add_sequence_collection_from_fasta(&fasta_path)
+            .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
             .unwrap();
         let duration = start.elapsed();
         println!("Time taken to load: {:.2?}", duration);
@@ -157,7 +161,7 @@ mod tests {
         let mut store2 = RefgetStore::in_memory();
         store2.disable_encoding(); // Switch to Raw mode
         store2
-            .add_sequence_collection_from_fasta(&fasta_path)
+            .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
             .unwrap();
 
         // Get list of sequences
@@ -209,7 +213,7 @@ mod tests {
 
         // Add sequences to the store
         store
-            .add_sequence_collection_from_fasta(temp_fasta)
+            .add_sequence_collection_from_fasta(temp_fasta, FastaImportOptions::new())
             .unwrap();
         println!("Listing sequences in the store...");
         let digest = "iYtREV555dUFKg2_agSJW6suquUyPpMw"; // from base.fa.gz

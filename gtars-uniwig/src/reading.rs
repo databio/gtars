@@ -1,5 +1,5 @@
 use crate::utils::Chromosome;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use gtars_core::utils::get_file_info;
 use noodles::bam;
 use std::error::Error;
@@ -25,7 +25,7 @@ pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> 
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
+        true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
     };
 
@@ -114,7 +114,7 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
+        true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
     };
 
