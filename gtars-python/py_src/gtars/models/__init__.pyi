@@ -196,6 +196,20 @@ class RegionSet:
         """
         ...
 
+    def coverage(self, other: "RegionSet") -> float:
+        """
+        Fraction of self's base pairs covered by other (after merging overlaps).
+        Returns a value in [0.0, 1.0].
+        """
+        ...
+
+    def overlap_coefficient(self, other: "RegionSet") -> float:
+        """
+        Overlap coefficient: |intersection_bp| / min(|self_bp|, |other_bp|).
+        Returns a value in [0.0, 1.0].
+        """
+        ...
+
     def mean_region_width(self) -> int:
         """
         Mean width of the regions
@@ -211,6 +225,83 @@ class RegionSet:
     def get_nucleotide_length(self) -> int:
         """
         Get total number of nucleotides in RegionSet
+        """
+        ...
+
+    def subset_by_overlaps(self, other: "RegionSet") -> "RegionSet":
+        """
+        Return a new RegionSet containing only regions from self that
+        overlap at least one region in other.
+
+        Builds an AIList index from other and queries each region in self.
+        """
+        ...
+
+    def count_overlaps(self, other: "RegionSet") -> List[int]:
+        """
+        Count how many regions in other overlap each region in self.
+
+        Returns a list of integers with one entry per region.
+        """
+        ...
+
+    def any_overlaps(self, other: "RegionSet") -> List[bool]:
+        """
+        Check whether each region in self overlaps any region in other.
+
+        Returns a list of booleans with one entry per region.
+        """
+        ...
+
+    def find_overlaps(self, other: "RegionSet") -> List[List[int]]:
+        """
+        Find indices into other that overlap each region in self.
+
+        Returns a list of lists, where each inner list contains the
+        0-based indices of regions in other that overlap the
+        corresponding region in self.
+        """
+        ...
+
+    def intersect(self, other: "RegionSet") -> "RegionSet":
+        """
+        All-vs-all genomic intersection.
+
+        For each pair of overlapping regions between self and other,
+        compute intersection coordinates [max(a.start, b.start), min(a.end, b.end)].
+        Returns a RegionSet of all intersection fragments.
+
+        Unlike pintersect (which pairs by index position), this finds ALL
+        overlapping pairs across the two sets.
+        """
+        ...
+
+    def subtract(self, other: "RegionSet") -> "RegionSet":
+        """
+        Genomic subtraction (alias for setdiff).
+
+        Remove portions of self that overlap with other.
+        Both inputs are reduced before subtraction.
+        """
+        ...
+
+    def closest(self, other: "RegionSet") -> List[tuple]:
+        """
+        Find nearest region in other for each region in self.
+
+        Returns list of (self_index, other_index, distance) tuples.
+        Distance is 0 for overlapping regions.
+        Regions on chromosomes absent in other are omitted.
+        """
+        ...
+
+    def cluster(self, max_gap: int = 0) -> List[int]:
+        """
+        Cluster nearby regions.
+
+        Assign a cluster ID to each region. Regions within max_gap
+        distance on the same chromosome are assigned the same cluster.
+        Returns cluster IDs in original region order.
         """
         ...
 

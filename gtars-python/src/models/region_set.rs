@@ -8,6 +8,7 @@ use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::IntervalRanges;
+use gtars_overlaprs::RegionSetOverlaps;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -411,6 +412,14 @@ impl PyRegionSet {
         self.regionset.jaccard(&other.regionset)
     }
 
+    fn coverage(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.coverage(&other.regionset)
+    }
+
+    fn overlap_coefficient(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.overlap_coefficient(&other.regionset)
+    }
+
     fn mean_region_width(&self) -> f64 {
         self.regionset.mean_region_width()
     }
@@ -421,6 +430,51 @@ impl PyRegionSet {
 
     fn get_nucleotide_length(&self) -> u32 {
         self.regionset.nucleotides_length()
+    }
+
+    /// Return a new RegionSet containing only regions that overlap at least
+    /// one region in other.
+    fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.subset_by_overlaps(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    /// Return a list of overlap counts, one per region in self.
+    fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
+        self.regionset.count_overlaps(&other.regionset)
+    }
+
+    /// Return a list of booleans indicating whether each region overlaps
+    /// any region in other.
+    fn any_overlaps(&self, other: &PyRegionSet) -> Vec<bool> {
+        self.regionset.any_overlaps(&other.regionset)
+    }
+
+    /// Return a list of lists of indices into other that overlap each
+    /// region in self.
+    fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
+        self.regionset.find_overlaps(&other.regionset)
+    }
+
+    fn intersect(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.intersect(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn subtract(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.subtract(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn closest(&self, other: &PyRegionSet) -> PyResult<Vec<(usize, usize, i64)>> {
+        let result = self.regionset.closest(&other.regionset);
+        Ok(result)
+    }
+
+    #[pyo3(signature = (max_gap = 0))]
+    fn cluster(&self, max_gap: u32) -> PyResult<Vec<u32>> {
+        let assignments = self.regionset.cluster(max_gap);
+        Ok(assignments)
     }
 
     fn chromosome_statistics(&self) -> HashMap<String, PyChromosomeStatistics> {
