@@ -1,11 +1,13 @@
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+use gtars_genomicdist::IntervalRanges;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -207,6 +209,133 @@ impl PyRegionSet {
 
     fn region_widths(&self) -> Vec<u32> {
         self.regionset.region_widths()
+    }
+
+    fn widths(&self) -> Vec<u32> {
+        self.regionset.calc_widths()
+    }
+
+    fn neighbor_distances(&self) -> PyResult<Vec<Option<f64>>> {
+        let dists = self
+            .regionset
+            .calc_neighbor_distances()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(dists
+            .into_iter()
+            .map(|d| {
+                if d == i64::MAX {
+                    None
+                } else {
+                    Some(d as f64)
+                }
+            })
+            .collect())
+    }
+
+    fn nearest_neighbors(&self) -> PyResult<Vec<Option<f64>>> {
+        let dists = self
+            .regionset
+            .calc_nearest_neighbors()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(dists
+            .into_iter()
+            .map(|d| {
+                if d == u32::MAX {
+                    None
+                } else {
+                    Some(d as f64)
+                }
+            })
+            .collect())
+    }
+
+    #[pyo3(signature = (n_bins = 250))]
+    fn distribution<'py>(&self, py: Python<'py>, n_bins: u32) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let bins = self.regionset.region_distribution_with_bins(n_bins);
+        let mut sorted_bins: Vec<_> = bins.into_values().collect();
+        sorted_bins.sort_by(|a, b| {
+            a.chr
+                .cmp(&b.chr)
+                .then(a.start.cmp(&b.start))
+        });
+        let mut result = Vec::with_capacity(sorted_bins.len());
+        for bin in sorted_bins {
+            let dict = PyDict::new(py);
+            dict.set_item("chr", &bin.chr)?;
+            dict.set_item("start", bin.start)?;
+            dict.set_item("end", bin.end)?;
+            dict.set_item("n", bin.n)?;
+            dict.set_item("rid", bin.rid)?;
+            result.push(dict);
+        }
+        Ok(result)
+    }
+
+    fn trim(&self, chrom_sizes: HashMap<String, u32>) -> PyResult<Self> {
+        let rs = self.regionset.trim(&chrom_sizes);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn promoters(&self, upstream: u32, downstream: u32) -> PyResult<Self> {
+        let rs = self.regionset.promoters(upstream, downstream);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn reduce(&self) -> PyResult<Self> {
+        let rs = self.regionset.reduce();
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn setdiff(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.setdiff(&other.regionset);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn pintersect(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.pintersect(&other.regionset);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn concat(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.concat(&other.regionset);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn union(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.union(&other.regionset);
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+        })
+    }
+
+    fn jaccard(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.jaccard(&other.regionset)
     }
 
     fn mean_region_width(&self) -> f64 {
