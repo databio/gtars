@@ -197,13 +197,7 @@ fn run_uniwig_streaming(matches: &ArgMatches) {
         };
 
         let mut output: Box<dyn Write> = if use_stdout {
-            if count_types_to_run.len() > 1 {
-                // Write a separator comment when outputting multiple types to stdout
-                let stdout = io::stdout();
-                let mut handle = stdout.lock();
-                writeln!(handle, "# count_type={}", label).expect("Failed to write separator");
-            }
-            Box::new(io::stdout().lock())
+            Box::new(io::stdout())
         } else {
             let header = matches
                 .get_one::<String>("fileheader")
@@ -215,6 +209,11 @@ fn run_uniwig_streaming(matches: &ArgMatches) {
             let filename = format!("{}_{}.{}", header, label, extension);
             Box::new(File::create(&filename).expect("Cannot create output file"))
         };
+
+        if use_stdout && count_types_to_run.len() > 1 {
+            // Write a separator comment when outputting multiple types to stdout
+            writeln!(output, "# count_type={}", label).expect("Failed to write separator");
+        }
 
         uniwig_streaming(
             input,
