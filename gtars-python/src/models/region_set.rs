@@ -28,6 +28,20 @@ pub struct PyRegionSet {
     pub regionset: RegionSet,
     curr: usize,
     identifier: Option<String>,
+    pub strands: Vec<String>,
+}
+
+impl PyRegionSet {
+    /// Create a PyRegionSet from a RegionSet with default "*" strands
+    fn from_regionset(rs: RegionSet) -> Self {
+        let n = rs.regions.len();
+        Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+            strands: vec!["*".to_string(); n],
+        }
+    }
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
@@ -41,10 +55,12 @@ impl From<Vec<PyRegion>> for PyRegionSet {
                 rest: region.rest,
             })
         }
+        let n = rust_regions.len();
         PyRegionSet {
             regionset: RegionSet::from(rust_regions),
             curr: 0,
             identifier: None,
+            strands: vec!["*".to_string(); n],
         }
     }
 }
@@ -63,28 +79,91 @@ impl PyRegionSet {
         let path = path.to_string();
         let regionset =
             RegionSet::try_from(path).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Self {
-            regionset,
-            curr: 0,
-            identifier: None,
-        })
+        Ok(Self::from_regionset(regionset))
     }
 
     /// Alternate constructor from a list of PyRegion
+    ///
     /// Args:
     ///     regions: a list/vec of PyRegion objects
+    ///     strands: optional list of strand strings ("+", "-", "*")
     ///
     /// Returns:
     ///     RegionSet object
     #[staticmethod]
-    fn from_regions(regions: Vec<PyRegion>) -> PyResult<Self> {
+    #[pyo3(signature = (regions, strands = None))]
+    fn from_regions(regions: Vec<PyRegion>, strands: Option<Vec<String>>) -> PyResult<Self> {
+        let n = regions.len();
         let rust_regions: Vec<Region> = regions.into_iter().map(PyRegion::into_region).collect();
-
+        let strands = strands.unwrap_or_else(|| vec!["*".to_string(); n]);
+        if strands.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "strands length ({}) must match regions length ({})",
+                strands.len(),
+                n
+            )));
+        }
         Ok(Self {
             regionset: RegionSet::from(rust_regions),
             curr: 0,
             identifier: None,
+            strands,
         })
+    }
+
+    /// Create a RegionSet from parallel vectors
+    ///
+    /// Args:
+    ///     chrs: list of chromosome names
+    ///     starts: list of start positions (0-based)
+    ///     ends: list of end positions (half-open)
+    ///     strands: optional list of strand strings ("+", "-", "*")
+    ///
+    /// Returns:
+    ///     RegionSet object
+    #[staticmethod]
+    #[pyo3(signature = (chrs, starts, ends, strands = None))]
+    fn from_vectors(
+        chrs: Vec<String>,
+        starts: Vec<u32>,
+        ends: Vec<u32>,
+        strands: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        let n = chrs.len();
+        if starts.len() != n || ends.len() != n {
+            return Err(PyValueError::new_err(
+                "chrs, starts, and ends must have the same length",
+            ));
+        }
+        let regions: Vec<Region> = chrs
+            .into_iter()
+            .zip(starts.into_iter().zip(ends.into_iter()))
+            .map(|(chr, (start, end))| Region {
+                chr,
+                start,
+                end,
+                rest: None,
+            })
+            .collect();
+        let strands = strands.unwrap_or_else(|| vec!["*".to_string(); n]);
+        if strands.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "strands length ({}) must match regions length ({})",
+                strands.len(),
+                n
+            )));
+        }
+        Ok(Self {
+            regionset: RegionSet::from(regions),
+            curr: 0,
+            identifier: None,
+            strands,
+        })
+    }
+
+    #[getter]
+    fn get_strands(&self) -> Vec<String> {
+        self.strands.clone()
     }
 
     #[getter]
@@ -123,11 +202,11 @@ impl PyRegionSet {
     }
 
     fn __repr__(&self) -> String {
-        self.regionset.to_string()
+        format!("RegionSet with {} regions.", self.regionset.len())
     }
 
     fn __str__(&self) -> String {
-        self.regionset.to_string()
+        format!("RegionSet with {} regions.", self.regionset.len())
     }
 
     fn __len__(&self) -> usize {
@@ -273,65 +352,59 @@ impl PyRegionSet {
 
     fn trim(&self, chrom_sizes: HashMap<String, u32>) -> PyResult<Self> {
         let rs = self.regionset.trim(&chrom_sizes);
-        Ok(Self {
-            regionset: rs,
-            curr: 0,
-            identifier: None,
-        })
+        // Trim may drop/reorder regions — strand mapping lost
+        Ok(Self::from_regionset(rs))
     }
 
     fn promoters(&self, upstream: u32, downstream: u32) -> PyResult<Self> {
         let rs = self.regionset.promoters(upstream, downstream);
+        // Same regions, same order — preserve strand
         Ok(Self {
             regionset: rs,
             curr: 0,
             identifier: None,
+            strands: self.strands.clone(),
         })
     }
 
     fn reduce(&self) -> PyResult<Self> {
         let rs = self.regionset.reduce();
-        Ok(Self {
-            regionset: rs,
-            curr: 0,
-            identifier: None,
-        })
+        // Merge op — strand lost
+        Ok(Self::from_regionset(rs))
     }
 
     fn setdiff(&self, other: &PyRegionSet) -> PyResult<Self> {
         let rs = self.regionset.setdiff(&other.regionset);
-        Ok(Self {
-            regionset: rs,
-            curr: 0,
-            identifier: None,
-        })
+        Ok(Self::from_regionset(rs))
     }
 
     fn pintersect(&self, other: &PyRegionSet) -> PyResult<Self> {
         let rs = self.regionset.pintersect(&other.regionset);
+        // Positional — take strand from self
         Ok(Self {
             regionset: rs,
             curr: 0,
             identifier: None,
+            strands: self.strands.clone(),
         })
     }
 
     fn concat(&self, other: &PyRegionSet) -> PyResult<Self> {
         let rs = self.regionset.concat(&other.regionset);
+        // Concatenate strand vectors
+        let mut strands = self.strands.clone();
+        strands.extend(other.strands.iter().cloned());
         Ok(Self {
             regionset: rs,
             curr: 0,
             identifier: None,
+            strands,
         })
     }
 
     fn union(&self, other: &PyRegionSet) -> PyResult<Self> {
         let rs = self.regionset.union(&other.regionset);
-        Ok(Self {
-            regionset: rs,
-            curr: 0,
-            identifier: None,
-        })
+        Ok(Self::from_regionset(rs))
     }
 
     fn jaccard(&self, other: &PyRegionSet) -> f64 {
