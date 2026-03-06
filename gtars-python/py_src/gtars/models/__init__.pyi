@@ -214,6 +214,41 @@ class RegionSet:
         """
         ...
 
+    def subset_by_overlaps(self, other: "RegionSet") -> "RegionSet":
+        """
+        Return a new RegionSet containing only regions from self that
+        overlap at least one region in other.
+
+        Builds an AIList index from other and queries each region in self.
+        """
+        ...
+
+    def count_overlaps(self, other: "RegionSet") -> List[int]:
+        """
+        Count how many regions in other overlap each region in self.
+
+        Returns a list of integers with one entry per region.
+        """
+        ...
+
+    def any_overlaps(self, other: "RegionSet") -> List[bool]:
+        """
+        Check whether each region in self overlaps any region in other.
+
+        Returns a list of booleans with one entry per region.
+        """
+        ...
+
+    def find_overlaps(self, other: "RegionSet") -> List[List[int]]:
+        """
+        Find indices into other that overlap each region in self.
+
+        Returns a list of lists, where each inner list contains the
+        0-based indices of regions in other that overlap the
+        corresponding region in self.
+        """
+        ...
+
     def chromosome_statistics(self) -> Dict[str, ChromosomeStatistics]:
         """
         Get a dictionary of ChromosomeStatistics for each chromosome in the RegionSet

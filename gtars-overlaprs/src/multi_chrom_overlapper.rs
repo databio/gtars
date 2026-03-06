@@ -192,6 +192,11 @@ where
             .map(|(chr, interval)| (chr, interval.clone()))
             .collect()
     }
+
+    /// Get the overlapper for a specific chromosome, if it exists.
+    pub fn get_chr_overlapper(&self, chr: &str) -> Option<&dyn Overlapper<I, T>> {
+        self.index_maps.get(chr).map(|b| b.as_ref())
+    }
 }
 
 /// A trait for converting region-based data into a [`MultiChromOverlapper`].
@@ -276,6 +281,42 @@ impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
             index_maps: core,
             overlapper_type,
         }
+    }
+}
+
+/// Build a [`MultiChromOverlapper`] from a [`RegionSet`] where each interval's
+/// val is the original index (position) of that region in the RegionSet.
+///
+/// This is useful for overlap operations that need to track which regions in
+/// `other` were hit (e.g., `find_overlaps` returning indices).
+pub fn build_indexed_overlapper(
+    rs: &RegionSet,
+    overlapper_type: OverlapperType,
+) -> MultiChromOverlapper<u32, usize> {
+    let mut core: HashMap<String, Box<dyn Overlapper<u32, usize>>> = HashMap::default();
+    let mut intervals: HashMap<String, Vec<Interval<u32, usize>>> = HashMap::default();
+
+    for (idx, region) in rs.regions.iter().enumerate() {
+        let interval = Interval {
+            start: region.start,
+            end: region.end,
+            val: idx,
+        };
+        let chr_intervals = intervals.entry(region.chr.clone()).or_default();
+        chr_intervals.push(interval);
+    }
+
+    for (chr, chr_intervals) in intervals.into_iter() {
+        let lapper: Box<dyn Overlapper<u32, usize>> = match overlapper_type {
+            OverlapperType::Bits => Box::new(Bits::build(chr_intervals)),
+            OverlapperType::AIList => Box::new(AIList::build(chr_intervals)),
+        };
+        core.insert(chr, lapper);
+    }
+
+    MultiChromOverlapper {
+        index_maps: core,
+        overlapper_type,
     }
 }
 
