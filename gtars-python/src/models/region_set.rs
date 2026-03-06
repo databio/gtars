@@ -1,11 +1,13 @@
 use pyo3::exceptions::{PyIndexError, PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
+use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+use gtars_genomicdist::IntervalRanges;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -26,6 +28,20 @@ pub struct PyRegionSet {
     pub regionset: RegionSet,
     curr: usize,
     identifier: Option<String>,
+    pub strands: Vec<String>,
+}
+
+impl PyRegionSet {
+    /// Create a PyRegionSet from a RegionSet with default "*" strands
+    fn from_regionset(rs: RegionSet) -> Self {
+        let n = rs.regions.len();
+        Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+            strands: vec!["*".to_string(); n],
+        }
+    }
 }
 
 impl From<Vec<PyRegion>> for PyRegionSet {
@@ -39,10 +55,12 @@ impl From<Vec<PyRegion>> for PyRegionSet {
                 rest: region.rest,
             })
         }
+        let n = rust_regions.len();
         PyRegionSet {
             regionset: RegionSet::from(rust_regions),
             curr: 0,
             identifier: None,
+            strands: vec!["*".to_string(); n],
         }
     }
 }
@@ -61,28 +79,91 @@ impl PyRegionSet {
         let path = path.to_string();
         let regionset =
             RegionSet::try_from(path).map_err(|e| PyRuntimeError::new_err(e.to_string()))?;
-        Ok(Self {
-            regionset,
-            curr: 0,
-            identifier: None,
-        })
+        Ok(Self::from_regionset(regionset))
     }
 
     /// Alternate constructor from a list of PyRegion
+    ///
     /// Args:
     ///     regions: a list/vec of PyRegion objects
+    ///     strands: optional list of strand strings ("+", "-", "*")
     ///
     /// Returns:
     ///     RegionSet object
     #[staticmethod]
-    fn from_regions(regions: Vec<PyRegion>) -> PyResult<Self> {
+    #[pyo3(signature = (regions, strands = None))]
+    fn from_regions(regions: Vec<PyRegion>, strands: Option<Vec<String>>) -> PyResult<Self> {
+        let n = regions.len();
         let rust_regions: Vec<Region> = regions.into_iter().map(PyRegion::into_region).collect();
-
+        let strands = strands.unwrap_or_else(|| vec!["*".to_string(); n]);
+        if strands.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "strands length ({}) must match regions length ({})",
+                strands.len(),
+                n
+            )));
+        }
         Ok(Self {
             regionset: RegionSet::from(rust_regions),
             curr: 0,
             identifier: None,
+            strands,
         })
+    }
+
+    /// Create a RegionSet from parallel vectors
+    ///
+    /// Args:
+    ///     chrs: list of chromosome names
+    ///     starts: list of start positions (0-based)
+    ///     ends: list of end positions (half-open)
+    ///     strands: optional list of strand strings ("+", "-", "*")
+    ///
+    /// Returns:
+    ///     RegionSet object
+    #[staticmethod]
+    #[pyo3(signature = (chrs, starts, ends, strands = None))]
+    fn from_vectors(
+        chrs: Vec<String>,
+        starts: Vec<u32>,
+        ends: Vec<u32>,
+        strands: Option<Vec<String>>,
+    ) -> PyResult<Self> {
+        let n = chrs.len();
+        if starts.len() != n || ends.len() != n {
+            return Err(PyValueError::new_err(
+                "chrs, starts, and ends must have the same length",
+            ));
+        }
+        let regions: Vec<Region> = chrs
+            .into_iter()
+            .zip(starts.into_iter().zip(ends.into_iter()))
+            .map(|(chr, (start, end))| Region {
+                chr,
+                start,
+                end,
+                rest: None,
+            })
+            .collect();
+        let strands = strands.unwrap_or_else(|| vec!["*".to_string(); n]);
+        if strands.len() != n {
+            return Err(PyValueError::new_err(format!(
+                "strands length ({}) must match regions length ({})",
+                strands.len(),
+                n
+            )));
+        }
+        Ok(Self {
+            regionset: RegionSet::from(regions),
+            curr: 0,
+            identifier: None,
+            strands,
+        })
+    }
+
+    #[getter]
+    fn get_strands(&self) -> Vec<String> {
+        self.strands.clone()
     }
 
     #[getter]
@@ -121,11 +202,11 @@ impl PyRegionSet {
     }
 
     fn __repr__(&self) -> String {
-        self.regionset.to_string()
+        format!("RegionSet with {} regions.", self.regionset.len())
     }
 
     fn __str__(&self) -> String {
-        self.regionset.to_string()
+        format!("RegionSet with {} regions.", self.regionset.len())
     }
 
     fn __len__(&self) -> usize {
@@ -207,6 +288,127 @@ impl PyRegionSet {
 
     fn region_widths(&self) -> Vec<u32> {
         self.regionset.region_widths()
+    }
+
+    fn widths(&self) -> Vec<u32> {
+        self.regionset.calc_widths()
+    }
+
+    fn neighbor_distances(&self) -> PyResult<Vec<Option<f64>>> {
+        let dists = self
+            .regionset
+            .calc_neighbor_distances()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(dists
+            .into_iter()
+            .map(|d| {
+                if d == i64::MAX {
+                    None
+                } else {
+                    Some(d as f64)
+                }
+            })
+            .collect())
+    }
+
+    fn nearest_neighbors(&self) -> PyResult<Vec<Option<f64>>> {
+        let dists = self
+            .regionset
+            .calc_nearest_neighbors()
+            .map_err(|e| PyValueError::new_err(e.to_string()))?;
+        Ok(dists
+            .into_iter()
+            .map(|d| {
+                if d == u32::MAX {
+                    None
+                } else {
+                    Some(d as f64)
+                }
+            })
+            .collect())
+    }
+
+    #[pyo3(signature = (n_bins = 250))]
+    fn distribution<'py>(&self, py: Python<'py>, n_bins: u32) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let bins = self.regionset.region_distribution_with_bins(n_bins);
+        let mut sorted_bins: Vec<_> = bins.into_values().collect();
+        sorted_bins.sort_by(|a, b| {
+            a.chr
+                .cmp(&b.chr)
+                .then(a.start.cmp(&b.start))
+        });
+        let mut result = Vec::with_capacity(sorted_bins.len());
+        for bin in sorted_bins {
+            let dict = PyDict::new(py);
+            dict.set_item("chr", &bin.chr)?;
+            dict.set_item("start", bin.start)?;
+            dict.set_item("end", bin.end)?;
+            dict.set_item("n", bin.n)?;
+            dict.set_item("rid", bin.rid)?;
+            result.push(dict);
+        }
+        Ok(result)
+    }
+
+    fn trim(&self, chrom_sizes: HashMap<String, u32>) -> PyResult<Self> {
+        let rs = self.regionset.trim(&chrom_sizes);
+        // Trim may drop/reorder regions — strand mapping lost
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn promoters(&self, upstream: u32, downstream: u32) -> PyResult<Self> {
+        let rs = self.regionset.promoters(upstream, downstream);
+        // Same regions, same order — preserve strand
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+            strands: self.strands.clone(),
+        })
+    }
+
+    fn reduce(&self) -> PyResult<Self> {
+        let rs = self.regionset.reduce();
+        // Merge op — strand lost
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn setdiff(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.setdiff(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn pintersect(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.pintersect(&other.regionset);
+        // Positional — take strand from self
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+            strands: self.strands.clone(),
+        })
+    }
+
+    fn concat(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.concat(&other.regionset);
+        // Concatenate strand vectors
+        let mut strands = self.strands.clone();
+        strands.extend(other.strands.iter().cloned());
+        Ok(Self {
+            regionset: rs,
+            curr: 0,
+            identifier: None,
+            strands,
+        })
+    }
+
+    fn union(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.union(&other.regionset);
+        Ok(Self::from_regionset(rs))
+    }
+
+    fn jaccard(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.jaccard(&other.regionset)
     }
 
     fn mean_region_width(&self) -> f64 {

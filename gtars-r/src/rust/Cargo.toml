@@ -1,6 +1,6 @@
 [package]
 name = "gtars-r"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 
 [lib]
@@ -10,9 +10,11 @@ crate-type = ["staticlib"]
 [dependencies]
 extendr-api = { git = "https://github.com/extendr/extendr", rev = "51bc14714d771cc670caa011f01187ff8cb0c36a" }
 anyhow = "1.0.82"
+openssl = { version = "0.10", features = ["vendored"] }
 gtars-core = { path = "../../../gtars-core" }
 gtars-io = { path = "../../../gtars-io" }
 gtars-igd = { path = "../../../gtars-igd" }
 gtars-refget = { path = "../../../gtars-refget" }
+gtars-genomicdist = { path = "../../../gtars-genomicdist" }
 gtars-tokenizers = { path = "../../../gtars-tokenizers", features = ["huggingface"] }
 serde_json = "1.0"

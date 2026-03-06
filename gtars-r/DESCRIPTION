@@ -1,6 +1,6 @@
 Package: gtars
 Title: Performance critical genomic interval analysis using Rust, in R
-Version: 0.7.0
+Version: 0.8.0
 Authors@R: 
     person("Nathan", "LeRoy", , "nleroy917@gmail.com", role = c("aut", "cre"),
            comment = c(ORCID = "0000-0002-7354-7213"))
@@ -9,6 +9,14 @@ License: MIT + file LICENSE
 Encoding: UTF-8
 Roxygen: list(markdown = TRUE)
 RoxygenNote: 7.3.3
-Suggests: jsonlite
+Imports: methods, BiocGenerics, IRanges, data.table
+Suggests: GenomicRanges, jsonlite
 Config/rextendr/version: 0.4.2
 SystemRequirements: Cargo (Rust's package manager), rustc
+Collate: 
+    'RegionSet-class.R'
+    'RegionSet-methods.R'
+    'extendr-wrappers.R'
+    'genomicdist.R'
+    'igd.R'
+    'refget.R'

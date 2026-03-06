@@ -5,7 +5,8 @@
 //!
 //! For in-memory/WASM-compatible parsing, use `crate::digest::fasta` directly.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
+use std::io::{BufRead, BufReader, Read};
 use std::path::Path;
 
 use crate::digest;
@@ -15,6 +16,126 @@ use crate::digest::types::{
 
 // Re-export types from digest::fasta
 pub use digest::fasta::{ParseOptions, parse_fasta_header};
+
+/// A single FASTA record yielded by `FastaReader`.
+pub struct FastaRecord {
+    pub name: String,
+    pub description: Option<String>,
+    pub raw_header: String,
+    pub raw_bytes: Vec<u8>,
+}
+
+/// Streaming FASTA reader that yields one record at a time.
+///
+/// Uses a fixed 1 MB `BufReader` internally — never grows to chromosome size.
+/// Handles plain and gzipped FASTA files (via `get_dynamic_reader`).
+/// Uppercases all sequence bytes (ASCII only).
+///
+/// ## Why not seq_io?
+///
+/// We previously used the `seq_io` crate for FASTA parsing in the store pipeline.
+/// seq_io is a well-tested, high-performance parser, but its `fasta::Reader` is
+/// record-oriented: it buffers the entire FASTA record (header + all sequence lines)
+/// in an internal buffer before returning a `RefRecord`. For typical genomes this is
+/// fine, but for large vertebrates (e.g., palmate newt chromosomes at ~2 GB), the
+/// reader's internal buffer grows to chromosome size. Combined with the `raw_bytes`
+/// Vec built from it, the reading thread holds two full copies of the chromosome
+/// simultaneously — pure waste that contributed to OOM on HPC.
+///
+/// This reader uses a fixed-size `BufReader` (1 MB) and builds `raw_bytes` directly
+/// line by line, so only one chromosome-sized allocation exists at a time. FASTA is
+/// a simple enough format (lines starting with `>` are headers, everything else is
+/// sequence data) that a custom reader is low-risk.
+///
+/// See `guides/core/refgetstore_oom_diagnosis.md` for the full investigation.
+pub struct FastaReader {
+    reader: BufReader<Box<dyn Read>>,
+    line_buf: Vec<u8>,
+    raw_bytes: Vec<u8>,
+    current_header: Option<(String, Option<String>, String)>,
+    done: bool,
+}
+
+impl FastaReader {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self> {
+        use gtars_core::utils::get_dynamic_reader;
+        // get_dynamic_reader returns BufReader<Box<dyn Read>> with 8KB buffer.
+        // Extract the inner reader and re-wrap with 1 MB buffer for better I/O
+        // throughput on large files (reduces syscalls through gzip decompression).
+        let buffered = get_dynamic_reader(path.as_ref())?;
+        let inner = buffered.into_inner();
+        Ok(Self {
+            reader: BufReader::with_capacity(1 << 20, inner), // 1 MB fixed buffer
+            line_buf: Vec::new(),
+            raw_bytes: Vec::new(),
+            current_header: None,
+            done: false,
+        })
+    }
+
+    /// Read the next FASTA record. Returns None at EOF.
+    pub fn next_record(&mut self) -> Result<Option<FastaRecord>> {
+        if self.done {
+            return Ok(None);
+        }
+        loop {
+            self.line_buf.clear();
+            let n = self.reader.read_until(b'\n', &mut self.line_buf)?;
+            let at_eof = n == 0;
+            let at_header = !at_eof && self.line_buf.first() == Some(&b'>');
+
+            // Emit previous record when we hit a new header or EOF
+            if (at_eof || at_header) && self.current_header.is_some() {
+                let (name, description, raw_header) = self.current_header.take().unwrap();
+                let prev_len = self.raw_bytes.len();
+                let record = FastaRecord {
+                    name,
+                    description,
+                    raw_header,
+                    raw_bytes: std::mem::replace(
+                        &mut self.raw_bytes,
+                        Vec::with_capacity(prev_len.min(256 * 1024 * 1024)),
+                    ),
+                };
+
+                if at_header {
+                    self.parse_header_line()?;
+                }
+                if at_eof {
+                    self.done = true;
+                }
+                return Ok(Some(record));
+            }
+
+            if at_eof {
+                self.done = true;
+                return Ok(None);
+            }
+
+            if at_header {
+                self.parse_header_line()?;
+            } else {
+                // Append sequence line: trim trailing whitespace, bulk copy + uppercase
+                let end = self.line_buf.iter().rposition(|b| !b.is_ascii_whitespace())
+                    .map_or(0, |p| p + 1);
+                let dest_start = self.raw_bytes.len();
+                self.raw_bytes.extend_from_slice(&self.line_buf[..end]);
+                self.raw_bytes[dest_start..].make_ascii_uppercase();
+            }
+        }
+    }
+
+    fn parse_header_line(&mut self) -> Result<()> {
+        let trimmed = self.line_buf.trim_ascii_end();
+        let header_bytes = &trimmed[1..]; // skip '>'
+        let header = std::str::from_utf8(header_bytes)
+            .context("Invalid UTF-8 in FASTA header")?;
+        let (name, description) = parse_fasta_header(header);
+        self.current_header = Some((name, description, header.to_string()));
+        self.raw_bytes.clear();
+        Ok(())
+    }
+}
 
 /// A lightweight record containing only FAI (FASTA index) metadata for a sequence.
 /// Returned by `compute_fai()` for fast FAI-only computation without digest overhead.
@@ -522,5 +643,64 @@ mod tests {
                 name
             );
         }
+    }
+
+    #[test]
+    fn test_fasta_reader_basic() {
+        let mut reader =
+            FastaReader::from_path("../tests/data/fasta/base.fa").expect("Failed to open FASTA");
+        let mut records = Vec::new();
+        while let Some(record) = reader.next_record().expect("Failed to read record") {
+            records.push(record);
+        }
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].name, "chrX");
+        assert_eq!(records[0].raw_bytes, b"TTGGGGAA");
+        assert_eq!(records[0].raw_bytes.len(), 8);
+    }
+
+    #[test]
+    fn test_fasta_reader_gzipped() {
+        let mut reader = FastaReader::from_path("../tests/data/fasta/base.fa.gz")
+            .expect("Failed to open gzipped FASTA");
+        let mut records = Vec::new();
+        while let Some(record) = reader.next_record().expect("Failed to read record") {
+            records.push(record);
+        }
+        assert_eq!(records.len(), 3);
+        assert_eq!(records[0].name, "chrX");
+        assert_eq!(records[0].raw_bytes, b"TTGGGGAA");
+    }
+
+    #[test]
+    fn test_fasta_reader_uppercases() {
+        // The existing base.fa has uppercase sequences; verify uppercasing works
+        // by checking that all bytes are uppercase ASCII
+        let mut reader =
+            FastaReader::from_path("../tests/data/fasta/base.fa").expect("Failed to open FASTA");
+        while let Some(record) = reader.next_record().expect("Failed to read record") {
+            for &b in &record.raw_bytes {
+                assert!(
+                    b.is_ascii_uppercase(),
+                    "Expected uppercase byte, got: {}",
+                    b as char
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_fasta_reader_matches_load_fasta() {
+        // Verify FastaReader produces same sequence data as load_fasta
+        let seqcol = load_fasta("../tests/data/fasta/base.fa").expect("Failed to load FASTA");
+        let mut reader =
+            FastaReader::from_path("../tests/data/fasta/base.fa").expect("Failed to open FASTA");
+
+        for seq in &seqcol.sequences {
+            let record = reader.next_record().expect("Failed to read").expect("Missing record");
+            assert_eq!(record.name, seq.metadata().name);
+            assert_eq!(record.raw_bytes, seq.sequence().unwrap());
+        }
+        assert!(reader.next_record().expect("Failed to read").is_none());
     }
 }

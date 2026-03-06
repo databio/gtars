@@ -33,6 +33,30 @@ impl PyTssIndex {
         Ok(distances)
     }
 
+    pub fn feature_distances(&self, rs: &PyRegionSet) -> PyResult<Vec<Option<f64>>> {
+        let dists = self
+            .tss_index
+            .calc_feature_distances(&rs.regionset)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(dists
+            .into_iter()
+            .map(|d| {
+                if d == i64::MAX {
+                    None
+                } else {
+                    Some(d as f64)
+                }
+            })
+            .collect())
+    }
+
+    #[staticmethod]
+    pub fn from_regionset(rs: &PyRegionSet) -> PyResult<Self> {
+        let tss_index = TssIndex::try_from(rs.regionset.clone())
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(Self { tss_index })
+    }
+
     pub fn __repr__(&self) -> String {
         self.tss_index.region_set.to_string()
     }

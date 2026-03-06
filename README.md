@@ -65,7 +65,7 @@ print(__version__)
 
 ## Usage
 
-`gtars` provides several useful tools. There are 3 ways to use `gtars`. 
+`gtars` provides several useful tools. There are 3 ways to use `gtars`.
 
 ### 1. From Python
 
@@ -74,6 +74,56 @@ Using bindings, you can call some `gtars` functions from within Python.
 ### 2. From the CLI
 
 To see the available tools you can use from the CLI run `gtars --help`. To see the help for a specific tool, run `gtars <tool> --help`.
+
+Available subcommands:
+
+| Subcommand | Description |
+|---|---|
+| `genomicdist` | Compute genomic distribution statistics for a BED file |
+| `prep` | Pre-serialize GTF gene models or signal matrices to binary for fast loading |
+| `ranges` | Interval set algebra operations on BED files (reduce, trim, promoters, setdiff, pintersect, concat, union, jaccard) |
+| `consensus` | Compute consensus regions across multiple BED files |
+
+#### Preparing reference files
+
+Pre-compile reference files to binary for fast repeated loading. This is optional but recommended when running `genomicdist` repeatedly against the same references.
+
+```bash
+# Pre-compile a GTF gene model
+gtars prep --gtf gencode.v47.annotation.gtf.gz
+
+# Pre-compile an open signal matrix
+gtars prep --signal-matrix openSignalMatrix_hg38.txt
+```
+
+Output defaults to the input path with `.bin` appended (stripping `.gz` first). Use `-o` to specify a custom output path.
+
+#### Computing genomic distributions
+
+```bash
+gtars genomicdist \
+  --bed query.bed \
+  --gtf gencode.v47.annotation.gtf.bin \
+  --tss tss.bed \
+  --chrom-sizes hg38.chrom.sizes \
+  --signal-matrix openSignalMatrix_hg38.txt.bin \
+  --output result.json
+```
+
+All flags except `--bed` are optional. Omit any flag to skip that analysis:
+
+| Flag | Required | Description |
+|---|---|---|
+| `--bed` | yes | Input BED file |
+| `--gtf` | no | GTF/GTF.gz or pre-compiled `.bin` — enables partitions and TSS distances |
+| `--tss` | no | TSS BED file — overrides GTF-derived TSS for distance calculation |
+| `--chrom-sizes` | no | Chrom sizes file — enables expected partitions |
+| `--signal-matrix` | no | Signal matrix TSV or pre-compiled `.bin` — enables open chromatin enrichment |
+| `--bins` | no | Number of bins for region distribution (default: 250) |
+| `--promoter-upstream` | no | Upstream distance from TSS for promoter regions (default: 200) |
+| `--promoter-downstream` | no | Downstream distance from TSS for promoter regions (default: 2000) |
+| `--output` | no | Output JSON path (default: stdout) |
+| `--compact` | no | Compact JSON output (default: pretty-printed) |
 
 ### 3. As a rust library
 
@@ -84,7 +134,8 @@ You can link `gtars` as a library in your rust project. To do so, add the follow
 gtars = { git = "https://github.com/databio/gtars/gtars" }
 ```
 
-we wall-off crates using features, so you will need to enable the features you want. For example, to use the `gtars` crate the overlap tool, you would do:
+We wall off crates using features, so you will need to enable the features you want. For example, to use the overlap tool:
+
 ```toml
 [dependencies]
 gtars = { git = "https://github.com/databio/gtars/gtars", features = ["overlaprs"] }

@@ -7,12 +7,9 @@
 use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
-use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
-use gtars_overlaprs::OverlapperType;
 
 use crate::errors::GtarsGenomicDistError;
 use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin};
-use crate::utils::partition_genome_into_bins;
 
 /// Trait for computing statistics and distributions of genomic intervals.
 pub trait GenomicIntervalSetStatistics {
@@ -27,20 +24,32 @@ pub trait GenomicIntervalSetStatistics {
     /// Compute the distribution of regions across chromosome bins.
     ///
     /// The genome is partitioned into `n_bins` fixed-size windows, where bin size
-    /// is determined by the longest chromosome. Returns bins with overlap counts.
+    /// is determined by the longest chromosome. Each region is assigned to the bin
+    /// containing its midpoint (matching R GenomicDistributions behavior), so each
+    /// region is counted exactly once regardless of width.
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin>;
 
-    /// Compute region distribution using 10 bins (default).
+    /// Compute distances between consecutive regions on each chromosome.
     ///
-    /// Convenience method that calls `region_distribution_with_bins(10)`.
-    fn region_distribution(&self) -> HashMap<String, RegionBin> {
-        self.region_distribution_with_bins(250)
-    }
+    /// For each pair of adjacent regions on the same chromosome, returns the
+    /// signed gap: `next.start - current.end`. Positive values indicate a gap,
+    /// negative values indicate overlapping regions, zero means adjacent/abutting.
+    /// Regions on chromosomes with fewer than 2 regions are skipped.
+    fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError>;
 
-    /// Compute Neighbor_distances
+    /// Compute the distance from each region to its nearest neighbor.
     ///
-    /// Returns a vector of vectors between the regions
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
+    /// For each region, takes the minimum absolute distance to its upstream
+    /// and downstream neighbors. First and last regions on each chromosome
+    /// use their only neighbor's distance. Overlapping neighbors have distance 0.
+    ///
+    /// Port of R GenomicDistributions `calcNearestNeighbors()`.
+    fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
+
+    /// Compute region widths (end - start for each region).
+    ///
+    /// Port of R GenomicDistributions `calcWidth()`.
+    fn calc_widths(&self) -> Vec<u32>;
 }
 
 impl GenomicIntervalSetStatistics for RegionSet {
@@ -100,65 +109,114 @@ impl GenomicIntervalSetStatistics for RegionSet {
     }
 
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin> {
-        let binned_genome = partition_genome_into_bins(&self.get_max_end_per_chr(), n_bins);
-        let binned_genome_overlapper =
-            binned_genome.into_multi_chrom_overlapper(OverlapperType::AIList);
+        if self.regions.is_empty() {
+            return HashMap::new();
+        }
 
-        let region_hits = binned_genome_overlapper
-            .find_overlaps_iter(self)
-            .map(|(chr, iv)| Region {
-                chr,
-                start: iv.start,
-                end: iv.end,
-                rest: None,
-            })
-            .collect::<Vec<Region>>();
+        // Use midpoint of each region for bin assignment, matching R GenomicDistributions.
+        // This ensures each region is counted in exactly one bin regardless of width,
+        // answering "where are the regions located?" rather than "how much coverage?"
+        let chrom_maxes = self.get_max_end_per_chr();
+        let chrom_max_length = match chrom_maxes.values().max() {
+            Some(&v) => v,
+            None => return HashMap::new(),
+        };
+        let bin_size = if n_bins == 0 {
+            chrom_max_length.max(1)
+        } else {
+            (chrom_max_length / n_bins).max(1)
+        };
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
-        let region_length = region_hits.first().unwrap().end - region_hits.first().unwrap().start;
 
-        for k in &region_hits {
-            if let Some(region_bin) = plot_results.get_mut(&k.digest()) {
-                region_bin.n += 1;
+        for region in &self.regions {
+            let mid = region.mid_point();
+            let rid = mid / bin_size;
+            let bin_start = rid * bin_size;
+            let chrom_end = chrom_maxes.get(&region.chr).copied().unwrap_or(0);
+            let bin_end = (bin_start + bin_size).min(chrom_end);
+
+            let key = format!("{}-{}-{}", region.chr, bin_start, bin_end);
+            if let Some(bin) = plot_results.get_mut(&key) {
+                bin.n += 1;
             } else {
                 plot_results.insert(
-                    k.digest().clone(),
+                    key,
                     RegionBin {
-                        chr: k.chr.clone(),
-                        start: k.start,
-                        end: k.end,
+                        chr: region.chr.clone(),
+                        start: bin_start,
+                        end: bin_end,
                         n: 1,
-                        rid: k.start / region_length,
+                        rid,
                     },
                 );
             }
         }
+
         plot_results
     }
 
-    fn calc_neighbor_distances(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
-        let mut distances: Vec<u32> = vec![];
+    fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError> {
+        let mut distances: Vec<i64> = vec![];
 
         for chr in self.iter_chroms() {
             let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
 
-            // if there is only one region on the chromosome, skip it, can't calculate distance between one region
             if chr_regions.len() < 2 {
                 continue;
             }
 
             for window in chr_regions.windows(2) {
-                let distance: f32 = window[1].start as f32 - window[0].end as f32;
-                let absolute_dist: u32 = if distance > 0f32 {
-                    distance as u32
-                } else {
-                    0u32
-                };
-                distances.push(absolute_dist);
+                let distance = window[1].start as i64 - window[0].end as i64;
+                distances.push(distance);
             }
         }
 
         Ok(distances)
+    }
+
+    fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError> {
+        let mut nearest: Vec<u32> = vec![];
+
+        for chr in self.iter_chroms() {
+            let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+
+            if chr_regions.len() < 2 {
+                // Single region on this chromosome has no neighbor.
+                // Push u32::MAX sentinel (matches calc_tss_distances convention).
+                for _ in &chr_regions {
+                    nearest.push(u32::MAX);
+                }
+                continue;
+            }
+
+            // compute absolute neighbor distances for this chromosome
+            // overlapping regions get distance 0
+            let distances: Vec<u32> = chr_regions
+                .windows(2)
+                .map(|w| {
+                    let d = w[1].start as i64 - w[0].end as i64;
+                    if d > 0 { d as u32 } else { 0 }
+                })
+                .collect();
+
+            // first region: only has right neighbor
+            nearest.push(distances[0]);
+
+            // middle regions: min of left and right neighbor distances
+            for pair in distances.windows(2) {
+                nearest.push(pair[0].min(pair[1]));
+            }
+
+            // last region: only has left neighbor
+            nearest.push(distances[distances.len() - 1]);
+        }
+
+        Ok(nearest)
+    }
+
+    fn calc_widths(&self) -> Vec<u32> {
+        self.regions.iter().map(|r| r.width()).collect()
     }
 }
 
@@ -199,7 +257,11 @@ pub fn calc_gc_content(
                         }
                         total_count += 1;
                     }
-                    gc_contents.push(gc_count as f64 / total_count as f64);
+                    if total_count > 0 {
+                        gc_contents.push(gc_count as f64 / total_count as f64);
+                    } else {
+                        gc_contents.push(0.0);
+                    }
                 }
                 Err(e) => {
                     if ignore_unk_chroms {
@@ -250,6 +312,62 @@ pub fn calc_dinucl_freq(
     }
 
     Ok(dinucl_freqs)
+}
+
+/// Canonical ordering of dinucleotides, matching GenomicDistributions' column order.
+pub const DINUCL_ORDER: [Dinucleotide; 16] = [
+    Dinucleotide::Aa, Dinucleotide::Ac, Dinucleotide::Ag, Dinucleotide::At,
+    Dinucleotide::Ca, Dinucleotide::Cc, Dinucleotide::Cg, Dinucleotide::Ct,
+    Dinucleotide::Ga, Dinucleotide::Gc, Dinucleotide::Gg, Dinucleotide::Gt,
+    Dinucleotide::Ta, Dinucleotide::Tc, Dinucleotide::Tg, Dinucleotide::Tt,
+];
+
+/// Per-region dinucleotide frequencies as percentages.
+///
+/// Returns a tuple of (region_labels, frequency_matrix) where:
+/// - `region_labels` is `chr_start_end` for each region
+/// - `frequency_matrix` is a `Vec<[f64; 16]>` — one row per region, columns
+///   in [`DINUCL_ORDER`] order, values are percentages (0–100).
+///
+/// This matches the output format of R's GenomicDistributions::calcDinuclFreq.
+pub fn calc_dinucl_freq_per_region(
+    region_set: &RegionSet,
+    genome: &GenomeAssembly,
+) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
+    let mut labels: Vec<String> = Vec::new();
+    let mut matrix: Vec<[f64; 16]> = Vec::new();
+
+    for chr in region_set.iter_chroms() {
+        for region in region_set.iter_chr_regions(chr) {
+            let seq = genome.seq_from_region(region)?;
+            let mut counts = [0u64; 16];
+            let mut total: u64 = 0;
+
+            for window in seq.windows(2) {
+                if let Some(dinucl) = Dinucleotide::from_bytes(window) {
+                    let idx = DINUCL_ORDER.iter().position(|d| *d == dinucl).unwrap();
+                    counts[idx] += 1;
+                    total += 1;
+                }
+            }
+
+            let freqs: [f64; 16] = if total > 0 {
+                let mut f = [0.0f64; 16];
+                for (i, &c) in counts.iter().enumerate() {
+                    f[i] = (c as f64 / total as f64) * 100.0;
+                }
+                f
+            } else {
+                [0.0; 16]
+            };
+
+            labels.push(format!("{}_{}_{}",
+                region.chr, region.start, region.end));
+            matrix.push(freqs);
+        }
+    }
+
+    Ok((labels, matrix))
 }
 
 #[cfg(test)]
@@ -303,15 +421,329 @@ mod tests {
     }
 
     #[rstest]
-    #[ignore] // only for local testing
+    fn test_calc_nearest_neighbors() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let nearest = region_set.calc_nearest_neighbors().unwrap();
+        // 9 regions on chr1 → 9 nearest-neighbor distances (one per region)
+        assert_eq!(nearest.len(), 9);
+        // each nearest-neighbor distance should be ≤ the max of its neighbor distances
+        // neighbor_dists are signed (i64), nearest are absolute (u32)
+        let neighbor_dists = region_set.calc_neighbor_distances().unwrap();
+        let abs_dists: Vec<u32> = neighbor_dists
+            .iter()
+            .map(|&d| if d > 0 { d as u32 } else { 0 })
+            .collect();
+        for i in 0..nearest.len() {
+            if i == 0 {
+                assert_eq!(nearest[i], abs_dists[0]);
+            } else if i == nearest.len() - 1 {
+                assert_eq!(nearest[i], abs_dists[abs_dists.len() - 1]);
+            } else {
+                assert_eq!(
+                    nearest[i],
+                    abs_dists[i - 1].min(abs_dists[i])
+                );
+            }
+        }
+    }
+
+    #[rstest]
+    fn test_calc_widths() {
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+
+        let widths = region_set.calc_widths();
+        assert_eq!(widths.len(), 9);
+        assert_eq!(*widths.iter().min().unwrap(), 2);
+        assert_eq!(*widths.iter().max().unwrap(), 9);
+    }
+
+    fn get_fasta_path(file_name: &str) -> PathBuf {
+        std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/fasta")
+            .join(file_name)
+    }
+
+    // --- calc_nearest_neighbors bug regression ---
+
+    #[rstest]
+    fn test_nearest_neighbors_single_region_chrom() {
+        // Regression: single-region chromosomes used to be skipped,
+        // producing a short vector. Now they get u32::MAX sentinel.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr1".into(), start: 30, end: 40, rest: None },
+            Region { chr: "chr2".into(), start: 100, end: 200, rest: None }, // lone region
+        ];
+        let rs = RegionSet::from(regions);
+        let nearest = rs.calc_nearest_neighbors().unwrap();
+
+        // Must return one value per region (3 total, not 2)
+        assert_eq!(nearest.len(), 3);
+        // Two chr1 regions have neighbor distance 10, one chr2 region gets sentinel.
+        // Order depends on HashSet iteration of iter_chroms.
+        let mut sorted = nearest.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![10, 10, u32::MAX]);
+    }
+
+    // --- GC content ---
+
+    #[rstest]
+    fn test_calc_gc_content() {
+        // base.fa: chr1=GGAA (2G, 0C → 50%), chr2=GCGC (2G, 2C → 100%)
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let gc = calc_gc_content(&rs, &ga, false).unwrap();
+
+        assert_eq!(gc.len(), 2);
+        // iter_chroms uses HashSet so order is nondeterministic
+        let mut sorted_gc = gc.clone();
+        sorted_gc.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((sorted_gc[0] - 0.5).abs() < 1e-10);  // chr1: GGAA → 50%
+        assert!((sorted_gc[1] - 1.0).abs() < 1e-10);  // chr2: GCGC → 100%
+    }
+
+    #[rstest]
+    fn test_calc_gc_content_ignore_unknown_chroms() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chrUnknown".into(), start: 0, end: 10, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+
+        // With ignore_unk_chroms=true, should skip unknown chromosome
+        let gc = calc_gc_content(&rs, &ga, true).unwrap();
+        assert_eq!(gc.len(), 1);
+
+        // With ignore_unk_chroms=false, should error
+        let gc_err = calc_gc_content(&rs, &ga, false);
+        assert!(gc_err.is_err());
+    }
+
+    // --- Dinucleotide frequency ---
+
+    #[rstest]
     fn test_calc_dinucl_freq() {
-        let ga = GenomeAssembly::try_from("/home/bnt4me/virginia/repos/bedboss/data/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4/fasta/default/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4.fa").unwrap();
-        let rs =
-            RegionSet::try_from("/home/bnt4me/Downloads/dcc005e8761ad5599545cc538f6a2a4d.bed.gz")
-                .unwrap();
+        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
-        let result = calc_dinucl_freq(&rs, &ga).unwrap();
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let freq = calc_dinucl_freq(&rs, &ga).unwrap();
 
-        assert_ne!(result.len(), 0);
+        assert_eq!(*freq.get(&Dinucleotide::Gg).unwrap_or(&0), 1);
+        assert_eq!(*freq.get(&Dinucleotide::Ga).unwrap_or(&0), 1);
+        assert_eq!(*freq.get(&Dinucleotide::Aa).unwrap_or(&0), 1);
+        // total should be 3 (4 bases → 3 dinucleotides)
+        let total: u64 = freq.values().sum();
+        assert_eq!(total, 3);
+    }
+
+    #[rstest]
+    fn test_calc_dinucl_freq_per_region() {
+        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let (labels, matrix) = calc_dinucl_freq_per_region(&rs, &ga).unwrap();
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0], "chr2_0_4");
+        assert_eq!(matrix.len(), 1);
+
+        // GC appears 2/3 times, CG appears 1/3 times
+        // Find indices in DINUCL_ORDER
+        let gc_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gc).unwrap();
+        let cg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Cg).unwrap();
+
+        let row = &matrix[0];
+        assert!((row[gc_idx] - 200.0 / 3.0).abs() < 0.1); // ~66.67%
+        assert!((row[cg_idx] - 100.0 / 3.0).abs() < 0.1);  // ~33.33%
+
+        // all other dinucleotides should be 0
+        let total: f64 = row.iter().sum();
+        assert!((total - 100.0).abs() < 0.1);
+    }
+
+    // --- Empty RegionSet edge cases ---
+
+    #[rstest]
+    fn test_empty_regionset_chromosome_statistics() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let stats = rs.chromosome_statistics();
+        assert!(stats.is_empty());
+    }
+
+    #[rstest]
+    fn test_empty_regionset_region_distribution() {
+        // Empty RegionSet should return empty distribution, not panic
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let dist = rs.region_distribution_with_bins(10);
+        assert!(dist.is_empty());
+    }
+
+    #[rstest]
+    fn test_empty_regionset_calc_widths() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        assert!(rs.calc_widths().is_empty());
+    }
+
+    #[rstest]
+    fn test_empty_regionset_neighbor_distances() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let dists = rs.calc_neighbor_distances().unwrap();
+        assert!(dists.is_empty());
+    }
+
+    #[rstest]
+    fn test_empty_regionset_nearest_neighbors() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let nearest = rs.calc_nearest_neighbors().unwrap();
+        assert!(nearest.is_empty());
+    }
+
+    // --- GC content edge cases ---
+
+    #[rstest]
+    fn test_calc_gc_content_zero_length_region() {
+        // A zero-length region (start == end) should return 0.0, not NaN
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 2, end: 2, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let gc = calc_gc_content(&rs, &ga, false).unwrap();
+        assert_eq!(gc.len(), 1);
+        assert!(!gc[0].is_nan());
+        assert!((gc[0] - 0.0).abs() < 1e-10);
+    }
+
+    // --- Property-based tests inspired by R GenomicDistributions ---
+
+    #[rstest]
+    fn test_neighbor_distances_shift_invariant() {
+        // R GenomicDistributions tests that shifting all regions by a constant
+        // produces the same neighbor distances. This verifies the algorithm
+        // depends on relative positions, not absolute coordinates.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 200, rest: None },
+            Region { chr: "chr1".into(), start: 300, end: 400, rest: None },
+            Region { chr: "chr1".into(), start: 500, end: 700, rest: None },
+        ];
+        let rs1 = RegionSet::from(regions);
+
+        let shifted = vec![
+            Region { chr: "chr1".into(), start: 10100, end: 10200, rest: None },
+            Region { chr: "chr1".into(), start: 10300, end: 10400, rest: None },
+            Region { chr: "chr1".into(), start: 10500, end: 10700, rest: None },
+        ];
+        let rs2 = RegionSet::from(shifted);
+
+        let d1 = rs1.calc_neighbor_distances().unwrap();
+        let d2 = rs2.calc_neighbor_distances().unwrap();
+        assert_eq!(d1, d2);
+
+        let nn1 = rs1.calc_nearest_neighbors().unwrap();
+        let nn2 = rs2.calc_nearest_neighbors().unwrap();
+        assert_eq!(nn1, nn2);
+    }
+
+    #[rstest]
+    fn test_overlapping_regions_neighbor_distance() {
+        // When regions overlap, neighbor distance should be negative (gap is negative)
+        // and nearest neighbor distance should be 0 (clamped, matching R behavior).
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 300, rest: None },
+            Region { chr: "chr1".into(), start: 200, end: 400, rest: None },
+            Region { chr: "chr1".into(), start: 500, end: 600, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+
+        let dists = rs.calc_neighbor_distances().unwrap();
+        // gap between [100,300) and [200,400): 200 - 300 = -100 (overlap)
+        assert_eq!(dists[0], -100);
+        // gap between [200,400) and [500,600): 500 - 400 = 100 (gap)
+        assert_eq!(dists[1], 100);
+
+        let nearest = rs.calc_nearest_neighbors().unwrap();
+        // First region: only right neighbor, distance clamped to 0 (overlap)
+        assert_eq!(nearest[0], 0);
+        // Middle region: min(0, 100) = 0
+        assert_eq!(nearest[1], 0);
+        // Last region: only left neighbor, distance 100
+        assert_eq!(nearest[2], 100);
+    }
+
+    #[rstest]
+    fn test_region_distribution_total_count() {
+        // Midpoint assignment: each region counted exactly once.
+        // Matches R GenomicDistributions: sum(result$N) == length(query)
+        let file_path = get_test_path("dummy.narrowPeak").unwrap();
+        let rs = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
+        let n_regions = rs.regions.len();
+
+        let dist = rs.region_distribution_with_bins(5);
+        let total_n: u32 = dist.values().map(|b| b.n).sum();
+        assert_eq!(
+            total_n as usize, n_regions,
+            "total bin count ({}) should equal number of regions ({})",
+            total_n, n_regions
+        );
+    }
+
+    #[rstest]
+    fn test_gc_content_in_valid_range() {
+        // R GenomicDistributions tests: all GC values should be in [0, 1]
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chrX".into(), start: 0, end: 8, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let gc = calc_gc_content(&rs, &ga, false).unwrap();
+
+        assert_eq!(gc.len(), 3);
+        for &val in &gc {
+            assert!(val >= 0.0 && val <= 1.0, "GC content out of range: {}", val);
+            assert!(!val.is_nan(), "GC content should not be NaN");
+        }
+    }
+
+    #[rstest]
+    fn test_widths_match_region_coordinates() {
+        // Width should equal end - start for each region
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr1".into(), start: 0, end: 0, rest: None },
+            Region { chr: "chr2".into(), start: 100, end: 350, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let widths = rs.calc_widths();
+        assert_eq!(widths, vec![10, 0, 250]);
     }
 }
