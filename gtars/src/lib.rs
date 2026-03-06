@@ -46,3 +46,7 @@ pub use gtars_scoring as scoring;
 #[cfg(feature = "fragsplit")]
 #[doc(inline)]
 pub use gtars_fragsplit as fragsplit;
+
+#[cfg(feature = "vrs")]
+#[doc(inline)]
+pub use gtars_vrs as vrs;

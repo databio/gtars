@@ -22,6 +22,7 @@ gtars-igd = { path = "../gtars-igd", optional = true, version="0.5.1" }
 gtars-bbcache = { path = "../gtars-bbcache", optional = true, version="0.5.3" }
 gtars-scoring = { path = "../gtars-scoring", optional = true, version="0.5.1" }
 gtars-fragsplit = { path = "../gtars-fragsplit", optional = true, version="0.5.0" }
+gtars-vrs = { path = "../gtars-vrs", optional = true, version="0.7.0" }
 
 
 [features]
@@ -37,6 +38,7 @@ igd = ["dep:gtars-igd"]
 bbcache = ["dep:gtars-bbcache"]
 scoring = ["dep:gtars-scoring"]
 fragsplit = ["dep:gtars-fragsplit"]
+vrs = ["dep:gtars-vrs"]
 
 [package.metadata.docs.rs]
 all-features = true
