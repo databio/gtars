@@ -196,6 +196,20 @@ class RegionSet:
         """
         ...
 
+    def coverage(self, other: "RegionSet") -> float:
+        """
+        Fraction of self's base pairs covered by other (after merging overlaps).
+        Returns a value in [0.0, 1.0].
+        """
+        ...
+
+    def overlap_coefficient(self, other: "RegionSet") -> float:
+        """
+        Overlap coefficient: |intersection_bp| / min(|self_bp|, |other_bp|).
+        Returns a value in [0.0, 1.0].
+        """
+        ...
+
     def mean_region_width(self) -> int:
         """
         Mean width of the regions

@@ -90,6 +90,20 @@ pub trait IntervalRanges {
     /// reduced first. Returns 0.0 if the union has zero base pairs.
     fn jaccard(&self, other: &RegionSet) -> f64;
 
+    /// Fraction of self's base pairs covered by other.
+    ///
+    /// Both sets are reduced first. Returns
+    /// `1.0 - (setdiff_bp / self_bp)`, or 0.0 if self has zero base pairs.
+    /// Result is in [0.0, 1.0].
+    fn coverage(&self, other: &RegionSet) -> f64;
+
+    /// Overlap coefficient between two region sets.
+    ///
+    /// Computes `|intersection_bp| / min(|self_bp|, |other_bp|)` after reducing
+    /// both sets. Returns 0.0 if either set has zero base pairs.
+    /// Result is in [0.0, 1.0].
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64;
+
     /// All-vs-all genomic intersection.
     ///
     /// For each pair of overlapping regions between `self` and `other`,
@@ -305,6 +319,29 @@ impl IntervalRanges for RegionSet {
         }
         let intersection_bp = a_bp + b_bp - union_bp;
         intersection_bp as f64 / union_bp as f64
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        let self_reduced = self.reduce();
+        let self_bp = self_reduced.nucleotides_length();
+        if self_bp == 0 {
+            return 0.0;
+        }
+        let diff = self_reduced.setdiff(other);
+        let diff_bp = diff.nucleotides_length();
+        1.0 - (diff_bp as f64 / self_bp as f64)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let min_bp = a_bp.min(b_bp);
+        if min_bp == 0 {
+            return 0.0;
+        }
+        let union_bp = self.union(other).nucleotides_length();
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / min_bp as f64
     }
 
     fn intersect(&self, other: &RegionSet) -> RegionSet {
@@ -1341,6 +1378,123 @@ mod tests {
         let a = make_regionset(vec![("chr1", 0, 10)]);
         let b = make_regionset(vec![("chr1", 10, 20)]);
         assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    // ── coverage tests ──────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_coverage_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.coverage(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!(a.coverage(&b).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_partial_overlap() {
+        // A=[0,10) 10bp, B=[5,15) 10bp
+        // setdiff(A, B) = [0,5) = 5bp, coverage = 1 - 5/10 = 0.5
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        assert!((a.coverage(&b) - 0.5).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_subset() {
+        // A is a subset of B => coverage(A, B) = 1.0
+        let a = make_regionset(vec![("chr1", 20, 50)]);
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.coverage(&b) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_superset() {
+        // A=[0,100) 100bp, B=[20,50) 30bp
+        // setdiff(A, B) = [0,20) + [50,100) = 70bp, coverage = 1 - 70/100 = 0.3
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 20, 50)]);
+        assert!((a.coverage(&b) - 0.3).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_empty_self() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        assert!(a.coverage(&b).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_asymmetry() {
+        // A=[0,10), B=[5,15)
+        // coverage(A,B) = 0.5, coverage(B,A) = 0.5 (symmetric in this case)
+        // Use asymmetric example: A=[0,100), B=[20,50)
+        // coverage(A,B) = 0.3, coverage(B,A) = 1.0
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 20, 50)]);
+        let cov_ab = a.coverage(&b);
+        let cov_ba = b.coverage(&a);
+        assert!((cov_ab - 0.3).abs() < 1e-10);
+        assert!((cov_ba - 1.0).abs() < 1e-10);
+        assert!((cov_ab - cov_ba).abs() > 0.1); // they differ
+    }
+
+    // ── overlap_coefficient tests ──────────────────────────────────────
+
+    #[rstest]
+    fn test_overlap_coefficient_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.overlap_coefficient(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!(a.overlap_coefficient(&b).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_partial_overlap() {
+        // A=[0,10) 10bp, B=[5,15) 10bp
+        // intersection = 5bp, min = 10bp, oc = 5/10 = 0.5
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        assert!((a.overlap_coefficient(&b) - 0.5).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_subset() {
+        // A=[20,50) 30bp inside B=[0,100) 100bp
+        // intersection = 30bp, min = 30bp, oc = 1.0
+        let a = make_regionset(vec![("chr1", 20, 50)]);
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.overlap_coefficient(&b) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        assert!(a.overlap_coefficient(&b).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_symmetry() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 20, 50)]);
+        assert!((a.overlap_coefficient(&b) - b.overlap_coefficient(&a)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_both_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        assert!(a.overlap_coefficient(&b).abs() < 1e-10);
     }
 
     // ── intersect tests ────────────────────────────────────────────────

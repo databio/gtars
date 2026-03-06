@@ -412,6 +412,14 @@ impl PyRegionSet {
         self.regionset.jaccard(&other.regionset)
     }
 
+    fn coverage(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.coverage(&other.regionset)
+    }
+
+    fn overlap_coefficient(&self, other: &PyRegionSet) -> f64 {
+        self.regionset.overlap_coefficient(&other.regionset)
+    }
+
     fn mean_region_width(&self) -> f64 {
         self.regionset.mean_region_width()
     }
