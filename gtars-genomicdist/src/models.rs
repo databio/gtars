@@ -658,6 +658,20 @@ mod tests {
     }
 
     #[test]
+    fn test_tss_index_try_from_path() {
+        let path = get_test_path("dummy_tss.bed").unwrap();
+        let tss = TssIndex::try_from(path.as_path());
+        assert!(tss.is_ok());
+    }
+
+    #[test]
+    fn test_tss_index_try_from_path_invalid() {
+        let path = PathBuf::from("/nonexistent/file.bed");
+        let tss = TssIndex::try_from(path.as_path());
+        assert!(tss.is_err());
+    }
+
+    #[test]
     fn test_tss_index_try_from_string() {
         let path = get_test_path("dummy_tss.bed").unwrap();
         let tss = TssIndex::try_from(path.to_str().unwrap().to_string());

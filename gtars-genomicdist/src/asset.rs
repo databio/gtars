@@ -407,6 +407,15 @@ mod tests {
     }
 
     #[test]
+    fn test_gda_rejects_truncated() {
+        let ann = make_test_annotation(true);
+        let bytes = ann.to_bytes();
+        // Truncate to just past header
+        let result = GenomicDistAnnotation::load_bin_from_bytes(&bytes[..20]);
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn test_gda_rejects_invalid_magic() {
         let data = b"not a valid GDA file at all!";
         let result = GenomicDistAnnotation::load_bin_from_bytes(data);

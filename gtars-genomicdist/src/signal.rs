@@ -724,6 +724,31 @@ mod tests {
     }
 
     #[rstest]
+    fn test_signal_matrix_rejects_truncated() {
+        // Valid header but truncated before intern table
+        let f = write_test_signal_matrix();
+        let sm = SignalMatrix::from_tsv(f.path()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("signal.bin");
+        sm.save_bin(&bin_path).unwrap();
+
+        let data = std::fs::read(&bin_path).unwrap();
+        // Truncate to just past the header
+        let result = SignalMatrix::load_bin_from_bytes(&data[..20]);
+        assert!(result.is_err());
+    }
+
+    #[rstest]
+    fn test_signal_matrix_empty_tsv() {
+        let mut f = NamedTempFile::new().unwrap();
+        writeln!(f, "V1\tcond_A").unwrap();
+        // No data rows
+        f.flush().unwrap();
+        let result = SignalMatrix::from_tsv(f.path());
+        assert!(result.is_err());
+    }
+
+    #[rstest]
     fn test_signal_matrix_rejects_old_bincode() {
         // A file that doesn't start with SIGM magic should be rejected
         let dir = tempfile::tempdir().unwrap();
