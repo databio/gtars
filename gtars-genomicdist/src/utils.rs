@@ -10,8 +10,11 @@ use gtars_core::models::RegionSet;
 /// on each chromosome may be smaller to accommodate the exact chromosome length.
 pub fn partition_genome_into_bins(chrom_sizes: &HashMap<String, u32>, n_bins: u32) -> RegionSet {
     let mut regions = Vec::new();
-    let chrom_max_length = *chrom_sizes.values().max().unwrap();
-    let bin_size: u32 = (chrom_max_length / n_bins).max(1);
+    let chrom_max_length = match chrom_sizes.values().max() {
+        Some(&v) => v,
+        None => return RegionSet::from(regions),
+    };
+    let bin_size: u32 = if n_bins == 0 { chrom_max_length.max(1) } else { (chrom_max_length / n_bins).max(1) };
 
     for (chr, size) in chrom_sizes {
         let mut start = 1;
@@ -147,5 +150,25 @@ mod tests {
         let mut chroms = vec!["MT", "X", "2", "1", "Y"];
         chroms.sort_by_key(|c| chrom_karyotype_key(c));
         assert_eq!(chroms, vec!["1", "2", "X", "Y", "MT"]);
+    }
+
+    #[test]
+    fn test_partition_genome_empty_chrom_sizes() {
+        // Empty chrom_sizes should return empty RegionSet, not panic
+        let chrom_sizes = HashMap::new();
+        let rs = partition_genome_into_bins(&chrom_sizes, 10);
+        assert!(rs.regions.is_empty());
+    }
+
+    #[test]
+    fn test_partition_genome_zero_bins() {
+        // n_bins=0 should not divide by zero; treat as 1 bin per chromosome
+        let mut chrom_sizes = HashMap::new();
+        chrom_sizes.insert("chr1".to_string(), 100);
+        let rs = partition_genome_into_bins(&chrom_sizes, 0);
+        // bin_size = max(100, 1) = 100, so chr1 gets 1 bin
+        assert_eq!(rs.regions.len(), 1);
+        assert_eq!(rs.regions[0].start, 1);
+        assert_eq!(rs.regions[0].end, 100);
     }
 }

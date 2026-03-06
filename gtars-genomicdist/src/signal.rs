@@ -241,12 +241,17 @@ impl SignalMatrix {
     }
 
     /// Deserialize a signal matrix from a packed binary file.
+    pub fn load_bin<P: AsRef<Path>>(path: P) -> Result<Self, GtarsGenomicDistError> {
+        let data = std::fs::read(path.as_ref())?;
+        Self::load_bin_from_bytes(&data)
+    }
+
+    /// Deserialize a signal matrix from a byte slice (for WASM or in-memory use).
     ///
     /// Validates the magic number and version, then reads the intern table,
     /// condition names, column-oriented regions, and flat f64 values.
     #[allow(unused_assignments)] // pos is incremented by read_bytes! macro on final read
-    pub fn load_bin<P: AsRef<Path>>(path: P) -> Result<Self, GtarsGenomicDistError> {
-        let data = std::fs::read(path.as_ref())?;
+    pub fn load_bin_from_bytes(data: &[u8]) -> Result<Self, GtarsGenomicDistError> {
         let mut pos = 0usize;
 
         let err = |msg: &str| GtarsGenomicDistError::SignalMatrixError(msg.to_string());

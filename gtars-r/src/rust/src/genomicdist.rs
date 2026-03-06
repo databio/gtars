@@ -7,8 +7,8 @@ use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
     consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
-    GenomicIntervalSetStatistics, GeneModel, IntervalRanges, PartitionList, SignalMatrix,
-    Strand, StrandedRegionSet, DINUCL_ORDER,
+    GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
+    PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
 
 // =========================================================================
@@ -859,6 +859,157 @@ pub fn r_calc_feature_distances(
 }
 
 // =========================================================================
+// 7. Binary Asset Loading
+// =========================================================================
+
+/// Load a GDA binary file and return a GenomicDistAnnotation pointer.
+///
+/// The returned pointer gives access to the gene model, partition list,
+/// and TSS index contained in the pre-compiled binary.
+/// @export
+/// @param path Path to a .bin GDA file (produced by `gtars prep`)
+#[extendr(r_name = "load_gda_bin")]
+pub fn r_load_gda_bin(path: &str) -> extendr_api::Result<Robj> {
+    let ann = GenomicDistAnnotation::load_bin(path)
+        .map_err(|e| extendr_api::Error::Other(format!("Loading GDA binary: {}", e)))?;
+    Ok(ExternalPtr::new(ann).into())
+}
+
+/// Extract the gene model from a GDA annotation pointer.
+/// @export
+/// @param gda_ptr External pointer to a GenomicDistAnnotation
+#[extendr(r_name = "gda_gene_model")]
+pub fn r_gda_gene_model(gda_ptr: Robj) -> extendr_api::Result<Robj> {
+    let ext_ptr = <ExternalPtr<GenomicDistAnnotation>>::try_from(gda_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid GenomicDistAnnotation pointer".into()))?;
+    let model = ext_ptr.gene_model.clone();
+    Ok(ExternalPtr::new(model).into())
+}
+
+/// Build a PartitionList from a GDA annotation pointer.
+/// @export
+/// @param gda_ptr External pointer to a GenomicDistAnnotation
+/// @param core_prom Core promoter size in bp
+/// @param prox_prom Proximal promoter size in bp
+/// @param chrom_names Chromosome names for trim (empty to skip)
+/// @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+#[extendr(r_name = "gda_partition_list")]
+pub fn r_gda_partition_list(
+    gda_ptr: Robj,
+    core_prom: i32,
+    prox_prom: i32,
+    chrom_names: Vec<String>,
+    chrom_sizes_vec: Vec<i32>,
+) -> extendr_api::Result<Robj> {
+    let ext_ptr = <ExternalPtr<GenomicDistAnnotation>>::try_from(gda_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid GenomicDistAnnotation pointer".into()))?;
+    let sizes = if chrom_names.is_empty() {
+        None
+    } else {
+        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec))
+    };
+    let pl = genome_partition_list(&ext_ptr.gene_model, core_prom as u32, prox_prom as u32, sizes.as_ref());
+    Ok(ExternalPtr::new(pl).into())
+}
+
+/// Derive a TssIndex from a GDA annotation (using strand-aware TSS positions).
+/// @export
+/// @param gda_ptr External pointer to a GenomicDistAnnotation
+#[extendr(r_name = "gda_tss_index")]
+pub fn r_gda_tss_index(gda_ptr: Robj) -> extendr_api::Result<Robj> {
+    let ext_ptr = <ExternalPtr<GenomicDistAnnotation>>::try_from(gda_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid GenomicDistAnnotation pointer".into()))?;
+    let model = &ext_ptr.gene_model;
+    let tss_regions: Vec<Region> = model.genes.inner.regions.iter()
+        .zip(model.genes.strands.iter())
+        .map(|(r, strand)| {
+            let tss_pos = match strand {
+                Strand::Minus => r.end.saturating_sub(1),
+                _ => r.start,
+            };
+            Region { chr: r.chr.clone(), start: tss_pos, end: tss_pos + 1, rest: None }
+        })
+        .collect();
+    let tss_rs = RegionSet { regions: tss_regions, header: None, path: None };
+    let index = TssIndex::try_from(tss_rs)
+        .map_err(|e| extendr_api::Error::Other(format!("Building TssIndex from GDA: {}", e)))?;
+    Ok(ExternalPtr::new(index).into())
+}
+
+/// Load a SignalMatrix from a packed binary file.
+/// @export
+/// @param path Path to a .bin signal matrix file (produced by `gtars prep`)
+#[extendr(r_name = "load_signal_matrix_bin")]
+pub fn r_load_signal_matrix_bin(path: &str) -> extendr_api::Result<Robj> {
+    let sm = SignalMatrix::load_bin(path)
+        .map_err(|e| extendr_api::Error::Other(format!("Loading signal matrix binary: {}", e)))?;
+    Ok(ExternalPtr::new(sm).into())
+}
+
+/// Load a SignalMatrix from a TSV file.
+/// @export
+/// @param path Path to a TSV signal matrix file
+#[extendr(r_name = "load_signal_matrix_tsv")]
+pub fn r_load_signal_matrix_tsv(path: &str) -> extendr_api::Result<Robj> {
+    let sm = SignalMatrix::from_tsv(path)
+        .map_err(|e| extendr_api::Error::Other(format!("Loading signal matrix TSV: {}", e)))?;
+    Ok(ExternalPtr::new(sm).into())
+}
+
+/// Calculate summary signal from a SignalMatrix pointer.
+/// @export
+/// @param rs_ptr External pointer to query RegionSet
+/// @param sm_ptr External pointer to a SignalMatrix
+#[extendr(r_name = "r_calc_summary_signal_from_matrix")]
+pub fn r_calc_summary_signal_from_matrix(
+    rs_ptr: Robj,
+    sm_ptr: Robj,
+) -> extendr_api::Result<List> {
+    with_regionset!(rs_ptr, rs, {
+        let sm_ext = <ExternalPtr<SignalMatrix>>::try_from(sm_ptr)
+            .map_err(|_| extendr_api::Error::Other("Invalid SignalMatrix pointer".into()))?;
+
+        let result = calc_summary_signal(rs, &*sm_ext)
+            .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
+
+        let n_cond = result.condition_names.len();
+        let region_labels: Vec<String> = result.signal_matrix.iter().map(|(l, _)| l.clone()).collect();
+        let mut signal_cols: Vec<Vec<f64>> = vec![Vec::new(); n_cond];
+        for (_label, signals) in &result.signal_matrix {
+            for (j, &val) in signals.iter().enumerate() {
+                if j < n_cond {
+                    signal_cols[j].push(val);
+                }
+            }
+        }
+
+        let stat_conditions: Vec<String> = result.matrix_stats.iter().map(|s| s.condition.clone()).collect();
+        let lower_whiskers: Vec<f64> = result.matrix_stats.iter().map(|s| s.lower_whisker).collect();
+        let lower_hinges: Vec<f64> = result.matrix_stats.iter().map(|s| s.lower_hinge).collect();
+        let medians: Vec<f64> = result.matrix_stats.iter().map(|s| s.median).collect();
+        let upper_hinges: Vec<f64> = result.matrix_stats.iter().map(|s| s.upper_hinge).collect();
+        let upper_whiskers: Vec<f64> = result.matrix_stats.iter().map(|s| s.upper_whisker).collect();
+
+        let mut signal_list = List::from_values(&signal_cols);
+        let _ = signal_list.set_names(result.condition_names.clone());
+
+        Ok(list!(
+            condition_names = result.condition_names,
+            region_labels = region_labels,
+            signal_matrix = signal_list,
+            matrixStats = list!(
+                condition = stat_conditions,
+                lower_whisker = lower_whiskers,
+                lower_hinge = lower_hinges,
+                median = medians,
+                upper_hinge = upper_hinges,
+                upper_whisker = upper_whiskers
+            )
+        ))
+    })
+}
+
+// =========================================================================
 // Module registration
 // =========================================================================
 
@@ -900,4 +1051,12 @@ extendr_module! {
     // TSS / Feature distances
     fn r_calc_tss_distances;
     fn r_calc_feature_distances;
+    // Binary asset loading
+    fn r_load_gda_bin;
+    fn r_gda_gene_model;
+    fn r_gda_partition_list;
+    fn r_gda_tss_index;
+    fn r_load_signal_matrix_bin;
+    fn r_load_signal_matrix_tsv;
+    fn r_calc_summary_signal_from_matrix;
 }

@@ -14,6 +14,14 @@ pub struct JsSignalMatrix {
 
 #[wasm_bindgen(js_class = "SignalMatrix")]
 impl JsSignalMatrix {
+    /// Load a SignalMatrix from packed binary bytes.
+    #[wasm_bindgen(js_name = "fromBin")]
+    pub fn from_bin(bytes: &[u8]) -> Result<JsSignalMatrix, JsValue> {
+        let matrix = SignalMatrix::load_bin_from_bytes(bytes)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(JsSignalMatrix { matrix })
+    }
+
     /// Construct a SignalMatrix from JS data.
     ///
     /// - `regionIds`: array of strings in `"chr_start_end"` format
