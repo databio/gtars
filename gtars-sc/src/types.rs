@@ -136,3 +136,93 @@ pub struct PreprocessingResult {
     pub variable_features: Vec<String>,
     pub cell_metadata: Vec<CellMetadata>,
 }
+
+/// Weighted SNN (Shared Nearest Neighbor) graph for clustering.
+///
+/// Edge weights represent Jaccard similarity of KNN neighborhoods.
+/// Edges below the prune threshold are excluded.
+#[derive(Debug, Clone)]
+pub struct SnnGraph {
+    pub n_cells: usize,
+    /// Adjacency list: for each cell, `(neighbor_index, jaccard_weight)`.
+    pub edges: Vec<Vec<(usize, f64)>>,
+}
+
+/// Result of community detection (clustering).
+#[derive(Debug, Clone)]
+pub struct ClusterResult {
+    /// Cluster assignment per cell (0-indexed).
+    pub assignments: Vec<u32>,
+    /// Number of distinct clusters.
+    pub n_clusters: u32,
+    /// Modularity / quality of the partition (if computed).
+    pub quality: Option<f64>,
+}
+
+/// Configuration for the downstream analysis pipeline.
+#[derive(Debug, Clone)]
+pub struct DownstreamConfig {
+    /// Number of nearest neighbors for KNN graph (default 20).
+    pub k_neighbors: usize,
+    /// SNN pruning threshold — edges with Jaccard below this are dropped (default 1/15).
+    pub prune_snn: f64,
+    /// Leiden resolution parameter (default 0.8).
+    pub resolution: f64,
+    /// Maximum Leiden iterations (default 10).
+    pub leiden_max_iter: usize,
+    /// Minimum fraction of cells expressing a gene to test (default 0.1).
+    pub min_pct: f64,
+    /// Minimum log2 fold change for marker genes (default 0.25).
+    pub min_log2fc: f64,
+    /// Whether to compute marker genes (default true).
+    pub compute_markers: bool,
+    /// Whether to compute silhouette scores (default true).
+    pub compute_silhouette: bool,
+}
+
+impl Default for DownstreamConfig {
+    fn default() -> Self {
+        Self {
+            k_neighbors: 20,
+            prune_snn: 1.0 / 15.0,
+            resolution: 0.8,
+            leiden_max_iter: 10,
+            min_pct: 0.1,
+            min_log2fc: 0.25,
+            compute_markers: true,
+            compute_silhouette: true,
+        }
+    }
+}
+
+/// Configuration for marker gene detection.
+#[derive(Debug, Clone)]
+pub struct MarkerConfig {
+    /// Minimum fraction of cells expressing gene in either group (default 0.1).
+    pub min_pct: f64,
+    /// Minimum absolute log2 fold change (default 0.25).
+    pub min_log2fc: f64,
+    /// Only return upregulated markers (default true).
+    pub only_positive: bool,
+}
+
+impl Default for MarkerConfig {
+    fn default() -> Self {
+        Self {
+            min_pct: 0.1,
+            min_log2fc: 0.25,
+            only_positive: true,
+        }
+    }
+}
+
+/// Full analysis result (preprocessing + downstream).
+#[derive(Debug, Clone)]
+pub struct AnalysisResult {
+    pub preprocessing: PreprocessingResult,
+    pub knn: KnnGraph,
+    pub clusters: ClusterResult,
+    pub markers: Option<Vec<MarkerResult>>,
+    pub silhouette_scores: Option<Vec<f64>>,
+    pub silhouette_avg: Option<f64>,
+}

@@ -5,3 +5,5 @@ pub mod types;
 pub mod rna;
 
 pub mod reduce;
+pub mod cluster;
+pub mod markers;

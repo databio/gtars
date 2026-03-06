@@ -11,10 +11,10 @@ use std::path::PathBuf;
 use gtars_sc::io::read_10x;
 use gtars_sc::rna::hvg::find_variable_features;
 use gtars_sc::rna::normalize::log_normalize;
-use gtars_sc::rna::pipeline::run_rna_preprocessing;
+use gtars_sc::rna::pipeline::{run_full_rna_pipeline, run_rna_preprocessing};
 use gtars_sc::rna::qc::{compute_rna_qc, filter_genes, filter_rna_cells};
 use gtars_sc::rna::scale::scale_data;
-use gtars_sc::types::{FeatureType, RnaPipelineConfig};
+use gtars_sc::types::{DownstreamConfig, FeatureType, RnaPipelineConfig};
 
 fn pbmc_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -220,4 +220,77 @@ fn test_pbmc3k_full_pipeline() {
     }
 
     println!("PBMC 3k pipeline smoketest PASSED");
+}
+
+#[test]
+fn test_pbmc3k_full_pipeline_with_downstream() {
+    if !has_pbmc_data() {
+        eprintln!("SKIP: PBMC 3k data not found");
+        return;
+    }
+
+    let fm = read_10x(&pbmc_dir()).unwrap();
+
+    let preprocess_config = RnaPipelineConfig {
+        min_features: 200,
+        min_cells: 3,
+        max_pct_mt: 5.0,
+        scale_factor: 10_000.0,
+        n_variable_features: 2000,
+        n_pcs: 50,
+        clip_value: Some(10.0),
+    };
+
+    let downstream_config = DownstreamConfig {
+        k_neighbors: 20,
+        resolution: 0.8,
+        compute_markers: true,
+        compute_silhouette: true,
+        ..Default::default()
+    };
+
+    let result = run_full_rna_pipeline(fm, &preprocess_config, &downstream_config).unwrap();
+
+    // Clustering
+    let n_clusters = result.clusters.n_clusters;
+    println!("PBMC 3k clusters: {n_clusters}");
+    assert!(n_clusters >= 3, "too few clusters: {n_clusters}");
+    assert!(n_clusters <= 20, "too many clusters: {n_clusters}");
+
+    // Modularity should be positive
+    if let Some(q) = result.clusters.quality {
+        println!("Modularity: {q:.4}");
+        assert!(q > 0.0, "modularity should be positive");
+    }
+
+    // Markers
+    let markers = result.markers.as_ref().expect("markers should be computed");
+    println!("Total markers found: {}", markers.len());
+    assert!(!markers.is_empty(), "should find some markers");
+
+    // Check for known PBMC marker genes
+    let known_markers = ["CD3D", "CD3E", "MS4A1", "CD79A", "LYZ", "S100A8", "NKG7", "GNLY"];
+    let marker_genes: Vec<&str> = markers.iter().map(|m| m.gene.as_str()).collect();
+    let found_known: Vec<&&str> = known_markers
+        .iter()
+        .filter(|&&g| marker_genes.contains(&g))
+        .collect();
+    println!("Known PBMC markers found: {:?} ({}/{})", found_known, found_known.len(), known_markers.len());
+    assert!(
+        found_known.len() >= 3,
+        "expected at least 3 known PBMC markers, found {:?}",
+        found_known
+    );
+
+    // Silhouette
+    let avg_sil = result.silhouette_avg.expect("silhouette should be computed");
+    println!("Mean silhouette: {avg_sil:.4}");
+    assert!(avg_sil > 0.0, "mean silhouette should be positive for PBMC data");
+
+    // Cell metadata should have cluster assignments
+    for meta in &result.preprocessing.cell_metadata {
+        assert!(meta.cluster.is_some(), "cell {} missing cluster", meta.cell_id);
+    }
+
+    println!("PBMC 3k full pipeline (with downstream) smoketest PASSED");
 }

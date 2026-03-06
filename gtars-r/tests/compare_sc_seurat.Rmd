@@ -20,9 +20,12 @@ if (has_seurat) library(Seurat)
 
 # Overview
 
-This document runs the full single-cell RNA preprocessing pipeline on the
+This document runs the full single-cell RNA analysis pipeline on the
 **PBMC 3k** dataset using both **gtars-sc** (Rust) and **Seurat** (R),
 comparing timings, metric agreement, and output overlap at each step.
+
+**Pipeline:** Read 10X → QC → Filter → HVG → Normalize → Scale → PCA →
+FindNeighbors → FindClusters (Leiden) → UMAP → FindMarkers → Silhouette
 
 ```{r resolve-data}
 data_dir <- params$data_dir
@@ -79,6 +82,7 @@ time_it <- function(expr) {
 }
 
 fmt_time <- function(secs) {
+  if (is.na(secs)) return("—")
   if (secs < 1) sprintf("%.0f ms", secs * 1000) else sprintf("%.2f s", secs)
 }
 ```
@@ -326,6 +330,300 @@ if (exists("cors")) {
           ylab = "|Pearson r|", las = 2, cex.names = 0.7)
   abline(h = 0.9, lty = 2, col = "grey50")
 }
+```
+
+---
+
+# Step 9: Find Neighbors (KNN + SNN)
+
+```{r find-neighbors}
+t_gtars <- time_it({
+  snn_ptr <- sc_find_neighbors(pca_gtars$embeddings, k = 20L, prune_snn = 1/15)
+})
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- FindNeighbors(seu, dims = 1:50, k.param = 20, prune.SNN = 1/15, verbose = FALSE)
+  })
+} else {
+  t_seurat <- NA
+}
+
+timings[nrow(timings) + 1, ] <- list("FindNeighbors", t_gtars, t_seurat)
+```
+
+---
+
+# Step 10: Find Clusters (Leiden)
+
+```{r find-clusters}
+t_gtars <- time_it({
+  clust_gtars <- sc_find_clusters(snn_ptr, resolution = 0.8, max_iter = 10L)
+})
+
+cat(sprintf("gtars:  %d clusters, modularity = %.4f\n",
+            clust_gtars$n_clusters, clust_gtars$quality))
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    seu <- FindClusters(seu, resolution = 0.8, algorithm = 1, verbose = FALSE)
+  })
+  seurat_clusters <- as.integer(Idents(seu)) - 1L  # Convert to 0-indexed
+  n_seurat_clusters <- length(unique(seurat_clusters))
+  cat(sprintf("Seurat: %d clusters\n", n_seurat_clusters))
+} else {
+  t_seurat <- NA
+}
+
+timings[nrow(timings) + 1, ] <- list("FindClusters", t_gtars, t_seurat)
+```
+
+```{r cluster-comparison, eval=has_seurat}
+# Adjusted Rand Index to compare cluster agreement
+if (requireNamespace("mclust", quietly = TRUE)) {
+  shared_cells_clust <- intersect(rownames(pca_gtars$embeddings), colnames(seu))
+  gtars_labels <- clust_gtars$assignments[match(shared_cells_clust, rownames(pca_gtars$embeddings))]
+  seurat_labels <- as.integer(Idents(seu)[shared_cells_clust]) - 1L
+  ari <- mclust::adjustedRandIndex(gtars_labels, seurat_labels)
+  cat(sprintf("Adjusted Rand Index (gtars vs Seurat): %.4f\n", ari))
+  cat("(1.0 = identical, 0.0 = random agreement)\n")
+} else {
+  cat("Install `mclust` package for Adjusted Rand Index comparison\n")
+}
+```
+
+```{r cluster-counts, fig.width=8, fig.height=4, eval=has_seurat}
+shared_cells_clust <- intersect(rownames(pca_gtars$embeddings), colnames(seu))
+gtars_labels <- clust_gtars$assignments[match(shared_cells_clust, rownames(pca_gtars$embeddings))]
+seurat_labels <- as.integer(Idents(seu)[shared_cells_clust]) - 1L
+
+par(mfrow = c(1, 2))
+barplot(table(gtars_labels), col = "steelblue", main = "gtars-sc Cluster Sizes",
+        xlab = "Cluster", ylab = "Cells")
+barplot(table(seurat_labels), col = "coral", main = "Seurat Cluster Sizes",
+        xlab = "Cluster", ylab = "Cells")
+```
+
+---
+
+# Step 11: UMAP Visualization
+
+UMAP is computed in R (using `uwot`) for both pipelines. gtars-sc deliberately
+defers UMAP to the host language since R/Python/JS users prefer their own
+implementations.
+
+```{r umap-setup}
+has_uwot <- requireNamespace("uwot", quietly = TRUE)
+if (!has_uwot) {
+  cat("Install `uwot` package for UMAP visualization: install.packages('uwot')\n")
+}
+```
+
+```{r umap-gtars, eval=has_uwot}
+t_umap_gtars <- time_it({
+  umap_gtars <- uwot::umap(pca_gtars$embeddings, n_neighbors = 30, min_dist = 0.3,
+                            metric = "cosine", n_threads = 1, ret_nn = FALSE)
+})
+rownames(umap_gtars) <- rownames(pca_gtars$embeddings)
+cat(sprintf("gtars UMAP: %.2f s\n", t_umap_gtars))
+```
+
+```{r umap-seurat, eval=has_seurat}
+t_seurat_umap <- time_it({
+  seu <- RunUMAP(seu, dims = 1:50, verbose = FALSE)
+})
+timings[nrow(timings) + 1, ] <- list("UMAP", t_umap_gtars, t_seurat_umap)
+```
+
+```{r umap-timing-no-seurat, eval=!has_seurat && has_uwot}
+timings[nrow(timings) + 1, ] <- list("UMAP", t_umap_gtars, NA)
+```
+
+```{r umap-plot, fig.width=12, fig.height=5, eval=has_uwot}
+# Color palette for clusters
+n_colors <- max(clust_gtars$n_clusters, if (has_seurat) n_seurat_clusters else 0)
+pal <- if (n_colors <= 20) {
+  rainbow(n_colors, s = 0.7, v = 0.85)
+} else {
+  hcl.colors(n_colors, "Dark 3")
+}
+
+if (has_seurat) {
+  par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+  # gtars UMAP + clusters
+  plot(umap_gtars[, 1], umap_gtars[, 2],
+       col = pal[clust_gtars$assignments + 1], pch = 16, cex = 0.4,
+       xlab = "UMAP 1", ylab = "UMAP 2",
+       main = sprintf("gtars-sc (%d clusters)", clust_gtars$n_clusters))
+
+  # Seurat UMAP + clusters
+  seurat_umap <- Embeddings(seu, "umap")
+  seurat_clust <- as.integer(Idents(seu)) - 1L
+  plot(seurat_umap[, 1], seurat_umap[, 2],
+       col = pal[seurat_clust + 1], pch = 16, cex = 0.4,
+       xlab = "UMAP 1", ylab = "UMAP 2",
+       main = sprintf("Seurat (%d clusters)", n_seurat_clusters))
+} else {
+  plot(umap_gtars[, 1], umap_gtars[, 2],
+       col = pal[clust_gtars$assignments + 1], pch = 16, cex = 0.4,
+       xlab = "UMAP 1", ylab = "UMAP 2",
+       main = sprintf("gtars-sc (%d clusters)", clust_gtars$n_clusters))
+}
+```
+
+```{r umap-cross-color, fig.width=12, fig.height=5, eval=has_seurat && has_uwot}
+# Show gtars UMAP colored by Seurat clusters and vice versa for visual alignment
+shared <- intersect(rownames(umap_gtars), colnames(seu))
+par(mfrow = c(1, 2), mar = c(4, 4, 3, 1))
+
+# gtars UMAP colored by Seurat clusters
+seurat_cl_for_gtars <- as.integer(Idents(seu)[shared]) - 1L
+plot(umap_gtars[shared, 1], umap_gtars[shared, 2],
+     col = pal[seurat_cl_for_gtars + 1], pch = 16, cex = 0.4,
+     xlab = "UMAP 1", ylab = "UMAP 2",
+     main = "gtars UMAP, Seurat clusters")
+
+# Seurat UMAP colored by gtars clusters
+gtars_cl_for_seurat <- clust_gtars$assignments[match(shared, rownames(pca_gtars$embeddings))]
+seurat_umap_shared <- Embeddings(seu, "umap")[shared, ]
+plot(seurat_umap_shared[, 1], seurat_umap_shared[, 2],
+     col = pal[gtars_cl_for_seurat + 1], pch = 16, cex = 0.4,
+     xlab = "UMAP 1", ylab = "UMAP 2",
+     main = "Seurat UMAP, gtars clusters")
+```
+
+---
+
+# Step 12: Find Markers
+
+```{r find-markers}
+t_gtars <- time_it({
+  markers_gtars <- sc_find_all_markers(fm_norm, clust_gtars$assignments,
+                                        min_pct = 0.25, min_log2fc = 0.25)
+})
+cat(sprintf("gtars:  %d markers found\n", nrow(markers_gtars)))
+
+if (has_seurat) {
+  t_seurat <- time_it({
+    markers_seurat <- FindAllMarkers(seu, only.pos = TRUE, min.pct = 0.25,
+                                      logfc.threshold = 0.25, verbose = FALSE)
+  })
+  cat(sprintf("Seurat: %d markers found\n", nrow(markers_seurat)))
+} else {
+  t_seurat <- NA
+}
+
+timings[nrow(timings) + 1, ] <- list("FindMarkers", t_gtars, t_seurat)
+```
+
+```{r top-markers}
+# Show top 5 markers per cluster (gtars)
+for (cl in sort(unique(markers_gtars$cluster))) {
+  cl_markers <- markers_gtars[markers_gtars$cluster == cl, ]
+  cl_markers <- cl_markers[order(cl_markers$pval_adj), ]
+  top <- head(cl_markers, 5)
+  cat(sprintf("Cluster %d: %s\n", cl, paste(top$gene, collapse = ", ")))
+}
+```
+
+```{r marker-overlap, eval=has_seurat}
+# Compare top markers per cluster (each pipeline's own clusters)
+cat("\n--- Marker overlap (top 20 per cluster, own clusters) ---\n")
+gtars_clusters <- sort(unique(markers_gtars$cluster))
+for (cl in gtars_clusters) {
+  g_top <- head(markers_gtars$gene[markers_gtars$cluster == cl][
+    order(markers_gtars$pval_adj[markers_gtars$cluster == cl])], 20)
+
+  # Find closest Seurat cluster by marker overlap
+  seurat_cl_ids <- sort(unique(markers_seurat$cluster))
+  best_overlap <- 0
+  best_seurat_cl <- NA
+  for (s_cl in seurat_cl_ids) {
+    s_top <- head(markers_seurat$gene[markers_seurat$cluster == s_cl][
+      order(markers_seurat$p_val_adj[markers_seurat$cluster == s_cl])], 20)
+    ov <- length(intersect(g_top, s_top))
+    if (ov > best_overlap) {
+      best_overlap <- ov
+      best_seurat_cl <- s_cl
+    }
+  }
+  cat(sprintf("  gtars %d -> Seurat %s: %d/20 top markers shared\n",
+              cl, best_seurat_cl, best_overlap))
+}
+```
+
+## Same-Cluster Marker Comparison
+
+To separate clustering differences from marker detection differences, we run
+**gtars marker detection on Seurat's clusters** and compare the resulting gene
+lists directly.
+
+```{r same-cluster-markers, eval=has_seurat}
+# Run gtars FindMarkers using Seurat's cluster assignments
+shared_cells_mk <- intersect(rownames(pca_gtars$embeddings), colnames(seu))
+seurat_labels_for_gtars <- as.integer(Idents(seu)[shared_cells_mk]) - 1L
+
+t_gtars_seurat_cl <- time_it({
+  markers_gtars_scl <- sc_find_all_markers(fm_norm, seurat_labels_for_gtars,
+                                            min_pct = 0.25, min_log2fc = 0.25)
+})
+
+cat(sprintf("gtars markers (Seurat clusters): %d found in %.2f s\n",
+            nrow(markers_gtars_scl), t_gtars_seurat_cl))
+
+cat("\n--- Same-cluster marker overlap (top 20 per cluster) ---\n")
+for (s_cl in sort(unique(markers_seurat$cluster))) {
+  s_cl_int <- as.integer(s_cl) - 1L
+  g_top <- head(markers_gtars_scl$gene[markers_gtars_scl$cluster == s_cl_int][
+    order(markers_gtars_scl$pval_adj[markers_gtars_scl$cluster == s_cl_int])], 20)
+  s_top <- head(markers_seurat$gene[markers_seurat$cluster == s_cl][
+    order(markers_seurat$p_val_adj[markers_seurat$cluster == s_cl])], 20)
+  ov <- length(intersect(g_top, s_top))
+  cat(sprintf("  Cluster %s: %d/20 top markers shared (gtars Wilcoxon vs Seurat)\n", s_cl, ov))
+}
+```
+
+```{r known-markers, fig.width=10, fig.height=5, eval=has_uwot}
+# Highlight known cell type markers on the UMAP
+known <- c("CD3D", "CD3E",     # T cells
+           "MS4A1", "CD79A",   # B cells
+           "LYZ", "S100A8",    # Monocytes
+           "NKG7", "GNLY")     # NK cells
+
+found <- known[known %in% markers_gtars$gene]
+cat(sprintf("Known PBMC markers in gtars results: %d/%d\n", length(found), length(known)))
+if (length(found) > 0) {
+  cat(sprintf("  Found: %s\n", paste(found, collapse = ", ")))
+  missing <- setdiff(known, found)
+  if (length(missing) > 0) cat(sprintf("  Missing: %s\n", paste(missing, collapse = ", ")))
+}
+```
+
+---
+
+# Step 13: Silhouette Scores
+
+```{r silhouette}
+t_gtars <- time_it({
+  sil_gtars <- sc_silhouette(pca_gtars$embeddings, clust_gtars$assignments)
+})
+cat(sprintf("gtars mean silhouette: %.4f\n", sil_gtars$avg))
+
+timings[nrow(timings) + 1, ] <- list("Silhouette", t_gtars, NA)
+```
+
+```{r silhouette-plot, fig.width=8, fig.height=5}
+# Per-cluster silhouette
+scores_by_cluster <- split(sil_gtars$scores, clust_gtars$assignments)
+cluster_means <- sapply(scores_by_cluster, mean)
+
+barplot(sort(cluster_means, decreasing = TRUE),
+        col = pal[as.integer(names(sort(cluster_means, decreasing = TRUE))) + 1],
+        main = sprintf("Mean Silhouette by Cluster (overall: %.3f)", sil_gtars$avg),
+        ylab = "Mean Silhouette Score", xlab = "Cluster",
+        names.arg = names(sort(cluster_means, decreasing = TRUE)))
+abline(h = sil_gtars$avg, lty = 2, col = "grey40")
 ```
 
 ---

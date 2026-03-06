@@ -648,5 +648,52 @@ sc_run_pca <- function(matrix_data, nrow, ncol, n_pcs) .Call(wrap__r_sc_run_pca,
 #' @param clip_value Clip value for scaling (default 10.0, NA to skip)
 sc_run_rna_pipeline <- function(ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value) .Call(wrap__r_sc_run_rna_pipeline, ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value)
 
+#' Build KNN + SNN graph from a PCA embedding matrix
+#' @export
+#' @param embedding_data Flat numeric vector (column-major) of cell embeddings
+#' @param nrow Number of rows (cells)
+#' @param ncol Number of columns (PCs)
+#' @param k Number of nearest neighbors (default 20)
+#' @param prune_snn Minimum Jaccard index to keep an SNN edge (default 1/15)
+sc_find_neighbors <- function(embedding_data, nrow, ncol, k, prune_snn) .Call(wrap__r_sc_find_neighbors, embedding_data, nrow, ncol, k, prune_snn)
+
+#' Run Leiden clustering on an SNN graph
+#' @export
+#' @param snn_ptr External pointer to an SnnGraph
+#' @param resolution Resolution parameter (default 0.8)
+#' @param max_iter Maximum iterations (default 10)
+sc_find_clusters <- function(snn_ptr, resolution, max_iter) .Call(wrap__r_sc_find_clusters, snn_ptr, resolution, max_iter)
+
+#' Find marker genes for each cluster using Wilcoxon rank-sum test
+#' @export
+#' @param ptr External pointer to a FeatureMatrix (log-normalized)
+#' @param clusters Integer vector of cluster assignments (0-indexed)
+#' @param min_pct Minimum fraction of cells expressing the gene (default 0.1)
+#' @param min_log2fc Minimum log2 fold-change (default 0.25)
+sc_find_all_markers <- function(ptr, clusters, min_pct, min_log2fc) .Call(wrap__r_sc_find_all_markers, ptr, clusters, min_pct, min_log2fc)
+
+#' Compute silhouette scores for cluster quality assessment
+#' @export
+#' @param embedding_data Flat numeric vector (column-major) of cell embeddings
+#' @param nrow Number of rows (cells)
+#' @param ncol Number of columns (PCs)
+#' @param clusters Integer vector of cluster assignments (0-indexed)
+sc_silhouette <- function(embedding_data, nrow, ncol, clusters) .Call(wrap__r_sc_silhouette, embedding_data, nrow, ncol, clusters)
+
+#' Run the full RNA analysis pipeline (preprocessing + clustering + markers)
+#' @export
+#' @param ptr External pointer to a FeatureMatrix
+#' @param min_features Minimum features per cell (default 200)
+#' @param min_cells Minimum cells per gene (default 3)
+#' @param max_pct_mt Maximum mitochondrial percentage (default 5.0)
+#' @param scale_factor Normalization scale factor (default 10000)
+#' @param n_variable_features Number of HVGs (default 2000)
+#' @param n_pcs Number of PCs (default 50)
+#' @param clip_value Clip value for scaling (default 10.0, NA to skip)
+#' @param k_neighbors Number of nearest neighbors (default 20)
+#' @param resolution Leiden resolution (default 0.8)
+#' @param compute_markers Whether to compute marker genes (default TRUE)
+#' @param compute_silhouette Whether to compute silhouette scores (default TRUE)
+sc_run_full_pipeline <- function(ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value, k_neighbors, resolution, compute_markers, compute_silhouette) .Call(wrap__r_sc_run_full_pipeline, ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value, k_neighbors, resolution, compute_markers, compute_silhouette)
 
 # nolint end

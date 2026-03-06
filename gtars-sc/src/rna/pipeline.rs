@@ -8,8 +8,13 @@ use crate::rna::hvg::find_variable_features;
 use crate::rna::normalize::log_normalize;
 use crate::rna::qc::{compute_rna_qc, filter_genes, filter_rna_cells};
 use crate::rna::scale::scale_data;
+use crate::cluster::leiden::leiden_clustering;
+use crate::cluster::silhouette::{mean_silhouette, silhouette_scores};
+use crate::markers::wilcoxon::find_all_markers;
+use crate::reduce::neighbors::{build_knn, build_snn};
 use crate::types::{
-    CellMetadata, Embedding, EmbeddingMethod, FeatureMatrix, PreprocessingResult, RnaPipelineConfig,
+    AnalysisResult, CellMetadata, DownstreamConfig, Embedding, EmbeddingMethod, FeatureMatrix,
+    MarkerConfig, PreprocessingResult, RnaPipelineConfig,
 };
 
 /// Run the full RNA preprocessing pipeline.
@@ -80,6 +85,74 @@ pub fn run_rna_preprocessing(
         variable_features,
         cell_metadata,
     })
+}
+
+/// Run downstream analysis on preprocessed data.
+///
+/// Steps: KNN → SNN → Leiden clustering → markers (optional) → silhouette (optional)
+///
+/// Updates `cell_metadata[i].cluster` with cluster assignments.
+pub fn run_rna_downstream(
+    result: &mut PreprocessingResult,
+    config: &DownstreamConfig,
+) -> Result<AnalysisResult> {
+    // 1. KNN from PCA embeddings
+    let knn = build_knn(&result.embedding.values, config.k_neighbors)?;
+
+    // 2. SNN graph with Jaccard weights
+    let snn = build_snn(&knn, config.prune_snn);
+
+    // 3. Leiden clustering
+    let clusters = leiden_clustering(&snn, config.resolution, config.leiden_max_iter)?;
+
+    // Update cell metadata with cluster assignments
+    for (i, meta) in result.cell_metadata.iter_mut().enumerate() {
+        meta.cluster = Some(clusters.assignments[i]);
+    }
+
+    // 4. Optional: marker genes
+    let markers = if config.compute_markers {
+        let marker_config = MarkerConfig {
+            min_pct: config.min_pct,
+            min_log2fc: config.min_log2fc,
+            only_positive: true,
+        };
+        Some(find_all_markers(
+            &result.matrix,
+            &clusters.assignments,
+            &marker_config,
+        )?)
+    } else {
+        None
+    };
+
+    // 5. Optional: silhouette scores
+    let (sil_scores, sil_avg) = if config.compute_silhouette {
+        let scores = silhouette_scores(&result.embedding.values, &clusters.assignments);
+        let avg = mean_silhouette(&scores);
+        (Some(scores), Some(avg))
+    } else {
+        (None, None)
+    };
+
+    Ok(AnalysisResult {
+        preprocessing: result.clone(),
+        knn,
+        clusters,
+        markers,
+        silhouette_scores: sil_scores,
+        silhouette_avg: sil_avg,
+    })
+}
+
+/// Run the full RNA analysis pipeline (preprocessing + downstream).
+pub fn run_full_rna_pipeline(
+    matrix: FeatureMatrix,
+    preprocess_config: &RnaPipelineConfig,
+    downstream_config: &DownstreamConfig,
+) -> Result<AnalysisResult> {
+    let mut prep = run_rna_preprocessing(matrix, preprocess_config)?;
+    run_rna_downstream(&mut prep, downstream_config)
 }
 
 #[cfg(test)]

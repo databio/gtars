@@ -171,3 +171,145 @@ sc_run_rna_pipeline <- function(ptr,
     final_n_cells = res$final_n_cells
   )
 }
+
+#' Build nearest neighbor graph (KNN + SNN)
+#'
+#' @param embeddings Matrix (cells x PCs) from sc_run_pca or sc_run_rna_pipeline
+#' @param k Number of nearest neighbors (default 20)
+#' @param prune_snn Minimum Jaccard index for SNN edges (default 1/15)
+#' @return An external pointer to an SnnGraph
+#' @export
+sc_find_neighbors <- function(embeddings, k = 20L, prune_snn = 1/15) {
+  stopifnot(is.matrix(embeddings), is.numeric(embeddings))
+  nr <- nrow(embeddings)
+  nc <- ncol(embeddings)
+  .Call(wrap__r_sc_find_neighbors, as.double(embeddings),
+        as.integer(nr), as.integer(nc), as.integer(k), as.double(prune_snn))
+}
+
+#' Find clusters using Leiden algorithm
+#'
+#' @param snn_ptr External pointer to an SnnGraph from sc_find_neighbors
+#' @param resolution Resolution parameter controlling cluster granularity (default 0.8)
+#' @param max_iter Maximum Leiden iterations (default 10)
+#' @return A named list with assignments (integer vector), n_clusters, quality (modularity)
+#' @export
+sc_find_clusters <- function(snn_ptr, resolution = 0.8, max_iter = 10L) {
+  .Call(wrap__r_sc_find_clusters, snn_ptr,
+        as.double(resolution), as.integer(max_iter))
+}
+
+#' Find marker genes for each cluster
+#'
+#' @param ptr External pointer to a FeatureMatrix (log-normalized)
+#' @param clusters Integer vector of cluster assignments (0-indexed)
+#' @param min_pct Minimum fraction of cells expressing gene (default 0.1)
+#' @param min_log2fc Minimum log2 fold-change threshold (default 0.25)
+#' @return A data.frame with columns: gene, cluster, avg_log2fc, pval, pval_adj, pct_in, pct_out
+#' @export
+sc_find_all_markers <- function(ptr, clusters, min_pct = 0.1, min_log2fc = 0.25) {
+  res <- .Call(wrap__r_sc_find_all_markers, ptr, as.integer(clusters),
+               as.double(min_pct), as.double(min_log2fc))
+  data.frame(
+    gene = res$gene,
+    cluster = res$cluster,
+    avg_log2fc = res$avg_log2fc,
+    pval = res$pval,
+    pval_adj = res$pval_adj,
+    pct_in = res$pct_in,
+    pct_out = res$pct_out,
+    stringsAsFactors = FALSE
+  )
+}
+
+#' Compute silhouette scores
+#'
+#' @param embeddings Matrix (cells x PCs) from sc_run_pca or sc_run_rna_pipeline
+#' @param clusters Integer vector of cluster assignments (0-indexed)
+#' @return A named list with scores (per-cell) and avg (mean silhouette)
+#' @export
+sc_silhouette <- function(embeddings, clusters) {
+  stopifnot(is.matrix(embeddings), is.numeric(embeddings))
+  nr <- nrow(embeddings)
+  nc <- ncol(embeddings)
+  .Call(wrap__r_sc_silhouette, as.double(embeddings),
+        as.integer(nr), as.integer(nc), as.integer(clusters))
+}
+
+#' Run the full RNA analysis pipeline (preprocessing + clustering + markers)
+#'
+#' @param ptr External pointer to a FeatureMatrix
+#' @param min_features Minimum features per cell (default 200)
+#' @param min_cells Minimum cells per gene (default 3)
+#' @param max_pct_mt Maximum mitochondrial percentage (default 5.0)
+#' @param scale_factor Normalization scale factor (default 10000)
+#' @param n_variable_features Number of HVGs (default 2000)
+#' @param n_pcs Number of PCs (default 50)
+#' @param clip_value Clip value for scaling (default 10.0, NA to skip)
+#' @param k_neighbors Number of nearest neighbors (default 20)
+#' @param resolution Leiden resolution (default 0.8)
+#' @param compute_markers Compute marker genes (default TRUE)
+#' @param compute_silhouette Compute silhouette scores (default TRUE)
+#' @return A named list with embeddings, clusters, markers, and cell metadata
+#' @export
+sc_run_full_pipeline <- function(ptr,
+                                 min_features = 200L,
+                                 min_cells = 3L,
+                                 max_pct_mt = 5.0,
+                                 scale_factor = 10000,
+                                 n_variable_features = 2000L,
+                                 n_pcs = 50L,
+                                 clip_value = 10.0,
+                                 k_neighbors = 20L,
+                                 resolution = 0.8,
+                                 compute_markers = TRUE,
+                                 compute_silhouette = TRUE) {
+  res <- .Call(wrap__r_sc_run_full_pipeline, ptr,
+               as.integer(min_features), as.integer(min_cells),
+               as.double(max_pct_mt), as.double(scale_factor),
+               as.integer(n_variable_features), as.integer(n_pcs),
+               clip_value,
+               as.integer(k_neighbors), as.double(resolution),
+               as.logical(compute_markers), as.logical(compute_silhouette))
+
+  # Build embeddings matrix
+  emb <- matrix(res$embeddings, nrow = res$emb_nrow, ncol = res$emb_ncol)
+  colnames(emb) <- paste0("PC_", seq_len(res$emb_ncol))
+  rownames(emb) <- res$cell_ids
+
+  # Build cell metadata data.frame
+  meta <- data.frame(
+    cell_id = res$cell_ids,
+    n_features = res$n_features,
+    n_counts = res$n_counts,
+    pct_mt = res$pct_mt,
+    cluster = res$clusters,
+    stringsAsFactors = FALSE
+  )
+
+  # Build markers data.frame if available
+  markers <- NULL
+  if (length(res$marker_gene) > 0) {
+    markers <- data.frame(
+      gene = res$marker_gene,
+      cluster = res$marker_cluster,
+      avg_log2fc = res$marker_avg_log2fc,
+      pval = res$marker_pval,
+      pval_adj = res$marker_pval_adj,
+      pct_in = res$marker_pct_in,
+      pct_out = res$marker_pct_out,
+      stringsAsFactors = FALSE
+    )
+  }
+
+  list(
+    embeddings = emb,
+    variance_explained = res$variance_explained,
+    variable_features = res$variable_features,
+    cell_metadata = meta,
+    n_clusters = res$n_clusters,
+    modularity = res$modularity,
+    markers = markers,
+    silhouette_avg = res$silhouette_avg
+  )
+}
