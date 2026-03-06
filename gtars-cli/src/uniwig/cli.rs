@@ -134,7 +134,7 @@ pub fn create_uniwig_cli() -> Command {
         .arg(
             Arg::new("dense")
                 .long("dense")
-                .help("Streaming: max gap width to fill with zeros. 0=sparse (default), -1=fully dense, N=fill gaps<=N")
+                .help("Streaming: max gap width to fill with zeros. 0=sparse, -1=fully dense, N=fill gaps<=N (default 100)")
                 .value_parser(clap::value_parser!(i64))
                 .default_value("100")
                 .required(false),

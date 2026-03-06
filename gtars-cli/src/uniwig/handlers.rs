@@ -208,7 +208,11 @@ fn run_uniwig_streaming(matches: &ArgMatches) {
             let header = matches
                 .get_one::<String>("fileheader")
                 .expect("--fileheader required for file output in streaming mode");
-            let filename = format!("{}_{}.wig", header, label);
+            let extension = match output_format {
+                OutputFormat::BedGraph => "bedgraph",
+                _ => "wig",
+            };
+            let filename = format!("{}_{}.{}", header, label, extension);
             Box::new(File::create(&filename).expect("Cannot create output file"))
         };
 
