@@ -2,7 +2,7 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{get_sequence_metadata_by_alias_store}
 \alias{get_sequence_metadata_by_alias_store}
-\title{Get sequence metadata by alias}
+\title{Get sequence by alias}
 \usage{
 get_sequence_metadata_by_alias_store(store_ptr, namespace, alias)
 }
@@ -14,5 +14,5 @@ get_sequence_metadata_by_alias_store(store_ptr, namespace, alias)
 \item{alias}{Alias name}
 }
 \description{
-Get sequence metadata by alias
+Get sequence by alias
 }

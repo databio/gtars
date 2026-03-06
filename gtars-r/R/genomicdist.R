@@ -85,16 +85,6 @@ regionset_to_df <- function(rs) {
              stringsAsFactors = FALSE)
 }
 
-#' Get number of regions in a RegionSet
-#'
-#' @param rs An external pointer to a RegionSet
-#' @return Integer count of regions
-#'
-#' @export
-regionset_length <- function(rs) {
-  .Call(wrap__r_regionset_length, rs)
-}
-
 # =========================================================================
 # Helper: ensure query is a RegionSet pointer
 # =========================================================================

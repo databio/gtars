@@ -203,7 +203,7 @@ r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom
 #' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
 #' @param n_regions Number of signal regions
 #' @param n_conditions Number of conditions
-r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, n_regions, n_conditions)
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions)
 
 #' Calculate absolute distance from each query region to nearest feature midpoint.
 #' Returns NA for regions on chromosomes without features.
@@ -484,7 +484,7 @@ get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_fil
 #' @param digest Sequence digest
 add_sequence_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_sequence_alias_store, store_ptr, namespace, alias, digest)
 
-#' Get sequence metadata by alias
+#' Get sequence by alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name
@@ -523,7 +523,7 @@ load_sequence_aliases_store <- function(store_ptr, namespace, path) .Call(wrap__
 #' @param digest Collection digest
 add_collection_alias_store <- function(store_ptr, namespace, alias, digest) .Call(wrap__add_collection_alias_store, store_ptr, namespace, alias, digest)
 
-#' Get collection metadata by alias
+#' Get collection by alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name

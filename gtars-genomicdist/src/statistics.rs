@@ -30,13 +30,6 @@ pub trait GenomicIntervalSetStatistics {
     /// is determined by the longest chromosome. Returns bins with overlap counts.
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin>;
 
-    /// Compute region distribution using 10 bins (default).
-    ///
-    /// Convenience method that calls `region_distribution_with_bins(10)`.
-    fn region_distribution(&self) -> HashMap<String, RegionBin> {
-        self.region_distribution_with_bins(250)
-    }
-
     /// Compute distances between consecutive regions on each chromosome.
     ///
     /// For each pair of adjacent regions on the same chromosome, returns the
@@ -132,7 +125,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
             .collect::<Vec<Region>>();
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
-        let region_length = region_hits.first().unwrap().end - region_hits.first().unwrap().start;
+        let region_length = (region_hits.first().unwrap().end - region_hits.first().unwrap().start).max(1);
 
         for k in &region_hits {
             if let Some(region_bin) = plot_results.get_mut(&k.digest()) {
@@ -179,6 +172,11 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
 
             if chr_regions.len() < 2 {
+                // Single region on this chromosome has no neighbor.
+                // Push u32::MAX sentinel (matches calc_tss_distances convention).
+                for _ in &chr_regions {
+                    nearest.push(u32::MAX);
+                }
                 continue;
             }
 
@@ -448,16 +446,128 @@ mod tests {
         assert_eq!(*widths.iter().max().unwrap(), 9);
     }
 
+    fn get_fasta_path(file_name: &str) -> PathBuf {
+        std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/fasta")
+            .join(file_name)
+    }
+
+    // --- calc_nearest_neighbors bug regression ---
+
     #[rstest]
-    #[ignore] // only for local testing
+    fn test_nearest_neighbors_single_region_chrom() {
+        // Regression: single-region chromosomes used to be skipped,
+        // producing a short vector. Now they get u32::MAX sentinel.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr1".into(), start: 30, end: 40, rest: None },
+            Region { chr: "chr2".into(), start: 100, end: 200, rest: None }, // lone region
+        ];
+        let rs = RegionSet::from(regions);
+        let nearest = rs.calc_nearest_neighbors().unwrap();
+
+        // Must return one value per region (3 total, not 2)
+        assert_eq!(nearest.len(), 3);
+        // Two chr1 regions have neighbor distance 10, one chr2 region gets sentinel.
+        // Order depends on HashSet iteration of iter_chroms.
+        let mut sorted = nearest.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec![10, 10, u32::MAX]);
+    }
+
+    // --- GC content ---
+
+    #[rstest]
+    fn test_calc_gc_content() {
+        // base.fa: chr1=GGAA (2G, 0C → 50%), chr2=GCGC (2G, 2C → 100%)
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let gc = calc_gc_content(&rs, &ga, false).unwrap();
+
+        assert_eq!(gc.len(), 2);
+        // iter_chroms uses HashSet so order is nondeterministic
+        let mut sorted_gc = gc.clone();
+        sorted_gc.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        assert!((sorted_gc[0] - 0.5).abs() < 1e-10);  // chr1: GGAA → 50%
+        assert!((sorted_gc[1] - 1.0).abs() < 1e-10);  // chr2: GCGC → 100%
+    }
+
+    #[rstest]
+    fn test_calc_gc_content_ignore_unknown_chroms() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chrUnknown".into(), start: 0, end: 10, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+
+        // With ignore_unk_chroms=true, should skip unknown chromosome
+        let gc = calc_gc_content(&rs, &ga, true).unwrap();
+        assert_eq!(gc.len(), 1);
+
+        // With ignore_unk_chroms=false, should error
+        let gc_err = calc_gc_content(&rs, &ga, false);
+        assert!(gc_err.is_err());
+    }
+
+    // --- Dinucleotide frequency ---
+
+    #[rstest]
     fn test_calc_dinucl_freq() {
-        let ga = GenomeAssembly::try_from("/home/bnt4me/virginia/repos/bedboss/data/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4/fasta/default/2230c535660fb4774114bfa966a62f823fdb6d21acf138d4.fa").unwrap();
-        let rs =
-            RegionSet::try_from("/home/bnt4me/Downloads/dcc005e8761ad5599545cc538f6a2a4d.bed.gz")
-                .unwrap();
+        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
-        let result = calc_dinucl_freq(&rs, &ga).unwrap();
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let freq = calc_dinucl_freq(&rs, &ga).unwrap();
 
-        assert_ne!(result.len(), 0);
+        assert_eq!(*freq.get(&Dinucleotide::Gg).unwrap_or(&0), 1);
+        assert_eq!(*freq.get(&Dinucleotide::Ga).unwrap_or(&0), 1);
+        assert_eq!(*freq.get(&Dinucleotide::Aa).unwrap_or(&0), 1);
+        // total should be 3 (4 bases → 3 dinucleotides)
+        let total: u64 = freq.values().sum();
+        assert_eq!(total, 3);
+    }
+
+    #[rstest]
+    fn test_calc_dinucl_freq_per_region() {
+        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let (labels, matrix) = calc_dinucl_freq_per_region(&rs, &ga).unwrap();
+
+        assert_eq!(labels.len(), 1);
+        assert_eq!(labels[0], "chr2_0_4");
+        assert_eq!(matrix.len(), 1);
+
+        // GC appears 2/3 times, CG appears 1/3 times
+        // Find indices in DINUCL_ORDER
+        let gc_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gc).unwrap();
+        let cg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Cg).unwrap();
+
+        let row = &matrix[0];
+        assert!((row[gc_idx] - 200.0 / 3.0).abs() < 0.1); // ~66.67%
+        assert!((row[cg_idx] - 100.0 / 3.0).abs() < 0.1);  // ~33.33%
+
+        // all other dinucleotides should be 0
+        let total: f64 = row.iter().sum();
+        assert!((total - 100.0).abs() < 0.1);
     }
 }

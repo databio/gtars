@@ -15,6 +15,7 @@ use gtars_genomicdist::{
     GeneModel, GenomicDistAnnotation, ExpectedPartitionResult, PartitionResult,
     calc_expected_partitions, calc_partitions, genome_partition_list,
     SignalMatrix, calc_summary_signal, ConditionStats,
+    median_abs_distance,
 };
 
 #[derive(Serialize)]
@@ -169,18 +170,10 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         None
     };
 
-    // Median of absolute distances (for the scalar summary)
-    let median_tss_dist = tss_distances.as_ref().map(|dists| {
-        let mut sorted: Vec<f64> = dists.iter().map(|&d| (d as f64).abs()).collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        let n = sorted.len();
-        if n == 0 {
-            0.0
-        } else if n % 2 == 0 {
-            (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0
-        } else {
-            sorted[n / 2]
-        }
+    // Median of absolute distances (for the scalar summary).
+    // Filters out i64::MAX sentinels (regions on chromosomes with no TSS features).
+    let median_tss_dist = tss_distances.as_ref().and_then(|dists| {
+        median_abs_distance(dists)
     });
 
     // --- Partitions ---

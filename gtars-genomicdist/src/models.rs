@@ -215,7 +215,7 @@ impl GenomeAssembly {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum Dinucleotide {
     Aa,
     Ac,
@@ -470,6 +470,244 @@ mod tests {
             .join(file_name);
         Ok(file_path)
     }
+
+    fn get_fasta_path(file_name: &str) -> PathBuf {
+        std::env::current_dir()
+            .unwrap()
+            .join("../tests/data/fasta")
+            .join(file_name)
+    }
+
+    // --- Strand ---
+
+    #[test]
+    fn test_strand_from_char() {
+        assert_eq!(Strand::from_char('+'), Strand::Plus);
+        assert_eq!(Strand::from_char('-'), Strand::Minus);
+        assert_eq!(Strand::from_char('.'), Strand::Unstranded);
+        assert_eq!(Strand::from_char('?'), Strand::Unstranded);
+    }
+
+    // --- Dinucleotide ---
+
+    #[test]
+    fn test_dinucleotide_from_bytes_all_variants() {
+        let pairs = [
+            (b"AA", Dinucleotide::Aa), (b"AC", Dinucleotide::Ac),
+            (b"AG", Dinucleotide::Ag), (b"AT", Dinucleotide::At),
+            (b"CA", Dinucleotide::Ca), (b"CC", Dinucleotide::Cc),
+            (b"CG", Dinucleotide::Cg), (b"CT", Dinucleotide::Ct),
+            (b"GA", Dinucleotide::Ga), (b"GC", Dinucleotide::Gc),
+            (b"GG", Dinucleotide::Gg), (b"GT", Dinucleotide::Gt),
+            (b"TA", Dinucleotide::Ta), (b"TC", Dinucleotide::Tc),
+            (b"TG", Dinucleotide::Tg), (b"TT", Dinucleotide::Tt),
+        ];
+        for (bytes, expected) in &pairs {
+            assert_eq!(Dinucleotide::from_bytes(&bytes[..]), Some(*expected));
+        }
+    }
+
+    #[test]
+    fn test_dinucleotide_case_insensitive() {
+        assert_eq!(Dinucleotide::from_bytes(b"aa"), Some(Dinucleotide::Aa));
+        assert_eq!(Dinucleotide::from_bytes(b"cG"), Some(Dinucleotide::Cg));
+        assert_eq!(Dinucleotide::from_bytes(b"Tc"), Some(Dinucleotide::Tc));
+    }
+
+    #[test]
+    fn test_dinucleotide_invalid() {
+        assert_eq!(Dinucleotide::from_bytes(b"AN"), None);
+        assert_eq!(Dinucleotide::from_bytes(b"A"), None);  // too short
+        assert_eq!(Dinucleotide::from_bytes(b"ACG"), None); // too long
+    }
+
+    #[test]
+    fn test_dinucleotide_to_string_round_trip() {
+        let all = [
+            Dinucleotide::Aa, Dinucleotide::Ac, Dinucleotide::Ag, Dinucleotide::At,
+            Dinucleotide::Ca, Dinucleotide::Cc, Dinucleotide::Cg, Dinucleotide::Ct,
+            Dinucleotide::Ga, Dinucleotide::Gc, Dinucleotide::Gg, Dinucleotide::Gt,
+            Dinucleotide::Ta, Dinucleotide::Tc, Dinucleotide::Tg, Dinucleotide::Tt,
+        ];
+        for d in &all {
+            let s = d.to_string().unwrap();
+            assert_eq!(s.len(), 2);
+            let round_tripped = Dinucleotide::from_bytes(s.as_bytes()).unwrap();
+            assert_eq!(*d, round_tripped);
+        }
+    }
+
+    // --- SortedRegionSet ---
+
+    #[test]
+    fn test_sorted_regionset_sorts_in_place() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 200, rest: None },
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr2".into(), start: 5, end: 15, rest: None },
+        ];
+        let sorted = SortedRegionSet::new(RegionSet::from(regions));
+        let starts: Vec<u32> = sorted.0.regions.iter().map(|r| r.start).collect();
+        // chr1 regions should come first (sorted by chr then start)
+        assert_eq!(starts, vec![10, 100, 5]);
+    }
+
+    // --- StrandedRegionSet ---
+
+    #[test]
+    fn test_stranded_regionset_new() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr1".into(), start: 30, end: 40, rest: None },
+        ];
+        let strands = vec![Strand::Plus, Strand::Minus];
+        let srs = StrandedRegionSet::new(RegionSet::from(regions), strands);
+        assert_eq!(srs.len(), 2);
+        assert!(!srs.is_empty());
+        assert_eq!(srs.strands[0], Strand::Plus);
+        assert_eq!(srs.strands[1], Strand::Minus);
+    }
+
+    #[test]
+    fn test_stranded_regionset_unstranded() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+        ];
+        let srs = StrandedRegionSet::unstranded(RegionSet::from(regions));
+        assert_eq!(srs.strands, vec![Strand::Unstranded]);
+    }
+
+    #[test]
+    #[should_panic(expected = "regions and strands must have the same length")]
+    fn test_stranded_regionset_mismatched_lengths() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+        ];
+        StrandedRegionSet::new(RegionSet::from(regions), vec![]);
+    }
+
+    #[test]
+    fn test_stranded_regionset_into_regionset() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+        ];
+        let srs = StrandedRegionSet::unstranded(RegionSet::from(regions));
+        let rs = srs.into_regionset();
+        assert_eq!(rs.regions.len(), 1);
+    }
+
+    // --- GenomeAssembly ---
+
+    #[test]
+    fn test_genome_assembly_from_fasta() {
+        // base.fa: chrX=TTGGGGAA, chr1=GGAA, chr2=GCGC
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.as_path()).unwrap();
+        assert!(ga.contains_chr("chr1"));
+        assert!(ga.contains_chr("chr2"));
+        assert!(ga.contains_chr("chrX"));
+        assert!(!ga.contains_chr("chr3"));
+    }
+
+    #[test]
+    fn test_genome_assembly_seq_from_region() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.as_path()).unwrap();
+
+        let region = Region { chr: "chr1".into(), start: 0, end: 4, rest: None };
+        let seq = ga.seq_from_region(&region).unwrap();
+        assert_eq!(seq, b"GGAA");
+
+        let region2 = Region { chr: "chrX".into(), start: 2, end: 6, rest: None };
+        let seq2 = ga.seq_from_region(&region2).unwrap();
+        assert_eq!(seq2, b"GGGG");
+    }
+
+    #[test]
+    fn test_genome_assembly_seq_unknown_chrom() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.as_path()).unwrap();
+
+        let region = Region { chr: "chr99".into(), start: 0, end: 1, rest: None };
+        assert!(ga.seq_from_region(&region).is_err());
+    }
+
+    #[test]
+    fn test_genome_assembly_seq_out_of_bounds() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.as_path()).unwrap();
+
+        // chr1 is only 4bp, request 0-100
+        let region = Region { chr: "chr1".into(), start: 0, end: 100, rest: None };
+        assert!(ga.seq_from_region(&region).is_err());
+    }
+
+    #[test]
+    fn test_genome_assembly_try_from_str() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap());
+        assert!(ga.is_ok());
+    }
+
+    #[test]
+    fn test_genome_assembly_try_from_string() {
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap().to_string());
+        assert!(ga.is_ok());
+        assert!(ga.unwrap().contains_chr("chr1"));
+    }
+
+    #[test]
+    fn test_tss_index_try_from_string() {
+        let path = get_test_path("dummy_tss.bed").unwrap();
+        let tss = TssIndex::try_from(path.to_str().unwrap().to_string());
+        assert!(tss.is_ok());
+    }
+
+    // --- TssIndex sentinel behavior ---
+
+    #[test]
+    fn test_tss_distances_sentinel_for_missing_chrom() {
+        // TSS features only on chr1
+        let tss_regions = vec![
+            Region { chr: "chr1".into(), start: 50, end: 51, rest: None },
+        ];
+        let tss_index = TssIndex::try_from(RegionSet::from(tss_regions)).unwrap();
+
+        // Query has regions on chr1 and chr2 (no TSS on chr2)
+        let query = RegionSet::from(vec![
+            Region { chr: "chr1".into(), start: 40, end: 45, rest: None },
+            Region { chr: "chr2".into(), start: 10, end: 20, rest: None },
+        ]);
+
+        let distances = tss_index.calc_tss_distances(&query).unwrap();
+        assert_eq!(distances.len(), 2); // one per input region
+        // One should be a real distance, the other should be u32::MAX sentinel
+        // (order depends on HashSet iteration of iter_chroms)
+        assert_eq!(distances.iter().filter(|&&d| d == u32::MAX).count(), 1);
+        assert_eq!(distances.iter().filter(|&&d| d < u32::MAX).count(), 1);
+    }
+
+    #[test]
+    fn test_feature_distances_sentinel_for_missing_chrom() {
+        let tss_regions = vec![
+            Region { chr: "chr1".into(), start: 50, end: 51, rest: None },
+        ];
+        let tss_index = TssIndex::try_from(RegionSet::from(tss_regions)).unwrap();
+
+        let query = RegionSet::from(vec![
+            Region { chr: "chr1".into(), start: 40, end: 45, rest: None },
+            Region { chr: "chr2".into(), start: 10, end: 20, rest: None },
+        ]);
+
+        let distances = tss_index.calc_feature_distances(&query).unwrap();
+        assert_eq!(distances.len(), 2);
+        // One real distance, one i64::MAX sentinel
+        assert_eq!(distances.iter().filter(|&&d| d == i64::MAX).count(), 1);
+        assert_eq!(distances.iter().filter(|&&d| d != i64::MAX).count(), 1);
+    }
+
+    // --- Existing tests ---
 
     #[rstest]
     fn test_calc_tss_distances() {
