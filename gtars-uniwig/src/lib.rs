@@ -2,6 +2,7 @@ pub mod counting;
 pub mod reading;
 pub mod utils;
 pub mod writing;
+pub mod stream;
 
 use indicatif::ProgressBar;
 use rayon::prelude::*;
@@ -125,18 +126,14 @@ pub fn uniwig_main(
                             *chrom_sizes.get(&chromosome.chrom).unwrap() as i32;
                         let chrom_name = chromosome.chrom.clone();
 
-                        // Iterate 3 times to output the three different files.
-                        for j in 0..3 {
-                            // todo change these to be ooptional based on vec_count_type
-                            // Original code uses:
-                            // bwOpen, then bwCreateChromList, then bwWriteHdr
-
+                        // Iterate over requested count types
+                        for count_type in vec_count_type.iter() {
                             let mut _success_count = 0;
                             let mut _failure_count = 0;
 
                             if smoothsize != 0 {
-                                match j {
-                                    0 => {
+                                match *count_type {
+                                    "start" => {
                                         let mut count_result = start_end_counts(
                                             &chromosome.starts,
                                             current_chrom_size,
@@ -242,7 +239,7 @@ pub fn uniwig_main(
                                             }
                                         }
                                     }
-                                    1 => {
+                                    "end" => {
                                         let mut count_result = start_end_counts(
                                             &chromosome.ends,
                                             current_chrom_size,
@@ -351,7 +348,7 @@ pub fn uniwig_main(
                                             }
                                         }
                                     }
-                                    2 => {
+                                    "core" => {
                                         let mut core_results = core_counts(
                                             &chromosome.starts,
                                             &chromosome.ends,
@@ -448,7 +445,7 @@ pub fn uniwig_main(
                                             }
                                         }
                                     }
-                                    _ => panic!("Unexpected value: {}", j), // Handle unexpected values
+                                    _ => {} // skip unknown count types
                                 }
                             }
                         }
@@ -2725,5 +2722,62 @@ mod tests {
             "Expected 8 positions with value 1 (window clamped to 1-8), got {}",
             ones_count
         );
+    }
+
+    #[rstest]
+    #[case("start", &["end", "core"])]
+    #[case("end", &["start", "core"])]
+    #[case("core", &["start", "end"])]
+    fn test_batch_single_count_type(
+        #[case] include: &str,
+        #[case] exclude: &[&str],
+    ) -> Result<(), Box<dyn std::error::Error + 'static>> {
+        let path_to_crate = env!("CARGO_MANIFEST_DIR");
+        let tempbedpath = format!("{}{}", path_to_crate, "/../tests/data/test5.bed");
+        let combinedbedpath = tempbedpath.as_str();
+        let chromsizerefpath = combinedbedpath;
+
+        let tempdir = tempfile::tempdir().unwrap();
+        let path = PathBuf::from(&tempdir.path());
+        let bwfileheader_path = path.into_os_string().into_string().unwrap();
+        let bwfileheader = bwfileheader_path.as_str();
+
+        uniwig_main(
+            vec![include],
+            5,
+            combinedbedpath,
+            chromsizerefpath,
+            bwfileheader,
+            "wig",
+            "bed",
+            6,
+            false,
+            1,
+            0,
+            false,
+            true,
+            1.0,
+            "fixed",
+        )
+        .expect("Uniwig main failed!");
+
+        let included_file = format!("{}_{}.wig", bwfileheader, include);
+        assert!(
+            std::path::Path::new(&included_file).exists(),
+            "{} wig file should exist",
+            include
+        );
+
+        for excluded in exclude {
+            let excluded_file = format!("{}_{}.wig", bwfileheader, excluded);
+            assert!(
+                !std::path::Path::new(&excluded_file).exists(),
+                "{} wig file should NOT exist when only {} is requested",
+                excluded,
+                include
+            );
+        }
+
+        Ok(())
     }
 }
