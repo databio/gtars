@@ -77,6 +77,8 @@ pub struct LolaResult {
     pub b: u64,
     pub c: u64,
     pub d: u64,
+    /// FDR-adjusted p-value (Benjamini-Hochberg). None until computed.
+    pub q_value: Option<f64>,
     /// DB set filename (from IGD file_info).
     pub filename: String,
 }

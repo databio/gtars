@@ -148,6 +148,7 @@ pub fn run_lola(
                 b,
                 c,
                 d,
+                q_value: None,
                 filename,
             });
         }
@@ -365,6 +366,7 @@ mod tests {
                 b: 0,
                 c: 0,
                 d: 0,
+                q_value: None,
                 filename: "a.bed".into(),
             },
             LolaResult {
@@ -381,6 +383,7 @@ mod tests {
                 b: 0,
                 c: 0,
                 d: 0,
+                q_value: None,
                 filename: "b.bed".into(),
             },
             LolaResult {
@@ -397,6 +400,7 @@ mod tests {
                 b: 0,
                 c: 0,
                 d: 0,
+                q_value: None,
                 filename: "c.bed".into(),
             },
         ];

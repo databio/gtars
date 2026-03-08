@@ -225,6 +225,8 @@ fn results_to_dict<'py>(
         filename.push(r.filename.clone());
     }
 
+    let q_value: Vec<Option<f64>> = results.iter().map(|r| r.q_value).collect();
+
     let dict = PyDict::new(py);
     dict.set_item("userSet", user_set)?;
     dict.set_item("dbSet", db_set)?;
@@ -240,6 +242,7 @@ fn results_to_dict<'py>(
     dict.set_item("c", c_vec)?;
     dict.set_item("d", d_vec)?;
     dict.set_item("filename", filename)?;
+    dict.set_item("qValue", q_value)?;
 
     Ok(dict)
 }

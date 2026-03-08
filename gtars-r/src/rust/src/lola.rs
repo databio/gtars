@@ -63,6 +63,8 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
     let mut d_vec = Vec::with_capacity(n);
     let mut filename = Vec::with_capacity(n);
 
+    let mut q_value: Vec<Option<f64>> = Vec::with_capacity(n);
+
     for r in results {
         user_set.push((r.user_set + 1) as i32); // 1-based for R
         db_set.push((r.db_set + 1) as i32);
@@ -78,7 +80,17 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         c_vec.push(r.c as i32);
         d_vec.push(r.d as i32);
         filename.push(r.filename.clone());
+        q_value.push(r.q_value);
     }
+
+    // Convert Option<f64> to Rfloat (NA for None)
+    let q_value_r: Vec<Rfloat> = q_value
+        .iter()
+        .map(|q| match q {
+            Some(v) => Rfloat::from(*v),
+            None => Rfloat::na(),
+        })
+        .collect();
 
     list!(
         userSet = user_set,
@@ -94,7 +106,8 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         b = b_vec,
         c = c_vec,
         d = d_vec,
-        filename = filename
+        filename = filename,
+        qValue = q_value_r
     )
 }
 
