@@ -204,7 +204,7 @@ fn wilcoxon_rank_sum(group1: &[f64], group2: &[f64]) -> f64 {
     let variance = (n1 as f64 * n2 as f64 / 12.0)
         * ((n_f + 1.0) - tie_correction / (n_f * (n_f - 1.0)));
 
-    if variance <= 0.0 {
+    if variance <= 0.0 || !variance.is_finite() {
         return 1.0;
     }
 
@@ -218,6 +218,8 @@ fn wilcoxon_rank_sum(group1: &[f64], group2: &[f64]) -> f64 {
 
 /// Normal CDF via error function approximation.
 /// Abramowitz and Stegun formula 7.1.26, max error ~1.5e-7.
+/// Accurate for |z| < ~8; for larger values, p-values are effectively 0
+/// and the approximation error is immaterial for BH correction.
 fn norm_cdf(x: f64) -> f64 {
     0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
 }

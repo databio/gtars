@@ -1,3 +1,5 @@
+use anyhow::{Result, anyhow};
+
 use crate::types::FeatureMatrix;
 
 /// Log-normalize the count matrix in place.
@@ -5,12 +7,14 @@ use crate::types::FeatureMatrix;
 /// For each cell, values become `log1p(count / total_counts * scale_factor)`.
 /// Only operates on nonzero entries (preserves sparsity pattern, though values
 /// will change).
-pub fn log_normalize(matrix: &mut FeatureMatrix, scale_factor: f64) {
+pub fn log_normalize(matrix: &mut FeatureMatrix, scale_factor: f64) -> Result<()> {
     let n_cells = matrix.n_cells();
 
     // First pass: compute per-cell totals
     // Clone indptr to avoid borrow conflict with data_mut()
-    let indptr: Vec<usize> = matrix.matrix.indptr().as_slice().unwrap().to_vec();
+    let indptr: Vec<usize> = matrix.matrix.indptr().as_slice()
+        .ok_or_else(|| anyhow!("sparse matrix has invalid indptr storage"))?
+        .to_vec();
 
     let mut cell_totals = vec![0.0f64; n_cells];
     {
@@ -37,6 +41,8 @@ pub fn log_normalize(matrix: &mut FeatureMatrix, scale_factor: f64) {
             *val = (*val / total * scale_factor).ln_1p();
         }
     }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -52,7 +58,7 @@ mod tests {
     #[test]
     fn test_log_normalize() {
         let mut fm = read_10x(&test_data_dir()).unwrap();
-        log_normalize(&mut fm, 10_000.0);
+        log_normalize(&mut fm, 10_000.0).unwrap();
 
         // Cell 0: total = 10. Gene1=5 → log1p(5/10*10000) = log1p(5000)
         let val = fm.matrix.get(0, 0).copied().unwrap_or(0.0);
@@ -66,7 +72,7 @@ mod tests {
     #[test]
     fn test_log_normalize_preserves_zeros() {
         let mut fm = read_10x(&test_data_dir()).unwrap();
-        log_normalize(&mut fm, 10_000.0);
+        log_normalize(&mut fm, 10_000.0).unwrap();
         // Gene2, cell 1 should still be absent (zero)
         assert_eq!(fm.matrix.get(1, 1), None);
     }

@@ -152,7 +152,8 @@ pub fn r_sc_filter_cells(
 pub fn r_sc_log_normalize(ptr: Robj, scale_factor: f64) -> extendr_api::Result<Robj> {
     with_feature_matrix!(ptr, fm, {
         let mut normalized = fm.clone();
-        log_normalize(&mut normalized, scale_factor);
+        log_normalize(&mut normalized, scale_factor)
+            .map_err(|e| extendr_api::Error::Other(e.to_string()))?;
         Ok(ExternalPtr::new(normalized).into())
     })
 }

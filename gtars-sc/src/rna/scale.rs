@@ -21,6 +21,9 @@ pub fn scale_data(
     if features.is_empty() {
         bail!("no features to scale");
     }
+    if matrix.n_cells() < 2 {
+        bail!("scale_data requires at least 2 cells (got {})", matrix.n_cells());
+    }
 
     // Map feature names to row indices
     let feature_indices: Vec<usize> = features

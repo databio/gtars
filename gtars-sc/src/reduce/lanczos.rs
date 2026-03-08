@@ -73,8 +73,8 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
         *v_basis.get_mut(i, 0) = rng.random::<f64>() - 0.5;
     }
     let norm = v_basis.as_ref().subcols(0, 1).norm_l2();
-    if norm == 0.0 {
-        bail!("random start vector has zero norm");
+    if norm < f64::EPSILON {
+        bail!("random start vector has near-zero norm");
     }
     for i in 0..n {
         *v_basis.get_mut(i, 0) /= norm;
@@ -99,7 +99,10 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
 
             // s = ||w||
             let s = w_col.as_ref().norm_l2();
-            if s < 1e-14 {
+            // Relative tolerance: scale with largest diagonal seen so far
+            let max_diag = (0..=j).map(|idx| (*b_mat.get(idx, idx)).abs()).fold(0.0f64, f64::max);
+            let breakdown_tol = 1e-12 * max_diag.max(1e-15);
+            if s < breakdown_tol {
                 // Lucky breakdown: w is in span(W). Set alpha=0, W[:,j]=0.
                 *b_mat.get_mut(j, j) = 0.0;
                 for i in 0..m {
@@ -111,7 +114,7 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
                 }
                 reorthogonalize(&mut f_vec, &v_basis, j + 1);
                 f_norm = f_vec.as_ref().norm_l2();
-                if j + 1 < p && f_norm > 1e-14 {
+                if j + 1 < p && f_norm > breakdown_tol {
                     *b_mat.get_mut(j, j + 1) = 0.0; // no coupling
                     for i in 0..n {
                         *v_basis.get_mut(i, j + 1) = *f_vec.get(i, 0) / f_norm;
@@ -144,14 +147,16 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
             if j + 1 < p {
                 *b_mat.get_mut(j, j + 1) = f_norm;
 
-                if f_norm < 1e-14 {
+                // Use same relative tolerance for residual breakdown
+                let res_tol = 1e-12 * (0..=j).map(|idx| (*b_mat.get(idx, idx)).abs()).fold(0.0f64, f64::max).max(1e-15);
+                if f_norm < res_tol {
                     // Lucky breakdown: residual is zero. Generate random restart vector.
                     for i in 0..n {
                         *f_vec.get_mut(i, 0) = rng.random::<f64>() - 0.5;
                     }
                     reorthogonalize(&mut f_vec, &v_basis, j + 1);
                     f_norm = f_vec.as_ref().norm_l2();
-                    if f_norm > 1e-14 {
+                    if f_norm > res_tol {
                         for i in 0..n {
                             *v_basis.get_mut(i, j + 1) = *f_vec.get(i, 0) / f_norm;
                         }

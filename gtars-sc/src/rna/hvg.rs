@@ -23,6 +23,9 @@ pub fn find_variable_features(
     if n_genes == 0 || n_cells == 0 {
         bail!("empty matrix");
     }
+    if n_cells < 2 {
+        bail!("find_variable_features requires at least 2 cells (got {n_cells})");
+    }
 
     // --- Pass 1: per-gene mean and variance ---
     let mut sums = vec![0.0f64; n_genes];
@@ -74,9 +77,16 @@ pub fn find_variable_features(
     let (x_min, x_max) = fit_x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
         (lo.min(v), hi.max(v))
     });
-    let grid_step = if (x_max - x_min).abs() < 1e-15 { 1.0 } else { (x_max - x_min) / (n_grid - 1) as f64 };
-    let grid_x: Vec<f64> = (0..n_grid).map(|i| x_min + i as f64 * grid_step).collect();
-    let grid_y = loess_fit_at(&fit_x, &fit_y, &grid_x, 0.3);
+    let (grid_x, grid_y) = if (x_max - x_min).abs() < 1e-15 {
+        // All genes have ~same mean; use constant fit (mean of fit_y)
+        let mean_y = fit_y.iter().sum::<f64>() / fit_y.len() as f64;
+        (vec![x_min], vec![mean_y])
+    } else {
+        let grid_step = (x_max - x_min) / (n_grid - 1) as f64;
+        let gx: Vec<f64> = (0..n_grid).map(|i| x_min + i as f64 * grid_step).collect();
+        let gy = loess_fit_at(&fit_x, &fit_y, &gx, 0.3);
+        (gx, gy)
+    };
 
     let mut expected_var = vec![1e-10f64; n_genes];
     for &i in &fit_idx {
@@ -154,7 +164,7 @@ fn loess_fit_at(data_x: &[f64], data_y: &[f64], query_x: &[f64], span: f64) -> V
 
     // Sort data by x
     let mut order: Vec<usize> = (0..n).collect();
-    order.sort_by(|&a, &b| data_x[a].partial_cmp(&data_x[b]).unwrap());
+    order.sort_by(|&a, &b| data_x[a].partial_cmp(&data_x[b]).unwrap_or(std::cmp::Ordering::Equal));
     let sorted_x: Vec<f64> = order.iter().map(|&i| data_x[i]).collect();
     let sorted_y: Vec<f64> = order.iter().map(|&i| data_y[i]).collect();
 

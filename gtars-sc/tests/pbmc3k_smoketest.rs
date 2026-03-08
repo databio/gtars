@@ -104,7 +104,7 @@ fn test_pbmc3k_normalize_and_hvg() {
     let fm = filter_rna_cells(&fm, 200, 5.0).unwrap();
 
     let mut fm = fm;
-    log_normalize(&mut fm, 10_000.0);
+    log_normalize(&mut fm, 10_000.0).unwrap();
 
     // All nonzero values should now be log-transformed (positive)
     let data = fm.matrix.data();
@@ -147,7 +147,7 @@ fn test_pbmc3k_scale() {
     let fm = filter_rna_cells(&fm, 200, 5.0).unwrap();
 
     let mut fm = fm;
-    log_normalize(&mut fm, 10_000.0);
+    log_normalize(&mut fm, 10_000.0).unwrap();
 
     let hvgs = find_variable_features(&fm, 2000).unwrap();
     let scaled = scale_data(&fm, &hvgs, Some(10.0), None).unwrap();

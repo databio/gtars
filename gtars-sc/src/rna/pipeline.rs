@@ -55,7 +55,7 @@ pub fn run_rna_preprocessing(
 
     // 4. Log normalize
     let mut matrix = matrix;
-    log_normalize(&mut matrix, config.scale_factor);
+    log_normalize(&mut matrix, config.scale_factor)?;
 
     // 5. Scale
     let scaled = scale_data(&matrix, &variable_features, config.clip_value, None)?;
