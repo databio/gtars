@@ -1,6 +1,7 @@
 #![allow(nonstandard_style)]
 
 pub mod create;
+pub mod igd;
 pub mod search;
 
 #[cfg(feature = "bloom")]
