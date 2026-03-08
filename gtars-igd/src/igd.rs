@@ -575,9 +575,8 @@ impl Igd {
         total_overlaps
     }
 
-    /// Query all regions in a set, returning hit counts per file.
-    /// This is the main LOLA operation: "for each region in my set,
-    /// which DB sets does it overlap?"
+    /// Query all regions in a set, returning total pairwise hit counts per file.
+    /// Each query region can contribute multiple hits to the same file.
     pub fn count_set_overlaps(&self, regions: &RegionSet, min_overlap: i32) -> Vec<u64> {
         let mut hits = vec![0u64; self.file_info.len()];
         for region in &regions.regions {
@@ -590,6 +589,40 @@ impl Igd {
             );
         }
         hits
+    }
+
+    /// Count the number of query regions that overlap each file (binary per query).
+    ///
+    /// Unlike `count_set_overlaps` which counts total pairwise overlaps,
+    /// this counts at most 1 per query region per file. This matches
+    /// R LOLA's `countOverlaps()` semantics where `support = sum(countOverlaps > 0)`.
+    pub fn count_region_hits(&self, regions: &RegionSet, min_overlap: i32) -> Vec<u64> {
+        let n_files = self.file_info.len();
+        let mut totals = vec![0u64; n_files];
+        let mut per_region = vec![0u64; n_files];
+
+        for region in &regions.regions {
+            // Zero out per-region hits
+            for h in per_region.iter_mut() {
+                *h = 0;
+            }
+
+            self.count_overlaps(
+                &region.chr,
+                region.start as i32,
+                region.end as i32,
+                min_overlap,
+                &mut per_region,
+            );
+
+            // Binary: if this region hit file i at all, count it once
+            for i in 0..n_files {
+                if per_region[i] > 0 {
+                    totals[i] += 1;
+                }
+            }
+        }
+        totals
     }
 
     /// Query all regions given as (chrom, start, end) tuples.

@@ -36,11 +36,13 @@ impl ContingencyTable {
 
         match direction {
             Direction::Enrichment => {
-                // P(X >= a): 1 - P(X <= a-1)
+                // P(X >= a) = P(X > a-1) = sf(a-1)
+                // Using sf() (survival function) avoids catastrophic cancellation
+                // that occurs with 1.0 - cdf(a-1) when the CDF is near 1.0.
                 if self.a == 0 {
                     1.0
                 } else {
-                    1.0 - hyper.cdf(self.a - 1)
+                    hyper.sf(self.a - 1)
                 }
             }
             Direction::Depletion => {
@@ -105,8 +107,9 @@ pub fn run_lola(
         return Err(LolaError::EmptyUniverse);
     }
 
-    // Step 1: Query universe against IGD (done once for all user sets)
-    let universe_hits = igd.count_set_overlaps(universe, config.min_overlap);
+    // Step 1: Query universe against IGD (binary per region)
+    // count_region_hits gives the number of universe regions overlapping each DB set.
+    let universe_hits = igd.count_region_hits(universe, config.min_overlap);
 
     // Step 2: For each user set, query against IGD and build contingency tables
     let mut all_results: Vec<LolaResult> = Vec::new();
@@ -114,7 +117,8 @@ pub fn run_lola(
     for (us_idx, user_set) in user_sets.iter().enumerate() {
         let user_set_size = user_set.regions.len() as u64;
 
-        let user_hits = igd.count_set_overlaps(user_set, config.min_overlap);
+        // Binary per-region overlap counting (matches R LOLA's countOverlaps semantics)
+        let user_hits = igd.count_region_hits(user_set, config.min_overlap);
 
         let mut user_results: Vec<LolaResult> = Vec::with_capacity(n_db);
 
@@ -334,7 +338,7 @@ mod tests {
 
     #[test]
     fn test_p_value_log_extreme() {
-        // Very significant result → p-value underflows to 0 → -log10(0) = inf
+        // Very significant result — sf() avoids precision loss
         let ct = ContingencyTable {
             a: 50,
             b: 10,
@@ -342,7 +346,9 @@ mod tests {
             d: 1000,
         };
         let pvl = ct.p_value_log(Direction::Enrichment);
-        assert_eq!(pvl, f64::INFINITY);
+        // Should be a large finite value, not infinity
+        assert!(pvl > 30.0, "expected large -log10(p), got {}", pvl);
+        assert!(pvl.is_finite(), "expected finite, got {}", pvl);
     }
 
     // -------------------------------------------------------------------
@@ -556,8 +562,9 @@ mod tests {
     }
 
     #[test]
-    fn test_run_lola_pairwise_counting() {
-        // One query region overlaps 3 DB regions in same file → support = 3
+    fn test_run_lola_binary_counting() {
+        // One query region overlaps 3 DB regions in same file.
+        // Support should be 1 (binary per query region), matching R LOLA semantics.
         let sets = vec![(
             "db0.bed".to_string(),
             vec![
@@ -575,7 +582,8 @@ mod tests {
         ]);
 
         let results = run_lola(&igd, &[user], &universe, &LolaConfig::default()).unwrap();
-        assert_eq!(results[0].support, 3);
+        // 1 query region overlaps db0 → support = 1 (not 3)
+        assert_eq!(results[0].support, 1);
     }
 
     #[test]

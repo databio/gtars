@@ -13,10 +13,11 @@ Imports: methods, BiocGenerics, IRanges, data.table
 Suggests: GenomicRanges, jsonlite
 Config/rextendr/version: 0.4.2
 SystemRequirements: Cargo (Rust's package manager), rustc
-Collate: 
+Collate:
     'RegionSet-class.R'
     'RegionSet-methods.R'
     'extendr-wrappers.R'
     'genomicdist.R'
     'igd.R'
+    'lola.R'
     'refget.R'

@@ -284,6 +284,51 @@ r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_creat
 #' @param query_path A string representing the path to the query bed file.
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
 
+#' Load a LOLA region database from a folder.
+#' @export
+#' @param db_location Path to the LOLA database folder
+#' @param collections Optional character vector of collection names to load
+#' @param limit Optional integer limit on files per collection
+load_region_db <- function(db_location, collections, limit) .Call(wrap__r_load_region_db, db_location, collections, limit)
+
+#' Load a region database from BED file paths and optional metadata.
+#' @export
+#' @param bed_files Character vector of paths to BED files
+#' @param filenames Optional character vector of display names for each file
+load_region_db_from_beds <- function(bed_files, filenames) .Call(wrap__r_load_region_db_from_beds, bed_files, filenames)
+
+#' List region set filenames in a database.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param collections Optional character vector filter
+list_region_sets <- function(db, collections) .Call(wrap__r_list_region_sets, db, collections)
+
+#' Run LOLA enrichment analysis.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+#' @param db_ptr ExternalPtr to RegionDB
+#' @param min_overlap Minimum base-pair overlap (default 1)
+#' @param direction "enrichment" or "depletion"
+run_lola <- function(user_sets_list, universe_ptr, db_ptr, min_overlap, direction) .Call(wrap__r_run_lola, user_sets_list, universe_ptr, db_ptr, min_overlap, direction)
+
+#' Check universe appropriateness for user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+check_universe <- function(user_sets_list, universe_ptr) .Call(wrap__r_check_universe, user_sets_list, universe_ptr)
+
+#' Redefine user sets in terms of universe regions.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+redefine_user_sets <- function(user_sets_list, universe_ptr) .Call(wrap__r_redefine_user_sets, user_sets_list, universe_ptr)
+
+#' Build a restricted universe from user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+build_restricted_universe <- function(user_sets_list) .Call(wrap__r_build_restricted_universe, user_sets_list)
+
 #' Create sha512t24u digest
 #' @export
 #' @param readable A readable string representing a sequence.

@@ -19,7 +19,7 @@ loadRegionDB <- function(dbLocation, useCache = TRUE, limit = NULL,
   if (!dir.exists(dbLocation)) {
     stop("Database directory does not exist: ", dbLocation)
   }
-  .Call(wrap__load_region_db, dbLocation, collections, limit)
+  load_region_db(dbLocation, collections, limit)
 }
 
 #' Load a region database from BED file paths
@@ -32,7 +32,7 @@ loadRegionDBFromBeds <- function(bedFiles, filenames = NULL) {
   if (!is.character(bedFiles)) {
     stop("bedFiles must be a character vector")
   }
-  .Call(wrap__load_region_db_from_beds, bedFiles, filenames)
+  load_region_db_from_beds(bedFiles, filenames)
 }
 
 #' Run LOLA enrichment analysis
@@ -71,15 +71,15 @@ runLOLA <- function(userSets, userUniverse, regionDB,
 
   # Optionally redefine user sets
   if (redefineUserSets) {
-    user_ptrs <- .Call(wrap__redefine_user_sets, user_ptrs, universe_ptr)
+    user_ptrs <- redefine_user_sets(user_ptrs, universe_ptr)
   }
 
   # Validate direction
   direction <- match.arg(direction, c("enrichment", "depletion"))
 
   # Run LOLA
-  result <- .Call(wrap__run_lola, user_ptrs, universe_ptr, regionDB,
-                  as.integer(minOverlap), direction)
+  result <- run_lola(user_ptrs, universe_ptr, regionDB,
+                     as.integer(minOverlap), direction)
 
   # Convert to data.frame
   as.data.frame(result, stringsAsFactors = FALSE)
@@ -92,7 +92,7 @@ runLOLA <- function(userSets, userUniverse, regionDB,
 #' @return Character vector of filenames
 #' @export
 listRegionSets <- function(regionDB, collections = NULL) {
-  .Call(wrap__list_region_sets, regionDB, collections)
+  list_region_sets(regionDB, collections)
 }
 
 #' Check universe appropriateness
@@ -119,7 +119,7 @@ checkUniverseAppropriateness <- function(userSets, userUniverse,
     stop("userUniverse must be a RegionSet object")
   }
 
-  result <- .Call(wrap__check_universe, user_ptrs, universe_ptr)
+  result <- check_universe(user_ptrs, universe_ptr)
   df <- as.data.frame(result[names(result) != "warnings"],
                       stringsAsFactors = FALSE)
 
@@ -153,7 +153,7 @@ redefineUserSets <- function(userSets, userUniverse, cores = 1) {
     stop("userUniverse must be a RegionSet object")
   }
 
-  ptrs <- .Call(wrap__redefine_user_sets, user_ptrs, universe_ptr)
+  ptrs <- redefine_user_sets(user_ptrs, universe_ptr)
   lapply(ptrs, function(p) RegionSet(p))
 }
 
@@ -171,7 +171,7 @@ buildRestrictedUniverse <- function(userSets) {
     stop("userSets must be a RegionSet or list of RegionSets")
   }
 
-  ptr <- .Call(wrap__build_restricted_universe, user_ptrs)
+  ptr <- build_restricted_universe(user_ptrs)
   RegionSet(ptr)
 }
 

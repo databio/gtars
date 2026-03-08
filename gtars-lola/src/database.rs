@@ -105,24 +105,36 @@ impl RegionDB {
             let coll_anno = parse_collection_txt(&coll_path.join("collection.txt"), &coll_name);
             all_collection_anno.push(coll_anno);
 
-            // Parse index.txt
+            // Parse index.txt for annotations (keyed by filename)
             let index_annos = parse_index_txt(&coll_path.join("index.txt"), &coll_name);
+            let anno_map: HashMap<String, RegionSetAnno> = index_annos
+                .into_iter()
+                .map(|a| (a.filename.clone(), a))
+                .collect();
 
-            // Read BED files from regions/
+            // Discover all BED files in regions/ directory (matching R LOLA behavior)
             let regions_dir = coll_path.join("regions");
+            let mut bed_files: Vec<String> = Vec::new();
+            if let Ok(entries) = fs::read_dir(&regions_dir) {
+                for entry in entries.flatten() {
+                    let fname = entry.file_name().to_string_lossy().into_owned();
+                    if entry.path().is_file() {
+                        bed_files.push(fname);
+                    }
+                }
+            }
+            bed_files.sort();
+
             let mut files_loaded = 0;
 
-            for anno in &index_annos {
+            for fname in &bed_files {
                 if let Some(max) = limit {
                     if files_loaded >= max {
                         break;
                     }
                 }
 
-                let bed_path = regions_dir.join(&anno.filename);
-                if !bed_path.exists() {
-                    continue;
-                }
+                let bed_path = regions_dir.join(fname);
 
                 match RegionSet::try_from(bed_path.as_path()) {
                     Ok(region_set) => {
@@ -133,9 +145,16 @@ impl RegionDB {
                             .map(|r| (r.chr.clone(), r.start as i32, r.end as i32))
                             .collect();
 
-                        igd_inputs.push((anno.filename.clone(), regions));
+                        igd_inputs.push((fname.clone(), regions));
                         all_region_sets.push(region_set);
-                        all_region_anno.push(anno.clone());
+
+                        // Use annotation from index.txt if available, otherwise default
+                        let anno = anno_map.get(fname).cloned().unwrap_or(RegionSetAnno {
+                            filename: fname.clone(),
+                            collection: coll_name.clone(),
+                            ..Default::default()
+                        });
+                        all_region_anno.push(anno);
                         files_loaded += 1;
                     }
                     Err(_) => continue,
