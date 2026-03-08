@@ -168,7 +168,7 @@ pub fn build_restricted_universe(user_sets: &[RegionSet]) -> RegionSet {
 type ChromIndex<'a> = HashMap<String, Vec<(u32, u32, usize)>>; // (start, end, index into universe.regions)
 
 /// Build a per-chromosome sorted index of regions for overlap queries.
-fn build_chrom_index(region_set: &RegionSet) -> ChromIndex {
+fn build_chrom_index(region_set: &RegionSet) -> ChromIndex<'_> {
     let mut index: ChromIndex = HashMap::new();
 
     for (i, region) in region_set.regions.iter().enumerate() {
