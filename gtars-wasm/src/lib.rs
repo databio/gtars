@@ -1,4 +1,5 @@
 mod asset;
+mod lola;
 mod models;
 mod overlaprs;
 mod partitions;
