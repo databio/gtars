@@ -82,10 +82,14 @@ fn arg_output() -> Arg {
 }
 
 fn arg_format() -> Arg {
+    #[cfg(not(feature = "sc-parquet"))]
+    let values = vec!["table", "json", "jsonl", "tsv"];
+    #[cfg(feature = "sc-parquet")]
+    let values = vec!["table", "json", "jsonl", "tsv", "parquet"];
     Arg::new("format")
         .long("format")
         .default_value("table")
-        .value_parser(["table", "json", "jsonl", "tsv"])
+        .value_parser(values)
         .help("Output format (jsonl: one JSON object per line for streaming)")
 }
 
@@ -185,12 +189,18 @@ fn create_rna_qc_cli() -> Command {
 
 fn create_rna_config_cli() -> Command {
     Command::new(RNA_CONFIG_CMD)
-        .about("Dump default configuration")
+        .about("Dump default configuration or JSON Schema")
         .arg(
             Arg::new("defaults")
                 .long("defaults")
                 .action(ArgAction::SetTrue)
                 .help("Print default config as YAML"),
+        )
+        .arg(
+            Arg::new("schema")
+                .long("schema")
+                .action(ArgAction::SetTrue)
+                .help("Print JSON Schema for config validation"),
         )
 }
 

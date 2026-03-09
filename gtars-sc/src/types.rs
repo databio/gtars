@@ -31,7 +31,7 @@ impl FeatureMatrix {
 
 /// Type of features stored in a FeatureMatrix.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub enum FeatureType {
     Gene,
     Peak,
@@ -48,7 +48,7 @@ pub struct Embedding {
 
 /// Method used to produce an embedding.
 #[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub enum EmbeddingMethod {
     Pca,
     Lsi { component_1_dropped: bool },
@@ -56,7 +56,7 @@ pub enum EmbeddingMethod {
 
 /// Per-cell metadata collected during preprocessing.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct CellMetadata {
     pub cell_id: String,
     pub n_features: u32,
@@ -68,7 +68,7 @@ pub struct CellMetadata {
 
 /// QC metrics for a single cell (RNA assay).
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct RnaQcMetrics {
     pub cell_id: String,
     pub n_features: u32,
@@ -87,7 +87,7 @@ pub struct KnnGraph {
 
 /// Differential expression marker result (placeholder for Phase 2).
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct MarkerResult {
     pub gene: String,
     pub cluster: u32,
@@ -109,7 +109,7 @@ pub struct SvdResult {
 
 /// Configuration for the RNA preprocessing pipeline.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct RnaPipelineConfig {
     pub min_features: u32,
     pub min_cells: u32,
@@ -156,7 +156,7 @@ pub struct SnnGraph {
 
 /// Result of community detection (clustering).
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct ClusterResult {
     /// Cluster assignment per cell (0-indexed).
     pub assignments: Vec<u32>,
@@ -168,7 +168,7 @@ pub struct ClusterResult {
 
 /// Configuration for the downstream analysis pipeline.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct DownstreamConfig {
     /// Number of nearest neighbors for KNN graph (default 20).
     pub k_neighbors: usize,
@@ -205,7 +205,7 @@ impl Default for DownstreamConfig {
 
 /// Configuration for marker gene detection.
 #[derive(Debug, Clone)]
-#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "cli", derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema))]
 pub struct MarkerConfig {
     /// Minimum fraction of cells expressing gene in either group (default 0.1).
     pub min_pct: f64,

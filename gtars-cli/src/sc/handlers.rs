@@ -11,15 +11,51 @@ use gtars_sc::rna::pipeline::{run_full_rna_pipeline, run_rna_preprocessing};
 use gtars_sc::types::{DownstreamConfig, FeatureType, RnaPipelineConfig};
 
 use super::cli;
+use super::error::{report_error, ScError};
 use super::output::{write_json, write_json_compact, write_jsonl, write_table, write_tsv, Format};
+#[cfg(feature = "sc-parquet")]
+use super::output::{write_parquet, ParquetColumn};
 
 pub fn run_sc(matches: &ArgMatches) -> Result<()> {
-    match matches.subcommand() {
+    // Determine if output is JSON-like (for structured error reporting)
+    let json_mode = detect_json_mode(matches);
+
+    let result = match matches.subcommand() {
         Some(("rna", sub)) => run_rna(sub),
         Some(("downstream", sub)) => run_downstream(sub),
         Some(("io", sub)) => run_io(sub),
         _ => unreachable!("sc subcommand not found"),
+    };
+
+    if let Err(err) = result {
+        report_error(&err, json_mode);
     }
+
+    Ok(())
+}
+
+/// Walk the subcommand tree to find a --format flag and check if it's JSON-like.
+fn detect_json_mode(matches: &ArgMatches) -> bool {
+    fn check_format(m: &ArgMatches) -> Option<bool> {
+        m.try_get_one::<String>("format")
+            .ok()
+            .flatten()
+            .map(|f| f == "json" || f == "jsonl")
+    }
+    if let Some(v) = check_format(matches) {
+        return v;
+    }
+    if let Some((_, sub)) = matches.subcommand() {
+        if let Some(v) = check_format(sub) {
+            return v;
+        }
+        if let Some((_, sub2)) = sub.subcommand() {
+            if let Some(v) = check_format(sub2) {
+                return v;
+            }
+        }
+    }
+    false
 }
 
 fn run_rna(matches: &ArgMatches) -> Result<()> {
@@ -155,6 +191,8 @@ fn run_rna_preprocess(matches: &ArgMatches) -> Result<()> {
             println!("n_hvgs\t{}", result.variable_features.len());
             println!("n_pcs\t{}", result.embedding.values.ncols());
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for preprocess summary; use json or tsv"),
     }
 
     Ok(())
@@ -252,13 +290,30 @@ fn run_rna_qc(matches: &ArgMatches) -> Result<()> {
                 println!("  ... ({} more cells)", n_cells - 20);
             }
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => {
+            let path = std::path::Path::new("qc_metrics.parquet");
+            let headers = &["cell_id", "n_features", "n_counts", "pct_mt"];
+            let columns = vec![
+                ParquetColumn::Str(qc.iter().map(|m| m.cell_id.clone()).collect()),
+                ParquetColumn::U32(qc.iter().map(|m| m.n_features).collect()),
+                ParquetColumn::F64(qc.iter().map(|m| m.n_counts).collect()),
+                ParquetColumn::F64(qc.iter().map(|m| m.pct_mt).collect()),
+            ];
+            write_parquet(path, headers, &columns)?;
+            eprintln!("Written to {}", path.display());
+        }
     }
 
     Ok(())
 }
 
 fn run_rna_config(matches: &ArgMatches) -> Result<()> {
-    if matches.get_flag("defaults") {
+    if matches.get_flag("schema") {
+        let schema = schemars::schema_for!(ConfigDefaults);
+        let json = serde_json::to_string_pretty(&schema)?;
+        println!("{}", json);
+    } else if matches.get_flag("defaults") {
         let preprocess = RnaPipelineConfig::default();
         let downstream = DownstreamConfig::default();
         let output = ConfigDefaults {
@@ -273,8 +328,10 @@ fn run_rna_config(matches: &ArgMatches) -> Result<()> {
         print!("{}", yaml);
     } else {
         println!("Use --defaults to print default configuration as YAML.");
-        println!("Pipe to a file and modify for your dataset:");
+        println!("Use --schema to print JSON Schema for config validation.");
+        println!();
         println!("  gtars sc rna config --defaults > pipeline.yaml");
+        println!("  gtars sc rna config --schema > config_schema.json");
     }
     Ok(())
 }
@@ -382,6 +439,8 @@ fn run_rna_filter(matches: &ArgMatches) -> Result<()> {
             println!("input_features\t{}", input_features);
             println!("output_features\t{}", genes_after);
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for filter summary; use json or tsv"),
     }
 
     Ok(())
@@ -451,6 +510,8 @@ fn run_rna_normalize(matches: &ArgMatches) -> Result<()> {
             println!("n_features\t{}", fm.n_features());
             println!("scale_factor\t{}", scale_factor);
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for normalize summary; use json or tsv"),
     }
 
     Ok(())
@@ -553,6 +614,8 @@ fn run_rna_hvg(matches: &ArgMatches) -> Result<()> {
                 println!("{}\t{}", i + 1, gene);
             }
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for HVG list; use json or tsv"),
     }
 
     Ok(())
@@ -583,10 +646,10 @@ fn run_rna_scale(matches: &ArgMatches) -> Result<()> {
     };
 
     if !hvgs_path.exists() {
-        anyhow::bail!(
+        return Err(ScError::input(format!(
             "No hvgs.json found at {}. Run 'sc rna hvg' first, or pass --hvgs <path>.",
             hvgs_path.display()
-        );
+        )).into());
     }
 
     let hvgs_content = fs::read_to_string(&hvgs_path)
@@ -658,6 +721,8 @@ fn run_rna_scale(matches: &ArgMatches) -> Result<()> {
                 println!("clip_value\t{}", clip);
             }
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for scale summary; use json or tsv"),
     }
 
     Ok(())
@@ -678,10 +743,10 @@ fn run_rna_pca(matches: &ArgMatches) -> Result<()> {
     // Read scaled matrix
     let scaled_path = Path::new(input).join("scaled.tsv.gz");
     if !scaled_path.exists() {
-        anyhow::bail!(
+        return Err(ScError::input(format!(
             "No scaled.tsv.gz found in {}. Run 'sc rna scale' first.",
             input,
-        );
+        )).into());
     }
 
     if !quiet {
@@ -760,6 +825,8 @@ fn run_rna_pca(matches: &ArgMatches) -> Result<()> {
                 println!("PC_{}\t{:.6}", i + 1, ve);
             }
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for PCA summary; use json or tsv"),
     }
 
     Ok(())
@@ -865,10 +932,13 @@ fn run_downstream_analyze(matches: &ArgMatches) -> Result<()> {
                     );
                 }
             }
+            #[cfg(feature = "sc-parquet")]
+            Format::Parquet => anyhow::bail!("Parquet output is not supported for analyze summary; use json or tsv"),
         }
     } else {
-        eprintln!("Preprocessed directory detected. Use 'downstream cluster' for clustering only.");
-        std::process::exit(2);
+        return Err(ScError::param(
+            "Preprocessed directory detected (has embedding.tsv). Use 'downstream cluster' for clustering only."
+        ).into());
     }
 
     Ok(())
@@ -883,9 +953,10 @@ fn run_downstream_cluster(matches: &ArgMatches) -> Result<()> {
     // Read embedding from preprocessed directory
     let embedding_path = Path::new(input).join("embedding.tsv");
     if !embedding_path.exists() {
-        eprintln!("Error: no embedding.tsv found in {}", input);
-        eprintln!("Run 'gtars sc rna preprocess' first.");
-        std::process::exit(1);
+        return Err(ScError::input(format!(
+            "No embedding.tsv found in {}. Run 'gtars sc rna preprocess' first.",
+            input,
+        )).into());
     }
 
     let (embedding, cell_ids) = read_embedding_tsv(&embedding_path)?;
@@ -956,6 +1027,8 @@ fn run_downstream_cluster(matches: &ArgMatches) -> Result<()> {
                 println!("{}\t{}", cell_ids[i], c);
             }
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for cluster summary; use json or tsv"),
     }
 
     Ok(())
@@ -985,10 +1058,10 @@ fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
     };
 
     if !clusters_path.exists() {
-        anyhow::bail!(
+        return Err(ScError::input(format!(
             "No clusters.json found at {}. Run 'sc downstream cluster' first, or pass --clusters <path>.",
             clusters_path.display()
-        );
+        )).into());
     }
 
     let clusters_content = fs::read_to_string(&clusters_path)
@@ -1004,11 +1077,14 @@ fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
         .with_context(|| format!("reading 10X data from {}", input))?;
 
     if fm.n_cells() != cluster_data.assignments.len() {
-        anyhow::bail!(
+        return Err(ScError::input(format!(
             "Matrix has {} cells but clusters.json has {} assignments",
             fm.n_cells(),
             cluster_data.assignments.len(),
-        );
+        )).with_details(serde_json::json!({
+            "matrix_cells": fm.n_cells(),
+            "cluster_assignments": cluster_data.assignments.len(),
+        })).into());
     }
 
     if !quiet {
@@ -1093,6 +1169,22 @@ fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
                 .collect();
             write_tsv(headers, &rows)?;
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => {
+            let path = std::path::Path::new("markers.parquet");
+            let headers = &["gene", "cluster", "avg_log2fc", "pval", "pval_adj", "pct_in", "pct_out"];
+            let columns = vec![
+                ParquetColumn::Str(markers.iter().map(|m| m.gene.clone()).collect()),
+                ParquetColumn::U32(markers.iter().map(|m| m.cluster).collect()),
+                ParquetColumn::F64(markers.iter().map(|m| m.avg_log2fc).collect()),
+                ParquetColumn::F64(markers.iter().map(|m| m.pval).collect()),
+                ParquetColumn::F64(markers.iter().map(|m| m.pval_adj).collect()),
+                ParquetColumn::F64(markers.iter().map(|m| m.pct_in).collect()),
+                ParquetColumn::F64(markers.iter().map(|m| m.pct_out).collect()),
+            ];
+            write_parquet(path, headers, &columns)?;
+            eprintln!("Written to {}", path.display());
+        }
     }
 
     Ok(())
@@ -1145,6 +1237,8 @@ fn run_io_inspect(matches: &ArgMatches) -> Result<()> {
             println!("  Sparsity:     {:.2}%", sparsity * 100.0);
             println!("  Feature type: {}", feature_type_str);
         }
+        #[cfg(feature = "sc-parquet")]
+        Format::Parquet => anyhow::bail!("Parquet output is not supported for inspect; use json or tsv"),
     }
 
     Ok(())
@@ -1542,7 +1636,7 @@ struct ClusterOutput {
     silhouette_avg: Option<f64>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, schemars::JsonSchema)]
 struct ConfigDefaults {
     preprocess: RnaPipelineConfig,
     downstream: DownstreamConfig,

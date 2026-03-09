@@ -37,3 +37,6 @@ rayon = "1.11.0"
 rand = "0.9"
 serde_yaml = "0.9"
 toml = "0.8"
+schemars = "0.8"
+arrow = { version = "55", default-features = false, features = ["prettyprint"] }
+parquet = { version = "55", default-features = false, features = ["arrow", "snap", "zstd"] }

@@ -17,6 +17,7 @@ rand = { workspace = true }
 getrandom = { version = "0.3", optional = true }
 serde = { workspace = true, optional = true }
 serde_json = { workspace = true, optional = true }
+schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions = "1.4.1"
@@ -28,4 +29,4 @@ default = ["parallel", "rna"]
 parallel = ["dep:rayon", "sprs/multi_thread", "faer/rayon"]
 rna = []
 wasm = ["getrandom/wasm_js"]
-cli = ["dep:serde", "dep:serde_json"]
+cli = ["dep:serde", "dep:serde_json", "dep:schemars"]

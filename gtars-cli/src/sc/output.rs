@@ -10,6 +10,8 @@ pub enum Format {
     JsonCompact,
     Jsonl,
     Tsv,
+    #[cfg(feature = "sc-parquet")]
+    Parquet,
 }
 
 impl Format {
@@ -18,6 +20,8 @@ impl Format {
             "json" => Format::Json,
             "jsonl" => Format::Jsonl,
             "tsv" => Format::Tsv,
+            #[cfg(feature = "sc-parquet")]
+            "parquet" => Format::Parquet,
             _ => Format::Table,
         }
     }
@@ -121,4 +125,62 @@ pub fn write_table(headers: &[&str], rows: &[Vec<String>]) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Write tabular data as a Parquet file.
+#[cfg(feature = "sc-parquet")]
+pub fn write_parquet(
+    path: &std::path::Path,
+    headers: &[&str],
+    columns: &[ParquetColumn],
+) -> Result<()> {
+    use arrow::array::{Float64Array, StringArray, UInt32Array};
+    use arrow::datatypes::{DataType, Field, Schema};
+    use arrow::record_batch::RecordBatch;
+    use parquet::arrow::ArrowWriter;
+    use std::sync::Arc;
+
+    let fields: Vec<Field> = headers
+        .iter()
+        .zip(columns.iter())
+        .map(|(name, col)| match col {
+            ParquetColumn::Str(_) => Field::new(*name, DataType::Utf8, false),
+            ParquetColumn::F64(_) => Field::new(*name, DataType::Float64, false),
+            ParquetColumn::U32(_) => Field::new(*name, DataType::UInt32, false),
+        })
+        .collect();
+
+    let schema = Arc::new(Schema::new(fields));
+
+    let arrays: Vec<Arc<dyn arrow::array::Array>> = columns
+        .iter()
+        .map(|col| -> Arc<dyn arrow::array::Array> {
+            match col {
+                ParquetColumn::Str(v) => Arc::new(StringArray::from(v.clone())),
+                ParquetColumn::F64(v) => Arc::new(Float64Array::from(v.clone())),
+                ParquetColumn::U32(v) => Arc::new(UInt32Array::from(v.clone())),
+            }
+        })
+        .collect();
+
+    let batch = RecordBatch::try_new(schema.clone(), arrays)
+        .context("creating Arrow record batch")?;
+
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    let mut writer = ArrowWriter::try_new(file, schema, None)
+        .context("creating Parquet writer")?;
+
+    writer.write(&batch).context("writing Parquet batch")?;
+    writer.close().context("closing Parquet writer")?;
+
+    Ok(())
+}
+
+/// Column data for Parquet output.
+#[cfg(feature = "sc-parquet")]
+pub enum ParquetColumn {
+    Str(Vec<String>),
+    F64(Vec<f64>),
+    U32(Vec<u32>),
 }
