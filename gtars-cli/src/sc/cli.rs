@@ -85,8 +85,15 @@ fn arg_format() -> Arg {
     Arg::new("format")
         .long("format")
         .default_value("table")
-        .value_parser(["table", "json", "tsv"])
-        .help("Output format")
+        .value_parser(["table", "json", "jsonl", "tsv"])
+        .help("Output format (jsonl: one JSON object per line for streaming)")
+}
+
+fn arg_compact() -> Arg {
+    Arg::new("compact")
+        .long("compact")
+        .action(ArgAction::SetTrue)
+        .help("Compact JSON output (single line, no pretty-printing)")
 }
 
 fn arg_seed() -> Arg {
@@ -119,6 +126,7 @@ fn create_rna_preprocess_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_config())
         .arg(arg_seed())
         .arg(arg_quiet())
@@ -171,6 +179,7 @@ fn create_rna_qc_cli() -> Command {
         .about("Compute per-cell QC metrics (n_features, n_counts, pct_mt)")
         .arg(arg_input())
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
 }
 
@@ -191,6 +200,7 @@ fn create_rna_filter_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("min-features")
@@ -218,6 +228,7 @@ fn create_rna_normalize_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("scale-factor")
@@ -233,6 +244,7 @@ fn create_rna_hvg_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output())
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("n-features")
@@ -248,6 +260,7 @@ fn create_rna_scale_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("clip")
@@ -268,6 +281,7 @@ fn create_rna_pca_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("n-pcs")
@@ -285,6 +299,7 @@ fn create_downstream_analyze_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_config())
         .arg(arg_seed())
         .arg(arg_quiet())
@@ -326,6 +341,7 @@ fn create_downstream_cluster_cli() -> Command {
         .arg(arg_input())
         .arg(arg_output().required(true))
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_seed())
         .arg(arg_quiet())
         .arg(
@@ -353,6 +369,7 @@ fn create_downstream_markers_cli() -> Command {
         .about("Find marker genes for each cluster (Wilcoxon rank-sum test)")
         .arg(arg_input())
         .arg(arg_format())
+        .arg(arg_compact())
         .arg(arg_quiet())
         .arg(
             Arg::new("clusters")
@@ -387,4 +404,5 @@ fn create_io_inspect_cli() -> Command {
         .about("Show matrix dimensions, sparsity, and feature types")
         .arg(arg_input())
         .arg(arg_format())
+        .arg(arg_compact())
 }

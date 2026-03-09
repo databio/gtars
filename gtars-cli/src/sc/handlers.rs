@@ -11,7 +11,7 @@ use gtars_sc::rna::pipeline::{run_full_rna_pipeline, run_rna_preprocessing};
 use gtars_sc::types::{DownstreamConfig, FeatureType, RnaPipelineConfig};
 
 use super::cli;
-use super::output::{write_json, write_table, write_tsv, Format};
+use super::output::{write_json, write_json_compact, write_jsonl, write_table, write_tsv, Format};
 
 pub fn run_sc(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
@@ -59,7 +59,7 @@ fn run_io(matches: &ArgMatches) -> Result<()> {
 fn run_rna_preprocess(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let config = build_rna_config(matches)?;
@@ -131,7 +131,7 @@ fn run_rna_preprocess(matches: &ArgMatches) -> Result<()> {
 
     // Also print summary to stdout in requested format
     match format {
-        Format::Json => write_json(&metadata)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &metadata)?,
         Format::Table => {
             println!("Preprocessing complete:");
             println!(
@@ -162,7 +162,7 @@ fn run_rna_preprocess(matches: &ArgMatches) -> Result<()> {
 
 fn run_rna_qc(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     if !quiet {
@@ -179,8 +179,18 @@ fn run_rna_qc(matches: &ArgMatches) -> Result<()> {
     let median_counts = percentile_f64(&qc.iter().map(|m| m.n_counts).collect::<Vec<_>>(), 50.0);
     let median_pct_mt = percentile_f64(&qc.iter().map(|m| m.pct_mt).collect::<Vec<_>>(), 50.0);
 
+    let qc_cells: Vec<QcCell> = qc
+        .iter()
+        .map(|m| QcCell {
+            cell_id: m.cell_id.clone(),
+            n_features: m.n_features,
+            n_counts: m.n_counts,
+            pct_mt: m.pct_mt,
+        })
+        .collect();
+
     match format {
-        Format::Json => {
+        Format::Json | Format::JsonCompact => {
             let output = QcOutput {
                 command: "sc rna qc".to_string(),
                 input: input.to_string(),
@@ -191,17 +201,12 @@ fn run_rna_qc(matches: &ArgMatches) -> Result<()> {
                     median_counts_per_cell: median_counts,
                     median_pct_mt,
                 },
-                cells: qc
-                    .iter()
-                    .map(|m| QcCell {
-                        cell_id: m.cell_id.clone(),
-                        n_features: m.n_features,
-                        n_counts: m.n_counts,
-                        pct_mt: m.pct_mt,
-                    })
-                    .collect(),
+                cells: qc_cells,
             };
-            write_json(&output)?;
+            write_json_auto(&format, &output)?;
+        }
+        Format::Jsonl => {
+            write_jsonl(&qc_cells)?;
         }
         Format::Tsv => {
             let headers = &["cell_id", "n_features", "n_counts", "pct_mt"];
@@ -281,7 +286,7 @@ fn run_rna_config(matches: &ArgMatches) -> Result<()> {
 fn run_rna_filter(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let min_features: u32 = matches
@@ -354,7 +359,7 @@ fn run_rna_filter(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => write_json(&metadata)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &metadata)?,
         Format::Table => {
             println!("Filter complete:");
             println!(
@@ -385,7 +390,7 @@ fn run_rna_filter(matches: &ArgMatches) -> Result<()> {
 fn run_rna_normalize(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let scale_factor: f64 = matches
@@ -433,7 +438,7 @@ fn run_rna_normalize(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => write_json(&metadata)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &metadata)?,
         Format::Table => {
             println!("Normalization complete:");
             println!("  Cells:        {}", fm.n_cells());
@@ -454,7 +459,7 @@ fn run_rna_normalize(matches: &ArgMatches) -> Result<()> {
 fn run_rna_hvg(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let n_features: usize = matches
@@ -519,7 +524,13 @@ fn run_rna_hvg(matches: &ArgMatches) -> Result<()> {
     };
 
     match format {
-        Format::Json => write_json(&hvg_output)?,
+        Format::Json | Format::JsonCompact => write_json_auto(&format, &hvg_output)?,
+        Format::Jsonl => {
+            // One gene per line
+            for gene in &hvgs {
+                println!("{}", serde_json::to_string(gene)?);
+            }
+        }
         Format::Table => {
             println!(
                 "HVG selection: {} → {} variable genes ({} cells)",
@@ -550,7 +561,7 @@ fn run_rna_hvg(matches: &ArgMatches) -> Result<()> {
 fn run_rna_scale(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let clip_str = matches.get_one::<String>("clip").unwrap();
@@ -630,7 +641,7 @@ fn run_rna_scale(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => write_json(&metadata)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &metadata)?,
         Format::Table => {
             println!("Scale complete:");
             println!("  Features: {} (HVGs)", scaled.nrows());
@@ -655,7 +666,7 @@ fn run_rna_scale(matches: &ArgMatches) -> Result<()> {
 fn run_rna_pca(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let n_pcs: usize = matches
@@ -733,7 +744,7 @@ fn run_rna_pca(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => write_json(&metadata)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &metadata)?,
         Format::Table => {
             println!("PCA complete:");
             println!("  Cells:      {}", n_cells);
@@ -761,7 +772,7 @@ fn run_rna_pca(matches: &ArgMatches) -> Result<()> {
 fn run_downstream_analyze(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let preprocess_config = RnaPipelineConfig::default(); // will be loaded from metadata
@@ -818,7 +829,7 @@ fn run_downstream_analyze(matches: &ArgMatches) -> Result<()> {
         }
 
         match format {
-            Format::Json => write_json(&cluster_output)?,
+            Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &cluster_output)?,
             Format::Table => {
                 println!("Clustering complete:");
                 println!("  Clusters: {}", result.clusters.n_clusters);
@@ -866,7 +877,7 @@ fn run_downstream_analyze(matches: &ArgMatches) -> Result<()> {
 fn run_downstream_cluster(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
     let output_dir = matches.get_one::<String>("output").expect("output required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     // Read embedding from preprocessed directory
@@ -932,7 +943,7 @@ fn run_downstream_cluster(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => write_json(&cluster_output)?,
+        Format::Json | Format::JsonCompact | Format::Jsonl => write_json_auto(&format, &cluster_output)?,
         Format::Table => {
             println!("Clusters: {}", clusters.n_clusters);
             if let Some(q) = clusters.quality {
@@ -952,7 +963,7 @@ fn run_downstream_cluster(matches: &ArgMatches) -> Result<()> {
 
 fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
     let quiet = matches.get_flag("quiet");
 
     let min_pct: f64 = matches
@@ -1025,14 +1036,17 @@ fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
     }
 
     match format {
-        Format::Json => {
+        Format::Json | Format::JsonCompact => {
             let output = MarkersOutput {
                 command: "sc downstream markers".to_string(),
                 n_clusters: cluster_data.n_clusters,
                 n_markers: markers.len(),
                 markers: markers.clone(),
             };
-            write_json(&output)?;
+            write_json_auto(&format, &output)?;
+        }
+        Format::Jsonl => {
+            write_jsonl(&markers)?;
         }
         Format::Table => {
             println!(
@@ -1090,7 +1104,7 @@ fn run_downstream_markers(matches: &ArgMatches) -> Result<()> {
 
 fn run_io_inspect(matches: &ArgMatches) -> Result<()> {
     let input = matches.get_one::<String>("input").expect("input required");
-    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let format = get_format(matches);
 
     let fm = read_10x(Path::new(input))
         .with_context(|| format!("reading 10X data from {}", input))?;
@@ -1104,7 +1118,7 @@ fn run_io_inspect(matches: &ArgMatches) -> Result<()> {
     let sparsity = 1.0 - (fm.matrix.nnz() as f64 / (fm.n_features() as f64 * fm.n_cells() as f64));
 
     match format {
-        Format::Json => {
+        Format::Json | Format::JsonCompact | Format::Jsonl => {
             let output = InspectOutput {
                 input: input.to_string(),
                 n_cells: fm.n_cells(),
@@ -1113,7 +1127,7 @@ fn run_io_inspect(matches: &ArgMatches) -> Result<()> {
                 sparsity,
                 feature_type: feature_type_str.to_string(),
             };
-            write_json(&output)?;
+            write_json_auto(&format, &output)?;
         }
         Format::Tsv => {
             println!("metric\tvalue");
@@ -1154,6 +1168,9 @@ fn load_config_file(matches: &ArgMatches) -> Result<Option<ConfigDefaults>> {
     let config: ConfigDefaults = if config_path.ends_with(".json") {
         serde_json::from_str(&content)
             .with_context(|| format!("parsing JSON config {}", config_path))?
+    } else if config_path.ends_with(".toml") {
+        toml::from_str(&content)
+            .with_context(|| format!("parsing TOML config {}", config_path))?
     } else {
         // YAML for .yaml, .yml, or anything else
         serde_yaml::from_str(&content)
@@ -1161,6 +1178,21 @@ fn load_config_file(matches: &ArgMatches) -> Result<Option<ConfigDefaults>> {
     };
 
     Ok(Some(config))
+}
+
+/// Extract format from CLI args, applying --compact flag.
+fn get_format(matches: &ArgMatches) -> Format {
+    let format = Format::from_str(matches.get_one::<String>("format").unwrap());
+    let compact = matches.try_get_one::<bool>("compact").ok().flatten().copied().unwrap_or(false);
+    format.with_compact(compact)
+}
+
+/// Write JSON respecting compact mode.
+fn write_json_auto<T: Serialize>(format: &Format, value: &T) -> anyhow::Result<()> {
+    match format {
+        Format::JsonCompact => write_json_compact(value),
+        _ => write_json(value),
+    }
 }
 
 /// Check if a CLI arg was explicitly provided (not just the default value).

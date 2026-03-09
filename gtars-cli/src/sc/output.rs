@@ -7,6 +7,8 @@ use serde::Serialize;
 pub enum Format {
     Table,
     Json,
+    JsonCompact,
+    Jsonl,
     Tsv,
 }
 
@@ -14,17 +16,53 @@ impl Format {
     pub fn from_str(s: &str) -> Self {
         match s {
             "json" => Format::Json,
+            "jsonl" => Format::Jsonl,
             "tsv" => Format::Tsv,
             _ => Format::Table,
         }
     }
+
+    /// Apply --compact flag: converts Json to JsonCompact.
+    pub fn with_compact(self, compact: bool) -> Self {
+        if compact {
+            match self {
+                Format::Json => Format::JsonCompact,
+                other => other,
+            }
+        } else {
+            self
+        }
+    }
+
+    pub fn is_json(&self) -> bool {
+        matches!(self, Format::Json | Format::JsonCompact | Format::Jsonl)
+    }
 }
 
-/// Write a serializable value as JSON to stdout.
+/// Write a serializable value as JSON to stdout (pretty-printed).
 pub fn write_json<T: Serialize>(value: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(value).context("serializing to JSON")?;
     io::stdout().write_all(json.as_bytes())?;
     println!();
+    Ok(())
+}
+
+/// Write a serializable value as compact JSON (single line) to stdout.
+pub fn write_json_compact<T: Serialize>(value: &T) -> Result<()> {
+    let json = serde_json::to_string(value).context("serializing to JSON")?;
+    io::stdout().write_all(json.as_bytes())?;
+    println!();
+    Ok(())
+}
+
+/// Write a sequence of serializable values as JSONL (one JSON object per line).
+pub fn write_jsonl<T: Serialize>(values: &[T]) -> Result<()> {
+    let out = io::stdout();
+    let mut w = out.lock();
+    for value in values {
+        let line = serde_json::to_string(value).context("serializing to JSONL")?;
+        writeln!(w, "{}", line)?;
+    }
     Ok(())
 }
 
