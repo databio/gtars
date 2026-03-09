@@ -7,11 +7,17 @@ const RNA_CMD: &str = "rna";
 pub const RNA_PREPROCESS_CMD: &str = "preprocess";
 pub const RNA_QC_CMD: &str = "qc";
 pub const RNA_CONFIG_CMD: &str = "config";
+pub const RNA_FILTER_CMD: &str = "filter";
+pub const RNA_NORMALIZE_CMD: &str = "normalize";
+pub const RNA_HVG_CMD: &str = "hvg";
+pub const RNA_SCALE_CMD: &str = "scale";
+pub const RNA_PCA_CMD: &str = "pca";
 
 // Downstream subcommands
 const DOWNSTREAM_CMD: &str = "downstream";
 pub const DOWNSTREAM_ANALYZE_CMD: &str = "analyze";
 pub const DOWNSTREAM_CLUSTER_CMD: &str = "cluster";
+pub const DOWNSTREAM_MARKERS_CMD: &str = "markers";
 
 // IO subcommands
 const IO_CMD: &str = "io";
@@ -35,6 +41,11 @@ fn create_rna_cli() -> Command {
         .subcommand(create_rna_preprocess_cli())
         .subcommand(create_rna_qc_cli())
         .subcommand(create_rna_config_cli())
+        .subcommand(create_rna_filter_cli())
+        .subcommand(create_rna_normalize_cli())
+        .subcommand(create_rna_hvg_cli())
+        .subcommand(create_rna_scale_cli())
+        .subcommand(create_rna_pca_cli())
 }
 
 fn create_downstream_cli() -> Command {
@@ -44,6 +55,7 @@ fn create_downstream_cli() -> Command {
         .arg_required_else_help(true)
         .subcommand(create_downstream_analyze_cli())
         .subcommand(create_downstream_cluster_cli())
+        .subcommand(create_downstream_markers_cli())
 }
 
 fn create_io_cli() -> Command {
@@ -173,6 +185,98 @@ fn create_rna_config_cli() -> Command {
         )
 }
 
+fn create_rna_filter_cli() -> Command {
+    Command::new(RNA_FILTER_CMD)
+        .about("Filter cells and genes (expects raw counts)")
+        .arg(arg_input())
+        .arg(arg_output().required(true))
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("min-features")
+                .long("min-features")
+                .default_value("200")
+                .help("Minimum genes per cell"),
+        )
+        .arg(
+            Arg::new("min-cells")
+                .long("min-cells")
+                .default_value("3")
+                .help("Minimum cells per gene"),
+        )
+        .arg(
+            Arg::new("max-pct-mt")
+                .long("max-pct-mt")
+                .default_value("5.0")
+                .help("Maximum mitochondrial percentage"),
+        )
+}
+
+fn create_rna_normalize_cli() -> Command {
+    Command::new(RNA_NORMALIZE_CMD)
+        .about("Log-normalize count matrix")
+        .arg(arg_input())
+        .arg(arg_output().required(true))
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("scale-factor")
+                .long("scale-factor")
+                .default_value("10000")
+                .help("Normalization scale factor"),
+        )
+}
+
+fn create_rna_hvg_cli() -> Command {
+    Command::new(RNA_HVG_CMD)
+        .about("Find highly variable genes (expects raw counts, before normalization)")
+        .arg(arg_input())
+        .arg(arg_output())
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("n-features")
+                .long("n-features")
+                .default_value("2000")
+                .help("Number of highly variable genes to select"),
+        )
+}
+
+fn create_rna_scale_cli() -> Command {
+    Command::new(RNA_SCALE_CMD)
+        .about("Scale and center data on HVG subset (produces dense matrix)")
+        .arg(arg_input())
+        .arg(arg_output().required(true))
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("clip")
+                .long("clip")
+                .default_value("10.0")
+                .help("Clip scaled values to [-clip, clip] (use 'none' to skip)"),
+        )
+        .arg(
+            Arg::new("hvgs")
+                .long("hvgs")
+                .help("Path to hvgs.json (default: <input>/hvgs.json)"),
+        )
+}
+
+fn create_rna_pca_cli() -> Command {
+    Command::new(RNA_PCA_CMD)
+        .about("PCA dimensionality reduction on scaled data")
+        .arg(arg_input())
+        .arg(arg_output().required(true))
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("n-pcs")
+                .long("n-pcs")
+                .default_value("50")
+                .help("Number of principal components"),
+        )
+}
+
 // --- Downstream subcommands ---
 
 fn create_downstream_analyze_cli() -> Command {
@@ -241,6 +345,38 @@ fn create_downstream_cluster_cli() -> Command {
                 .long("prune-snn")
                 .default_value("0.0667")
                 .help("SNN pruning threshold (Jaccard)"),
+        )
+}
+
+fn create_downstream_markers_cli() -> Command {
+    Command::new(DOWNSTREAM_MARKERS_CMD)
+        .about("Find marker genes for each cluster (Wilcoxon rank-sum test)")
+        .arg(arg_input())
+        .arg(arg_format())
+        .arg(arg_quiet())
+        .arg(
+            Arg::new("clusters")
+                .long("clusters")
+                .help("Path to clusters.json (default: <input>/clusters.json)"),
+        )
+        .arg(
+            Arg::new("min-pct")
+                .long("min-pct")
+                .default_value("0.1")
+                .help("Minimum fraction of cells expressing a gene"),
+        )
+        .arg(
+            Arg::new("min-log2fc")
+                .long("min-log2fc")
+                .default_value("0.25")
+                .help("Minimum log2 fold change"),
+        )
+        .arg(
+            Arg::new("only-positive")
+                .long("only-positive")
+                .action(ArgAction::SetTrue)
+                .default_value("true")
+                .help("Only return upregulated markers"),
         )
 }
 
