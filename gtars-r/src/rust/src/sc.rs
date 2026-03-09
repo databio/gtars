@@ -1,7 +1,7 @@
 use extendr_api::prelude::*;
 use ndarray::Array2;
 
-use gtars_sc::cluster::leiden::leiden_clustering;
+use gtars_sc::cluster::leiden::{leiden_clustering, leiden_clustering_seeded};
 use gtars_sc::cluster::silhouette::{mean_silhouette, silhouette_scores};
 use gtars_sc::io::read_10x;
 use gtars_sc::markers::wilcoxon::find_all_markers;
@@ -397,6 +397,53 @@ pub fn r_sc_find_neighbors(
 }
 
 // =========================================================================
+// 11b. Export SNN graph as edge list (for diagnostics)
+// =========================================================================
+
+/// Export SNN graph as an edge list for cross-validation with igraph
+/// @export
+/// @param snn_ptr External pointer to an SnnGraph
+#[extendr(r_name = "sc_export_snn")]
+pub fn r_sc_export_snn(snn_ptr: Robj) -> extendr_api::Result<List> {
+    with_snn_graph!(snn_ptr, snn, {
+        let mut from_vec: Vec<i32> = Vec::new();
+        let mut to_vec: Vec<i32> = Vec::new();
+        let mut weight_vec: Vec<f64> = Vec::new();
+
+        // Export upper-triangle only (i < j) to avoid duplicates
+        for i in 0..snn.n_cells {
+            for &(j, w) in &snn.edges[i] {
+                if j > i {
+                    from_vec.push(i as i32 + 1); // 1-indexed for R/igraph
+                    to_vec.push(j as i32 + 1);
+                    weight_vec.push(w);
+                }
+            }
+        }
+
+        // Compute degree and strength stats
+        let degrees: Vec<i32> = (0..snn.n_cells)
+            .map(|i| snn.edges[i].len() as i32)
+            .collect();
+        let strengths: Vec<f64> = (0..snn.n_cells)
+            .map(|i| snn.edges[i].iter().map(|&(_, w)| w).sum())
+            .collect();
+
+        let n_edges = from_vec.len() as i32;
+
+        Ok(list!(
+            from = from_vec,
+            to = to_vec,
+            weight = weight_vec,
+            n_cells = snn.n_cells as i32,
+            n_edges = n_edges,
+            degree = degrees,
+            strength = strengths
+        ))
+    })
+}
+
+// =========================================================================
 // 12. Find clusters (Leiden)
 // =========================================================================
 
@@ -405,14 +452,24 @@ pub fn r_sc_find_neighbors(
 /// @param snn_ptr External pointer to an SnnGraph
 /// @param resolution Resolution parameter (default 0.8)
 /// @param max_iter Maximum iterations (default 10)
+/// @param seed Random seed (default 42)
 #[extendr(r_name = "sc_find_clusters")]
 pub fn r_sc_find_clusters(
     snn_ptr: Robj,
     resolution: f64,
     max_iter: i32,
+    seed: Robj,
 ) -> extendr_api::Result<List> {
     with_snn_graph!(snn_ptr, snn, {
-        let result = leiden_clustering(snn, resolution, max_iter as usize)
+        let seed_val = if seed.is_na() || seed.is_null() {
+            42u64
+        } else {
+            seed.as_real()
+                .ok_or_else(|| extendr_api::Error::Other("seed must be numeric".into()))?
+                as u64
+        };
+
+        let result = leiden_clustering_seeded(snn, resolution, max_iter as usize, seed_val)
             .map_err(|e| extendr_api::Error::Other(format!("leiden: {}", e)))?;
 
         let assignments: Vec<i32> = result.assignments.iter().map(|&c| c as i32).collect();
@@ -657,6 +714,7 @@ extendr_module! {
     fn r_sc_run_pca;
     fn r_sc_run_rna_pipeline;
     fn r_sc_find_neighbors;
+    fn r_sc_export_snn;
     fn r_sc_find_clusters;
     fn r_sc_find_all_markers;
     fn r_sc_silhouette;

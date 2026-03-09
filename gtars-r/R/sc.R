@@ -187,16 +187,27 @@ sc_find_neighbors <- function(embeddings, k = 20L, prune_snn = 1/15) {
         as.integer(nr), as.integer(nc), as.integer(k), as.double(prune_snn))
 }
 
+#' Export SNN graph as edge list
+#'
+#' @param snn_ptr External pointer to an SnnGraph from sc_find_neighbors
+#' @return A named list with from, to, weight (edge list), n_cells, n_edges,
+#'   degree, and strength vectors
+#' @export
+sc_export_snn <- function(snn_ptr) {
+  .Call(wrap__r_sc_export_snn, snn_ptr)
+}
+
 #' Find clusters using Leiden algorithm
 #'
 #' @param snn_ptr External pointer to an SnnGraph from sc_find_neighbors
 #' @param resolution Resolution parameter controlling cluster granularity (default 0.8)
 #' @param max_iter Maximum Leiden iterations (default 10)
+#' @param seed Random seed (default 42)
 #' @return A named list with assignments (integer vector), n_clusters, quality (modularity)
 #' @export
-sc_find_clusters <- function(snn_ptr, resolution = 0.8, max_iter = 10L) {
+sc_find_clusters <- function(snn_ptr, resolution = 0.8, max_iter = 10L, seed = 42) {
   .Call(wrap__r_sc_find_clusters, snn_ptr,
-        as.double(resolution), as.integer(max_iter))
+        as.double(resolution), as.integer(max_iter), as.double(seed))
 }
 
 #' Find marker genes for each cluster

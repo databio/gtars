@@ -180,7 +180,7 @@ info_fc <- sc_feature_matrix_info(fm_fc)
 
 if (has_seurat) {
   t_seurat <- time_it({
-    seu <- subset(seu, subset = nFeature_RNA > 200 & percent.mt < 5)
+    seu <- subset(seu, subset = nFeature_RNA >= 200 & percent.mt <= 5)
   })
   cat(sprintf("Seurat: %d cells\n", ncol(seu)))
 } else {
@@ -267,6 +267,38 @@ cat(sprintf("gtars  scaled: %d x %d\n", nrow(scaled_gtars), ncol(scaled_gtars)))
 timings[nrow(timings) + 1, ] <- list("Scale", t_gtars, t_seurat)
 ```
 
+```{r scale-comparison, eval=has_seurat}
+# Compare scaled data between gtars and Seurat for shared HVGs
+shared_hvgs <- intersect(hvg_gtars, hvg_seurat)
+shared_cells_sc <- intersect(colnames(scaled_gtars), colnames(seu))
+cat(sprintf("Shared HVGs: %d, Shared cells: %d\n", length(shared_hvgs), length(shared_cells_sc)))
+
+seurat_scaled <- GetAssayData(seu, layer = "scale.data")
+# Subset both to shared genes and cells
+g_sub <- scaled_gtars[shared_hvgs, shared_cells_sc, drop = FALSE]
+s_sub <- as.matrix(seurat_scaled[shared_hvgs, shared_cells_sc, drop = FALSE])
+
+# Per-gene correlation
+gene_cors <- sapply(seq_len(nrow(g_sub)), function(i) cor(g_sub[i, ], s_sub[i, ]))
+cat(sprintf("Scaled data per-gene correlation: mean=%.4f, min=%.4f, median=%.4f\n",
+            mean(gene_cors, na.rm = TRUE), min(gene_cors, na.rm = TRUE),
+            median(gene_cors, na.rm = TRUE)))
+
+# Per-cell correlation (column-wise)
+cell_cors <- sapply(seq_len(ncol(g_sub)), function(j) cor(g_sub[, j], s_sub[, j]))
+cat(sprintf("Scaled data per-cell correlation: mean=%.4f, min=%.4f, median=%.4f\n",
+            mean(cell_cors, na.rm = TRUE), min(cell_cors, na.rm = TRUE),
+            median(cell_cors, na.rm = TRUE)))
+
+# Check a few specific genes
+cat("\nTop 5 HVGs, gtars vs Seurat scaled values (first 3 cells):\n")
+for (g in head(shared_hvgs, 5)) {
+  cat(sprintf("  %s: gtars=[%.3f, %.3f, %.3f] seurat=[%.3f, %.3f, %.3f]\n",
+              g, g_sub[g, 1], g_sub[g, 2], g_sub[g, 3],
+              s_sub[g, 1], s_sub[g, 2], s_sub[g, 3]))
+}
+```
+
 ---
 
 # Step 8: PCA (50 PCs)
@@ -318,7 +350,97 @@ if (length(shared_cells) > 0) {
 
   cat(sprintf("Shared cells: %d\n", length(shared_cells)))
   cat(sprintf("Mean |cor| across %d PCs: %.4f\n", n_compare, mean(cors)))
-  cat(sprintf("PC1 |cor|: %.4f, PC2 |cor|: %.4f, PC3 |cor|: %.4f\n", cors[1], cors[2], cors[3]))
+  cat(sprintf("PC1-5  |cor|: %.4f, %.4f, %.4f, %.4f, %.4f\n", cors[1], cors[2], cors[3], cors[4], cors[5]))
+  cat(sprintf("PC6-10 |cor|: %.4f, %.4f, %.4f, %.4f, %.4f\n", cors[6], cors[7], cors[8], cors[9], cors[10]))
+  cat(sprintf("PCs with |cor| > 0.95: %d/%d\n", sum(cors > 0.95), n_compare))
+  cat(sprintf("PCs with |cor| > 0.90: %d/%d\n", sum(cors > 0.90), n_compare))
+  cat(sprintf("PCs with |cor| < 0.50: %d/%d\n", sum(cors < 0.50), n_compare))
+}
+```
+
+## PCA Deep Diagnostic
+
+```{r pca-diagnostic, eval=has_seurat}
+# Run exact SVD on BOTH scaled matrices
+cat("Running exact SVD on gtars scaled matrix...\n")
+t_exact_g <- time_it({
+  exact_g <- svd(t(scaled_gtars), nu = 50, nv = 0)
+})
+exact_emb_g <- exact_g$u %*% diag(exact_g$d[1:50])
+rownames(exact_emb_g) <- colnames(scaled_gtars)
+cat(sprintf("  %.2f s\n", t_exact_g))
+
+cat("Running exact SVD on Seurat scaled matrix...\n")
+seurat_scaled <- GetAssayData(seu, layer = "scale.data")
+# Subset to the HVGs Seurat used for PCA
+seurat_pca_features <- rownames(Loadings(seu, "pca"))
+seurat_scaled_sub <- seurat_scaled[seurat_pca_features, ]
+t_exact_s <- time_it({
+  exact_s <- svd(t(seurat_scaled_sub), nu = 50, nv = 0)
+})
+exact_emb_s <- exact_s$u %*% diag(exact_s$d[1:50])
+rownames(exact_emb_s) <- colnames(seurat_scaled_sub)
+cat(sprintf("  %.2f s\n\n", t_exact_s))
+
+# Singular value spectrum
+cat("--- Singular value spectrum (exact SVD) ---\n")
+cat(sprintf("gtars  sdev[1:5]:   %s\n", paste(round(exact_g$d[1:5], 2), collapse = ", ")))
+cat(sprintf("Seurat sdev[1:5]:   %s\n", paste(round(exact_s$d[1:5], 2), collapse = ", ")))
+cat(sprintf("gtars  sdev[46:50]: %s\n", paste(round(exact_g$d[46:50], 2), collapse = ", ")))
+cat(sprintf("Seurat sdev[46:50]: %s\n", paste(round(exact_s$d[46:50], 2), collapse = ", ")))
+cat(sprintf("gtars  ratio sdev[50]/sdev[1]: %.4f\n", exact_g$d[50] / exact_g$d[1]))
+cat(sprintf("Seurat ratio sdev[50]/sdev[1]: %.4f\n\n", exact_s$d[50] / exact_s$d[1]))
+
+shared <- intersect(rownames(exact_emb_g), rownames(exact_emb_s))
+
+# Each IRLBA vs its OWN exact SVD
+gtars_emb <- pca_gtars$embeddings[shared, ]
+seurat_emb <- Embeddings(seu, "pca")[shared, ]
+exact_g_s <- exact_emb_g[shared, ]
+exact_s_s <- exact_emb_s[shared, ]
+
+cors_gtars_own <- sapply(1:50, function(i) abs(cor(gtars_emb[, i], exact_g_s[, i])))
+cors_seurat_own <- sapply(1:50, function(i) abs(cor(seurat_emb[, i], exact_s_s[, i])))
+
+cat("--- gtars IRLBA vs gtars Exact SVD (same matrix) ---\n")
+cat(sprintf("  PCs >0.95: %d/50, >0.90: %d/50, <0.50: %d/50\n",
+            sum(cors_gtars_own > 0.95), sum(cors_gtars_own > 0.90), sum(cors_gtars_own < 0.50)))
+cat(sprintf("  Mean |cor|: %.4f\n", mean(cors_gtars_own)))
+
+cat("\n--- Seurat IRLBA vs Seurat Exact SVD (same matrix) ---\n")
+cat(sprintf("  PCs >0.95: %d/50, >0.90: %d/50, <0.50: %d/50\n",
+            sum(cors_seurat_own > 0.95), sum(cors_seurat_own > 0.90), sum(cors_seurat_own < 0.50)))
+cat(sprintf("  Mean |cor|: %.4f\n", mean(cors_seurat_own)))
+
+# Cross-matrix exact SVD comparison (are the matrices themselves different?)
+cors_exact_cross <- sapply(1:50, function(i) abs(cor(exact_g_s[, i], exact_s_s[, i])))
+cat("\n--- gtars Exact SVD vs Seurat Exact SVD (different matrices?) ---\n")
+cat(sprintf("  PCs >0.95: %d/50, >0.90: %d/50, <0.50: %d/50\n",
+            sum(cors_exact_cross > 0.95), sum(cors_exact_cross > 0.90), sum(cors_exact_cross < 0.50)))
+cat(sprintf("  Mean |cor|: %.4f\n", mean(cors_exact_cross)))
+
+# Check if HVG sets match
+cat(sprintf("\n--- HVG comparison ---\n"))
+cat(sprintf("gtars HVGs: %d, Seurat HVGs: %d\n", length(hvg_gtars), length(hvg_seurat)))
+cat(sprintf("Shared HVGs: %d\n", length(intersect(hvg_gtars, hvg_seurat))))
+cat(sprintf("gtars-only: %d, Seurat-only: %d\n",
+            length(setdiff(hvg_gtars, hvg_seurat)), length(setdiff(hvg_seurat, hvg_gtars))))
+cat(sprintf("PCA features — gtars: %d, Seurat: %d\n",
+            nrow(scaled_gtars), length(seurat_pca_features)))
+```
+
+```{r pca-diagnostic-plot, fig.width=10, fig.height=5, eval=has_seurat}
+if (exists("cors_gtars_own")) {
+  par(mfrow = c(1, 1))
+  plot(1:50, cors_gtars_own, type = "b", pch = 16, col = "steelblue",
+       ylim = c(0, 1), xlab = "PC", ylab = "|Pearson r| vs own Exact SVD",
+       main = "Each IRLBA vs its own Exact SVD")
+  lines(1:50, cors_seurat_own, type = "b", pch = 17, col = "coral")
+  lines(1:50, cors_exact_cross, type = "b", pch = 18, col = "forestgreen")
+  legend("bottomleft", c("gtars IRLBA vs gtars Exact", "Seurat IRLBA vs Seurat Exact",
+                          "gtars Exact vs Seurat Exact (input diff)"),
+         col = c("steelblue", "coral", "forestgreen"), pch = c(16, 17, 18), lty = 1)
+  abline(h = 0.9, lty = 2, col = "grey50")
 }
 ```
 
@@ -352,9 +474,37 @@ if (has_seurat) {
 timings[nrow(timings) + 1, ] <- list("FindNeighbors", t_gtars, t_seurat)
 ```
 
+## SNN Graph Diagnostics
+
+```{r snn-diagnostics}
+# Export gtars SNN graph for cross-validation
+snn_export <- sc_export_snn(snn_ptr)
+cat(sprintf("gtars SNN graph: %d cells, %d edges\n", snn_export$n_cells, snn_export$n_edges))
+cat(sprintf("Degree: min=%d, median=%.0f, max=%d\n",
+            min(snn_export$degree), median(snn_export$degree), max(snn_export$degree)))
+cat(sprintf("Strength: min=%.2f, median=%.2f, max=%.2f\n",
+            min(snn_export$strength), median(snn_export$strength), max(snn_export$strength)))
+cat(sprintf("Edge weights: min=%.4f, median=%.4f, max=%.4f\n",
+            min(snn_export$weight), median(snn_export$weight), max(snn_export$weight)))
+```
+
+```{r seurat-snn-diagnostics, eval=has_seurat}
+# Compare SNN graph properties between Seurat and gtars
+seurat_snn <- seu@graphs$RNA_snn
+cat(sprintf("\nSeurat SNN graph: %d x %d, %d non-zero entries\n",
+            nrow(seurat_snn), ncol(seurat_snn), length(seurat_snn@x)))
+cat(sprintf("Seurat edge weights: min=%.4f, median=%.4f, max=%.4f\n",
+            min(seurat_snn@x[seurat_snn@x > 0]),
+            median(seurat_snn@x[seurat_snn@x > 0]),
+            max(seurat_snn@x[seurat_snn@x > 0])))
+```
+
 ---
 
-# Step 10: Find Clusters (Leiden)
+# Step 10: Find Clusters (Louvain)
+
+Note: gtars-sc implements Louvain (not Leiden). Using `algorithm = 1` (Louvain)
+for Seurat for a fair comparison.
 
 ```{r find-clusters}
 t_gtars <- time_it({
@@ -397,11 +547,85 @@ shared_cells_clust <- intersect(rownames(pca_gtars$embeddings), colnames(seu))
 gtars_labels <- clust_gtars$assignments[match(shared_cells_clust, rownames(pca_gtars$embeddings))]
 seurat_labels <- as.integer(Idents(seu)[shared_cells_clust]) - 1L
 
+cat("gtars-sc cluster sizes:\n")
+print(sort(table(gtars_labels), decreasing = TRUE))
+cat("\nSeurat cluster sizes:\n")
+print(sort(table(seurat_labels), decreasing = TRUE))
+
 par(mfrow = c(1, 2))
 barplot(table(gtars_labels), col = "steelblue", main = "gtars-sc Cluster Sizes",
         xlab = "Cluster", ylab = "Cells")
 barplot(table(seurat_labels), col = "coral", main = "Seurat Cluster Sizes",
         xlab = "Cluster", ylab = "Cells")
+```
+
+## Multi-Seed Clustering Comparison
+
+```{r multi-seed, eval=has_seurat}
+seeds <- c(0, 42, 123, 456, 999)
+cat("=== gtars Louvain cluster sizes across 5 seeds ===\n")
+for (s in seeds) {
+  res <- sc_find_clusters(snn_ptr, resolution = 0.8, max_iter = 10L, seed = s)
+  sizes <- sort(table(res$assignments), decreasing = TRUE)
+  cat(sprintf("  seed %3d: %d clusters — %s\n", s, res$n_clusters,
+              paste(sizes, collapse = ", ")))
+}
+
+cat("\n=== Seurat Louvain cluster sizes across 5 seeds ===\n")
+for (s in seeds) {
+  seu_tmp <- FindClusters(seu, resolution = 0.8, algorithm = 1,
+                          random.seed = s, verbose = FALSE)
+  sizes <- sort(table(Idents(seu_tmp)), decreasing = TRUE)
+  cat(sprintf("  seed %3d: %d clusters — %s\n", s, length(sizes),
+              paste(sizes, collapse = ", ")))
+}
+```
+
+## Louvain Cross-Validation (igraph on gtars SNN)
+
+```{r snn-igraph-crosscheck}
+# Cross-validate: run igraph's Louvain on the gtars SNN graph
+if (requireNamespace("igraph", quietly = TRUE)) {
+  # Build igraph from exported edge list
+  el <- data.frame(from = snn_export$from, to = snn_export$to, weight = snn_export$weight)
+  g_gtars <- igraph::graph_from_data_frame(el, directed = FALSE,
+                                            vertices = data.frame(name = seq_len(snn_export$n_cells)))
+  igraph::E(g_gtars)$weight <- el$weight
+
+  # Run igraph Louvain on gtars SNN
+  igraph_on_gtars <- igraph::cluster_louvain(g_gtars, resolution = 0.8)
+  igraph_on_gtars_labels <- igraph::membership(igraph_on_gtars) - 1L
+
+  cat("igraph Louvain on gtars SNN:\n")
+  cat(sprintf("  %d clusters\n", length(unique(igraph_on_gtars_labels))))
+  print(sort(table(igraph_on_gtars_labels), decreasing = TRUE))
+
+  cat("\ngtars Louvain on gtars SNN:\n")
+  cat(sprintf("  %d clusters\n", clust_gtars$n_clusters))
+  print(sort(table(clust_gtars$assignments), decreasing = TRUE))
+
+  if (requireNamespace("mclust", quietly = TRUE)) {
+    ari_algo <- mclust::adjustedRandIndex(clust_gtars$assignments, igraph_on_gtars_labels)
+    cat(sprintf("\nARI (gtars Louvain vs igraph Louvain on SAME graph): %.4f\n", ari_algo))
+    cat("If ARI is high -> Louvain impl is correct, issue is in graph construction\n")
+    cat("If ARI is low  -> Louvain impl has a bug\n")
+  }
+
+  # Also run igraph Louvain on Seurat's SNN for comparison
+  if (has_seurat) {
+    seurat_snn <- seu@graphs$RNA_snn
+    g_seurat <- igraph::graph_from_adjacency_matrix(seurat_snn, mode = "undirected",
+                                                      weighted = TRUE, diag = FALSE)
+    igraph_on_seurat <- igraph::cluster_louvain(g_seurat, resolution = 0.8)
+    igraph_on_seurat_labels <- igraph::membership(igraph_on_seurat) - 1L
+
+    cat("\nigraph Louvain on Seurat SNN:\n")
+    cat(sprintf("  %d clusters\n", length(unique(igraph_on_seurat_labels))))
+    print(sort(table(igraph_on_seurat_labels), decreasing = TRUE))
+  }
+} else {
+  cat("Install `igraph` for Louvain cross-validation\n")
+}
 ```
 
 ---

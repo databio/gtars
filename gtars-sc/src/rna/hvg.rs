@@ -72,27 +72,15 @@ pub fn find_variable_features(
         }
     }
 
-    // Evaluate loess at grid points, then interpolate per-gene (O(n_grid * n_fit) instead of O(n^2))
-    let n_grid = 200;
-    let (x_min, x_max) = fit_x.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), &v| {
-        (lo.min(v), hi.max(v))
-    });
-    let (grid_x, grid_y) = if (x_max - x_min).abs() < 1e-15 {
-        // All genes have ~same mean; use constant fit (mean of fit_y)
-        let mean_y = fit_y.iter().sum::<f64>() / fit_y.len() as f64;
-        (vec![x_min], vec![mean_y])
-    } else {
-        let grid_step = (x_max - x_min) / (n_grid - 1) as f64;
-        let gx: Vec<f64> = (0..n_grid).map(|i| x_min + i as f64 * grid_step).collect();
-        let gy = loess_fit_at(&fit_x, &fit_y, &gx, 0.3);
-        (gx, gy)
-    };
+    // Evaluate loess directly at each gene's log10(mean) — no grid interpolation.
+    // This matches Seurat's loess(log10(variance) ~ log10(mean), span = 0.3) more
+    // closely than grid-then-interpolate, which can shift borderline HVG rankings.
+    let query_x: Vec<f64> = fit_idx.iter().map(|&i| log10_means[i]).collect();
+    let fitted_y = loess_fit_at(&fit_x, &fit_y, &query_x, 0.3);
 
     let mut expected_var = vec![1e-10f64; n_genes];
-    for &i in &fit_idx {
-        let lm = log10_means[i];
-        let expected_lv = interpolate(&grid_x, &grid_y, lm);
-        expected_var[i] = 10.0_f64.powf(expected_lv);
+    for (idx_pos, &i) in fit_idx.iter().enumerate() {
+        expected_var[i] = 10.0_f64.powf(fitted_y[idx_pos]);
     }
 
     // --- Pass 2: variance of standardized values (Seurat convention) ---
@@ -150,17 +138,18 @@ pub fn find_variable_features(
     Ok(hvgs)
 }
 
-/// Evaluate loess (local weighted linear regression, degree=1) at query points.
+/// Evaluate loess (local weighted quadratic regression, degree=2) at query points.
 ///
 /// `data_x` and `data_y` are the training data; `query_x` are the points to predict.
 /// Uses tricube kernel with the given span (fraction of data points in each window).
+/// Degree=2 matches R's `loess()` default (locally quadratic fit).
 fn loess_fit_at(data_x: &[f64], data_y: &[f64], query_x: &[f64], span: f64) -> Vec<f64> {
     let n = data_x.len();
     if n == 0 {
         return vec![0.0; query_x.len()];
     }
 
-    let window = ((span * n as f64).ceil() as usize).max(2).min(n);
+    let window = ((span * n as f64).ceil() as usize).max(3).min(n);
 
     // Sort data by x
     let mut order: Vec<usize> = (0..n).collect();
@@ -191,60 +180,61 @@ fn loess_fit_at(data_x: &[f64], data_y: &[f64], query_x: &[f64], span: f64) -> V
             .map(|&v| (v - xi).abs())
             .fold(1e-15f64, f64::max);
 
-        // Tricube-weighted linear regression
-        let mut sw = 0.0f64;
-        let mut swx = 0.0f64;
-        let mut swy = 0.0f64;
-        let mut swxx = 0.0f64;
-        let mut swxy = 0.0f64;
+        // Tricube-weighted quadratic regression: y = a + b*x + c*x^2
+        // Use centered coordinates (dx = x - xi) for numerical stability,
+        // matching R's loess which normalizes predictors.
+        // With centering, prediction at xi is simply the intercept a.
+        let mut s0 = 0.0f64; // sum of weights
+        let mut s1 = 0.0f64; // sum(w * dx)
+        let mut s2 = 0.0f64; // sum(w * dx^2)
+        let mut s3 = 0.0f64; // sum(w * dx^3)
+        let mut s4 = 0.0f64; // sum(w * dx^4)
+        let mut t0 = 0.0f64; // sum(w * y)
+        let mut t1 = 0.0f64; // sum(w * dx * y)
+        let mut t2 = 0.0f64; // sum(w * dx^2 * y)
 
         for j in lo..hi {
             let u = ((sorted_x[j] - xi).abs() / max_dist).min(1.0);
-            let t = 1.0 - u * u * u;
-            let w = t * t * t;
-            sw += w;
-            swx += w * sorted_x[j];
-            swy += w * sorted_y[j];
-            swxx += w * sorted_x[j] * sorted_x[j];
-            swxy += w * sorted_x[j] * sorted_y[j];
+            let tc = 1.0 - u * u * u;
+            let w = tc * tc * tc;
+            let dx = sorted_x[j] - xi;
+            let dx2 = dx * dx;
+            s0 += w;
+            s1 += w * dx;
+            s2 += w * dx2;
+            s3 += w * dx2 * dx;
+            s4 += w * dx2 * dx2;
+            t0 += w * sorted_y[j];
+            t1 += w * dx * sorted_y[j];
+            t2 += w * dx2 * sorted_y[j];
         }
 
-        let val = if sw < 1e-15 {
+        let val = if s0 < 1e-15 {
             0.0
         } else {
-            let denom = sw * swxx - swx * swx;
-            if denom.abs() < 1e-15 {
-                swy / sw
+            // Solve 3x3 normal equations for [a, b, c]:
+            // [s0 s1 s2] [a]   [t0]
+            // [s1 s2 s3] [b] = [t1]
+            // [s2 s3 s4] [c]   [t2]
+            // We only need a (the intercept = prediction at xi due to centering).
+            let det = s0 * (s2 * s4 - s3 * s3)
+                    - s1 * (s1 * s4 - s3 * s2)
+                    + s2 * (s1 * s3 - s2 * s2);
+            if det.abs() < 1e-30 {
+                // Degenerate: fall back to weighted mean
+                t0 / s0
             } else {
-                let b = (sw * swxy - swx * swy) / denom;
-                let a = (swy - b * swx) / sw;
-                a + b * xi
+                // Cramer's rule for a (first component)
+                let a_num = t0 * (s2 * s4 - s3 * s3)
+                          - s1 * (t1 * s4 - s3 * t2)
+                          + s2 * (t1 * s3 - s2 * t2);
+                a_num / det
             }
         };
         fitted.push(val);
     }
 
     fitted
-}
-
-/// Linear interpolation from sorted (x, y) control points.
-fn interpolate(xs: &[f64], ys: &[f64], x: f64) -> f64 {
-    if xs.is_empty() {
-        return 0.0;
-    }
-    if xs.len() == 1 || x <= xs[0] {
-        return ys[0];
-    }
-    if x >= xs[xs.len() - 1] {
-        return ys[ys.len() - 1];
-    }
-    let pos = xs.partition_point(|&v| v < x);
-    if pos == 0 {
-        return ys[0];
-    }
-    let i = pos - 1;
-    let frac = (x - xs[i]) / (xs[i + 1] - xs[i]);
-    ys[i] + frac * (ys[i + 1] - ys[i])
 }
 
 #[cfg(test)]

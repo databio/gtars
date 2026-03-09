@@ -24,7 +24,7 @@ use rand::SeedableRng;
 
 use crate::types::{ClusterResult, SnnGraph};
 
-/// Run Leiden community detection on an SNN graph.
+/// Run Leiden community detection on an SNN graph with default seed (42).
 ///
 /// # Arguments
 /// * `graph` — Weighted SNN graph (Jaccard-weighted edges)
@@ -34,6 +34,16 @@ pub fn leiden_clustering(
     graph: &SnnGraph,
     resolution: f64,
     max_iterations: usize,
+) -> Result<ClusterResult> {
+    leiden_clustering_seeded(graph, resolution, max_iterations, 42)
+}
+
+/// Run Leiden community detection on an SNN graph with a specified random seed.
+pub fn leiden_clustering_seeded(
+    graph: &SnnGraph,
+    resolution: f64,
+    max_iterations: usize,
+    seed: u64,
 ) -> Result<ClusterResult> {
     let n = graph.n_cells;
     if n == 0 {
@@ -58,7 +68,7 @@ pub fn leiden_clustering(
         });
     }
 
-    let mut rng = rand::rngs::SmallRng::seed_from_u64(42);
+    let mut rng = rand::rngs::SmallRng::seed_from_u64(seed);
 
     // Global assignment: original node → current community
     let mut global_community: Vec<u32> = (0..n as u32).collect();

@@ -46,7 +46,11 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
     let min_dim = m.min(n);
 
     // Work = subspace dimension. Must satisfy k < work < min_dim.
+    // Match R's irlba default: work = k + 7. Using the same work dimension
+    // as R keeps the restart path similar, improving correlation of later
+    // singular vectors on near-degenerate spectra.
     let work = k + 7;
+
     if work >= min_dim || k >= min_dim {
         return crate::reduce::svd::truncated_svd(matrix, n_components);
     }
@@ -200,7 +204,10 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
         }
 
         // --- Augmented implicit restart ---
-        let k_r = (n_converged + k).max(k).min(p - 3);
+        // Match R's irlba: always restart with exactly k Ritz vectors.
+        // This leaves (p - k) fresh Lanczos steps per restart (= 7 with
+        // work = k + 7), matching R's convergence path.
+        let k_r = k;
 
         // Rotate V basis: V_new[:, 0..k_r] = V[:, 0..p] * V_B[:, 0..k_r]
         let mut v_new = Mat::<f64>::zeros(n, k_r);
@@ -250,18 +257,23 @@ pub fn lanczos_svd(matrix: &Array2<f64>, n_components: usize) -> Result<SvdResul
 }
 
 /// Reorthogonalize column vector `v` (stored as m×1 Mat) against the first
-/// `ncols` columns of `basis`. Uses Classical Gram-Schmidt (one pass).
+/// `ncols` columns of `basis`. Uses double Classical Gram-Schmidt (two passes)
+/// to maintain numerical orthogonality — a single pass loses orthogonality
+/// in finite precision, causing ghost eigenvalues and poor convergence of
+/// later singular vectors.
 fn reorthogonalize(v: &mut Mat<f64>, basis: &Mat<f64>, ncols: usize) {
     if ncols == 0 {
         return;
     }
     let q = basis.as_ref().subcols(0, ncols);
-
-    // h = Q^T * v  → (ncols × 1)
     let mut h = Mat::<f64>::zeros(ncols, 1);
-    matmul(h.as_mut(), Accum::Replace, q.transpose(), v.as_ref(), 1.0, Par::Seq);
 
-    // v = v - Q * h
+    // First pass: h = Q^T * v; v = v - Q * h
+    matmul(h.as_mut(), Accum::Replace, q.transpose(), v.as_ref(), 1.0, Par::Seq);
+    matmul(v.as_mut(), Accum::Add, q, h.as_ref(), -1.0, Par::Seq);
+
+    // Second pass: removes residual components lost to rounding
+    matmul(h.as_mut(), Accum::Replace, q.transpose(), v.as_ref(), 1.0, Par::Seq);
     matmul(v.as_mut(), Accum::Add, q, h.as_ref(), -1.0, Par::Seq);
 }
 

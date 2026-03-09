@@ -1,24 +1,263 @@
-//! Brute-force KNN and SNN graph construction.
+//! KNN and SNN graph construction for single-cell analysis.
 //!
-//! Builds a k-nearest-neighbor graph from PCA/LSI embeddings, then derives
-//! a Shared Nearest Neighbor (SNN) graph with Jaccard-weighted edges for
-//! downstream clustering. Matches Seurat's `FindNeighbors` behavior.
+//! Builds a k-nearest-neighbor graph from PCA/LSI embeddings using approximate
+//! nearest neighbors (NN-descent algorithm), then derives a Shared Nearest
+//! Neighbor (SNN) graph with Jaccard-weighted edges for downstream clustering.
+//! Matches Seurat's `FindNeighbors` behavior.
+//!
+//! NN-descent is the algorithm used by pynndescent/UMAP. It starts with a random
+//! KNN graph and iteratively improves it by checking "neighbors of neighbors" until
+//! convergence.
 
 use std::collections::HashSet;
 
 use anyhow::{Result, bail};
 use ndarray::Array2;
+use rand::Rng;
+use rand::rngs::SmallRng;
+use rand::SeedableRng;
 
 use crate::types::{KnnGraph, SnnGraph};
 
-/// Build a brute-force KNN graph from a cells × components embedding matrix.
+// ---------------------------------------------------------------------------
+// NN-Descent (approximate nearest neighbors)
+// ---------------------------------------------------------------------------
+
+/// Compute squared Euclidean distance between two rows of a matrix.
+#[inline]
+fn dist_sq(data: &Array2<f64>, i: usize, j: usize) -> f64 {
+    let n_dims = data.ncols();
+    let mut d2 = 0.0f64;
+    for d in 0..n_dims {
+        let diff = data[[i, d]] - data[[j, d]];
+        d2 += diff * diff;
+    }
+    d2
+}
+
+/// A single entry in a KNN heap: (distance, index).
+/// We use a max-heap (largest distance at top) so we can efficiently evict the
+/// farthest current neighbor when a closer one is found.
+#[derive(Clone, Copy)]
+struct HeapEntry {
+    dist: f64,
+    idx: usize,
+    is_new: bool, // NN-descent flag: was this entry added in the current iteration?
+}
+
+/// Fixed-size max-heap for maintaining k nearest neighbors.
+struct KnnHeap {
+    entries: Vec<HeapEntry>,
+    k: usize,
+}
+
+impl KnnHeap {
+    fn new(k: usize) -> Self {
+        KnnHeap {
+            entries: Vec::with_capacity(k),
+            k,
+        }
+    }
+
+    /// Try to insert a new neighbor. Returns true if it was inserted (improved the heap).
+    fn insert(&mut self, idx: usize, dist: f64) -> bool {
+        // Don't insert duplicates
+        if self.entries.iter().any(|e| e.idx == idx) {
+            return false;
+        }
+
+        if self.entries.len() < self.k {
+            self.entries.push(HeapEntry {
+                dist,
+                idx,
+                is_new: true,
+            });
+            return true;
+        }
+
+        // Find the farthest current neighbor
+        let (max_pos, max_dist) = self
+            .entries
+            .iter()
+            .enumerate()
+            .max_by(|a, b| a.1.dist.partial_cmp(&b.1.dist).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, e)| (i, e.dist))
+            .unwrap();
+
+        if dist < max_dist {
+            self.entries[max_pos] = HeapEntry {
+                dist,
+                idx,
+                is_new: true,
+            };
+            return true;
+        }
+
+        false
+    }
+
+    /// Get sorted indices and distances.
+    fn to_sorted(&self) -> (Vec<usize>, Vec<f64>) {
+        let mut sorted: Vec<(f64, usize)> = self.entries.iter().map(|e| (e.dist, e.idx)).collect();
+        sorted.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        let indices: Vec<usize> = sorted.iter().map(|&(_, i)| i).collect();
+        let distances: Vec<f64> = sorted.iter().map(|&(d, _)| d.sqrt()).collect();
+        (indices, distances)
+    }
+
+    /// Get indices marked as "new" (added in the current iteration).
+    fn new_indices(&self) -> Vec<usize> {
+        self.entries
+            .iter()
+            .filter(|e| e.is_new)
+            .map(|e| e.idx)
+            .collect()
+    }
+
+    /// Mark all entries as "old" (not new).
+    fn mark_all_old(&mut self) {
+        for e in &mut self.entries {
+            e.is_new = false;
+        }
+    }
+
+    /// Get all neighbor indices.
+    fn all_indices(&self) -> Vec<usize> {
+        self.entries.iter().map(|e| e.idx).collect()
+    }
+}
+
+/// Build an approximate KNN graph using NN-descent.
 ///
-/// For each cell, computes Euclidean distance to all other cells and retains
-/// the k nearest neighbors. Uses `select_nth_unstable_by` for O(n) partial
-/// sort per cell.
+/// NN-descent starts with a random KNN and iteratively refines it by exploring
+/// "neighbors of neighbors". This is the same algorithm used by pynndescent (UMAP).
+/// It produces high-quality approximate nearest neighbors without tree structures.
 ///
-/// Parallelizes over cells with rayon when `parallel` feature is enabled.
+/// Parameters:
+/// - `max_iterations`: Maximum NN-descent iterations (default: 10)
+/// - `delta`: Convergence threshold — stop when fewer than delta*n*k updates occur (default: 0.001)
+/// - `seed`: Random seed for reproducibility
 pub fn build_knn(embedding: &Array2<f64>, k: usize) -> Result<KnnGraph> {
+    let n_cells = embedding.nrows();
+    // Adaptive iteration count following pynndescent's formula:
+    // max_iterations = max(5, round(log2(n_cells)))
+    // This scales naturally: 2K cells → 11 iters, 10K → 14, 100K → 17
+    let max_iterations = 5.max((n_cells as f64).log2().round() as usize);
+    build_knn_nndescent(embedding, k, max_iterations, 0.001, 42)
+}
+
+/// Build an approximate KNN graph using NN-descent with full parameter control.
+pub fn build_knn_nndescent(
+    embedding: &Array2<f64>,
+    k: usize,
+    max_iterations: usize,
+    delta: f64,
+    seed: u64,
+) -> Result<KnnGraph> {
+    let n_cells = embedding.nrows();
+    if k == 0 {
+        bail!("k must be at least 1");
+    }
+    if k >= n_cells {
+        bail!("k ({k}) must be less than n_cells ({n_cells})");
+    }
+
+    let mut rng = SmallRng::seed_from_u64(seed);
+
+    // Initialize with random neighbors
+    let mut heaps: Vec<KnnHeap> = Vec::with_capacity(n_cells);
+    for i in 0..n_cells {
+        let mut heap = KnnHeap::new(k);
+        // Pick k random distinct neighbors
+        let mut used: HashSet<usize> = HashSet::new();
+        used.insert(i);
+        while heap.entries.len() < k {
+            let j = rng.random_range(0..n_cells);
+            if used.insert(j) {
+                let d = dist_sq(embedding, i, j);
+                heap.insert(j, d);
+            }
+        }
+        heaps.push(heap);
+    }
+
+    // NN-descent iterations: only compare pairs of cells that share a
+    // neighbor (the standard NN-descent "local join"). This is more conservative
+    // than full neighbor-of-neighbor exploration.
+    let threshold = (delta * n_cells as f64 * k as f64) as usize;
+    // Sample rate for local join. Following pynndescent, use full exploration
+    // (sample_rate=1.0) and rely on convergence-based early stopping via delta.
+    let sample_rate = 1.0;
+
+    for _iter in 0..max_iterations {
+        let mut n_updates = 0usize;
+
+        // Collect new neighbors for each cell
+        let new_neighbors: Vec<Vec<usize>> = heaps.iter().map(|h| h.new_indices()).collect();
+
+        // Mark all as old for next iteration
+        for heap in &mut heaps {
+            heap.mark_all_old();
+        }
+
+        // Local join: for each cell i with new neighbors, compare pairs of
+        // i's neighbors with each other. If neighbor u and neighbor v of cell i
+        // are close to each other, they might be each other's KNN.
+        for i in 0..n_cells {
+            if new_neighbors[i].is_empty() {
+                continue;
+            }
+
+            let all_nn: Vec<usize> = heaps[i].all_indices();
+
+            // Compare new neighbors with all neighbors
+            for &u in &new_neighbors[i] {
+                for &v in &all_nn {
+                    if u == v {
+                        continue;
+                    }
+                    // Subsample to control exploration rate
+                    if rng.random::<f64>() > sample_rate {
+                        continue;
+                    }
+                    let d = dist_sq(embedding, u, v);
+                    if heaps[u].insert(v, d) {
+                        n_updates += 1;
+                    }
+                    if heaps[v].insert(u, d) {
+                        n_updates += 1;
+                    }
+                }
+            }
+        }
+
+        if n_updates <= threshold {
+            break;
+        }
+    }
+
+    // Extract results
+    let mut indices = Vec::with_capacity(n_cells);
+    let mut distances = Vec::with_capacity(n_cells);
+    for heap in &heaps {
+        let (idx, dist) = heap.to_sorted();
+        indices.push(idx);
+        distances.push(dist);
+    }
+
+    Ok(KnnGraph {
+        n_cells,
+        k,
+        indices,
+        distances,
+    })
+}
+
+/// Build an exact brute-force KNN graph.
+///
+/// Computes exact Euclidean distances between all pairs of cells. Only use for
+/// small datasets or when exact results are required.
+pub fn build_knn_exact(embedding: &Array2<f64>, k: usize) -> Result<KnnGraph> {
     let n_cells = embedding.nrows();
 
     if k == 0 {
@@ -58,7 +297,7 @@ pub fn build_knn(embedding: &Array2<f64>, k: usize) -> Result<KnnGraph> {
     })
 }
 
-/// Find k nearest neighbors for a single cell.
+/// Find k nearest neighbors for a single cell (brute-force).
 fn knn_for_cell(
     embedding: &Array2<f64>,
     i: usize,
@@ -92,46 +331,73 @@ fn knn_for_cell(
     (indices, distances)
 }
 
+// ---------------------------------------------------------------------------
+// SNN graph construction
+// ---------------------------------------------------------------------------
+
 /// Build an SNN (Shared Nearest Neighbor) graph from a KNN graph.
 ///
-/// For each pair of cells (i, j) connected by KNN in either direction,
-/// computes the Jaccard index: `|KNN(i) ∩ KNN(j)| / |KNN(i) ∪ KNN(j)|`.
-/// Edges with Jaccard below `prune_threshold` are dropped.
+/// Matches Seurat's `FindNeighbors` SNN construction: computes the Jaccard
+/// index for ALL pairs of cells that share at least one KNN neighbor (not just
+/// direct KNN pairs). This is equivalent to Seurat's matrix-multiply approach:
+/// `SNN = nn_indicator %*% t(nn_indicator)`, then normalizing to Jaccard.
 ///
-/// Matches Seurat's `FindNeighbors` SNN construction with `prune.SNN` parameter.
+/// Edges with Jaccard below `prune_threshold` are dropped.
 pub fn build_snn(knn: &KnnGraph, prune_threshold: f64) -> SnnGraph {
     let n = knn.n_cells;
     let k = knn.k;
 
-    // Build HashSets for O(1) neighbor lookup
+    // Build neighbor sets: self + first k-1 true neighbors = k elements.
+    // Matches Seurat's convention where k.param=20 returns 20 items including
+    // self (19 true neighbors + self).
     let neighbor_sets: Vec<HashSet<usize>> = knn
         .indices
         .iter()
-        .map(|nn| nn.iter().copied().collect())
+        .enumerate()
+        .map(|(i, nn)| {
+            let mut set: HashSet<usize> = nn.iter().take(k - 1).copied().collect();
+            set.insert(i);
+            set
+        })
         .collect();
 
-    // Collect all unique unordered pairs connected by KNN in either direction.
-    // KNN is asymmetric: j ∈ KNN(i) does not imply i ∈ KNN(j).
-    // Seurat symmetrizes, so we consider the union of both directions.
-    let mut pairs: HashSet<(usize, usize)> = HashSet::new();
-    for i in 0..n {
-        for &j in &knn.indices[i] {
-            if i != j {
-                pairs.insert((i.min(j), i.max(j)));
-            }
+    // Build inverted index: for each cell c, which cells have c in their
+    // neighbor set? This lets us find ALL pairs sharing at least one neighbor.
+    let mut inv_index: Vec<Vec<usize>> = vec![Vec::new(); n];
+    for (i, set) in neighbor_sets.iter().enumerate() {
+        for &neighbor in set {
+            inv_index[neighbor].push(i);
         }
     }
 
+    // For each cell i, find all cells j that share at least one neighbor.
+    // Count shared neighbors via the inverted index, then compute Jaccard.
     let mut edges: Vec<Vec<(usize, f64)>> = vec![Vec::new(); n];
 
-    for (i, j) in pairs {
-        let intersection = neighbor_sets[i].intersection(&neighbor_sets[j]).count();
-        let union_size = 2 * k - intersection; // |A ∪ B| = |A| + |B| - |A ∩ B|
-        let jaccard = intersection as f64 / union_size as f64;
+    for i in 0..n {
+        // Count how many neighbors cell i shares with each other cell
+        let mut shared_counts: std::collections::HashMap<usize, usize> =
+            std::collections::HashMap::new();
 
-        if jaccard > prune_threshold {
-            edges[i].push((j, jaccard));
-            edges[j].push((i, jaccard));
+        for &neighbor in &neighbor_sets[i] {
+            for &j in &inv_index[neighbor] {
+                if j > i {
+                    // Only count upper triangle to avoid duplicates
+                    *shared_counts.entry(j).or_insert(0) += 1;
+                }
+            }
+        }
+
+        // Compute Jaccard for each pair with shared neighbors
+        for (j, intersection) in shared_counts {
+            // Each set has k elements, |A ∪ B| = |A| + |B| - |A ∩ B|
+            let union_size = 2 * k - intersection;
+            let jaccard = intersection as f64 / union_size as f64;
+
+            if jaccard >= prune_threshold {
+                edges[i].push((j, jaccard));
+                edges[j].push((i, jaccard));
+            }
         }
     }
 
@@ -144,7 +410,7 @@ mod tests {
     use ndarray::array;
 
     #[test]
-    fn test_knn_basic() {
+    fn test_knn_exact_basic() {
         // 4 points in 2D: two pairs close together
         let embedding = array![
             [0.0, 0.0], // 0
@@ -152,7 +418,7 @@ mod tests {
             [5.0, 0.0], // 2
             [5.1, 0.0], // 3 — close to 2
         ];
-        let knn = build_knn(&embedding, 2).unwrap();
+        let knn = build_knn_exact(&embedding, 2).unwrap();
         assert_eq!(knn.n_cells, 4);
         assert_eq!(knn.k, 2);
 
@@ -163,6 +429,73 @@ mod tests {
     }
 
     #[test]
+    fn test_knn_nndescent_basic() {
+        // Well-separated clusters — NN-descent should find correct neighbors
+        let embedding = array![
+            [0.0, 0.0],  // cluster A
+            [0.1, 0.0],
+            [0.0, 0.1],
+            [0.1, 0.1],
+            [10.0, 0.0], // cluster B
+            [10.1, 0.0],
+            [10.0, 0.1],
+            [10.1, 0.1],
+        ];
+        let knn = build_knn_nndescent(&embedding, 3, 20, 0.001, 42).unwrap();
+        assert_eq!(knn.k, 3);
+
+        // Cell 0's neighbors should all be in cluster A
+        for &neighbor in &knn.indices[0] {
+            assert!(
+                neighbor <= 3,
+                "cell 0 neighbor {neighbor} should be in cluster A"
+            );
+        }
+        // Cell 4's neighbors should all be in cluster B
+        for &neighbor in &knn.indices[4] {
+            assert!(
+                neighbor >= 4,
+                "cell 4 neighbor {neighbor} should be in cluster B"
+            );
+        }
+    }
+
+    #[test]
+    fn test_knn_nndescent_recall() {
+        // Generate a larger random dataset and verify high recall
+        let mut rng = SmallRng::seed_from_u64(123);
+        let n = 200;
+        let d = 10;
+        let mut data = Array2::zeros((n, d));
+        for i in 0..n {
+            for j in 0..d {
+                data[[i, j]] = rng.random::<f64>();
+            }
+        }
+
+        let k = 10;
+        let exact = build_knn_exact(&data, k).unwrap();
+        let approx = build_knn_nndescent(&data, k, 10, 0.001, 42).unwrap();
+
+        // Compute recall
+        let mut total_found = 0;
+        let total = n * k;
+        for i in 0..n {
+            let exact_set: HashSet<usize> = exact.indices[i].iter().copied().collect();
+            for &j in &approx.indices[i] {
+                if exact_set.contains(&j) {
+                    total_found += 1;
+                }
+            }
+        }
+        let recall = total_found as f64 / total as f64;
+        assert!(
+            recall > 0.80,
+            "NN-descent recall {recall:.3} is too low (expected > 0.80)"
+        );
+    }
+
+    #[test]
     fn test_knn_distances_sorted() {
         let embedding = array![
             [0.0, 0.0],
@@ -170,7 +503,7 @@ mod tests {
             [3.0, 0.0],
             [6.0, 0.0],
         ];
-        let knn = build_knn(&embedding, 3).unwrap();
+        let knn = build_knn_exact(&embedding, 3).unwrap();
         for cell in 0..4 {
             for w in knn.distances[cell].windows(2) {
                 assert!(w[0] <= w[1], "distances not sorted for cell {cell}");
@@ -187,7 +520,6 @@ mod tests {
     #[test]
     fn test_snn_jaccard() {
         // 8 cells: 4 in each cluster, well separated. k=3.
-        // With k=3 out of 7 other cells, intra-cluster neighbors dominate.
         let embedding = array![
             [0.0, 0.0],  // cluster A
             [0.1, 0.0],
@@ -198,7 +530,7 @@ mod tests {
             [10.0, 0.1],
             [10.1, 0.1],
         ];
-        let knn = build_knn(&embedding, 3).unwrap();
+        let knn = build_knn_exact(&embedding, 3).unwrap();
 
         // All of cell 0's neighbors should be in cluster A (cells 1,2,3)
         for &neighbor in &knn.indices[0] {
@@ -227,7 +559,7 @@ mod tests {
             [10.0, 0.0],
             [10.1, 0.0],
         ];
-        let knn = build_knn(&embedding, 3).unwrap();
+        let knn = build_knn_exact(&embedding, 3).unwrap();
 
         // High threshold should remove weak edges
         let snn_strict = build_snn(&knn, 0.5);

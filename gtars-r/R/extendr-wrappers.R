@@ -657,12 +657,18 @@ sc_run_rna_pipeline <- function(ptr, min_features, min_cells, max_pct_mt, scale_
 #' @param prune_snn Minimum Jaccard index to keep an SNN edge (default 1/15)
 sc_find_neighbors <- function(embedding_data, nrow, ncol, k, prune_snn) .Call(wrap__r_sc_find_neighbors, embedding_data, nrow, ncol, k, prune_snn)
 
+#' Export SNN graph as an edge list for cross-validation with igraph
+#' @export
+#' @param snn_ptr External pointer to an SnnGraph
+sc_export_snn <- function(snn_ptr) .Call(wrap__r_sc_export_snn, snn_ptr)
+
 #' Run Leiden clustering on an SNN graph
 #' @export
 #' @param snn_ptr External pointer to an SnnGraph
 #' @param resolution Resolution parameter (default 0.8)
 #' @param max_iter Maximum iterations (default 10)
-sc_find_clusters <- function(snn_ptr, resolution, max_iter) .Call(wrap__r_sc_find_clusters, snn_ptr, resolution, max_iter)
+#' @param seed Random seed (default 42)
+sc_find_clusters <- function(snn_ptr, resolution, max_iter, seed) .Call(wrap__r_sc_find_clusters, snn_ptr, resolution, max_iter, seed)
 
 #' Find marker genes for each cluster using Wilcoxon rank-sum test
 #' @export
@@ -695,5 +701,6 @@ sc_silhouette <- function(embedding_data, nrow, ncol, clusters) .Call(wrap__r_sc
 #' @param compute_markers Whether to compute marker genes (default TRUE)
 #' @param compute_silhouette Whether to compute silhouette scores (default TRUE)
 sc_run_full_pipeline <- function(ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value, k_neighbors, resolution, compute_markers, compute_silhouette) .Call(wrap__r_sc_run_full_pipeline, ptr, min_features, min_cells, max_pct_mt, scale_factor, n_variable_features, n_pcs, clip_value, k_neighbors, resolution, compute_markers, compute_silhouette)
+
 
 # nolint end
