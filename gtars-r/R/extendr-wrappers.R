@@ -388,6 +388,26 @@ redefine_user_sets <- function(user_sets_list, universe_ptr) .Call(wrap__r_redef
 #' @param user_sets_list R list of RegionSet external pointers
 build_restricted_universe <- function(user_sets_list) .Call(wrap__r_build_restricted_universe, user_sets_list)
 
+#' Get per-file annotations from a RegionDB as a data.frame-like list.
+#'
+#' Returns a list with columns: filename, cellType, description, tissue,
+#' dataSource, antibody, treatment, collection. This matches the structure
+#' of R LOLA's regionDB$regionAnno.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_anno <- function(db) .Call(wrap__r_regiondb_anno, db)
+
+#' Get collection-level annotations from a RegionDB as a data.frame-like list.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_collection_anno <- function(db) .Call(wrap__r_regiondb_collection_anno, db)
+
+#' Get a single RegionSet from a RegionDB by 1-based index.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param index 1-based integer index into the region sets
+regiondb_region_set <- function(db, index) .Call(wrap__r_regiondb_region_set, db, index)
+
 #' Create sha512t24u digest
 #' @export
 #' @param readable A readable string representing a sequence.

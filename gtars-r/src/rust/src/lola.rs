@@ -348,6 +348,106 @@ pub fn r_build_restricted_universe(user_sets_list: List) -> extendr_api::Result<
 }
 
 // =========================================================================
+// RegionDB accessors
+// =========================================================================
+
+/// Get per-file annotations from a RegionDB as a data.frame-like list.
+///
+/// Returns a list with columns: filename, cellType, description, tissue,
+/// dataSource, antibody, treatment, collection. This matches the structure
+/// of R LOLA's regionDB$regionAnno.
+/// @export
+/// @param db ExternalPtr to RegionDB
+#[extendr(r_name = "regiondb_anno")]
+pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
+    with_regiondb!(db, db_ref, {
+        let n = db_ref.region_anno.len();
+        let mut filename = Vec::with_capacity(n);
+        let mut cell_type = Vec::with_capacity(n);
+        let mut description = Vec::with_capacity(n);
+        let mut tissue = Vec::with_capacity(n);
+        let mut data_source = Vec::with_capacity(n);
+        let mut antibody = Vec::with_capacity(n);
+        let mut treatment = Vec::with_capacity(n);
+        let mut collection = Vec::with_capacity(n);
+
+        for a in &db_ref.region_anno {
+            filename.push(a.filename.clone());
+            cell_type.push(a.cell_type.clone());
+            description.push(a.description.clone());
+            tissue.push(a.tissue.clone());
+            data_source.push(a.data_source.clone());
+            antibody.push(a.antibody.clone());
+            treatment.push(a.treatment.clone());
+            collection.push(a.collection.clone());
+        }
+
+        Ok(list!(
+            filename = filename,
+            cellType = cell_type,
+            description = description,
+            tissue = tissue,
+            dataSource = data_source,
+            antibody = antibody,
+            treatment = treatment,
+            collection = collection
+        )
+        .into())
+    })
+}
+
+/// Get collection-level annotations from a RegionDB as a data.frame-like list.
+/// @export
+/// @param db ExternalPtr to RegionDB
+#[extendr(r_name = "regiondb_collection_anno")]
+pub fn r_regiondb_collection_anno(db: Robj) -> extendr_api::Result<Robj> {
+    with_regiondb!(db, db_ref, {
+        let n = db_ref.collection_anno.len();
+        let mut collector = Vec::with_capacity(n);
+        let mut date = Vec::with_capacity(n);
+        let mut source = Vec::with_capacity(n);
+        let mut description = Vec::with_capacity(n);
+        let mut collection_name = Vec::with_capacity(n);
+
+        for a in &db_ref.collection_anno {
+            collector.push(a.collector.clone());
+            date.push(a.date.clone());
+            source.push(a.source.clone());
+            description.push(a.description.clone());
+            collection_name.push(a.collection_name.clone());
+        }
+
+        Ok(list!(
+            collectionname = collection_name,
+            collector = collector,
+            date = date,
+            source = source,
+            description = description
+        )
+        .into())
+    })
+}
+
+/// Get a single RegionSet from a RegionDB by 1-based index.
+/// @export
+/// @param db ExternalPtr to RegionDB
+/// @param index 1-based integer index into the region sets
+#[extendr(r_name = "regiondb_region_set")]
+pub fn r_regiondb_region_set(db: Robj, index: i32) -> extendr_api::Result<Robj> {
+    with_regiondb!(db, db_ref, {
+        let i = (index - 1) as usize; // convert to 0-based
+        if i >= db_ref.region_sets.len() {
+            return Err(extendr_api::Error::Other(format!(
+                "Index {} out of range (database has {} region sets)",
+                index,
+                db_ref.region_sets.len()
+            )));
+        }
+        Ok(ExternalPtr::new(db_ref.region_sets[i].clone()).into())
+    })
+}
+
+// =========================================================================
 // Module registration
 // =========================================================================
 
@@ -360,4 +460,7 @@ extendr_module! {
     fn r_check_universe;
     fn r_redefine_user_sets;
     fn r_build_restricted_universe;
+    fn r_regiondb_anno;
+    fn r_regiondb_collection_anno;
+    fn r_regiondb_region_set;
 }

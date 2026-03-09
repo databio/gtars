@@ -175,6 +175,47 @@ buildRestrictedUniverse <- function(userSets) {
   RegionSet(ptr)
 }
 
+#' Get per-file annotations from a RegionDB
+#'
+#' Extracts the per-file annotation table from a RegionDB pointer,
+#' returning a data.table matching R LOLA's \code{regionDB$regionAnno}
+#' structure.
+#'
+#' @param regionDB An external pointer to a RegionDB (from loadRegionDB)
+#' @return A data.table with columns: filename, cellType, description,
+#'   tissue, dataSource, antibody, treatment, collection
+#' @export
+regionDBAnno <- function(regionDB) {
+  result <- regiondb_anno(regionDB)
+  data.table::as.data.table(result)
+}
+
+#' Get collection-level annotations from a RegionDB
+#'
+#' @param regionDB An external pointer to a RegionDB (from loadRegionDB)
+#' @return A data.table with columns: collectionname, collector, date,
+#'   source, description
+#' @export
+regionDBCollectionAnno <- function(regionDB) {
+  result <- regiondb_collection_anno(regionDB)
+  data.table::as.data.table(result)
+}
+
+#' Get a single RegionSet from a RegionDB by index
+#'
+#' Retrieves a single RegionSet from a loaded RegionDB, returning it
+#' as a RegionSet S4 object that can be converted to GRanges via
+#' \code{as_granges()}.
+#'
+#' @param regionDB An external pointer to a RegionDB (from loadRegionDB)
+#' @param index Integer (1-based) index into the region sets
+#' @return A RegionSet object
+#' @export
+regionDBRegionSet <- function(regionDB, index) {
+  ptr <- regiondb_region_set(regionDB, as.integer(index))
+  RegionSet(ptr)
+}
+
 # Helper to extract the external pointer from a RegionSet S4 object
 .ptr <- function(x) {
   if (is(x, "RegionSet")) x@ptr
