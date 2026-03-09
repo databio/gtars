@@ -6,6 +6,9 @@
 \alias{union,RegionSet,RegionSet-method}
 \alias{union,RegionSet,ANY-method}
 \alias{union,ANY,RegionSet-method}
+\alias{intersect,RegionSet,RegionSet-method}
+\alias{intersect,RegionSet,ANY-method}
+\alias{intersect,ANY,RegionSet-method}
 \alias{setdiff,RegionSet,RegionSet-method}
 \alias{setdiff,RegionSet,ANY-method}
 \alias{setdiff,ANY,RegionSet-method}
@@ -16,6 +19,12 @@
 \S4method{union}{RegionSet,ANY}(x, y)
 
 \S4method{union}{ANY,RegionSet}(x, y)
+
+\S4method{intersect}{RegionSet,RegionSet}(x, y)
+
+\S4method{intersect}{RegionSet,ANY}(x, y)
+
+\S4method{intersect}{ANY,RegionSet}(x, y)
 
 \S4method{setdiff}{RegionSet,RegionSet}(x, y)
 

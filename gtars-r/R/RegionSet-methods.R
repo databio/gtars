@@ -1,6 +1,6 @@
 #' @include RegionSet-class.R
-#' @importFrom BiocGenerics union setdiff
-#' @importFrom IRanges reduce promoters trim
+#' @importFrom BiocGenerics union setdiff intersect
+#' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps
 NULL
 
 # =========================================================================
@@ -195,6 +195,130 @@ setMethod("promoters", "ANY", function(x, upstream = 2000L,
   promoters(RegionSet(x), upstream = upstream, downstream = downstream)
 })
 
+#' Shift regions by a fixed offset
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param shift Integer offset (positive = downstream, negative = upstream)
+#' @param use.names ignored
+#' @return A RegionSet with shifted regions
+#' @rdname shift
+#' @export
+setMethod("shift", "RegionSet", function(x, shift = 0L, use.names = TRUE) {
+  ptr <- .Call(wrap__r_shift, .ptr(x), as.integer(shift))
+  new("RegionSet", ptr = ptr, strand = x@strand)
+})
+
+#' @rdname shift
+#' @export
+setMethod("shift", "ANY", function(x, shift = 0L, use.names = TRUE) {
+  shift(RegionSet(x), shift = shift)
+})
+
+#' Generate flanking regions
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param width Flank width in base pairs
+#' @param start If TRUE (default), flank upstream of start; if FALSE,
+#'   flank downstream of end
+#' @param both If TRUE, flank on both sides
+#' @param ... ignored
+#' @return A RegionSet with flanking regions
+#' @rdname flank
+#' @export
+setMethod("flank", "RegionSet", function(x, width, start = TRUE,
+                                          both = FALSE, use.names = TRUE, ...) {
+  ptr <- .Call(wrap__r_flank, .ptr(x), as.integer(width),
+               as.logical(start), as.logical(both))
+  new("RegionSet", ptr = ptr, strand = rep("*", .Call(wrap__r_regionset_length, ptr)))
+})
+
+#' @rdname flank
+#' @export
+setMethod("flank", "ANY", function(x, width, start = TRUE,
+                                    both = FALSE, use.names = TRUE, ...) {
+  flank(RegionSet(x), width = width, start = start, both = both)
+})
+
+#' Resize regions to a fixed width
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param width New width in base pairs
+#' @param fix Anchor point: "start" (default), "end", or "center"
+#' @param ... ignored
+#' @return A RegionSet with resized regions
+#' @rdname resize
+#' @export
+setMethod("resize", "RegionSet", function(x, width, fix = "start", ...) {
+  ptr <- .Call(wrap__r_resize, .ptr(x), as.integer(width), as.character(fix))
+  new("RegionSet", ptr = ptr, strand = x@strand)
+})
+
+#' @rdname resize
+#' @export
+setMethod("resize", "ANY", function(x, width, fix = "start", ...) {
+  resize(RegionSet(x), width = width, fix = fix)
+})
+
+#' Narrow regions by specifying a relative sub-range
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param start 1-based relative start within each region (NA to omit)
+#' @param end 1-based relative end within each region (NA to omit)
+#' @param width Width of the sub-range (NA to omit)
+#' @param use.names ignored
+#' @return A RegionSet with narrowed regions
+#' @rdname narrow
+#' @export
+setMethod("narrow", "RegionSet", function(x, start = NA, end = NA,
+                                           width = NA, use.names = TRUE) {
+  s <- if (is.na(start)) NA_integer_ else as.integer(start)
+  e <- if (is.na(end)) NA_integer_ else as.integer(end)
+  w <- if (is.na(width)) NA_integer_ else as.integer(width)
+  ptr <- .Call(wrap__r_narrow, .ptr(x), s, e, w)
+  new("RegionSet", ptr = ptr, strand = rep("*", .Call(wrap__r_regionset_length, ptr)))
+})
+
+#' @rdname narrow
+#' @export
+setMethod("narrow", "ANY", function(x, start = NA, end = NA,
+                                     width = NA, use.names = TRUE) {
+  narrow(RegionSet(x), start = start, end = end, width = width)
+})
+
+#' Break regions into non-overlapping disjoint pieces
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param ... ignored
+#' @return A RegionSet with disjoint regions
+#' @rdname disjoin
+#' @export
+setMethod("disjoin", "RegionSet", function(x, ...) {
+  .rs_from_ptr(.Call(wrap__r_disjoin, .ptr(x)))
+})
+
+#' @rdname disjoin
+#' @export
+setMethod("disjoin", "ANY", function(x, ...) {
+  disjoin(RegionSet(x))
+})
+
+#' Return gaps between regions per chromosome
+#'
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param ... ignored
+#' @return A RegionSet with gap regions
+#' @rdname gaps
+#' @export
+setMethod("gaps", "RegionSet", function(x, start = NA, end = NA, ...) {
+  .rs_from_ptr(.Call(wrap__r_gaps, .ptr(x)))
+})
+
+#' @rdname gaps
+#' @export
+setMethod("gaps", "ANY", function(x, start = NA, end = NA, ...) {
+  gaps(RegionSet(x))
+})
+
 # =========================================================================
 # BiocGenerics methods: binary (merge ops — strand lost)
 # =========================================================================
@@ -215,6 +339,24 @@ setMethod("union", c("RegionSet", "ANY"), function(x, y) {
 #' @export
 setMethod("union", c("ANY", "RegionSet"), function(x, y) {
   union(RegionSet(x), y)
+})
+
+#' @rdname RegionSet-class
+#' @export
+setMethod("intersect", c("RegionSet", "RegionSet"), function(x, y) {
+  .rs_from_ptr(.Call(wrap__r_intersect, .ptr(x), .ptr(y)))
+})
+
+#' @rdname RegionSet-class
+#' @export
+setMethod("intersect", c("RegionSet", "ANY"), function(x, y) {
+  intersect(x, RegionSet(y))
+})
+
+#' @rdname RegionSet-class
+#' @export
+setMethod("intersect", c("ANY", "RegionSet"), function(x, y) {
+  intersect(RegionSet(x), y)
 })
 
 #' @rdname RegionSet-class

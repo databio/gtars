@@ -127,6 +127,51 @@ r_union <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_union, rs_ptr_a, rs_ptr_b)
 #' @param rs_ptr_b External pointer to RegionSet B
 r_jaccard <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_jaccard, rs_ptr_a, rs_ptr_b)
 
+#' Shift all regions by a fixed offset
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param offset Integer offset (positive = downstream, negative = upstream)
+r_shift <- function(rs_ptr, offset) .Call(wrap__r_shift, rs_ptr, offset)
+
+#' Generate flanking regions
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param width Flank width in base pairs
+#' @param use_start If TRUE, flank upstream of start; if FALSE, downstream of end
+#' @param both If TRUE, flank on both sides of the anchor
+r_flank <- function(rs_ptr, width, use_start, both) .Call(wrap__r_flank, rs_ptr, width, use_start, both)
+
+#' Resize regions to a fixed width
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param width New width in base pairs
+#' @param fix Anchor point: "start", "end", or "center"
+r_resize <- function(rs_ptr, width, fix) .Call(wrap__r_resize, rs_ptr, width, fix)
+
+#' Narrow regions by specifying a relative sub-range
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param start 1-based relative start (NA to omit)
+#' @param end 1-based relative end (NA to omit)
+#' @param width Width of the sub-range (NA to omit)
+r_narrow <- function(rs_ptr, start, end, width) .Call(wrap__r_narrow, rs_ptr, start, end, width)
+
+#' Break regions into non-overlapping disjoint pieces
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_disjoin <- function(rs_ptr) .Call(wrap__r_disjoin, rs_ptr)
+
+#' Return gaps between regions per chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
+
+#' Range-level intersection of two region sets
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_intersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_intersect, rs_ptr_a, rs_ptr_b)
+
 #' Compute consensus regions from a list of RegionSet pointers
 #' @export
 #' @param rs_list An R list of external pointers to RegionSets

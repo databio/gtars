@@ -42,13 +42,20 @@ library(gtars)
 The tutorial uses the VISTA enhancers dataset bundled with
 GenomicDistributions (1,339 human enhancer regions).
 
+`RegionSet()` can load BED files directly — no GRanges intermediate needed:
+
 ```{r load-data}
 queryFile <- system.file("extdata", "vistaEnhancers.bed.gz",
                          package = "GenomicDistributions")
-query_gr <- rtracklayer::import(queryFile)
-query <- RegionSet(query_gr)
+query <- RegionSet(queryFile)
 cat(length(query), "regions across",
     length(unique(as.data.frame(query)$chr)), "chromosomes\n")
+```
+
+We also need GRanges for GenomicDistributions comparisons and multi-query examples:
+
+```{r load-granges}
+query_gr <- rtracklayer::import(queryFile)
 ```
 
 For multi-query examples, we create a shifted copy:
@@ -183,21 +190,20 @@ plotNeighborDist(list("GenomicDistributions" = gd_nd, "gtars" = gt_nd_nonneg))
 Multi-query:
 
 ```{r neighbor-multi}
-setB <- rtracklayer::import(
-  system.file("extdata", "setB_100.bed.gz", package = "GenomicDistributions")
-)
+setBFile <- system.file("extdata", "setB_100.bed.gz", package = "GenomicDistributions")
+setB_gr <- rtracklayer::import(setBFile)
 
 # GD handles GRangesList natively
-queryList2 <- GRangesList(vistaEnhancers = query_gr, setB = setB)
+queryList2 <- GRangesList(vistaEnhancers = query_gr, setB = setB_gr)
 gd_nd2 <- GenomicDistributions::calcNeighborDist(queryList2)
 plotNeighborDist(gd_nd2)
 ```
 
-gtars multi-query (compute each RegionSet, combine into named list):
+gtars multi-query (load BED directly, compute each RegionSet separately):
 
 ```{r neighbor-multi-gtars}
 gt_nd_A <- neighborDistances(query)
-gt_nd_B <- neighborDistances(RegionSet(setB))
+gt_nd_B <- neighborDistances(RegionSet(setBFile))
 plotNeighborDist(list(
   vistaEnhancers = gt_nd_A[gt_nd_A >= 0],
   setB = gt_nd_B[gt_nd_B >= 0]
