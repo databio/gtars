@@ -1,8 +1,7 @@
 //! Universe validation, user set redefinition, and restricted universe construction.
 
-use std::collections::HashMap;
-
 use gtars_core::models::{Region, RegionSet};
+use gtars_genomicdist::IntervalRanges;
 
 /// Diagnostic report from universe appropriateness check.
 #[derive(Debug, Clone)]
@@ -39,30 +38,16 @@ pub fn check_universe_appropriateness(
     user_sets: &[RegionSet],
     universe: &RegionSet,
 ) -> UniverseReport {
-    // Build a per-chromosome sorted index of universe regions for efficient overlap queries
-    let uni_index = build_chrom_index(universe);
-
     let mut user_set_reports = Vec::with_capacity(user_sets.len());
 
     for (us_idx, user_set) in user_sets.iter().enumerate() {
         let total = user_set.regions.len();
-        let mut in_universe = 0usize;
-        let mut many_to_many = 0usize;
 
-        for region in &user_set.regions {
-            let overlap_count = count_overlapping_regions(
-                &region.chr,
-                region.start,
-                region.end,
-                &uni_index,
-            );
-            if overlap_count > 0 {
-                in_universe += 1;
-            }
-            if overlap_count > 1 {
-                many_to_many += 1;
-            }
-        }
+        // count_overlaps returns per-query counts of overlapping subject (universe) regions
+        let counts = user_set.count_overlaps(universe, 1);
+
+        let in_universe = counts.iter().filter(|&&c| c > 0).count();
+        let many_to_many = counts.iter().filter(|&&c| c > 1).count();
 
         let coverage = if total > 0 {
             in_universe as f64 / total as f64
@@ -115,30 +100,25 @@ pub fn check_universe_appropriateness(
 ///
 /// This is the Rust equivalent of R LOLA's `redefineUserSets()`.
 pub fn redefine_user_sets(user_sets: &[RegionSet], universe: &RegionSet) -> Vec<RegionSet> {
-    let uni_index = build_chrom_index(universe);
-
     user_sets
         .iter()
         .map(|user_set| {
-            let mut new_regions: Vec<Region> = Vec::new();
+            // find_overlaps returns (query_idx, subject_idx) pairs
+            // Here query=user_set, subject=universe, so subject_idx indexes into universe
+            let pairs = user_set.find_overlaps(universe, 1);
+
             let mut seen = std::collections::HashSet::new();
+            let mut new_regions: Vec<Region> = Vec::new();
 
-            for user_region in &user_set.regions {
-                let overlapping = find_overlapping_regions(
-                    &user_region.chr,
-                    user_region.start,
-                    user_region.end,
-                    &uni_index,
-                );
-
-                for uni_region in overlapping {
-                    // Deduplicate by (chr, start, end)
-                    let key = (uni_region.chr.clone(), uni_region.start, uni_region.end);
-                    if seen.insert(key) {
-                        new_regions.push(uni_region);
-                    }
+            for &(_, subj_idx) in &pairs {
+                if seen.insert(subj_idx) {
+                    let uni_region = &universe.regions[subj_idx as usize];
+                    new_regions.push(uni_region.clone());
                 }
             }
+
+            // Sort by (chr, start) for consistent output
+            new_regions.sort_by(|a, b| a.chr.cmp(&b.chr).then(a.start.cmp(&b.start)));
 
             RegionSet::from(new_regions)
         })
@@ -150,143 +130,16 @@ pub fn redefine_user_sets(user_sets: &[RegionSet], universe: &RegionSet) -> Vec<
 /// Merges all regions from all user sets, then merges overlapping intervals
 /// to produce a disjoint set. Used for differential enrichment analysis.
 pub fn build_restricted_universe(user_sets: &[RegionSet]) -> RegionSet {
-    // Collect all regions from all user sets
-    let mut all_regions: Vec<Region> = Vec::new();
-    for us in user_sets {
-        all_regions.extend(us.regions.iter().cloned());
+    if user_sets.is_empty() {
+        return RegionSet::from(Vec::<Region>::new());
     }
 
-    // Merge overlapping intervals per chromosome
-    let merged = merge_regions(&all_regions);
-    RegionSet::from(merged)
-}
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
-
-type ChromIndex<'a> = HashMap<String, Vec<(u32, u32, usize)>>; // (start, end, index into universe.regions)
-
-/// Build a per-chromosome sorted index of regions for overlap queries.
-fn build_chrom_index(region_set: &RegionSet) -> ChromIndex<'_> {
-    let mut index: ChromIndex = HashMap::new();
-
-    for (i, region) in region_set.regions.iter().enumerate() {
-        index
-            .entry(region.chr.clone())
-            .or_default()
-            .push((region.start, region.end, i));
+    // Concatenate all user sets, then reduce (merge overlapping intervals)
+    let mut combined = user_sets[0].clone();
+    for us in &user_sets[1..] {
+        combined = combined.concat(us);
     }
-
-    // Sort each chromosome's entries by start position
-    for entries in index.values_mut() {
-        entries.sort_by_key(|&(start, _, _)| start);
-    }
-
-    index
-}
-
-/// Count how many regions in the index overlap the given interval.
-fn count_overlapping_regions(
-    chrom: &str,
-    start: u32,
-    end: u32,
-    index: &ChromIndex,
-) -> usize {
-    let entries = match index.get(chrom) {
-        Some(e) => e,
-        None => return 0,
-    };
-
-    let mut count = 0;
-    for &(s, e, _) in entries {
-        if s >= end {
-            break; // sorted by start, no more overlaps possible
-        }
-        if e > start {
-            count += 1;
-        }
-    }
-    count
-}
-
-/// Find all regions in the index that overlap the given interval.
-fn find_overlapping_regions(
-    chrom: &str,
-    start: u32,
-    end: u32,
-    index: &ChromIndex,
-) -> Vec<Region> {
-    let entries = match index.get(chrom) {
-        Some(e) => e,
-        None => return Vec::new(),
-    };
-
-    let mut result = Vec::new();
-    for &(s, e, _) in entries {
-        if s >= end {
-            break;
-        }
-        if e > start {
-            result.push(Region {
-                chr: chrom.to_string(),
-                start: s,
-                end: e,
-                rest: None,
-            });
-        }
-    }
-    result
-}
-
-/// Merge overlapping intervals across all chromosomes.
-/// Returns a sorted, disjoint set of regions.
-fn merge_regions(regions: &[Region]) -> Vec<Region> {
-    // Group by chromosome
-    let mut by_chr: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
-    for r in regions {
-        by_chr
-            .entry(r.chr.clone())
-            .or_default()
-            .push((r.start, r.end));
-    }
-
-    let mut merged: Vec<Region> = Vec::new();
-
-    let mut chroms: Vec<String> = by_chr.keys().cloned().collect();
-    chroms.sort();
-
-    for chr in &chroms {
-        let intervals = by_chr.get_mut(chr.as_str()).unwrap();
-        intervals.sort_by_key(|&(s, _)| s);
-
-        let mut it = intervals.iter();
-        if let Some(&(mut cur_start, mut cur_end)) = it.next() {
-            for &(s, e) in it {
-                if s <= cur_end {
-                    // Overlapping or adjacent — extend
-                    cur_end = cur_end.max(e);
-                } else {
-                    merged.push(Region {
-                        chr: chr.clone(),
-                        start: cur_start,
-                        end: cur_end,
-                        rest: None,
-                    });
-                    cur_start = s;
-                    cur_end = e;
-                }
-            }
-            merged.push(Region {
-                chr: chr.clone(),
-                start: cur_start,
-                end: cur_end,
-                rest: None,
-            });
-        }
-    }
-
-    merged
+    combined.reduce()
 }
 
 #[cfg(test)]
@@ -469,48 +322,5 @@ mod tests {
 
         let restricted = build_restricted_universe(&[user]);
         assert_eq!(restricted.regions.len(), 3);
-    }
-
-    // -------------------------------------------------------------------
-    // merge_regions
-    // -------------------------------------------------------------------
-
-    #[test]
-    fn test_merge_regions_overlapping() {
-        let regions = vec![
-            r("chr1", 100, 300),
-            r("chr1", 200, 400),
-            r("chr1", 350, 500),
-        ];
-        let merged = merge_regions(&regions);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].start, 100);
-        assert_eq!(merged[0].end, 500);
-    }
-
-    #[test]
-    fn test_merge_regions_adjacent() {
-        // Adjacent intervals (end == start of next) should merge
-        let regions = vec![
-            r("chr1", 100, 200),
-            r("chr1", 200, 300),
-        ];
-        let merged = merge_regions(&regions);
-        assert_eq!(merged.len(), 1);
-        assert_eq!(merged[0].start, 100);
-        assert_eq!(merged[0].end, 300);
-    }
-
-    #[test]
-    fn test_merge_regions_multi_chrom() {
-        let regions = vec![
-            r("chr2", 100, 200),
-            r("chr1", 100, 200),
-            r("chr1", 150, 250),
-        ];
-        let merged = merge_regions(&regions);
-        assert_eq!(merged.len(), 2); // chr1: [100,250), chr2: [100,200)
-        assert_eq!(merged[0].chr, "chr1");
-        assert_eq!(merged[1].chr, "chr2");
     }
 }

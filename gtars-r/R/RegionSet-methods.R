@@ -1,6 +1,6 @@
 #' @include RegionSet-class.R
 #' @importFrom BiocGenerics union setdiff intersect
-#' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps
+#' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps findOverlaps countOverlaps
 NULL
 
 # =========================================================================
@@ -433,6 +433,71 @@ setMethod("jaccard", c("ANY", "ANY"), function(x, y) {
   x <- RegionSet(x)
   y <- RegionSet(y)
   .Call(wrap__r_jaccard, .ptr(x), .ptr(y))
+})
+
+# =========================================================================
+# Overlap queries (findOverlaps / countOverlaps)
+# =========================================================================
+
+#' Find overlapping pairs between two region sets
+#'
+#' @description Returns all (queryHits, subjectHits) pairs where the query
+#'   region overlaps the subject region by at least \code{minoverlap} base
+#'   pairs. Uses an IGD (Integrated Genome Database) index for fast queries.
+#' @param query A RegionSet, GRanges, file path, or data.frame
+#' @param subject A RegionSet, GRanges, file path, or data.frame
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+#' @param type ignored (present for generic compatibility)
+#' @param maxgap ignored
+#' @param select ignored
+#' @param ... ignored
+#' @return A data.frame with columns queryHits and subjectHits (1-based)
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("RegionSet", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    mo <- max(as.integer(minoverlap), 1L)
+    result <- .Call(wrap__r_find_overlaps, .ptr(query), .ptr(subject), mo)
+    data.frame(queryHits = result$queryHits, subjectHits = result$subjectHits)
+})
+
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("ANY", "ANY"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    findOverlaps(RegionSet(query), RegionSet(subject), minoverlap = minoverlap)
+})
+
+#' Count overlaps per query region
+#'
+#' @description For each query region, counts the number of subject regions
+#'   that overlap by at least \code{minoverlap} base pairs.
+#' @param query A RegionSet, GRanges, file path, or data.frame
+#' @param subject A RegionSet, GRanges, file path, or data.frame
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+#' @param type ignored
+#' @param maxgap ignored
+#' @param ... ignored
+#' @return Integer vector of length equal to the number of query regions
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("RegionSet", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    mo <- max(as.integer(minoverlap), 1L)
+    .Call(wrap__r_count_overlaps, .ptr(query), .ptr(subject), mo)
+})
+
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("ANY", "ANY"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    countOverlaps(RegionSet(query), RegionSet(subject), minoverlap = minoverlap)
 })
 
 # =========================================================================

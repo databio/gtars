@@ -546,6 +546,47 @@ pub fn r_consensus(rs_list: List) -> extendr_api::Result<List> {
     Ok(list!(chr = chrs, start = starts, end = ends, count = counts))
 }
 
+/// Find all overlapping (queryHits, subjectHits) pairs between two RegionSets
+/// @export
+/// @param query_ptr External pointer to query RegionSet
+/// @param subject_ptr External pointer to subject RegionSet
+/// @param minoverlap Minimum overlap in base pairs (default 1)
+#[extendr(r_name = "r_find_overlaps")]
+pub fn r_find_overlaps(
+    query_ptr: Robj,
+    subject_ptr: Robj,
+    minoverlap: i32,
+) -> extendr_api::Result<List> {
+    let ext_q = <ExternalPtr<RegionSet>>::try_from(query_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
+    let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
+    let pairs = ext_q.find_overlaps(&*ext_s, minoverlap);
+    // Convert to 1-based indices for R
+    let query_hits: Vec<i32> = pairs.iter().map(|(q, _)| *q as i32 + 1).collect();
+    let subject_hits: Vec<i32> = pairs.iter().map(|(_, s)| *s as i32 + 1).collect();
+    Ok(list!(queryHits = query_hits, subjectHits = subject_hits))
+}
+
+/// Count the number of subject regions overlapping each query region
+/// @export
+/// @param query_ptr External pointer to query RegionSet
+/// @param subject_ptr External pointer to subject RegionSet
+/// @param minoverlap Minimum overlap in base pairs (default 1)
+#[extendr(r_name = "r_count_overlaps")]
+pub fn r_count_overlaps(
+    query_ptr: Robj,
+    subject_ptr: Robj,
+    minoverlap: i32,
+) -> extendr_api::Result<Vec<i32>> {
+    let ext_q = <ExternalPtr<RegionSet>>::try_from(query_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
+    let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
+    let counts = ext_q.count_overlaps(&*ext_s, minoverlap);
+    Ok(counts.into_iter().map(|c| c as i32).collect())
+}
+
 // =========================================================================
 // 4. Partitions
 // =========================================================================
@@ -1138,6 +1179,8 @@ extendr_module! {
     fn r_disjoin;
     fn r_gaps;
     fn r_intersect;
+    fn r_find_overlaps;
+    fn r_count_overlaps;
     fn r_consensus;
     // Partitions
     fn r_partition_list_from_regions;

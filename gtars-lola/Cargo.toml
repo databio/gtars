@@ -11,6 +11,7 @@ anyhow.workspace = true
 thiserror.workspace = true
 gtars-core = { path = "../gtars-core", version = "0.5.2" }
 gtars-igd = { path = "../gtars-igd", version = "0.5.1" }
+gtars-genomicdist = { path = "../gtars-genomicdist" }
 statrs = "0.18"
 
 [dev-dependencies]

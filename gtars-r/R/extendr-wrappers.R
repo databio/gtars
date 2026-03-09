@@ -172,6 +172,20 @@ r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
 #' @param rs_ptr_b External pointer to RegionSet B
 r_intersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_intersect, rs_ptr_a, rs_ptr_b)
 
+#' Find all overlapping (queryHits, subjectHits) pairs between two RegionSets
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_find_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_find_overlaps, query_ptr, subject_ptr, minoverlap)
+
+#' Count the number of subject regions overlapping each query region
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_count_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_count_overlaps, query_ptr, subject_ptr, minoverlap)
+
 #' Compute consensus regions from a list of RegionSet pointers
 #' @export
 #' @param rs_list An R list of external pointers to RegionSets

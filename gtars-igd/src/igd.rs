@@ -638,6 +638,249 @@ impl Igd {
         hits
     }
 
+    /// Build an IGD from a single RegionSet (for two-set overlap queries).
+    ///
+    /// Stores the original region index in the `value` field of each record,
+    /// enabling `find_overlaps_regionset` to return subject indices.
+    pub fn from_single_region_set(rs: &RegionSet) -> Self {
+        let mut igd = Igd::new();
+        igd.file_info = vec![FileInfo {
+            filename: String::new(),
+            num_regions: rs.regions.len() as u32,
+            avg_region_width: if rs.regions.is_empty() {
+                0.0
+            } else {
+                rs.regions.iter().map(|r| (r.end - r.start) as f64).sum::<f64>()
+                    / rs.regions.len() as f64
+            },
+        }];
+
+        for (i, region) in rs.regions.iter().enumerate() {
+            igd.add(
+                &region.chr,
+                region.start as i32,
+                region.end as i32,
+                i as i32, // store original index in value field
+                0,
+            );
+        }
+
+        igd.finalize();
+        igd
+    }
+
+    /// Find all overlapping (query_idx, subject_idx) pairs between a query
+    /// RegionSet and the subject indexed in this IGD.
+    ///
+    /// The IGD must have been built with `from_single_region_set` so that
+    /// `record.value` stores the original subject region index.
+    pub fn find_overlaps_regionset(
+        &self,
+        query: &RegionSet,
+        min_overlap: i32,
+    ) -> Vec<(u32, u32)> {
+        assert!(self.finalized, "Must finalize before querying");
+
+        let mut pairs: Vec<(u32, u32)> = Vec::new();
+
+        for (q_idx, region) in query.regions.iter().enumerate() {
+            let ctg_idx = match self.chrom_index.get(&region.chr) {
+                Some(&idx) => idx,
+                None => continue,
+            };
+
+            let start = region.start as i32;
+            let end = region.end as i32;
+            let contig = &self.contigs[ctg_idx];
+            let n_tiles = contig.tiles.len() as i32;
+
+            let n1 = start / self.nbp;
+            let mut n2 = (end - 1) / self.nbp;
+            if n1 >= n_tiles {
+                continue;
+            }
+            n2 = n2.min(n_tiles - 1);
+
+            // Use a set to deduplicate subject hits (records span multiple tiles)
+            let mut seen_subjects = std::collections::HashSet::new();
+
+            // First tile
+            let tile = &contig.tiles[n1 as usize];
+            if !tile.records.is_empty() && end > tile.records[0].start {
+                let mut tl: i32 = 0;
+                let mut tr: i32 = tile.records.len() as i32 - 1;
+                while tl < tr - 1 {
+                    let tm = (tl + tr) / 2;
+                    if tile.records[tm as usize].start < end {
+                        tl = tm;
+                    } else {
+                        tr = tm;
+                    }
+                }
+                if tile.records[tr as usize].start < end {
+                    tl = tr;
+                }
+                for i in (0..=tl).rev() {
+                    let rec = &tile.records[i as usize];
+                    let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                    if overlap_bp >= min_overlap && seen_subjects.insert(rec.value as u32) {
+                        pairs.push((q_idx as u32, rec.value as u32));
+                    }
+                }
+            }
+
+            // Subsequent tiles
+            if n2 > n1 {
+                let mut bd = self.nbp * (n1 + 1);
+                for j in (n1 + 1)..=n2 {
+                    let tile = &contig.tiles[j as usize];
+                    if tile.records.is_empty() {
+                        bd += self.nbp;
+                        continue;
+                    }
+                    if end > tile.records[0].start {
+                        let mut ts: i32 = 0;
+                        while ts < tile.records.len() as i32
+                            && tile.records[ts as usize].start < bd
+                        {
+                            ts += 1;
+                        }
+                        let mut tl: i32 = 0;
+                        let mut tr: i32 = tile.records.len() as i32 - 1;
+                        while tl < tr - 1 {
+                            let tm = (tl + tr) / 2;
+                            if tile.records[tm as usize].start < end {
+                                tl = tm;
+                            } else {
+                                tr = tm;
+                            }
+                        }
+                        if tile.records[tr as usize].start < end {
+                            tl = tr;
+                        }
+                        for i in (ts..=tl).rev() {
+                            let rec = &tile.records[i as usize];
+                            let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                            if overlap_bp >= min_overlap
+                                && seen_subjects.insert(rec.value as u32)
+                            {
+                                pairs.push((q_idx as u32, rec.value as u32));
+                            }
+                        }
+                    }
+                    bd += self.nbp;
+                }
+            }
+        }
+
+        pairs
+    }
+
+    /// Count the number of subject regions overlapping each query region.
+    ///
+    /// Returns a `Vec<u32>` of length `query.regions.len()` where each entry
+    /// is the number of distinct subject regions overlapping that query region.
+    ///
+    /// The IGD must have been built with `from_single_region_set`.
+    pub fn count_overlaps_per_query(
+        &self,
+        query: &RegionSet,
+        min_overlap: i32,
+    ) -> Vec<u32> {
+        assert!(self.finalized, "Must finalize before querying");
+
+        let mut counts = vec![0u32; query.regions.len()];
+
+        for (q_idx, region) in query.regions.iter().enumerate() {
+            let ctg_idx = match self.chrom_index.get(&region.chr) {
+                Some(&idx) => idx,
+                None => continue,
+            };
+
+            let start = region.start as i32;
+            let end = region.end as i32;
+            let contig = &self.contigs[ctg_idx];
+            let n_tiles = contig.tiles.len() as i32;
+
+            let n1 = start / self.nbp;
+            let mut n2 = (end - 1) / self.nbp;
+            if n1 >= n_tiles {
+                continue;
+            }
+            n2 = n2.min(n_tiles - 1);
+
+            let mut seen = std::collections::HashSet::new();
+
+            // First tile
+            let tile = &contig.tiles[n1 as usize];
+            if !tile.records.is_empty() && end > tile.records[0].start {
+                let mut tl: i32 = 0;
+                let mut tr: i32 = tile.records.len() as i32 - 1;
+                while tl < tr - 1 {
+                    let tm = (tl + tr) / 2;
+                    if tile.records[tm as usize].start < end {
+                        tl = tm;
+                    } else {
+                        tr = tm;
+                    }
+                }
+                if tile.records[tr as usize].start < end {
+                    tl = tr;
+                }
+                for i in (0..=tl).rev() {
+                    let rec = &tile.records[i as usize];
+                    let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                    if overlap_bp >= min_overlap && seen.insert(rec.value) {
+                        counts[q_idx] += 1;
+                    }
+                }
+            }
+
+            // Subsequent tiles
+            if n2 > n1 {
+                let mut bd = self.nbp * (n1 + 1);
+                for j in (n1 + 1)..=n2 {
+                    let tile = &contig.tiles[j as usize];
+                    if tile.records.is_empty() {
+                        bd += self.nbp;
+                        continue;
+                    }
+                    if end > tile.records[0].start {
+                        let mut ts: i32 = 0;
+                        while ts < tile.records.len() as i32
+                            && tile.records[ts as usize].start < bd
+                        {
+                            ts += 1;
+                        }
+                        let mut tl: i32 = 0;
+                        let mut tr: i32 = tile.records.len() as i32 - 1;
+                        while tl < tr - 1 {
+                            let tm = (tl + tr) / 2;
+                            if tile.records[tm as usize].start < end {
+                                tl = tm;
+                            } else {
+                                tr = tm;
+                            }
+                        }
+                        if tile.records[tr as usize].start < end {
+                            tl = tr;
+                        }
+                        for i in (ts..=tl).rev() {
+                            let rec = &tile.records[i as usize];
+                            let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                            if overlap_bp >= min_overlap && seen.insert(rec.value) {
+                                counts[q_idx] += 1;
+                            }
+                        }
+                    }
+                    bd += self.nbp;
+                }
+            }
+        }
+
+        counts
+    }
+
     /// Number of source files indexed.
     pub fn num_files(&self) -> usize {
         self.file_info.len()
@@ -1045,5 +1288,142 @@ mod tests {
 
         assert_eq!(igd.num_files(), 0);
         assert_eq!(igd.num_contigs(), 0);
+    }
+
+    fn make_region(chr: &str, start: u32, end: u32) -> gtars_core::models::Region {
+        gtars_core::models::Region {
+            chr: chr.to_string(),
+            start,
+            end,
+            rest: None,
+        }
+    }
+
+    #[test]
+    fn test_from_single_region_set() {
+        let subject = RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr1", 300, 400),
+            make_region("chr2", 50, 150),
+        ]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        assert_eq!(igd.num_files(), 1);
+        assert_eq!(igd.file_info[0].num_regions, 3);
+    }
+
+    #[test]
+    fn test_find_overlaps_regionset_basic() {
+        let subject = RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr1", 300, 400),
+            make_region("chr1", 500, 600),
+        ]);
+
+        let query = RegionSet::from(vec![
+            make_region("chr1", 150, 350), // overlaps subject 0 and 1
+            make_region("chr1", 550, 650), // overlaps subject 2
+            make_region("chr1", 700, 800), // no overlap
+        ]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let mut pairs = igd.find_overlaps_regionset(&query, 1);
+        pairs.sort();
+
+        assert_eq!(pairs, vec![(0, 0), (0, 1), (1, 2)]);
+    }
+
+    #[test]
+    fn test_find_overlaps_regionset_no_overlap() {
+        let subject = RegionSet::from(vec![make_region("chr1", 100, 200)]);
+        let query = RegionSet::from(vec![make_region("chr1", 300, 400)]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let pairs = igd.find_overlaps_regionset(&query, 1);
+        assert!(pairs.is_empty());
+    }
+
+    #[test]
+    fn test_find_overlaps_regionset_min_overlap() {
+        let subject = RegionSet::from(vec![make_region("chr1", 100, 200)]);
+        let query = RegionSet::from(vec![make_region("chr1", 190, 300)]); // 10bp overlap
+
+        let igd = Igd::from_single_region_set(&subject);
+
+        let pairs1 = igd.find_overlaps_regionset(&query, 1);
+        assert_eq!(pairs1.len(), 1);
+
+        let pairs50 = igd.find_overlaps_regionset(&query, 50);
+        assert!(pairs50.is_empty());
+    }
+
+    #[test]
+    fn test_find_overlaps_regionset_multi_chrom() {
+        let subject = RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr2", 100, 200),
+        ]);
+
+        let query = RegionSet::from(vec![
+            make_region("chr1", 150, 180),
+            make_region("chr2", 150, 180),
+            make_region("chr3", 150, 180), // no subject on chr3
+        ]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let mut pairs = igd.find_overlaps_regionset(&query, 1);
+        pairs.sort();
+
+        assert_eq!(pairs, vec![(0, 0), (1, 1)]);
+    }
+
+    #[test]
+    fn test_count_overlaps_per_query_basic() {
+        let subject = RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr1", 150, 250),
+            make_region("chr1", 500, 600),
+        ]);
+
+        let query = RegionSet::from(vec![
+            make_region("chr1", 160, 180), // overlaps subject 0 and 1
+            make_region("chr1", 550, 580), // overlaps subject 2
+            make_region("chr1", 700, 800), // no overlap
+        ]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let counts = igd.count_overlaps_per_query(&query, 1);
+
+        assert_eq!(counts, vec![2, 1, 0]);
+    }
+
+    #[test]
+    fn test_count_overlaps_per_query_empty() {
+        let subject = RegionSet::from(vec![make_region("chr1", 100, 200)]);
+        let query = RegionSet::from(vec![]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let counts = igd.count_overlaps_per_query(&query, 1);
+        assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn test_find_overlaps_multi_tile_dedup() {
+        // Subject region spans multiple tiles — should only appear once per query
+        let subject = RegionSet::from(vec![
+            make_region("chr1", 10000, 40000), // spans tiles 0, 1, 2
+        ]);
+
+        let query = RegionSet::from(vec![
+            make_region("chr1", 15000, 35000), // also spans tiles
+        ]);
+
+        let igd = Igd::from_single_region_set(&subject);
+        let pairs = igd.find_overlaps_regionset(&query, 1);
+        assert_eq!(pairs.len(), 1);
+        assert_eq!(pairs[0], (0, 0));
+
+        let counts = igd.count_overlaps_per_query(&query, 1);
+        assert_eq!(counts, vec![1]);
     }
 }
