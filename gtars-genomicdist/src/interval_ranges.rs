@@ -279,21 +279,33 @@ impl IntervalRanges for RegionSet {
             .regions
             .iter()
             .zip(other.regions.iter())
-            .filter_map(|(a, b)| {
+            .map(|(a, b)| {
                 if a.chr != b.chr {
-                    return None;
+                    // Different chromosomes — zero-width interval at a's start
+                    return Region {
+                        chr: a.chr.clone(),
+                        start: a.start,
+                        end: a.start,
+                        rest: None,
+                    };
                 }
                 let start = a.start.max(b.start);
                 let end = a.end.min(b.end);
-                if start > end {
-                    None
+                if start >= end {
+                    // No overlap — zero-width interval
+                    Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end: start,
+                        rest: None,
+                    }
                 } else {
-                    Some(Region {
+                    Region {
                         chr: a.chr.clone(),
                         start,
                         end,
                         rest: None,
-                    })
+                    }
                 }
             })
             .collect();
@@ -327,7 +339,7 @@ impl IntervalRanges for RegionSet {
             .iter()
             .map(|r| {
                 let start = (r.start as i64 + offset).max(0) as u32;
-                let end = (r.end as i64 + offset).max(0) as u32;
+                let end = (r.end as i64 + offset).max(start as i64) as u32;
                 Region {
                     chr: r.chr.clone(),
                     start,
@@ -335,7 +347,6 @@ impl IntervalRanges for RegionSet {
                     rest: None,
                 }
             })
-            .filter(|r| r.start < r.end)
             .collect();
         RegionSet::from(regions)
     }
@@ -369,7 +380,6 @@ impl IntervalRanges for RegionSet {
                     }
                 }
             })
-            .filter(|r| r.start < r.end)
             .collect();
         RegionSet::from(regions)
     }
@@ -411,7 +421,7 @@ impl IntervalRanges for RegionSet {
         let regions: Vec<Region> = self
             .regions
             .iter()
-            .filter_map(|r| {
+            .map(|r| {
                 let region_width = r.end - r.start;
                 // Parameters are 1-based relative positions within the region
                 let (rel_start, rel_end) = match (start, end, width) {
@@ -423,15 +433,11 @@ impl IntervalRanges for RegionSet {
                 };
                 let abs_start = r.start + rel_start.min(region_width);
                 let abs_end = r.start + rel_end.min(region_width);
-                if abs_start < abs_end {
-                    Some(Region {
-                        chr: r.chr.clone(),
-                        start: abs_start,
-                        end: abs_end,
-                        rest: None,
-                    })
-                } else {
-                    None
+                Region {
+                    chr: r.chr.clone(),
+                    start: abs_start,
+                    end: abs_end.max(abs_start),
+                    rest: None,
                 }
             })
             .collect();
@@ -1040,19 +1046,24 @@ mod tests {
     }
 
     #[rstest]
-    fn test_pintersect_no_overlap_dropped() {
+    fn test_pintersect_no_overlap_zero_width() {
         let a = make_regionset(vec![("chr1", 0, 5)]);
         let b = make_regionset(vec![("chr1", 10, 20)]);
         let result = a.pintersect(&b);
-        assert_eq!(result.regions.len(), 0);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0].start, 10);
+        assert_eq!(result.regions[0].end, 10);
     }
 
     #[rstest]
-    fn test_pintersect_chrom_mismatch_dropped() {
+    fn test_pintersect_chrom_mismatch_zero_width() {
         let a = make_regionset(vec![("chr1", 0, 10)]);
         let b = make_regionset(vec![("chr2", 0, 10)]);
         let result = a.pintersect(&b);
-        assert_eq!(result.regions.len(), 0);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0].chr, "chr1");
+        assert_eq!(result.regions[0].start, 0);
+        assert_eq!(result.regions[0].end, 0);
     }
 
     #[rstest]

@@ -229,7 +229,7 @@ setMethod("flank", "RegionSet", function(x, width, start = TRUE,
                                           both = FALSE, use.names = TRUE, ...) {
   ptr <- .Call(wrap__r_flank, .ptr(x), as.integer(width),
                as.logical(start), as.logical(both))
-  new("RegionSet", ptr = ptr, strand = rep("*", .Call(wrap__r_regionset_length, ptr)))
+  new("RegionSet", ptr = ptr, strand = x@strand)
 })
 
 #' @rdname flank
@@ -275,7 +275,7 @@ setMethod("narrow", "RegionSet", function(x, start = NA, end = NA,
   e <- if (is.na(end)) NA_integer_ else as.integer(end)
   w <- if (is.na(width)) NA_integer_ else as.integer(width)
   ptr <- .Call(wrap__r_narrow, .ptr(x), s, e, w)
-  new("RegionSet", ptr = ptr, strand = rep("*", .Call(wrap__r_regionset_length, ptr)))
+  new("RegionSet", ptr = ptr, strand = x@strand)
 })
 
 #' @rdname narrow

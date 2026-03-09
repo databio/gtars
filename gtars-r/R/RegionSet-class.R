@@ -110,13 +110,29 @@ setMethod("length", "RegionSet", function(x) {
   .Call(wrap__r_regionset_length, .ptr(x))
 })
 
-#' @method as.data.frame RegionSet
+#' @rdname RegionSet-class
 #' @export
-as.data.frame.RegionSet <- function(x, ...) {
+setMethod("as.data.frame", "RegionSet", function(x, ...) {
   vecs <- .Call(wrap__r_regionset_to_vectors, .ptr(x))
   data.frame(chr = vecs$chr, start = vecs$start, end = vecs$end,
              strand = x@strand, stringsAsFactors = FALSE)
-}
+})
+
+#' Subset a RegionSet
+#'
+#' @param x A RegionSet
+#' @param i Numeric, logical, or character index
+#' @param j ignored
+#' @param ... ignored
+#' @param drop ignored
+#' @return A RegionSet with selected regions
+#' @rdname RegionSet-class
+#' @export
+setMethod("[", "RegionSet", function(x, i, j, ..., drop = TRUE) {
+  df <- as.data.frame(x)
+  df <- df[i, , drop = FALSE]
+  RegionSet(df)
+})
 
 # =========================================================================
 # Conversion utilities

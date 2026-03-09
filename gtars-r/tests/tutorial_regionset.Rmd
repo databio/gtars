@@ -58,18 +58,156 @@ We also need GRanges for GenomicDistributions comparisons and multi-query exampl
 query_gr <- rtracklayer::import(queryFile)
 ```
 
-For multi-query examples, we create a shifted copy:
+For multi-query examples, we create a shifted copy using `shift()` directly
+on the RegionSet (no GRanges intermediate needed):
 
 ```{r query-list}
+query2 <- shift(query, shift = 1000000L)
 query2_gr <- GenomicRanges::shift(query_gr, 1e6)
 queryList <- GRangesList(vistaEnhancers = query_gr, shifted = query2_gr)
-query2 <- RegionSet(query2_gr)
 ```
 
 We also load hg19 gene models (used in several sections below):
 
 ```{r gene-models}
 geneModels <- GenomicDistributions::getGeneModels("hg19")
+```
+
+
+# Interval operations on RegionSet
+
+RegionSet supports GenomicRanges/IRanges-style interval operations,
+all backed by Rust for performance. Here we demonstrate each one and
+compare output against GenomicRanges.
+
+```{r interval-setup}
+# Small RegionSets for clear demonstrations
+a <- RegionSet(data.frame(
+  chr = c("chr1", "chr1", "chr1", "chr2"),
+  start = c(100, 300, 500, 100),
+  end = c(200, 450, 600, 300)
+))
+
+b <- RegionSet(data.frame(
+  chr = c("chr1", "chr1", "chr2"),
+  start = c(150, 350, 250),
+  end = c(250, 550, 400)
+))
+
+# GRanges equivalents (1-based)
+a_gr <- GRanges(
+  seqnames = c("chr1", "chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(101, 301, 501, 101), end = c(200, 450, 600, 300))
+)
+b_gr <- GRanges(
+  seqnames = c("chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(151, 351, 251), end = c(250, 550, 400))
+)
+
+show_rs <- function(rs, label = "") {
+  df <- as.data.frame(rs)
+  if (nchar(label) > 0) cat(label, ": ", sep = "")
+  cat(nrow(df), "regions\n")
+  print(df)
+}
+
+# Compare gtars RegionSet (0-based) to GRanges (1-based) results
+cmp_gr <- function(rs, gr) {
+  rs_df <- as.data.frame(rs)
+  gr_df <- as.data.frame(gr)
+  all(gr_df$start - 1L == rs_df$start & gr_df$end == rs_df$end)
+}
+```
+
+## shift — translate all regions by a fixed offset
+
+```{r op-shift}
+shifted <- shift(a, shift = 50L)
+shifted_gr <- GenomicRanges::shift(a_gr, 50L)
+show_rs(shifted, "shift(a, 50)")
+cat("\nGR match:", cmp_gr(shifted, shifted_gr), "\n")
+```
+
+## flank — generate flanking regions
+
+```{r op-flank}
+flanked <- flank(a, width = 30L, start = TRUE)
+flanked_gr <- GenomicRanges::flank(a_gr, width = 30L, start = TRUE)
+show_rs(flanked, "flank(a, 30, start=TRUE)")
+cat("\nGR match:", cmp_gr(flanked, flanked_gr), "\n")
+```
+
+## resize — change width, anchored at start/end/center
+
+```{r op-resize}
+resized <- resize(a, width = 50L, fix = "center")
+resized_gr <- GenomicRanges::resize(a_gr, width = 50L, fix = "center")
+show_rs(resized, "resize(a, 50, fix='center')")
+cat("\nGR match:", cmp_gr(resized, resized_gr), "\n")
+```
+
+## narrow — extract a sub-range within each region
+
+```{r op-narrow}
+narrowed <- narrow(a, start = 10L, width = 20L)
+narrowed_gr <- GenomicRanges::narrow(a_gr, start = 10L, width = 20L)
+show_rs(narrowed, "narrow(a, start=10, width=20)")
+cat("\nGR match:", cmp_gr(narrowed, narrowed_gr), "\n")
+```
+
+## reduce — merge overlapping/adjacent regions
+
+```{r op-reduce}
+# Concatenate a and b, then reduce
+combined <- concat(a, b)
+reduced <- reduce(combined)
+show_rs(reduced, "reduce(concat(a, b))")
+```
+
+## disjoin — break into non-overlapping pieces
+
+```{r op-disjoin}
+disjoined <- disjoin(combined)
+show_rs(disjoined, "disjoin(concat(a, b))")
+```
+
+## gaps — intervals between regions
+
+```{r op-gaps}
+gapped <- gaps(a)
+show_rs(gapped, "gaps(a)")
+```
+
+## Set operations: union, intersect, setdiff
+
+```{r op-set-ops}
+show_rs(union(a, b), "union(a, b)")
+show_rs(intersect(a, b), "intersect(a, b)")
+show_rs(setdiff(a, b), "setdiff(a, b)")
+```
+
+## pintersect — pairwise intersection by position
+
+```{r op-pintersect}
+# Pairwise: 1st with 1st, 2nd with 2nd, etc. (must be same length)
+# Subset a to first 3 regions to match b's length
+pi_rs <- pintersect(a[1:3], b)
+show_rs(pi_rs, "pintersect(a[1:3], b)")
+```
+
+## jaccard — nucleotide-level similarity
+
+```{r op-jaccard}
+j <- jaccard(a, b)
+cat("Jaccard similarity:", round(j, 4), "\n")
+```
+
+## consensus — annotated union from multiple sets
+
+```{r op-consensus}
+cons <- consensus(list(a, b))
+cat("consensus(list(a, b)):\n")
+print(cons)
 ```
 
 
@@ -585,7 +723,13 @@ coverage <- data.frame(
     "calcCumulativePartitions",
     "calcSummarySignal / plotSummarySignal (single-query)",
     "calcGCContent / plotGCContent",
-    "calcDinuclFreq / plotDinuclFreq"
+    "calcDinuclFreq / plotDinuclFreq",
+    "GR: shift, flank, resize, narrow",
+    "GR: reduce, disjoin, gaps",
+    "GR: union, intersect, setdiff",
+    "GR: pintersect",
+    "consensus (gtars-only)",
+    "jaccard (gtars-only)"
   ),
   `RegionSet method` = c(
     "widths(rs)",
@@ -598,7 +742,13 @@ coverage <- data.frame(
     "Not yet implemented",
     "calcSummarySignal(rs, signalMatrix)",
     "calcGCContent(rs, genomeAssembly)",
-    "calcDinuclFreq(rs, genomeAssembly)"
+    "calcDinuclFreq(rs, genomeAssembly)",
+    "shift(rs, n), flank(rs, w), resize(rs, w, fix), narrow(rs, start, end, width)",
+    "reduce(rs), disjoin(rs), gaps(rs)",
+    "union(a, b), intersect(a, b), setdiff(a, b)",
+    "pintersect(a, b)",
+    "consensus(list(a, b, ...))",
+    "jaccard(a, b)"
   ),
   `Status` = c(
     "Exact match",
@@ -611,7 +761,13 @@ coverage <- data.frame(
     "Not yet implemented",
     "plotSummarySignal compatible",
     "Uses FASTA via loadGenomeAssembly",
-    "Uses FASTA via loadGenomeAssembly"
+    "Uses FASTA via loadGenomeAssembly",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Returns chr/start/end/count",
+    "Returns base-pair Jaccard [0, 1]"
   ),
   check.names = FALSE,
   stringsAsFactors = FALSE

@@ -3,6 +3,8 @@
 \docType{class}
 \name{RegionSet-class}
 \alias{RegionSet-class}
+\alias{as.data.frame,RegionSet-method}
+\alias{[,RegionSet,ANY,ANY-method}
 \alias{union,RegionSet,RegionSet-method}
 \alias{union,RegionSet,ANY-method}
 \alias{union,ANY,RegionSet-method}
@@ -14,6 +16,10 @@
 \alias{setdiff,ANY,RegionSet-method}
 \title{RegionSet class}
 \usage{
+\S4method{as.data.frame}{RegionSet}(x, row.names = NULL, optional = FALSE, ...)
+
+\S4method{[}{RegionSet,ANY,ANY}(x, i, j, ..., drop = TRUE)
+
 \S4method{union}{RegionSet,RegionSet}(x, y)
 
 \S4method{union}{RegionSet,ANY}(x, y)
@@ -31,6 +37,20 @@
 \S4method{setdiff}{RegionSet,ANY}(x, y)
 
 \S4method{setdiff}{ANY,RegionSet}(x, y)
+}
+\arguments{
+\item{x}{A RegionSet}
+
+\item{...}{ignored}
+
+\item{i}{Numeric, logical, or character index}
+
+\item{j}{ignored}
+
+\item{drop}{ignored}
+}
+\value{
+A RegionSet with selected regions
 }
 \description{
 S4 class representing a set of genomic regions, backed by
