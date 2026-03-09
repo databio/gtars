@@ -1,9 +1,11 @@
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
+use std::fs::{self, File};
+use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result, bail};
+use flate2::Compression;
 use flate2::read::GzDecoder;
+use flate2::write::GzEncoder;
 use sprs::TriMat;
 
 use crate::types::{FeatureMatrix, FeatureType};
@@ -167,6 +169,92 @@ fn read_mtx(path: &Path, n_features: usize, n_cells: usize) -> Result<sprs::CsMa
     }
 
     Ok(tri.to_csc())
+}
+
+/// Write a FeatureMatrix to a 10X-style directory (gzipped).
+///
+/// Creates:
+/// - `matrix.mtx.gz` — Matrix Market sparse matrix
+/// - `barcodes.tsv.gz` — Cell IDs
+/// - `features.tsv.gz` — Feature IDs, names, types
+pub fn write_10x(dir: &Path, fm: &FeatureMatrix) -> Result<()> {
+    fs::create_dir_all(dir)
+        .with_context(|| format!("creating output directory {}", dir.display()))?;
+
+    write_mtx_gz(&dir.join("matrix.mtx.gz"), fm)?;
+    write_barcodes_gz(&dir.join("barcodes.tsv.gz"), &fm.cell_ids)?;
+    write_features_gz(
+        &dir.join("features.tsv.gz"),
+        &fm.feature_ids,
+        &fm.feature_names,
+        &fm.feature_type,
+    )?;
+
+    Ok(())
+}
+
+fn write_mtx_gz(path: &Path, fm: &FeatureMatrix) -> Result<()> {
+    let file = File::create(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    let gz = GzEncoder::new(BufWriter::new(file), Compression::default());
+    let mut w = BufWriter::new(gz);
+
+    let (n_features, n_cells) = fm.shape();
+    let nnz = fm.matrix.nnz();
+
+    writeln!(w, "%%MatrixMarket matrix coordinate real general")?;
+    writeln!(w, "{} {} {}", n_features, n_cells, nnz)?;
+
+    // Iterate CSC matrix and output in 1-based indices
+    let csc = &fm.matrix;
+    for col in 0..n_cells {
+        let outer = csc.outer_view(col);
+        if let Some(col_view) = outer {
+            for (row, &val) in col_view.iter() {
+                writeln!(w, "{} {} {}", row + 1, col + 1, val)?;
+            }
+        }
+    }
+
+    w.flush()?;
+    Ok(())
+}
+
+fn write_barcodes_gz(path: &Path, cell_ids: &[String]) -> Result<()> {
+    let file = File::create(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    let gz = GzEncoder::new(BufWriter::new(file), Compression::default());
+    let mut w = BufWriter::new(gz);
+
+    for id in cell_ids {
+        writeln!(w, "{}", id)?;
+    }
+    w.flush()?;
+    Ok(())
+}
+
+fn write_features_gz(
+    path: &Path,
+    feature_ids: &[String],
+    feature_names: &[String],
+    feature_type: &FeatureType,
+) -> Result<()> {
+    let file = File::create(path)
+        .with_context(|| format!("creating {}", path.display()))?;
+    let gz = GzEncoder::new(BufWriter::new(file), Compression::default());
+    let mut w = BufWriter::new(gz);
+
+    let type_str = match feature_type {
+        FeatureType::Gene => "Gene Expression",
+        FeatureType::Peak => "Peaks",
+        FeatureType::Custom(s) => s.as_str(),
+    };
+
+    for (id, name) in feature_ids.iter().zip(feature_names.iter()) {
+        writeln!(w, "{}\t{}\t{}", id, name, type_str)?;
+    }
+    w.flush()?;
+    Ok(())
 }
 
 #[cfg(test)]

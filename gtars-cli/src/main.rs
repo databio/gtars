@@ -28,6 +28,9 @@ mod consensus;
 #[cfg(feature = "genomicdist")]
 mod prep;
 
+#[cfg(feature = "sc")]
+mod sc;
+
 use anyhow::Result;
 use clap::Command;
 
@@ -74,6 +77,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "genomicdist")]
     let cmd = cmd.subcommand(prep::cli::create_prep_cli());
+
+    #[cfg(feature = "sc")]
+    let cmd = cmd.subcommand(sc::cli::create_sc_cli());
 
     cmd
 }
@@ -168,6 +174,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "genomicdist")]
         Some((prep::cli::PREP_CMD, matches)) => {
             prep::handlers::run_prep(matches)?;
+        }
+
+        //
+        // SINGLE-CELL
+        //
+        #[cfg(feature = "sc")]
+        Some((sc::cli::SC_CMD, matches)) => {
+            sc::handlers::run_sc(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),
