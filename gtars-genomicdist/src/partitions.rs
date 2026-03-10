@@ -561,14 +561,20 @@ pub fn calc_expected_partitions(
     let genome_size: u64 = chrom_sizes.values().map(|&v| v as u64).sum();
     let query_total = observed.total as f64;
 
-    // Compute partition sizes in bp
+    // Compute partition sizes in bp using priority resolution.
+    // Each genomic bp is assigned to the first (highest-priority) partition
+    // that covers it, matching R's approach and avoiding double-counting.
     let mut partition_bp_total: u64 = 0;
+    let mut claimed = RegionSet::from(Vec::<Region>::new());
     let partition_sizes: Vec<u64> = partitions
         .partitions
         .iter()
-        .map(|(_, rs)| {
-            let bp: u64 = rs.regions.iter().map(|r| (r.end - r.start) as u64).sum();
+        .map(|(_name, rs)| {
+            let reduced = rs.reduce();
+            let exclusive = reduced.setdiff(&claimed);
+            let bp: u64 = exclusive.regions.iter().map(|r| (r.end - r.start) as u64).sum();
             partition_bp_total += bp;
+            claimed = claimed.union(&reduced);
             bp
         })
         .collect();
