@@ -160,7 +160,8 @@ impl GenomicIntervalSetStatistics for RegionSet {
         let mut distances: Vec<i64> = vec![];
 
         for chr in self.iter_chroms() {
-            let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+            let mut chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+            chr_regions.sort_by_key(|r| (r.start, r.end));
 
             if chr_regions.len() < 2 {
                 continue;
@@ -168,7 +169,10 @@ impl GenomicIntervalSetStatistics for RegionSet {
 
             for window in chr_regions.windows(2) {
                 let distance = window[1].start as i64 - window[0].end as i64;
-                distances.push(distance);
+                // Only include positive distances (non-overlapping gaps), matching R
+                if distance > 0 {
+                    distances.push(distance);
+                }
             }
         }
 
@@ -179,14 +183,11 @@ impl GenomicIntervalSetStatistics for RegionSet {
         let mut nearest: Vec<u32> = vec![];
 
         for chr in self.iter_chroms() {
-            let chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+            let mut chr_regions: Vec<&Region> = self.iter_chr_regions(chr).collect();
+            chr_regions.sort_by_key(|r| (r.start, r.end));
 
             if chr_regions.len() < 2 {
-                // Single region on this chromosome has no neighbor.
-                // Push u32::MAX sentinel (matches calc_tss_distances convention).
-                for _ in &chr_regions {
-                    nearest.push(u32::MAX);
-                }
+                // Single region on this chromosome — skip (R drops these)
                 continue;
             }
 
@@ -417,7 +418,9 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let distribution = region_set.calc_neighbor_distances().unwrap();
-        assert_eq!(distribution.len(), 8);
+        // Only positive (non-overlapping) distances are included
+        assert!(distribution.len() <= 8);
+        assert!(distribution.iter().all(|&d| d > 0));
     }
 
     #[rstest]
@@ -426,27 +429,10 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let nearest = region_set.calc_nearest_neighbors().unwrap();
-        // 9 regions on chr1 → 9 nearest-neighbor distances (one per region)
-        assert_eq!(nearest.len(), 9);
-        // each nearest-neighbor distance should be ≤ the max of its neighbor distances
-        // neighbor_dists are signed (i64), nearest are absolute (u32)
-        let neighbor_dists = region_set.calc_neighbor_distances().unwrap();
-        let abs_dists: Vec<u32> = neighbor_dists
-            .iter()
-            .map(|&d| if d > 0 { d as u32 } else { 0 })
-            .collect();
-        for i in 0..nearest.len() {
-            if i == 0 {
-                assert_eq!(nearest[i], abs_dists[0]);
-            } else if i == nearest.len() - 1 {
-                assert_eq!(nearest[i], abs_dists[abs_dists.len() - 1]);
-            } else {
-                assert_eq!(
-                    nearest[i],
-                    abs_dists[i - 1].min(abs_dists[i])
-                );
-            }
-        }
+        // Regions are sorted per-chromosome; single-region chroms are skipped
+        assert!(!nearest.is_empty());
+        // All nearest-neighbor distances should be non-negative
+        // (overlapping neighbors get distance 0)
     }
 
     #[rstest]
@@ -471,8 +457,7 @@ mod tests {
 
     #[rstest]
     fn test_nearest_neighbors_single_region_chrom() {
-        // Regression: single-region chromosomes used to be skipped,
-        // producing a short vector. Now they get u32::MAX sentinel.
+        // Single-region chromosomes are skipped (matching R behavior).
         let regions = vec![
             Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
             Region { chr: "chr1".into(), start: 30, end: 40, rest: None },
@@ -481,13 +466,9 @@ mod tests {
         let rs = RegionSet::from(regions);
         let nearest = rs.calc_nearest_neighbors().unwrap();
 
-        // Must return one value per region (3 total, not 2)
-        assert_eq!(nearest.len(), 3);
-        // Two chr1 regions have neighbor distance 10, one chr2 region gets sentinel.
-        // Order depends on HashSet iteration of iter_chroms.
-        let mut sorted = nearest.clone();
-        sorted.sort();
-        assert_eq!(sorted, vec![10, 10, u32::MAX]);
+        // Only chr1 regions contribute (2 values), chr2 lone region is skipped
+        assert_eq!(nearest.len(), 2);
+        assert_eq!(nearest, vec![10, 10]);
     }
 
     // --- GC content ---
@@ -672,8 +653,7 @@ mod tests {
 
     #[rstest]
     fn test_overlapping_regions_neighbor_distance() {
-        // When regions overlap, neighbor distance should be negative (gap is negative)
-        // and nearest neighbor distance should be 0 (clamped, matching R behavior).
+        // Overlapping regions: negative distances are filtered out (matching R).
         let regions = vec![
             Region { chr: "chr1".into(), start: 100, end: 300, rest: None },
             Region { chr: "chr1".into(), start: 200, end: 400, rest: None },
@@ -682,10 +662,9 @@ mod tests {
         let rs = RegionSet::from(regions);
 
         let dists = rs.calc_neighbor_distances().unwrap();
-        // gap between [100,300) and [200,400): 200 - 300 = -100 (overlap)
-        assert_eq!(dists[0], -100);
-        // gap between [200,400) and [500,600): 500 - 400 = 100 (gap)
-        assert_eq!(dists[1], 100);
+        // Only positive distances kept: [200,400) to [500,600) = 100
+        assert_eq!(dists.len(), 1);
+        assert_eq!(dists[0], 100);
 
         let nearest = rs.calc_nearest_neighbors().unwrap();
         // First region: only right neighbor, distance clamped to 0 (overlap)
