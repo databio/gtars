@@ -13,7 +13,7 @@ default = ["refget", "tokenizers", "genomic_distributions", "models", "utils", "
 refget = ["dep:gtars-refget"]
 tokenizers = ["dep:gtars-tokenizers", "dep:gtars-core"]
 genomic_distributions = ["dep:gtars-genomicdist"]
-models = ["dep:gtars-core", "dep:gtars-genomicdist"]
+models = ["dep:gtars-core", "dep:gtars-genomicdist", "dep:gtars-overlaprs"]
 utils = ["dep:gtars-core", "dep:gtars-io"]
 lola = ["dep:gtars-lola", "dep:gtars-igd", "dep:gtars-core"]
 
@@ -32,3 +32,4 @@ gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], o
 gtars-io = { path = "../gtars-io", optional = true }
 gtars-igd = { path = "../gtars-igd", optional = true }
 gtars-lola = { path = "../gtars-lola", optional = true }
+gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
