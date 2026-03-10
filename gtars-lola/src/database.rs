@@ -103,7 +103,7 @@ impl RegionDB {
 
             // Parse collection.txt
             let coll_anno = parse_collection_txt(&coll_path.join("collection.txt"), &coll_name);
-            all_collection_anno.push(coll_anno);
+            all_collection_anno.push(coll_anno.clone());
 
             // Parse index.txt for annotations (keyed by filename)
             let index_annos = parse_index_txt(&coll_path.join("index.txt"), &coll_name);
@@ -148,12 +148,16 @@ impl RegionDB {
                         igd_inputs.push((fname.clone(), regions));
                         all_region_sets.push(region_set);
 
-                        // Use annotation from index.txt if available, otherwise default
-                        let anno = anno_map.get(fname).cloned().unwrap_or(RegionSetAnno {
+                        // Use annotation from index.txt if available, otherwise default.
+                        // Fall back to collection description if file-level is empty.
+                        let mut anno = anno_map.get(fname).cloned().unwrap_or(RegionSetAnno {
                             filename: fname.clone(),
                             collection: coll_name.clone(),
                             ..Default::default()
                         });
+                        if anno.description.is_empty() {
+                            anno.description = coll_anno.description.clone();
+                        }
                         all_region_anno.push(anno);
                         files_loaded += 1;
                     }

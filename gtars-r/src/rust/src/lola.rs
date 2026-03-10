@@ -370,8 +370,9 @@ pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
         let mut antibody = Vec::with_capacity(n);
         let mut treatment = Vec::with_capacity(n);
         let mut collection = Vec::with_capacity(n);
+        let mut size = Vec::with_capacity(n);
 
-        for a in &db_ref.region_anno {
+        for (i, a) in db_ref.region_anno.iter().enumerate() {
             filename.push(a.filename.clone());
             cell_type.push(a.cell_type.clone());
             description.push(a.description.clone());
@@ -380,6 +381,7 @@ pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
             antibody.push(a.antibody.clone());
             treatment.push(a.treatment.clone());
             collection.push(a.collection.clone());
+            size.push(db_ref.region_sets[i].len() as i32);
         }
 
         Ok(list!(
@@ -390,7 +392,8 @@ pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
             dataSource = data_source,
             antibody = antibody,
             treatment = treatment,
-            collection = collection
+            collection = collection,
+            size = size
         )
         .into())
     })
