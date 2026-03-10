@@ -52,8 +52,8 @@ calcNearestNeighbors <- function(query) nearestNeighbors(query)
 #' @return A data.table compatible with plotChromBins
 #'
 #' @export
-regionDistribution <- function(query, nBins = 250L) {
-  distribution(query, nBins = nBins)
+regionDistribution <- function(query, nBins = 250L, chromSizes = NULL) {
+  distribution(query, nBins = nBins, chromSizes = chromSizes)
 }
 
 # =========================================================================

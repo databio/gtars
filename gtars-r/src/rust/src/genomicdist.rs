@@ -208,9 +208,25 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
 /// @param rs_ptr External pointer to a RegionSet
 /// @param n_bins Number of bins (default 250)
 #[extendr(r_name = "r_region_distribution")]
-pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32) -> extendr_api::Result<List> {
+pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom_lengths: Robj) -> extendr_api::Result<List> {
     with_regionset!(rs_ptr, rs, {
-        let dist = rs.region_distribution_with_bins(n_bins as u32);
+        let dist = if !chrom_names.is_null() && !chrom_lengths.is_null() {
+            let names: Vec<String> = chrom_names.as_str_iter()
+                .ok_or_else(|| extendr_api::Error::Other("chrom_names must be character".into()))?
+                .map(|s| s.to_string())
+                .collect();
+            let lengths: Vec<f64> = chrom_lengths.as_real_iter()
+                .ok_or_else(|| extendr_api::Error::Other("chrom_lengths must be numeric".into()))?
+                .copied()
+                .collect();
+            let chrom_sizes: HashMap<String, u32> = names
+                .into_iter()
+                .zip(lengths.into_iter().map(|v| v as u32))
+                .collect();
+            rs.region_distribution_with_chrom_sizes(n_bins as u32, &chrom_sizes)
+        } else {
+            rs.region_distribution_with_bins(n_bins as u32)
+        };
         let mut bins: Vec<_> = dist.into_values().collect();
         bins.sort_by(|a, b| {
             chrom_karyotype_key(&a.chr)

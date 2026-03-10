@@ -105,12 +105,18 @@ setMethod("chromosomeStatistics", "ANY", function(x, ...) {
 #' @param ... ignored
 #' @return A data.table compatible with plotChromBins
 #' @export
-setGeneric("distribution", function(x, nBins = 250L, ...) standardGeneric("distribution"))
+setGeneric("distribution", function(x, nBins = 250L, chromSizes = NULL, ...) standardGeneric("distribution"))
 
 #' @rdname distribution
 #' @export
-setMethod("distribution", "RegionSet", function(x, nBins = 250L, ...) {
-  result <- .Call(wrap__r_region_distribution, .ptr(x), as.integer(nBins))
+setMethod("distribution", "RegionSet", function(x, nBins = 250L, chromSizes = NULL, ...) {
+  chrom_names <- NULL
+  chrom_lengths <- NULL
+  if (!is.null(chromSizes)) {
+    chrom_names <- names(chromSizes)
+    chrom_lengths <- as.numeric(chromSizes)
+  }
+  result <- .Call(wrap__r_region_distribution, .ptr(x), as.integer(nBins), chrom_names, chrom_lengths)
   dt <- data.table::as.data.table(result)
   data.table::setnames(dt, c("n", "rid"), c("N", "regionID"))
   data.table::set(dt, j = "withinGroupID", value = dt[["regionID"]])
@@ -121,8 +127,8 @@ setMethod("distribution", "RegionSet", function(x, nBins = 250L, ...) {
 
 #' @rdname distribution
 #' @export
-setMethod("distribution", "ANY", function(x, nBins = 250L, ...) {
-  distribution(RegionSet(x), nBins = nBins)
+setMethod("distribution", "ANY", function(x, nBins = 250L, chromSizes = NULL, ...) {
+  distribution(RegionSet(x), nBins = nBins, chromSizes = chromSizes)
 })
 
 # =========================================================================

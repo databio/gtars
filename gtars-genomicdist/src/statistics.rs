@@ -29,6 +29,17 @@ pub trait GenomicIntervalSetStatistics {
     /// region is counted exactly once regardless of width.
     fn region_distribution_with_bins(&self, n_bins: u32) -> HashMap<String, RegionBin>;
 
+    /// Compute the distribution of regions across per-chromosome bins.
+    ///
+    /// Like `region_distribution_with_bins` but uses actual chromosome sizes
+    /// to create bins per-chromosome, matching R's `getGenomeBins(chromSizes)`.
+    /// Each chromosome gets `n_bins` bins sized to that chromosome's length.
+    fn region_distribution_with_chrom_sizes(
+        &self,
+        n_bins: u32,
+        chrom_sizes: &HashMap<String, u32>,
+    ) -> HashMap<String, RegionBin>;
+
     /// Compute distances between consecutive regions on each chromosome.
     ///
     /// For each pair of adjacent regions on the same chromosome, returns the
@@ -135,6 +146,49 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let bin_start = rid * bin_size;
             let chrom_end = chrom_maxes.get(&region.chr).copied().unwrap_or(0);
             let bin_end = (bin_start + bin_size).min(chrom_end);
+
+            let key = format!("{}-{}-{}", region.chr, bin_start, bin_end);
+            if let Some(bin) = plot_results.get_mut(&key) {
+                bin.n += 1;
+            } else {
+                plot_results.insert(
+                    key,
+                    RegionBin {
+                        chr: region.chr.clone(),
+                        start: bin_start,
+                        end: bin_end,
+                        n: 1,
+                        rid,
+                    },
+                );
+            }
+        }
+
+        plot_results
+    }
+
+    fn region_distribution_with_chrom_sizes(
+        &self,
+        n_bins: u32,
+        chrom_sizes: &HashMap<String, u32>,
+    ) -> HashMap<String, RegionBin> {
+        if self.regions.is_empty() || n_bins == 0 {
+            return HashMap::new();
+        }
+
+        let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
+
+        for region in &self.regions {
+            let chrom_size = match chrom_sizes.get(&region.chr) {
+                Some(&s) => s,
+                None => continue, // skip regions on chromosomes not in chrom_sizes
+            };
+            let bin_size = (chrom_size / n_bins).max(1);
+
+            let mid = region.mid_point();
+            let rid = mid / bin_size;
+            let bin_start = rid * bin_size;
+            let bin_end = (bin_start + bin_size).min(chrom_size);
 
             let key = format!("{}-{}-{}", region.chr, bin_start, bin_end);
             if let Some(bin) = plot_results.get_mut(&key) {
