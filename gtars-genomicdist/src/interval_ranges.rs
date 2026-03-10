@@ -593,6 +593,15 @@ impl IntervalRanges for RegionSet {
         while i < reduced.regions.len() {
             let chr = &reduced.regions[i].chr;
             let mut j = i + 1;
+            // Leading gap from position 0 to the first region on this chromosome
+            if reduced.regions[i].start > 0 {
+                result.push(Region {
+                    chr: chr.clone(),
+                    start: 0,
+                    end: reduced.regions[i].start,
+                    rest: None,
+                });
+            }
             while j < reduced.regions.len() && reduced.regions[j].chr == *chr {
                 // Gap between consecutive reduced regions
                 let gap_start = reduced.regions[j - 1].end;

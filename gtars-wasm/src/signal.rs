@@ -135,7 +135,7 @@ pub fn js_calc_summary_signal(
     region_set: &JsRegionSet,
     signal_matrix: &JsSignalMatrix,
 ) -> Result<JsValue, JsValue> {
-    let result = calc_summary_signal(&region_set.region_set, &signal_matrix.matrix)
+    let result = calc_summary_signal(&region_set.region_set, &signal_matrix.matrix, gtars_genomicdist::CoordinateMode::Bed)
         .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
     let js_result = SignalSummaryResultJs {

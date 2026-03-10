@@ -1,6 +1,6 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{CoordinateMode, Region, RegionSet};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, fmt::Debug};
 use std::fs::File;
@@ -297,7 +297,17 @@ pub struct TssIndex {
 impl TryFrom<RegionSet> for TssIndex {
     type Error = GtarsGenomicDistError;
     fn try_from(value: RegionSet) -> Result<Self, GtarsGenomicDistError> {
-        let mut mid_points = value.calc_mid_points();
+        TssIndex::from_region_set(value, CoordinateMode::Bed)
+    }
+}
+
+impl TssIndex {
+    /// Create a TssIndex from a RegionSet using the specified coordinate mode for midpoints.
+    pub fn from_region_set(
+        value: RegionSet,
+        mode: CoordinateMode,
+    ) -> Result<Self, GtarsGenomicDistError> {
+        let mut mid_points = value.calc_mid_points_with_mode(mode);
 
         for points in mid_points.values_mut() {
             points.sort_unstable();
@@ -362,13 +372,17 @@ impl TssIndex {
     /// Uses binary search for O(R * log M) complexity instead of O(R * M),
     /// where R is the number of regions and M is the number of TSS midpoints.
     ///
-    pub fn calc_tss_distances(&self, rs: &RegionSet) -> Result<Vec<u32>, GtarsGenomicDistError> {
+    pub fn calc_tss_distances(
+        &self,
+        rs: &RegionSet,
+        mode: CoordinateMode,
+    ) -> Result<Vec<u32>, GtarsGenomicDistError> {
         let mut distances: Vec<u32> = Vec::with_capacity(rs.len());
 
         for chromosome in rs.iter_chroms() {
             if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
                 for region in rs.iter_chr_regions(chromosome.as_str()) {
-                    let target = region.mid_point();
+                    let target = region.mid_point_with_mode(mode);
 
                     let min_distance = match chr_midpoints.binary_search(&target) {
                         Ok(_) => 0,
@@ -409,13 +423,14 @@ impl TssIndex {
     pub fn calc_feature_distances(
         &self,
         rs: &RegionSet,
+        mode: CoordinateMode,
     ) -> Result<Vec<i64>, GtarsGenomicDistError> {
         let mut distances: Vec<i64> = Vec::with_capacity(rs.len());
 
         for chromosome in rs.iter_chroms() {
             if let Some(chr_midpoints) = self.mid_points.get(chromosome.as_str()) {
                 for region in rs.iter_chr_regions(chromosome.as_str()) {
-                    let target = region.mid_point() as i64;
+                    let target = region.mid_point_with_mode(mode) as i64;
 
                     let distance = match chr_midpoints.binary_search(&(target as u32)) {
                         Ok(_) => 0i64,
@@ -694,7 +709,7 @@ mod tests {
             Region { chr: "chr2".into(), start: 10, end: 20, rest: None },
         ]);
 
-        let distances = tss_index.calc_tss_distances(&query).unwrap();
+        let distances = tss_index.calc_tss_distances(&query, CoordinateMode::Bed).unwrap();
         assert_eq!(distances.len(), 2); // one per input region
         // One should be a real distance, the other should be u32::MAX sentinel
         // (order depends on HashSet iteration of iter_chroms)
@@ -714,7 +729,7 @@ mod tests {
             Region { chr: "chr2".into(), start: 10, end: 20, rest: None },
         ]);
 
-        let distances = tss_index.calc_feature_distances(&query).unwrap();
+        let distances = tss_index.calc_feature_distances(&query, CoordinateMode::Bed).unwrap();
         assert_eq!(distances.len(), 2);
         // One real distance, one i64::MAX sentinel
         assert_eq!(distances.iter().filter(|&&d| d == i64::MAX).count(), 1);
@@ -730,7 +745,7 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
 
-        let distances = tss_index.calc_tss_distances(&region_set).unwrap();
+        let distances = tss_index.calc_tss_distances(&region_set, CoordinateMode::Bed).unwrap();
 
         assert_eq!(distances.len(), 9);
         assert_eq!(distances.iter().min(), Some(&2));
@@ -743,8 +758,8 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
         let tss_index = TssIndex::try_from(tss_path.to_str().unwrap()).unwrap();
 
-        let signed_distances = tss_index.calc_feature_distances(&region_set).unwrap();
-        let abs_distances = tss_index.calc_tss_distances(&region_set).unwrap();
+        let signed_distances = tss_index.calc_feature_distances(&region_set, CoordinateMode::Bed).unwrap();
+        let abs_distances = tss_index.calc_tss_distances(&region_set, CoordinateMode::Bed).unwrap();
 
         // same number of results
         assert_eq!(signed_distances.len(), abs_distances.len());

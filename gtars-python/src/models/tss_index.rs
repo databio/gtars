@@ -1,5 +1,6 @@
 use crate::models::PyRegionSet;
 use gtars_genomicdist::models::TssIndex;
+use gtars_genomicdist::CoordinateMode;
 use pyo3::prelude::*;
 
 #[pyclass(name = "TssIndex")]
@@ -28,7 +29,7 @@ impl PyTssIndex {
     pub fn calc_tss_distances(&self, rs: &PyRegionSet) -> PyResult<Vec<u32>> {
         let distances: Vec<u32> = self
             .tss_index
-            .calc_tss_distances(&rs.regionset)
+            .calc_tss_distances(&rs.regionset, CoordinateMode::Bed)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(distances)
     }
@@ -36,7 +37,7 @@ impl PyTssIndex {
     pub fn feature_distances(&self, rs: &PyRegionSet) -> PyResult<Vec<Option<f64>>> {
         let dists = self
             .tss_index
-            .calc_feature_distances(&rs.regionset)
+            .calc_feature_distances(&rs.regionset, CoordinateMode::Bed)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
         Ok(dists
             .into_iter()

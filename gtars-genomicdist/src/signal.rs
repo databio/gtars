@@ -11,7 +11,7 @@ use std::path::Path;
 
 use flate2::read::MultiGzDecoder;
 
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{CoordinateMode, Region, RegionSet};
 use gtars_overlaprs::traits::{Interval, Overlapper};
 use gtars_overlaprs::AIList;
 
@@ -374,6 +374,7 @@ impl SignalMatrix {
 pub fn calc_summary_signal(
     query: &RegionSet,
     signal_matrix: &SignalMatrix,
+    mode: CoordinateMode,
 ) -> Result<SignalSummaryResult, GtarsGenomicDistError> {
     let n_conditions = signal_matrix.condition_names.len();
 
@@ -420,9 +421,13 @@ pub fn calc_summary_signal(
             }
 
             if let Some(vals) = max_vals {
+                let label_start = match mode {
+                    CoordinateMode::Bed => query_region.start,
+                    CoordinateMode::GRanges => query_region.start + 1,
+                };
                 let label = format!(
                     "{}_{}_{}",
-                    query_region.chr, query_region.start, query_region.end
+                    query_region.chr, label_start, query_region.end
                 );
                 signal_rows.push((label, vals));
             }
@@ -643,7 +648,7 @@ mod tests {
             },
         ]);
 
-        let result = calc_summary_signal(&query, &sm).unwrap();
+        let result = calc_summary_signal(&query, &sm, CoordinateMode::Bed).unwrap();
 
         // 2 query regions had overlaps
         assert_eq!(result.signal_matrix.len(), 2);
@@ -683,7 +688,7 @@ mod tests {
             rest: None,
         }]);
 
-        let result = calc_summary_signal(&query, &sm).unwrap();
+        let result = calc_summary_signal(&query, &sm, CoordinateMode::Bed).unwrap();
         assert!(result.signal_matrix.is_empty());
         assert!(result.matrix_stats.is_empty());
     }

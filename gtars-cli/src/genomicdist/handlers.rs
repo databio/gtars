@@ -139,7 +139,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to load TSS BED file: {}", e))?;
         Some(
             tss_index
-                .calc_feature_distances(&rs)
+                .calc_feature_distances(&rs, gtars_genomicdist::CoordinateMode::Bed)
                 .map_err(|e| anyhow::anyhow!("Failed to compute TSS distances: {}", e))?,
         )
     } else if let Some(ref model) = gene_model {
@@ -160,7 +160,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
             .map_err(|e| anyhow::anyhow!("Failed to build TSS index from GTF genes: {}", e))?;
         Some(
             tss_index
-                .calc_feature_distances(&rs)
+                .calc_feature_distances(&rs, gtars_genomicdist::CoordinateMode::Bed)
                 .map_err(|e| anyhow::anyhow!("Failed to compute TSS distances: {}", e))?,
         )
     } else {
@@ -204,7 +204,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
                 SignalMatrix::from_tsv(p)
                     .map_err(|e| anyhow::anyhow!("Failed to load signal matrix: {}", e))?
             };
-            let result = calc_summary_signal(&rs, &sm)
+            let result = calc_summary_signal(&rs, &sm, gtars_genomicdist::CoordinateMode::Bed)
                 .map_err(|e| anyhow::anyhow!("Failed to compute signal summary: {}", e))?;
             Some(OpenSignalOutput {
                 condition_names: result.condition_names,

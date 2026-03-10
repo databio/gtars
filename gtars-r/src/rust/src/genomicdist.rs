@@ -7,7 +7,7 @@ use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
     consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
-    GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
+    CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
 
@@ -884,7 +884,7 @@ pub fn r_calc_summary_signal(
             values: values_flat,
         };
 
-        let result = calc_summary_signal(rs, &signal_matrix)
+        let result = calc_summary_signal(rs, &signal_matrix, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
         // Build signal summary matrix as list of vectors
@@ -940,10 +940,10 @@ pub fn r_calc_tss_distances(query_ptr: Robj, features_ptr: Robj) -> extendr_api:
     with_regionset!(query_ptr, query, {
         let features_ext = <ExternalPtr<RegionSet>>::try_from(features_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid features RegionSet pointer".into()))?;
-        let index = TssIndex::try_from((*features_ext).clone())
+        let index = TssIndex::from_region_set((*features_ext).clone(), CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("Building TssIndex: {}", e)))?;
         let dists = index
-            .calc_tss_distances(query)
+            .calc_tss_distances(query, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
         let result: Doubles = dists
             .into_iter()
@@ -972,10 +972,10 @@ pub fn r_calc_feature_distances(
     with_regionset!(query_ptr, query, {
         let features_ext = <ExternalPtr<RegionSet>>::try_from(features_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid features RegionSet pointer".into()))?;
-        let index = TssIndex::try_from((*features_ext).clone())
+        let index = TssIndex::from_region_set((*features_ext).clone(), CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("Building TssIndex: {}", e)))?;
         let dists = index
-            .calc_feature_distances(query)
+            .calc_feature_distances(query, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
         let result: Doubles = dists
             .into_iter()
@@ -1102,7 +1102,7 @@ pub fn r_calc_summary_signal_from_matrix(
         let sm_ext = <ExternalPtr<SignalMatrix>>::try_from(sm_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid SignalMatrix pointer".into()))?;
 
-        let result = calc_summary_signal(rs, &*sm_ext)
+        let result = calc_summary_signal(rs, &*sm_ext, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
         let n_cond = result.condition_names.len();

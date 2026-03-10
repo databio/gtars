@@ -545,6 +545,24 @@ impl RegionSet {
         mid_points
     }
 
+    /// Calculate midpoints using the specified coordinate convention.
+    ///
+    /// See [`Region::mid_point_with_mode`] for details on how each mode computes the midpoint.
+    pub fn calc_mid_points_with_mode(
+        &self,
+        mode: super::coords::CoordinateMode,
+    ) -> HashMap<String, Vec<u32>> {
+        let mut mid_points: HashMap<String, Vec<u32>> = HashMap::new();
+        for chromosome in self.iter_chroms() {
+            let mut chr_mid_points: Vec<u32> = Vec::new();
+            for region in self.iter_chr_regions(chromosome) {
+                chr_mid_points.push(region.mid_point_with_mode(mode));
+            }
+            mid_points.insert(chromosome.clone(), chr_mid_points);
+        }
+        mid_points
+    }
+
     ///
     /// Get number of regions in RegionSet
     ///

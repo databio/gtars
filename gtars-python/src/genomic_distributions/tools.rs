@@ -91,7 +91,7 @@ pub fn py_calc_summary_signal<'py>(
     signal_matrix: &PySignalMatrix,
 ) -> anyhow::Result<Bound<'py, PyDict>> {
     let result =
-        gtars_genomicdist::calc_summary_signal(&rs.regionset, &signal_matrix.signal_matrix)?;
+        gtars_genomicdist::calc_summary_signal(&rs.regionset, &signal_matrix.signal_matrix, gtars_genomicdist::CoordinateMode::Bed)?;
     let dict = PyDict::new(py);
     dict.set_item("condition_names", &result.condition_names)?;
     let region_labels: Vec<&str> = result.signal_matrix.iter().map(|(label, _)| label.as_str()).collect();

@@ -1,4 +1,5 @@
 use gtars_genomicdist::models::TssIndex;
+use gtars_genomicdist::CoordinateMode;
 use wasm_bindgen::prelude::*;
 
 use crate::regionset::JsRegionSet;
@@ -36,7 +37,7 @@ impl JsTssIndex {
     pub fn calc_tss_distances(&self, query: &JsRegionSet) -> Result<JsValue, JsValue> {
         let distances = self
             .index
-            .calc_tss_distances(&query.region_set)
+            .calc_tss_distances(&query.region_set, CoordinateMode::Bed)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         // Convert u32::MAX sentinel to None (JS null)
@@ -63,7 +64,7 @@ impl JsTssIndex {
     pub fn calc_feature_distances(&self, query: &JsRegionSet) -> Result<JsValue, JsValue> {
         let distances = self
             .index
-            .calc_feature_distances(&query.region_set)
+            .calc_feature_distances(&query.region_set, CoordinateMode::Bed)
             .map_err(|e| JsValue::from_str(&e.to_string()))?;
 
         // Convert i64::MAX sentinel to None (JS null)
