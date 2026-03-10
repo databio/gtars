@@ -434,6 +434,98 @@ pub fn r_jaccard(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<f64> {
     Ok(ext_a.jaccard(&*ext_b))
 }
 
+/// Shift all regions by a fixed offset
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param offset Integer offset (positive = downstream, negative = upstream)
+#[extendr(r_name = "r_shift")]
+pub fn r_shift(rs_ptr: Robj, offset: i32) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let result = rs.shift(offset as i64);
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Generate flanking regions
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param width Flank width in base pairs
+/// @param use_start If TRUE, flank upstream of start; if FALSE, downstream of end
+/// @param both If TRUE, flank on both sides of the anchor
+#[extendr(r_name = "r_flank")]
+pub fn r_flank(rs_ptr: Robj, width: i32, use_start: bool, both: bool) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let result = rs.flank(width as u32, use_start, both);
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Resize regions to a fixed width
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param width New width in base pairs
+/// @param fix Anchor point: "start", "end", or "center"
+#[extendr(r_name = "r_resize")]
+pub fn r_resize(rs_ptr: Robj, width: i32, fix: &str) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let result = rs.resize(width as u32, fix);
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Narrow regions by specifying a relative sub-range
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param start 1-based relative start (NA to omit)
+/// @param end 1-based relative end (NA to omit)
+/// @param width Width of the sub-range (NA to omit)
+#[extendr(r_name = "r_narrow")]
+pub fn r_narrow(rs_ptr: Robj, start: Robj, end: Robj, width: Robj) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let s = if start.is_na() { None } else { Some(i32::try_from(start).unwrap_or(1) as u32) };
+        let e = if end.is_na() { None } else { Some(i32::try_from(end).unwrap_or(1) as u32) };
+        let w = if width.is_na() { None } else { Some(i32::try_from(width).unwrap_or(1) as u32) };
+        let result = rs.narrow(s, e, w);
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Break regions into non-overlapping disjoint pieces
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+#[extendr(r_name = "r_disjoin")]
+pub fn r_disjoin(rs_ptr: Robj) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let result = rs.disjoin();
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Return gaps between regions per chromosome
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+#[extendr(r_name = "r_gaps")]
+pub fn r_gaps(rs_ptr: Robj) -> extendr_api::Result<Robj> {
+    with_regionset!(rs_ptr, rs, {
+        let result = rs.gaps();
+        Ok(ExternalPtr::new(result).into())
+    })
+}
+
+/// Range-level intersection of two region sets
+/// @export
+/// @param rs_ptr_a External pointer to RegionSet A
+/// @param rs_ptr_b External pointer to RegionSet B
+#[extendr(r_name = "r_intersect")]
+pub fn r_intersect(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<Robj> {
+    let ext_a = <ExternalPtr<RegionSet>>::try_from(rs_ptr_a)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (a)".into()))?;
+    let ext_b = <ExternalPtr<RegionSet>>::try_from(rs_ptr_b)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
+    let result = ext_a.intersect(&*ext_b);
+    Ok(ExternalPtr::new(result).into())
+}
+
 /// Compute consensus regions from a list of RegionSet pointers
 /// @export
 /// @param rs_list An R list of external pointers to RegionSets
@@ -1039,6 +1131,13 @@ extendr_module! {
     fn r_concat;
     fn r_union;
     fn r_jaccard;
+    fn r_shift;
+    fn r_flank;
+    fn r_resize;
+    fn r_narrow;
+    fn r_disjoin;
+    fn r_gaps;
+    fn r_intersect;
     fn r_consensus;
     // Partitions
     fn r_partition_list_from_regions;

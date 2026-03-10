@@ -58,8 +58,8 @@ class TestOverlapOps:
         result = self.a.find_overlaps(self.b)
         assert result == [[0], [], [1]]
 
-    def test_intersect(self):
-        result = self.a.intersect(self.b)
+    def test_intersect_all(self):
+        result = self.a.intersect_all(self.b)
         assert len(result) == 2
         assert result[0].start == 150
         assert result[0].end == 200

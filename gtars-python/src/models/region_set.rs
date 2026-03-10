@@ -456,8 +456,8 @@ impl PyRegionSet {
         self.regionset.find_overlaps(&other.regionset)
     }
 
-    fn intersect(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.intersect(&other.regionset);
+    fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {
+        let rs = self.regionset.intersect_all(&other.regionset);
         Ok(Self::from_regionset(rs))
     }
 

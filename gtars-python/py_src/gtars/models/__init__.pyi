@@ -263,7 +263,7 @@ class RegionSet:
         """
         ...
 
-    def intersect(self, other: "RegionSet") -> "RegionSet":
+    def intersect_all(self, other: "RegionSet") -> "RegionSet":
         """
         All-vs-all genomic intersection.
 

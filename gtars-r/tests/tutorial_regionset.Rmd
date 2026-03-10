@@ -1,6 +1,8 @@
 ---
-title: "RegionSet S4 Class"
-subtitle: "gtars genomic interval analysis with Rust-backed S4 objects"
+title: "GenomicDistributions Tutorial — with RegionSet S4 class"
+subtitle: >
+  Following the [GenomicDistributions intro vignette](https://code.databio.org/GenomicDistributions/articles/intro.html),
+  using the gtars RegionSet S4 class and its methods instead of drop-in wrappers.
 output:
   html_document:
     toc: true
@@ -10,267 +12,783 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, comment = "#>")
+knitr::opts_chunk$set(
+  echo = TRUE, warning = FALSE, message = FALSE,
+  fig.width = 10, fig.height = 5
+)
 ```
 
-# Overview
+# Getting started
 
-gtars provides a `RegionSet` S4 class that wraps Rust-backed genomic interval
-data. It supports:
+GenomicDistributions provides a suite of functions for computing and
+visualizing properties of genomic ranges. Every analysis follows the same
+pattern: a **calc** function computes a summary, and a **plot** function
+visualizes it.
 
-- Construction from BED files, GRanges, or data.frames
-- Strand support: preserved from GRanges and data.frames, round-trips correctly
-- Statistics: `widths()`, `neighborDistances()`, `nearestNeighbors()`
-- Interval operations: `reduce()`, `union()`, `setdiff()`, `trim()`, etc.
-- Drop-in compatibility with GenomicDistributions plotting functions
+**gtars** provides a `RegionSet` S4 class backed by Rust that exposes
+these computations as S4 methods (`widths()`, `neighborDistances()`,
+`nearestNeighbors()`, `distribution()`). The outputs are compatible with
+GenomicDistributions' `plot*` functions.
 
-```{r load}
+```{r libraries}
+library(GenomicDistributions)
+library(GenomicRanges)
 library(gtars)
 ```
 
-# Creating a RegionSet
 
-## From a BED file
+## Load data
 
-```{r from-file}
-data_dir <- normalizePath(file.path("..", "..", "tests", "data", "regionset"))
-rs <- RegionSet(file.path(data_dir, "dummy.bed"))
-rs
+The tutorial uses the VISTA enhancers dataset bundled with
+GenomicDistributions (1,339 human enhancer regions).
+
+`RegionSet()` can load BED files directly — no GRanges intermediate needed:
+
+```{r load-data}
+queryFile <- system.file("extdata", "vistaEnhancers.bed.gz",
+                         package = "GenomicDistributions")
+query <- RegionSet(queryFile)
+cat(length(query), "regions across",
+    length(unique(as.data.frame(query)$chr)), "chromosomes\n")
 ```
 
-## From a data.frame
+We also need GRanges for GenomicDistributions comparisons and multi-query examples:
 
-Data.frames use 0-based half-open (BED) coordinates.
-
-```{r from-df}
-df <- data.frame(
-  chr   = c("chr1", "chr1", "chr2"),
-  start = c(100L, 500L, 0L),
-  end   = c(200L, 600L, 300L)
-)
-rs_df <- RegionSet(df)
-rs_df
+```{r load-granges}
+query_gr <- rtracklayer::import(queryFile)
 ```
 
-## From GRanges
+For multi-query examples, we create a shifted copy using `shift()` directly
+on the RegionSet (no GRanges intermediate needed):
 
-GRanges coordinates (1-based closed) are automatically converted.
-
-```{r from-granges, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
-library(GenomicRanges)
-gr <- GRanges(
-  seqnames = c("chr1", "chr1", "chr2"),
-  ranges = IRanges(start = c(101, 501, 1), end = c(200, 600, 300))
-)
-rs_gr <- RegionSet(gr)
-rs_gr
-
-# Round-trip back to GRanges
-as_granges(rs_gr)
+```{r query-list}
+query2 <- shift(query, shift = 1000000L)
+query2_gr <- GenomicRanges::shift(query_gr, 1e6)
+queryList <- GRangesList(vistaEnhancers = query_gr, shifted = query2_gr)
 ```
 
-# Strand support
+We also load hg19 gene models (used in several sections below):
 
-RegionSet carries strand information as `"+"`, `"-"`, or `"*"` (unstranded).
-
-## From a stranded data.frame
-
-```{r strand-df}
-df_stranded <- data.frame(
-  chr    = c("chr1", "chr1", "chr2"),
-  start  = c(100L, 500L, 0L),
-  end    = c(200L, 600L, 300L),
-  strand = c("+", "-", "+")
-)
-rs_stranded <- RegionSet(df_stranded)
-rs_stranded
+```{r gene-models}
+geneModels <- GenomicDistributions::getGeneModels("hg19")
 ```
 
-## From stranded GRanges
 
-Strand is automatically extracted from GRanges objects.
+# Interval operations on RegionSet
 
-```{r strand-granges, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
-gr_stranded <- GRanges(
-  seqnames = c("chr1", "chr1", "chr2"),
-  ranges = IRanges(start = c(101, 501, 1), end = c(200, 600, 300)),
-  strand = c("+", "-", "+")
-)
-rs_from_gr <- RegionSet(gr_stranded)
-rs_from_gr
+RegionSet supports GenomicRanges/IRanges-style interval operations,
+all backed by Rust for performance. Here we demonstrate each one and
+compare output against GenomicRanges.
 
-# Round-trip preserves strand
-as_granges(rs_from_gr)
-```
-
-## Strand in as.data.frame
-
-The strand column is always included in the data.frame output.
-
-```{r strand-as-df}
-as.data.frame(rs_stranded)
-```
-
-## Strand through operations
-
-Positional operations (`promoters`, `concat`, `pintersect`) preserve strand.
-Merge operations (`reduce`, `union`, `setdiff`, `trim`) reset strand to `"*"`
-because they create new regions.
-
-```{r strand-ops}
-# promoters preserves strand
-as.data.frame(promoters(rs_stranded, upstream = 50L, downstream = 10L))
-
-# concat preserves strand from both inputs
-rs_plus <- RegionSet(data.frame(
-  chr = "chr3", start = 0L, end = 50L, strand = "+"
-))
-as.data.frame(concat(rs_stranded, rs_plus))
-
-# reduce loses strand (regions are merged)
-as.data.frame(reduce(rs_stranded))
-```
-
-## BED files
-
-BED files loaded via file path default to `"*"` (unstranded). Strand is shown
-in the display only when at least one region has `"+"` or `"-"`.
-
-```{r strand-file}
-rs_file <- RegionSet(file.path(data_dir, "dummy.bed"))
-rs_file
-```
-
-# Basic methods
-
-```{r basic}
-length(rs_df)
-as.data.frame(rs_df)
-```
-
-# Statistics
-
-## Region widths
-
-```{r widths}
-widths(rs)
-
-# GenomicDistributions drop-in:
-calcWidth(rs)
-```
-
-## Neighbor distances
-
-```{r neighbors}
-neighborDistances(rs)
-nearestNeighbors(rs)
-```
-
-## Chromosome statistics
-
-```{r chrom-stats}
-chromosomeStatistics(rs_df)
-```
-
-# Interval operations
-
-## reduce — merge overlapping regions
-
-```{r reduce}
-rs
-reduce(rs)
-as.data.frame(reduce(rs))
-```
-
-## union, setdiff
-
-```{r set-ops}
+```{r interval-setup}
+# Small RegionSets for clear demonstrations
 a <- RegionSet(data.frame(
-  chr = "chr1", start = c(0L, 20L), end = c(10L, 30L)
+  chr = c("chr1", "chr1", "chr1", "chr2"),
+  start = c(100, 300, 500, 100),
+  end = c(200, 450, 600, 300)
 ))
+
 b <- RegionSet(data.frame(
-  chr = "chr1", start = 5L, end = 25L
+  chr = c("chr1", "chr1", "chr2"),
+  start = c(150, 350, 250),
+  end = c(250, 550, 400)
 ))
 
-as.data.frame(union(a, b))
-as.data.frame(setdiff(a, b))
-```
-
-## concat — combine without merging
-
-```{r concat}
-ab <- concat(a, b)
-length(ab)
-as.data.frame(ab)
-```
-
-## trim — clip to chromosome boundaries
-
-```{r trim}
-chrom_sizes <- c(chr1 = 8L)
-as.data.frame(rs)
-as.data.frame(trim(rs, chromSizes = chrom_sizes))
-```
-
-## promoters
-
-```{r promoters}
-as.data.frame(promoters(a, upstream = 50L, downstream = 10L))
-```
-
-# Jaccard similarity
-
-```{r jaccard}
-jaccard(a, b)
-jaccard(a, a)  # self-similarity
-
-# Disjoint sets
-c <- RegionSet(data.frame(chr = "chr2", start = 100L, end = 200L))
-jaccard(a, c)
-```
-
-# Consensus regions
-
-Find regions present in k-of-n input sets.
-
-```{r consensus}
-consensus(list(a, b))
-consensus(list(a, b, c))
-```
-
-# Mixed input types
-
-All methods accept GRanges, file paths, data.frames, or RegionSet objects.
-At least one argument must be a RegionSet for binary BiocGenerics methods
-(`union`, `setdiff`).
-
-```{r mixed}
-# widths on a data.frame directly
-widths(data.frame(chr = "chr1", start = c(0L, 100L), end = c(50L, 200L)))
-
-# jaccard with mixed types
-jaccard(
-  data.frame(chr = "chr1", start = 0L, end = 100L),
-  data.frame(chr = "chr1", start = 50L, end = 150L)
+# GRanges equivalents (1-based)
+a_gr <- GRanges(
+  seqnames = c("chr1", "chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(101, 301, 501, 101), end = c(200, 450, 600, 300))
+)
+b_gr <- GRanges(
+  seqnames = c("chr1", "chr1", "chr2"),
+  ranges = IRanges(start = c(151, 351, 251), end = c(250, 550, 400))
 )
 
-# concat file path + data.frame
-rs_file <- RegionSet(file.path(data_dir, "dummy.bed"))
-rs_mixed <- concat(rs_file, data.frame(chr = "chr2", start = 0L, end = 100L))
-as.data.frame(rs_mixed)
+show_rs <- function(rs, label = "") {
+  df <- as.data.frame(rs)
+  if (nchar(label) > 0) cat(label, ": ", sep = "")
+  cat(nrow(df), "regions\n")
+  print(df)
+}
+
+# Compare gtars RegionSet (0-based) to GRanges (1-based) results
+cmp_gr <- function(rs, gr) {
+  rs_df <- as.data.frame(rs)
+  gr_df <- as.data.frame(gr)
+  all(gr_df$start - 1L == rs_df$start & gr_df$end == rs_df$end)
+}
 ```
 
-# Drop-in for GenomicDistributions
+## shift — translate all regions by a fixed offset
 
-The `calc*` functions accept GRanges directly, so existing GenomicDistributions
-scripts work by swapping `library(GenomicDistributions)` for `library(gtars)`.
-
-```{r drop-in, eval=requireNamespace("GenomicRanges", quietly=TRUE)}
-# Existing workflow — unchanged:
-calcWidth(gr)
-calcNeighborDist(gr)
-calcNearestNeighbors(gr)
+```{r op-shift}
+shifted <- shift(a, shift = 50L)
+shifted_gr <- GenomicRanges::shift(a_gr, 50L)
+show_rs(shifted, "shift(a, 50)")
+cat("\nGR match:", cmp_gr(shifted, shifted_gr), "\n")
 ```
 
-Multi-object functions like `calcPartitions`, `calcGCContent`, etc. also
-accept both GRanges and RegionSet.
+## flank — generate flanking regions
+
+```{r op-flank}
+flanked <- flank(a, width = 30L, start = TRUE)
+flanked_gr <- GenomicRanges::flank(a_gr, width = 30L, start = TRUE)
+show_rs(flanked, "flank(a, 30, start=TRUE)")
+cat("\nGR match:", cmp_gr(flanked, flanked_gr), "\n")
+```
+
+## resize — change width, anchored at start/end/center
+
+```{r op-resize}
+resized <- resize(a, width = 50L, fix = "center")
+resized_gr <- GenomicRanges::resize(a_gr, width = 50L, fix = "center")
+show_rs(resized, "resize(a, 50, fix='center')")
+cat("\nGR match:", cmp_gr(resized, resized_gr), "\n")
+```
+
+## narrow — extract a sub-range within each region
+
+```{r op-narrow}
+narrowed <- narrow(a, start = 10L, width = 20L)
+narrowed_gr <- GenomicRanges::narrow(a_gr, start = 10L, width = 20L)
+show_rs(narrowed, "narrow(a, start=10, width=20)")
+cat("\nGR match:", cmp_gr(narrowed, narrowed_gr), "\n")
+```
+
+## reduce — merge overlapping/adjacent regions
+
+```{r op-reduce}
+# Concatenate a and b, then reduce
+combined <- concat(a, b)
+reduced <- reduce(combined)
+show_rs(reduced, "reduce(concat(a, b))")
+```
+
+## disjoin — break into non-overlapping pieces
+
+```{r op-disjoin}
+disjoined <- disjoin(combined)
+show_rs(disjoined, "disjoin(concat(a, b))")
+```
+
+## gaps — intervals between regions
+
+```{r op-gaps}
+gapped <- gaps(a)
+show_rs(gapped, "gaps(a)")
+```
+
+## Set operations: union, intersect, setdiff
+
+```{r op-set-ops}
+show_rs(union(a, b), "union(a, b)")
+show_rs(intersect(a, b), "intersect(a, b)")
+show_rs(setdiff(a, b), "setdiff(a, b)")
+```
+
+## pintersect — pairwise intersection by position
+
+```{r op-pintersect}
+# Pairwise: 1st with 1st, 2nd with 2nd, etc. (must be same length)
+# Subset a to first 3 regions to match b's length
+pi_rs <- pintersect(a[1:3], b)
+show_rs(pi_rs, "pintersect(a[1:3], b)")
+```
+
+## jaccard — nucleotide-level similarity
+
+```{r op-jaccard}
+j <- jaccard(a, b)
+cat("Jaccard similarity:", round(j, 4), "\n")
+```
+
+## consensus — annotated union from multiple sets
+
+```{r op-consensus}
+cons <- consensus(list(a, b))
+cat("consensus(list(a, b)):\n")
+print(cons)
+```
+
+
+# Width distribution {.tabset}
+
+`widths()` computes `end - start` for each region.
+
+## GenomicDistributions
+
+```{r gd-width}
+gd_widths <- GenomicDistributions::calcWidth(query_gr)
+plotQTHist(gd_widths)
+```
+
+## gtars RegionSet
+
+```{r gt-width}
+gt_widths <- widths(query)
+plotQTHist(gt_widths)
+```
+
+## Comparison
+
+```{r cmp-width}
+cat("Exact match:", all(gd_widths == gt_widths), "\n")
+plotQTHist(list("GenomicDistributions" = gd_widths, "gtars" = gt_widths))
+```
+
+##
+
+Multi-query (GD only — gtars doesn't accept GRangesList directly):
+
+```{r width-multi}
+gd_widths2 <- GenomicDistributions::calcWidth(queryList)
+plotQTHist(gd_widths2)
+```
+
+gtars multi-query (compute each RegionSet separately, combine into named list):
+
+```{r width-multi-gtars}
+plotQTHist(list(
+  vistaEnhancers = widths(query),
+  shifted = widths(query2)
+))
+```
+
+
+# Chromosome distribution {.tabset}
+
+`distribution()` bins the genome and counts region overlaps per bin.
+
+## GenomicDistributions
+
+```{r gd-chrom-bins}
+gd_bins <- calcChromBinsRef(query_gr, "hg19")
+plotChromBins(gd_bins)
+```
+
+## gtars RegionSet
+
+`distribution()` returns a data.table with karyotype-sorted rows and
+GD-compatible column names, so it can be passed directly to `plotChromBins`:
+
+```{r gt-chrom-bins}
+gt_bins <- distribution(query, 250L)
+plotChromBins(gt_bins)
+```
+
+## Comparison
+
+```{r cmp-chrom-bins}
+cat("GD bins:", nrow(gd_bins), " gtars bins:", nrow(gt_bins), "\n")
+```
+
+##
+
+Multi-query (GD only):
+
+```{r chrom-bins-multi}
+gd_bins2 <- calcChromBinsRef(queryList, "hg19")
+plotChromBins(gd_bins2)
+```
+
+
+# Neighboring regions distance {.tabset}
+
+`neighborDistances()` computes the gap between consecutive regions on each
+chromosome.
+
+## GenomicDistributions
+
+```{r gd-neighbor}
+gd_nd <- GenomicDistributions::calcNeighborDist(query_gr)
+cat(length(gd_nd), "distances (negative/overlapping filtered out)\n")
+plotNeighborDist(gd_nd)
+```
+
+## gtars RegionSet
+
+```{r gt-neighbor}
+gt_nd <- neighborDistances(query)
+cat(length(gt_nd), "distances (signed, including", sum(gt_nd < 0), "overlaps)\n")
+
+# Filter to non-negative for GD-compatible plotting
+gt_nd_nonneg <- gt_nd[gt_nd >= 0]
+plotNeighborDist(gt_nd_nonneg)
+```
+
+## Comparison
+
+```{r cmp-neighbor}
+cat("Non-negative values match:", all(gd_nd == gt_nd_nonneg), "\n")
+plotNeighborDist(list("GenomicDistributions" = gd_nd, "gtars" = gt_nd_nonneg))
+```
+
+##
+
+Multi-query:
+
+```{r neighbor-multi}
+setBFile <- system.file("extdata", "setB_100.bed.gz", package = "GenomicDistributions")
+setB_gr <- rtracklayer::import(setBFile)
+
+# GD handles GRangesList natively
+queryList2 <- GRangesList(vistaEnhancers = query_gr, setB = setB_gr)
+gd_nd2 <- GenomicDistributions::calcNeighborDist(queryList2)
+plotNeighborDist(gd_nd2)
+```
+
+gtars multi-query (load BED directly, compute each RegionSet separately):
+
+```{r neighbor-multi-gtars}
+gt_nd_A <- neighborDistances(query)
+gt_nd_B <- neighborDistances(RegionSet(setBFile))
+plotNeighborDist(list(
+  vistaEnhancers = gt_nd_A[gt_nd_A >= 0],
+  setB = gt_nd_B[gt_nd_B >= 0]
+))
+```
+
+
+# Nearest neighbor distance {.tabset}
+
+`nearestNeighbors()` returns the minimum distance to the closest adjacent
+neighbor for each region.
+
+## GenomicDistributions
+
+```{r gd-nn}
+gd_nn <- GenomicDistributions::calcNearestNeighbors(query_gr)
+cat(length(gd_nn), "values\n")
+plotNeighborDist(as.integer(gd_nn), Nneighbors = TRUE)
+```
+
+## gtars RegionSet
+
+```{r gt-nn}
+gt_nn <- nearestNeighbors(query)
+cat(length(gt_nn), "values (one per region)\n")
+plotNeighborDist(gt_nn, Nneighbors = TRUE)
+```
+
+## Comparison
+
+GD returns n-2 values (drops first/last on some chromosomes); gtars returns
+one per region.
+
+```{r cmp-nn}
+cat("GD:", length(gd_nn), "  gtars:", length(gt_nn), "\n")
+plotNeighborDist(
+  list("GenomicDistributions" = as.integer(gd_nn), "gtars" = gt_nn),
+  Nneighbors = TRUE
+)
+```
+
+
+# Feature distance distribution {.tabset}
+
+`calcFeatureDist` computes the signed distance from each region midpoint to
+the nearest feature midpoint.
+
+## GenomicDistributions
+
+The tutorial uses `calcFeatureDistRefTSS` to auto-load hg19 TSS annotations:
+
+```{r gd-featdist}
+gd_tss <- calcFeatureDistRefTSS(query_gr, "hg19")
+plotFeatureDist(gd_tss, featureName = "TSS")
+```
+
+## gtars RegionSet
+
+gtars needs explicit TSS GRanges. We build width-1 TSS regions from the
+gene starts and convert to RegionSet:
+
+```{r gt-featdist}
+tss_gr <- GenomicRanges::promoters(geneModels$genesGR, upstream = 0,
+                                    downstream = 1)
+tss_rs <- RegionSet(tss_gr)
+gt_tss <- gtars::calcFeatureDist(query, tss_rs)
+
+# gtars returns NA for regions on chromosomes without features
+gt_tss_valid <- gt_tss[!is.na(gt_tss)]
+cat(length(gt_tss), "total,", sum(is.na(gt_tss)), "NAs,",
+    length(gt_tss_valid), "with distances\n")
+plotFeatureDist(gt_tss_valid, featureName = "TSS")
+```
+
+## Comparison
+
+```{r cmp-featdist}
+plotFeatureDist(
+  list("GenomicDistributions" = gd_tss, "gtars" = gt_tss_valid),
+  featureName = "TSS"
+)
+```
+
+> **Note**: ~2.6% of regions may differ by 1bp due to midpoint rounding
+> conventions (see Known Differences below). gtars returns `NA` for regions
+> on chromosomes without features; GD computes cross-chromosome distances.
+
+##
+
+Multi-query (GD):
+
+```{r featdist-multi}
+gd_tss2 <- calcFeatureDistRefTSS(queryList, "hg19")
+plotFeatureDist(gd_tss2, featureName = "TSS")
+```
+
+Custom features — randomly shifted copy as features:
+
+```{r featdist-custom}
+featureExample <- GenomicRanges::shift(
+  query_gr, round(rnorm(length(query_gr), 0, 1000))
+)
+gd_custom <- GenomicDistributions::calcFeatureDist(query_gr, featureExample)
+gt_custom <- gtars::calcFeatureDist(query, RegionSet(featureExample))
+gt_custom_valid <- gt_custom[!is.na(gt_custom)]
+
+plotFeatureDist(
+  list("GenomicDistributions" = gd_custom, "gtars" = gt_custom_valid)
+)
+```
+
+
+# Partition distribution {.tabset}
+
+`calcPartitions` classifies each region into genomic partitions (promoter,
+exon, intron, intergenic, etc.).
+
+## GenomicDistributions
+
+```{r gd-partition}
+gd_parts <- calcPartitionsRef(query_gr, "hg19")
+print(gd_parts)
+plotPartitions(gd_parts)
+```
+
+## gtars RegionSet
+
+Build the partition list from GD's gene model GRanges. Optionally pass
+`chromSizes` to trim promoters at chromosome boundaries:
+
+```{r gt-partition}
+chromSizes <- GenomeInfoDb::seqlengths(GenomeInfoDb::Seqinfo(genome = "hg19"))
+chromSizes <- chromSizes[grep("^chr[0-9]+$|^chr[XY]$", names(chromSizes))]
+
+gt_pl <- gtars::genomePartitionList(
+  geneModels$genesGR, geneModels$exonsGR,
+  geneModels$threeUTRGR, geneModels$fiveUTRGR,
+  chromSizes = chromSizes
+)
+gt_parts <- gtars::calcPartitions(query, gt_pl)
+print(gt_parts)
+plotPartitions(gt_parts)
+```
+
+## Comparison
+
+gtars returns a `Freq` column (matching GD), so the outputs merge
+directly:
+
+```{r cmp-partition}
+merged <- merge(gd_parts, gt_parts, by = "partition",
+                suffixes = c("_GD", "_gtars"), all = TRUE)
+merged[is.na(merged)] <- 0
+print(merged)
+```
+
+##
+
+Multi-query with raw numbers (GD):
+
+```{r partition-multi}
+gd_parts2 <- calcPartitionsRef(queryList, "hg19")
+tryCatch(
+  print(plotPartitions(gd_parts2, numbers = TRUE)),
+  error = function(e) {
+    cat("plotPartitions multi-query failed (known GD/ggplot2 compat issue):\n")
+    print(gd_parts2)
+  }
+)
+```
+
+
+# Expected partition enrichment {.tabset}
+
+`calcExpectedPartitions` compares observed partition overlaps to what would
+be expected by chance, using a chi-square test.
+
+## GenomicDistributions
+
+```{r gd-expected}
+gd_exp <- calcExpectedPartitionsRef(query_gr, "hg19")
+print(gd_exp[, c("partition", "observed", "expected", "log10OE")])
+plotExpectedPartitions(gd_exp)
+```
+
+## gtars RegionSet
+
+gtars needs explicit chromosome sizes (reusing `chromSizes` from above):
+
+```{r gt-expected}
+gt_exp <- gtars::calcExpectedPartitions(query, gt_pl, chromSizes)
+print(gt_exp)
+```
+
+## Comparison
+
+```{r cmp-expected}
+merged_exp <- merge(
+  gd_exp[, c("partition", "log10OE")],
+  gt_exp[, c("partition", "log10OE")],
+  by = "partition", suffixes = c("_GD", "_gtars")
+)
+print(merged_exp)
+```
+
+##
+
+Multi-query with p-values (GD):
+
+```{r expected-multi}
+gd_exp2 <- calcExpectedPartitionsRef(queryList, "hg19")
+tryCatch(
+  print(plotExpectedPartitions(gd_exp2, pval = TRUE)),
+  error = function(e) {
+    cat("plotExpectedPartitions multi-query failed (known GD/ggplot2 compat issue):\n")
+    print(gd_exp2[, c("partition", "observed", "expected", "log10OE")])
+  }
+)
+```
+
+
+# Cumulative partition distribution
+
+```{r cumulative}
+cp <- calcCumulativePartitionsRef(query_gr, "hg19")
+plotCumulativePartitions(cp)
+```
+
+```{r cumulative-multi}
+cp2 <- calcCumulativePartitionsRef(queryList, "hg19")
+plotCumulativePartitions(cp2)
+```
+
+> **gtars note**: `calcCumulativePartitions` is not yet implemented in gtars.
+
+
+# Open signal in regions {.tabset}
+
+`calcSummarySignal` overlaps query regions with a signal matrix and computes
+per-condition summaries.
+
+```{r signal-setup}
+cellMatrix <- data.table::fread(
+  system.file("extdata", "example_cell_matrix.txt",
+              package = "GenomicDistributions")
+)
+```
+
+## GenomicDistributions
+
+```{r gd-signal}
+gd_sig <- GenomicDistributions::calcSummarySignal(query_gr, cellMatrix)
+plotSummarySignal(gd_sig)
+```
+
+## gtars RegionSet
+
+```{r gt-signal}
+gt_sig <- gtars::calcSummarySignal(query, cellMatrix)
+plotSummarySignal(gt_sig)
+```
+
+##
+
+Multi-query (GD):
+
+```{r signal-multi}
+gd_sig2 <- GenomicDistributions::calcSummarySignal(queryList, cellMatrix)
+plotSummarySignal(gd_sig2)
+```
+
+
+# GC content {.tabset}
+
+`calcGCContent` computes the proportion of G/C bases in each region.
+GD uses a BSgenome object; gtars uses a FASTA file loaded via
+`loadGenomeAssembly`.
+
+```{r gc-setup}
+hg19_fasta <- "hg19.fa"
+has_fasta <- file.exists(hg19_fasta)
+has_bsgenome <- requireNamespace("BSgenome.Hsapiens.UCSC.hg19", quietly = TRUE)
+
+if (has_fasta) {
+  genome_assembly <- gtars::loadGenomeAssembly(hg19_fasta)
+  cat("Loaded hg19 FASTA for gtars\n")
+} else {
+  cat("hg19.fa not found — gtars GC/dinucleotide sections will be skipped\n")
+}
+```
+
+## GenomicDistributions
+
+```{r gd-gc, eval=has_bsgenome}
+gd_gc <- calcGCContentRef(query_gr, "hg19")
+plotGCContent(gd_gc)
+```
+
+```{r gd-gc-skip, eval=!has_bsgenome, echo=FALSE, results='asis'}
+cat("> **Skipped**: `BSgenome.Hsapiens.UCSC.hg19` is not installed.",
+    "Install with `BiocManager::install('BSgenome.Hsapiens.UCSC.hg19')`.\n")
+```
+
+## gtars RegionSet
+
+```{r gt-gc, eval=has_fasta}
+gt_gc <- gtars::calcGCContent(query, genome_assembly, ignoreUnkChroms = TRUE)
+cat(length(gt_gc), "GC values, range:", round(range(gt_gc), 4), "\n")
+plotGCContent(gt_gc)
+```
+
+```{r gt-gc-skip, eval=!has_fasta, echo=FALSE, results='asis'}
+cat("> **Skipped**: `hg19.fa` not found in test directory.\n")
+```
+
+## Comparison
+
+```{r cmp-gc, eval=has_bsgenome && has_fasta}
+cat("Max absolute difference:", max(abs(gd_gc - gt_gc)), "\n")
+cat("Correlation:", cor(gd_gc, gt_gc), "\n")
+plotGCContent(list("GenomicDistributions" = gd_gc, "gtars" = gt_gc))
+```
+
+```{r cmp-gc-skip, eval=!(has_bsgenome && has_fasta), echo=FALSE, results='asis'}
+cat("> **Skipped**: Need both BSgenome and hg19.fa for comparison.\n")
+```
+
+
+# Dinucleotide frequency {.tabset}
+
+`calcDinuclFreq` counts all 16 dinucleotide pairs across the query regions.
+Like GC content, it requires genome sequence data.
+
+## GenomicDistributions
+
+```{r gd-dinucl, eval=has_bsgenome}
+gd_df <- calcDinuclFreqRef(query_gr, "hg19")
+plotDinuclFreq(gd_df)
+```
+
+```{r gd-dinucl-skip, eval=!has_bsgenome, echo=FALSE, results='asis'}
+cat("> **Skipped**: `BSgenome.Hsapiens.UCSC.hg19` is not installed.\n")
+```
+
+## gtars RegionSet
+
+```{r gt-dinucl, eval=has_fasta}
+gt_df <- gtars::calcDinuclFreq(query, genome_assembly)
+plotDinuclFreq(gt_df)
+```
+
+```{r gt-dinucl-skip, eval=!has_fasta, echo=FALSE, results='asis'}
+cat("> **Skipped**: `hg19.fa` not found in test directory.\n")
+```
+
+## Comparison
+
+```{r cmp-dinucl, eval=has_bsgenome && has_fasta}
+plotDinuclFreq(list("GenomicDistributions" = gd_df, "gtars" = gt_df))
+```
+
+```{r cmp-dinucl-skip, eval=!(has_bsgenome && has_fasta), echo=FALSE, results='asis'}
+cat("> **Skipped**: Need both BSgenome and hg19.fa for comparison.\n")
+```
+
+
+# Summary
+
+```{r summary-table, echo=FALSE}
+coverage <- data.frame(
+  `GD function` = c(
+    "calcWidth / plotQTHist",
+    "calcChromBins / plotChromBins",
+    "calcNeighborDist / plotNeighborDist",
+    "calcNearestNeighbors",
+    "calcFeatureDist / plotFeatureDist",
+    "calcPartitions / plotPartitions",
+    "calcExpectedPartitions",
+    "calcCumulativePartitions",
+    "calcSummarySignal / plotSummarySignal (single-query)",
+    "calcGCContent / plotGCContent",
+    "calcDinuclFreq / plotDinuclFreq",
+    "GR: shift, flank, resize, narrow",
+    "GR: reduce, disjoin, gaps",
+    "GR: union, intersect, setdiff",
+    "GR: pintersect",
+    "consensus (gtars-only)",
+    "jaccard (gtars-only)"
+  ),
+  `RegionSet method` = c(
+    "widths(rs)",
+    "distribution(rs, nBins)",
+    "neighborDistances(rs)",
+    "nearestNeighbors(rs)",
+    "calcFeatureDist(rs, features_rs)",
+    "calcPartitions(rs, partitionList)",
+    "calcExpectedPartitions(rs, partitionList, chromSizes)",
+    "Not yet implemented",
+    "calcSummarySignal(rs, signalMatrix)",
+    "calcGCContent(rs, genomeAssembly)",
+    "calcDinuclFreq(rs, genomeAssembly)",
+    "shift(rs, n), flank(rs, w), resize(rs, w, fix), narrow(rs, start, end, width)",
+    "reduce(rs), disjoin(rs), gaps(rs)",
+    "union(a, b), intersect(a, b), setdiff(a, b)",
+    "pintersect(a, b)",
+    "consensus(list(a, b, ...))",
+    "jaccard(a, b)"
+  ),
+  `Status` = c(
+    "Exact match",
+    "Karyotype-sorted; plotChromBins compatible",
+    "Match (also returns signed overlaps)",
+    "Match (returns n; GD returns n-2)",
+    "Match (see known differences)",
+    "Freq column; plotPartitions compatible",
+    "plotExpectedPartitions compatible",
+    "Not yet implemented",
+    "plotSummarySignal compatible",
+    "Uses FASTA via loadGenomeAssembly",
+    "Uses FASTA via loadGenomeAssembly",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Matches GenomicRanges",
+    "Returns chr/start/end/count",
+    "Returns base-pair Jaccard [0, 1]"
+  ),
+  check.names = FALSE,
+  stringsAsFactors = FALSE
+)
+knitr::kable(coverage, caption = "RegionSet S4 methods vs GenomicDistributions")
+```
+
+### Known differences
+
+1. **neighborDistances**: gtars returns signed distances for all consecutive
+   pairs; GD filters out negative (overlapping) distances.
+2. **nearestNeighbors**: gtars returns one value per region; GD drops
+   first/last on some chromosomes.
+3. **calcFeatureDist**: ~2.6% of regions may differ by 1bp due to midpoint
+   rounding conventions. gtars returns `NA` for regions on chromosomes
+   without features; GD computes cross-chromosome distances.
+4. **calcExpectedPartitions**: gtars uses a goodness-of-fit (O-E)^2/E
+   chi-square formula. R's `chisq.test()` (used by GD) computes a 2x2 test
+   of independence and may apply Yates' continuity correction, so p-values
+   will differ.
+5. **Genome sequence functions**: gtars loads genome from FASTA files via
+   `loadGenomeAssembly()` instead of BSgenome objects. Both `calcGCContent`
+   and `calcDinuclFreq` accept the resulting pointer. No `*Ref` convenience
+   wrappers yet (you must supply the FASTA path yourself).
