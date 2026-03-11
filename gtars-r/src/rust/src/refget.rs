@@ -4,7 +4,7 @@ use gtars_refget::collection::{
     SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
-use gtars_refget::fhr_metadata::FhrMetadata;
+use gtars_refget::FhrMetadata;
 use gtars_refget::store::{FastaImportOptions, RefgetStore, RetrievedSequence, StorageMode};
 
 // =========================================================================

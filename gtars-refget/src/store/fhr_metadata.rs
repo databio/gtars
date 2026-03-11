@@ -1,10 +1,13 @@
 //! FAIR Headers Reference genome (FHR) metadata for sequence collections.
 //!
-//! This module is self-contained: it defines the FHR data types and provides
-//! free functions for reading/writing FHR sidecar JSON files. RefgetStore
-//! calls into these helpers but the module has no dependency on RefgetStore.
+//! This module contains the FHR data types, sidecar JSON I/O functions,
+//! and RefgetStore bridge methods for managing FHR metadata.
 //!
 //! See: https://github.com/FAIR-bioHeaders/FHR-Specification
+
+use super::*;
+use super::readonly::ReadonlyRefgetStore;
+use super::core::RefgetStore;
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,7 +25,7 @@ use crate::hashkeyable::{HashKeyable, key_to_digest_string};
 /// FAIR Headers Reference genome (FHR) metadata for a sequence collection.
 ///
 /// All fields are optional to allow partial metadata. RefgetStore does not
-/// enforce FHR schema compliance — that's the user's responsibility.
+/// enforce FHR schema compliance -- that's the user's responsibility.
 #[derive(Clone, Debug, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct FhrMetadata {
@@ -168,10 +171,10 @@ pub struct FhrIdentifier {
 }
 
 // ============================================================================
-// Disk I/O helpers — called by RefgetStore, no dependency on it
+// Disk I/O helpers -- called by RefgetStore, no dependency on it
 // ============================================================================
 
-const SIDECAR_EXTENSION: &str = ".fhr.json";
+pub(crate) const SIDECAR_EXTENSION: &str = ".fhr.json";
 
 /// Load all FHR sidecar files from a collections directory.
 ///
@@ -270,7 +273,223 @@ pub fn load_from_json(path: &str) -> Result<FhrMetadata> {
 }
 
 // ============================================================================
-// Tests — serialization, roundtripping, disk I/O (no RefgetStore needed)
+// ReadonlyRefgetStore FHR bridge methods
+// ============================================================================
+
+impl ReadonlyRefgetStore {
+    /// Set FHR metadata for a collection.
+    pub fn set_fhr_metadata(
+        &mut self,
+        collection_digest: &str,
+        metadata: FhrMetadata,
+    ) -> Result<()> {
+        let key = collection_digest.to_key();
+        if !self.collections.contains_key(&key) {
+            return Err(anyhow::anyhow!("Collection not found: {}", collection_digest));
+        }
+        if self.persist_to_disk {
+            if let Some(ref local_path) = self.local_path {
+                let path = sidecar_path(
+                    &local_path.join("collections"),
+                    collection_digest,
+                );
+                write_sidecar(&path, &metadata)?;
+            }
+        }
+        self.fhr_metadata.insert(key, metadata);
+        Ok(())
+    }
+
+    /// Get FHR metadata for a collection. Returns None if missing.
+    pub fn get_fhr_metadata(&self, collection_digest: &str) -> Option<&FhrMetadata> {
+        let key = collection_digest.to_key();
+        self.fhr_metadata.get(&key)
+    }
+
+    /// Remove FHR metadata for a collection.
+    pub fn remove_fhr_metadata(&mut self, collection_digest: &str) -> bool {
+        let key = collection_digest.to_key();
+        if self.persist_to_disk {
+            if let Some(ref local_path) = self.local_path {
+                remove_sidecar(
+                    &local_path.join("collections"),
+                    collection_digest,
+                );
+            }
+        }
+        self.fhr_metadata.remove(&key).is_some()
+    }
+
+    /// List all collection digests that have FHR metadata.
+    pub fn list_fhr_metadata(&self) -> Vec<String> {
+        self.fhr_metadata
+            .keys()
+            .map(|key| key_to_digest_string(key))
+            .collect()
+    }
+
+    /// Load FHR metadata from a JSON file and attach it to a collection.
+    pub fn load_fhr_metadata(&mut self, collection_digest: &str, path: &str) -> Result<()> {
+        let metadata = load_from_json(path)?;
+        self.set_fhr_metadata(collection_digest, metadata)
+    }
+}
+
+// ============================================================================
+// RefgetStore FHR wrapper delegates
+// ============================================================================
+
+impl RefgetStore {
+    /// Set FHR metadata for a collection.
+    pub fn set_fhr_metadata(&mut self, collection_digest: &str, metadata: FhrMetadata) -> Result<()> {
+        self.inner.set_fhr_metadata(collection_digest, metadata)
+    }
+
+    /// Remove FHR metadata for a collection.
+    pub fn remove_fhr_metadata(&mut self, collection_digest: &str) -> bool {
+        self.inner.remove_fhr_metadata(collection_digest)
+    }
+
+    /// Load FHR metadata from a JSON file.
+    pub fn load_fhr_metadata(&mut self, collection_digest: &str, path: &str) -> Result<()> {
+        self.inner.load_fhr_metadata(collection_digest, path)
+    }
+
+    /// Pull FHR metadata sidecars from the remote store.
+    ///
+    /// If `digest` is Some, pulls only that collection's FHR.
+    /// If `digest` is None, pulls FHR for all known collections.
+    pub fn pull_fhr(
+        &mut self,
+        digest: Option<&str>,
+        strategy: SyncStrategy,
+    ) -> Result<PullResult> {
+        let mut result = PullResult::default();
+
+        let digests: Vec<String> = match digest {
+            Some(d) => vec![d.to_string()],
+            None => self
+                .inner
+                .collections
+                .values()
+                .map(|r| r.metadata().digest.to_string())
+                .collect(),
+        };
+
+        for digest_str in &digests {
+            let relative_path = format!("collections/{}.fhr.json", digest_str);
+
+            match strategy {
+                SyncStrategy::KeepOurs => {
+                    let was_local = self
+                        .inner
+                        .local_path
+                        .as_ref()
+                        .map(|p| p.join(&relative_path).exists())
+                        .unwrap_or(false);
+                    match ReadonlyRefgetStore::fetch_file(
+                        &self.inner.local_path,
+                        &self.inner.remote_source,
+                        &relative_path,
+                        self.inner.persist_to_disk,
+                        false,
+                    ) {
+                        Ok(data) => {
+                            if was_local {
+                                result.skipped += 1;
+                            } else {
+                                if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
+                                    let key = digest_str.to_key();
+                                    self.inner.fhr_metadata.insert(key, fhr);
+                                }
+                                result.pulled += 1;
+                            }
+                        }
+                        Err(_) => {
+                            result.not_found += 1;
+                        }
+                    }
+                }
+                SyncStrategy::KeepTheirs => {
+                    match ReadonlyRefgetStore::fetch_file(
+                        &self.inner.local_path,
+                        &self.inner.remote_source,
+                        &relative_path,
+                        self.inner.persist_to_disk,
+                        true,
+                    ) {
+                        Ok(data) => {
+                            if let Ok(fhr) = serde_json::from_slice::<FhrMetadata>(&data) {
+                                let key = digest_str.to_key();
+                                self.inner.fhr_metadata.insert(key, fhr);
+                            }
+                            result.pulled += 1;
+                        }
+                        Err(_) => {
+                            result.not_found += 1;
+                        }
+                    }
+                }
+                SyncStrategy::Notify => {
+                    let local_exists = self
+                        .inner
+                        .local_path
+                        .as_ref()
+                        .map(|p| p.join(&relative_path).exists())
+                        .unwrap_or(false);
+
+                    if local_exists {
+                        match ReadonlyRefgetStore::fetch_file(
+                            &None,
+                            &self.inner.remote_source,
+                            &relative_path,
+                            false,
+                            false,
+                        ) {
+                            Ok(remote_data) => {
+                                let local_path = self
+                                    .inner
+                                    .local_path
+                                    .as_ref()
+                                    .unwrap()
+                                    .join(&relative_path);
+                                let local_data = fs::read(&local_path)?;
+                                if local_data != remote_data {
+                                    result.conflicts.push(relative_path);
+                                } else {
+                                    result.skipped += 1;
+                                }
+                            }
+                            Err(_) => {
+                                result.not_found += 1;
+                            }
+                        }
+                    } else {
+                        match ReadonlyRefgetStore::fetch_file(
+                            &None,
+                            &self.inner.remote_source,
+                            &relative_path,
+                            false,
+                            false,
+                        ) {
+                            Ok(_) => {
+                                result.conflicts.push(relative_path);
+                            }
+                            Err(_) => {
+                                result.not_found += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+// ============================================================================
+// Tests -- serialization, roundtripping, disk I/O, and store integration
 // ============================================================================
 
 #[cfg(test)]
@@ -321,7 +540,6 @@ mod tests {
         assert_eq!(fhr.genome, Some("Test".to_string()));
         assert!(fhr.extra.contains_key("customField"));
 
-        // Round-trip preserves extra fields
         let json_out = serde_json::to_string(&fhr).unwrap();
         assert!(json_out.contains("customField"));
         assert!(json_out.contains("custom_value"));
@@ -339,7 +557,6 @@ mod tests {
         assert!(json.contains("schemaVersion"));
         assert!(json.contains("genomeSynonym"));
         assert!(json.contains("dateCreated"));
-        // snake_case should NOT appear
         assert!(!json.contains("schema_version"));
         assert!(!json.contains("genome_synonym"));
     }
@@ -386,7 +603,6 @@ mod tests {
     #[test]
     fn test_remove_sidecar_missing_is_ok() {
         let dir = tempdir().unwrap();
-        // Should not panic
         remove_sidecar(dir.path(), "nonexistent_digest");
     }
 
@@ -400,21 +616,18 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string(&fhr).unwrap();
-        // Must be uppercase "ID", not camelCase "Id"
         assert!(json.contains("accessionID"));
         assert!(!json.contains("accessionId"));
     }
 
     #[test]
     fn test_schema_version_as_number() {
-        // Integer
         let json = r#"{"schemaVersion": 1}"#;
         let fhr: FhrMetadata = serde_json::from_str(json).unwrap();
         assert!(fhr.schema_version.is_some());
         let ver = fhr.schema_version.unwrap();
         assert_eq!(ver.to_string(), "1");
 
-        // Float
         let json = r#"{"schemaVersion": 1.0}"#;
         let fhr: FhrMetadata = serde_json::from_str(json).unwrap();
         assert!(fhr.schema_version.is_some());
@@ -437,13 +650,11 @@ mod tests {
             ..Default::default()
         };
         let json = serde_json::to_string_pretty(&fhr).unwrap();
-        // Uppercase stat names
         assert!(json.contains("\"L50\""));
         assert!(json.contains("\"N50\""));
         assert!(json.contains("\"L90\""));
         assert!(json.contains("\"totalBasePairs\""));
         assert!(json.contains("\"numberContigs\""));
-        // Roundtrip
         let roundtripped: FhrMetadata = serde_json::from_str(&json).unwrap();
         let stats = roundtripped.vital_stats.unwrap();
         assert_eq!(stats.l50, Some(42));
@@ -485,7 +696,6 @@ mod tests {
         assert_eq!(fhr.identifier, Some(vec!["beetlebase:TC010103".to_string()]));
         assert!(fhr.accession_id.is_some());
         assert_eq!(fhr.accession_id.as_ref().unwrap().name, Some("PBARC".to_string()));
-        // Non-spec fields captured in extra
         assert!(fhr.extra.contains_key("assemblySoftware"));
         assert!(fhr.extra.contains_key("reuseConditions"));
     }
@@ -498,7 +708,6 @@ mod tests {
         };
         fhr.seqcol_digest = Some("abc123".to_string());
         let json = serde_json::to_string(&fhr).unwrap();
-        // seqcol_digest should NOT appear in serialized JSON
         assert!(!json.contains("seqcolDigest"));
         assert!(!json.contains("seqcol_digest"));
         assert!(!json.contains("abc123"));
@@ -531,17 +740,269 @@ mod tests {
     fn test_load_sidecars_loads_valid_skips_invalid() {
         let dir = tempdir().unwrap();
 
-        // Write a valid sidecar
         let valid_fhr = FhrMetadata {
             genome: Some("ValidGenome".to_string()),
             ..Default::default()
         };
         write_sidecar(&dir.path().join("validdigest.fhr.json"), &valid_fhr).unwrap();
 
-        // Write an invalid sidecar
         fs::write(dir.path().join("baddigest.fhr.json"), "not json at all").unwrap();
 
         let map = load_sidecars(dir.path());
         assert_eq!(map.len(), 1);
+    }
+
+    // =========================================================================
+    // Store-level FHR integration tests
+    // =========================================================================
+
+    #[test]
+    fn test_fhr_metadata_empty_by_default() {
+        let mut store = RefgetStore::in_memory();
+
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+            .unwrap();
+
+        assert!(store.get_fhr_metadata(&meta.digest).is_none());
+        assert!(store.list_fhr_metadata().is_empty());
+    }
+
+    #[test]
+    fn test_fhr_metadata_set_get() {
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+            .unwrap();
+
+        let mut fhr = FhrMetadata::default();
+        fhr.genome = Some("Test genome".to_string());
+        fhr.version = Some("1.0".to_string());
+        fhr.masking = Some("not-masked".to_string());
+
+        store.set_fhr_metadata(&meta.digest, fhr.clone()).unwrap();
+
+        let retrieved = store.get_fhr_metadata(&meta.digest).unwrap();
+        assert_eq!(retrieved.genome, Some("Test genome".to_string()));
+        assert_eq!(retrieved.version, Some("1.0".to_string()));
+    }
+
+    #[test]
+    fn test_fhr_metadata_nonexistent_collection() {
+        let mut store = RefgetStore::in_memory();
+        let fhr = FhrMetadata::default();
+        assert!(store.set_fhr_metadata("nonexistent_digest", fhr).is_err());
+    }
+
+    #[test]
+    fn test_fhr_metadata_remove() {
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+            .unwrap();
+
+        let fhr = FhrMetadata {
+            genome: Some("Test".to_string()),
+            ..Default::default()
+        };
+        store.set_fhr_metadata(&meta.digest, fhr).unwrap();
+
+        assert!(store.get_fhr_metadata(&meta.digest).is_some());
+        assert!(store.remove_fhr_metadata(&meta.digest));
+        assert!(store.get_fhr_metadata(&meta.digest).is_none());
+    }
+
+    #[test]
+    fn test_fhr_metadata_persistence() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+        let digest: String;
+
+        {
+            let mut store = RefgetStore::on_disk(&store_path).unwrap();
+            let (meta, _) = store
+                .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+                .unwrap();
+            digest = meta.digest.clone();
+
+            let fhr = FhrMetadata {
+                genome: Some("Homo sapiens".to_string()),
+                version: Some("GRCh38".to_string()),
+                masking: Some("soft-masked".to_string()),
+                ..Default::default()
+            };
+            store.set_fhr_metadata(&digest, fhr).unwrap();
+        }
+
+        {
+            let store = RefgetStore::open_local(&store_path).unwrap();
+            let fhr = store.get_fhr_metadata(&digest).unwrap();
+            assert_eq!(fhr.genome, Some("Homo sapiens".to_string()));
+            assert_eq!(fhr.version, Some("GRCh38".to_string()));
+            assert_eq!(fhr.masking, Some("soft-masked".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_fhr_list() {
+        let mut store = RefgetStore::in_memory();
+        assert!(store.list_fhr_metadata().is_empty());
+
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+            .unwrap();
+        let fhr = FhrMetadata {
+            genome: Some("Test".to_string()),
+            ..Default::default()
+        };
+        store.set_fhr_metadata(&meta.digest, fhr).unwrap();
+
+        let list = store.list_fhr_metadata();
+        assert_eq!(list.len(), 1);
+        assert!(list.contains(&meta.digest));
+    }
+
+    #[test]
+    fn test_remove_collection_cleans_up_fhr_metadata() {
+        let dir = tempdir().unwrap();
+        let fasta = dir.path().join("test.fa");
+        std::fs::write(&fasta, ">chr1\nACGT\n").unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        let digest = meta.digest;
+
+        let fhr = FhrMetadata::default();
+        store.set_fhr_metadata(&digest, fhr).unwrap();
+        assert!(store.get_fhr_metadata(&digest).is_some());
+
+        store.remove_collection(&digest, false).unwrap();
+
+        assert!(store.get_fhr_metadata(&digest).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // KeepOurs sync strategy tests (regression test for was_local ordering bug)
+    // -----------------------------------------------------------------------
+
+    /// Spin up a minimal HTTP server serving files from `serve_dir`.
+    /// Returns `(base_url, shutdown_fn)`.
+    fn start_file_server(serve_dir: std::path::PathBuf) -> (String, impl FnOnce()) {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            listener.set_nonblocking(false).ok();
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let n = stream.read(&mut buf).unwrap_or(0);
+                        let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|l| l.split_whitespace().nth(1))
+                            .unwrap_or("/");
+                        let rel = path.trim_start_matches('/');
+                        let file_path = serve_dir.join(rel);
+                        if file_path.exists() && file_path.is_file() {
+                            let data = fs::read(&file_path).unwrap_or_default();
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(&data);
+                        } else {
+                            let body = b"Not Found";
+                            let header = format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(body);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
+
+    /// Pull an FHR sidecar that does NOT exist locally yet.
+    /// KeepOurs: first pull should count as `pulled`, second pull as `skipped`.
+    #[test]
+    fn test_keep_ours_fhr_first_pull_counts_as_pulled() {
+        // "Remote" store: directory with a pre-built FHR JSON sidecar.
+        let remote_dir = tempdir().unwrap();
+        let collections_dir = remote_dir.path().join("collections");
+        fs::create_dir_all(&collections_dir).unwrap();
+
+        // We need a fake digest string to use as the collection identity.
+        let fake_digest = "SQ.aaaaaaaaaaaaaaaaaaaaaaaa";
+        let sidecar_name = format!("{}.fhr.json", fake_digest);
+        let fhr = FhrMetadata {
+            genome: Some("TestGenome".to_string()),
+            ..Default::default()
+        };
+        let sidecar_json = serde_json::to_string(&fhr).unwrap();
+        fs::write(collections_dir.join(&sidecar_name), &sidecar_json).unwrap();
+
+        // Start HTTP server.
+        let (base_url, shutdown) = start_file_server(remote_dir.path().to_path_buf());
+
+        // "Local" store: disk-backed, with a stub collection so pull_fhr has a digest.
+        let local_dir = tempdir().unwrap();
+        let local_store_path = local_dir.path().join("store");
+
+        let mut store = RefgetStore::on_disk(&local_store_path).unwrap();
+        store.inner.remote_source = Some(base_url);
+
+        // Inject a minimal stub collection so pull_fhr iterates over it.
+        use crate::hashkeyable::HashKeyable;
+        use crate::digest::SequenceCollectionRecord;
+        let key = fake_digest.to_key();
+        let stub = crate::digest::SequenceCollectionMetadata {
+            digest: fake_digest.to_string(),
+            n_sequences: 0,
+            names_digest: String::new(),
+            sequences_digest: String::new(),
+            lengths_digest: String::new(),
+            name_length_pairs_digest: None,
+            sorted_name_length_pairs_digest: None,
+            sorted_sequences_digest: None,
+            file_path: None,
+        };
+        store.inner.collections.insert(key, SequenceCollectionRecord::Stub(stub));
+
+        // First pull: FHR sidecar not yet local → should be pulled.
+        let result = store.pull_fhr(Some(fake_digest), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result.pulled, 1, "first pull should count as pulled, not skipped");
+        assert_eq!(result.skipped, 0, "first pull should not be skipped");
+        assert_eq!(result.not_found, 0);
+
+        // Second pull: sidecar now on disk → should be skipped.
+        let result2 = store.pull_fhr(Some(fake_digest), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result2.skipped, 1, "second pull should be skipped (file already local)");
+        assert_eq!(result2.pulled, 0, "second pull should not count as pulled");
+
+        shutdown();
     }
 }

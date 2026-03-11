@@ -39,9 +39,21 @@ pub fn extract_regions_from_py_any(regions: &Bound<'_, PyAny>) -> Result<RegionS
 
             // extract chr, start, end
             // this lets us interface any python object with chr, start, end attributes
-            let chr = x.getattr("chr").unwrap().extract::<String>().unwrap();
-            let start = x.getattr("start").unwrap().extract::<u32>().unwrap();
-            let end = x.getattr("end").unwrap().extract::<u32>().unwrap();
+            let chr = x.getattr("chr")
+                .and_then(|v| v.extract::<String>())
+                .map_err(|e| anyhow::anyhow!(
+                    "Region object missing or invalid 'chr' attribute (expected str): {}", e
+                ))?;
+            let start = x.getattr("start")
+                .and_then(|v| v.extract::<u32>())
+                .map_err(|e| anyhow::anyhow!(
+                    "Region object missing or invalid 'start' attribute (expected u32): {}", e
+                ))?;
+            let end = x.getattr("end")
+                .and_then(|v| v.extract::<u32>())
+                .map_err(|e| anyhow::anyhow!(
+                    "Region object missing or invalid 'end' attribute (expected u32): {}", e
+                ))?;
 
             Ok(Region {
                 chr,

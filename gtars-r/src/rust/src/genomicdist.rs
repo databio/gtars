@@ -47,27 +47,34 @@ macro_rules! with_partitions {
 // Helper functions
 // =========================================================================
 
+/// Convert an R signed integer to u32 with a clear error on negative values.
+fn checked_u32(value: i32, name: &str) -> extendr_api::Result<u32> {
+    u32::try_from(value).map_err(|_| {
+        extendr_api::Error::Other(format!("{} must be non-negative, got {}", name, value))
+    })
+}
+
 /// Construct RegionSet from R vectors (0-based half-open coordinates)
-fn regionset_from_vecs(chrs: Vec<String>, starts: Vec<i32>, ends: Vec<i32>) -> RegionSet {
+fn regionset_from_vecs(chrs: Vec<String>, starts: Vec<i32>, ends: Vec<i32>) -> extendr_api::Result<RegionSet> {
     let regions: Vec<Region> = chrs
         .into_iter()
         .zip(starts.into_iter().zip(ends.into_iter()))
-        .map(|(chr, (start, end))| Region {
+        .map(|(chr, (start, end))| Ok(Region {
             chr,
-            start: start as u32,
-            end: end as u32,
+            start: checked_u32(start, "start")?,
+            end: checked_u32(end, "end")?,
             rest: None,
-        })
-        .collect();
-    RegionSet::from(regions)
+        }))
+        .collect::<extendr_api::Result<Vec<Region>>>()?;
+    Ok(RegionSet::from(regions))
 }
 
 /// Build HashMap<String, u32> from parallel name/size vectors
-fn chrom_sizes_from_vecs(names: Vec<String>, sizes: Vec<i32>) -> HashMap<String, u32> {
+fn chrom_sizes_from_vecs(names: Vec<String>, sizes: Vec<i32>) -> extendr_api::Result<HashMap<String, u32>> {
     names
         .into_iter()
         .zip(sizes.into_iter())
-        .map(|(name, size)| (name, size as u32))
+        .map(|(name, size)| Ok((name, checked_u32(size, "chrom_size")?)))
         .collect()
 }
 
@@ -91,9 +98,9 @@ pub fn r_load_regionset(bed_path: &str) -> extendr_api::Result<Robj> {
 /// @param starts Integer vector of start positions (0-based)
 /// @param ends Integer vector of end positions (half-open)
 #[extendr(r_name = "regionset_from_vectors")]
-pub fn r_regionset_from_vectors(chrs: Vec<String>, starts: Vec<i32>, ends: Vec<i32>) -> Robj {
-    let rs = regionset_from_vecs(chrs, starts, ends);
-    ExternalPtr::new(rs).into()
+pub fn r_regionset_from_vectors(chrs: Vec<String>, starts: Vec<i32>, ends: Vec<i32>) -> extendr_api::Result<Robj> {
+    let rs = regionset_from_vecs(chrs, starts, ends)?;
+    Ok(ExternalPtr::new(rs).into())
 }
 
 /// Extract chr/start/end vectors from a RegionSet pointer
@@ -103,8 +110,8 @@ pub fn r_regionset_from_vectors(chrs: Vec<String>, starts: Vec<i32>, ends: Vec<i
 pub fn r_regionset_to_vectors(rs_ptr: Robj) -> extendr_api::Result<List> {
     with_regionset!(rs_ptr, rs, {
         let chrs: Vec<String> = rs.regions.iter().map(|r| r.chr.clone()).collect();
-        let starts: Vec<i32> = rs.regions.iter().map(|r| r.start as i32).collect();
-        let ends: Vec<i32> = rs.regions.iter().map(|r| r.end as i32).collect();
+        let starts: Vec<f64> = rs.regions.iter().map(|r| r.start as f64).collect();
+        let ends: Vec<f64> = rs.regions.iter().map(|r| r.end as f64).collect();
         Ok(list!(chr = chrs, start = starts, end = ends))
     })
 }
@@ -127,9 +134,9 @@ pub fn r_regionset_length(rs_ptr: Robj) -> extendr_api::Result<i32> {
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_widths")]
-pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
+pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
     with_regionset!(rs_ptr, rs, {
-        Ok(rs.calc_widths().into_iter().map(|w| w as i32).collect())
+        Ok(rs.calc_widths().into_iter().map(|w| w as f64).collect())
     })
 }
 
@@ -150,12 +157,12 @@ pub fn r_calc_neighbor_distances(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> 
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_nearest_neighbors")]
-pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
+pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
     with_regionset!(rs_ptr, rs, {
         let dists = rs
             .calc_nearest_neighbors()
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
-        Ok(dists.into_iter().map(|d| d as i32).collect())
+        Ok(dists.into_iter().map(|d| d as f64).collect())
     })
 }
 
@@ -172,21 +179,21 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
         });
 
         let mut chr_names: Vec<String> = Vec::new();
-        let mut n_regions: Vec<i32> = Vec::new();
-        let mut start_pos: Vec<i32> = Vec::new();
-        let mut end_pos: Vec<i32> = Vec::new();
-        let mut min_len: Vec<i32> = Vec::new();
-        let mut max_len: Vec<i32> = Vec::new();
+        let mut n_regions: Vec<f64> = Vec::new();
+        let mut start_pos: Vec<f64> = Vec::new();
+        let mut end_pos: Vec<f64> = Vec::new();
+        let mut min_len: Vec<f64> = Vec::new();
+        let mut max_len: Vec<f64> = Vec::new();
         let mut mean_len: Vec<f64> = Vec::new();
         let mut median_len: Vec<f64> = Vec::new();
 
         for (chr, s) in &entries {
             chr_names.push(chr.clone());
-            n_regions.push(s.number_of_regions as i32);
-            start_pos.push(s.start_nucleotide_position as i32);
-            end_pos.push(s.end_nucleotide_position as i32);
-            min_len.push(s.minimum_region_length as i32);
-            max_len.push(s.maximum_region_length as i32);
+            n_regions.push(s.number_of_regions as f64);
+            start_pos.push(s.start_nucleotide_position as f64);
+            end_pos.push(s.end_nucleotide_position as f64);
+            min_len.push(s.minimum_region_length as f64);
+            max_len.push(s.maximum_region_length as f64);
             mean_len.push(s.mean_region_length);
             median_len.push(s.median_region_length);
         }
@@ -210,6 +217,7 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
 /// @param n_bins Number of bins (default 250)
 #[extendr(r_name = "r_region_distribution")]
 pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom_lengths: Robj) -> extendr_api::Result<List> {
+    let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
     with_regionset!(rs_ptr, rs, {
         let dist = if !chrom_names.is_null() && !chrom_lengths.is_null() {
             let names: Vec<String> = chrom_names.as_str_iter()
@@ -224,9 +232,9 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom
                 .into_iter()
                 .zip(lengths.into_iter().map(|v| v as u32))
                 .collect();
-            rs.region_distribution_with_chrom_sizes(n_bins as u32, &chrom_sizes)
+            rs.region_distribution_with_chrom_sizes(n_bins_u32, &chrom_sizes)
         } else {
-            rs.region_distribution_with_bins(n_bins as u32)
+            rs.region_distribution_with_bins(n_bins_u32)
         };
         let mut bins: Vec<_> = dist.into_values().collect();
         bins.sort_by(|a, b| {
@@ -236,17 +244,17 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom
         });
 
         let mut chrs: Vec<String> = Vec::new();
-        let mut starts: Vec<i32> = Vec::new();
-        let mut ends: Vec<i32> = Vec::new();
-        let mut counts: Vec<i32> = Vec::new();
-        let mut rids: Vec<i32> = Vec::new();
+        let mut starts: Vec<f64> = Vec::new();
+        let mut ends: Vec<f64> = Vec::new();
+        let mut counts: Vec<f64> = Vec::new();
+        let mut rids: Vec<f64> = Vec::new();
 
         for bin in &bins {
             chrs.push(bin.chr.clone());
-            starts.push(bin.start as i32);
-            ends.push(bin.end as i32);
-            counts.push(bin.n as i32);
-            rids.push(bin.rid as i32);
+            starts.push(bin.start as f64);
+            ends.push(bin.end as f64);
+            counts.push(bin.n as f64);
+            rids.push(bin.rid as f64);
         }
 
         Ok(list!(
@@ -351,8 +359,8 @@ pub fn r_trim(
     chrom_names: Vec<String>,
     chrom_sizes: Vec<i32>,
 ) -> extendr_api::Result<Robj> {
+    let sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes)?;
     with_regionset!(rs_ptr, rs, {
-        let sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes);
         let trimmed = rs.trim(&sizes);
         Ok(ExternalPtr::new(trimmed).into())
     })
@@ -365,8 +373,10 @@ pub fn r_trim(
 /// @param downstream Bases downstream of start
 #[extendr(r_name = "r_promoters")]
 pub fn r_promoters(rs_ptr: Robj, upstream: i32, downstream: i32) -> extendr_api::Result<Robj> {
+    let upstream_u32 = checked_u32(upstream, "upstream")?;
+    let downstream_u32 = checked_u32(downstream, "downstream")?;
     with_regionset!(rs_ptr, rs, {
-        let result = rs.promoters(upstream as u32, downstream as u32);
+        let result = rs.promoters(upstream_u32, downstream_u32);
         Ok(ExternalPtr::new(result).into())
     })
 }
@@ -471,8 +481,9 @@ pub fn r_shift(rs_ptr: Robj, offset: i32) -> extendr_api::Result<Robj> {
 /// @param both If TRUE, flank on both sides of the anchor
 #[extendr(r_name = "r_flank")]
 pub fn r_flank(rs_ptr: Robj, width: i32, use_start: bool, both: bool) -> extendr_api::Result<Robj> {
+    let width_u32 = checked_u32(width, "width")?;
     with_regionset!(rs_ptr, rs, {
-        let result = rs.flank(width as u32, use_start, both);
+        let result = rs.flank(width_u32, use_start, both);
         Ok(ExternalPtr::new(result).into())
     })
 }
@@ -484,8 +495,9 @@ pub fn r_flank(rs_ptr: Robj, width: i32, use_start: bool, both: bool) -> extendr
 /// @param fix Anchor point: "start", "end", or "center"
 #[extendr(r_name = "r_resize")]
 pub fn r_resize(rs_ptr: Robj, width: i32, fix: &str) -> extendr_api::Result<Robj> {
+    let width_u32 = checked_u32(width, "width")?;
     with_regionset!(rs_ptr, rs, {
-        let result = rs.resize(width as u32, fix);
+        let result = rs.resize(width_u32, fix);
         Ok(ExternalPtr::new(result).into())
     })
 }
@@ -499,9 +511,9 @@ pub fn r_resize(rs_ptr: Robj, width: i32, fix: &str) -> extendr_api::Result<Robj
 #[extendr(r_name = "r_narrow")]
 pub fn r_narrow(rs_ptr: Robj, start: Robj, end: Robj, width: Robj) -> extendr_api::Result<Robj> {
     with_regionset!(rs_ptr, rs, {
-        let s = if start.is_na() { None } else { Some(i32::try_from(start).unwrap_or(1) as u32) };
-        let e = if end.is_na() { None } else { Some(i32::try_from(end).unwrap_or(1) as u32) };
-        let w = if width.is_na() { None } else { Some(i32::try_from(width).unwrap_or(1) as u32) };
+        let s = if start.is_na() { None } else { Some(checked_u32(i32::try_from(start).unwrap_or(1), "start")?) };
+        let e = if end.is_na() { None } else { Some(checked_u32(i32::try_from(end).unwrap_or(1), "end")?) };
+        let w = if width.is_na() { None } else { Some(checked_u32(i32::try_from(width).unwrap_or(1), "width")?) };
         let result = rs.narrow(s, e, w);
         Ok(ExternalPtr::new(result).into())
     })
@@ -557,9 +569,9 @@ pub fn r_consensus(rs_list: List) -> extendr_api::Result<List> {
     }
     let result = consensus(&sets);
     let chrs: Vec<String> = result.iter().map(|r| r.chr.clone()).collect();
-    let starts: Vec<i32> = result.iter().map(|r| r.start as i32).collect();
-    let ends: Vec<i32> = result.iter().map(|r| r.end as i32).collect();
-    let counts: Vec<i32> = result.iter().map(|r| r.count as i32).collect();
+    let starts: Vec<f64> = result.iter().map(|r| r.start as f64).collect();
+    let ends: Vec<f64> = result.iter().map(|r| r.end as f64).collect();
+    let counts: Vec<f64> = result.iter().map(|r| r.count as f64).collect();
     Ok(list!(chr = chrs, start = starts, end = ends, count = counts))
 }
 
@@ -670,9 +682,11 @@ pub fn r_partition_list_from_regions(
     let sizes = if chrom_names.is_empty() {
         None
     } else {
-        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec))
+        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?)
     };
-    let pl = genome_partition_list(&model, core_prom as u32, prox_prom as u32, sizes.as_ref());
+    let core_prom_u32 = checked_u32(core_prom, "core_prom")?;
+    let prox_prom_u32 = checked_u32(prox_prom, "prox_prom")?;
+    let pl = genome_partition_list(&model, core_prom_u32, prox_prom_u32, sizes.as_ref());
     Ok(ExternalPtr::new(pl).into())
 }
 
@@ -731,16 +745,16 @@ pub fn r_partition_list_from_regions_stranded(
     // Pre-reducing genes would collapse overlapping genes before promoter
     // construction, losing individual gene promoters (R computes promoters
     // from raw genes, then reduces the promoters).
-    let genes_rs = regionset_from_vecs(genes_chrs, genes_starts, genes_ends);
+    let genes_rs = regionset_from_vecs(genes_chrs, genes_starts, genes_ends)?;
     let genes_srs = StrandedRegionSet::new(genes_rs, parse_strands(genes_strands));
 
-    let exons_rs = regionset_from_vecs(exons_chrs, exons_starts, exons_ends);
+    let exons_rs = regionset_from_vecs(exons_chrs, exons_starts, exons_ends)?;
     let exons_srs = StrandedRegionSet::new(exons_rs, parse_strands(exons_strands));
 
     let three_utr = if three_utr_chrs.is_empty() {
         None
     } else {
-        let rs = regionset_from_vecs(three_utr_chrs, three_utr_starts, three_utr_ends);
+        let rs = regionset_from_vecs(three_utr_chrs, three_utr_starts, three_utr_ends)?;
         let srs = StrandedRegionSet::new(rs, parse_strands(three_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
@@ -748,7 +762,7 @@ pub fn r_partition_list_from_regions_stranded(
     let five_utr = if five_utr_chrs.is_empty() {
         None
     } else {
-        let rs = regionset_from_vecs(five_utr_chrs, five_utr_starts, five_utr_ends);
+        let rs = regionset_from_vecs(five_utr_chrs, five_utr_starts, five_utr_ends)?;
         let srs = StrandedRegionSet::new(rs, parse_strands(five_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
@@ -763,9 +777,11 @@ pub fn r_partition_list_from_regions_stranded(
     let sizes = if chrom_names.is_empty() {
         None
     } else {
-        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec))
+        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?)
     };
-    let pl = genome_partition_list(&model, core_prom as u32, prox_prom as u32, sizes.as_ref());
+    let core_prom_u32 = checked_u32(core_prom, "core_prom")?;
+    let prox_prom_u32 = checked_u32(prox_prom, "prox_prom")?;
+    let pl = genome_partition_list(&model, core_prom_u32, prox_prom_u32, sizes.as_ref());
     Ok(ExternalPtr::new(pl).into())
 }
 
@@ -793,9 +809,11 @@ pub fn r_partition_list_from_gtf(
     let sizes = if chrom_names.is_empty() {
         None
     } else {
-        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec))
+        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?)
     };
-    let pl = genome_partition_list(&model, core_prom as u32, prox_prom as u32, sizes.as_ref());
+    let core_prom_u32 = checked_u32(core_prom, "core_prom")?;
+    let prox_prom_u32 = checked_u32(prox_prom, "prox_prom")?;
+    let pl = genome_partition_list(&model, core_prom_u32, prox_prom_u32, sizes.as_ref());
     Ok(ExternalPtr::new(pl).into())
 }
 
@@ -814,11 +832,11 @@ pub fn r_calc_partitions(
         with_partitions!(partition_ptr, pl, {
             let result = calc_partitions(rs, pl, bp_proportion);
             let names: Vec<String> = result.counts.iter().map(|(n, _)| n.clone()).collect();
-            let counts: Vec<i32> = result.counts.iter().map(|(_, c)| *c as i32).collect();
+            let counts: Vec<f64> = result.counts.iter().map(|(_, c)| *c as f64).collect();
             Ok(list!(
                 partition = names,
                 count = counts,
-                total = result.total as i32
+                total = result.total as f64
             ))
         })
     })
@@ -839,9 +857,9 @@ pub fn r_calc_expected_partitions(
     chrom_sizes: Vec<i32>,
     bp_proportion: bool,
 ) -> extendr_api::Result<List> {
+    let sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes)?;
     with_regionset!(rs_ptr, rs, {
         with_partitions!(partition_ptr, pl, {
-            let sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes);
             let result = calc_expected_partitions(rs, pl, &sizes, bp_proportion);
             let partitions: Vec<String> = result.rows.iter().map(|r| r.partition.clone()).collect();
             let observed: Vec<f64> = result.rows.iter().map(|r| r.observed).collect();
@@ -1066,9 +1084,11 @@ pub fn r_gda_partition_list(
     let sizes = if chrom_names.is_empty() {
         None
     } else {
-        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec))
+        Some(chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?)
     };
-    let pl = genome_partition_list(&ext_ptr.gene_model, core_prom as u32, prox_prom as u32, sizes.as_ref());
+    let core_prom_u32 = checked_u32(core_prom, "core_prom")?;
+    let prox_prom_u32 = checked_u32(prox_prom, "prox_prom")?;
+    let pl = genome_partition_list(&ext_ptr.gene_model, core_prom_u32, prox_prom_u32, sizes.as_ref());
     Ok(ExternalPtr::new(pl).into())
 }
 
@@ -1228,4 +1248,112 @@ extendr_module! {
     fn r_load_signal_matrix_bin;
     fn r_load_signal_matrix_tsv;
     fn r_calc_summary_signal_from_matrix;
+}
+
+// =========================================================================
+// Unit tests (pure Rust, no R runtime needed)
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- checked_u32 helper tests ---
+
+    #[test]
+    fn test_checked_u32_zero() {
+        assert_eq!(checked_u32(0, "x").unwrap(), 0u32);
+    }
+
+    #[test]
+    fn test_checked_u32_positive() {
+        assert_eq!(checked_u32(42, "x").unwrap(), 42u32);
+    }
+
+    #[test]
+    fn test_checked_u32_max_i32() {
+        assert_eq!(checked_u32(i32::MAX, "x").unwrap(), i32::MAX as u32);
+    }
+
+    #[test]
+    fn test_checked_u32_negative_one() {
+        let err = checked_u32(-1, "start").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("start"), "error should name the parameter");
+        assert!(msg.contains("-1"), "error should include the value");
+    }
+
+    #[test]
+    fn test_checked_u32_min_i32() {
+        let err = checked_u32(i32::MIN, "end").unwrap_err();
+        let msg = format!("{}", err);
+        assert!(msg.contains("end"));
+        assert!(msg.contains(&i32::MIN.to_string()));
+    }
+
+    // --- regionset_from_vecs tests ---
+
+    #[test]
+    fn test_regionset_from_vecs_valid() {
+        let rs = regionset_from_vecs(
+            vec!["chr1".into(), "chr2".into()],
+            vec![0, 100],
+            vec![50, 200],
+        )
+        .unwrap();
+        assert_eq!(rs.regions.len(), 2);
+        assert_eq!(rs.regions[0].start, 0);
+        assert_eq!(rs.regions[0].end, 50);
+        assert_eq!(rs.regions[1].start, 100);
+        assert_eq!(rs.regions[1].end, 200);
+    }
+
+    #[test]
+    fn test_regionset_from_vecs_negative_start() {
+        let result = regionset_from_vecs(
+            vec!["chr1".into()],
+            vec![-5],
+            vec![100],
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("start"));
+        assert!(msg.contains("-5"));
+    }
+
+    #[test]
+    fn test_regionset_from_vecs_negative_end() {
+        let result = regionset_from_vecs(
+            vec!["chr1".into()],
+            vec![0],
+            vec![-1],
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("end"));
+    }
+
+    // --- chrom_sizes_from_vecs tests ---
+
+    #[test]
+    fn test_chrom_sizes_from_vecs_valid() {
+        let sizes = chrom_sizes_from_vecs(
+            vec!["chr1".into(), "chr2".into()],
+            vec![248956422, 242193529],
+        )
+        .unwrap();
+        assert_eq!(sizes["chr1"], 248956422);
+        assert_eq!(sizes["chr2"], 242193529);
+    }
+
+    #[test]
+    fn test_chrom_sizes_from_vecs_negative() {
+        let result = chrom_sizes_from_vecs(
+            vec!["chr1".into()],
+            vec![-100],
+        );
+        assert!(result.is_err());
+        let msg = format!("{}", result.unwrap_err());
+        assert!(msg.contains("chrom_size"));
+    }
 }

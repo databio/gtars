@@ -22,7 +22,7 @@ use crate::errors::GtarsGenomicDistError;
 /// Magic bytes for the packed signal matrix format: "SIGM" = 0x5349474D.
 const SIGM_MAGIC: u32 = 0x5349474D;
 /// Current version of the packed signal matrix format.
-const SIGM_VERSION: u32 = 1;
+const SIGM_VERSION: u32 = 2;
 
 /// A matrix of signal values across genomic regions and conditions.
 ///
@@ -225,15 +225,10 @@ impl SignalMatrix {
             buf.extend_from_slice(&region.end.to_le_bytes());
         }
 
-        // Values — flat row-major f64 array
-        // Write as raw bytes for maximum speed
-        let values_bytes = unsafe {
-            std::slice::from_raw_parts(
-                self.values.as_ptr() as *const u8,
-                self.values.len() * std::mem::size_of::<f64>(),
-            )
-        };
-        buf.extend_from_slice(values_bytes);
+        // Values — flat row-major f64 array, explicit little-endian encoding
+        for &v in &self.values {
+            buf.extend_from_slice(&v.to_le_bytes());
+        }
 
         let mut file = File::create(path)?;
         file.write_all(&buf)?;
@@ -288,8 +283,8 @@ impl SignalMatrix {
         let version = read_u32!();
         if version != SIGM_VERSION {
             return Err(err(&format!(
-                "Unsupported signal matrix format version {}",
-                version
+                "Unsupported signal matrix format version {} (expected {}) — regenerate with 'gtars prep'",
+                version, SIGM_VERSION
             )));
         }
         let n_regions = read_u32!() as usize;
@@ -341,17 +336,12 @@ impl SignalMatrix {
             });
         }
 
-        // Values — flat row-major f64 array (one big memcpy)
+        // Values — flat row-major f64 array, explicit little-endian decoding
         let n_values = n_regions * n_conditions;
-        let values_bytes = read_bytes!(n_values * 8);
-        let mut values = vec![0.0f64; n_values];
-        // Safety: copying raw bytes into properly sized Vec<f64>
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                values_bytes.as_ptr(),
-                values.as_mut_ptr() as *mut u8,
-                n_values * 8,
-            );
+        let mut values = Vec::with_capacity(n_values);
+        for _ in 0..n_values {
+            let bytes = read_bytes!(8);
+            values.push(f64::from_le_bytes(bytes.try_into().unwrap()));
         }
 
         Ok(SignalMatrix {
@@ -766,5 +756,149 @@ mod tests {
             Ok(_) => panic!("Expected error loading invalid file"),
         };
         assert!(msg.contains("regenerate"), "Error should mention regeneration: {}", msg);
+    }
+
+    /// Test that save_bin writes f64 values in little-endian byte order.
+    ///
+    /// We construct a SignalMatrix with a known f64 value (1.0), save it,
+    /// then scan the binary output for those bytes and verify they appear
+    /// in IEEE 754 little-endian encoding (0x3FF0000000000000 in LE = [0,0,0,0,0,0,F0,3F]).
+    #[rstest]
+    fn test_save_bin_f64_little_endian_encoding() {
+        // 1.0f64 in IEEE 754 little-endian bytes
+        let one_le: [u8; 8] = 1.0f64.to_le_bytes();
+
+        // Build a minimal 1-region, 1-condition SignalMatrix with value 1.0
+        use gtars_core::models::Region;
+        let regions = vec![Region {
+            chr: "chr1".to_string(),
+            start: 100,
+            end: 200,
+            rest: None,
+        }];
+        let sm = SignalMatrix {
+            regions: RegionSet::from(regions),
+            condition_names: vec!["cond_A".to_string()],
+            n_conditions: 1,
+            values: vec![1.0f64],
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let bin_path = dir.path().join("le_test.bin");
+        sm.save_bin(&bin_path).unwrap();
+
+        let data = std::fs::read(&bin_path).unwrap();
+
+        // Find the 8-byte little-endian encoding of 1.0 somewhere in the output
+        let found = data.windows(8).any(|w| w == one_le);
+        assert!(
+            found,
+            "Expected to find 1.0f64 in little-endian encoding {:?} in binary output, but did not. \
+             This indicates the f64 values are NOT written in little-endian byte order.",
+            one_le
+        );
+
+        // Also verify that the big-endian encoding of 1.0 does NOT appear
+        // (unless it coincidentally appears as part of another field, which is unlikely here)
+        let one_be: [u8; 8] = 1.0f64.to_be_bytes();
+        // Only check if LE and BE differ (they differ for 1.0)
+        if one_le != one_be {
+            let found_be = data.windows(8).any(|w| w == one_be);
+            assert!(
+                !found_be,
+                "Found 1.0f64 in big-endian encoding {:?} in binary output — values should be little-endian.",
+                one_be
+            );
+        }
+    }
+
+    /// Test that load_bin_from_bytes correctly interprets bytes as little-endian f64.
+    ///
+    /// We manually construct a minimal valid binary with a known f64 value
+    /// written in little-endian, and verify load_bin_from_bytes decodes it correctly.
+    #[rstest]
+    fn test_load_bin_from_bytes_f64_little_endian_decoding() {
+        // Build expected binary manually:
+        // header: magic(4) + version(4) + n_regions(4) + n_conditions(4) = 16 bytes
+        // intern table: n_strings(4) + len("chr1")(4) + "chr1"(4) + len("C")(4) + "C"(1) = 17 bytes
+        // condition names section: n_names(4) + id(2) = 6 bytes
+        // regions column-oriented: chr_ids(2) + starts(4) + ends(4) = 10 bytes
+        // values: 8 bytes (one f64)
+        let mut buf: Vec<u8> = Vec::new();
+
+        // Header
+        buf.extend_from_slice(&SIGM_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&SIGM_VERSION.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // n_regions = 1
+        buf.extend_from_slice(&1u32.to_le_bytes()); // n_conditions = 1
+
+        // Intern table: 2 strings: "chr1" (id=0), "C" (id=1)
+        buf.extend_from_slice(&2u32.to_le_bytes()); // n_strings
+        buf.extend_from_slice(&4u32.to_le_bytes()); // len("chr1")
+        buf.extend_from_slice(b"chr1");
+        buf.extend_from_slice(&1u32.to_le_bytes()); // len("C")
+        buf.extend_from_slice(b"C");
+
+        // Condition names: 1 name, id=1 ("C")
+        buf.extend_from_slice(&1u32.to_le_bytes()); // n_names
+        buf.extend_from_slice(&1u16.to_le_bytes()); // id of "C"
+
+        // Regions (column-oriented): chr_id=0, start=100, end=200
+        buf.extend_from_slice(&0u16.to_le_bytes()); // chr_id for region 0
+        buf.extend_from_slice(&100u32.to_le_bytes()); // start
+        buf.extend_from_slice(&200u32.to_le_bytes()); // end
+
+        // Values: 1 f64 = 3.14, written in little-endian
+        let pi: f64 = 3.14;
+        buf.extend_from_slice(&pi.to_le_bytes());
+
+        let sm = SignalMatrix::load_bin_from_bytes(&buf)
+            .expect("load_bin_from_bytes should succeed with valid little-endian data");
+
+        assert_eq!(sm.values.len(), 1);
+        assert!(
+            (sm.values[0] - pi).abs() < 1e-15,
+            "Expected value {} but got {} — load_bin_from_bytes may not be reading f64 as little-endian",
+            pi,
+            sm.values[0]
+        );
+        assert_eq!(sm.condition_names, vec!["C"]);
+        assert_eq!(sm.regions.regions[0].chr, "chr1");
+        assert_eq!(sm.regions.regions[0].start, 100);
+        assert_eq!(sm.regions.regions[0].end, 200);
+    }
+
+    /// Test that a file written with version 1 is rejected once SIGM_VERSION is bumped to 2.
+    ///
+    /// This test verifies the version-mismatch guard works. After bumping SIGM_VERSION
+    /// to 2, a file with version=1 in the header must be rejected with an error message
+    /// that mentions the mismatched version number (1) so users know to regenerate.
+    #[rstest]
+    fn test_signal_matrix_rejects_version_1_file() {
+        // Only meaningful once SIGM_VERSION > 1
+        if SIGM_VERSION == 1 {
+            // Pre-bump: this test is a sentinel; skip the assertion
+            return;
+        }
+
+        // Construct a minimal binary with SIGM_MAGIC but version=1 (old format)
+        let mut buf: Vec<u8> = Vec::new();
+        buf.extend_from_slice(&SIGM_MAGIC.to_le_bytes());
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version 1 (old)
+        buf.extend_from_slice(&0u32.to_le_bytes()); // n_regions
+        buf.extend_from_slice(&0u32.to_le_bytes()); // n_conditions
+
+        let result = SignalMatrix::load_bin_from_bytes(&buf);
+        assert!(
+            result.is_err(),
+            "Expected error loading version-1 file when SIGM_VERSION={}",
+            SIGM_VERSION
+        );
+        let msg = format!("{}", result.err().unwrap());
+        assert!(
+            msg.contains("1"),
+            "Error message should mention the mismatched version number (1): {}",
+            msg
+        );
     }
 }
