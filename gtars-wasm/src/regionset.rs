@@ -196,14 +196,15 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(getter, js_name = "classify")]
-    pub fn classify_bed_js(&self) -> JsBedClassificationOutput {
-        let output = classify_bed(&self.region_set).unwrap();
-        JsBedClassificationOutput {
+    pub fn classify_bed_js(&self) -> Result<JsBedClassificationOutput, JsValue> {
+        let output = classify_bed(&self.region_set)
+            .map_err(|e| JsValue::from_str(&e.to_string()))?;
+        Ok(JsBedClassificationOutput {
             bed_compliance: output.bed_compliance.clone(),
             data_format: format!("{:#?}", output.data_format),
             compliant_columns: output.compliant_columns,
             non_compliant_columns: output.non_compliant_columns,
-        }
+        })
     }
 
     // ── Statistics methods ───────────────────────────────────────────
