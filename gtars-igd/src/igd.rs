@@ -510,100 +510,19 @@ impl Igd {
             None => return 0,
         };
 
-        let contig = &self.contigs[ctg_idx];
-        let n_tiles = contig.tiles.len() as i32;
-
-        let n1 = start / self.nbp;
-        let mut n2 = (end - 1) / self.nbp;
-
-        if n1 >= n_tiles {
-            return 0;
-        }
-        n2 = n2.min(n_tiles - 1);
-
         let mut total_overlaps: u32 = 0;
 
-        // First tile (n1): binary search + backward scan
-        let tile = &contig.tiles[n1 as usize];
-        if !tile.records.is_empty() && end > tile.records[0].start {
-            // Binary search: find rightmost record with start < end
-            let mut tl: i32 = 0;
-            let mut tr: i32 = tile.records.len() as i32 - 1;
-
-            while tl < tr - 1 {
-                let tm = (tl + tr) / 2;
-                if tile.records[tm as usize].start < end {
-                    tl = tm;
-                } else {
-                    tr = tm;
-                }
-            }
-            if tile.records[tr as usize].start < end {
-                tl = tr;
-            }
-
-            // Scan backward checking overlap
-            for i in (0..=tl).rev() {
-                let rec = &tile.records[i as usize];
-                let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                if overlap_bp >= min_overlap {
-                    hits[rec.file_idx as usize] += 1;
-                    total_overlaps += 1;
-                }
-            }
-        }
-
-        // Subsequent tiles (n1+1 through n2)
-        if n2 > n1 {
-            let mut bd = self.nbp * (n1 + 1);
-
-            for j in (n1 + 1)..=n2 {
-                let tile = &contig.tiles[j as usize];
-                if tile.records.is_empty() {
-                    bd += self.nbp;
-                    continue;
-                }
-
-                if end > tile.records[0].start {
-                    // Skip records that start before this tile's boundary
-                    // (they were already counted in a previous tile)
-                    let mut ts: i32 = 0;
-                    while ts < tile.records.len() as i32
-                        && tile.records[ts as usize].start < bd
-                    {
-                        ts += 1;
-                    }
-
-                    // Binary search for rightmost record with start < end
-                    let mut tl: i32 = 0;
-                    let mut tr: i32 = tile.records.len() as i32 - 1;
-
-                    while tl < tr - 1 {
-                        let tm = (tl + tr) / 2;
-                        if tile.records[tm as usize].start < end {
-                            tl = tm;
-                        } else {
-                            tr = tm;
-                        }
-                    }
-                    if tile.records[tr as usize].start < end {
-                        tl = tr;
-                    }
-
-                    // Scan from ts to tl checking overlap
-                    for i in (ts..=tl).rev() {
-                        let rec = &tile.records[i as usize];
-                        let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                        if overlap_bp >= min_overlap {
-                            hits[rec.file_idx as usize] += 1;
-                            total_overlaps += 1;
-                        }
-                    }
-                }
-
-                bd += self.nbp;
-            }
-        }
+        Self::walk_tile_overlaps(
+            &self.contigs[ctg_idx],
+            start,
+            end,
+            min_overlap,
+            self.nbp,
+            |rec| {
+                hits[rec.file_idx as usize] += 1;
+                total_overlaps += 1;
+            },
+        );
 
         total_overlaps
     }
@@ -726,88 +645,21 @@ impl Igd {
                 None => continue,
             };
 
-            let start = region.start as i32;
-            let end = region.end as i32;
-            let contig = &self.contigs[ctg_idx];
-            let n_tiles = contig.tiles.len() as i32;
-
-            let n1 = start / self.nbp;
-            let mut n2 = (end - 1) / self.nbp;
-            if n1 >= n_tiles {
-                continue;
-            }
-            n2 = n2.min(n_tiles - 1);
-
-            // Use a set to deduplicate subject hits (records span multiple tiles)
+            // Deduplicate subject hits (records span multiple tiles)
             let mut seen_subjects = std::collections::HashSet::new();
 
-            // First tile
-            let tile = &contig.tiles[n1 as usize];
-            if !tile.records.is_empty() && end > tile.records[0].start {
-                let mut tl: i32 = 0;
-                let mut tr: i32 = tile.records.len() as i32 - 1;
-                while tl < tr - 1 {
-                    let tm = (tl + tr) / 2;
-                    if tile.records[tm as usize].start < end {
-                        tl = tm;
-                    } else {
-                        tr = tm;
-                    }
-                }
-                if tile.records[tr as usize].start < end {
-                    tl = tr;
-                }
-                for i in (0..=tl).rev() {
-                    let rec = &tile.records[i as usize];
-                    let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                    if overlap_bp >= min_overlap && seen_subjects.insert(rec.value as u32) {
+            Self::walk_tile_overlaps(
+                &self.contigs[ctg_idx],
+                region.start as i32,
+                region.end as i32,
+                min_overlap,
+                self.nbp,
+                |rec| {
+                    if seen_subjects.insert(rec.value as u32) {
                         pairs.push((q_idx as u32, rec.value as u32));
                     }
-                }
-            }
-
-            // Subsequent tiles
-            if n2 > n1 {
-                let mut bd = self.nbp * (n1 + 1);
-                for j in (n1 + 1)..=n2 {
-                    let tile = &contig.tiles[j as usize];
-                    if tile.records.is_empty() {
-                        bd += self.nbp;
-                        continue;
-                    }
-                    if end > tile.records[0].start {
-                        let mut ts: i32 = 0;
-                        while ts < tile.records.len() as i32
-                            && tile.records[ts as usize].start < bd
-                        {
-                            ts += 1;
-                        }
-                        let mut tl: i32 = 0;
-                        let mut tr: i32 = tile.records.len() as i32 - 1;
-                        while tl < tr - 1 {
-                            let tm = (tl + tr) / 2;
-                            if tile.records[tm as usize].start < end {
-                                tl = tm;
-                            } else {
-                                tr = tm;
-                            }
-                        }
-                        if tile.records[tr as usize].start < end {
-                            tl = tr;
-                        }
-                        for i in (ts..=tl).rev() {
-                            let rec = &tile.records[i as usize];
-                            let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                            if overlap_bp >= min_overlap
-                                && seen_subjects.insert(rec.value as u32)
-                            {
-                                pairs.push((q_idx as u32, rec.value as u32));
-                            }
-                        }
-                    }
-                    bd += self.nbp;
-                }
-            }
+                },
+            );
         }
 
         pairs
@@ -838,85 +690,20 @@ impl Igd {
                 None => continue,
             };
 
-            let start = region.start as i32;
-            let end = region.end as i32;
-            let contig = &self.contigs[ctg_idx];
-            let n_tiles = contig.tiles.len() as i32;
-
-            let n1 = start / self.nbp;
-            let mut n2 = (end - 1) / self.nbp;
-            if n1 >= n_tiles {
-                continue;
-            }
-            n2 = n2.min(n_tiles - 1);
-
             let mut seen = std::collections::HashSet::new();
 
-            // First tile
-            let tile = &contig.tiles[n1 as usize];
-            if !tile.records.is_empty() && end > tile.records[0].start {
-                let mut tl: i32 = 0;
-                let mut tr: i32 = tile.records.len() as i32 - 1;
-                while tl < tr - 1 {
-                    let tm = (tl + tr) / 2;
-                    if tile.records[tm as usize].start < end {
-                        tl = tm;
-                    } else {
-                        tr = tm;
-                    }
-                }
-                if tile.records[tr as usize].start < end {
-                    tl = tr;
-                }
-                for i in (0..=tl).rev() {
-                    let rec = &tile.records[i as usize];
-                    let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                    if overlap_bp >= min_overlap && seen.insert(rec.value) {
+            Self::walk_tile_overlaps(
+                &self.contigs[ctg_idx],
+                region.start as i32,
+                region.end as i32,
+                min_overlap,
+                self.nbp,
+                |rec| {
+                    if seen.insert(rec.value) {
                         counts[q_idx] += 1;
                     }
-                }
-            }
-
-            // Subsequent tiles
-            if n2 > n1 {
-                let mut bd = self.nbp * (n1 + 1);
-                for j in (n1 + 1)..=n2 {
-                    let tile = &contig.tiles[j as usize];
-                    if tile.records.is_empty() {
-                        bd += self.nbp;
-                        continue;
-                    }
-                    if end > tile.records[0].start {
-                        let mut ts: i32 = 0;
-                        while ts < tile.records.len() as i32
-                            && tile.records[ts as usize].start < bd
-                        {
-                            ts += 1;
-                        }
-                        let mut tl: i32 = 0;
-                        let mut tr: i32 = tile.records.len() as i32 - 1;
-                        while tl < tr - 1 {
-                            let tm = (tl + tr) / 2;
-                            if tile.records[tm as usize].start < end {
-                                tl = tm;
-                            } else {
-                                tr = tm;
-                            }
-                        }
-                        if tile.records[tr as usize].start < end {
-                            tl = tr;
-                        }
-                        for i in (ts..=tl).rev() {
-                            let rec = &tile.records[i as usize];
-                            let overlap_bp = rec.end.min(end) - rec.start.max(start);
-                            if overlap_bp >= min_overlap && seen.insert(rec.value) {
-                                counts[q_idx] += 1;
-                            }
-                        }
-                    }
-                    bd += self.nbp;
-                }
-            }
+                },
+            );
         }
 
         counts
@@ -945,6 +732,107 @@ impl Igd {
     // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
+
+    /// Walk all overlapping records for a query interval on a single contig.
+    ///
+    /// Calls `on_hit(&Record)` for each record that overlaps `[start, end)` by
+    /// at least `min_overlap` base pairs. Handles the first-tile binary search,
+    /// subsequent-tile boundary dedup, and min_overlap filtering.
+    fn walk_tile_overlaps<F>(
+        contig: &Contig,
+        start: i32,
+        end: i32,
+        min_overlap: i32,
+        nbp: i32,
+        mut on_hit: F,
+    ) where
+        F: FnMut(&Record),
+    {
+        let n_tiles = contig.tiles.len() as i32;
+        let n1 = start / nbp;
+        let mut n2 = (end - 1) / nbp;
+
+        if n1 >= n_tiles {
+            return;
+        }
+        n2 = n2.min(n_tiles - 1);
+
+        // First tile (n1): binary search + backward scan
+        let tile = &contig.tiles[n1 as usize];
+        if !tile.records.is_empty() && end > tile.records[0].start {
+            let mut tl: i32 = 0;
+            let mut tr: i32 = tile.records.len() as i32 - 1;
+
+            while tl < tr - 1 {
+                let tm = (tl + tr) / 2;
+                if tile.records[tm as usize].start < end {
+                    tl = tm;
+                } else {
+                    tr = tm;
+                }
+            }
+            if tile.records[tr as usize].start < end {
+                tl = tr;
+            }
+
+            for i in (0..=tl).rev() {
+                let rec = &tile.records[i as usize];
+                let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                if overlap_bp >= min_overlap {
+                    on_hit(rec);
+                }
+            }
+        }
+
+        // Subsequent tiles (n1+1 through n2)
+        if n2 > n1 {
+            let mut bd = nbp * (n1 + 1);
+
+            for j in (n1 + 1)..=n2 {
+                let tile = &contig.tiles[j as usize];
+                if tile.records.is_empty() {
+                    bd += nbp;
+                    continue;
+                }
+
+                if end > tile.records[0].start {
+                    // Skip records starting before this tile's boundary (already counted)
+                    let mut ts: i32 = 0;
+                    while ts < tile.records.len() as i32
+                        && tile.records[ts as usize].start < bd
+                    {
+                        ts += 1;
+                    }
+
+                    // Binary search for rightmost record with start < end
+                    let mut tl: i32 = 0;
+                    let mut tr: i32 = tile.records.len() as i32 - 1;
+
+                    while tl < tr - 1 {
+                        let tm = (tl + tr) / 2;
+                        if tile.records[tm as usize].start < end {
+                            tl = tm;
+                        } else {
+                            tr = tm;
+                        }
+                    }
+                    if tile.records[tr as usize].start < end {
+                        tl = tr;
+                    }
+
+                    for i in (ts..=tl).rev() {
+                        let rec = &tile.records[i as usize];
+                        let overlap_bp = rec.end.min(end) - rec.start.max(start);
+                        if overlap_bp >= min_overlap {
+                            on_hit(rec);
+                        }
+                    }
+                }
+
+                bd += nbp;
+            }
+        }
+    }
 
     /// Parse a BED line into (chrom, start, end, score).
     fn parse_bed_line(line: &str) -> Option<(String, i32, i32, i32)> {
