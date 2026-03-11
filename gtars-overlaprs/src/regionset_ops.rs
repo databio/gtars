@@ -33,7 +33,7 @@ pub trait RegionSetOverlaps {
 impl RegionSetOverlaps for RegionSet {
     fn subset_by_overlaps(&self, other: &RegionSet) -> RegionSet {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        let flags = index.any_query_overlaps(self);
+        let flags = index.any_overlaps(self);
         let kept: Vec<_> = self
             .regions
             .iter()
@@ -45,17 +45,17 @@ impl RegionSetOverlaps for RegionSet {
 
     fn count_overlaps(&self, other: &RegionSet) -> Vec<usize> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        index.count_query_overlaps(self)
+        index.count_overlaps(self)
     }
 
     fn any_overlaps(&self, other: &RegionSet) -> Vec<bool> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        index.any_query_overlaps(self)
+        index.any_overlaps(self)
     }
 
     fn find_overlaps(&self, other: &RegionSet) -> Vec<Vec<usize>> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        index.find_query_overlaps(self)
+        index.find_overlaps_indexed(self)
     }
 }
 

@@ -10,7 +10,7 @@ use std::collections::HashMap;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::OverlapperType;
-use gtars_overlaprs::multi_chrom_overlapper::IntoMultiChromOverlapper;
+use gtars_overlaprs::multi_chrom_overlapper::MultiChromOverlapper;
 
 use crate::models::{Strand, StrandedRegionSet};
 
@@ -34,25 +34,8 @@ impl IntervalRanges for RegionSet {
             return RegionSet::from(Vec::<Region>::new());
         }
 
-        let index = other.clone().into_multi_chrom_overlapper(OverlapperType::AIList);
-        let mut result: Vec<Region> = Vec::new();
-
-        for a in &self.regions {
-            for hit in index.find_overlaps_for_region(&a.chr, a.start, a.end) {
-                let start = a.start.max(hit.start);
-                let end = a.end.min(hit.end);
-                if start < end {
-                    result.push(Region {
-                        chr: a.chr.clone(),
-                        start,
-                        end,
-                        rest: None,
-                    });
-                }
-            }
-        }
-
-        RegionSet::from(result)
+        let mco = MultiChromOverlapper::from_region_set(other.clone(), OverlapperType::AIList);
+        mco.intersect_all(self)
     }
 }
 
