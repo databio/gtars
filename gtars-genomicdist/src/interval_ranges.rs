@@ -696,6 +696,13 @@ impl IntervalRanges for RegionSet {
             v.sort_by_key(|(_, r)| r.start);
         }
 
+        // Precompute max region width per chromosome for left-side early termination
+        let mut max_width_by_chr: HashMap<String, u32> = HashMap::new();
+        for (chr, candidates) in &other_by_chr {
+            let max_w = candidates.iter().map(|(_, r)| r.end - r.start).max().unwrap_or(0);
+            max_width_by_chr.insert(chr.clone(), max_w);
+        }
+
         let mut result: Vec<(usize, usize, i64)> = Vec::new();
 
         for (self_idx, a) in self.regions.iter().enumerate() {
@@ -708,28 +715,54 @@ impl IntervalRanges for RegionSet {
                 .binary_search_by_key(&a.start, |(_, r)| r.start)
                 .unwrap_or_else(|x| x);
 
+            let gap_dist = |a_reg: &Region, b_reg: &Region| -> i64 {
+                if a_reg.start < b_reg.end && b_reg.start < a_reg.end {
+                    0i64
+                } else if b_reg.end <= a_reg.start {
+                    (a_reg.start as i64) - (b_reg.end as i64)
+                } else {
+                    (b_reg.start as i64) - (a_reg.end as i64)
+                }
+            };
+
+            let max_width = *max_width_by_chr.get(&a.chr).unwrap_or(&0) as i64;
+
             let mut best_other_idx = 0usize;
             let mut best_dist = i64::MAX;
 
-            // Check candidates around the insertion point
-            let check_range_start = if ins >= 2 { ins - 2 } else { 0 };
-            let check_range_end = (ins + 2).min(candidates.len());
+            let mut left_done = ins == 0;
+            let mut right_done = ins >= candidates.len();
+            let mut li = if ins > 0 { ins - 1 } else { 0 };
+            let mut ri = ins;
 
-            for &(other_idx, b) in &candidates[check_range_start..check_range_end] {
-                let dist = if a.start < b.end && b.start < a.end {
-                    // Overlapping
-                    0i64
-                } else if b.end <= a.start {
-                    // b is upstream
-                    (a.start as i64) - (b.end as i64)
-                } else {
-                    // b is downstream
-                    (b.start as i64) - (a.end as i64)
-                };
+            while !left_done || !right_done {
+                if !right_done {
+                    let (other_idx, b) = candidates[ri];
+                    let dist = gap_dist(a, b);
+                    if dist.abs() < best_dist.abs() {
+                        best_dist = dist;
+                        best_other_idx = other_idx;
+                    }
+                    if best_dist == 0 { break; }
+                    ri += 1;
+                    if ri >= candidates.len() || (b.start as i64 - a.end as i64 > best_dist.abs()) {
+                        right_done = true;
+                    }
+                }
 
-                if dist.abs() < best_dist.abs() {
-                    best_dist = dist;
-                    best_other_idx = other_idx;
+                if !left_done {
+                    let (other_idx, b) = candidates[li];
+                    let dist = gap_dist(a, b);
+                    if dist.abs() < best_dist.abs() {
+                        best_dist = dist;
+                        best_other_idx = other_idx;
+                    }
+                    if best_dist == 0 { break; }
+                    if li == 0 || (a.start as i64 - b.start as i64 > best_dist.abs() + max_width) {
+                        left_done = true;
+                    } else {
+                        li -= 1;
+                    }
                 }
             }
 
@@ -1938,6 +1971,78 @@ mod tests {
         let b = make_regionset(vec![("chr1", 100, 200)]);
         let result = a.closest(&b);
         assert_eq!(result.len(), 0);
+    }
+
+    #[rstest]
+    fn test_closest_nearest_far_left_of_insertion() {
+        let a = make_regionset(vec![("chr1", 1000, 1010)]);
+        let b = make_regionset(vec![
+            ("chr1", 0, 999),     // dist = 1 (nearest)
+            ("chr1", 1, 2),       // dist = 998
+            ("chr1", 3, 4),       // dist = 996
+            ("chr1", 5, 6),       // dist = 994
+            ("chr1", 1020, 2000), // dist = 10
+        ]);
+        let result = a.closest(&b);
+        assert_eq!(result[0].2, 1);
+    }
+
+    #[rstest]
+    fn test_closest_nearest_far_right_of_insertion() {
+        let a = make_regionset(vec![("chr1", 500, 510)]);
+        let b = make_regionset(vec![
+            ("chr1", 0, 490),     // dist = 10
+            ("chr1", 520, 521),   // dist = 10
+            ("chr1", 522, 523),   // dist = 12
+            ("chr1", 524, 525),   // dist = 14
+            ("chr1", 526, 527),   // dist = 16
+            ("chr1", 528, 529),   // dist = 18
+            ("chr1", 530, 531),   // dist = 20
+            ("chr1", 508, 509),   // dist = 0 (overlap!)
+        ]);
+        // After sorting by start, the overlapping region should be found
+        let result = a.closest(&b);
+        assert_eq!(result[0].2, 0);
+    }
+
+    #[rstest]
+    fn test_closest_variable_density() {
+        let a = make_regionset(vec![("chr1", 5000, 5010)]);
+        let mut regions: Vec<(&str, u32, u32)> = Vec::new();
+        // 20 tiny regions clustered at the start
+        for i in 0..20 {
+            regions.push(("chr1", i * 2, i * 2 + 1));
+        }
+        // One region that's actually close
+        regions.push(("chr1", 4990, 4999)); // dist = 1
+        // Some regions after
+        regions.push(("chr1", 6000, 6001));
+        let b = make_regionset(regions);
+        let result = a.closest(&b);
+        assert_eq!(result[0].2, 1);
+    }
+
+    #[rstest]
+    fn test_closest_single_candidate() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 500, 600)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].2, 300);
+    }
+
+    #[rstest]
+    fn test_closest_wide_region_far_left() {
+        let a = make_regionset(vec![("chr1", 1000, 1010)]);
+        let b = make_regionset(vec![
+            ("chr1", 10, 998),    // dist = 2 (wide region, close end)
+            ("chr1", 500, 501),   // dist = 499
+            ("chr1", 600, 601),   // dist = 399
+            ("chr1", 700, 701),   // dist = 299
+            ("chr1", 1050, 1060), // dist = 40
+        ]);
+        let result = a.closest(&b);
+        assert_eq!(result[0].2, 2);
     }
 
     // ── cluster tests ──────────────────────────────────────────────────
