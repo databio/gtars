@@ -159,26 +159,6 @@ impl ContingencyTable {
         }
     }
 
-    /// Compute the sample odds ratio: (a*d) / (b*c).
-    ///
-    /// This is the unconditional (plug-in) estimator; it differs from R's
-    /// `fisher.test()$estimate` which uses the conditional MLE.
-    #[allow(dead_code)]
-    pub fn sample_odds_ratio(&self) -> f64 {
-        let num = self.a as f64 * self.d as f64;
-        let den = self.b as f64 * self.c as f64;
-
-        if den == 0.0 {
-            if num > 0.0 {
-                f64::INFINITY
-            } else {
-                0.0
-            }
-        } else {
-            num / den
-        }
-    }
-
     /// Compute -log10(p-value).
     pub fn p_value_log(&self, direction: Direction) -> f64 {
         let p = self.fisher_pvalue(direction);
@@ -321,12 +301,16 @@ fn rank_results(results: &mut [LolaResult]) {
         results[idx].rnk_pv = rank + 1;
     }
 
-    // Rank by odds_ratio (descending)
+    // Rank by odds_ratio (descending, NaN gets worst rank)
     indices.sort_by(|&a, &b| {
-        results[b]
-            .odds_ratio
-            .partial_cmp(&results[a].odds_ratio)
-            .unwrap_or(std::cmp::Ordering::Equal)
+        let ra = results[a].odds_ratio;
+        let rb = results[b].odds_ratio;
+        match (ra.is_nan(), rb.is_nan()) {
+            (true, true) => std::cmp::Ordering::Equal,
+            (true, false) => std::cmp::Ordering::Greater,  // NaN sorts last (worst rank)
+            (false, true) => std::cmp::Ordering::Less,
+            (false, false) => rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal),
+        }
     });
     for (rank, &idx) in indices.iter().enumerate() {
         results[idx].rnk_or = rank + 1;
@@ -464,11 +448,6 @@ mod tests {
             or
         );
 
-        // Sample OR for comparison: (10*40)/(20*30) = 0.6667
-        let sample = ct.sample_odds_ratio();
-        assert!((sample - 0.6667).abs() < 0.001);
-        // CMLE and sample OR should differ
-        assert!((or - sample).abs() > 0.001);
     }
 
     #[test]
@@ -1107,5 +1086,92 @@ mod tests {
         };
         let r50 = run_lola(&igd, &[user], &universe, &config50).unwrap();
         assert_eq!(r50[0].support, 0);
+    }
+
+    #[test]
+    fn test_run_lola_depletion_direction() {
+        // Run with Direction::Depletion — p-values should differ from enrichment
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![
+                ("chr1".to_string(), 100, 200),
+                ("chr1".to_string(), 300, 400),
+            ],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let user = make_region_set(vec![make_region("chr1", 150, 180)]);
+        let universe = make_region_set(vec![
+            make_region("chr1", 50, 250),
+            make_region("chr1", 250, 450),
+            make_region("chr1", 500, 600),
+            make_region("chr1", 700, 800),
+            make_region("chr1", 900, 1000),
+        ]);
+
+        let config_enrich = LolaConfig {
+            direction: Direction::Enrichment,
+            ..Default::default()
+        };
+        let config_deplete = LolaConfig {
+            direction: Direction::Depletion,
+            ..Default::default()
+        };
+
+        let r_enrich = run_lola(&igd, &[user.clone()], &universe, &config_enrich).unwrap();
+        let r_deplete = run_lola(&igd, &[user], &universe, &config_deplete).unwrap();
+
+        // The p-value logs should differ between enrichment and depletion
+        assert_ne!(
+            r_enrich[0].p_value_log, r_deplete[0].p_value_log,
+            "Enrichment and depletion p-values should differ"
+        );
+    }
+
+    #[test]
+    fn test_odds_ratio_nan_ranking() {
+        // When odds_ratio is NaN, it should get worst (highest) rank
+        let mut results = vec![
+            LolaResult {
+                user_set: 0,
+                db_set: 0,
+                p_value_log: 5.0,
+                odds_ratio: f64::NAN,
+                support: 10,
+                rnk_pv: 0,
+                rnk_or: 0,
+                rnk_sup: 0,
+                max_rnk: 0,
+                mean_rnk: 0.0,
+                b: 0,
+                c: 0,
+                d: 0,
+                q_value: None,
+                filename: "nan.bed".into(),
+            },
+            LolaResult {
+                user_set: 0,
+                db_set: 1,
+                p_value_log: 3.0,
+                odds_ratio: 2.0,
+                support: 20,
+                rnk_pv: 0,
+                rnk_or: 0,
+                rnk_sup: 0,
+                max_rnk: 0,
+                mean_rnk: 0.0,
+                b: 0,
+                c: 0,
+                d: 0,
+                q_value: None,
+                filename: "real.bed".into(),
+            },
+        ];
+
+        rank_results(&mut results);
+
+        // NaN odds ratio should get worst rank (2 out of 2)
+        assert_eq!(results[0].rnk_or, 2, "NaN odds ratio should get worst rank");
+        assert_eq!(results[1].rnk_or, 1, "Real odds ratio should get rank 1");
     }
 }

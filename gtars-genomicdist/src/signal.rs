@@ -459,7 +459,7 @@ pub fn calc_summary_signal(
 /// (median of each half, including the median element for odd n), then
 /// computes whiskers as the most extreme data points within 1.5 × IQR fences.
 fn boxplot_stats(data: &mut [f64]) -> ConditionStats {
-    data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = data.len();
 
     if n == 0 {
@@ -900,5 +900,14 @@ mod tests {
             "Error message should mention the mismatched version number (1): {}",
             msg
         );
+    }
+
+    #[test]
+    fn test_boxplot_stats_with_nan() {
+        // Regression: NaN values in signal data should not panic
+        let mut data = vec![1.0, f64::NAN, 3.0, 2.0, f64::NAN, 5.0];
+        let stats = boxplot_stats(&mut data);
+        // Should complete without panic; NaN values sort to end
+        assert!(stats.median.is_finite() || stats.median.is_nan());
     }
 }

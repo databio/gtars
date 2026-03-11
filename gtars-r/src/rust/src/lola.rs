@@ -5,6 +5,7 @@ use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
 use gtars_lola::models::{Direction, LolaConfig};
+use gtars_lola::output::apply_fdr_correction;
 use gtars_lola::universe;
 
 // =========================================================================
@@ -70,15 +71,15 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         db_set.push((r.db_set + 1) as i32);
         p_value_log.push(r.p_value_log);
         odds_ratio.push(r.odds_ratio);
-        support.push(r.support as i32);
+        support.push(r.support as f64);
         rnk_pv.push(r.rnk_pv as i32);
         rnk_or.push(r.rnk_or as i32);
         rnk_sup.push(r.rnk_sup as i32);
         max_rnk.push(r.max_rnk as i32);
         mean_rnk.push(r.mean_rnk);
-        b_vec.push(r.b as i32);
-        c_vec.push(r.c as i32);
-        d_vec.push(r.d as i32);
+        b_vec.push(r.b as f64);
+        c_vec.push(r.c as f64);
+        d_vec.push(r.d as f64);
         filename.push(r.filename.clone());
         q_value.push(r.q_value);
     }
@@ -258,8 +259,10 @@ pub fn r_run_lola(
                 direction: dir,
             };
 
-            let results = run_lola(&db.igd, &user_sets, universe, &config)
+            let mut results = run_lola(&db.igd, &user_sets, universe, &config)
                 .map_err(|e| extendr_api::Error::Other(format!("LOLA error: {}", e)))?;
+
+            apply_fdr_correction(&mut results);
 
             Ok(results_to_list(&results).into())
         })

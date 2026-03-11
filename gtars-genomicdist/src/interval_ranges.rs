@@ -465,7 +465,7 @@ impl IntervalRanges for RegionSet {
                     rest: None,
                 },
                 "center" => {
-                    let mid = (r.start + r.end) / 2;
+                    let mid = r.start + (r.end - r.start) / 2;
                     let half = width / 2;
                     Region {
                         chr: r.chr.clone(),
@@ -494,8 +494,8 @@ impl IntervalRanges for RegionSet {
                 let region_width = r.end - r.start;
                 // Parameters are 1-based relative positions within the region
                 let (rel_start, rel_end) = match (start, end, width) {
-                    (Some(s), Some(e), None) => (s - 1, e),
-                    (Some(s), None, Some(w)) => (s - 1, (s - 1) + w),
+                    (Some(s), Some(e), None) => (s.saturating_sub(1), e),
+                    (Some(s), None, Some(w)) => (s.saturating_sub(1), s.saturating_sub(1) + w),
                     (None, Some(e), Some(w)) => (e.saturating_sub(w), e),
                     (None, None, Some(w)) => (0, w),
                     _ => (0, region_width),
@@ -541,21 +541,46 @@ impl IntervalRanges for RegionSet {
             events.sort_unstable();
             events.dedup();
 
-            // Walk pairs of events, emit segments where coverage > 0
-            for w in events.windows(2) {
-                let seg_start = w[0];
-                let seg_end = w[1];
-                // Check if any input region covers this segment
-                let covered = regions[i..chr_end]
-                    .iter()
-                    .any(|r| r.start <= seg_start && r.end >= seg_end);
-                if covered {
-                    result.push(Region {
-                        chr: chr.clone(),
-                        start: seg_start,
-                        end: seg_end,
-                        rest: None,
-                    });
+            // Sweep-line: collect tagged events, sort, walk with coverage counter
+            let mut tagged_events: Vec<(u32, i8)> = Vec::with_capacity((chr_end - i) * 2);
+            for r in &regions[i..chr_end] {
+                tagged_events.push((r.start, 1));  // +1 for start
+                tagged_events.push((r.end, -1));   // -1 for end
+            }
+            // Sort by position; break ties: starts (+1) before ends (-1)
+            tagged_events.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+
+            let mut coverage: i32 = 0;
+            let mut seg_start: Option<u32> = None;
+            for &(pos, delta) in &tagged_events {
+                let prev_coverage = coverage;
+                coverage += delta as i32;
+                if prev_coverage == 0 && coverage > 0 {
+                    seg_start = Some(pos);
+                } else if prev_coverage > 0 && coverage == 0 {
+                    if let Some(start) = seg_start {
+                        // Split this covered span at all boundary points
+                        let boundaries: Vec<u32> = events.iter()
+                            .copied()
+                            .filter(|&e| e > start && e < pos)
+                            .collect();
+                        let mut prev = start;
+                        for b in boundaries {
+                            result.push(Region {
+                                chr: chr.clone(),
+                                start: prev,
+                                end: b,
+                                rest: None,
+                            });
+                            prev = b;
+                        }
+                        result.push(Region {
+                            chr: chr.clone(),
+                            start: prev,
+                            end: pos,
+                            rest: None,
+                        });
+                    }
                 }
             }
 
@@ -2161,5 +2186,26 @@ mod tests {
         // idx 0 (chr1:100-110) should get cluster 1
         assert_eq!(ids[0], 1); // original idx 0 maps to cluster 1
         assert_eq!(ids[1], 0); // original idx 1 maps to cluster 0
+    }
+
+    #[test]
+    fn test_resize_center_large_coords() {
+        // Regression: coordinates near u32::MAX/2 should not overflow in midpoint calc
+        let rs = make_regionset(vec![("chr1", 2_000_000_000, 2_100_000_000)]);
+        let resized = rs.resize(1000, "center");
+        assert_eq!(resized.regions.len(), 1);
+        let r = &resized.regions[0];
+        let expected_mid = 2_000_000_000u32 + (2_100_000_000u32 - 2_000_000_000u32) / 2;
+        assert_eq!(r.start, expected_mid - 500);
+        assert_eq!(r.end, expected_mid - 500 + 1000);
+    }
+
+    #[test]
+    fn test_narrow_start_zero() {
+        // Regression: narrow with start=0 should not panic from underflow
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let narrowed = rs.narrow(Some(0), Some(50), None);
+        assert_eq!(narrowed.regions.len(), 1);
+        // start=0, saturating_sub(1) = 0, so abs_start = 100 + 0 = 100
     }
 }

@@ -62,7 +62,7 @@ pub struct Igd {
     /// Tile/bin size in base pairs (default 16384 = 2^14).
     pub nbp: i32,
     /// Per-chromosome data.
-    pub contigs: Vec<Contig>,
+    pub(crate) contigs: Vec<Contig>,
     /// Per-file metadata (filename, region count, avg width).
     pub file_info: Vec<FileInfo>,
     /// Chromosome name → index into `contigs`.
@@ -92,9 +92,16 @@ impl Igd {
         }
     }
 
+    /// Access the per-chromosome contig data.
+    pub fn contigs(&self) -> &[Contig] {
+        &self.contigs
+    }
+
     /// Add a single interval from a given file index. The IGD must not yet be finalized.
     ///
     /// Intervals with `start >= end` or negative coordinates are silently skipped.
+    /// Note: coordinates are stored as `i32`, limiting effective range to ~2.1 Gbp.
+    /// Values exceeding `i32::MAX` should not be passed.
     ///
     /// # Panics
     ///
@@ -510,6 +517,7 @@ impl Igd {
             None => return 0,
         };
 
+        debug_assert!(hits.len() >= self.file_info.len(), "hits buffer too small");
         let mut total_overlaps: u32 = 0;
 
         Self::walk_tile_overlaps(

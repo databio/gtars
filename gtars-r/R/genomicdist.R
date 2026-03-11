@@ -165,10 +165,10 @@ genomePartitionList <- function(genesGR, exonsGR, threeUTRGR = NULL,
 
   if (has_strand) {
     .Call(wrap__r_partition_list_from_regions_stranded,
-          g$chrs, g$starts, g$ends, g$strands,
-          e$chrs, e$starts, e$ends, e$strands,
-          t3$chrs, t3$starts, t3$ends, t3$strands,
-          t5$chrs, t5$starts, t5$ends, t5$strands,
+          g$chrs, as.integer(g$starts), as.integer(g$ends), g$strands,
+          e$chrs, as.integer(e$starts), as.integer(e$ends), e$strands,
+          t3$chrs, as.integer(t3$starts), as.integer(t3$ends), t3$strands,
+          t5$chrs, as.integer(t5$starts), as.integer(t5$ends), t5$strands,
           as.integer(corePromSize), as.integer(proxPromSize),
           cs_names, cs_sizes)
   } else {

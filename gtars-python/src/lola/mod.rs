@@ -9,6 +9,7 @@ use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
 use gtars_lola::models::{Direction, LolaConfig, LolaResult};
+use gtars_lola::output::apply_fdr_correction;
 use gtars_lola::universe;
 
 // =========================================================================
@@ -181,8 +182,10 @@ fn py_run_lola<'py>(
         direction: dir,
     };
 
-    let results = run_lola(&region_db.inner.igd, &rs_user, &rs_universe, &config)
+    let mut results = run_lola(&region_db.inner.igd, &rs_user, &rs_universe, &config)
         .map_err(|e| PyRuntimeError::new_err(format!("LOLA error: {}", e)))?;
+
+    apply_fdr_correction(&mut results);
 
     results_to_dict(py, &results)
 }

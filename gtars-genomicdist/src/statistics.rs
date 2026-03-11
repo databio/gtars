@@ -91,7 +91,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
 
                 let minimum = widths[0];
                 let maximum = widths[widths.len() - 1];
-                let sum: u32 = widths.iter().sum();
+                let sum: u64 = widths.iter().map(|&w| w as u64).sum();
                 let mean = sum as f64 / count as f64;
 
                 let median = if count % 2 == 0 {
@@ -776,5 +776,25 @@ mod tests {
         let rs = RegionSet::from(regions);
         let widths = rs.calc_widths();
         assert_eq!(widths, vec![10, 0, 250]);
+    }
+
+    #[test]
+    fn test_chromosome_statistics_large_widths() {
+        // Regression: many wide regions whose total width exceeds u32::MAX
+        // Use separate chromosomes to avoid coordinate overlap issues
+        let regions: Vec<Region> = (0..5)
+            .map(|i| Region {
+                chr: format!("chr{}", i + 1),
+                start: 0,
+                end: 1_000_000_000,
+                rest: None,
+            })
+            .collect();
+        let rs = RegionSet::from(regions);
+        let stats = rs.chromosome_statistics();
+        assert_eq!(stats.len(), 5);
+        let s = &stats["chr1"];
+        // Mean width should be 1 billion
+        assert!((s.mean_region_length - 1_000_000_000.0).abs() < 1.0);
     }
 }

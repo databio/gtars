@@ -134,9 +134,9 @@ pub fn r_regionset_length(rs_ptr: Robj) -> extendr_api::Result<i32> {
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_widths")]
-pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
     with_regionset!(rs_ptr, rs, {
-        Ok(rs.calc_widths().into_iter().map(|w| w as f64).collect())
+        Ok(rs.calc_widths().into_iter().map(|w| w as i32).collect())
     })
 }
 
@@ -157,12 +157,12 @@ pub fn r_calc_neighbor_distances(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> 
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_nearest_neighbors")]
-pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
     with_regionset!(rs_ptr, rs, {
         let dists = rs
             .calc_nearest_neighbors()
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
-        Ok(dists.into_iter().map(|d| d as f64).collect())
+        Ok(dists.into_iter().map(|d| d as i32).collect())
     })
 }
 
@@ -179,21 +179,21 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
         });
 
         let mut chr_names: Vec<String> = Vec::new();
-        let mut n_regions: Vec<f64> = Vec::new();
+        let mut n_regions: Vec<i32> = Vec::new();
         let mut start_pos: Vec<f64> = Vec::new();
         let mut end_pos: Vec<f64> = Vec::new();
-        let mut min_len: Vec<f64> = Vec::new();
-        let mut max_len: Vec<f64> = Vec::new();
+        let mut min_len: Vec<i32> = Vec::new();
+        let mut max_len: Vec<i32> = Vec::new();
         let mut mean_len: Vec<f64> = Vec::new();
         let mut median_len: Vec<f64> = Vec::new();
 
         for (chr, s) in &entries {
             chr_names.push(chr.clone());
-            n_regions.push(s.number_of_regions as f64);
+            n_regions.push(s.number_of_regions as i32);
             start_pos.push(s.start_nucleotide_position as f64);
             end_pos.push(s.end_nucleotide_position as f64);
-            min_len.push(s.minimum_region_length as f64);
-            max_len.push(s.maximum_region_length as f64);
+            min_len.push(s.minimum_region_length as i32);
+            max_len.push(s.maximum_region_length as i32);
             mean_len.push(s.mean_region_length);
             median_len.push(s.median_region_length);
         }
@@ -246,15 +246,15 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom
         let mut chrs: Vec<String> = Vec::new();
         let mut starts: Vec<f64> = Vec::new();
         let mut ends: Vec<f64> = Vec::new();
-        let mut counts: Vec<f64> = Vec::new();
-        let mut rids: Vec<f64> = Vec::new();
+        let mut counts: Vec<i32> = Vec::new();
+        let mut rids: Vec<i32> = Vec::new();
 
         for bin in &bins {
             chrs.push(bin.chr.clone());
             starts.push(bin.start as f64);
             ends.push(bin.end as f64);
-            counts.push(bin.n as f64);
-            rids.push(bin.rid as f64);
+            counts.push(bin.n as i32);
+            rids.push(bin.rid as i32);
         }
 
         Ok(list!(
@@ -511,9 +511,12 @@ pub fn r_resize(rs_ptr: Robj, width: i32, fix: &str) -> extendr_api::Result<Robj
 #[extendr(r_name = "r_narrow")]
 pub fn r_narrow(rs_ptr: Robj, start: Robj, end: Robj, width: Robj) -> extendr_api::Result<Robj> {
     with_regionset!(rs_ptr, rs, {
-        let s = if start.is_na() { None } else { Some(checked_u32(i32::try_from(start).unwrap_or(1), "start")?) };
-        let e = if end.is_na() { None } else { Some(checked_u32(i32::try_from(end).unwrap_or(1), "end")?) };
-        let w = if width.is_na() { None } else { Some(checked_u32(i32::try_from(width).unwrap_or(1), "width")?) };
+        let s = if start.is_na() { None } else { Some(checked_u32(i32::try_from(start)
+            .map_err(|_| extendr_api::Error::Other("start must be an integer".into()))?, "start")?) };
+        let e = if end.is_na() { None } else { Some(checked_u32(i32::try_from(end)
+            .map_err(|_| extendr_api::Error::Other("end must be an integer".into()))?, "end")?) };
+        let w = if width.is_na() { None } else { Some(checked_u32(i32::try_from(width)
+            .map_err(|_| extendr_api::Error::Other("width must be an integer".into()))?, "width")?) };
         let result = rs.narrow(s, e, w);
         Ok(ExternalPtr::new(result).into())
     })
@@ -571,7 +574,7 @@ pub fn r_consensus(rs_list: List) -> extendr_api::Result<List> {
     let chrs: Vec<String> = result.iter().map(|r| r.chr.clone()).collect();
     let starts: Vec<f64> = result.iter().map(|r| r.start as f64).collect();
     let ends: Vec<f64> = result.iter().map(|r| r.end as f64).collect();
-    let counts: Vec<f64> = result.iter().map(|r| r.count as f64).collect();
+    let counts: Vec<i32> = result.iter().map(|r| r.count as i32).collect();
     Ok(list!(chr = chrs, start = starts, end = ends, count = counts))
 }
 
@@ -832,11 +835,11 @@ pub fn r_calc_partitions(
         with_partitions!(partition_ptr, pl, {
             let result = calc_partitions(rs, pl, bp_proportion);
             let names: Vec<String> = result.counts.iter().map(|(n, _)| n.clone()).collect();
-            let counts: Vec<f64> = result.counts.iter().map(|(_, c)| *c as f64).collect();
+            let counts: Vec<i32> = result.counts.iter().map(|(_, c)| *c as i32).collect();
             Ok(list!(
                 partition = names,
                 count = counts,
-                total = result.total as f64
+                total = result.total as i32
             ))
         })
     })
