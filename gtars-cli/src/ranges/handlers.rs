@@ -65,6 +65,71 @@ pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
             println!("{}", j);
             Ok(())
         }
+        Some(("shift", m)) => {
+            let rs = load_input(m)?;
+            let offset: i64 = m
+                .get_one::<String>("offset")
+                .unwrap()
+                .parse()
+                .context("--offset must be an integer")?;
+            let result = rs.shift(offset);
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("flank", m)) => {
+            let rs = load_input(m)?;
+            let width: u32 = m
+                .get_one::<String>("width")
+                .unwrap()
+                .parse()
+                .context("--width must be a positive integer")?;
+            let use_start = m.get_flag("start");
+            let both = m.get_flag("both");
+            let result = rs.flank(width, use_start, both);
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("resize", m)) => {
+            let rs = load_input(m)?;
+            let width: u32 = m
+                .get_one::<String>("width")
+                .unwrap()
+                .parse()
+                .context("--width must be a positive integer")?;
+            let fix = m.get_one::<String>("fix").map(|s| s.as_str()).unwrap_or("start");
+            let result = rs.resize(width, fix);
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("narrow", m)) => {
+            let rs = load_input(m)?;
+            let start: Option<u32> = m
+                .get_one::<String>("start")
+                .map(|s| s.parse().context("--start must be a positive integer"))
+                .transpose()?;
+            let end: Option<u32> = m
+                .get_one::<String>("end")
+                .map(|s| s.parse().context("--end must be a positive integer"))
+                .transpose()?;
+            let width: Option<u32> = m
+                .get_one::<String>("width")
+                .map(|s| s.parse().context("--width must be a positive integer"))
+                .transpose()?;
+            let result = rs.narrow(start, end, width);
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("disjoin", m)) => {
+            let rs = load_input(m)?;
+            let result = rs.disjoin();
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("gaps", m)) => {
+            let rs = load_input(m)?;
+            let result = rs.gaps();
+            write_output(&result, m.get_one::<String>("output"))
+        }
+        Some(("intersect", m)) => {
+            let (a, b) = load_pair(m)?;
+            let result = a.intersect(&b);
+            write_output(&result, m.get_one::<String>("output"))
+        }
         _ => unreachable!("ranges subcommand not found"),
     }
 }
