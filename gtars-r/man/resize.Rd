@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{resize,RegionSet-method}
 \alias{resize,RegionSet-method}
-\alias{resize,ANY-method}
+\alias{resize,character-method}
+\alias{resize,data.frame-method}
 \title{Resize regions to a fixed width}
 \usage{
 \S4method{resize}{RegionSet}(x, width, fix = "start", use.names = TRUE, ...)
 
-\S4method{resize}{ANY}(x, width, fix = "start", use.names = TRUE, ...)
+\S4method{resize}{character}(x, width, fix = "start", use.names = TRUE, ...)
+
+\S4method{resize}{data.frame}(x, width, fix = "start", use.names = TRUE, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

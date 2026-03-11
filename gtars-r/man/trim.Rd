@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{trim,RegionSet-method}
 \alias{trim,RegionSet-method}
-\alias{trim,ANY-method}
+\alias{trim,character-method}
+\alias{trim,data.frame-method}
 \title{Trim regions to chromosome boundaries}
 \usage{
 \S4method{trim}{RegionSet}(x, chromSizes, ...)
 
-\S4method{trim}{ANY}(x, chromSizes, ...)
+\S4method{trim}{character}(x, chromSizes, ...)
+
+\S4method{trim}{data.frame}(x, chromSizes, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

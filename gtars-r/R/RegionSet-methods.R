@@ -3,6 +3,12 @@
 #' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps findOverlaps countOverlaps
 NULL
 
+# Helper: coerce-and-dispatch for Bioconductor generics.
+# We register methods for "character" and "data.frame" rather than
+# "ANY", to avoid hijacking dispatch for GRanges/IRanges objects
+# (which have their own methods on these generics).
+.coerce_classes <- c("character", "data.frame")
+
 # =========================================================================
 # Own generics: unary statistics
 # =========================================================================
@@ -156,7 +162,13 @@ setMethod("trim", "RegionSet", function(x, chromSizes, ...) {
 
 #' @rdname trim
 #' @export
-setMethod("trim", "ANY", function(x, chromSizes, ...) {
+setMethod("trim", "character", function(x, chromSizes, ...) {
+  trim(RegionSet(x), chromSizes = chromSizes)
+})
+
+#' @rdname trim
+#' @export
+setMethod("trim", "data.frame", function(x, chromSizes, ...) {
   trim(RegionSet(x), chromSizes = chromSizes)
 })
 
@@ -173,7 +185,13 @@ setMethod("reduce", "RegionSet", function(x, ...) {
 
 #' @rdname reduce
 #' @export
-setMethod("reduce", "ANY", function(x, ...) {
+setMethod("reduce", "character", function(x, ...) {
+  reduce(RegionSet(x))
+})
+
+#' @rdname reduce
+#' @export
+setMethod("reduce", "data.frame", function(x, ...) {
   reduce(RegionSet(x))
 })
 
@@ -196,9 +214,18 @@ setMethod("promoters", "RegionSet", function(x, upstream = 2000L,
 
 #' @rdname promoters
 #' @export
-setMethod("promoters", "ANY", function(x, upstream = 2000L,
-                                        downstream = 200L, ...) {
-  promoters(RegionSet(x), upstream = upstream, downstream = downstream)
+setMethod("promoters", "character", function(x, upstream = 2000L,
+                                              downstream = 200L, ...) {
+  promoters(RegionSet(x), upstream = upstream,
+            downstream = downstream)
+})
+
+#' @rdname promoters
+#' @export
+setMethod("promoters", "data.frame", function(x, upstream = 2000L,
+                                               downstream = 200L, ...) {
+  promoters(RegionSet(x), upstream = upstream,
+            downstream = downstream)
 })
 
 #' Shift regions by a fixed offset
@@ -216,7 +243,15 @@ setMethod("shift", "RegionSet", function(x, shift = 0L, use.names = TRUE) {
 
 #' @rdname shift
 #' @export
-setMethod("shift", "ANY", function(x, shift = 0L, use.names = TRUE) {
+setMethod("shift", "character", function(x, shift = 0L,
+                                          use.names = TRUE) {
+  shift(RegionSet(x), shift = shift)
+})
+
+#' @rdname shift
+#' @export
+setMethod("shift", "data.frame", function(x, shift = 0L,
+                                           use.names = TRUE) {
   shift(RegionSet(x), shift = shift)
 })
 
@@ -240,9 +275,21 @@ setMethod("flank", "RegionSet", function(x, width, start = TRUE,
 
 #' @rdname flank
 #' @export
-setMethod("flank", "ANY", function(x, width, start = TRUE,
-                                    both = FALSE, use.names = TRUE, ...) {
-  flank(RegionSet(x), width = width, start = start, both = both)
+setMethod("flank", "character", function(x, width, start = TRUE,
+                                          both = FALSE,
+                                          use.names = TRUE, ...) {
+  flank(RegionSet(x), width = width, start = start,
+        both = both)
+})
+
+#' @rdname flank
+#' @export
+setMethod("flank", "data.frame", function(x, width,
+                                           start = TRUE,
+                                           both = FALSE,
+                                           use.names = TRUE, ...) {
+  flank(RegionSet(x), width = width, start = start,
+        both = both)
 })
 
 #' Resize regions to a fixed width
@@ -261,7 +308,15 @@ setMethod("resize", "RegionSet", function(x, width, fix = "start", ...) {
 
 #' @rdname resize
 #' @export
-setMethod("resize", "ANY", function(x, width, fix = "start", ...) {
+setMethod("resize", "character", function(x, width,
+                                           fix = "start", ...) {
+  resize(RegionSet(x), width = width, fix = fix)
+})
+
+#' @rdname resize
+#' @export
+setMethod("resize", "data.frame", function(x, width,
+                                            fix = "start", ...) {
   resize(RegionSet(x), width = width, fix = fix)
 })
 
@@ -286,9 +341,20 @@ setMethod("narrow", "RegionSet", function(x, start = NA, end = NA,
 
 #' @rdname narrow
 #' @export
-setMethod("narrow", "ANY", function(x, start = NA, end = NA,
-                                     width = NA, use.names = TRUE) {
-  narrow(RegionSet(x), start = start, end = end, width = width)
+setMethod("narrow", "character", function(x, start = NA,
+                                           end = NA, width = NA,
+                                           use.names = TRUE) {
+  narrow(RegionSet(x), start = start, end = end,
+         width = width)
+})
+
+#' @rdname narrow
+#' @export
+setMethod("narrow", "data.frame", function(x, start = NA,
+                                            end = NA, width = NA,
+                                            use.names = TRUE) {
+  narrow(RegionSet(x), start = start, end = end,
+         width = width)
 })
 
 #' Break regions into non-overlapping disjoint pieces
@@ -304,7 +370,13 @@ setMethod("disjoin", "RegionSet", function(x, ...) {
 
 #' @rdname disjoin
 #' @export
-setMethod("disjoin", "ANY", function(x, ...) {
+setMethod("disjoin", "character", function(x, ...) {
+  disjoin(RegionSet(x))
+})
+
+#' @rdname disjoin
+#' @export
+setMethod("disjoin", "data.frame", function(x, ...) {
   disjoin(RegionSet(x))
 })
 
@@ -321,7 +393,15 @@ setMethod("gaps", "RegionSet", function(x, start = NA, end = NA, ...) {
 
 #' @rdname gaps
 #' @export
-setMethod("gaps", "ANY", function(x, start = NA, end = NA, ...) {
+setMethod("gaps", "character", function(x, start = NA,
+                                         end = NA, ...) {
+  gaps(RegionSet(x))
+})
+
+#' @rdname gaps
+#' @export
+setMethod("gaps", "data.frame", function(x, start = NA,
+                                          end = NA, ...) {
   gaps(RegionSet(x))
 })
 
@@ -471,11 +551,22 @@ setMethod("findOverlaps", c("RegionSet", "RegionSet"),
 
 #' @rdname findOverlaps
 #' @export
-setMethod("findOverlaps", c("ANY", "ANY"),
+setMethod("findOverlaps", c("RegionSet", "ANY"),
   function(query, subject, maxgap = -1L, minoverlap = 0L,
            type = c("any", "start", "end", "within", "equal"),
            select = c("all", "first", "last", "arbitrary"), ...) {
-    findOverlaps(RegionSet(query), RegionSet(subject), minoverlap = minoverlap)
+    findOverlaps(query, RegionSet(subject),
+                 minoverlap = minoverlap)
+})
+
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("ANY", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    findOverlaps(RegionSet(query), subject,
+                 minoverlap = minoverlap)
 })
 
 #' Count overlaps per query region
@@ -500,10 +591,20 @@ setMethod("countOverlaps", c("RegionSet", "RegionSet"),
 
 #' @rdname countOverlaps
 #' @export
-setMethod("countOverlaps", c("ANY", "ANY"),
+setMethod("countOverlaps", c("RegionSet", "ANY"),
   function(query, subject, maxgap = -1L, minoverlap = 0L,
            type = c("any", "start", "end", "within", "equal"), ...) {
-    countOverlaps(RegionSet(query), RegionSet(subject), minoverlap = minoverlap)
+    countOverlaps(query, RegionSet(subject),
+                  minoverlap = minoverlap)
+})
+
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("ANY", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    countOverlaps(RegionSet(query), subject,
+                  minoverlap = minoverlap)
 })
 
 # =========================================================================

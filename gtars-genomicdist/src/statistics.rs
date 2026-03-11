@@ -541,11 +541,9 @@ mod tests {
         let gc = calc_gc_content(&rs, &ga, false).unwrap();
 
         assert_eq!(gc.len(), 2);
-        // iter_chroms uses HashSet so order is nondeterministic
-        let mut sorted_gc = gc.clone();
-        sorted_gc.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        assert!((sorted_gc[0] - 0.5).abs() < 1e-10);  // chr1: GGAA → 50%
-        assert!((sorted_gc[1] - 1.0).abs() < 1e-10);  // chr2: GCGC → 100%
+        // iter_chroms preserves insertion order: chr1 first, chr2 second
+        assert!((gc[0] - 0.5).abs() < 1e-10);  // chr1: GGAA → 50%
+        assert!((gc[1] - 1.0).abs() < 1e-10);  // chr2: GCGC → 100%
     }
 
     #[rstest]

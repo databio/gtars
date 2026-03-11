@@ -2,7 +2,8 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{findOverlaps,RegionSet,RegionSet-method}
 \alias{findOverlaps,RegionSet,RegionSet-method}
-\alias{findOverlaps,ANY,ANY-method}
+\alias{findOverlaps,RegionSet,ANY-method}
+\alias{findOverlaps,ANY,RegionSet-method}
 \title{Find overlapping pairs between two region sets}
 \usage{
 \S4method{findOverlaps}{RegionSet,RegionSet}(
@@ -15,7 +16,17 @@
   ...
 )
 
-\S4method{findOverlaps}{ANY,ANY}(
+\S4method{findOverlaps}{RegionSet,ANY}(
+  query,
+  subject,
+  maxgap = -1L,
+  minoverlap = 0L,
+  type = c("any", "start", "end", "within", "equal"),
+  select = c("all", "first", "last", "arbitrary"),
+  ...
+)
+
+\S4method{findOverlaps}{ANY,RegionSet}(
   query,
   subject,
   maxgap = -1L,

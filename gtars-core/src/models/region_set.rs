@@ -397,7 +397,13 @@ impl RegionSet {
     /// Iterate unique chromosomes located in RegionSet
     ///
     pub fn iter_chroms(&self) -> impl Iterator<Item = &String> {
-        let unique_chroms: HashSet<&String> = self.regions.iter().map(|r| &r.chr).collect();
+        let mut seen = HashSet::new();
+        let mut unique_chroms = Vec::new();
+        for r in &self.regions {
+            if seen.insert(&r.chr) {
+                unique_chroms.push(&r.chr);
+            }
+        }
         unique_chroms.into_iter()
     }
 

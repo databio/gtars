@@ -50,24 +50,10 @@ runLOLA <- function(userSets, userUniverse, regionDB,
                      minOverlap = 1, cores = 1,
                      redefineUserSets = FALSE,
                      direction = "enrichment") {
-  # Normalize userSets to a list of RegionSet pointers
-  if (is(userSets, "RegionSet")) {
-    user_ptrs <- list(.ptr(userSets))
-  } else if (is.list(userSets)) {
-    user_ptrs <- lapply(userSets, function(x) {
-      if (is(x, "RegionSet")) .ptr(x)
-      else stop("All elements of userSets must be RegionSet objects")
-    })
-  } else {
-    stop("userSets must be a RegionSet or list of RegionSets")
-  }
-
-  # Get universe pointer
-  if (is(userUniverse, "RegionSet")) {
-    universe_ptr <- .ptr(userUniverse)
-  } else {
-    stop("userUniverse must be a RegionSet object")
-  }
+  # Normalize inputs — accept GRanges, RegionSet, file paths, etc.
+  if (!is.list(userSets)) userSets <- list(userSets)
+  user_ptrs <- lapply(userSets, .ensure_regionset)
+  universe_ptr <- .ensure_regionset(userUniverse)
 
   # Optionally redefine user sets
   if (redefineUserSets) {
@@ -105,19 +91,9 @@ listRegionSets <- function(regionDB, collections = NULL) {
 #' @export
 checkUniverseAppropriateness <- function(userSets, userUniverse,
                                           cores = 1, fast = FALSE) {
-  if (is(userSets, "RegionSet")) {
-    user_ptrs <- list(.ptr(userSets))
-  } else if (is.list(userSets)) {
-    user_ptrs <- lapply(userSets, .ptr)
-  } else {
-    stop("userSets must be a RegionSet or list of RegionSets")
-  }
-
-  if (is(userUniverse, "RegionSet")) {
-    universe_ptr <- .ptr(userUniverse)
-  } else {
-    stop("userUniverse must be a RegionSet object")
-  }
+  if (!is.list(userSets)) userSets <- list(userSets)
+  user_ptrs <- lapply(userSets, .ensure_regionset)
+  universe_ptr <- .ensure_regionset(userUniverse)
 
   result <- check_universe(user_ptrs, universe_ptr)
   df <- as.data.frame(result[names(result) != "warnings"],
@@ -139,19 +115,9 @@ checkUniverseAppropriateness <- function(userSets, userUniverse,
 #' @return A list of RegionSet objects
 #' @export
 redefineUserSets <- function(userSets, userUniverse, cores = 1) {
-  if (is(userSets, "RegionSet")) {
-    user_ptrs <- list(.ptr(userSets))
-  } else if (is.list(userSets)) {
-    user_ptrs <- lapply(userSets, .ptr)
-  } else {
-    stop("userSets must be a RegionSet or list of RegionSets")
-  }
-
-  if (is(userUniverse, "RegionSet")) {
-    universe_ptr <- .ptr(userUniverse)
-  } else {
-    stop("userUniverse must be a RegionSet object")
-  }
+  if (!is.list(userSets)) userSets <- list(userSets)
+  user_ptrs <- lapply(userSets, .ensure_regionset)
+  universe_ptr <- .ensure_regionset(userUniverse)
 
   ptrs <- redefine_user_sets(user_ptrs, universe_ptr)
   lapply(ptrs, function(p) RegionSet(p))

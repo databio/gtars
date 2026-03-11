@@ -2,7 +2,8 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{countOverlaps,RegionSet,RegionSet-method}
 \alias{countOverlaps,RegionSet,RegionSet-method}
-\alias{countOverlaps,ANY,ANY-method}
+\alias{countOverlaps,RegionSet,ANY-method}
+\alias{countOverlaps,ANY,RegionSet-method}
 \title{Count overlaps per query region}
 \usage{
 \S4method{countOverlaps}{RegionSet,RegionSet}(
@@ -14,7 +15,16 @@
   ...
 )
 
-\S4method{countOverlaps}{ANY,ANY}(
+\S4method{countOverlaps}{RegionSet,ANY}(
+  query,
+  subject,
+  maxgap = -1L,
+  minoverlap = 0L,
+  type = c("any", "start", "end", "within", "equal"),
+  ...
+)
+
+\S4method{countOverlaps}{ANY,RegionSet}(
   query,
   subject,
   maxgap = -1L,

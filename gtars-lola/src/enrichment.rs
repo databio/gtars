@@ -52,10 +52,119 @@ impl ContingencyTable {
         }
     }
 
-    /// Compute the odds ratio: (a*d) / (b*c).
-    /// Returns f64::INFINITY if denominator is zero and numerator > 0.
-    /// Returns 0.0 if numerator is zero.
+    /// Compute the conditional maximum likelihood estimate (CMLE) of the odds
+    /// ratio, matching R's `fisher.test()$estimate`.
+    ///
+    /// This finds the noncentrality parameter ω of the Fisher noncentral
+    /// hypergeometric distribution such that E[X | ω] equals the observed
+    /// cell count `a`.  When the observed `a` is at the boundary of its
+    /// support the MLE is 0 or ∞.
     pub fn odds_ratio(&self) -> f64 {
+        let m = self.a + self.c; // column 1 total
+        let n = self.b + self.d; // column 2 total
+        let k = self.a + self.b; // row 1 total
+        let x = self.a;
+
+        let lo = if k > n { k - n } else { 0 };
+        let hi = k.min(m);
+
+        // Boundary / degenerate cases
+        if lo == hi {
+            return f64::NAN; // only one possible table
+        }
+        if x == lo {
+            return 0.0;
+        }
+        if x == hi {
+            return f64::INFINITY;
+        }
+
+        // Precompute log-densities of the central hypergeometric distribution
+        // using pure recurrence (no lgamma calls) for maximum precision.
+        // d(y+1)/d(y) = (m-y)(k-y) / ((y+1)(n-k+y+1))
+        // We set logdc[0] = 0 since only relative values matter (they cancel
+        // in the normalised mean computation).
+        let support_size = (hi - lo + 1) as usize;
+        let mut logdc = Vec::with_capacity(support_size);
+        logdc.push(0.0); // logdc[0] = log(1) = 0 (arbitrary reference)
+        for i in 1..support_size {
+            let y = lo + i as u64 - 1; // previous support value
+            let log_ratio = ((m - y) as f64).ln() + ((k - y) as f64).ln()
+                - ((y + 1) as f64).ln()
+                - ((n - k + y + 1) as f64).ln();
+            logdc.push(logdc[i - 1] + log_ratio);
+        }
+
+        // Mean of the noncentral hypergeometric for a given omega.
+        // Uses compensated (Kahan) summation for precision.
+        let mean_nhyper = |omega: f64| -> f64 {
+            if omega == 0.0 {
+                return lo as f64;
+            }
+            if omega.is_infinite() {
+                return hi as f64;
+            }
+            let log_omega = omega.ln();
+            let log_vals: Vec<f64> = logdc
+                .iter()
+                .enumerate()
+                .map(|(i, &ld)| ld + (lo as f64 + i as f64) * log_omega)
+                .collect();
+            let max_log = log_vals.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+
+            // Kahan summation for both sum and weighted sum
+            let mut sum = 0.0f64;
+            let mut sum_c = 0.0f64;
+            let mut wsum = 0.0f64;
+            let mut wsum_c = 0.0f64;
+            for (i, &lv) in log_vals.iter().enumerate() {
+                let w = (lv - max_log).exp();
+                let y = lo as f64 + i as f64;
+
+                let yw = y * w - wsum_c;
+                let wt = wsum + yw;
+                wsum_c = (wt - wsum) - yw;
+                wsum = wt;
+
+                let sw = w - sum_c;
+                let st = sum + sw;
+                sum_c = (st - sum) - sw;
+                sum = st;
+            }
+            wsum / sum
+        };
+
+        let xf = x as f64;
+        let mu1 = mean_nhyper(1.0);
+
+        if (mu1 - xf).abs() < 1e-12 {
+            return 1.0;
+        }
+
+        // Brent's method (bisection with ITP-like speedup)
+        // E[X | omega] is monotonically increasing in omega, so a unique root exists.
+        if mu1 > xf {
+            // omega < 1: search [0, 1]
+            brent(|t| mean_nhyper(t) - xf, 0.0, 1.0, 1e-8, 100)
+        } else {
+            // omega > 1: reparameterise as t = 1/omega, search t in (eps, 1)
+            let t = brent(
+                |t| mean_nhyper(1.0 / t) - xf,
+                f64::EPSILON,
+                1.0,
+                1e-8,
+                100,
+            );
+            1.0 / t
+        }
+    }
+
+    /// Compute the sample odds ratio: (a*d) / (b*c).
+    ///
+    /// This is the unconditional (plug-in) estimator; it differs from R's
+    /// `fisher.test()$estimate` which uses the conditional MLE.
+    #[allow(dead_code)]
+    pub fn sample_odds_ratio(&self) -> f64 {
         let num = self.a as f64 * self.d as f64;
         let den = self.b as f64 * self.c as f64;
 
@@ -63,7 +172,7 @@ impl ContingencyTable {
             if num > 0.0 {
                 f64::INFINITY
             } else {
-                0.0 // 0/0 case
+                0.0
             }
         } else {
             num / den
@@ -210,6 +319,98 @@ fn rank_results(results: &mut [LolaResult]) {
     }
 }
 
+/// Brent's root-finding method on the interval [a, b].
+///
+/// `f` must be continuous and `f(a)` and `f(b)` must have opposite signs
+/// (or one must be zero).  Returns the root to within `tol`.
+fn brent<F: Fn(f64) -> f64>(f: F, mut a: f64, mut b: f64, tol: f64, max_iter: usize) -> f64 {
+    let mut fa = f(a);
+    let mut fb = f(b);
+
+    // If one endpoint is already a root, return it.
+    if fa.abs() < tol {
+        return a;
+    }
+    if fb.abs() < tol {
+        return b;
+    }
+
+    // Ensure fa and fb have opposite signs; if not, fall back to midpoint.
+    if fa * fb > 0.0 {
+        return (a + b) / 2.0;
+    }
+
+    let mut c = a;
+    let mut fc = fa;
+    let mut d = b - a;
+    let mut e = d;
+
+    for _ in 0..max_iter {
+        if fb * fc > 0.0 {
+            c = a;
+            fc = fa;
+            d = b - a;
+            e = d;
+        }
+        if fc.abs() < fb.abs() {
+            a = b;
+            b = c;
+            c = a;
+            fa = fb;
+            fb = fc;
+            fc = fa;
+        }
+
+        let tol1 = 2.0 * f64::EPSILON * b.abs() + 0.5 * tol;
+        let m = 0.5 * (c - b);
+
+        if m.abs() <= tol1 || fb == 0.0 {
+            return b;
+        }
+
+        if e.abs() >= tol1 && fa.abs() > fb.abs() {
+            // Attempt inverse quadratic interpolation
+            let s = fb / fa;
+            let (p, q) = if (a - c).abs() < f64::EPSILON {
+                let p = 2.0 * m * s;
+                let q = 1.0 - s;
+                (p, q)
+            } else {
+                let q_val = fa / fc;
+                let r = fb / fc;
+                let p = s * (2.0 * m * q_val * (q_val - r) - (b - a) * (r - 1.0));
+                let q = (q_val - 1.0) * (r - 1.0) * (s - 1.0);
+                (p, q)
+            };
+
+            let (p, q) = if p > 0.0 { (p, -q) } else { (-p, q) };
+
+            if 2.0 * p < (3.0 * m * q - (tol1 * q).abs()).min(e * q) {
+                e = d;
+                d = p / q;
+            } else {
+                d = m;
+                e = m;
+            }
+        } else {
+            d = m;
+            e = m;
+        }
+
+        a = b;
+        fa = fb;
+
+        if d.abs() > tol1 {
+            b += d;
+        } else {
+            b += if m > 0.0 { tol1 } else { -tol1 };
+        }
+        fb = f(b);
+    }
+
+    b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -221,21 +422,32 @@ mod tests {
     // -------------------------------------------------------------------
 
     #[test]
-    fn test_contingency_odds_ratio() {
+    fn test_contingency_odds_ratio_cmle() {
+        // Compare CMLE against R's fisher.test()$estimate
+        // R: fisher.test(matrix(c(10,30,20,40), nrow=2))$estimate = 0.6693434
         let ct = ContingencyTable {
             a: 10,
             b: 20,
             c: 30,
             d: 40,
         };
-        // (10*40) / (20*30) = 400/600 = 0.6667
         let or = ct.odds_ratio();
-        assert!((or - 0.6667).abs() < 0.001);
+        assert!(
+            (or - 0.6693434).abs() < 0.001,
+            "CMLE odds ratio should be ~0.6693, got {}",
+            or
+        );
+
+        // Sample OR for comparison: (10*40)/(20*30) = 0.6667
+        let sample = ct.sample_odds_ratio();
+        assert!((sample - 0.6667).abs() < 0.001);
+        // CMLE and sample OR should differ
+        assert!((or - sample).abs() > 0.001);
     }
 
     #[test]
-    fn test_contingency_odds_ratio_zero_denom() {
-        // b=0: denominator is 0, numerator > 0 → infinity
+    fn test_contingency_odds_ratio_boundary() {
+        // a at upper boundary (a = hi = min(k, m)) → Infinity
         let ct = ContingencyTable {
             a: 10,
             b: 0,
@@ -244,12 +456,12 @@ mod tests {
         };
         assert_eq!(ct.odds_ratio(), f64::INFINITY);
 
-        // a=0, d=0: numerator is 0 → 0
+        // a at lower boundary (a = lo = max(0, k-n)) → 0
         let ct2 = ContingencyTable {
             a: 0,
             b: 5,
-            c: 0,
-            d: 0,
+            c: 10,
+            d: 100,
         };
         assert_eq!(ct2.odds_ratio(), 0.0);
     }

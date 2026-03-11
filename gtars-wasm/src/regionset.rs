@@ -282,6 +282,54 @@ impl JsRegionSet {
     pub fn jaccard(&self, other: &JsRegionSet) -> f64 {
         self.region_set.jaccard(&other.region_set)
     }
+
+    #[wasm_bindgen(js_name = "shift")]
+    pub fn shift(&self, offset: i64) -> JsRegionSet {
+        let result = self.region_set.shift(offset);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "flank")]
+    pub fn flank(&self, width: u32, use_start: bool, both: bool) -> JsRegionSet {
+        let result = self.region_set.flank(width, use_start, both);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "resize")]
+    pub fn resize(&self, width: u32, fix: &str) -> JsRegionSet {
+        let result = self.region_set.resize(width, fix);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "narrow")]
+    pub fn narrow(
+        &self,
+        start: Option<u32>,
+        end: Option<u32>,
+        width: Option<u32>,
+    ) -> JsRegionSet {
+        let result = self.region_set.narrow(start, end, width);
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "disjoin")]
+    pub fn disjoin(&self) -> JsRegionSet {
+        let result = self.region_set.disjoin();
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "gaps")]
+    pub fn gaps(&self) -> JsRegionSet {
+        let result = self.region_set.gaps();
+        JsRegionSet { region_set: result }
+    }
+
+    #[wasm_bindgen(js_name = "intersect")]
+    pub fn intersect(&self, other: &JsRegionSet) -> JsRegionSet {
+        let result = self.region_set.intersect(&other.region_set);
+        JsRegionSet { region_set: result }
+    }
+
 }
 
 /// Builder for computing consensus regions from multiple RegionSet objects.

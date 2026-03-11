@@ -58,7 +58,7 @@ r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics,
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param n_bins Number of bins (default 250)
-r_region_distribution <- function(rs_ptr, n_bins, chrom_names = NULL, chrom_lengths = NULL) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
+r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
 
 #' Load a genome assembly from a FASTA file
 #' @export

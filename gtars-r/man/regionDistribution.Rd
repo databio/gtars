@@ -4,7 +4,7 @@
 \alias{regionDistribution}
 \title{Calculate region distribution across bins}
 \usage{
-regionDistribution(query, nBins = 250L)
+regionDistribution(query, nBins = 250L, chromSizes = NULL)
 }
 \arguments{
 \item{query}{A GRanges object, file path, data.frame, or RegionSet}

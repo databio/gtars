@@ -25,9 +25,11 @@ genomePartitionList(
 \item{fiveUTRGR}{GRanges, file path, data.frame, or RegionSet for 5'UTR regions
 (NULL to omit)}
 
-\item{corePromSize}{Core promoter size in bp (default 100)}
+\item{corePromSize}{Core promoter size in bp (default 100, matching R
+GenomicDistributions)}
 
-\item{proxPromSize}{Proximal promoter size in bp (default 2000)}
+\item{proxPromSize}{Proximal promoter size in bp (default 2000, matching R
+GenomicDistributions)}
 
 \item{chromSizes}{Optional named numeric vector of chromosome sizes.
 When provided, promoter regions are trimmed at chromosome boundaries.}

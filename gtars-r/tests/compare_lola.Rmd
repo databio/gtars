@@ -25,13 +25,21 @@ library(GenomicRanges)
 
 ## 1. Load the Region Database
 
-The LOLA package ships with a small example database (5 BED files from UCSC, hg19).
+```{r config}
+# Set db_path before knitting to use a custom database.
+# Default: LOLA's built-in 5-file hg19 example.
+if (!exists("db_path")) {
+  db_path <- system.file("extdata", "hg19", package = "LOLA")
+}
+cat("Database:", db_path, "\n")
+```
 
 ### R LOLA
 
 ```{r load-db-r}
-dbPath <- system.file("extdata", "hg19", package = "LOLA")
-t_r <- system.time(regionDB_r <- LOLA::loadRegionDB(dbPath))
+t_r <- system.time(
+  regionDB_r <- LOLA::loadRegionDB(db_path)
+)
 cat("R LOLA loadRegionDB:", t_r["elapsed"], "s\n")
 cat("Type:", class(regionDB_r), "\n")
 cat("Elements:", paste(names(regionDB_r), collapse = ", "), "\n")
@@ -41,11 +49,13 @@ cat("Region sets:", nrow(regionDB_r$regionAnno), "\n")
 ### gtars (Rust)
 
 ```{r load-db-rust}
-t_rust <- system.time(regionDB_rust <- gtars::loadRegionDB(dbPath))
+t_rust <- system.time(
+  regionDB_rust <- gtars::loadRegionDB(db_path)
+)
 cat("gtars loadRegionDB:", t_rust["elapsed"], "s\n")
 cat("Type:", class(regionDB_rust), "\n")
-cat("Region sets:", length(gtars::listRegionSets(regionDB_rust)), "\n")
-cat("Filenames:", paste(gtars::listRegionSets(regionDB_rust), collapse = ", "), "\n")
+cat("Region sets:",
+    length(gtars::listRegionSets(regionDB_rust)), "\n")
 ```
 
 ### Compare database contents
@@ -58,11 +68,13 @@ cat("Filenames match:", identical(r_files, rust_files), "\n")
 
 ## 2. Load Sample Data
 
-LOLA ships with `sample_input` (a GRangesList with 2 user sets) and `sample_universe`.
+LOLA ships with `sample_input` (a GRangesList with 2 user sets)
+and `sample_universe`. For larger databases, we also use the
+vistaEnhancers dataset as a more interesting query.
 
 ```{r load-sample-data}
-data("sample_input", package = "LOLA")   # loads userSets (GRangesList)
-data("sample_universe", package = "LOLA") # loads userUniverse (GRanges)
+data("sample_input", package = "LOLA")
+data("sample_universe", package = "LOLA")
 
 cat("userSets:", length(userSets), "sets\n")
 for (i in seq_along(userSets)) {
@@ -73,19 +85,17 @@ cat("userUniverse:", length(userUniverse), "regions\n")
 
 ### Convert to gtars RegionSet objects
 
-gtars uses its own `RegionSet` S4 class (backed by Rust). GRanges objects convert
-automatically via `RegionSet()`.
+gtars uses its own `RegionSet` S4 class (backed by Rust). GRanges
+objects convert automatically via `RegionSet()`.
 
 ```{r convert-to-regionset}
-# Convert each user set to a gtars RegionSet
-userSets_rust <- lapply(userSets, function(gr) gtars::RegionSet(gr))
+userSets_rust <- lapply(userSets, function(gr) {
+  gtars::RegionSet(gr)
+})
 universe_rust <- gtars::RegionSet(userUniverse)
 
-cat("Converted", length(userSets_rust), "user sets and 1 universe to RegionSet\n")
-for (i in seq_along(userSets_rust)) {
-  cat("  set", i, ":", length(userSets_rust[[i]]), "regions\n")
-}
-cat("  universe:", length(universe_rust), "regions\n")
+cat("Converted", length(userSets_rust),
+    "user sets and 1 universe to RegionSet\n")
 ```
 
 ## 3. Run LOLA Enrichment
@@ -258,24 +268,36 @@ print(univ_check_rust)
 Both packages can build a database directly from BED file paths (no LOLA folder needed).
 
 ```{r db-from-beds}
-bed_dir <- file.path(dbPath, "ucsc_example", "regions")
-bed_files <- list.files(bed_dir, pattern = "\\.bed$", full.names = TRUE)
-# Exclude the one with column names header
-bed_files <- bed_files[!grepl("colNames", bed_files)]
-cat("BED files:", length(bed_files), "\n")
-cat(paste(" ", basename(bed_files), collapse = "\n"), "\n")
+# Find BED files from the first collection
+colls <- list.dirs(db_path, recursive = FALSE)
+bed_dir <- file.path(colls[1], "regions")
+if (!dir.exists(bed_dir)) {
+  cat("Skipping: no regions/ dir in", colls[1], "\n")
+} else {
+  bed_files <- list.files(bed_dir, pattern = "\\.bed$",
+                          full.names = TRUE)
+  bed_files <- bed_files[!grepl("colNames", bed_files)]
+  # Limit to 20 files for speed
+  bed_files <- head(bed_files, 20)
+  cat("BED files:", length(bed_files), "from",
+      basename(colls[1]), "\n")
 
-db_from_beds <- gtars::loadRegionDBFromBeds(bed_files)
-cat("\nLoaded DB with", length(gtars::listRegionSets(db_from_beds)), "region sets\n")
+  db_from_beds <- gtars::loadRegionDBFromBeds(bed_files)
+  cat("Loaded DB with",
+      length(gtars::listRegionSets(db_from_beds)),
+      "region sets\n")
 
-results_beds <- gtars::runLOLA(userSets_rust, universe_rust, db_from_beds)
-cat("Results from BED-loaded DB:", nrow(results_beds), "rows\n")
+  results_beds <- gtars::runLOLA(
+    userSets_rust, universe_rust, db_from_beds
+  )
+  cat("Results:", nrow(results_beds), "rows\n")
+}
 ```
 
 ## 10. Performance Comparison
 
 ```{r benchmark, fig.width=8, fig.height=4}
-n_iter <- 20
+n_iter <- 5
 
 times_r <- replicate(n_iter, {
   system.time(LOLA::runLOLA(userSets, userUniverse, regionDB_r, cores = 1))["elapsed"]
@@ -299,22 +321,38 @@ boxplot(list(R_LOLA = times_r, gtars = times_rust),
 ```{r summary}
 cat("=== LOLA Port Validation Summary ===\n\n")
 
+pv_cor <- cor(r_df$pValueLog, rust_df$pValueLog,
+              use = "complete.obs")
+or_cor <- cor(r_df$oddsRatio, rust_df$oddsRatio,
+              use = "complete.obs")
+
 checks <- c(
-  "Database filenames match" = identical(r_files, rust_files),
-  "Support values match" = all(r_df$support == rust_df$support),
+  "Database filenames match" =
+    identical(r_files, rust_files),
+  "Support values match" =
+    all(r_df$support == rust_df$support),
   "b values match" = all(r_df$b == rust_df$b),
   "c values match" = all(r_df$c == rust_df$c),
   "d values match" = all(r_df$d == rust_df$d),
-  "pValueLog correlation > 0.99" = cor(r_df$pValueLog, rust_df$pValueLog) > 0.99,
-  "oddsRatio correlation > 0.99" = cor(r_df$oddsRatio, rust_df$oddsRatio) > 0.99
+  "pValueLog correlation > 0.99" =
+    !is.na(pv_cor) && pv_cor > 0.99,
+  "oddsRatio max relative diff < 0.1%" = {
+    finite <- is.finite(r_df$oddsRatio) &
+              is.finite(rust_df$oddsRatio) &
+              rust_df$oddsRatio != 0
+    all(abs(r_df$oddsRatio[finite] -
+            rust_df$oddsRatio[finite]) /
+        rust_df$oddsRatio[finite] < 0.001)
+  }
 )
 
 for (nm in names(checks)) {
-  status <- if (checks[[nm]]) "PASS" else "FAIL"
+  status <- if (isTRUE(checks[[nm]])) "PASS" else "FAIL"
   cat(sprintf("  [%s] %s\n", status, nm))
 }
 
-cat(sprintf("\nOverall: %d/%d checks passed\n", sum(checks), length(checks)))
+cat(sprintf("\nOverall: %d/%d checks passed\n",
+            sum(checks, na.rm = TRUE), length(checks)))
 ```
 
 ## Session Info

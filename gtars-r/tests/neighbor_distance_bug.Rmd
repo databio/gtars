@@ -143,7 +143,8 @@ not the actual gap between the regions.
 
 gtars uses `next.start - current.end` (in 0-based half-open coordinates). For
 the contained-region case, this correctly produces a negative value (the regions
-overlap), which is then filtered out.
+overlap), which is filtered out internally — only positive inter-region gaps
+are returned.
 
 ```{r compare}
 cat("All", length(g_dists), "gtars distances are real inter-region gaps\n")

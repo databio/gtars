@@ -48,6 +48,8 @@ gtars-r/tests/compare_genomicdist.*
 gtars-r/tests/tutorial_genomicdist.*
 gtars-r/tests/*.bed
 gtars-r/tests/*.html
+gtars-r/tests/LOLACore*
+gtars-r/tests/ext/
 gtars-r/tests/export_reference_data.R
 gtars-r/tests/ref/
 gtars-r/tests/smoketest_set_operations.*
