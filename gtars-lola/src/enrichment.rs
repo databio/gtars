@@ -233,9 +233,35 @@ pub fn run_lola(
 
         for db_idx in 0..n_db {
             let a = user_hits[db_idx];
-            let b = universe_hits[db_idx].saturating_sub(a);
-            let c = user_set_size.saturating_sub(a);
-            let d = universe_size.saturating_sub(a + b + c);
+
+            // Validate: user hits cannot exceed universe hits (user must be subset of universe)
+            if a > universe_hits[db_idx] {
+                return Err(LolaError::NegativeContingency {
+                    field: "b",
+                    value: universe_hits[db_idx] as i64 - a as i64,
+                    db_set: db_idx,
+                });
+            }
+            let b = universe_hits[db_idx] - a;
+
+            if a > user_set_size {
+                return Err(LolaError::NegativeContingency {
+                    field: "c",
+                    value: user_set_size as i64 - a as i64,
+                    db_set: db_idx,
+                });
+            }
+            let c = user_set_size - a;
+
+            let abc = a + b + c;
+            if abc > universe_size {
+                return Err(LolaError::NegativeContingency {
+                    field: "d",
+                    value: universe_size as i64 - abc as i64,
+                    db_set: db_idx,
+                });
+            }
+            let d = universe_size - abc;
 
             let ct = ContingencyTable { a, b, c, d };
             let pv_log = ct.p_value_log(config.direction);
@@ -1017,6 +1043,38 @@ mod tests {
         };
         let r11 = run_lola(&igd, &[user_10bp], &universe, &config11).unwrap();
         assert_eq!(r11[0].support, 0, "10bp overlap with min_overlap=11 should not count");
+    }
+
+    #[test]
+    fn test_run_lola_user_not_subset_of_universe() {
+        // User set has regions NOT in the universe — should return NegativeContingency error
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![("chr1".to_string(), 100, 200)],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        // User has 3 regions that overlap db0, but universe only has 1 that overlaps db0.
+        // This means user_hits > universe_hits, which is invalid.
+        let user = make_region_set(vec![
+            make_region("chr1", 110, 120),
+            make_region("chr1", 130, 140),
+            make_region("chr1", 150, 160),
+        ]);
+        // Universe has only 1 region overlapping db0 and 1 not overlapping
+        let universe = make_region_set(vec![
+            make_region("chr1", 110, 120),
+            make_region("chr1", 500, 600),
+        ]);
+
+        let result = run_lola(&igd, &[user], &universe, &LolaConfig::default());
+        assert!(result.is_err(), "Expected NegativeContingency error");
+        let err = result.unwrap_err();
+        assert!(
+            matches!(err, LolaError::NegativeContingency { field: "b", .. }),
+            "Expected NegativeContingency for field 'b', got: {}",
+            err
+        );
     }
 
     #[test]

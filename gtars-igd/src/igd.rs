@@ -98,7 +98,7 @@ impl Igd {
             !self.finalized,
             "Cannot add intervals after finalization"
         );
-        if start >= end {
+        if start < 0 || end < 0 || start >= end {
             return;
         }
 
@@ -190,7 +190,7 @@ impl Igd {
             for line in reader.lines() {
                 let line = line?;
                 if let Some((chrom, start, end, score)) = Self::parse_bed_line(&line) {
-                    if start >= 0 && end < 321_000_000 {
+                    if start >= 0 {
                         igd.add(&chrom, start, end, score, file_idx as u32);
                         count += 1;
                         total_width += (end - start) as u64;
@@ -234,9 +234,11 @@ impl Igd {
             let mut total_width: u64 = 0;
 
             for (chrom, start, end) in &regions {
-                igd.add(chrom, *start, *end, 0, file_idx as u32);
-                count += 1;
-                total_width += (*end - *start) as u64;
+                if *start < *end {
+                    igd.add(chrom, *start, *end, 0, file_idx as u32);
+                    count += 1;
+                    total_width += (*end - *start) as u64;
+                }
             }
 
             file_infos.push(FileInfo {
@@ -265,11 +267,13 @@ impl Igd {
             let mut total_width: u64 = 0;
 
             for region in &region_set.regions {
-                let start = region.start as i32;
-                let end = region.end as i32;
-                igd.add(&region.chr, start, end, 0, file_idx as u32);
-                count += 1;
-                total_width += (end - start) as u64;
+                if region.start < region.end {
+                    let start = region.start as i32;
+                    let end = region.end as i32;
+                    igd.add(&region.chr, start, end, 0, file_idx as u32);
+                    count += 1;
+                    total_width += (end - start) as u64;
+                }
             }
 
             file_infos.push(FileInfo {
@@ -471,6 +475,11 @@ impl Igd {
         hits: &mut [u64],
     ) -> u32 {
         assert!(self.finalized, "Must finalize before querying");
+
+        if start >= end || end <= 0 {
+            return 0;
+        }
+        let start = start.max(0);
 
         let ctg_idx = match self.chrom_index.get(chrom) {
             Some(&idx) => idx,
@@ -912,7 +921,7 @@ impl Igd {
         let start: i32 = fields.next()?.parse().ok()?;
         let end: i32 = fields.next()?.parse().ok()?;
 
-        if !chrom.starts_with("chr") || chrom.len() >= 40 || end <= 0 {
+        if chrom.len() >= 40 || end <= 0 {
             return None;
         }
 
@@ -1425,5 +1434,97 @@ mod tests {
 
         let counts = igd.count_overlaps_per_query(&query, 1);
         assert_eq!(counts, vec![1]);
+    }
+
+    #[test]
+    fn test_from_region_sets_skips_invalid_intervals() {
+        // Mix of valid and invalid intervals — invalid should be skipped in count/width
+        let sets = vec![(
+            "test.bed".to_string(),
+            vec![
+                ("chr1".to_string(), 100, 200), // valid: 100bp
+                ("chr1".to_string(), 300, 300), // invalid: start == end
+                ("chr1".to_string(), 500, 400), // invalid: start > end
+                ("chr1".to_string(), 600, 700), // valid: 100bp
+            ],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        assert_eq!(igd.file_info.len(), 1);
+        assert_eq!(igd.file_info[0].num_regions, 2, "Only 2 valid intervals");
+        assert!(
+            (igd.file_info[0].avg_region_width - 100.0).abs() < 1e-6,
+            "avg width should be 100.0, got {}",
+            igd.file_info[0].avg_region_width
+        );
+    }
+
+    #[test]
+    fn test_add_negative_coordinates_no_panic() {
+        let mut igd = Igd::new();
+        igd.file_info = vec![FileInfo {
+            filename: "test.bed".into(),
+            num_regions: 0,
+            avg_region_width: 0.0,
+        }];
+
+        // These should all be silently skipped, no panic
+        igd.add("chr1", -100, 200, 0, 0);
+        igd.add("chr1", 100, -200, 0, 0);
+        igd.add("chr1", -100, -50, 0, 0);
+
+        // Add one valid interval to verify the IGD still works
+        igd.add("chr1", 100, 200, 0, 0);
+        igd.finalize();
+
+        // Query should find the one valid interval
+        let mut hits = vec![0u64; 1];
+        let count = igd.count_overlaps("chr1", 150, 160, 1, &mut hits);
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_query_negative_coordinates() {
+        let sets = vec![(
+            "test.bed".to_string(),
+            vec![("chr1".to_string(), 100, 200)],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let mut hits = vec![0u64; 1];
+        // Negative start, positive end — should clamp start to 0 and still work
+        let count = igd.count_overlaps("chr1", -50, 150, 1, &mut hits);
+        assert_eq!(count, 1, "Should find overlap after clamping negative start");
+
+        // Both negative — should return 0
+        hits[0] = 0;
+        let count = igd.count_overlaps("chr1", -100, -50, 1, &mut hits);
+        assert_eq!(count, 0, "Both negative should return 0");
+    }
+
+    #[test]
+    fn test_parse_bed_line_no_chr_prefix() {
+        // Non-UCSC chromosome names should now be accepted
+        let result = Igd::parse_bed_line("1\t100\t200\tname\t500");
+        assert!(result.is_some(), "Should parse non-chr-prefixed chromosomes");
+        let (chrom, start, end, score) = result.unwrap();
+        assert_eq!(chrom, "1");
+        assert_eq!(start, 100);
+        assert_eq!(end, 200);
+        assert_eq!(score, 500);
+    }
+
+    #[test]
+    fn test_from_bed_dir_large_coordinates() {
+        // Intervals with coordinates > 321M should now be accepted
+        let sets = vec![(
+            "test.bed".to_string(),
+            vec![("chr1".to_string(), 400_000_000, 400_001_000)],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let mut hits = vec![0u64; 1];
+        let count = igd.count_overlaps("chr1", 400_000_500, 400_000_600, 1, &mut hits);
+        assert_eq!(count, 1, "Should find overlap at coordinates > 321M");
     }
 }

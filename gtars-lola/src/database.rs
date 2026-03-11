@@ -155,7 +155,10 @@ impl RegionDB {
                         all_region_anno.push(anno);
                         files_loaded += 1;
                     }
-                    Err(_) => continue,
+                    Err(e) => {
+                        eprintln!("Warning: skipping {}: {}", bed_path.display(), e);
+                        continue;
+                    }
                 }
             }
         }
@@ -195,51 +198,37 @@ impl RegionDB {
 
     /// Merge two RegionDBs.
     pub fn merge(a: RegionDB, b: RegionDB) -> Self {
-        let mut all_sets: Vec<(String, Vec<(String, i32, i32)>)> = Vec::new();
+        let mut all_filenames: Vec<String> = Vec::new();
         let mut region_sets = Vec::new();
         let mut region_anno = Vec::new();
 
-        // Add all from a
-        for (i, rs) in a.region_sets.into_iter().enumerate() {
-            let filename = if i < a.region_anno.len() {
-                a.region_anno[i].filename.clone()
-            } else if i < a.igd.file_info.len() {
-                a.igd.file_info[i].filename.clone()
-            } else {
-                format!("set_{}", i)
-            };
-
-            let regions: Vec<(String, i32, i32)> = rs
-                .regions
-                .iter()
-                .map(|r| (r.chr.clone(), r.start as i32, r.end as i32))
-                .collect();
-            all_sets.push((filename, regions));
-            region_sets.push(rs);
+        // Collect filenames and region sets from both DBs
+        for (source_sets, source_anno, source_igd) in [
+            (&a.region_sets, &a.region_anno, &a.igd),
+            (&b.region_sets, &b.region_anno, &b.igd),
+        ] {
+            for (i, rs) in source_sets.iter().enumerate() {
+                let filename = if i < source_anno.len() {
+                    source_anno[i].filename.clone()
+                } else if i < source_igd.file_info.len() {
+                    source_igd.file_info[i].filename.clone()
+                } else {
+                    format!("set_{}", i)
+                };
+                all_filenames.push(filename);
+                region_sets.push(rs.clone());
+            }
         }
         region_anno.extend(a.region_anno);
-
-        // Add all from b
-        for (i, rs) in b.region_sets.into_iter().enumerate() {
-            let filename = if i < b.region_anno.len() {
-                b.region_anno[i].filename.clone()
-            } else if i < b.igd.file_info.len() {
-                b.igd.file_info[i].filename.clone()
-            } else {
-                format!("set_{}", i)
-            };
-
-            let regions: Vec<(String, i32, i32)> = rs
-                .regions
-                .iter()
-                .map(|r| (r.chr.clone(), r.start as i32, r.end as i32))
-                .collect();
-            all_sets.push((filename, regions));
-            region_sets.push(rs);
-        }
         region_anno.extend(b.region_anno);
 
-        let igd = Igd::from_region_sets(all_sets);
+        // Build IGD directly from RegionSets (avoids copying regions into tuples)
+        let named_sets: Vec<(String, &RegionSet)> = all_filenames
+            .iter()
+            .zip(region_sets.iter())
+            .map(|(name, rs)| (name.clone(), rs))
+            .collect();
+        let igd = Igd::from_named_region_sets(&named_sets);
 
         let mut collection_anno = a.collection_anno;
         collection_anno.extend(b.collection_anno);
