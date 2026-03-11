@@ -9,7 +9,8 @@ use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_core::models::IntervalSetOps;
 use gtars_genomicdist::IntervalRanges;
-use gtars_overlaprs::RegionSetOverlaps;
+use gtars_overlaprs::multi_chrom_overlapper::build_indexed_overlapper;
+use gtars_overlaprs::OverlapperType;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -439,25 +440,29 @@ impl PyRegionSet {
     /// Return a new RegionSet containing only regions that overlap at least
     /// one region in other.
     fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subset_by_overlaps(&other.regionset);
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        let rs = index.subset_by(&self.regionset);
         Ok(Self::from_regionset(rs))
     }
 
     /// Return a list of overlap counts, one per region in self.
     fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
-        self.regionset.count_overlaps(&other.regionset)
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        index.count_overlaps(&self.regionset)
     }
 
     /// Return a list of booleans indicating whether each region overlaps
     /// any region in other.
     fn any_overlaps(&self, other: &PyRegionSet) -> Vec<bool> {
-        self.regionset.any_overlaps(&other.regionset)
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        index.any_overlaps(&self.regionset)
     }
 
     /// Return a list of lists of indices into other that overlap each
     /// region in self.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        self.regionset.find_overlaps(&other.regionset)
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        index.find_overlaps_indexed(&self.regionset)
     }
 
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {

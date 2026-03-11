@@ -1121,52 +1121,6 @@ mod tests {
         assert_eq!(find1, find2);
     }
 
-    // ── MCO matches RegionSetOverlaps (same results, different impl) ──
-
-    #[rstest]
-    #[case(OverlapperType::AIList)]
-    #[case(OverlapperType::Bits)]
-    fn test_mco_matches_regionset_overlaps(#[case] overlapper_type: OverlapperType) {
-        use crate::RegionSetOverlaps;
-
-        let query_rs = RegionSet::from(vec![
-            make_region("chr1", 100, 300),
-            make_region("chr1", 500, 600),
-            make_region("chr2", 100, 200),
-        ]);
-        let source_rs = RegionSet::from(vec![
-            make_region("chr1", 150, 200),
-            make_region("chr1", 250, 350),
-            make_region("chr1", 550, 650),
-            make_region("chr2", 50, 150),
-        ]);
-
-        // RegionSetOverlaps builds index from `other` and queries `self`
-        let trait_counts = query_rs.count_overlaps(&source_rs);
-        let trait_any = query_rs.any_overlaps(&source_rs);
-        let trait_find = query_rs.find_overlaps(&source_rs);
-
-        // MCO: build index from source, query with query
-        let index = build_indexed_overlapper(&source_rs, overlapper_type);
-        let mco_counts = index.count_overlaps(&query_rs);
-        let mco_any = index.any_overlaps(&query_rs);
-        let mco_find = index.find_overlaps_indexed(&query_rs);
-
-        assert_eq!(trait_counts, mco_counts);
-        assert_eq!(trait_any, mco_any);
-
-        // Sort inner vecs for comparison since order may differ
-        let mut trait_find_sorted = trait_find.clone();
-        let mut mco_find_sorted = mco_find.clone();
-        for v in &mut trait_find_sorted {
-            v.sort();
-        }
-        for v in &mut mco_find_sorted {
-            v.sort();
-        }
-        assert_eq!(trait_find_sorted, mco_find_sorted);
-    }
-
     // ── MCO IntervalSetOps matches RegionSet IntervalSetOps ─────
 
     #[rstest]
