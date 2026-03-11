@@ -71,7 +71,7 @@ impl RegionDB {
         let mut all_region_sets: Vec<RegionSet> = Vec::new();
         let mut all_region_anno: Vec<RegionSetAnno> = Vec::new();
         let mut all_collection_anno: Vec<CollectionAnno> = Vec::new();
-        let mut igd_inputs: Vec<(String, Vec<(String, i32, i32)>)> = Vec::new();
+        let mut all_filenames: Vec<String> = Vec::new();
 
         // Discover collections (subdirectories with a regions/ folder)
         let mut collections: Vec<PathBuf> = Vec::new();
@@ -138,14 +138,7 @@ impl RegionDB {
 
                 match RegionSet::try_from(bed_path.as_path()) {
                     Ok(region_set) => {
-                        // Build IGD input tuples
-                        let regions: Vec<(String, i32, i32)> = region_set
-                            .regions
-                            .iter()
-                            .map(|r| (r.chr.clone(), r.start as i32, r.end as i32))
-                            .collect();
-
-                        igd_inputs.push((fname.clone(), regions));
+                        all_filenames.push(fname.clone());
                         all_region_sets.push(region_set);
 
                         // Use annotation from index.txt if available, otherwise default.
@@ -167,8 +160,13 @@ impl RegionDB {
             }
         }
 
-        // Build IGD from all loaded region sets
-        let igd = Igd::from_region_sets(igd_inputs);
+        // Build IGD directly from RegionSets (avoids copying regions into tuples)
+        let named_sets: Vec<(String, &RegionSet)> = all_filenames
+            .iter()
+            .zip(all_region_sets.iter())
+            .map(|(name, rs)| (name.clone(), rs))
+            .collect();
+        let igd = Igd::from_named_region_sets(&named_sets);
 
         Ok(RegionDB {
             igd,
