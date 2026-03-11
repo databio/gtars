@@ -173,8 +173,9 @@ pub fn js_check_universe(
         .collect();
 
     let rs_universe = tuples_to_regionset(universe_data);
+    let universe_igd = gtars_igd::igd::Igd::from_single_region_set(&rs_universe);
 
-    let report = universe::check_universe_appropriateness(&rs_user, &rs_universe);
+    let report = universe::check_universe_appropriateness(&rs_user, &universe_igd);
 
     let result = UniverseCheckResult {
         user_set: report.user_set_reports.iter().map(|r| r.user_set_index).collect(),

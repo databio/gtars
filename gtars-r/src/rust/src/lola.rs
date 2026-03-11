@@ -282,7 +282,8 @@ pub fn r_check_universe(
     let user_sets = extract_region_sets(user_sets_list)?;
 
     with_regionset!(universe_ptr, universe, {
-        let report = universe::check_universe_appropriateness(&user_sets, universe);
+        let universe_igd = Igd::from_single_region_set(universe);
+        let report = universe::check_universe_appropriateness(&user_sets, &universe_igd);
 
         let mut us_index = Vec::new();
         let mut total = Vec::new();
@@ -326,7 +327,8 @@ pub fn r_redefine_user_sets(
     let user_sets = extract_region_sets(user_sets_list)?;
 
     with_regionset!(universe_ptr, universe, {
-        let redefined = universe::redefine_user_sets(&user_sets, universe);
+        let universe_igd = Igd::from_single_region_set(universe);
+        let redefined = universe::redefine_user_sets(&user_sets, universe, &universe_igd);
 
         let result_list: Vec<Robj> = redefined
             .into_iter()

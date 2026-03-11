@@ -16,8 +16,6 @@ use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, Overlapp
 use serde::{Deserialize, Serialize};
 
 use crate::errors::GtarsGenomicDistError;
-
-use crate::interval_ranges::IntervalRanges;
 use crate::models::{Strand, StrandedRegionSet};
 
 /// A gene model loaded from BED files or GTF.
@@ -742,6 +740,7 @@ fn ln_gamma(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interval_ranges::IntervalRanges;
     use pretty_assertions::assert_eq;
     use rstest::*;
     use std::path::PathBuf;

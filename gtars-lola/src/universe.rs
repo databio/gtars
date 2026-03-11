@@ -2,6 +2,7 @@
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::IntervalRanges;
+use gtars_igd::igd::Igd;
 
 /// Diagnostic report from universe appropriateness check.
 #[derive(Debug, Clone)]
@@ -34,9 +35,11 @@ pub struct UserSetReport {
 /// - What fraction of user set regions overlap at least one universe region
 /// - Whether there are many-to-many mappings (user region overlaps >1 universe region)
 /// - Warnings if coverage is low
+///
+/// Takes a pre-built `&Igd` index of the universe so it can be reused across calls.
 pub fn check_universe_appropriateness(
     user_sets: &[RegionSet],
-    universe: &RegionSet,
+    universe_igd: &Igd,
 ) -> UniverseReport {
     let mut user_set_reports = Vec::with_capacity(user_sets.len());
 
@@ -44,7 +47,7 @@ pub fn check_universe_appropriateness(
         let total = user_set.regions.len();
 
         // count_overlaps returns per-query counts of overlapping subject (universe) regions
-        let counts = user_set.count_overlaps(universe, 1);
+        let counts = universe_igd.count_overlaps_per_query(user_set, 1);
 
         let in_universe = counts.iter().filter(|&&c| c > 0).count();
         let many_to_many = counts.iter().filter(|&&c| c > 1).count();
@@ -98,14 +101,21 @@ pub fn check_universe_appropriateness(
 /// and returns those universe regions as the new user set. This eliminates
 /// many-to-many mapping artifacts.
 ///
+/// Takes a pre-built `&Igd` index of the universe and the original `&RegionSet`
+/// (needed to look up actual region coordinates by index).
+///
 /// This is the Rust equivalent of R LOLA's `redefineUserSets()`.
-pub fn redefine_user_sets(user_sets: &[RegionSet], universe: &RegionSet) -> Vec<RegionSet> {
+pub fn redefine_user_sets(
+    user_sets: &[RegionSet],
+    universe: &RegionSet,
+    universe_igd: &Igd,
+) -> Vec<RegionSet> {
     user_sets
         .iter()
         .map(|user_set| {
             // find_overlaps returns (query_idx, subject_idx) pairs
             // Here query=user_set, subject=universe, so subject_idx indexes into universe
-            let pairs = user_set.find_overlaps(universe, 1);
+            let pairs = universe_igd.find_overlaps_regionset(user_set, 1);
 
             let mut seen = std::collections::HashSet::new();
             let mut new_regions: Vec<Region> = Vec::new();
@@ -174,7 +184,8 @@ mod tests {
             r("chr1", 2500, 2600), // inside [2000,3000)
         ]);
 
-        let report = check_universe_appropriateness(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let report = check_universe_appropriateness(&[user], &universe_igd);
         assert_eq!(report.user_set_reports.len(), 1);
 
         let ur = &report.user_set_reports[0];
@@ -194,7 +205,8 @@ mod tests {
             r("chr1", 700, 800),  // does NOT overlap
         ]);
 
-        let report = check_universe_appropriateness(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let report = check_universe_appropriateness(&[user], &universe_igd);
         let ur = &report.user_set_reports[0];
 
         assert_eq!(ur.regions_in_universe, 1);
@@ -211,7 +223,8 @@ mod tests {
         ]);
         let user = rs(vec![r("chr1", 120, 220)]); // overlaps both
 
-        let report = check_universe_appropriateness(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let report = check_universe_appropriateness(&[user], &universe_igd);
         let ur = &report.user_set_reports[0];
 
         assert_eq!(ur.many_to_many_count, 1);
@@ -232,7 +245,8 @@ mod tests {
         // User region overlaps first two universe regions
         let user = rs(vec![r("chr1", 150, 350)]);
 
-        let redefined = redefine_user_sets(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let redefined = redefine_user_sets(&[user], &universe, &universe_igd);
         assert_eq!(redefined.len(), 1);
 
         let new_set = &redefined[0];
@@ -252,7 +266,8 @@ mod tests {
             r("chr1", 200, 250),
         ]);
 
-        let redefined = redefine_user_sets(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let redefined = redefine_user_sets(&[user], &universe, &universe_igd);
         assert_eq!(redefined[0].regions.len(), 1); // deduplicated
     }
 
@@ -261,7 +276,8 @@ mod tests {
         let universe = rs(vec![r("chr1", 100, 200)]);
         let user = rs(vec![r("chr1", 500, 600)]);
 
-        let redefined = redefine_user_sets(&[user], &universe);
+        let universe_igd = Igd::from_single_region_set(&universe);
+        let redefined = redefine_user_sets(&[user], &universe, &universe_igd);
         assert_eq!(redefined[0].regions.len(), 0);
     }
 

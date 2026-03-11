@@ -150,22 +150,6 @@ pub trait IntervalRanges {
     /// reduced before computing the intersection.
     fn intersect(&self, other: &RegionSet) -> RegionSet;
 
-    /// Find all overlapping (query_idx, subject_idx) pairs.
-    ///
-    /// Builds an IGD index from `subject`, then queries each region in `self`
-    /// to find overlapping subject regions. Returns pairs of 0-based indices.
-    ///
-    /// `min_overlap` is the minimum number of overlapping base pairs required.
-    fn find_overlaps(&self, subject: &RegionSet, min_overlap: i32) -> Vec<(u32, u32)>;
-
-    /// Count the number of subject regions overlapping each query region.
-    ///
-    /// Returns a `Vec<u32>` of length equal to the number of regions in `self`,
-    /// where each entry is the count of subject regions overlapping that query.
-    ///
-    /// `min_overlap` is the minimum number of overlapping base pairs required.
-    fn count_overlaps(&self, subject: &RegionSet, min_overlap: i32) -> Vec<u32>;
-
     /// All-vs-all genomic intersection.
     ///
     /// For each pair of overlapping regions between `self` and `other`,
@@ -672,16 +656,6 @@ impl IntervalRanges for RegionSet {
         }
 
         RegionSet::from(result)
-    }
-
-    fn find_overlaps(&self, subject: &RegionSet, min_overlap: i32) -> Vec<(u32, u32)> {
-        let igd = gtars_igd::igd::Igd::from_single_region_set(subject);
-        igd.find_overlaps_regionset(self, min_overlap)
-    }
-
-    fn count_overlaps(&self, subject: &RegionSet, min_overlap: i32) -> Vec<u32> {
-        let igd = gtars_igd::igd::Igd::from_single_region_set(subject);
-        igd.count_overlaps_per_query(self, min_overlap)
     }
 
     fn intersect_all(&self, other: &RegionSet) -> RegionSet {

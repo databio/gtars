@@ -264,8 +264,9 @@ fn py_check_universe<'py>(
         .collect();
 
     let rs_universe = tuples_to_regionset(universe_regions);
+    let universe_igd = gtars_igd::igd::Igd::from_single_region_set(&rs_universe);
 
-    let report = universe::check_universe_appropriateness(&rs_user, &rs_universe);
+    let report = universe::check_universe_appropriateness(&rs_user, &universe_igd);
 
     let dict = PyDict::new(py);
     let mut us_index = Vec::new();
@@ -306,7 +307,8 @@ fn py_redefine_user_sets(
         .collect();
 
     let rs_universe = tuples_to_regionset(universe_regions);
-    let redefined = universe::redefine_user_sets(&rs_user, &rs_universe);
+    let universe_igd = gtars_igd::igd::Igd::from_single_region_set(&rs_universe);
+    let redefined = universe::redefine_user_sets(&rs_user, &rs_universe, &universe_igd);
 
     redefined
         .into_iter()

@@ -156,7 +156,8 @@ impl RegionDB {
                             ..Default::default()
                         });
                         if anno.description.is_empty() {
-                            anno.description = coll_anno.description.clone();
+                            // R LOLA uses the collection folder name as fallback
+                            anno.description = coll_name.clone();
                         }
                         all_region_anno.push(anno);
                         files_loaded += 1;
@@ -620,7 +621,8 @@ mod tests {
 
     #[test]
     fn test_load_db_description_fallback() {
-        // Verify description falls back to collection.txt when index.txt description is empty
+        // Verify description falls back to collection folder name when index.txt
+        // description is empty (matching R LOLA behavior).
         let tmpdir = tempfile::tempdir().unwrap();
         let coll = tmpdir.path().join("fallback_coll");
         let regions = coll.join("regions");
@@ -645,10 +647,10 @@ mod tests {
 
         let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
         assert_eq!(db.num_region_sets(), 1);
-        // The file's description should fall back to collection-level description
+        // R LOLA uses the collection folder name as fallback, not collection.txt description
         assert_eq!(
-            db.region_anno[0].description, "Collection-level description",
-            "Description should fall back to collection.txt when index.txt description is empty"
+            db.region_anno[0].description, "fallback_coll",
+            "Description should fall back to collection folder name when index.txt description is empty"
         );
         // Other fields from index.txt should still be present
         assert_eq!(db.region_anno[0].cell_type, "K562");
