@@ -8,9 +8,6 @@ pub enum LolaError {
     #[error("No database sets indexed (IGD has 0 files)")]
     EmptyDatabase,
 
-    #[error("User set {0} is empty (0 regions)")]
-    EmptyUserSet(usize),
-
     #[error("Negative contingency table value: {field} = {value} for db_set {db_set}")]
     NegativeContingency {
         field: &'static str,

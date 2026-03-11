@@ -497,6 +497,11 @@ fn calc_partitions_priority(query: &RegionSet, partitions: &PartitionList) -> Pa
 }
 
 /// BP-proportion partition assignment.
+///
+/// Note: a query region overlapping multiple partitions contributes its
+/// overlapping base pairs to each partition independently. This matches
+/// R GenomicDistributions behavior (partitions are not mutually exclusive
+/// in bp mode — use region-count mode for exclusive assignment).
 fn calc_partitions_bp(query: &RegionSet, partitions: &PartitionList) -> PartitionResult {
     let total_query_bp: u32 = query.regions.iter().map(|r| r.end - r.start).sum();
 

@@ -93,6 +93,12 @@ impl Igd {
     }
 
     /// Add a single interval from a given file index. The IGD must not yet be finalized.
+    ///
+    /// Intervals with `start >= end` or negative coordinates are silently skipped.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called after [`finalize`](Self::finalize).
     pub fn add(&mut self, chrom: &str, start: i32, end: i32, value: i32, file_idx: u32) {
         assert!(
             !self.finalized,
@@ -157,7 +163,7 @@ impl Igd {
     pub fn from_bed_dir(path: &Path) -> anyhow::Result<Self> {
         let mut bed_files: Vec<PathBuf> = Vec::new();
 
-        // Collect valid BED files
+        // Collect BED/gz files (validation happens during the parse pass)
         for entry in fs::read_dir(path)? {
             let p = entry?.path();
             if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
@@ -165,14 +171,7 @@ impl Igd {
                     || ext == GZ_FILE_EXTENSION.trim_start_matches('.'))
                     && p.is_file()
                 {
-                    // Quick validation: try reading first line
-                    if let Ok(reader) = get_dynamic_reader(&p) {
-                        if let Some(Ok(line)) = reader.lines().next() {
-                            if Self::parse_bed_line(&line).is_some() {
-                                bed_files.push(p);
-                            }
-                        }
-                    }
+                    bed_files.push(p);
                 }
             }
         }
@@ -180,22 +179,36 @@ impl Igd {
         bed_files.sort(); // deterministic order
 
         let mut igd = Igd::new();
-        let mut file_infos: Vec<FileInfo> = Vec::with_capacity(bed_files.len());
+        let mut file_infos: Vec<FileInfo> = Vec::new();
 
-        for (file_idx, bed_path) in bed_files.iter().enumerate() {
-            let reader = get_dynamic_reader(bed_path)?;
+        for bed_path in &bed_files {
+            let reader = match get_dynamic_reader(bed_path) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
             let mut count: u32 = 0;
             let mut total_width: u64 = 0;
+            let mut has_valid_line = false;
+            let file_idx = file_infos.len();
 
             for line in reader.lines() {
-                let line = line?;
+                let line = match line {
+                    Ok(l) => l,
+                    Err(_) => continue,
+                };
                 if let Some((chrom, start, end, score)) = Self::parse_bed_line(&line) {
+                    has_valid_line = true;
                     if start >= 0 {
                         igd.add(&chrom, start, end, score, file_idx as u32);
                         count += 1;
                         total_width += (end - start) as u64;
                     }
                 }
+            }
+
+            // Skip files with no parseable BED lines
+            if !has_valid_line {
+                continue;
             }
 
             let filename = bed_path
@@ -394,6 +407,10 @@ impl Igd {
     }
 
     /// Save the IGD to a `.igd` binary file and companion `.tsv` metadata.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called before [`finalize`](Self::finalize).
     pub fn save(&self, path: &Path) -> anyhow::Result<()> {
         assert!(self.finalized, "Must finalize before saving");
 
@@ -445,11 +462,11 @@ impl Igd {
         // Write companion .tsv
         let tsv_path = path.with_extension("tsv");
         let mut tsv = String::new();
-        tsv.push_str("Index\tFile\tNumber of Regions\t Avg size\n");
+        tsv.push_str("Index\tFile\tNumber of Regions\tAvg size\n");
         for (i, fi) in self.file_info.iter().enumerate() {
             tsv.push_str(&format!(
-                "{} \t {} \t {} \t {} \n",
-                i, fi.filename, fi.num_regions, fi.avg_region_width as i32
+                "{}\t{}\t{}\t{:.2}\n",
+                i, fi.filename, fi.num_regions, fi.avg_region_width
             ));
         }
         fs::write(tsv_path, tsv)?;
@@ -466,6 +483,13 @@ impl Igd {
     ///
     /// `hits` must have length >= `self.file_info.len()`.
     /// `min_overlap` is the minimum number of overlapping base pairs required (default 1).
+    ///
+    /// Intervals with `start >= end` or `end <= 0` return 0 immediately.
+    /// Negative `start` is clamped to 0.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called before [`finalize`](Self::finalize).
     pub fn count_overlaps(
         &self,
         chrom: &str,
@@ -683,6 +707,10 @@ impl Igd {
     ///
     /// The IGD must have been built with `from_single_region_set` so that
     /// `record.value` stores the original subject region index.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called before [`finalize`](Self::finalize).
     pub fn find_overlaps_regionset(
         &self,
         query: &RegionSet,
@@ -791,6 +819,10 @@ impl Igd {
     /// is the number of distinct subject regions overlapping that query region.
     ///
     /// The IGD must have been built with `from_single_region_set`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called before [`finalize`](Self::finalize).
     pub fn count_overlaps_per_query(
         &self,
         query: &RegionSet,
