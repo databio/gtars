@@ -820,11 +820,47 @@ impl IntervalRanges for RegionSet {
 // ── Strand-aware operations on StrandedRegionSet ─────────────────────────
 
 impl StrandedRegionSet {
+    /// Clip regions to chromosome boundaries, preserving strand information.
+    pub fn trim(&self, chrom_sizes: &HashMap<String, u32>) -> StrandedRegionSet {
+        let mut regions = Vec::new();
+        let mut strands = Vec::new();
+        for (r, s) in self.inner.regions.iter().zip(self.strands.iter()) {
+            if let Some(&chrom_size) = chrom_sizes.get(&r.chr) {
+                let start = r.start.min(chrom_size);
+                let end = r.end.min(chrom_size);
+                if start < end {
+                    regions.push(Region {
+                        chr: r.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    });
+                    strands.push(*s);
+                }
+                // Drop zero-width regions (start == end after clipping)
+            } else {
+                // Chromosome not in chrom_sizes — keep region as-is (no trimming)
+                regions.push(r.clone());
+                strands.push(*s);
+            }
+        }
+        StrandedRegionSet {
+            inner: RegionSet::from(regions),
+            strands,
+        }
+    }
+
     /// Strand-aware promoter computation. Returns an unstranded `RegionSet`.
     ///
     /// - Plus / Unstranded: `[start - upstream, start + downstream)`
     /// - Minus: `[end - downstream, end + upstream)`
     pub fn promoters(&self, upstream: u32, downstream: u32) -> RegionSet {
+        self.promoters_stranded(upstream, downstream).inner
+    }
+
+    /// Like `promoters()` but preserves strand information, so a subsequent
+    /// strand-aware `reduce()` merges only same-strand promoters.
+    pub fn promoters_stranded(&self, upstream: u32, downstream: u32) -> StrandedRegionSet {
         let regions: Vec<Region> = self
             .inner
             .regions
@@ -845,7 +881,10 @@ impl StrandedRegionSet {
                 },
             })
             .collect();
-        RegionSet::from(regions)
+        StrandedRegionSet {
+            inner: RegionSet::from(regions),
+            strands: self.strands.clone(),
+        }
     }
 
     /// Strand-aware reduce: merge overlapping/adjacent intervals only within

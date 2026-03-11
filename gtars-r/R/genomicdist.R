@@ -127,8 +127,10 @@ calcDinuclFreq <- function(query, ref) {
 #'   (NULL to omit)
 #' @param fiveUTRGR GRanges, file path, data.frame, or RegionSet for 5'UTR regions
 #'   (NULL to omit)
-#' @param corePromSize Core promoter size in bp (default 100)
-#' @param proxPromSize Proximal promoter size in bp (default 2000)
+#' @param corePromSize Core promoter size in bp (default 100, matching R
+#'   GenomicDistributions)
+#' @param proxPromSize Proximal promoter size in bp (default 2000, matching R
+#'   GenomicDistributions)
 #' @param chromSizes Optional named numeric vector of chromosome sizes.
 #'   When provided, promoter regions are trimmed at chromosome boundaries.
 #' @return An external pointer to a PartitionList

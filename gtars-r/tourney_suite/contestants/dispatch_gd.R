@@ -109,7 +109,8 @@ switch(func,
       partitionList <- gtars::genomePartitionList(
         geneModels$genesGR, geneModels$exonsGR,
         threeUTRGR = geneModels$threeUTRGR,
-        fiveUTRGR = geneModels$fiveUTRGR
+        fiveUTRGR = geneModels$fiveUTRGR,
+        chromSizes = chromSizes
       )
       result <- gtars::calcExpectedPartitions(
         vistaEnhancers, partitionList, genomeSize = chromSizes
@@ -138,7 +139,7 @@ switch(func,
       genomeBins <- GenomicDistributions::getGenomeBins(chromSizes)
       result <- GenomicDistributions::calcChromBins(vistaEnhancers, genomeBins)
     } else {
-      result <- gtars::regionDistribution(vistaEnhancers, 250L, chromSizes = chromSizes)
+      result <- gtars::regionDistribution(vistaEnhancers, 250L)
     }
     fwrite(result, output_path, sep = "\t")
   },

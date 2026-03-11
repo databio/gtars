@@ -1,0 +1,177 @@
+---
+title: "R neighbordt() bug with contained regions"
+output: html_document
+---
+
+## The bug
+
+`GenomicDistributions::calcNeighborDist()` uses an internal helper `neighbordt()`
+that computes distances between consecutive sorted regions. Its formula reports
+spurious positive distances when one region is fully contained within another.
+
+```{r setup, message=FALSE}
+library(GenomicDistributions)
+library(gtars)
+library(GenomicRanges)
+```
+
+## Demonstration with synthetic data
+
+Region B is fully contained within Region A. The distance between them should be
+zero or negative (they overlap), not positive.
+
+```{r synthetic}
+# A: chr1:100-500, B: chr1:200-350 (B fully inside A)
+gr <- GRanges(
+  seqnames = c("chr1", "chr1"),
+  ranges = IRanges(start = c(100, 200), end = c(500, 350))
+)
+gr
+```
+
+```{r r_formula}
+# R's neighbordt formula (1-based coords):
+sorted_gr <- sort(gr)
+ends <- end(sorted_gr)          # 500, 350
+starts <- start(sorted_gr)      # 100, 200
+widths_1b <- ends - starts + 1  # 401, 151
+
+end_diff <- abs(diff(ends))     # abs(350 - 500) = 150
+distance_r <- end_diff - widths_1b[-1]  # 150 - 151 = -1 -> clamped to 0
+
+cat("R formula result:", end_diff, "-", widths_1b[2], "=", end_diff - widths_1b[2], "\n")
+cat("After clamping negatives to 0:", max(0, end_diff - widths_1b[2]), "\n")
+```
+
+In this small example R clamps to 0 (then removes it). But when the contained region
+is offset enough from A's end, R produces a positive value:
+
+```{r contained_positive}
+# A: chr1:100-1000, B: chr1:200-500 (B inside A, but B's end far from A's end)
+gr2 <- GRanges(
+  seqnames = c("chr1", "chr1"),
+  ranges = IRanges(start = c(100, 200), end = c(1000, 500))
+)
+
+ends2 <- end(sort(gr2))          # 1000, 500
+starts2 <- start(sort(gr2))      # 100, 200
+widths2 <- ends2 - starts2 + 1   # 901, 301
+
+end_diff2 <- abs(diff(ends2))    # abs(500 - 1000) = 500
+dist2 <- end_diff2 - widths2[2]  # 500 - 301 = 199
+
+cat("R reports distance:", dist2, "between two regions that COMPLETELY OVERLAP\n")
+cat("Actual gap (start_B - end_A):", starts2[2] - ends2[1], "(negative = overlap)\n")
+```
+
+R says these regions are 199bp apart. They overlap by 800bp.
+
+## Real-world occurrence in vistaEnhancers
+
+```{r real_data}
+data("vistaEnhancers", package = "episcope")
+
+r_dists <- GenomicDistributions::calcNeighborDist(vistaEnhancers)
+g_dists <- gtars::calcNeighborDist(vistaEnhancers)
+
+cat("R count:    ", length(r_dists), "\n")
+cat("gtars count:", length(g_dists), "\n")
+```
+
+```{r find_culprit}
+# Find the extra value R produces
+r_sorted <- sort(r_dists)
+g_sorted <- sort(g_dists)
+
+# R has exactly 1 value that gtars doesn't
+r_tab <- table(r_dists)
+g_tab <- table(g_dists)
+
+extra_in_r <- setdiff(names(r_tab), names(g_tab))
+cat("Values in R but not gtars:", extra_in_r, "\n")
+```
+
+```{r trace_bug}
+# Trace which region pair produces the spurious distance
+querydt <- GenomicDistributions:::grToDt(sort(vistaEnhancers))
+querydts <- GenomicDistributions:::splitDataTable(querydt, "chr")
+
+for (chrname in names(querydts)) {
+  dt <- querydts[[chrname]]
+  if (nrow(dt) <= 1) next
+  endVect <- abs(dt[, diff(end)])
+  regionWidth <- dt[, (end - start + 1)]
+  dv <- endVect - regionWidth[-1]
+  dv[dv < 0] <- 0
+  idx <- which(dv == 230)
+  if (length(idx) > 0) {
+    for (i in idx) {
+      cat("Found on", chrname, "at pair index", i, "\n")
+      cat("  Region A:", dt$start[i], "-", dt$end[i], "\n")
+      cat("  Region B:", dt$start[i+1], "-", dt$end[i+1], "\n")
+      cat("  B starts INSIDE A and ends BEFORE A ends (fully contained)\n")
+      cat("  R's abs(diff(end)):", endVect[i], "\n")
+      cat("  R's width(B):", regionWidth[i+1], "\n")
+      cat("  R's 'distance':", dv[i], "\n")
+      cat("  Actual gap (start_B - end_A):", dt$start[i+1] - dt$end[i], "(overlap)\n")
+    }
+  }
+}
+```
+
+## Why R's formula fails
+
+`neighbordt()` computes:
+
+```
+endVect = abs(diff(end))
+regionWidth = end - start + 1
+distance = endVect - regionWidth[-1]
+```
+
+This is equivalent to `abs(end[i+1] - end[i]) - width(region[i+1])`. For
+non-overlapping sorted regions, this simplifies to `start[i+1] - end[i] - 1`
+(the gap in 1-based coords), which is correct.
+
+But when region B is contained within A (sorted by start), `end[i+1] < end[i]`.
+The `abs()` on `diff(end)` flips the sign, and the subtraction of B's width
+can still yield a positive number. R then reports a "distance" that has no
+biological meaning — it's computing the gap between the ends minus the width,
+not the actual gap between the regions.
+
+## How gtars fixes this
+
+gtars uses `next.start - current.end` (in 0-based half-open coordinates). For
+the contained-region case, this correctly produces a negative value (the regions
+overlap), which is then filtered out.
+
+```{r compare}
+cat("All", length(g_dists), "gtars distances are real inter-region gaps\n")
+cat("R reports", length(r_dists) - length(g_dists), "spurious distance(s)\n")
+```
+
+## calcNearestNeighbors: cross-chromosome contamination
+
+R's `calcNearestNeighbors` has a second issue. It builds on the flattened output
+of `calcNeighborDist`, treating the entire distance vector as a single sequence:
+
+```r
+# R's algorithm:
+dist = calcNeighborDist(query)        # flat vector, zeros removed
+upstream = dist[-length(dist)]
+downstream = dist[-1]
+nNeighbors = c(dist[1], pmin(upstream, downstream), dist[length(dist)])
+```
+
+This means the last distance on chromosome N and the first distance on
+chromosome N+1 get paired as "neighbors." gtars computes nearest neighbors
+per-region within each chromosome, which is biologically correct.
+
+```{r nn_compare}
+r_nn <- GenomicDistributions::calcNearestNeighbors(vistaEnhancers)
+g_nn <- gtars::calcNearestNeighbors(vistaEnhancers)
+
+cat("R nearest neighbors: ", length(r_nn), "values\n")
+cat("gtars nearest neighbors:", length(g_nn), "values (one per region)\n")
+cat("Total regions:", length(vistaEnhancers), "\n")
+```

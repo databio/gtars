@@ -720,17 +720,21 @@ pub fn r_partition_list_from_regions_stranded(
             .collect()
     };
 
+    // Do NOT reduce here — genome_partition_list handles all reductions.
+    // Pre-reducing genes would collapse overlapping genes before promoter
+    // construction, losing individual gene promoters (R computes promoters
+    // from raw genes, then reduces the promoters).
     let genes_rs = regionset_from_vecs(genes_chrs, genes_starts, genes_ends);
-    let genes_srs = StrandedRegionSet::new(genes_rs, parse_strands(genes_strands)).reduce();
+    let genes_srs = StrandedRegionSet::new(genes_rs, parse_strands(genes_strands));
 
     let exons_rs = regionset_from_vecs(exons_chrs, exons_starts, exons_ends);
-    let exons_srs = StrandedRegionSet::new(exons_rs, parse_strands(exons_strands)).reduce();
+    let exons_srs = StrandedRegionSet::new(exons_rs, parse_strands(exons_strands));
 
     let three_utr = if three_utr_chrs.is_empty() {
         None
     } else {
         let rs = regionset_from_vecs(three_utr_chrs, three_utr_starts, three_utr_ends);
-        let srs = StrandedRegionSet::new(rs, parse_strands(three_utr_strands)).reduce();
+        let srs = StrandedRegionSet::new(rs, parse_strands(three_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
 
@@ -738,7 +742,7 @@ pub fn r_partition_list_from_regions_stranded(
         None
     } else {
         let rs = regionset_from_vecs(five_utr_chrs, five_utr_starts, five_utr_ends);
-        let srs = StrandedRegionSet::new(rs, parse_strands(five_utr_strands)).reduce();
+        let srs = StrandedRegionSet::new(rs, parse_strands(five_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
 

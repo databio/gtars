@@ -359,22 +359,23 @@ pub fn genome_partition_list(
     let mut partitions: Vec<(String, RegionSet)> = Vec::new();
 
     // 1. Core promoters (strand-aware: minus-strand uses end, not start)
-    // When chrom_sizes are provided, trim promoters at chromosome boundaries
-    // before reduce to avoid promoter regions extending past chromosome ends.
-    let raw_core = model.genes.promoters(core_prom_size, 0);
-    let core_promoters = match chrom_sizes {
+    // trim → strand-aware reduce, matching R's reduce(trim(promoters(...)))
+    let raw_core = model.genes.promoters_stranded(core_prom_size, 0);
+    let core_stranded = match chrom_sizes {
         Some(sizes) => raw_core.trim(sizes).reduce(),
         None => raw_core.reduce(),
     };
-    partitions.push(("promoterCore".to_string(), core_promoters.clone()));
+    partitions.push(("promoterCore".to_string(), core_stranded.inner.clone()));
 
     // 2. Proximal promoters (larger window minus core)
-    let raw_prox = model.genes.promoters(prox_prom_size, 0);
-    let prox_promoters = match chrom_sizes {
+    // Keep as StrandedRegionSet through setdiff — R's setdiff is strand-aware,
+    // so + strand prox is only subtracted by + strand core, etc.
+    let raw_prox = model.genes.promoters_stranded(prox_prom_size, 0);
+    let prox_stranded = match chrom_sizes {
         Some(sizes) => raw_prox.trim(sizes).reduce(),
         None => raw_prox.reduce(),
-    }
-    .setdiff(&core_promoters);
+    };
+    let prox_promoters = prox_stranded.setdiff(&core_stranded).into_regionset();
     partitions.push(("promoterProx".to_string(), prox_promoters));
 
     // UTR/exon/intron construction does NOT subtract promoters — R doesn't either.
@@ -561,20 +562,19 @@ pub fn calc_expected_partitions(
     let genome_size: u64 = chrom_sizes.values().map(|&v| v as u64).sum();
     let query_total = observed.total as f64;
 
-    // Compute partition sizes in bp using priority resolution.
-    // Each genomic bp is assigned to the first (highest-priority) partition
-    // that covers it, matching R's approach and avoiding double-counting.
+    // Compute partition sizes as raw bp sums (no priority resolution).
+    // This matches R's GenomicDistributions::calcExpectedPartitions, which uses
+    // sum(width(partitionList[[i]])) — the total annotated bp per partition,
+    // allowing overlaps between partitions to be counted in each.
+    // Priority resolution only applies to observed counts (which partition a
+    // query region is assigned to), not to expected proportions.
     let mut partition_bp_total: u64 = 0;
-    let mut claimed = RegionSet::from(Vec::<Region>::new());
     let partition_sizes: Vec<u64> = partitions
         .partitions
         .iter()
         .map(|(_name, rs)| {
-            let reduced = rs.reduce();
-            let exclusive = reduced.setdiff(&claimed);
-            let bp: u64 = exclusive.regions.iter().map(|r| (r.end - r.start) as u64).sum();
+            let bp: u64 = rs.regions.iter().map(|r| (r.end - r.start) as u64).sum();
             partition_bp_total += bp;
-            claimed = claimed.union(&reduced);
             bp
         })
         .collect();
