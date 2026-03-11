@@ -624,6 +624,667 @@ impl RegionSet {
     }
 }
 
+/// A `RegionSet` that is guaranteed to be sorted by (chr, start).
+///
+/// Created by moving a `RegionSet` into `SortedRegionSet::new()`, which
+/// sorts in place (no clone). Functions that require sorted input can
+/// accept this type instead of re-sorting every time.
+pub struct SortedRegionSet(pub RegionSet);
+
+impl SortedRegionSet {
+    /// Sort a RegionSet in place and wrap it. This is a move, not a clone.
+    pub fn new(mut rs: RegionSet) -> Self {
+        rs.sort();
+        Self(rs)
+    }
+}
+
+// ── Structural interval operations (pure coordinate math) ───────────────
+//
+// These are inherent methods on RegionSet — no trait import needed.
+// All operations return new RegionSet instances (immutable pattern) with
+// 0-based half-open coordinates. Metadata (`rest` field) is not preserved.
+
+impl RegionSet {
+    /// Clamp regions to chromosome boundaries.
+    ///
+    /// Regions extending past chromosome ends are trimmed to `[0, chrom_size)`.
+    /// Regions on chromosomes not present in `chrom_sizes` are dropped.
+    /// Empty regions (start > end after clamping) are dropped; zero-width
+    /// regions where start == end are kept.
+    pub fn trim(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .filter_map(|r| {
+                let chrom_size = chrom_sizes.get(&r.chr)?;
+                let start = r.start.min(*chrom_size);
+                let end = r.end.min(*chrom_size);
+                if start > end {
+                    None
+                } else {
+                    Some(Region {
+                        chr: r.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    })
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Generate promoter regions relative to each region's start position.
+    ///
+    /// For each region, produces `[start - upstream, start + downstream)`.
+    /// Uses saturating subtraction at coordinate 0.
+    pub fn promoters(&self, upstream: u32, downstream: u32) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| Region {
+                chr: r.chr.clone(),
+                start: r.start.saturating_sub(upstream),
+                end: r.start.saturating_add(downstream),
+                rest: None,
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Merge overlapping and adjacent intervals per chromosome.
+    ///
+    /// Sorts by (chr, start), then sweeps to merge intervals where
+    /// `next.start <= current.end`. Returns a minimal set of non-overlapping regions.
+    pub fn reduce(&self) -> RegionSet {
+        if self.regions.is_empty() {
+            return RegionSet::from(Vec::<Region>::new());
+        }
+
+        let sorted = SortedRegionSet::new(RegionSet::from(self.regions.clone()));
+        let regions = &sorted.0.regions;
+
+        let mut merged: Vec<Region> = Vec::new();
+        let mut current = regions[0].clone();
+
+        for r in &regions[1..] {
+            if r.chr == current.chr && r.start <= current.end {
+                current.end = current.end.max(r.end);
+            } else {
+                merged.push(Region {
+                    chr: current.chr.clone(),
+                    start: current.start,
+                    end: current.end,
+                    rest: None,
+                });
+                current = r.clone();
+            }
+        }
+        merged.push(Region {
+            chr: current.chr,
+            start: current.start,
+            end: current.end,
+            rest: None,
+        });
+
+        RegionSet::from(merged)
+    }
+
+    /// Combine two region sets without merging overlapping intervals.
+    ///
+    /// Clones regions from both sets into a single `RegionSet`. No sorting,
+    /// deduplication, or merging is performed.
+    pub fn concat(&self, other: &RegionSet) -> RegionSet {
+        let mut regions = self.regions.clone();
+        regions.extend(other.regions.iter().cloned());
+        RegionSet::from(regions)
+    }
+
+    /// Shift all regions by a fixed offset.
+    ///
+    /// Adds `offset` to both start and end of every region. Negative offsets
+    /// use saturating subtraction at coordinate 0.
+    pub fn shift(&self, offset: i64) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                let start = (r.start as i64 + offset).max(0) as u32;
+                let end = (r.end as i64 + offset).max(start as i64) as u32;
+                Region {
+                    chr: r.chr.clone(),
+                    start,
+                    end,
+                    rest: None,
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Generate flanking regions.
+    ///
+    /// - `use_start = true`: flank upstream of start -> `[start - width, start)`
+    /// - `use_start = false`: flank downstream of end -> `[end, end + width)`
+    /// - `both = true`: flank on both sides -> `[anchor - width, anchor + width)`
+    pub fn flank(&self, width: u32, use_start: bool, both: bool) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                if both {
+                    let anchor = if use_start { r.start } else { r.end };
+                    Region {
+                        chr: r.chr.clone(),
+                        start: anchor.saturating_sub(width),
+                        end: anchor.saturating_add(width),
+                        rest: None,
+                    }
+                } else if use_start {
+                    Region {
+                        chr: r.chr.clone(),
+                        start: r.start.saturating_sub(width),
+                        end: r.start,
+                        rest: None,
+                    }
+                } else {
+                    Region {
+                        chr: r.chr.clone(),
+                        start: r.end,
+                        end: r.end.saturating_add(width),
+                        rest: None,
+                    }
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Resize regions to a fixed width, anchored at start, end, or center.
+    ///
+    /// - `"start"`: keep start, set end = start + width
+    /// - `"end"`: keep end, set start = end - width
+    /// - `"center"`: keep midpoint, expand symmetrically
+    pub fn resize(&self, width: u32, fix: &str) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| match fix {
+                "end" => Region {
+                    chr: r.chr.clone(),
+                    start: r.end.saturating_sub(width),
+                    end: r.end,
+                    rest: None,
+                },
+                "center" => {
+                    let mid = (r.start + r.end) / 2;
+                    let half = width / 2;
+                    Region {
+                        chr: r.chr.clone(),
+                        start: mid.saturating_sub(half),
+                        end: mid.saturating_sub(half).saturating_add(width),
+                        rest: None,
+                    }
+                }
+                _ => Region {
+                    chr: r.chr.clone(),
+                    start: r.start,
+                    end: r.start.saturating_add(width),
+                    rest: None,
+                },
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Narrow each region by specifying a relative sub-range within it.
+    ///
+    /// Parameters are 1-based relative positions within each region (matching
+    /// GenomicRanges convention). Exactly two of the three must be provided.
+    pub fn narrow(&self, start: Option<u32>, end: Option<u32>, width: Option<u32>) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                let region_width = r.end - r.start;
+                let (rel_start, rel_end) = match (start, end, width) {
+                    (Some(s), Some(e), None) => (s - 1, e),
+                    (Some(s), None, Some(w)) => (s - 1, (s - 1) + w),
+                    (None, Some(e), Some(w)) => (e.saturating_sub(w), e),
+                    (None, None, Some(w)) => (0, w),
+                    _ => (0, region_width),
+                };
+                let abs_start = r.start + rel_start.min(region_width);
+                let abs_end = r.start + rel_end.min(region_width);
+                Region {
+                    chr: r.chr.clone(),
+                    start: abs_start,
+                    end: abs_end.max(abs_start),
+                    rest: None,
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Break all regions into non-overlapping disjoint pieces.
+    ///
+    /// Every boundary in the input becomes a boundary in the output. The result
+    /// tiles the covered positions exactly, with no overlaps.
+    pub fn disjoin(&self) -> RegionSet {
+        if self.regions.is_empty() {
+            return RegionSet::from(Vec::<Region>::new());
+        }
+
+        let sorted = SortedRegionSet::new(RegionSet::from(self.regions.clone()));
+        let regions = &sorted.0.regions;
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut i = 0;
+        while i < regions.len() {
+            let chr = &regions[i].chr;
+            let mut chr_end = i;
+            while chr_end < regions.len() && regions[chr_end].chr == *chr {
+                chr_end += 1;
+            }
+
+            let mut events: Vec<u32> = Vec::with_capacity((chr_end - i) * 2);
+            for r in &regions[i..chr_end] {
+                events.push(r.start);
+                events.push(r.end);
+            }
+            events.sort_unstable();
+            events.dedup();
+
+            for w in events.windows(2) {
+                let seg_start = w[0];
+                let seg_end = w[1];
+                let covered = regions[i..chr_end]
+                    .iter()
+                    .any(|r| r.start <= seg_start && r.end >= seg_end);
+                if covered {
+                    result.push(Region {
+                        chr: chr.clone(),
+                        start: seg_start,
+                        end: seg_end,
+                        rest: None,
+                    });
+                }
+            }
+
+            i = chr_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    /// Return the gaps between regions per chromosome.
+    ///
+    /// Reduces the input first, then emits intervals between consecutive
+    /// reduced regions on each chromosome.
+    pub fn gaps(&self) -> RegionSet {
+        let reduced = self.reduce();
+        if reduced.regions.is_empty() {
+            return RegionSet::from(Vec::<Region>::new());
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut i = 0;
+        while i < reduced.regions.len() {
+            let chr = &reduced.regions[i].chr;
+            let mut j = i + 1;
+            while j < reduced.regions.len() && reduced.regions[j].chr == *chr {
+                let gap_start = reduced.regions[j - 1].end;
+                let gap_end = reduced.regions[j].start;
+                if gap_start < gap_end {
+                    result.push(Region {
+                        chr: chr.clone(),
+                        start: gap_start,
+                        end: gap_end,
+                        rest: None,
+                    });
+                }
+                j += 1;
+            }
+            i = j.max(i + 1);
+        }
+
+        RegionSet::from(result)
+    }
+
+    /// Pairwise intersection of two region sets by index position.
+    ///
+    /// For each pair at the same index, computes `[max(a.start, b.start), min(a.end, b.end))`.
+    /// Pairs with no overlap or mismatched chromosomes produce zero-width regions.
+    /// If the region sets differ in length, intersections are computed only up
+    /// to the length of the shorter set.
+    pub fn pintersect(&self, other: &RegionSet) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .zip(other.regions.iter())
+            .map(|(a, b)| {
+                if a.chr != b.chr {
+                    return Region {
+                        chr: a.chr.clone(),
+                        start: a.start,
+                        end: a.start,
+                        rest: None,
+                    };
+                }
+                let start = a.start.max(b.start);
+                let end = a.end.min(b.end);
+                if start >= end {
+                    Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end: start,
+                        rest: None,
+                    }
+                } else {
+                    Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    }
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+}
+
+// ── IntervalSetOps trait ────────────────────────────────────────────────
+//
+// Two-set operations defined as a trait so both RegionSet (sweep-line) and
+// MultiChromOverlapper (index-based) can implement them.
+
+/// Two-set interval operations on genomic region sets.
+///
+/// Provides set algebra (setdiff, intersect, union) and similarity metrics
+/// (jaccard, coverage, overlap_coefficient) plus nearest-neighbor and
+/// clustering operations. Implementations may use sweep-line or index-based
+/// algorithms.
+pub trait IntervalSetOps {
+    /// Set difference: remove portions of `self` that overlap with `other`.
+    fn setdiff(&self, other: &RegionSet) -> RegionSet;
+
+    /// Range-level intersection: positions covered by *both* sets.
+    fn intersect(&self, other: &RegionSet) -> RegionSet;
+
+    /// Merge two region sets into a minimal non-overlapping set.
+    fn union(&self, other: &RegionSet) -> RegionSet;
+
+    /// Nucleotide-level Jaccard similarity: `|intersection| / |union|`.
+    fn jaccard(&self, other: &RegionSet) -> f64;
+
+    /// Fraction of self's base pairs covered by other.
+    fn coverage(&self, other: &RegionSet) -> f64;
+
+    /// Overlap coefficient: `|intersection| / min(|self|, |other|)`.
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64;
+
+    /// Alias for `setdiff`.
+    fn subtract(&self, other: &RegionSet) -> RegionSet;
+
+    /// Find the nearest region in `other` for each region in `self`.
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)>;
+
+    /// Cluster nearby regions within `max_gap` distance.
+    fn cluster(&self, max_gap: u32) -> Vec<u32>;
+}
+
+// ── Sweep-line implementation of IntervalSetOps for RegionSet ───────────
+
+impl IntervalSetOps for RegionSet {
+    fn setdiff(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<&Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_chr_start = 0;
+        while a_chr_start < a.regions.len() {
+            let chr = &a.regions[a_chr_start].chr;
+            let mut a_chr_end = a_chr_start;
+            while a_chr_end < a.regions.len() && a.regions[a_chr_end].chr == *chr {
+                a_chr_end += 1;
+            }
+
+            let empty_vec = vec![];
+            let b_chr = b_by_chr.get(chr.as_str()).unwrap_or(&empty_vec);
+            let mut b_idx = 0;
+
+            for a_region in &a.regions[a_chr_start..a_chr_end] {
+                while b_idx < b_chr.len() && b_chr[b_idx].end <= a_region.start {
+                    b_idx += 1;
+                }
+
+                let mut pos = a_region.start;
+                let mut j = b_idx;
+
+                while j < b_chr.len() && b_chr[j].start < a_region.end && pos < a_region.end {
+                    if b_chr[j].start > pos {
+                        result.push(Region {
+                            chr: chr.clone(),
+                            start: pos,
+                            end: b_chr[j].start,
+                            rest: None,
+                        });
+                    }
+                    pos = pos.max(b_chr[j].end);
+                    j += 1;
+                }
+
+                if pos < a_region.end {
+                    result.push(Region {
+                        chr: chr.clone(),
+                        start: pos,
+                        end: a_region.end,
+                        rest: None,
+                    });
+                }
+            }
+
+            a_chr_start = a_chr_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<&Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_i = 0;
+        while a_i < a.regions.len() {
+            let chr = &a.regions[a_i].chr;
+            let mut a_end = a_i;
+            while a_end < a.regions.len() && a.regions[a_end].chr == *chr {
+                a_end += 1;
+            }
+
+            if let Some(b_chr) = b_by_chr.get(chr.as_str()) {
+                let mut b_idx = 0;
+                for a_region in &a.regions[a_i..a_end] {
+                    while b_idx < b_chr.len() && b_chr[b_idx].end <= a_region.start {
+                        b_idx += 1;
+                    }
+                    let mut j = b_idx;
+                    while j < b_chr.len() && b_chr[j].start < a_region.end {
+                        let start = a_region.start.max(b_chr[j].start);
+                        let end = a_region.end.min(b_chr[j].end);
+                        if start < end {
+                            result.push(Region {
+                                chr: chr.clone(),
+                                start,
+                                end,
+                                rest: None,
+                            });
+                        }
+                        j += 1;
+                    }
+                }
+            }
+
+            a_i = a_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn union(&self, other: &RegionSet) -> RegionSet {
+        self.concat(other).reduce()
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let union_bp = self.union(other).nucleotides_length();
+        if union_bp == 0 {
+            return 0.0;
+        }
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / union_bp as f64
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        let self_reduced = self.reduce();
+        let self_bp = self_reduced.nucleotides_length();
+        if self_bp == 0 {
+            return 0.0;
+        }
+        let diff = self_reduced.setdiff(other);
+        let diff_bp = diff.nucleotides_length();
+        1.0 - (diff_bp as f64 / self_bp as f64)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let min_bp = a_bp.min(b_bp);
+        if min_bp == 0 {
+            return 0.0;
+        }
+        let union_bp = self.union(other).nucleotides_length();
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / min_bp as f64
+    }
+
+    fn subtract(&self, other: &RegionSet) -> RegionSet {
+        self.setdiff(other)
+    }
+
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+        if other.regions.is_empty() {
+            return Vec::new();
+        }
+
+        let mut other_by_chr: HashMap<String, Vec<(usize, &Region)>> = HashMap::new();
+        for (idx, r) in other.regions.iter().enumerate() {
+            other_by_chr
+                .entry(r.chr.clone())
+                .or_default()
+                .push((idx, r));
+        }
+        for v in other_by_chr.values_mut() {
+            v.sort_by_key(|(_, r)| r.start);
+        }
+
+        let mut result: Vec<(usize, usize, i64)> = Vec::new();
+
+        for (self_idx, a) in self.regions.iter().enumerate() {
+            let Some(candidates) = other_by_chr.get(&a.chr) else {
+                continue;
+            };
+
+            let ins = candidates
+                .binary_search_by_key(&a.start, |(_, r)| r.start)
+                .unwrap_or_else(|x| x);
+
+            let mut best_other_idx = 0usize;
+            let mut best_dist = i64::MAX;
+
+            let check_range_start = if ins >= 2 { ins - 2 } else { 0 };
+            let check_range_end = (ins + 2).min(candidates.len());
+
+            for &(other_idx, b) in &candidates[check_range_start..check_range_end] {
+                let dist = if a.start < b.end && b.start < a.end {
+                    0i64
+                } else if b.end <= a.start {
+                    (a.start as i64) - (b.end as i64)
+                } else {
+                    (b.start as i64) - (a.end as i64)
+                };
+
+                if dist.abs() < best_dist.abs() {
+                    best_dist = dist;
+                    best_other_idx = other_idx;
+                }
+            }
+
+            result.push((self_idx, best_other_idx, best_dist));
+        }
+
+        result
+    }
+
+    fn cluster(&self, max_gap: u32) -> Vec<u32> {
+        if self.regions.is_empty() {
+            return Vec::new();
+        }
+
+        let n = self.regions.len();
+        let mut result = vec![0u32; n];
+
+        let mut sorted_indices: Vec<usize> = (0..n).collect();
+        sorted_indices.sort_by(|&i, &j| {
+            self.regions[i]
+                .chr
+                .cmp(&self.regions[j].chr)
+                .then(self.regions[i].start.cmp(&self.regions[j].start))
+                .then(self.regions[i].end.cmp(&self.regions[j].end))
+        });
+
+        let mut cluster_id: u32 = 0;
+        let mut cluster_end = self.regions[sorted_indices[0]].end;
+        let mut current_chr = &self.regions[sorted_indices[0]].chr;
+        result[sorted_indices[0]] = cluster_id;
+
+        for &idx in &sorted_indices[1..] {
+            let r = &self.regions[idx];
+            if r.chr != *current_chr
+                || r.start > cluster_end.saturating_add(max_gap)
+            {
+                cluster_id += 1;
+                cluster_end = r.end;
+                current_chr = &r.chr;
+            } else {
+                cluster_end = cluster_end.max(r.end);
+            }
+            result[idx] = cluster_id;
+        }
+
+        result
+    }
+}
+
 impl Display for RegionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RegionSet with {} regions.", self.len())
@@ -835,5 +1496,621 @@ mod tests {
                 .unwrap(),
             6u32
         );
+    }
+
+    // ── Helpers for structural / IntervalSetOps tests ────────────────
+
+    fn make_region(chr: &str, start: u32, end: u32) -> Region {
+        Region {
+            chr: chr.to_string(),
+            start,
+            end,
+            rest: None,
+        }
+    }
+
+    fn make_regionset(regions: Vec<(&str, u32, u32)>) -> RegionSet {
+        let regions: Vec<Region> = regions
+            .into_iter()
+            .map(|(chr, start, end)| make_region(chr, start, end))
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    // ── SortedRegionSet tests ───────────────────────────────────────
+
+    #[test]
+    fn test_sorted_regionset_sorts_in_place() {
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 200, rest: None },
+            Region { chr: "chr1".into(), start: 10, end: 20, rest: None },
+            Region { chr: "chr2".into(), start: 5, end: 15, rest: None },
+        ];
+        let sorted = SortedRegionSet::new(RegionSet::from(regions));
+        let starts: Vec<u32> = sorted.0.regions.iter().map(|r| r.start).collect();
+        assert_eq!(starts, vec![10, 100, 5]);
+    }
+
+    // ── trim tests ──────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_trim_clamps_past_chrom_end() {
+        let rs = make_regionset(vec![("chr1", 90, 150)]);
+        let chrom_sizes: HashMap<String, u32> =
+            [("chr1".to_string(), 100)].into_iter().collect();
+        let trimmed = rs.trim(&chrom_sizes);
+        assert_eq!(trimmed.regions.len(), 1);
+        assert_eq!(trimmed.regions[0].start, 90);
+        assert_eq!(trimmed.regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_trim_drops_unknown_chrom() {
+        let rs = make_regionset(vec![("chrX", 0, 50), ("chr1", 10, 20)]);
+        let chrom_sizes: HashMap<String, u32> =
+            [("chr1".to_string(), 100)].into_iter().collect();
+        let trimmed = rs.trim(&chrom_sizes);
+        assert_eq!(trimmed.regions.len(), 1);
+        assert_eq!(trimmed.regions[0].chr, "chr1");
+    }
+
+    #[rstest]
+    fn test_trim_keeps_zero_width_after_clamp() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let chrom_sizes: HashMap<String, u32> =
+            [("chr1".to_string(), 100)].into_iter().collect();
+        let trimmed = rs.trim(&chrom_sizes);
+        assert_eq!(trimmed.regions.len(), 1);
+        assert_eq!(trimmed.regions[0].start, 100);
+        assert_eq!(trimmed.regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_trim_drops_inverted_after_clamp() {
+        let rs = make_regionset(vec![("chr1", 150, 100)]);
+        let chrom_sizes: HashMap<String, u32> =
+            [("chr1".to_string(), 200)].into_iter().collect();
+        let trimmed = rs.trim(&chrom_sizes);
+        assert_eq!(trimmed.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_trim_no_change_when_within_bounds() {
+        let rs = make_regionset(vec![("chr1", 10, 50)]);
+        let chrom_sizes: HashMap<String, u32> =
+            [("chr1".to_string(), 100)].into_iter().collect();
+        let trimmed = rs.trim(&chrom_sizes);
+        assert_eq!(trimmed.regions.len(), 1);
+        assert_eq!(trimmed.regions[0].start, 10);
+        assert_eq!(trimmed.regions[0].end, 50);
+    }
+
+    // ── promoters tests ─────────────────────────────────────────────
+
+    #[rstest]
+    fn test_promoters_standard() {
+        let rs = make_regionset(vec![("chr1", 1000, 2000)]);
+        let result = rs.promoters(500, 200);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0].start, 500);
+        assert_eq!(result.regions[0].end, 1200);
+    }
+
+    #[rstest]
+    fn test_promoters_saturating_sub_at_zero() {
+        let rs = make_regionset(vec![("chr1", 100, 500)]);
+        let result = rs.promoters(200, 50);
+        assert_eq!(result.regions[0].start, 0);
+        assert_eq!(result.regions[0].end, 150);
+    }
+
+    #[rstest]
+    fn test_promoters_at_origin() {
+        let rs = make_regionset(vec![("chr1", 0, 100)]);
+        let result = rs.promoters(500, 200);
+        assert_eq!(result.regions[0].start, 0);
+        assert_eq!(result.regions[0].end, 200);
+    }
+
+    // ── reduce tests ────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_reduce_dummy_bed() {
+        let path = get_test_path("dummy.bed");
+        let rs = RegionSet::try_from(path.to_str().unwrap()).unwrap();
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 1);
+        assert_eq!(reduced.regions[0].chr, "chr1");
+        assert_eq!(reduced.regions[0].start, 2);
+        assert_eq!(reduced.regions[0].end, 12);
+    }
+
+    #[rstest]
+    fn test_reduce_non_overlapping() {
+        let rs = make_regionset(vec![("chr1", 0, 5), ("chr1", 10, 15), ("chr1", 20, 25)]);
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 3);
+    }
+
+    #[rstest]
+    fn test_reduce_adjacent_merged() {
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 10, 20)]);
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 1);
+        assert_eq!(reduced.regions[0].start, 0);
+        assert_eq!(reduced.regions[0].end, 20);
+    }
+
+    #[rstest]
+    fn test_reduce_multi_chrom() {
+        let rs = make_regionset(vec![
+            ("chr1", 0, 10),
+            ("chr1", 5, 15),
+            ("chr2", 0, 10),
+            ("chr2", 20, 30),
+        ]);
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 3);
+        assert_eq!(reduced.regions[0], make_region("chr1", 0, 15));
+        assert_eq!(reduced.regions[1], make_region("chr2", 0, 10));
+        assert_eq!(reduced.regions[2], make_region("chr2", 20, 30));
+    }
+
+    #[rstest]
+    fn test_reduce_lexicographic_chrom_order() {
+        let rs = make_regionset(vec![
+            ("chr10", 0, 10),
+            ("chr2", 0, 10),
+            ("chr1", 0, 10),
+            ("chrX", 0, 10),
+            ("chrM", 0, 10),
+            ("chrY", 0, 10),
+        ]);
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 6);
+        assert_eq!(reduced.regions[0].chr, "chr1");
+        assert_eq!(reduced.regions[1].chr, "chr10");
+        assert_eq!(reduced.regions[2].chr, "chr2");
+        assert_eq!(reduced.regions[3].chr, "chrM");
+        assert_eq!(reduced.regions[4].chr, "chrX");
+        assert_eq!(reduced.regions[5].chr, "chrY");
+    }
+
+    #[rstest]
+    fn test_reduce_empty() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let reduced = rs.reduce();
+        assert_eq!(reduced.regions.len(), 0);
+    }
+
+    // ── concat tests ────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_concat() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 3);
+    }
+
+    #[rstest]
+    fn test_concat_preserves_regions_and_order() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.concat(&b);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 10));
+        assert_eq!(result.regions[1], make_region("chr1", 20, 30));
+        assert_eq!(result.regions[2], make_region("chr1", 5, 15));
+    }
+
+    #[rstest]
+    fn test_concat_both_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        let result = a.concat(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    // ── pintersect tests ────────────────────────────────────────────
+
+    #[rstest]
+    fn test_pintersect_overlapping_pair() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.pintersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 5, 10));
+    }
+
+    #[rstest]
+    fn test_pintersect_no_overlap_zero_width() {
+        let a = make_regionset(vec![("chr1", 0, 5)]);
+        let b = make_regionset(vec![("chr1", 10, 20)]);
+        let result = a.pintersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0].start, 10);
+        assert_eq!(result.regions[0].end, 10);
+    }
+
+    #[rstest]
+    fn test_pintersect_chrom_mismatch_zero_width() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr2", 0, 10)]);
+        let result = a.pintersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0].chr, "chr1");
+        assert_eq!(result.regions[0].start, 0);
+        assert_eq!(result.regions[0].end, 0);
+    }
+
+    // ── disjoin tests ───────────────────────────────────────────────
+
+    #[rstest]
+    fn test_disjoin_overlapping() {
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 5, 15)]);
+        let result = rs.disjoin();
+        assert_eq!(result.regions.len(), 3);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 5));
+        assert_eq!(result.regions[1], make_region("chr1", 5, 10));
+        assert_eq!(result.regions[2], make_region("chr1", 10, 15));
+    }
+
+    #[rstest]
+    fn test_disjoin_empty() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        assert_eq!(rs.disjoin().regions.len(), 0);
+    }
+
+    // ── gaps tests ──────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_gaps_basic() {
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let result = rs.gaps();
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 10, 20));
+    }
+
+    #[rstest]
+    fn test_gaps_empty() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        assert_eq!(rs.gaps().regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_gaps_adjacent_no_gap() {
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 10, 20)]);
+        let result = rs.gaps();
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    // ── shift tests ─────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_shift_positive() {
+        let rs = make_regionset(vec![("chr1", 10, 20)]);
+        let result = rs.shift(5);
+        assert_eq!(result.regions[0], make_region("chr1", 15, 25));
+    }
+
+    #[rstest]
+    fn test_shift_negative_saturates() {
+        let rs = make_regionset(vec![("chr1", 3, 10)]);
+        let result = rs.shift(-5);
+        assert_eq!(result.regions[0].start, 0);
+        assert_eq!(result.regions[0].end, 5);
+    }
+
+    // ── flank tests ─────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_flank_upstream_of_start() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.flank(50, true, false);
+        assert_eq!(result.regions[0], make_region("chr1", 50, 100));
+    }
+
+    #[rstest]
+    fn test_flank_downstream_of_end() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.flank(50, false, false);
+        assert_eq!(result.regions[0], make_region("chr1", 200, 250));
+    }
+
+    #[rstest]
+    fn test_flank_both_around_start() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.flank(50, true, true);
+        assert_eq!(result.regions[0], make_region("chr1", 50, 150));
+    }
+
+    // ── resize tests ────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_resize_from_start() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.resize(50, "start");
+        assert_eq!(result.regions[0], make_region("chr1", 100, 150));
+    }
+
+    #[rstest]
+    fn test_resize_from_end() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.resize(50, "end");
+        assert_eq!(result.regions[0], make_region("chr1", 150, 200));
+    }
+
+    #[rstest]
+    fn test_resize_from_center() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.resize(40, "center");
+        assert_eq!(result.regions[0], make_region("chr1", 130, 170));
+    }
+
+    // ── narrow tests ────────────────────────────────────────────────
+
+    #[rstest]
+    fn test_narrow_start_and_end() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.narrow(Some(1), Some(50), None);
+        assert_eq!(result.regions[0], make_region("chr1", 100, 150));
+    }
+
+    #[rstest]
+    fn test_narrow_start_and_width() {
+        let rs = make_regionset(vec![("chr1", 100, 200)]);
+        let result = rs.narrow(Some(1), None, Some(30));
+        assert_eq!(result.regions[0], make_region("chr1", 100, 130));
+    }
+
+    // ── IntervalSetOps: setdiff tests ───────────────────────────────
+
+    #[rstest]
+    fn test_setdiff_middle_subtraction() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 3, 7)]);
+        let result = a.setdiff(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 3));
+        assert_eq!(result.regions[1], make_region("chr1", 7, 10));
+    }
+
+    #[rstest]
+    fn test_setdiff_complete_subtraction() {
+        let a = make_regionset(vec![("chr1", 3, 7)]);
+        let b = make_regionset(vec![("chr1", 0, 10)]);
+        let result = a.setdiff(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_setdiff_no_overlap() {
+        let a = make_regionset(vec![("chr1", 0, 5)]);
+        let b = make_regionset(vec![("chr1", 10, 20)]);
+        let result = a.setdiff(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 5));
+    }
+
+    #[rstest]
+    fn test_setdiff_multi_chrom() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr2", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let result = a.setdiff(&b);
+        assert_eq!(result.regions.len(), 2);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 5));
+        assert_eq!(result.regions[1], make_region("chr2", 0, 10));
+    }
+
+    #[rstest]
+    fn test_setdiff_from_bed_files() {
+        let path_a = get_test_path("dummy.bed");
+        let path_b = get_test_path("dummy_b.bed");
+        let a = RegionSet::try_from(path_a.to_str().unwrap()).unwrap();
+        let b = RegionSet::try_from(path_b.to_str().unwrap()).unwrap();
+        let result = a.setdiff(&b);
+        assert_eq!(result.regions.len(), 3);
+        assert_eq!(result.regions[0], make_region("chr1", 2, 3));
+        assert_eq!(result.regions[1], make_region("chr1", 5, 8));
+        assert_eq!(result.regions[2], make_region("chr1", 10, 12));
+    }
+
+    // ── IntervalSetOps: intersect tests ─────────────────────────────
+
+    #[rstest]
+    fn test_intersect_overlapping() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 150, 250)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 150, 200));
+    }
+
+    #[rstest]
+    fn test_intersect_no_overlap() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 300, 400)]);
+        let result = a.intersect(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_intersect_empty_inputs() {
+        let empty = RegionSet::from(Vec::<Region>::new());
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        assert_eq!(a.intersect(&empty).regions.len(), 0);
+        assert_eq!(empty.intersect(&a).regions.len(), 0);
+    }
+
+    // ── IntervalSetOps: union tests ─────────────────────────────────
+
+    #[rstest]
+    fn test_union_overlapping() {
+        let a = make_regionset(vec![("chr1", 0, 15)]);
+        let b = make_regionset(vec![("chr1", 10, 25)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 1);
+        assert_eq!(result.regions[0], make_region("chr1", 0, 25));
+    }
+
+    #[rstest]
+    fn test_union_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 2);
+    }
+
+    #[rstest]
+    fn test_union_both_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        let result = a.union(&b);
+        assert_eq!(result.regions.len(), 0);
+    }
+
+    // ── IntervalSetOps: jaccard tests ───────────────────────────────
+
+    #[rstest]
+    fn test_jaccard() {
+        let path_a = get_test_path("dummy.bed");
+        let path_b = get_test_path("dummy_b.bed");
+        let a = RegionSet::try_from(path_a.to_str().unwrap()).unwrap();
+        let b = RegionSet::try_from(path_b.to_str().unwrap()).unwrap();
+        let j = a.jaccard(&b);
+        assert!((j - 0.4).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.jaccard(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_jaccard_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let b = RegionSet::from(Vec::<Region>::new());
+        assert!((a.jaccard(&b)).abs() < 1e-10);
+    }
+
+    // ── IntervalSetOps: coverage tests ──────────────────────────────
+
+    #[rstest]
+    fn test_coverage_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.coverage(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!(a.coverage(&b).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_coverage_partial_overlap() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        assert!((a.coverage(&b) - 0.5).abs() < 1e-10);
+    }
+
+    // ── IntervalSetOps: overlap_coefficient tests ───────────────────
+
+    #[rstest]
+    fn test_overlap_coefficient_identical() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        assert!((a.overlap_coefficient(&a) - 1.0).abs() < 1e-10);
+    }
+
+    #[rstest]
+    fn test_overlap_coefficient_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 20, 30)]);
+        assert!(a.overlap_coefficient(&b).abs() < 1e-10);
+    }
+
+    // ── IntervalSetOps: subtract tests ──────────────────────────────
+
+    #[rstest]
+    fn test_subtract_same_as_setdiff() {
+        let a = make_regionset(vec![("chr1", 0, 20)]);
+        let b = make_regionset(vec![("chr1", 5, 15)]);
+        let setdiff_result = a.setdiff(&b);
+        let subtract_result = a.subtract(&b);
+        assert_eq!(setdiff_result.regions, subtract_result.regions);
+    }
+
+    // ── IntervalSetOps: closest tests ───────────────────────────────
+
+    #[rstest]
+    fn test_closest_overlapping() {
+        let a = make_regionset(vec![("chr1", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 150, 250)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 0));
+    }
+
+    #[rstest]
+    fn test_closest_upstream() {
+        let a = make_regionset(vec![("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 100, 150)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0], (0, 0, 50));
+    }
+
+    #[rstest]
+    fn test_closest_absent_chrom_omitted() {
+        let a = make_regionset(vec![("chr2", 100, 200)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let result = a.closest(&b);
+        assert_eq!(result.len(), 0);
+    }
+
+    // ── IntervalSetOps: cluster tests ───────────────────────────────
+
+    #[rstest]
+    fn test_cluster_non_overlapping_separate() {
+        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30), ("chr1", 40, 50)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids.len(), 3);
+        assert_ne!(ids[0], ids[1]);
+        assert_ne!(ids[1], ids[2]);
+    }
+
+    #[rstest]
+    fn test_cluster_overlapping_same() {
+        let a = make_regionset(vec![("chr1", 0, 15), ("chr1", 10, 25)]);
+        let ids = a.cluster(0);
+        assert_eq!(ids[0], ids[1]);
+    }
+
+    #[rstest]
+    fn test_cluster_empty() {
+        let a = RegionSet::from(Vec::<Region>::new());
+        let ids = a.cluster(0);
+        assert!(ids.is_empty());
+    }
+
+    #[rstest]
+    fn test_cluster_original_order() {
+        let a = make_regionset(vec![
+            ("chr1", 100, 110),
+            ("chr1", 0, 10),
+        ]);
+        let ids = a.cluster(0);
+        assert_eq!(ids.len(), 2);
+        assert_eq!(ids[0], 1);
+        assert_eq!(ids[1], 0);
     }
 }

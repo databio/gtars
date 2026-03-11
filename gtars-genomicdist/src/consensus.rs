@@ -8,7 +8,7 @@
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
 
-use crate::interval_ranges::IntervalRanges;
+// reduce() is now an inherent method on RegionSet (from gtars-core), no trait import needed.
 
 /// A region annotated with the number of input sets overlapping it.
 #[derive(Debug, Clone, PartialEq)]

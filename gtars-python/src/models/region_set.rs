@@ -7,6 +7,7 @@ use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
+use gtars_core::models::IntervalSetOps;
 use gtars_genomicdist::IntervalRanges;
 use gtars_overlaprs::RegionSetOverlaps;
 

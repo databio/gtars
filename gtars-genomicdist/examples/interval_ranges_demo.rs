@@ -1,4 +1,4 @@
-//! Demo: load a BED file and run the 5 IntervalRanges operations.
+//! Demo: load a BED file and run structural + set operations.
 //!
 //! Usage:
 //!   cargo run -p gtars-genomicdist --example interval_ranges_demo -- <bed_file> [bed_file_b]
@@ -9,8 +9,7 @@
 use std::collections::HashMap;
 use std::env;
 
-use gtars_core::models::RegionSet;
-use gtars_genomicdist::interval_ranges::IntervalRanges;
+use gtars_core::models::{IntervalSetOps, RegionSet};
 
 fn print_regionset(label: &str, rs: &RegionSet, max: usize) {
     println!("\n=== {} ({} regions) ===", label, rs.regions.len());
