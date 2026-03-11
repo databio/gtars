@@ -4,7 +4,7 @@ use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::bed_classifier::classify_bed;
 use gtars_genomicdist::consensus;
-use gtars_genomicdist::interval_ranges::IntervalRanges;
+use gtars_core::models::IntervalSetOps;
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;

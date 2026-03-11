@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::errors::GtarsGenomicDistError;
 
-use crate::interval_ranges::IntervalRanges;
+use gtars_core::models::IntervalSetOps;
 use crate::models::{Strand, StrandedRegionSet};
 
 /// A gene model loaded from BED files or GTF.

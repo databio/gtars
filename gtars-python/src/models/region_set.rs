@@ -7,8 +7,9 @@ use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
-use gtars_genomicdist::IntervalRanges;
-use gtars_overlaprs::RegionSetOverlaps;
+use gtars_core::models::IntervalSetOps;
+use gtars_overlaprs::multi_chrom_overlapper::{build_indexed_overlapper, MultiChromOverlapper};
+use gtars_overlaprs::OverlapperType;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -435,32 +436,50 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    /// Return a new RegionSet containing only regions that overlap at least
-    /// one region in other.
+    /// Return a new RegionSet containing only regions from self that overlap
+    /// at least one region in other.
     fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subset_by_overlaps(&other.regionset);
-        Ok(Self::from_regionset(rs))
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        let flags = index.any_overlaps(&self.regionset);
+        let kept: Vec<Region> = self
+            .regionset
+            .regions
+            .iter()
+            .zip(flags)
+            .filter_map(|(r, hit)| if hit { Some(r.clone()) } else { None })
+            .collect();
+        Ok(Self::from_regionset(RegionSet::from(kept)))
     }
 
     /// Return a list of overlap counts, one per region in self.
     fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
-        self.regionset.count_overlaps(&other.regionset)
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        index.count_overlaps(&self.regionset)
     }
 
     /// Return a list of booleans indicating whether each region overlaps
     /// any region in other.
     fn any_overlaps(&self, other: &PyRegionSet) -> Vec<bool> {
-        self.regionset.any_overlaps(&other.regionset)
+        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        index.any_overlaps(&self.regionset)
     }
 
     /// Return a list of lists of indices into other that overlap each
     /// region in self.
+    ///
+    /// Builds an index of `other` with back-references so we can return
+    /// the original indices into `other.regions`.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        self.regionset.find_overlaps(&other.regionset)
+        let index = MultiChromOverlapper::from_region_set(
+            other.regionset.clone(),
+            OverlapperType::AIList,
+        );
+        index.find_overlaps_indexed(&self.regionset)
     }
 
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.intersect_all(&other.regionset);
+        let mco = MultiChromOverlapper::from_region_set(other.regionset.clone(), OverlapperType::AIList);
+        let rs = mco.intersect_all(&self.regionset);
         Ok(Self::from_regionset(rs))
     }
 

@@ -107,7 +107,7 @@ class TestRegionSetStatistics:
 # =========================================================================
 
 
-class TestIntervalRanges:
+class TestIntervalSetOps:
     def test_trim(self):
         rs = make_regionset([("chr1", 0, 1000), ("chr2", 500, 2000)])
         trimmed = rs.trim({"chr1": 500, "chr2": 1500})

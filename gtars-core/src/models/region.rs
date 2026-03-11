@@ -61,6 +61,20 @@ impl Region {
     pub fn mid_point(&self) -> u32 {
         self.start + self.width() / 2
     }
+
+    /// Gap distance between two regions.
+    ///
+    /// Returns 0 if the regions overlap, otherwise returns the positive
+    /// gap (in bases) between the closer edges of the two regions.
+    pub fn distance_to(&self, other: &Region) -> i64 {
+        if self.start < other.end && other.start < self.end {
+            0i64
+        } else if other.end <= self.start {
+            (self.start as i64) - (other.end as i64)
+        } else {
+            (other.start as i64) - (self.end as i64)
+        }
+    }
 }
 
 impl Display for Region {
@@ -75,3 +89,62 @@ impl Display for Region {
 //
 //     }
 // }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn region(chr: &str, start: u32, end: u32) -> Region {
+        Region {
+            chr: chr.to_string(),
+            start,
+            end,
+            rest: None,
+        }
+    }
+
+    #[test]
+    fn test_distance_to_overlap() {
+        let a = region("chr1", 100, 200);
+        let b = region("chr1", 150, 250);
+        assert_eq!(a.distance_to(&b), 0);
+        assert_eq!(b.distance_to(&a), 0);
+    }
+
+    #[test]
+    fn test_distance_to_contained() {
+        let a = region("chr1", 100, 300);
+        let b = region("chr1", 150, 200);
+        assert_eq!(a.distance_to(&b), 0);
+        assert_eq!(b.distance_to(&a), 0);
+    }
+
+    #[test]
+    fn test_distance_to_adjacent() {
+        let a = region("chr1", 100, 200);
+        let b = region("chr1", 200, 300);
+        assert_eq!(a.distance_to(&b), 0);
+        assert_eq!(b.distance_to(&a), 0);
+    }
+
+    #[test]
+    fn test_distance_to_gap_right() {
+        let a = region("chr1", 100, 200);
+        let b = region("chr1", 250, 300);
+        assert_eq!(a.distance_to(&b), 50);
+    }
+
+    #[test]
+    fn test_distance_to_gap_left() {
+        let a = region("chr1", 250, 300);
+        let b = region("chr1", 100, 200);
+        assert_eq!(a.distance_to(&b), 50);
+    }
+
+    #[test]
+    fn test_distance_to_symmetric() {
+        let a = region("chr1", 100, 200);
+        let b = region("chr1", 300, 400);
+        assert_eq!(a.distance_to(&b), b.distance_to(&a));
+    }
+}

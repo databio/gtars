@@ -6,7 +6,7 @@ use clap::ArgMatches;
 
 use gtars_core::models::RegionSet;
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::IntervalRanges;
+use gtars_core::models::IntervalSetOps;
 
 pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {

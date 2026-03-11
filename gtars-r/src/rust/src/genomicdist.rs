@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use extendr_api::prelude::*;
 
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{IntervalSetOps, Region, RegionSet};
 use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
     consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
-    GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
+    GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
 

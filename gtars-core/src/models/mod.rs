@@ -8,4 +8,6 @@ pub mod region_set;
 pub use self::fragments::Fragment;
 pub use self::interval::Interval;
 pub use self::region::Region;
-pub use self::region_set::RegionSet;
+pub use self::region_set::{
+    sweep_intersect_chr, sweep_setdiff_chr, IntervalSetOps, RegionSet, SortedRegionSet,
+};

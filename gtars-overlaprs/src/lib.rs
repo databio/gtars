@@ -89,12 +89,6 @@ pub mod multi_chrom_overlapper;
 /// See [`Overlapper`] for the main trait.
 pub mod traits;
 
-/// Overlap query operations on RegionSet.
-///
-/// See [`RegionSetOverlaps`] for the main trait.
-pub mod regionset_ops;
-pub use self::regionset_ops::RegionSetOverlaps;
-
 // re-exports
 pub use self::ailist::AIList;
 pub use self::bits::Bits;

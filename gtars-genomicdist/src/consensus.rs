@@ -8,8 +8,6 @@
 use gtars_core::models::{Region, RegionSet};
 use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
 
-use crate::interval_ranges::IntervalRanges;
-
 /// A region annotated with the number of input sets overlapping it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ConsensusRegion {
