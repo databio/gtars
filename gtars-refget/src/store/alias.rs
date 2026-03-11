@@ -498,6 +498,12 @@ impl RefgetStore {
 
         match strategy {
             SyncStrategy::KeepOurs => {
+                let was_local = self
+                    .inner
+                    .local_path
+                    .as_ref()
+                    .map(|p| p.join(&relative_path).exists())
+                    .unwrap_or(false);
                 match ReadonlyRefgetStore::fetch_file(
                     &self.inner.local_path,
                     &self.inner.remote_source,
@@ -506,12 +512,6 @@ impl RefgetStore {
                     false,
                 ) {
                     Ok(_) => {
-                        let was_local = self
-                            .inner
-                            .local_path
-                            .as_ref()
-                            .map(|p| p.join(&relative_path).exists())
-                            .unwrap_or(false);
                         if was_local {
                             result.skipped += 1;
                         } else {
@@ -591,6 +591,79 @@ impl RefgetStore {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    // -----------------------------------------------------------------------
+    // Minimal HTTP test server helper
+    // -----------------------------------------------------------------------
+
+    /// Spin up a single-threaded HTTP file server on a random port.
+    ///
+    /// The server serves files from `serve_dir` for as long as the returned
+    /// `JoinHandle` is alive (call `drop()` or let it go out of scope, but
+    /// the thread will block on the next request; `shutdown_flag` is used to
+    /// stop it cleanly after the test).
+    ///
+    /// Returns `(base_url, shutdown_fn)` where `shutdown_fn()` signals the
+    /// server to stop.
+    fn start_file_server(serve_dir: std::path::PathBuf) -> (String, impl FnOnce()) {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            listener.set_nonblocking(false).ok();
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let n = stream.read(&mut buf).unwrap_or(0);
+                        let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                        // Parse GET /path HTTP/1.x
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|l| l.split_whitespace().nth(1))
+                            .unwrap_or("/");
+                        // Strip leading '/'
+                        let rel = path.trim_start_matches('/');
+                        let file_path = serve_dir.join(rel);
+                        if file_path.exists() && file_path.is_file() {
+                            let data = std::fs::read(&file_path).unwrap_or_default();
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(&data);
+                        } else {
+                            let body = b"Not Found";
+                            let header = format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(body);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            // Connect once to unblock the accept() call
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
 
     // --- AliasManager unit tests ---
 
@@ -1114,5 +1187,54 @@ mod tests {
         let available = store2.available_alias_namespaces();
         assert!(available.sequences.is_empty());
         assert!(available.collections.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // KeepOurs sync strategy tests (regression test for was_local ordering bug)
+    // -----------------------------------------------------------------------
+
+    /// Pull an alias file that does NOT exist locally yet.
+    /// KeepOurs: first pull should count as `pulled`, second pull as `skipped`.
+    #[test]
+    fn test_keep_ours_alias_first_pull_counts_as_pulled() {
+        // "Remote" store: a directory with pre-built alias TSV files.
+        // pull_aliases(Some("ncbi"), ...) pulls BOTH sequences and collections
+        // namespace "ncbi", so we create both files on the remote.
+        let remote_dir = tempdir().unwrap();
+        let seq_dir = remote_dir.path().join("aliases").join("sequences");
+        let coll_dir = remote_dir.path().join("aliases").join("collections");
+        fs::create_dir_all(&seq_dir).unwrap();
+        fs::create_dir_all(&coll_dir).unwrap();
+        fs::write(seq_dir.join("ncbi.tsv"), "NC_000001.11\tsome_digest\n").unwrap();
+        fs::write(coll_dir.join("ncbi.tsv"), "hg38\tcoll_digest\n").unwrap();
+
+        // Start a local HTTP server serving the remote_dir.
+        let (base_url, shutdown) = start_file_server(remote_dir.path().to_path_buf());
+
+        // "Local" store: empty disk-backed store that will pull from the server.
+        let local_dir = tempdir().unwrap();
+        let local_store_path = local_dir.path().join("store");
+        fs::create_dir_all(&local_store_path).unwrap();
+
+        let mut store = RefgetStore::on_disk(&local_store_path).unwrap();
+        store.inner.remote_source = Some(base_url);
+        // Advertise "ncbi" as an available namespace for both sequences and collections.
+        // pull_aliases(Some("ncbi"), ...) pulls both kinds, so we need both files on remote.
+        store.inner.available_sequence_alias_namespaces = vec!["ncbi".to_string()];
+        store.inner.available_collection_alias_namespaces = vec!["ncbi".to_string()];
+
+        // First pull: both alias files do not exist locally → both should be pulled.
+        // pull_aliases(Some("ncbi"), ...) pulls sequences/ncbi.tsv AND collections/ncbi.tsv.
+        let result = store.pull_aliases(Some("ncbi"), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result.pulled, 2, "first pull should count both files as pulled, not skipped");
+        assert_eq!(result.skipped, 0, "first pull should not be skipped");
+        assert_eq!(result.not_found, 0);
+
+        // Second pull: both files now exist locally → both should be skipped.
+        let result2 = store.pull_aliases(Some("ncbi"), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result2.skipped, 2, "second pull should skip both files (already local)");
+        assert_eq!(result2.pulled, 0, "second pull should not count any files as pulled");
+
+        shutdown();
     }
 }

@@ -381,6 +381,12 @@ impl RefgetStore {
 
             match strategy {
                 SyncStrategy::KeepOurs => {
+                    let was_local = self
+                        .inner
+                        .local_path
+                        .as_ref()
+                        .map(|p| p.join(&relative_path).exists())
+                        .unwrap_or(false);
                     match ReadonlyRefgetStore::fetch_file(
                         &self.inner.local_path,
                         &self.inner.remote_source,
@@ -389,12 +395,6 @@ impl RefgetStore {
                         false,
                     ) {
                         Ok(data) => {
-                            let was_local = self
-                                .inner
-                                .local_path
-                                .as_ref()
-                                .map(|p| p.join(&relative_path).exists())
-                                .unwrap_or(false);
                             if was_local {
                                 result.skipped += 1;
                             } else {
@@ -881,5 +881,128 @@ mod tests {
         store.remove_collection(&digest, false).unwrap();
 
         assert!(store.get_fhr_metadata(&digest).is_none());
+    }
+
+    // -----------------------------------------------------------------------
+    // KeepOurs sync strategy tests (regression test for was_local ordering bug)
+    // -----------------------------------------------------------------------
+
+    /// Spin up a minimal HTTP server serving files from `serve_dir`.
+    /// Returns `(base_url, shutdown_fn)`.
+    fn start_file_server(serve_dir: std::path::PathBuf) -> (String, impl FnOnce()) {
+        use std::io::{Read as _, Write as _};
+        use std::net::TcpListener;
+        use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            listener.set_nonblocking(false).ok();
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let n = stream.read(&mut buf).unwrap_or(0);
+                        let request = std::str::from_utf8(&buf[..n]).unwrap_or("");
+                        let path = request
+                            .lines()
+                            .next()
+                            .and_then(|l| l.split_whitespace().nth(1))
+                            .unwrap_or("/");
+                        let rel = path.trim_start_matches('/');
+                        let file_path = serve_dir.join(rel);
+                        if file_path.exists() && file_path.is_file() {
+                            let data = fs::read(&file_path).unwrap_or_default();
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                data.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(&data);
+                        } else {
+                            let body = b"Not Found";
+                            let header = format!(
+                                "HTTP/1.1 404 Not Found\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(body);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
+
+    /// Pull an FHR sidecar that does NOT exist locally yet.
+    /// KeepOurs: first pull should count as `pulled`, second pull as `skipped`.
+    #[test]
+    fn test_keep_ours_fhr_first_pull_counts_as_pulled() {
+        // "Remote" store: directory with a pre-built FHR JSON sidecar.
+        let remote_dir = tempdir().unwrap();
+        let collections_dir = remote_dir.path().join("collections");
+        fs::create_dir_all(&collections_dir).unwrap();
+
+        // We need a fake digest string to use as the collection identity.
+        let fake_digest = "SQ.aaaaaaaaaaaaaaaaaaaaaaaa";
+        let sidecar_name = format!("{}.fhr.json", fake_digest);
+        let fhr = FhrMetadata {
+            genome: Some("TestGenome".to_string()),
+            ..Default::default()
+        };
+        let sidecar_json = serde_json::to_string(&fhr).unwrap();
+        fs::write(collections_dir.join(&sidecar_name), &sidecar_json).unwrap();
+
+        // Start HTTP server.
+        let (base_url, shutdown) = start_file_server(remote_dir.path().to_path_buf());
+
+        // "Local" store: disk-backed, with a stub collection so pull_fhr has a digest.
+        let local_dir = tempdir().unwrap();
+        let local_store_path = local_dir.path().join("store");
+
+        let mut store = RefgetStore::on_disk(&local_store_path).unwrap();
+        store.inner.remote_source = Some(base_url);
+
+        // Inject a minimal stub collection so pull_fhr iterates over it.
+        use crate::hashkeyable::HashKeyable;
+        use crate::digest::SequenceCollectionRecord;
+        let key = fake_digest.to_key();
+        let stub = crate::digest::SequenceCollectionMetadata {
+            digest: fake_digest.to_string(),
+            n_sequences: 0,
+            names_digest: String::new(),
+            sequences_digest: String::new(),
+            lengths_digest: String::new(),
+            name_length_pairs_digest: None,
+            sorted_name_length_pairs_digest: None,
+            sorted_sequences_digest: None,
+            file_path: None,
+        };
+        store.inner.collections.insert(key, SequenceCollectionRecord::Stub(stub));
+
+        // First pull: FHR sidecar not yet local → should be pulled.
+        let result = store.pull_fhr(Some(fake_digest), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result.pulled, 1, "first pull should count as pulled, not skipped");
+        assert_eq!(result.skipped, 0, "first pull should not be skipped");
+        assert_eq!(result.not_found, 0);
+
+        // Second pull: sidecar now on disk → should be skipped.
+        let result2 = store.pull_fhr(Some(fake_digest), SyncStrategy::KeepOurs).unwrap();
+        assert_eq!(result2.skipped, 1, "second pull should be skipped (file already local)");
+        assert_eq!(result2.pulled, 0, "second pull should not count as pulled");
+
+        shutdown();
     }
 }

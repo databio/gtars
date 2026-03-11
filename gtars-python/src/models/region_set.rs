@@ -171,8 +171,11 @@ impl PyRegionSet {
     fn get_identifier(&mut self) -> PyResult<String> {
         if self.identifier.is_none() {
             self.identifier = Some(self.regionset.identifier());
-        };
-        Ok(self.identifier.clone().unwrap())
+        }
+        // Safe: the block above guarantees Some
+        self.identifier.clone().ok_or_else(|| {
+            pyo3::exceptions::PyRuntimeError::new_err("Failed to compute identifier")
+        })
     }
 
     #[getter]
