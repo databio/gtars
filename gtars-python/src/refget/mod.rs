@@ -906,7 +906,7 @@ impl From<PyStorageMode> for StorageMode {
 #[pyclass(name = "FhrMetadata", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PyFhrMetadata {
-    inner: gtars_refget::fhr_metadata::FhrMetadata,
+    inner: gtars_refget::FhrMetadata,
 }
 
 #[pymethods]
@@ -918,14 +918,14 @@ impl PyFhrMetadata {
             Some(dict) => {
                 // Convert kwargs dict to JSON string, then deserialize
                 let json_str = dict_to_json_string(dict)?;
-                let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+                let metadata: gtars_refget::FhrMetadata =
                     serde_json::from_str(&json_str).map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
                     })?;
                 Ok(Self { inner: metadata })
             }
             None => Ok(Self {
-                inner: gtars_refget::fhr_metadata::FhrMetadata::default(),
+                inner: gtars_refget::FhrMetadata::default(),
             }),
         }
     }
@@ -934,7 +934,7 @@ impl PyFhrMetadata {
     fn from_json(path: &str) -> PyResult<Self> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-        let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+        let metadata: gtars_refget::FhrMetadata =
             serde_json::from_str(&json)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         Ok(Self { inner: metadata })
