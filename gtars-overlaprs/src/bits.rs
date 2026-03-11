@@ -171,6 +171,10 @@ where
         };
         Box::new(finder)
     }
+
+    fn iter(&self) -> Box<dyn Iterator<Item = &Interval<I, T>> + '_> {
+        Box::new(self.intervals.iter())
+    }
 }
 
 impl<I, T> Bits<I, T>
@@ -227,15 +231,6 @@ where
     #[inline]
     pub fn is_empty(&self) -> bool {
         self.intervals.is_empty()
-    }
-
-    /// Return an iterator over the intervals in Bits
-    #[inline]
-    pub fn iter(&'_ self) -> IterBits<'_, I, T> {
-        IterBits {
-            inner: self,
-            pos: 0,
-        }
     }
 
     /// Determine the first index that we should start checking for overlaps for via a binary
@@ -439,55 +434,6 @@ where
             }
         }
         None
-    }
-}
-
-/// An iterator over all intervals in a [`Bits`] structure, in sorted order.
-///
-/// This struct is created by the [`iter`](Bits::iter) method. It yields references to all
-/// intervals in the `Bits` structure in sorted order by start position, regardless of overlap.
-///
-/// # Examples
-///
-/// ```
-/// use gtars_overlaprs::{Bits, Overlapper, Interval};
-///
-/// let intervals = vec![
-///     Interval { start: 10u32, end: 20, val: 1 },
-///     Interval { start: 15, end: 25, val: 2 },
-///     Interval { start: 30, end: 40, val: 3 },
-/// ];
-///
-/// let bits = Bits::build(intervals);
-///
-/// // Iterate over all intervals
-/// for interval in bits.iter() {
-///     println!("Interval: {}-{}", interval.start, interval.end);
-/// }
-/// ```
-pub struct IterBits<'a, I, T>
-where
-    T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Send + Sync,
-{
-    inner: &'a Bits<I, T>,
-    pos: usize,
-}
-
-impl<'a, I, T> Iterator for IterBits<'a, I, T>
-where
-    T: Eq + Clone + Send + Sync + 'a,
-    I: PrimInt + Unsigned + Send + Sync,
-{
-    type Item = &'a Interval<I, T>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.pos >= self.inner.intervals.len() {
-            None
-        } else {
-            self.pos += 1;
-            self.inner.intervals.get(self.pos - 1)
-        }
     }
 }
 

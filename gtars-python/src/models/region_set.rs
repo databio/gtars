@@ -436,12 +436,19 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    /// Return a new RegionSet containing only regions that overlap at least
-    /// one region in other.
+    /// Return a new RegionSet containing only regions from self that overlap
+    /// at least one region in other.
     fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
         let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
-        let rs = index.subset_by(&self.regionset);
-        Ok(Self::from_regionset(rs))
+        let flags = index.any_overlaps(&self.regionset);
+        let kept: Vec<Region> = self
+            .regionset
+            .regions
+            .iter()
+            .zip(flags)
+            .filter_map(|(r, hit)| if hit { Some(r.clone()) } else { None })
+            .collect();
+        Ok(Self::from_regionset(RegionSet::from(kept)))
     }
 
     /// Return a list of overlap counts, one per region in self.
@@ -459,8 +466,14 @@ impl PyRegionSet {
 
     /// Return a list of lists of indices into other that overlap each
     /// region in self.
+    ///
+    /// Builds an index of `other` with back-references so we can return
+    /// the original indices into `other.regions`.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        let index = build_indexed_overlapper(&other.regionset, OverlapperType::AIList);
+        let index = MultiChromOverlapper::from_region_set(
+            other.regionset.clone(),
+            OverlapperType::AIList,
+        );
         index.find_overlaps_indexed(&self.regionset)
     }
 

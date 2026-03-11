@@ -996,221 +996,57 @@ impl RegionSet {
             .collect();
         RegionSet::from(regions)
     }
-}
-
-// ── IntervalSetOps trait ────────────────────────────────────────────────
-//
-// Two-set operations defined as a trait so both RegionSet (sweep-line) and
-// MultiChromOverlapper (index-based) can implement them.
-
-/// Two-set interval operations on genomic region sets.
-///
-/// Provides set algebra (setdiff, intersect, union) and similarity metrics
-/// (jaccard, coverage, overlap_coefficient) plus nearest-neighbor and
-/// clustering operations. Implementations may use sweep-line or index-based
-/// algorithms.
-pub trait IntervalSetOps {
-    /// Set difference: remove portions of `self` that overlap with `other`.
-    fn setdiff(&self, other: &RegionSet) -> RegionSet;
-
-    /// Range-level intersection: positions covered by *both* sets.
-    fn intersect(&self, other: &RegionSet) -> RegionSet;
 
     /// Merge two region sets into a minimal non-overlapping set.
-    fn union(&self, other: &RegionSet) -> RegionSet;
-
-    /// Nucleotide-level Jaccard similarity: `|intersection| / |union|`.
-    fn jaccard(&self, other: &RegionSet) -> f64;
-
-    /// Fraction of self's base pairs covered by other.
-    fn coverage(&self, other: &RegionSet) -> f64;
-
-    /// Overlap coefficient: `|intersection| / min(|self|, |other|)`.
-    fn overlap_coefficient(&self, other: &RegionSet) -> f64;
-
-    /// Alias for `setdiff`.
-    fn subtract(&self, other: &RegionSet) -> RegionSet;
-
-    /// Find the nearest region in `other` for each region in `self`.
-    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)>;
-
-    /// Cluster nearby regions within `max_gap` distance.
-    fn cluster(&self, max_gap: u32) -> Vec<u32>;
-}
-
-// ── Sweep-line implementation of IntervalSetOps for RegionSet ───────────
-
-impl IntervalSetOps for RegionSet {
-    fn setdiff(&self, other: &RegionSet) -> RegionSet {
-        let a = self.reduce();
-        let b = other.reduce();
-
-        let mut b_by_chr: HashMap<String, Vec<&Region>> = HashMap::new();
-        for r in &b.regions {
-            b_by_chr.entry(r.chr.clone()).or_default().push(r);
-        }
-
-        let mut result: Vec<Region> = Vec::new();
-
-        let mut a_chr_start = 0;
-        while a_chr_start < a.regions.len() {
-            let chr = &a.regions[a_chr_start].chr;
-            let mut a_chr_end = a_chr_start;
-            while a_chr_end < a.regions.len() && a.regions[a_chr_end].chr == *chr {
-                a_chr_end += 1;
-            }
-
-            let empty_vec = vec![];
-            let b_chr = b_by_chr.get(chr.as_str()).unwrap_or(&empty_vec);
-            let mut b_idx = 0;
-
-            for a_region in &a.regions[a_chr_start..a_chr_end] {
-                while b_idx < b_chr.len() && b_chr[b_idx].end <= a_region.start {
-                    b_idx += 1;
-                }
-
-                let mut pos = a_region.start;
-                let mut j = b_idx;
-
-                while j < b_chr.len() && b_chr[j].start < a_region.end && pos < a_region.end {
-                    if b_chr[j].start > pos {
-                        result.push(Region {
-                            chr: chr.clone(),
-                            start: pos,
-                            end: b_chr[j].start,
-                            rest: None,
-                        });
-                    }
-                    pos = pos.max(b_chr[j].end);
-                    j += 1;
-                }
-
-                if pos < a_region.end {
-                    result.push(Region {
-                        chr: chr.clone(),
-                        start: pos,
-                        end: a_region.end,
-                        rest: None,
-                    });
-                }
-            }
-
-            a_chr_start = a_chr_end;
-        }
-
-        RegionSet::from(result)
-    }
-
-    fn intersect(&self, other: &RegionSet) -> RegionSet {
-        let a = self.reduce();
-        let b = other.reduce();
-
-        let mut b_by_chr: HashMap<String, Vec<&Region>> = HashMap::new();
-        for r in &b.regions {
-            b_by_chr.entry(r.chr.clone()).or_default().push(r);
-        }
-
-        let mut result: Vec<Region> = Vec::new();
-
-        let mut a_i = 0;
-        while a_i < a.regions.len() {
-            let chr = &a.regions[a_i].chr;
-            let mut a_end = a_i;
-            while a_end < a.regions.len() && a.regions[a_end].chr == *chr {
-                a_end += 1;
-            }
-
-            if let Some(b_chr) = b_by_chr.get(chr.as_str()) {
-                let mut b_idx = 0;
-                for a_region in &a.regions[a_i..a_end] {
-                    while b_idx < b_chr.len() && b_chr[b_idx].end <= a_region.start {
-                        b_idx += 1;
-                    }
-                    let mut j = b_idx;
-                    while j < b_chr.len() && b_chr[j].start < a_region.end {
-                        let start = a_region.start.max(b_chr[j].start);
-                        let end = a_region.end.min(b_chr[j].end);
-                        if start < end {
-                            result.push(Region {
-                                chr: chr.clone(),
-                                start,
-                                end,
-                                rest: None,
-                            });
-                        }
-                        j += 1;
-                    }
-                }
-            }
-
-            a_i = a_end;
-        }
-
-        RegionSet::from(result)
-    }
-
-    fn union(&self, other: &RegionSet) -> RegionSet {
+    pub fn union(&self, other: &RegionSet) -> RegionSet {
         self.concat(other).reduce()
     }
 
-    fn jaccard(&self, other: &RegionSet) -> f64 {
-        let a_bp = self.reduce().nucleotides_length();
-        let b_bp = other.reduce().nucleotides_length();
-        let union_bp = self.union(other).nucleotides_length();
-        if union_bp == 0 {
-            return 0.0;
-        }
-        let intersection_bp = a_bp + b_bp - union_bp;
-        intersection_bp as f64 / union_bp as f64
-    }
-
-    fn coverage(&self, other: &RegionSet) -> f64 {
-        let self_reduced = self.reduce();
-        let self_bp = self_reduced.nucleotides_length();
-        if self_bp == 0 {
-            return 0.0;
-        }
-        let diff = self_reduced.setdiff(other);
-        let diff_bp = diff.nucleotides_length();
-        1.0 - (diff_bp as f64 / self_bp as f64)
-    }
-
-    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
-        let a_bp = self.reduce().nucleotides_length();
-        let b_bp = other.reduce().nucleotides_length();
-        let min_bp = a_bp.min(b_bp);
-        if min_bp == 0 {
-            return 0.0;
-        }
-        let union_bp = self.union(other).nucleotides_length();
-        let intersection_bp = a_bp + b_bp - union_bp;
-        intersection_bp as f64 / min_bp as f64
-    }
-
-    fn subtract(&self, other: &RegionSet) -> RegionSet {
+    /// Alias for `setdiff`.
+    pub fn subtract(&self, other: &RegionSet) -> RegionSet {
         self.setdiff(other)
     }
 
-    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+    /// Find the nearest region in `other` for each region in `self`.
+    ///
+    /// Returns a vec of `(self_index, other_index, signed_distance)` tuples,
+    /// one per region in `self` that shares a chromosome with at least one
+    /// region in `other`.
+    ///
+    /// The algorithm sorts candidates by `start`, builds a prefix-max array
+    /// of `end` values, then scans rightward and leftward from the binary
+    /// search insertion point with early termination.
+    pub fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
         if other.regions.is_empty() {
             return Vec::new();
         }
 
-        let mut other_by_chr: HashMap<String, Vec<(usize, &Region)>> = HashMap::new();
+        // Group other's regions by chromosome, sorted by start.
+        // Each entry also carries a prefix-max of end values for pruning.
+        let mut other_by_chr: HashMap<String, (Vec<(usize, &Region)>, Vec<u32>)> = HashMap::new();
         for (idx, r) in other.regions.iter().enumerate() {
             other_by_chr
                 .entry(r.chr.clone())
-                .or_default()
+                .or_insert_with(|| (Vec::new(), Vec::new()))
+                .0
                 .push((idx, r));
         }
-        for v in other_by_chr.values_mut() {
-            v.sort_by_key(|(_, r)| r.start);
+        for (candidates, max_ends) in other_by_chr.values_mut() {
+            candidates.sort_by_key(|(_, r)| r.start);
+            // Build prefix-max of end values: max_ends[i] = max(candidates[0..=i].end)
+            let mut running_max = 0u32;
+            max_ends.clear();
+            max_ends.reserve(candidates.len());
+            for &(_, r) in candidates.iter() {
+                running_max = running_max.max(r.end);
+                max_ends.push(running_max);
+            }
         }
 
         let mut result: Vec<(usize, usize, i64)> = Vec::new();
 
         for (self_idx, a) in self.regions.iter().enumerate() {
-            let Some(candidates) = other_by_chr.get(&a.chr) else {
+            let Some((candidates, max_ends)) = other_by_chr.get(&a.chr) else {
                 continue;
             };
 
@@ -1221,21 +1057,44 @@ impl IntervalSetOps for RegionSet {
             let mut best_other_idx = 0usize;
             let mut best_dist = i64::MAX;
 
-            let check_range_start = if ins >= 2 { ins - 2 } else { 0 };
-            let check_range_end = (ins + 2).min(candidates.len());
-
-            for &(other_idx, b) in &candidates[check_range_start..check_range_end] {
-                let dist = if a.start < b.end && b.start < a.end {
-                    0i64
-                } else if b.end <= a.start {
-                    (a.start as i64) - (b.end as i64)
-                } else {
-                    (b.start as i64) - (a.end as i64)
-                };
-
+            // Scan rightward from insertion point
+            for j in ins..candidates.len() {
+                let (other_idx, b) = candidates[j];
+                let dist = a.distance_to(b);
                 if dist.abs() < best_dist.abs() {
                     best_dist = dist;
                     best_other_idx = other_idx;
+                }
+                if best_dist == 0 {
+                    break;
+                }
+                // All further candidates start even farther right
+                if b.start >= a.end && (b.start as i64 - a.end as i64) >= best_dist.abs() {
+                    break;
+                }
+            }
+
+            // Scan leftward from insertion point
+            if best_dist != 0 {
+                for j in (0..ins).rev() {
+                    let (other_idx, b) = candidates[j];
+                    let dist = a.distance_to(b);
+                    if dist.abs() < best_dist.abs() {
+                        best_dist = dist;
+                        best_other_idx = other_idx;
+                    }
+                    if best_dist == 0 {
+                        break;
+                    }
+                    // Prune using prefix-max: if max_ends[j] <= a.start, then no
+                    // candidate at index 0..=j overlaps the query. Check if the
+                    // gap from query start to the farthest-reaching end among
+                    // 0..=j is already worse than best.
+                    if max_ends[j] <= a.start
+                        && (a.start as i64 - max_ends[j] as i64) >= best_dist.abs()
+                    {
+                        break;
+                    }
                 }
             }
 
@@ -1245,7 +1104,8 @@ impl IntervalSetOps for RegionSet {
         result
     }
 
-    fn cluster(&self, max_gap: u32) -> Vec<u32> {
+    /// Cluster nearby regions within `max_gap` distance.
+    pub fn cluster(&self, max_gap: u32) -> Vec<u32> {
         if self.regions.is_empty() {
             return Vec::new();
         }
@@ -1282,6 +1142,211 @@ impl IntervalSetOps for RegionSet {
         }
 
         result
+    }
+}
+
+// ── Shared sweep-line helpers ────────────────────────────────────────────
+//
+// Free functions that operate on per-chromosome slices of *already-reduced*
+// (sorted, non-overlapping) regions.  Both RegionSet and MCO call these so
+// the sweep-line logic lives in exactly one place.
+
+/// Sweep-line set-difference on a single chromosome.
+///
+/// Both `a` and `b` must be sorted by start and non-overlapping (reduced).
+/// Returns the portions of `a` that do **not** overlap any region in `b`.
+pub fn sweep_setdiff_chr(chr: &str, a: &[Region], b: &[Region]) -> Vec<Region> {
+    let mut result = Vec::new();
+    let mut b_idx = 0;
+
+    for a_region in a {
+        while b_idx < b.len() && b[b_idx].end <= a_region.start {
+            b_idx += 1;
+        }
+
+        let mut pos = a_region.start;
+        let mut j = b_idx;
+
+        while j < b.len() && b[j].start < a_region.end && pos < a_region.end {
+            if b[j].start > pos {
+                result.push(Region {
+                    chr: chr.to_string(),
+                    start: pos,
+                    end: b[j].start,
+                    rest: None,
+                });
+            }
+            pos = pos.max(b[j].end);
+            j += 1;
+        }
+
+        if pos < a_region.end {
+            result.push(Region {
+                chr: chr.to_string(),
+                start: pos,
+                end: a_region.end,
+                rest: None,
+            });
+        }
+    }
+
+    result
+}
+
+/// Sweep-line intersection on a single chromosome.
+///
+/// Both `a` and `b` must be sorted by start and non-overlapping (reduced).
+/// Returns regions covered by **both** `a` and `b`.
+pub fn sweep_intersect_chr(chr: &str, a: &[Region], b: &[Region]) -> Vec<Region> {
+    let mut result = Vec::new();
+    let mut b_idx = 0;
+
+    for a_region in a {
+        while b_idx < b.len() && b[b_idx].end <= a_region.start {
+            b_idx += 1;
+        }
+        let mut j = b_idx;
+        while j < b.len() && b[j].start < a_region.end {
+            let start = a_region.start.max(b[j].start);
+            let end = a_region.end.min(b[j].end);
+            if start < end {
+                result.push(Region {
+                    chr: chr.to_string(),
+                    start,
+                    end,
+                    rest: None,
+                });
+            }
+            j += 1;
+        }
+    }
+
+    result
+}
+
+// ── IntervalSetOps trait ────────────────────────────────────────────────
+//
+// Two-set operations defined as a trait so both RegionSet (sweep-line) and
+// MultiChromOverlapper (index-based) can implement them.
+
+/// Two-set interval operations on genomic region sets.
+///
+/// Provides set algebra (setdiff, intersect) and similarity metrics
+/// (jaccard, coverage, overlap_coefficient). Implementations may use
+/// sweep-line or index-based algorithms.
+///
+/// Note: `union`, `subtract`, `closest`, and `cluster` are inherent methods
+/// on `RegionSet` rather than trait methods.
+pub trait IntervalSetOps {
+    /// Set difference: remove portions of `self` that overlap with `other`.
+    fn setdiff(&self, other: &RegionSet) -> RegionSet;
+
+    /// Range-level intersection: positions covered by *both* sets.
+    fn intersect(&self, other: &RegionSet) -> RegionSet;
+
+    /// Nucleotide-level Jaccard similarity: `|intersection| / |union|`.
+    fn jaccard(&self, other: &RegionSet) -> f64;
+
+    /// Fraction of self's base pairs covered by other.
+    fn coverage(&self, other: &RegionSet) -> f64;
+
+    /// Overlap coefficient: `|intersection| / min(|self|, |other|)`.
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64;
+}
+
+// ── Sweep-line implementation of IntervalSetOps for RegionSet ───────────
+
+impl IntervalSetOps for RegionSet {
+    fn setdiff(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r.clone());
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_chr_start = 0;
+        while a_chr_start < a.regions.len() {
+            let chr = &a.regions[a_chr_start].chr;
+            let mut a_chr_end = a_chr_start;
+            while a_chr_end < a.regions.len() && a.regions[a_chr_end].chr == *chr {
+                a_chr_end += 1;
+            }
+
+            let empty_vec = vec![];
+            let b_chr = b_by_chr.get(chr.as_str()).unwrap_or(&empty_vec);
+            result.extend(sweep_setdiff_chr(chr, &a.regions[a_chr_start..a_chr_end], b_chr));
+
+            a_chr_start = a_chr_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r.clone());
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_i = 0;
+        while a_i < a.regions.len() {
+            let chr = &a.regions[a_i].chr;
+            let mut a_end = a_i;
+            while a_end < a.regions.len() && a.regions[a_end].chr == *chr {
+                a_end += 1;
+            }
+
+            if let Some(b_chr) = b_by_chr.get(chr.as_str()) {
+                result.extend(sweep_intersect_chr(chr, &a.regions[a_i..a_end], b_chr));
+            }
+
+            a_i = a_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let union_bp = self.union(other).nucleotides_length();
+        if union_bp == 0 {
+            return 0.0;
+        }
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / union_bp as f64
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        let self_reduced = self.reduce();
+        let self_bp = self_reduced.nucleotides_length();
+        if self_bp == 0 {
+            return 0.0;
+        }
+        let diff = self_reduced.setdiff(other);
+        let diff_bp = diff.nucleotides_length();
+        1.0 - (diff_bp as f64 / self_bp as f64)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let min_bp = a_bp.min(b_bp);
+        if min_bp == 0 {
+            return 0.0;
+        }
+        let union_bp = self.union(other).nucleotides_length();
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / min_bp as f64
     }
 }
 
@@ -2045,6 +2110,7 @@ mod tests {
         let a = make_regionset(vec![("chr1", 0, 20)]);
         let b = make_regionset(vec![("chr1", 5, 15)]);
         let setdiff_result = a.setdiff(&b);
+        // subtract is now an inherent method (alias for setdiff)
         let subtract_result = a.subtract(&b);
         assert_eq!(setdiff_result.regions, subtract_result.regions);
     }
@@ -2075,6 +2141,96 @@ mod tests {
         let b = make_regionset(vec![("chr1", 100, 200)]);
         let result = a.closest(&b);
         assert_eq!(result.len(), 0);
+    }
+
+    /// Regression: a long interval far to the left overlaps the query but the
+    /// old fixed-window algorithm never examined it.
+    #[rstest]
+    fn test_closest_long_interval_overlaps_query() {
+        let other = make_regionset(vec![
+            ("chr1", 0, 10000),
+            ("chr1", 100, 101),
+            ("chr1", 200, 201),
+            ("chr1", 300, 301),
+            ("chr1", 400, 401),
+        ]);
+        let query = make_regionset(vec![("chr1", 500, 501)]);
+        let result = query.closest(&other);
+        assert_eq!(result.len(), 1);
+        // The long interval (0, 10000) overlaps (500, 501), so distance is 0
+        assert_eq!(result[0].2, 0, "expected overlap (distance 0)");
+        assert_eq!(result[0].1, 0, "expected match to index 0 in other");
+    }
+
+    /// Regression: a long interval far to the left is the nearest but does
+    /// not overlap the query. The old algorithm would miss it.
+    #[rstest]
+    fn test_closest_long_interval_nearest_no_overlap() {
+        let other = make_regionset(vec![
+            ("chr1", 0, 490),
+            ("chr1", 100, 101),
+            ("chr1", 200, 201),
+            ("chr1", 300, 301),
+            ("chr1", 400, 401),
+        ]);
+        let query = make_regionset(vec![("chr1", 500, 501)]);
+        let result = query.closest(&other);
+        assert_eq!(result.len(), 1);
+        // (0, 490) has distance 10 from (500, 501); (400, 401) has distance 99
+        assert_eq!(result[0].2, 10, "expected distance 10 to (0,490)");
+        assert_eq!(result[0].1, 0, "expected match to index 0 in other");
+    }
+
+    /// Stress test: many small intervals with one long interval far left
+    /// that is the true nearest neighbor.
+    #[rstest]
+    fn test_closest_many_small_intervals_with_long_left() {
+        let mut regions: Vec<(&str, u32, u32)> = Vec::new();
+        // Long interval at the start that reaches close to query
+        regions.push(("chr1", 0, 995));
+        // 100 small intervals between positions 100-600
+        for i in 0..100 {
+            regions.push(("chr1", 100 + i * 5, 101 + i * 5));
+        }
+        let other = make_regionset(regions);
+        let query = make_regionset(vec![("chr1", 1000, 1001)]);
+        let result = query.closest(&other);
+        assert_eq!(result.len(), 1);
+        // (0, 995) has distance 5; the closest small interval is (595, 596) with distance 404
+        assert_eq!(result[0].2, 5, "expected distance 5 to (0,995)");
+        assert_eq!(result[0].1, 0, "expected match to index 0 in other");
+    }
+
+    /// Symmetry: a.closest(b) and b.closest(a) should give matching distances.
+    #[rstest]
+    fn test_closest_symmetric_distances() {
+        let a = make_regionset(vec![
+            ("chr1", 100, 200),
+            ("chr1", 500, 600),
+        ]);
+        let b = make_regionset(vec![
+            ("chr1", 0, 5000),
+            ("chr1", 250, 260),
+            ("chr1", 700, 800),
+        ]);
+        let ab = a.closest(&b);
+        let ba = b.closest(&a);
+        // For each pair found in ab, the distance should appear in ba as well
+        for &(ai, bi, dist_ab) in &ab {
+            // Find the ba entry for bi
+            if let Some(&(_, matched_a, dist_ba)) = ba.iter().find(|&&(b_idx, _, _)| b_idx == bi) {
+                // If b[bi]'s closest in a is a[ai], distances must match
+                if matched_a == ai {
+                    assert_eq!(
+                        dist_ab.abs(),
+                        dist_ba.abs(),
+                        "symmetric distance mismatch for pair ({}, {})",
+                        ai,
+                        bi
+                    );
+                }
+            }
+        }
     }
 
     // ── IntervalSetOps: cluster tests ───────────────────────────────
