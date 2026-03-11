@@ -33,52 +33,29 @@ pub trait RegionSetOverlaps {
 impl RegionSetOverlaps for RegionSet {
     fn subset_by_overlaps(&self, other: &RegionSet) -> RegionSet {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        let mut kept = Vec::new();
-        for region in &self.regions {
-            if let Some(lapper) = index.get_chr_overlapper(&region.chr) {
-                let mut iter = lapper.find_iter(region.start, region.end);
-                if iter.next().is_some() {
-                    kept.push(region.clone());
-                }
-            }
-        }
+        let flags = index.any_query_overlaps(self);
+        let kept: Vec<_> = self
+            .regions
+            .iter()
+            .zip(flags)
+            .filter_map(|(r, hit)| if hit { Some(r.clone()) } else { None })
+            .collect();
         RegionSet::from(kept)
     }
 
     fn count_overlaps(&self, other: &RegionSet) -> Vec<usize> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        self.regions
-            .iter()
-            .map(|region| match index.get_chr_overlapper(&region.chr) {
-                Some(lapper) => lapper.find_iter(region.start, region.end).count(),
-                None => 0,
-            })
-            .collect()
+        index.count_query_overlaps(self)
     }
 
     fn any_overlaps(&self, other: &RegionSet) -> Vec<bool> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        self.regions
-            .iter()
-            .map(|region| match index.get_chr_overlapper(&region.chr) {
-                Some(lapper) => lapper.find_iter(region.start, region.end).next().is_some(),
-                None => false,
-            })
-            .collect()
+        index.any_query_overlaps(self)
     }
 
     fn find_overlaps(&self, other: &RegionSet) -> Vec<Vec<usize>> {
         let index = build_indexed_overlapper(other, OverlapperType::AIList);
-        self.regions
-            .iter()
-            .map(|region| match index.get_chr_overlapper(&region.chr) {
-                Some(lapper) => lapper
-                    .find_iter(region.start, region.end)
-                    .map(|iv| iv.val)
-                    .collect(),
-                None => Vec::new(),
-            })
-            .collect()
+        index.find_query_overlaps(self)
     }
 }
 
