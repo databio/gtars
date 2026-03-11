@@ -441,7 +441,7 @@ impl PyRegionSet {
 
     /// Return a list of overlap counts, one per region in self.
     fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
-        self.regionset.count_overlaps(&other.regionset)
+        RegionSetOverlaps::count_overlaps(&self.regionset, &other.regionset)
     }
 
     /// Return a list of booleans indicating whether each region overlaps
@@ -453,7 +453,7 @@ impl PyRegionSet {
     /// Return a list of lists of indices into other that overlap each
     /// region in self.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        self.regionset.find_overlaps(&other.regionset)
+        RegionSetOverlaps::find_overlaps(&self.regionset, &other.regionset)
     }
 
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {

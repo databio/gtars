@@ -592,6 +592,70 @@ mod tests {
     }
 
     #[test]
+    fn test_load_db_empty_collection() {
+        // Collection directory with collection.txt but no BED files in regions/
+        let tmpdir = tempfile::tempdir().unwrap();
+        let coll = tmpdir.path().join("empty_coll");
+        let regions = coll.join("regions");
+        fs::create_dir_all(&regions).unwrap();
+
+        write_file(
+            &coll.join("collection.txt"),
+            "collector\tdate\tsource\tdescription\nAlice\t2024\tTest\tEmpty collection\n",
+        );
+        write_file(
+            &coll.join("index.txt"),
+            "filename\tcellType\tdescription\n",
+        );
+        // No BED files in regions/
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+        assert_eq!(db.num_region_sets(), 0);
+        assert_eq!(db.igd.num_files(), 0);
+        // Collection annotation should still be loaded
+        assert_eq!(db.collection_anno.len(), 1);
+        assert_eq!(db.collection_anno[0].collector, "Alice");
+        assert_eq!(db.collection_anno[0].description, "Empty collection");
+    }
+
+    #[test]
+    fn test_load_db_description_fallback() {
+        // Verify description falls back to collection.txt when index.txt description is empty
+        let tmpdir = tempfile::tempdir().unwrap();
+        let coll = tmpdir.path().join("fallback_coll");
+        let regions = coll.join("regions");
+        fs::create_dir_all(&regions).unwrap();
+
+        write_file(
+            &coll.join("collection.txt"),
+            "collector\tdate\tsource\tdescription\nBob\t2024\tTest\tCollection-level description\n",
+        );
+
+        // index.txt has a file entry with empty description
+        write_file(
+            &coll.join("index.txt"),
+            "filename\tcellType\tdescription\ttissue\n\
+             file1.bed\tK562\t\tblood\n",
+        );
+
+        write_file(
+            &regions.join("file1.bed"),
+            "chr1\t100\t200\nchr1\t300\t400\n",
+        );
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+        assert_eq!(db.num_region_sets(), 1);
+        // The file's description should fall back to collection-level description
+        assert_eq!(
+            db.region_anno[0].description, "Collection-level description",
+            "Description should fall back to collection.txt when index.txt description is empty"
+        );
+        // Other fields from index.txt should still be present
+        assert_eq!(db.region_anno[0].cell_type, "K562");
+        assert_eq!(db.region_anno[0].tissue, "blood");
+    }
+
+    #[test]
     fn test_query_loaded_db() {
         // End-to-end: load DB, query with run_lola
         let tmpdir = tempfile::tempdir().unwrap();

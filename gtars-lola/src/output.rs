@@ -226,6 +226,107 @@ mod tests {
     }
 
     #[test]
+    fn test_fdr_identical_pvalues() {
+        // All results have the same p-value (tie handling)
+        let mut results = vec![
+            make_result(0, 0, 3.0), // p = 0.001
+            make_result(0, 1, 3.0), // p = 0.001
+            make_result(0, 2, 3.0), // p = 0.001
+            make_result(0, 3, 3.0), // p = 0.001
+        ];
+
+        apply_fdr_correction(&mut results);
+
+        // All should have q-values set
+        for r in &results {
+            assert!(r.q_value.is_some(), "q_value should be set");
+        }
+
+        // With identical p-values, BH correction should produce q-values
+        // that are >= p-values and <= 1.0
+        let p = 10.0_f64.powf(-3.0);
+        for r in &results {
+            let q = r.q_value.unwrap();
+            assert!(q >= p - 1e-10, "q={} should be >= p={}", q, p);
+            assert!(q <= 1.0, "q={} should be <= 1.0", q);
+        }
+    }
+
+    #[test]
+    fn test_fdr_preserves_order() {
+        // After FDR correction, q-values should be monotonically non-decreasing
+        // when results are sorted by p-value ascending (i.e., -log10(p) descending)
+        let mut results = vec![
+            make_result(0, 0, 10.0), // most significant
+            make_result(0, 1, 7.0),
+            make_result(0, 2, 5.0),
+            make_result(0, 3, 3.0),
+            make_result(0, 4, 2.0),
+            make_result(0, 5, 1.0),
+            make_result(0, 6, 0.5),
+            make_result(0, 7, 0.1), // least significant
+        ];
+
+        apply_fdr_correction(&mut results);
+
+        // Sort by p_value_log descending (= p-value ascending)
+        let mut sorted = results.clone();
+        sorted.sort_by(|a, b| {
+            b.p_value_log
+                .partial_cmp(&a.p_value_log)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        // q-values should be monotonically non-decreasing
+        for i in 1..sorted.len() {
+            let q_prev = sorted[i - 1].q_value.unwrap();
+            let q_curr = sorted[i].q_value.unwrap();
+            assert!(
+                q_curr >= q_prev - 1e-10,
+                "q-values not monotonic: q[{}]={} < q[{}]={}",
+                i,
+                q_curr,
+                i - 1,
+                q_prev
+            );
+        }
+    }
+
+    #[test]
+    fn test_fdr_single_very_significant() {
+        // One very significant result among many non-significant ones
+        let mut results = vec![
+            make_result(0, 0, 20.0), // very significant (p ~ 1e-20)
+            make_result(0, 1, 0.1),  // not significant
+            make_result(0, 2, 0.05), // not significant
+            make_result(0, 3, 0.01), // not significant
+            make_result(0, 4, 0.0),  // p = 1.0 (no signal)
+        ];
+
+        apply_fdr_correction(&mut results);
+
+        // The very significant result should still be significant after correction
+        let best = results.iter().find(|r| r.db_set == 0).unwrap();
+        assert!(
+            best.q_value.unwrap() < 0.05,
+            "Very significant result should remain significant after FDR, q={}",
+            best.q_value.unwrap()
+        );
+
+        // The non-significant results should have q-values >= their p-values
+        for r in results.iter().filter(|r| r.db_set != 0) {
+            let p = 10.0_f64.powf(-r.p_value_log);
+            assert!(
+                r.q_value.unwrap() >= p - 1e-10,
+                "q={} should be >= p={} for db_set={}",
+                r.q_value.unwrap(),
+                p,
+                r.db_set
+            );
+        }
+    }
+
+    #[test]
     fn test_write_tsv() {
         let mut results = vec![
             make_result(0, 0, 5.0),

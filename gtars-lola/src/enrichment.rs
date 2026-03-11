@@ -656,6 +656,158 @@ mod tests {
     }
 
     #[test]
+    fn test_empty_user_set() {
+        // User set with 0 regions should return results with 0 support
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![("chr1".to_string(), 100, 200)],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let user = make_region_set(vec![]); // empty user set
+        let universe = make_region_set(vec![
+            make_region("chr1", 50, 250),
+            make_region("chr1", 400, 500),
+        ]);
+
+        let results = run_lola(&igd, &[user], &universe, &LolaConfig::default()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].support, 0);
+        assert_eq!(results[0].p_value_log, 0.0); // no overlap → p=1.0, -log10(1)=0
+        // c should be 0 (user_set_size - a = 0 - 0)
+        assert_eq!(results[0].c, 0);
+    }
+
+    #[test]
+    fn test_single_region_user_set() {
+        // User set with exactly 1 region
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![
+                ("chr1".to_string(), 100, 200),
+                ("chr1".to_string(), 300, 400),
+            ],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let user = make_region_set(vec![make_region("chr1", 150, 180)]);
+        let universe = make_region_set(vec![
+            make_region("chr1", 50, 250),
+            make_region("chr1", 250, 450),
+            make_region("chr1", 500, 600),
+            make_region("chr1", 700, 800),
+            make_region("chr1", 900, 1000),
+        ]);
+
+        let results = run_lola(&igd, &[user], &universe, &LolaConfig::default()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].support, 1); // single region overlaps db0[0]
+        // a=1, user_set_size=1, so c = 1-1 = 0
+        assert_eq!(results[0].c, 0);
+    }
+
+    #[test]
+    fn test_universe_equals_user_set() {
+        // Edge case where universe == user set (same regions)
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![
+                ("chr1".to_string(), 100, 200),
+                ("chr1".to_string(), 500, 600),
+            ],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let regions = vec![
+            make_region("chr1", 50, 250),
+            make_region("chr1", 450, 650),
+            make_region("chr1", 700, 800),
+        ];
+        let user = make_region_set(regions.clone());
+        let universe = make_region_set(regions);
+
+        let config = LolaConfig::default();
+        let results = run_lola(&igd, &[user], &universe, &config).unwrap();
+        assert_eq!(results.len(), 1);
+        // When user == universe, a should equal universe_hits (all universe hits are user hits)
+        // b = universe_hits - a = 0
+        assert_eq!(results[0].b, 0);
+        // c = user_size - a = universe_size - a
+        // d should be 0 since universe_size - a - b - c = universe_size - a - 0 - (universe_size - a) = 0
+        assert_eq!(results[0].d, 0);
+    }
+
+    #[test]
+    fn test_large_universe_tiny_user_set() {
+        // Imbalanced case: large universe, small user set
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![("chr1".to_string(), 100, 200)],
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        // 5 user regions, 1 overlaps db
+        let user = make_region_set(vec![
+            make_region("chr1", 150, 180),
+            make_region("chr2", 100, 200),
+            make_region("chr3", 100, 200),
+            make_region("chr4", 100, 200),
+            make_region("chr5", 100, 200),
+        ]);
+
+        // 100 universe regions (only first overlaps db)
+        let mut uni_regions = vec![make_region("chr1", 50, 250)];
+        for i in 1..100 {
+            uni_regions.push(make_region("chr1", (1000 + i * 200) as u32, (1000 + i * 200 + 100) as u32));
+        }
+        let universe = make_region_set(uni_regions);
+
+        let results = run_lola(&igd, &[user], &universe, &LolaConfig::default()).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].support, 1); // only 1 user region overlaps
+        // universe_size=100, user_size=5
+        // a=1, b=universe_hits-1, c=5-1=4
+        assert_eq!(results[0].c, 4);
+        // d = 100 - a - b - c; should be large since universe is much bigger
+        assert!(results[0].d > 90, "d should be large, got {}", results[0].d);
+    }
+
+    #[test]
+    fn test_min_overlap_boundary() {
+        // Test regions that overlap by exactly min_overlap bp vs min_overlap-1 bp
+        let sets = vec![(
+            "db0.bed".to_string(),
+            vec![("chr1".to_string(), 100, 200)], // db region: [100, 200)
+        )];
+        let igd = Igd::from_region_sets(sets);
+
+        let universe = make_region_set(vec![
+            make_region("chr1", 0, 500),
+            make_region("chr1", 600, 700),
+            make_region("chr1", 800, 900),
+        ]);
+
+        // User region [190, 210) overlaps db [100,200) by exactly 10bp
+        let user_10bp = make_region_set(vec![make_region("chr1", 190, 210)]);
+
+        // min_overlap=10: exactly 10bp overlap → should count
+        let config10 = LolaConfig {
+            min_overlap: 10,
+            ..Default::default()
+        };
+        let r10 = run_lola(&igd, &[user_10bp.clone()], &universe, &config10).unwrap();
+        assert_eq!(r10[0].support, 1, "10bp overlap with min_overlap=10 should count");
+
+        // min_overlap=11: only 10bp overlap → should NOT count
+        let config11 = LolaConfig {
+            min_overlap: 11,
+            ..Default::default()
+        };
+        let r11 = run_lola(&igd, &[user_10bp], &universe, &config11).unwrap();
+        assert_eq!(r11[0].support, 0, "10bp overlap with min_overlap=11 should not count");
+    }
+
+    #[test]
     fn test_run_lola_with_min_overlap() {
         let sets = vec![(
             "db0.bed".to_string(),
