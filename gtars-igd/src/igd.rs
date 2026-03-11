@@ -184,12 +184,16 @@ impl Igd {
         }
 
         bed_files.sort(); // deterministic order
+        Self::from_bed_files(bed_files)
+    }
 
+    /// Build an IGD from an explicit list of BED file paths.
+    pub fn from_bed_files(paths: impl IntoIterator<Item = PathBuf>) -> anyhow::Result<Self> {
         let mut igd = Igd::new();
         let mut file_infos: Vec<FileInfo> = Vec::new();
 
-        for bed_path in &bed_files {
-            let reader = match get_dynamic_reader(bed_path) {
+        for bed_path in paths {
+            let reader = match get_dynamic_reader(&bed_path) {
                 Ok(r) => r,
                 Err(_) => continue,
             };

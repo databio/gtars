@@ -355,6 +355,70 @@ cat(sprintf("\nOverall: %d/%d checks passed\n",
             sum(checks, na.rm = TRUE), length(checks)))
 ```
 
+## 11. IGD Bindings Demo
+
+The `igd_create` and `igd_search` functions provide direct access to the
+Integrated Genome Database (IGD) for fast interval overlap queries outside
+of the LOLA enrichment workflow.
+
+### Create an IGD database
+
+```{r igd-create}
+# Use the multi-file test dataset (relative to this Rmd file in gtars-r/tests/)
+bed_dir <- normalizePath(file.path("..", "..", "tests", "data", "igd_file_list_02"))
+
+cat("BED directory:", bed_dir, "\n")
+cat("BED files:", paste(list.files(bed_dir, pattern = "\\.bed$"), collapse = ", "), "\n")
+
+# Create a temporary IGD database
+igd_output <- tempdir()
+igd_create(igd_output, bed_dir, db_name = "demo")
+
+igd_file <- file.path(igd_output, "demo.igd")
+cat("IGD database created:", file.exists(igd_file), "\n")
+cat("IGD file size:", file.size(igd_file), "bytes\n")
+```
+
+### Search the IGD database
+
+```{r igd-search}
+query_file <- normalizePath(file.path("..", "..", "tests", "data", "igd_query_files", "query1.bed"))
+cat("Query file:", basename(query_file), "\n")
+
+results <- igd_search(igd_file, query_file)
+cat("Result type:", class(results), "\n")
+cat("Columns:", paste(colnames(results), collapse = ", "), "\n\n")
+print(results)
+```
+
+### Compare with directory input vs filelist input
+
+```{r igd-filelist}
+# Create a .txt filelist (alternative input mode)
+filelist_path <- file.path(tempdir(), "bed_paths.txt")
+bed_files <- list.files(bed_dir, pattern = "\\.bed$", full.names = TRUE)
+writeLines(bed_files, filelist_path)
+cat("Filelist contents:\n")
+cat(readLines(filelist_path), sep = "\n")
+
+# Create IGD from filelist
+igd_output2 <- file.path(tempdir(), "from_filelist")
+dir.create(igd_output2, showWarnings = FALSE)
+igd_create(igd_output2, filelist_path, db_name = "demo2")
+
+# Search and compare
+results2 <- igd_search(
+  file.path(igd_output2, "demo2.igd"),
+  query_file
+)
+
+cat("\nResults from directory input:\n")
+print(results)
+cat("\nResults from filelist input:\n")
+print(results2)
+cat("\nHits match:", identical(results$hits, results2$hits), "\n")
+```
+
 ## Session Info
 
 ```{r session-info}

@@ -341,6 +341,7 @@ r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_creat
 #' Search igd with a bed file
 #' @param database_path A string representing the path to the database igd file.
 #' @param query_path A string representing the path to the query bed file.
+#' @return A named list with columns: filename, numRegions, hits (convertible to data.frame)
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
 
 #' Load a LOLA region database from a folder.
