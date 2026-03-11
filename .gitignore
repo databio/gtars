@@ -55,3 +55,4 @@ gtars-r/tests/smoketest_set_operations.*
 gtars-sc/
 gtars-r/tourney_suite/
 gtars-r/runs/
+gtars-r/test-r.sh
