@@ -8,8 +8,7 @@ use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_core::models::IntervalSetOps;
-use gtars_genomicdist::IntervalRanges;
-use gtars_overlaprs::multi_chrom_overlapper::build_indexed_overlapper;
+use gtars_overlaprs::multi_chrom_overlapper::{build_indexed_overlapper, MultiChromOverlapper};
 use gtars_overlaprs::OverlapperType;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
@@ -466,7 +465,8 @@ impl PyRegionSet {
     }
 
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.intersect_all(&other.regionset);
+        let mco = MultiChromOverlapper::from_region_set(other.regionset.clone(), OverlapperType::AIList);
+        let rs = mco.intersect_all(&self.regionset);
         Ok(Self::from_regionset(rs))
     }
 
