@@ -28,6 +28,9 @@ jobs:
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       
+      - name: Set R library path
+        run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
+
       - name: Generate code coverage
         run: >
           cargo llvm-cov --all-features --workspace --lcov --output-path lcov.info
