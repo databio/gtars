@@ -4,10 +4,11 @@ use extendr_api::prelude::*;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
+use gtars_overlaprs::RegionSetOverlaps;
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
     consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
-    GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
+    CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
 
@@ -133,9 +134,9 @@ pub fn r_regionset_length(rs_ptr: Robj) -> extendr_api::Result<i32> {
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_widths")]
-pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
     with_regionset!(rs_ptr, rs, {
-        Ok(rs.calc_widths().into_iter().map(|w| w as f64).collect())
+        Ok(rs.calc_widths().into_iter().map(|w| w as i32).collect())
     })
 }
 
@@ -156,12 +157,12 @@ pub fn r_calc_neighbor_distances(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> 
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_nearest_neighbors")]
-pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
     with_regionset!(rs_ptr, rs, {
         let dists = rs
             .calc_nearest_neighbors()
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
-        Ok(dists.into_iter().map(|d| d as f64).collect())
+        Ok(dists.into_iter().map(|d| d as i32).collect())
     })
 }
 
@@ -178,21 +179,21 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
         });
 
         let mut chr_names: Vec<String> = Vec::new();
-        let mut n_regions: Vec<f64> = Vec::new();
+        let mut n_regions: Vec<i32> = Vec::new();
         let mut start_pos: Vec<f64> = Vec::new();
         let mut end_pos: Vec<f64> = Vec::new();
-        let mut min_len: Vec<f64> = Vec::new();
-        let mut max_len: Vec<f64> = Vec::new();
+        let mut min_len: Vec<i32> = Vec::new();
+        let mut max_len: Vec<i32> = Vec::new();
         let mut mean_len: Vec<f64> = Vec::new();
         let mut median_len: Vec<f64> = Vec::new();
 
         for (chr, s) in &entries {
             chr_names.push(chr.clone());
-            n_regions.push(s.number_of_regions as f64);
+            n_regions.push(s.number_of_regions as i32);
             start_pos.push(s.start_nucleotide_position as f64);
             end_pos.push(s.end_nucleotide_position as f64);
-            min_len.push(s.minimum_region_length as f64);
-            max_len.push(s.maximum_region_length as f64);
+            min_len.push(s.minimum_region_length as i32);
+            max_len.push(s.maximum_region_length as i32);
             mean_len.push(s.mean_region_length);
             median_len.push(s.median_region_length);
         }
@@ -215,10 +216,26 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
 /// @param rs_ptr External pointer to a RegionSet
 /// @param n_bins Number of bins (default 250)
 #[extendr(r_name = "r_region_distribution")]
-pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32) -> extendr_api::Result<List> {
+pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom_lengths: Robj) -> extendr_api::Result<List> {
     let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
     with_regionset!(rs_ptr, rs, {
-        let dist = rs.region_distribution_with_bins(n_bins_u32);
+        let dist = if !chrom_names.is_null() && !chrom_lengths.is_null() {
+            let names: Vec<String> = chrom_names.as_str_iter()
+                .ok_or_else(|| extendr_api::Error::Other("chrom_names must be character".into()))?
+                .map(|s| s.to_string())
+                .collect();
+            let lengths: Vec<f64> = chrom_lengths.as_real_iter()
+                .ok_or_else(|| extendr_api::Error::Other("chrom_lengths must be numeric".into()))?
+                .copied()
+                .collect();
+            let chrom_sizes: HashMap<String, u32> = names
+                .into_iter()
+                .zip(lengths.into_iter().map(|v| v as u32))
+                .collect();
+            rs.region_distribution_with_chrom_sizes(n_bins_u32, &chrom_sizes)
+        } else {
+            rs.region_distribution_with_bins(n_bins_u32)
+        };
         let mut bins: Vec<_> = dist.into_values().collect();
         bins.sort_by(|a, b| {
             chrom_karyotype_key(&a.chr)
@@ -229,15 +246,15 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32) -> extendr_api::Result<L
         let mut chrs: Vec<String> = Vec::new();
         let mut starts: Vec<f64> = Vec::new();
         let mut ends: Vec<f64> = Vec::new();
-        let mut counts: Vec<f64> = Vec::new();
-        let mut rids: Vec<f64> = Vec::new();
+        let mut counts: Vec<i32> = Vec::new();
+        let mut rids: Vec<i32> = Vec::new();
 
         for bin in &bins {
             chrs.push(bin.chr.clone());
             starts.push(bin.start as f64);
             ends.push(bin.end as f64);
-            counts.push(bin.n as f64);
-            rids.push(bin.rid as f64);
+            counts.push(bin.n as i32);
+            rids.push(bin.rid as i32);
         }
 
         Ok(list!(
@@ -494,9 +511,12 @@ pub fn r_resize(rs_ptr: Robj, width: i32, fix: &str) -> extendr_api::Result<Robj
 #[extendr(r_name = "r_narrow")]
 pub fn r_narrow(rs_ptr: Robj, start: Robj, end: Robj, width: Robj) -> extendr_api::Result<Robj> {
     with_regionset!(rs_ptr, rs, {
-        let s = if start.is_na() { None } else { Some(checked_u32(i32::try_from(start).unwrap_or(1), "start")?) };
-        let e = if end.is_na() { None } else { Some(checked_u32(i32::try_from(end).unwrap_or(1), "end")?) };
-        let w = if width.is_na() { None } else { Some(checked_u32(i32::try_from(width).unwrap_or(1), "width")?) };
+        let s = if start.is_na() { None } else { Some(checked_u32(i32::try_from(start)
+            .map_err(|_| extendr_api::Error::Other("start must be an integer".into()))?, "start")?) };
+        let e = if end.is_na() { None } else { Some(checked_u32(i32::try_from(end)
+            .map_err(|_| extendr_api::Error::Other("end must be an integer".into()))?, "end")?) };
+        let w = if width.is_na() { None } else { Some(checked_u32(i32::try_from(width)
+            .map_err(|_| extendr_api::Error::Other("width must be an integer".into()))?, "width")?) };
         let result = rs.narrow(s, e, w);
         Ok(ExternalPtr::new(result).into())
     })
@@ -554,8 +574,55 @@ pub fn r_consensus(rs_list: List) -> extendr_api::Result<List> {
     let chrs: Vec<String> = result.iter().map(|r| r.chr.clone()).collect();
     let starts: Vec<f64> = result.iter().map(|r| r.start as f64).collect();
     let ends: Vec<f64> = result.iter().map(|r| r.end as f64).collect();
-    let counts: Vec<f64> = result.iter().map(|r| r.count as f64).collect();
+    let counts: Vec<i32> = result.iter().map(|r| r.count as i32).collect();
     Ok(list!(chr = chrs, start = starts, end = ends, count = counts))
+}
+
+/// Find all overlapping (queryHits, subjectHits) pairs between two RegionSets
+/// @export
+/// @param query_ptr External pointer to query RegionSet
+/// @param subject_ptr External pointer to subject RegionSet
+/// @param minoverlap Minimum overlap in base pairs (default 1)
+#[extendr(r_name = "r_find_overlaps")]
+pub fn r_find_overlaps(
+    query_ptr: Robj,
+    subject_ptr: Robj,
+    minoverlap: i32,
+) -> extendr_api::Result<List> {
+    let ext_q = <ExternalPtr<RegionSet>>::try_from(query_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
+    let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
+    let indices = RegionSetOverlaps::find_overlaps(&*ext_q, &*ext_s, Some(minoverlap));
+    // Flatten Vec<Vec<usize>> to (queryHits, subjectHits) pair vecs, 1-based for R
+    let mut query_hits: Vec<i32> = Vec::new();
+    let mut subject_hits: Vec<i32> = Vec::new();
+    for (q_idx, hits) in indices.iter().enumerate() {
+        for &s_idx in hits {
+            query_hits.push(q_idx as i32 + 1);
+            subject_hits.push(s_idx as i32 + 1);
+        }
+    }
+    Ok(list!(queryHits = query_hits, subjectHits = subject_hits))
+}
+
+/// Count the number of subject regions overlapping each query region
+/// @export
+/// @param query_ptr External pointer to query RegionSet
+/// @param subject_ptr External pointer to subject RegionSet
+/// @param minoverlap Minimum overlap in base pairs (default 1)
+#[extendr(r_name = "r_count_overlaps")]
+pub fn r_count_overlaps(
+    query_ptr: Robj,
+    subject_ptr: Robj,
+    minoverlap: i32,
+) -> extendr_api::Result<Vec<i32>> {
+    let ext_q = <ExternalPtr<RegionSet>>::try_from(query_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
+    let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
+    let counts = RegionSetOverlaps::count_overlaps(&*ext_q, &*ext_s, Some(minoverlap));
+    Ok(counts.into_iter().map(|c| c as i32).collect())
 }
 
 // =========================================================================
@@ -677,17 +744,21 @@ pub fn r_partition_list_from_regions_stranded(
             .collect()
     };
 
+    // Do NOT reduce here — genome_partition_list handles all reductions.
+    // Pre-reducing genes would collapse overlapping genes before promoter
+    // construction, losing individual gene promoters (R computes promoters
+    // from raw genes, then reduces the promoters).
     let genes_rs = regionset_from_vecs(genes_chrs, genes_starts, genes_ends)?;
-    let genes_srs = StrandedRegionSet::new(genes_rs, parse_strands(genes_strands)).reduce();
+    let genes_srs = StrandedRegionSet::new(genes_rs, parse_strands(genes_strands));
 
     let exons_rs = regionset_from_vecs(exons_chrs, exons_starts, exons_ends)?;
-    let exons_srs = StrandedRegionSet::new(exons_rs, parse_strands(exons_strands)).reduce();
+    let exons_srs = StrandedRegionSet::new(exons_rs, parse_strands(exons_strands));
 
     let three_utr = if three_utr_chrs.is_empty() {
         None
     } else {
         let rs = regionset_from_vecs(three_utr_chrs, three_utr_starts, three_utr_ends)?;
-        let srs = StrandedRegionSet::new(rs, parse_strands(three_utr_strands)).reduce();
+        let srs = StrandedRegionSet::new(rs, parse_strands(three_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
 
@@ -695,7 +766,7 @@ pub fn r_partition_list_from_regions_stranded(
         None
     } else {
         let rs = regionset_from_vecs(five_utr_chrs, five_utr_starts, five_utr_ends)?;
-        let srs = StrandedRegionSet::new(rs, parse_strands(five_utr_strands)).reduce();
+        let srs = StrandedRegionSet::new(rs, parse_strands(five_utr_strands));
         if srs.is_empty() { None } else { Some(srs) }
     };
 
@@ -764,11 +835,11 @@ pub fn r_calc_partitions(
         with_partitions!(partition_ptr, pl, {
             let result = calc_partitions(rs, pl, bp_proportion);
             let names: Vec<String> = result.counts.iter().map(|(n, _)| n.clone()).collect();
-            let counts: Vec<f64> = result.counts.iter().map(|(_, c)| *c as f64).collect();
+            let counts: Vec<i32> = result.counts.iter().map(|(_, c)| *c as i32).collect();
             Ok(list!(
                 partition = names,
                 count = counts,
-                total = result.total as f64
+                total = result.total as i32
             ))
         })
     })
@@ -861,7 +932,7 @@ pub fn r_calc_summary_signal(
             values: values_flat,
         };
 
-        let result = calc_summary_signal(rs, &signal_matrix)
+        let result = calc_summary_signal(rs, &signal_matrix, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
         // Build signal summary matrix as list of vectors
@@ -917,10 +988,10 @@ pub fn r_calc_tss_distances(query_ptr: Robj, features_ptr: Robj) -> extendr_api:
     with_regionset!(query_ptr, query, {
         let features_ext = <ExternalPtr<RegionSet>>::try_from(features_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid features RegionSet pointer".into()))?;
-        let index = TssIndex::try_from((*features_ext).clone())
+        let index = TssIndex::from_region_set((*features_ext).clone(), CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("Building TssIndex: {}", e)))?;
         let dists = index
-            .calc_tss_distances(query)
+            .calc_tss_distances(query, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
         let result: Doubles = dists
             .into_iter()
@@ -949,10 +1020,10 @@ pub fn r_calc_feature_distances(
     with_regionset!(query_ptr, query, {
         let features_ext = <ExternalPtr<RegionSet>>::try_from(features_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid features RegionSet pointer".into()))?;
-        let index = TssIndex::try_from((*features_ext).clone())
+        let index = TssIndex::from_region_set((*features_ext).clone(), CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("Building TssIndex: {}", e)))?;
         let dists = index
-            .calc_feature_distances(query)
+            .calc_feature_distances(query, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
         let result: Doubles = dists
             .into_iter()
@@ -1081,7 +1152,7 @@ pub fn r_calc_summary_signal_from_matrix(
         let sm_ext = <ExternalPtr<SignalMatrix>>::try_from(sm_ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid SignalMatrix pointer".into()))?;
 
-        let result = calc_summary_signal(rs, &*sm_ext)
+        let result = calc_summary_signal(rs, &*sm_ext, CoordinateMode::GRanges)
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
         let n_cond = result.condition_names.len();
@@ -1158,6 +1229,8 @@ extendr_module! {
     fn r_disjoin;
     fn r_gaps;
     fn r_intersect;
+    fn r_find_overlaps;
+    fn r_count_overlaps;
     fn r_consensus;
     // Partitions
     fn r_partition_list_from_regions;

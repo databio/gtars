@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{gaps,RegionSet-method}
 \alias{gaps,RegionSet-method}
-\alias{gaps,ANY-method}
+\alias{gaps,character-method}
+\alias{gaps,data.frame-method}
 \title{Return gaps between regions per chromosome}
 \usage{
 \S4method{gaps}{RegionSet}(x, start = NA, end = NA, ...)
 
-\S4method{gaps}{ANY}(x, start = NA, end = NA, ...)
+\S4method{gaps}{character}(x, start = NA, end = NA, ...)
+
+\S4method{gaps}{data.frame}(x, start = NA, end = NA, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

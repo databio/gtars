@@ -9,12 +9,13 @@ name = "gtars"
 crate-type = ["cdylib"]
 
 [features]
-default = ["refget", "tokenizers", "genomic_distributions", "models", "utils"]
+default = ["refget", "tokenizers", "genomic_distributions", "models", "utils", "lola"]
 refget = ["dep:gtars-refget"]
 tokenizers = ["dep:gtars-tokenizers", "dep:gtars-core"]
 genomic_distributions = ["dep:gtars-genomicdist"]
 models = ["dep:gtars-core", "dep:gtars-genomicdist", "dep:gtars-overlaprs"]
 utils = ["dep:gtars-core", "dep:gtars-io"]
+lola = ["dep:gtars-lola", "dep:gtars-igd", "dep:gtars-core"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -29,4 +30,6 @@ gtars-genomicdist = { path = "../gtars-genomicdist", optional = true }
 gtars-refget = { path = "../gtars-refget", optional = true }
 gtars-tokenizers = { path = "../gtars-tokenizers", features = ["huggingface"], optional = true }
 gtars-io = { path = "../gtars-io", optional = true }
+gtars-igd = { path = "../gtars-igd", optional = true }
+gtars-lola = { path = "../gtars-lola", optional = true }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }

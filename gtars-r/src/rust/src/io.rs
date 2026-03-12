@@ -16,12 +16,12 @@ pub fn r_write_tokens_to_gtok(filename: String, tokens: Vec<i32>) {
 /// @export
 /// @param filename A string representing the path to the gtok file.
 #[extendr(r_name = "read_tokens_from_gtok")]
-pub fn r_read_tokens_from_gtok(filename: String) -> Vec<i32> {
-    read_tokens_from_gtok(&filename)
-        .unwrap()
+pub fn r_read_tokens_from_gtok(filename: String) -> extendr_api::Result<Vec<i32>> {
+    Ok(read_tokens_from_gtok(&filename)
+        .map_err(|e| extendr_api::Error::Other(format!("Reading gtok: {e}")))?
         .into_iter()
         .map(|gtok| gtok as i32)
-        .collect()
+        .collect())
 }
 
 extendr_module! {

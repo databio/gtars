@@ -25,7 +25,6 @@ pub fn py_calc_dinucleotide_frequency(
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
 ) -> anyhow::Result<HashMap<String, u64>> {
-    println!("Calculating dinucleotide_frequency...");
     let frequencies = statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly)?;
     let mut freq_map: HashMap<String, u64> = HashMap::new();
     // Convert Dinucleotide to String and push to HashMap
@@ -91,7 +90,7 @@ pub fn py_calc_summary_signal<'py>(
     signal_matrix: &PySignalMatrix,
 ) -> anyhow::Result<Bound<'py, PyDict>> {
     let result =
-        gtars_genomicdist::calc_summary_signal(&rs.regionset, &signal_matrix.signal_matrix)?;
+        gtars_genomicdist::calc_summary_signal(&rs.regionset, &signal_matrix.signal_matrix, gtars_genomicdist::CoordinateMode::Bed)?;
     let dict = PyDict::new(py);
     dict.set_item("condition_names", &result.condition_names)?;
     let region_labels: Vec<&str> = result.signal_matrix.iter().map(|(label, _)| label.as_str()).collect();

@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{narrow,RegionSet-method}
 \alias{narrow,RegionSet-method}
-\alias{narrow,ANY-method}
+\alias{narrow,character-method}
+\alias{narrow,data.frame-method}
 \title{Narrow regions by specifying a relative sub-range}
 \usage{
 \S4method{narrow}{RegionSet}(x, start = NA, end = NA, width = NA, use.names = TRUE)
 
-\S4method{narrow}{ANY}(x, start = NA, end = NA, width = NA, use.names = TRUE)
+\S4method{narrow}{character}(x, start = NA, end = NA, width = NA, use.names = TRUE)
+
+\S4method{narrow}{data.frame}(x, start = NA, end = NA, width = NA, use.names = TRUE)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

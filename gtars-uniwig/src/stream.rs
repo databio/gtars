@@ -118,6 +118,9 @@ fn parse_bed_line(line: &[u8]) -> Result<Option<BedRecord>, String> {
 /// Streaming processor for BED-like input.
 /// Memory usage: O(smooth_size) for the count buffer.
 /// Does NOT grow with chromosome size or file size.
+///
+/// **Important:** Input BED records must be sorted by chromosome and then by
+/// start position. Unsorted input will produce incorrect counts.
 pub struct UniwigStreamProcessor {
     state: ChromState,
     count_buffer: VecDeque<u32>, // sliding window

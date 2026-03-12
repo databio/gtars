@@ -37,6 +37,7 @@ pub mod utils;
 pub use asset::GenomicDistAnnotation;
 #[cfg(feature = "bedclassifier")]
 pub use bed_classifier::classify_bed;
+pub use gtars_core::models::CoordinateMode;
 pub use consensus::{ConsensusRegion, consensus};
 pub use interval_ranges::IntervalRanges;
 pub use partitions::{

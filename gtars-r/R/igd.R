@@ -64,12 +64,7 @@ igd_search <- function(database_path, query_path) {
     stop("query_path must be a single character string")
   }
   
-  # Call Rust function
-  chr_vector <- .Call(wrap__r_igd_search, database_path, query_path)
-  
-  split_result <- strsplit(chr_vector, split = '\t')
-  df <- data.frame(matrix(unlist(split_result[-1]), nrow = length(chr_vector)-1, byrow = TRUE))
-  colnames(df) <- split_result[[1]]
-  
-  invisible(df)
+  # Call Rust function (returns named list of columns)
+  result <- .Call(wrap__r_igd_search, database_path, query_path)
+  as.data.frame(result, stringsAsFactors = FALSE)
 }

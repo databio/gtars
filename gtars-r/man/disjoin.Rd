@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{disjoin,RegionSet-method}
 \alias{disjoin,RegionSet-method}
-\alias{disjoin,ANY-method}
+\alias{disjoin,character-method}
+\alias{disjoin,data.frame-method}
 \title{Break regions into non-overlapping disjoint pieces}
 \usage{
 \S4method{disjoin}{RegionSet}(x, ...)
 
-\S4method{disjoin}{ANY}(x, ...)
+\S4method{disjoin}{character}(x, ...)
+
+\S4method{disjoin}{data.frame}(x, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

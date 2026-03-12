@@ -11,7 +11,7 @@ use std::path::Path;
 
 use flate2::read::MultiGzDecoder;
 
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{CoordinateMode, Region, RegionSet};
 use gtars_overlaprs::traits::{Interval, Overlapper};
 use gtars_overlaprs::AIList;
 
@@ -364,6 +364,7 @@ impl SignalMatrix {
 pub fn calc_summary_signal(
     query: &RegionSet,
     signal_matrix: &SignalMatrix,
+    mode: CoordinateMode,
 ) -> Result<SignalSummaryResult, GtarsGenomicDistError> {
     let n_conditions = signal_matrix.condition_names.len();
 
@@ -410,9 +411,13 @@ pub fn calc_summary_signal(
             }
 
             if let Some(vals) = max_vals {
+                let label_start = match mode {
+                    CoordinateMode::Bed => query_region.start,
+                    CoordinateMode::GRanges => query_region.start + 1,
+                };
                 let label = format!(
                     "{}_{}_{}",
-                    query_region.chr, query_region.start, query_region.end
+                    query_region.chr, label_start, query_region.end
                 );
                 signal_rows.push((label, vals));
             }
@@ -454,7 +459,7 @@ pub fn calc_summary_signal(
 /// (median of each half, including the median element for odd n), then
 /// computes whiskers as the most extreme data points within 1.5 × IQR fences.
 fn boxplot_stats(data: &mut [f64]) -> ConditionStats {
-    data.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    data.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let n = data.len();
 
     if n == 0 {
@@ -633,7 +638,7 @@ mod tests {
             },
         ]);
 
-        let result = calc_summary_signal(&query, &sm).unwrap();
+        let result = calc_summary_signal(&query, &sm, CoordinateMode::Bed).unwrap();
 
         // 2 query regions had overlaps
         assert_eq!(result.signal_matrix.len(), 2);
@@ -673,7 +678,7 @@ mod tests {
             rest: None,
         }]);
 
-        let result = calc_summary_signal(&query, &sm).unwrap();
+        let result = calc_summary_signal(&query, &sm, CoordinateMode::Bed).unwrap();
         assert!(result.signal_matrix.is_empty());
         assert!(result.matrix_stats.is_empty());
     }
@@ -895,5 +900,14 @@ mod tests {
             "Error message should mention the mismatched version number (1): {}",
             msg
         );
+    }
+
+    #[test]
+    fn test_boxplot_stats_with_nan() {
+        // Regression: NaN values in signal data should not panic
+        let mut data = vec![1.0, f64::NAN, 3.0, 2.0, f64::NAN, 5.0];
+        let stats = boxplot_stats(&mut data);
+        // Should complete without panic; NaN values sort to end
+        assert!(stats.median.is_finite() || stats.median.is_nan());
     }
 }

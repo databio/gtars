@@ -6,11 +6,11 @@
 \alias{distribution,ANY-method}
 \title{Region distribution across bins}
 \usage{
-distribution(x, nBins = 250L, ...)
+distribution(x, nBins = 250L, chromSizes = NULL, ...)
 
-\S4method{distribution}{RegionSet}(x, nBins = 250L, ...)
+\S4method{distribution}{RegionSet}(x, nBins = 250L, chromSizes = NULL, ...)
 
-\S4method{distribution}{ANY}(x, nBins = 250L, ...)
+\S4method{distribution}{ANY}(x, nBins = 250L, chromSizes = NULL, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

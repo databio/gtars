@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{promoters,RegionSet-method}
 \alias{promoters,RegionSet-method}
-\alias{promoters,ANY-method}
+\alias{promoters,character-method}
+\alias{promoters,data.frame-method}
 \title{Generate promoter regions}
 \usage{
 \S4method{promoters}{RegionSet}(x, upstream = 2000, downstream = 200, use.names = TRUE, ...)
 
-\S4method{promoters}{ANY}(x, upstream = 2000, downstream = 200, use.names = TRUE, ...)
+\S4method{promoters}{character}(x, upstream = 2000, downstream = 200, use.names = TRUE, ...)
+
+\S4method{promoters}{data.frame}(x, upstream = 2000, downstream = 200, use.names = TRUE, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

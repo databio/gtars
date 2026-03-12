@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{reduce,RegionSet-method}
 \alias{reduce,RegionSet-method}
-\alias{reduce,ANY-method}
+\alias{reduce,character-method}
+\alias{reduce,data.frame-method}
 \title{Merge overlapping and adjacent intervals}
 \usage{
 \S4method{reduce}{RegionSet}(x, drop.empty.ranges = FALSE, ...)
 
-\S4method{reduce}{ANY}(x, drop.empty.ranges = FALSE, ...)
+\S4method{reduce}{character}(x, drop.empty.ranges = FALSE, ...)
+
+\S4method{reduce}{data.frame}(x, drop.empty.ranges = FALSE, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

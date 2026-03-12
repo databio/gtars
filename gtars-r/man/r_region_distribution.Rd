@@ -4,7 +4,7 @@
 \alias{r_region_distribution}
 \title{Calculate region distribution across chromosome bins}
 \usage{
-r_region_distribution(rs_ptr, n_bins)
+r_region_distribution(rs_ptr, n_bins, chrom_names, chrom_lengths)
 }
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}

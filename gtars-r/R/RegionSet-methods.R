@@ -1,7 +1,13 @@
 #' @include RegionSet-class.R
 #' @importFrom BiocGenerics union setdiff intersect
-#' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps
+#' @importFrom IRanges reduce promoters trim shift narrow resize flank disjoin gaps findOverlaps countOverlaps
 NULL
+
+# Helper: coerce-and-dispatch for Bioconductor generics.
+# We register methods for "character" and "data.frame" rather than
+# "ANY", to avoid hijacking dispatch for GRanges/IRanges objects
+# (which have their own methods on these generics).
+.coerce_classes <- c("character", "data.frame")
 
 # =========================================================================
 # Own generics: unary statistics
@@ -105,12 +111,18 @@ setMethod("chromosomeStatistics", "ANY", function(x, ...) {
 #' @param ... ignored
 #' @return A data.table compatible with plotChromBins
 #' @export
-setGeneric("distribution", function(x, nBins = 250L, ...) standardGeneric("distribution"))
+setGeneric("distribution", function(x, nBins = 250L, chromSizes = NULL, ...) standardGeneric("distribution"))
 
 #' @rdname distribution
 #' @export
-setMethod("distribution", "RegionSet", function(x, nBins = 250L, ...) {
-  result <- .Call(wrap__r_region_distribution, .ptr(x), as.integer(nBins))
+setMethod("distribution", "RegionSet", function(x, nBins = 250L, chromSizes = NULL, ...) {
+  chrom_names <- NULL
+  chrom_lengths <- NULL
+  if (!is.null(chromSizes)) {
+    chrom_names <- names(chromSizes)
+    chrom_lengths <- as.numeric(chromSizes)
+  }
+  result <- .Call(wrap__r_region_distribution, .ptr(x), as.integer(nBins), chrom_names, chrom_lengths)
   dt <- data.table::as.data.table(result)
   data.table::setnames(dt, c("n", "rid"), c("N", "regionID"))
   data.table::set(dt, j = "withinGroupID", value = dt[["regionID"]])
@@ -121,8 +133,8 @@ setMethod("distribution", "RegionSet", function(x, nBins = 250L, ...) {
 
 #' @rdname distribution
 #' @export
-setMethod("distribution", "ANY", function(x, nBins = 250L, ...) {
-  distribution(RegionSet(x), nBins = nBins)
+setMethod("distribution", "ANY", function(x, nBins = 250L, chromSizes = NULL, ...) {
+  distribution(RegionSet(x), nBins = nBins, chromSizes = chromSizes)
 })
 
 # =========================================================================
@@ -150,7 +162,13 @@ setMethod("trim", "RegionSet", function(x, chromSizes, ...) {
 
 #' @rdname trim
 #' @export
-setMethod("trim", "ANY", function(x, chromSizes, ...) {
+setMethod("trim", "character", function(x, chromSizes, ...) {
+  trim(RegionSet(x), chromSizes = chromSizes)
+})
+
+#' @rdname trim
+#' @export
+setMethod("trim", "data.frame", function(x, chromSizes, ...) {
   trim(RegionSet(x), chromSizes = chromSizes)
 })
 
@@ -167,7 +185,13 @@ setMethod("reduce", "RegionSet", function(x, ...) {
 
 #' @rdname reduce
 #' @export
-setMethod("reduce", "ANY", function(x, ...) {
+setMethod("reduce", "character", function(x, ...) {
+  reduce(RegionSet(x))
+})
+
+#' @rdname reduce
+#' @export
+setMethod("reduce", "data.frame", function(x, ...) {
   reduce(RegionSet(x))
 })
 
@@ -190,9 +214,18 @@ setMethod("promoters", "RegionSet", function(x, upstream = 2000L,
 
 #' @rdname promoters
 #' @export
-setMethod("promoters", "ANY", function(x, upstream = 2000L,
-                                        downstream = 200L, ...) {
-  promoters(RegionSet(x), upstream = upstream, downstream = downstream)
+setMethod("promoters", "character", function(x, upstream = 2000L,
+                                              downstream = 200L, ...) {
+  promoters(RegionSet(x), upstream = upstream,
+            downstream = downstream)
+})
+
+#' @rdname promoters
+#' @export
+setMethod("promoters", "data.frame", function(x, upstream = 2000L,
+                                               downstream = 200L, ...) {
+  promoters(RegionSet(x), upstream = upstream,
+            downstream = downstream)
 })
 
 #' Shift regions by a fixed offset
@@ -210,7 +243,15 @@ setMethod("shift", "RegionSet", function(x, shift = 0L, use.names = TRUE) {
 
 #' @rdname shift
 #' @export
-setMethod("shift", "ANY", function(x, shift = 0L, use.names = TRUE) {
+setMethod("shift", "character", function(x, shift = 0L,
+                                          use.names = TRUE) {
+  shift(RegionSet(x), shift = shift)
+})
+
+#' @rdname shift
+#' @export
+setMethod("shift", "data.frame", function(x, shift = 0L,
+                                           use.names = TRUE) {
   shift(RegionSet(x), shift = shift)
 })
 
@@ -234,9 +275,21 @@ setMethod("flank", "RegionSet", function(x, width, start = TRUE,
 
 #' @rdname flank
 #' @export
-setMethod("flank", "ANY", function(x, width, start = TRUE,
-                                    both = FALSE, use.names = TRUE, ...) {
-  flank(RegionSet(x), width = width, start = start, both = both)
+setMethod("flank", "character", function(x, width, start = TRUE,
+                                          both = FALSE,
+                                          use.names = TRUE, ...) {
+  flank(RegionSet(x), width = width, start = start,
+        both = both)
+})
+
+#' @rdname flank
+#' @export
+setMethod("flank", "data.frame", function(x, width,
+                                           start = TRUE,
+                                           both = FALSE,
+                                           use.names = TRUE, ...) {
+  flank(RegionSet(x), width = width, start = start,
+        both = both)
 })
 
 #' Resize regions to a fixed width
@@ -255,7 +308,15 @@ setMethod("resize", "RegionSet", function(x, width, fix = "start", ...) {
 
 #' @rdname resize
 #' @export
-setMethod("resize", "ANY", function(x, width, fix = "start", ...) {
+setMethod("resize", "character", function(x, width,
+                                           fix = "start", ...) {
+  resize(RegionSet(x), width = width, fix = fix)
+})
+
+#' @rdname resize
+#' @export
+setMethod("resize", "data.frame", function(x, width,
+                                            fix = "start", ...) {
   resize(RegionSet(x), width = width, fix = fix)
 })
 
@@ -280,9 +341,20 @@ setMethod("narrow", "RegionSet", function(x, start = NA, end = NA,
 
 #' @rdname narrow
 #' @export
-setMethod("narrow", "ANY", function(x, start = NA, end = NA,
-                                     width = NA, use.names = TRUE) {
-  narrow(RegionSet(x), start = start, end = end, width = width)
+setMethod("narrow", "character", function(x, start = NA,
+                                           end = NA, width = NA,
+                                           use.names = TRUE) {
+  narrow(RegionSet(x), start = start, end = end,
+         width = width)
+})
+
+#' @rdname narrow
+#' @export
+setMethod("narrow", "data.frame", function(x, start = NA,
+                                            end = NA, width = NA,
+                                            use.names = TRUE) {
+  narrow(RegionSet(x), start = start, end = end,
+         width = width)
 })
 
 #' Break regions into non-overlapping disjoint pieces
@@ -298,7 +370,13 @@ setMethod("disjoin", "RegionSet", function(x, ...) {
 
 #' @rdname disjoin
 #' @export
-setMethod("disjoin", "ANY", function(x, ...) {
+setMethod("disjoin", "character", function(x, ...) {
+  disjoin(RegionSet(x))
+})
+
+#' @rdname disjoin
+#' @export
+setMethod("disjoin", "data.frame", function(x, ...) {
   disjoin(RegionSet(x))
 })
 
@@ -315,7 +393,15 @@ setMethod("gaps", "RegionSet", function(x, start = NA, end = NA, ...) {
 
 #' @rdname gaps
 #' @export
-setMethod("gaps", "ANY", function(x, start = NA, end = NA, ...) {
+setMethod("gaps", "character", function(x, start = NA,
+                                         end = NA, ...) {
+  gaps(RegionSet(x))
+})
+
+#' @rdname gaps
+#' @export
+setMethod("gaps", "data.frame", function(x, start = NA,
+                                          end = NA, ...) {
   gaps(RegionSet(x))
 })
 
@@ -433,6 +519,92 @@ setMethod("jaccard", c("ANY", "ANY"), function(x, y) {
   x <- RegionSet(x)
   y <- RegionSet(y)
   .Call(wrap__r_jaccard, .ptr(x), .ptr(y))
+})
+
+# =========================================================================
+# Overlap queries (findOverlaps / countOverlaps)
+# =========================================================================
+
+#' Find overlapping pairs between two region sets
+#'
+#' @description Returns all (queryHits, subjectHits) pairs where the query
+#'   region overlaps the subject region by at least \code{minoverlap} base
+#'   pairs. Uses an IGD (Integrated Genome Database) index for fast queries.
+#' @param query A RegionSet, GRanges, file path, or data.frame
+#' @param subject A RegionSet, GRanges, file path, or data.frame
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+#' @param type ignored (present for generic compatibility)
+#' @param maxgap ignored
+#' @param select ignored
+#' @param ... ignored
+#' @return A data.frame with columns queryHits and subjectHits (1-based)
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("RegionSet", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    mo <- max(as.integer(minoverlap), 1L)
+    result <- .Call(wrap__r_find_overlaps, .ptr(query), .ptr(subject), mo)
+    data.frame(queryHits = result$queryHits, subjectHits = result$subjectHits)
+})
+
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("RegionSet", "ANY"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    findOverlaps(query, RegionSet(subject),
+                 minoverlap = minoverlap)
+})
+
+#' @rdname findOverlaps
+#' @export
+setMethod("findOverlaps", c("ANY", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"),
+           select = c("all", "first", "last", "arbitrary"), ...) {
+    findOverlaps(RegionSet(query), subject,
+                 minoverlap = minoverlap)
+})
+
+#' Count overlaps per query region
+#'
+#' @description For each query region, counts the number of subject regions
+#'   that overlap by at least \code{minoverlap} base pairs.
+#' @param query A RegionSet, GRanges, file path, or data.frame
+#' @param subject A RegionSet, GRanges, file path, or data.frame
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+#' @param type ignored
+#' @param maxgap ignored
+#' @param ... ignored
+#' @return Integer vector of length equal to the number of query regions
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("RegionSet", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    mo <- max(as.integer(minoverlap), 1L)
+    .Call(wrap__r_count_overlaps, .ptr(query), .ptr(subject), mo)
+})
+
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("RegionSet", "ANY"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    countOverlaps(query, RegionSet(subject),
+                  minoverlap = minoverlap)
+})
+
+#' @rdname countOverlaps
+#' @export
+setMethod("countOverlaps", c("ANY", "RegionSet"),
+  function(query, subject, maxgap = -1L, minoverlap = 0L,
+           type = c("any", "start", "end", "within", "equal"), ...) {
+    countOverlaps(RegionSet(query), subject,
+                  minoverlap = minoverlap)
 })
 
 # =========================================================================

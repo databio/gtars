@@ -58,7 +58,7 @@ r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics,
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param n_bins Number of bins (default 250)
-r_region_distribution <- function(rs_ptr, n_bins) .Call(wrap__r_region_distribution, rs_ptr, n_bins)
+r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
 
 #' Load a genome assembly from a FASTA file
 #' @export
@@ -171,6 +171,20 @@ r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
 #' @param rs_ptr_a External pointer to RegionSet A
 #' @param rs_ptr_b External pointer to RegionSet B
 r_intersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_intersect, rs_ptr_a, rs_ptr_b)
+
+#' Find all overlapping (queryHits, subjectHits) pairs between two RegionSets
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_find_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_find_overlaps, query_ptr, subject_ptr, minoverlap)
+
+#' Count the number of subject regions overlapping each query region
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_count_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_count_overlaps, query_ptr, subject_ptr, minoverlap)
 
 #' Compute consensus regions from a list of RegionSet pointers
 #' @export
@@ -327,7 +341,73 @@ r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_creat
 #' Search igd with a bed file
 #' @param database_path A string representing the path to the database igd file.
 #' @param query_path A string representing the path to the query bed file.
+#' @return A named list with columns: filename, numRegions, hits (convertible to data.frame)
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
+
+#' Load a LOLA region database from a folder.
+#' @export
+#' @param db_location Path to the LOLA database folder
+#' @param collections Optional character vector of collection names to load
+#' @param limit Optional integer limit on files per collection
+load_region_db <- function(db_location, collections, limit) .Call(wrap__r_load_region_db, db_location, collections, limit)
+
+#' Load a region database from BED file paths and optional metadata.
+#' @export
+#' @param bed_files Character vector of paths to BED files
+#' @param filenames Optional character vector of display names for each file
+load_region_db_from_beds <- function(bed_files, filenames) .Call(wrap__r_load_region_db_from_beds, bed_files, filenames)
+
+#' List region set filenames in a database.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param collections Optional character vector filter
+list_region_sets <- function(db, collections) .Call(wrap__r_list_region_sets, db, collections)
+
+#' Run LOLA enrichment analysis.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+#' @param db_ptr ExternalPtr to RegionDB
+#' @param min_overlap Minimum base-pair overlap (default 1)
+#' @param direction "enrichment" or "depletion"
+run_lola <- function(user_sets_list, universe_ptr, db_ptr, min_overlap, direction) .Call(wrap__r_run_lola, user_sets_list, universe_ptr, db_ptr, min_overlap, direction)
+
+#' Check universe appropriateness for user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+check_universe <- function(user_sets_list, universe_ptr) .Call(wrap__r_check_universe, user_sets_list, universe_ptr)
+
+#' Redefine user sets in terms of universe regions.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+redefine_user_sets <- function(user_sets_list, universe_ptr) .Call(wrap__r_redefine_user_sets, user_sets_list, universe_ptr)
+
+#' Build a restricted universe from user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+build_restricted_universe <- function(user_sets_list) .Call(wrap__r_build_restricted_universe, user_sets_list)
+
+#' Get per-file annotations from a RegionDB as a data.frame-like list.
+#'
+#' Returns a list with columns: filename, cellType, description, tissue,
+#' dataSource, antibody, treatment, collection. This matches the structure
+#' of R LOLA's regionDB$regionAnno.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_anno <- function(db) .Call(wrap__r_regiondb_anno, db)
+
+#' Get collection-level annotations from a RegionDB as a data.frame-like list.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_collection_anno <- function(db) .Call(wrap__r_regiondb_collection_anno, db)
+
+#' Get a single RegionSet from a RegionDB by 1-based index.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param index 1-based integer index into the region sets
+regiondb_region_set <- function(db, index) .Call(wrap__r_regiondb_region_set, db, index)
 
 #' Create sha512t24u digest
 #' @export

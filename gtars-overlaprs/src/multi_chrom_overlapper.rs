@@ -930,9 +930,9 @@ mod tests {
         ]);
 
         // RegionSetOverlaps builds index from `other` and queries `self`
-        let trait_counts = query_rs.count_overlaps(&source_rs);
-        let trait_any = query_rs.any_overlaps(&source_rs);
-        let trait_find = query_rs.find_overlaps(&source_rs);
+        let trait_counts = query_rs.count_overlaps(&source_rs, None);
+        let trait_any = query_rs.any_overlaps(&source_rs, None);
+        let trait_find = query_rs.find_overlaps(&source_rs, None);
 
         // MCO: build index from source, query with query
         let index = build_indexed_overlapper(&source_rs, overlapper_type);

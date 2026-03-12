@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{flank,RegionSet-method}
 \alias{flank,RegionSet-method}
-\alias{flank,ANY-method}
+\alias{flank,character-method}
+\alias{flank,data.frame-method}
 \title{Generate flanking regions}
 \usage{
 \S4method{flank}{RegionSet}(x, width, start = TRUE, both = FALSE, use.names = TRUE, ...)
 
-\S4method{flank}{ANY}(x, width, start = TRUE, both = FALSE, use.names = TRUE, ...)
+\S4method{flank}{character}(x, width, start = TRUE, both = FALSE, use.names = TRUE, ...)
+
+\S4method{flank}{data.frame}(x, width, start = TRUE, both = FALSE, use.names = TRUE, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

@@ -2,12 +2,15 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{shift,RegionSet-method}
 \alias{shift,RegionSet-method}
-\alias{shift,ANY-method}
+\alias{shift,character-method}
+\alias{shift,data.frame-method}
 \title{Shift regions by a fixed offset}
 \usage{
 \S4method{shift}{RegionSet}(x, shift = 0L, use.names = TRUE)
 
-\S4method{shift}{ANY}(x, shift = 0L, use.names = TRUE)
+\S4method{shift}{character}(x, shift = 0L, use.names = TRUE)
+
+\S4method{shift}{data.frame}(x, shift = 0L, use.names = TRUE)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

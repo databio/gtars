@@ -16,8 +16,6 @@ use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, Overlapp
 use serde::{Deserialize, Serialize};
 
 use crate::errors::GtarsGenomicDistError;
-
-use crate::interval_ranges::IntervalRanges;
 use crate::models::{Strand, StrandedRegionSet};
 
 /// A gene model loaded from BED files or GTF.
@@ -359,22 +357,23 @@ pub fn genome_partition_list(
     let mut partitions: Vec<(String, RegionSet)> = Vec::new();
 
     // 1. Core promoters (strand-aware: minus-strand uses end, not start)
-    // When chrom_sizes are provided, trim promoters at chromosome boundaries
-    // before reduce to avoid promoter regions extending past chromosome ends.
-    let raw_core = model.genes.promoters(core_prom_size, 0);
-    let core_promoters = match chrom_sizes {
+    // trim → strand-aware reduce, matching R's reduce(trim(promoters(...)))
+    let raw_core = model.genes.promoters_stranded(core_prom_size, 0);
+    let core_stranded = match chrom_sizes {
         Some(sizes) => raw_core.trim(sizes).reduce(),
         None => raw_core.reduce(),
     };
-    partitions.push(("promoterCore".to_string(), core_promoters.clone()));
+    partitions.push(("promoterCore".to_string(), core_stranded.inner.clone()));
 
     // 2. Proximal promoters (larger window minus core)
-    let raw_prox = model.genes.promoters(prox_prom_size, 0);
-    let prox_promoters = match chrom_sizes {
+    // Keep as StrandedRegionSet through setdiff — R's setdiff is strand-aware,
+    // so + strand prox is only subtracted by + strand core, etc.
+    let raw_prox = model.genes.promoters_stranded(prox_prom_size, 0);
+    let prox_stranded = match chrom_sizes {
         Some(sizes) => raw_prox.trim(sizes).reduce(),
         None => raw_prox.reduce(),
-    }
-    .setdiff(&core_promoters);
+    };
+    let prox_promoters = prox_stranded.setdiff(&core_stranded).into_regionset();
     partitions.push(("promoterProx".to_string(), prox_promoters));
 
     // UTR/exon/intron construction does NOT subtract promoters — R doesn't either.
@@ -498,6 +497,11 @@ fn calc_partitions_priority(query: &RegionSet, partitions: &PartitionList) -> Pa
 }
 
 /// BP-proportion partition assignment.
+///
+/// Note: a query region overlapping multiple partitions contributes its
+/// overlapping base pairs to each partition independently. This matches
+/// R GenomicDistributions behavior (partitions are not mutually exclusive
+/// in bp mode — use region-count mode for exclusive assignment).
 fn calc_partitions_bp(query: &RegionSet, partitions: &PartitionList) -> PartitionResult {
     let total_query_bp: u32 = query.regions.iter().map(|r| r.end - r.start).sum();
 
@@ -561,12 +565,17 @@ pub fn calc_expected_partitions(
     let genome_size: u64 = chrom_sizes.values().map(|&v| v as u64).sum();
     let query_total = observed.total as f64;
 
-    // Compute partition sizes in bp
+    // Compute partition sizes as raw bp sums (no priority resolution).
+    // This matches R's GenomicDistributions::calcExpectedPartitions, which uses
+    // sum(width(partitionList[[i]])) — the total annotated bp per partition,
+    // allowing overlaps between partitions to be counted in each.
+    // Priority resolution only applies to observed counts (which partition a
+    // query region is assigned to), not to expected proportions.
     let mut partition_bp_total: u64 = 0;
     let partition_sizes: Vec<u64> = partitions
         .partitions
         .iter()
-        .map(|(_, rs)| {
+        .map(|(_name, rs)| {
             let bp: u64 = rs.regions.iter().map(|r| (r.end - r.start) as u64).sum();
             partition_bp_total += bp;
             bp
@@ -736,6 +745,7 @@ fn ln_gamma(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interval_ranges::IntervalRanges;
     use pretty_assertions::assert_eq;
     use rstest::*;
     use std::path::PathBuf;
