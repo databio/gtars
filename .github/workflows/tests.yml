@@ -35,7 +35,7 @@ jobs:
       working-directory: ./gtars-python
       run: |
         uv venv
-        uv pip install maturin pytest
+        uv pip install -e ".[dev]"
         uv run maturin develop --release
     - name: Run Python tests
       working-directory: ./gtars-python
