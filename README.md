@@ -6,7 +6,7 @@
 </h1>
 
 
-`gtars` is a rust project that provides a set of tools for working with genomic interval data. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well. For more information, see the [public-facing documentation](https://docs.bedbase.org/gtars/) (under construction).
+`gtars` is a rust project that provides a set of tools for working with genomic interval data. It includes modules for genomic distribution analysis (`genomicdist`), locus overlap enrichment analysis (`lola`), integrated genome database overlap queries (`igd`), sequence collection management (`refget`), and more. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well. For more information, see the [public-facing documentation](https://docs.bedbase.org/gtars/) (under construction).
 
 
 `gtars` provides these things:
@@ -57,11 +57,6 @@ Then, you can use it in Python like so:
 from gtars import __version__
 print(__version__)
 ```
-
-### Dev Python bindings
-
-
-
 
 ## Usage
 
