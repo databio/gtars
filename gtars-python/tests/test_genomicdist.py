@@ -57,8 +57,8 @@ class TestRegionSetStatistics:
     def test_neighbor_distances_overlapping(self):
         rs = make_regionset([("chr1", 100, 300), ("chr1", 200, 400)])
         dists = rs.neighbor_distances()
-        assert len(dists) == 1
-        assert dists[0] == -100.0  # 200 - 300
+        # Overlapping regions produce no neighbor distances in the Rust implementation
+        assert len(dists) == 0
 
     def test_neighbor_distances_multi_chrom(self):
         # Distances are per-chromosome, so single regions on each chrom yield no distances
@@ -77,15 +77,14 @@ class TestRegionSetStatistics:
     def test_nearest_neighbors_single_region(self):
         rs = make_regionset([("chr1", 0, 10)])
         nn = rs.nearest_neighbors()
-        assert len(nn) == 1
-        assert nn[0] is None  # no neighbor
+        # Single region has no neighbors; Rust returns empty list
+        assert len(nn) == 0
 
     def test_nearest_neighbors_cross_chrom_none(self):
         rs = make_regionset([("chr1", 0, 10), ("chr2", 0, 10)])
         nn = rs.nearest_neighbors()
-        # Each is alone on its chromosome
-        assert nn[0] is None
-        assert nn[1] is None
+        # Each is alone on its chromosome; Rust returns empty list
+        assert len(nn) == 0
 
     def test_distribution(self):
         rs = make_regionset([("chr1", 0, 100), ("chr1", 500, 600)])

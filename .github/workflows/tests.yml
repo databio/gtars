@@ -25,6 +25,15 @@ jobs:
     - name: Run tests
       run: cargo test --verbose --workspace --all-features
 
+    - name: Install R dependencies
+      run: Rscript -e 'install.packages(c("testthat", "data.table", "BiocManager"), repos="https://cloud.r-project.org"); BiocManager::install(c("BiocGenerics", "IRanges"))'
+
+    - name: Install R package
+      run: R CMD INSTALL gtars-r
+
+    - name: Run R tests
+      run: Rscript -e 'testthat::test_dir("gtars-r/tests/testthat")'
+
     - name: Set up Python
       uses: actions/setup-python@v5
       with:

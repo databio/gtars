@@ -181,9 +181,9 @@ class TestCollectionAPI:
         assert record.decode() is not None
 
     def test_get_sequence_not_found(self, store_with_data):
-        """get_sequence() returns None for non-existent digest."""
-        result = store_with_data.get_sequence("nonexistent_digest")
-        assert result is None
+        """get_sequence() raises KeyError for non-existent digest."""
+        with pytest.raises(KeyError):
+            store_with_data.get_sequence("nonexistent_digest")
 
     # =========================================================================
     # get_sequence_by_name() tests
@@ -204,10 +204,10 @@ class TestCollectionAPI:
         assert len(decoded) == record.metadata.length
 
     def test_get_sequence_by_name_not_found(self, store_with_data, expected_data):
-        """get_sequence_by_name() returns None for non-existent name."""
+        """get_sequence_by_name() raises KeyError for non-existent name."""
         collection_digest = expected_data.digest
-        result = store_with_data.get_sequence_by_name(collection_digest, "nonexistent_seq")
-        assert result is None
+        with pytest.raises(KeyError):
+            store_with_data.get_sequence_by_name(collection_digest, "nonexistent_seq")
 
     # =========================================================================
     # iter_collections() tests

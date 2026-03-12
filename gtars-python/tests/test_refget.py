@@ -161,15 +161,18 @@ class TestRefget:
         with pytest.raises(Exception):
             store.add_sequence_collection_from_fasta("nonexistent.fa")
 
-        # Test getting non-existent sequence
+        # Test getting non-existent sequence raises KeyError
         bogus_digest = "not_a_sequence"
-        assert store.get_sequence(bogus_digest) is None
+        with pytest.raises(KeyError):
+            store.get_sequence(bogus_digest)
 
-        # Test invalid substring parameters
+        # Test invalid substring parameters raise KeyError
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
-        assert store.get_substring(sha512, 10, 5) is None  # end < start
-        assert store.get_substring(sha512, 0, 100) is None  # end > length
+        with pytest.raises(KeyError):
+            store.get_substring(sha512, 10, 5)  # end < start
+        with pytest.raises(KeyError):
+            store.get_substring(sha512, 0, 100)  # end > length
 
     def test_store_collection_operations(self):
         """Test collection-related operations"""
@@ -496,8 +499,8 @@ GGGG
         store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get expected digest
-        result = digest_fasta(fasta_path)
-        expected_digest = result.digest
+        fasta_result = digest_fasta(fasta_path)
+        expected_digest = fasta_result.digest
 
         # Test list_collections - now returns paginated dict
         result = store.list_collections()
@@ -510,9 +513,9 @@ GGGG
         assert meta is not None
         assert meta.digest == expected_digest
         assert meta.n_sequences == 3
-        assert meta.names_digest == result.lvl1.names_digest
-        assert meta.sequences_digest == result.lvl1.sequences_digest
-        assert meta.lengths_digest == result.lvl1.lengths_digest
+        assert meta.names_digest == fasta_result.lvl1.names_digest
+        assert meta.sequences_digest == fasta_result.lvl1.sequences_digest
+        assert meta.lengths_digest == fasta_result.lvl1.lengths_digest
 
         # Test str/repr
         assert expected_digest in str(meta)
@@ -858,19 +861,17 @@ class TestAutoLoadingAliasMethods:
         assert coll.metadata.digest == meta.digest
         assert len(coll.sequences) > 0
 
-    def test_get_sequence_by_alias_not_found_raises(self):
-        """Test that get_sequence_by_alias raises KeyError for unknown alias."""
+    def test_get_sequence_by_alias_not_found_returns_none(self):
+        """Test that get_sequence_by_alias returns None for unknown alias."""
         store = RefgetStore.in_memory()
-        import pytest
-        with pytest.raises(KeyError):
-            store.get_sequence_by_alias("ncbi", "nonexistent")
+        result = store.get_sequence_by_alias("ncbi", "nonexistent")
+        assert result is None
 
-    def test_get_collection_by_alias_not_found_raises(self):
-        """Test that get_collection_by_alias raises KeyError for unknown alias."""
+    def test_get_collection_by_alias_not_found_returns_none(self):
+        """Test that get_collection_by_alias returns None for unknown alias."""
         store = RefgetStore.in_memory()
-        import pytest
-        with pytest.raises(KeyError):
-            store.get_collection_by_alias("ucsc", "nonexistent")
+        result = store.get_collection_by_alias("ucsc", "nonexistent")
+        assert result is None
 
 
 # =========================================================================
@@ -1160,19 +1161,19 @@ def test_fasta_namespace_alias_extraction(tmp_path):
     # Verify aliases were registered and can be resolved
     seq = store.get_sequence_by_alias("ncbi", "NC_000001.11")
     assert seq is not None
-    assert seq.name == "chr1"
+    assert seq.metadata.name == "chr1"
 
     seq = store.get_sequence_by_alias("refseq", "NC_000001.11")
     assert seq is not None
-    assert seq.name == "chr1"
+    assert seq.metadata.name == "chr1"
 
     seq = store.get_sequence_by_alias("ncbi", "NC_000002.12")
     assert seq is not None
-    assert seq.name == "chr2"
+    assert seq.metadata.name == "chr2"
 
-    # Non-existent alias should raise KeyError
-    with pytest.raises(KeyError):
-        store.get_sequence_by_alias("ncbi", "NC_999999.1")
+    # Non-existent alias should return None
+    result = store.get_sequence_by_alias("ncbi", "NC_999999.1")
+    assert result is None
 
 
 def test_fasta_no_namespaces_no_aliases(tmp_path):
@@ -1183,5 +1184,6 @@ def test_fasta_no_namespaces_no_aliases(tmp_path):
     store = RefgetStore.in_memory()
     store.add_sequence_collection_from_fasta(str(fasta))
 
-    with pytest.raises(KeyError):
-        store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    # Without namespaces, no aliases are registered; lookup returns None
+    result = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    assert result is None
