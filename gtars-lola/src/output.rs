@@ -1,9 +1,33 @@
-//! Output formatting and FDR correction.
+//! Output formatting, FDR correction, and annotation.
 
 use std::io::Write;
 use std::path::Path;
 
+use crate::database::RegionDB;
 use crate::models::LolaResult;
+
+/// Attach DB metadata (collection, description, cellType, etc.) to results.
+///
+/// Uses each result's `db_set` index to look up annotations from the RegionDB.
+/// Also fills in `db_set_size` from the original region sets.
+pub fn annotate_results(results: &mut [LolaResult], db: &RegionDB) {
+    for r in results.iter_mut() {
+        if r.db_set < db.region_anno.len() {
+            let anno = &db.region_anno[r.db_set];
+            r.collection = anno.collection.clone();
+            // Truncate description to 80 chars (matches R LOLA behavior)
+            r.description = anno.description.chars().take(80).collect();
+            r.cell_type = anno.cell_type.clone();
+            r.tissue = anno.tissue.clone();
+            r.antibody = anno.antibody.clone();
+            r.treatment = anno.treatment.clone();
+            r.data_source = anno.data_source.clone();
+        }
+        if r.db_set < db.region_sets.len() {
+            r.db_set_size = db.region_sets[r.db_set].regions.len() as u64;
+        }
+    }
+}
 
 /// Apply Benjamini-Hochberg FDR correction to LOLA results.
 ///
@@ -89,7 +113,10 @@ pub fn write_results_tsv<W: Write>(
     // Header
     writeln!(
         writer,
-        "userSet\tdbSet\tpValueLog\toddsRatio\tsupport\trnkPV\trnkOR\trnkSup\tmaxRnk\tmeanRnk\tb\tc\td\tqValue\tfilename"
+        "userSet\tdbSet\tcollection\tpValueLog\toddsRatio\tsupport\t\
+         rnkPV\trnkOR\trnkSup\tmaxRnk\tmeanRnk\tb\tc\td\t\
+         description\tcellType\ttissue\tantibody\ttreatment\tdataSource\t\
+         filename\tqValue\tsize"
     )?;
 
     for r in results {
@@ -100,9 +127,11 @@ pub fn write_results_tsv<W: Write>(
 
         writeln!(
             writer,
-            "{}\t{}\t{:.4}\t{:.4}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{:.4}\t{:.4}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t\
+             {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             r.user_set + 1, // 1-based for R compatibility
             r.db_set + 1,
+            r.collection,
             r.p_value_log,
             r.odds_ratio,
             r.support,
@@ -114,8 +143,15 @@ pub fn write_results_tsv<W: Write>(
             r.b,
             r.c,
             r.d,
+            r.description,
+            r.cell_type,
+            r.tissue,
+            r.antibody,
+            r.treatment,
+            r.data_source,
+            r.filename,
             qv,
-            r.filename
+            r.db_set_size,
         )?;
     }
 
@@ -153,6 +189,14 @@ mod tests {
             d: 100,
             q_value: None,
             filename: format!("file{}.bed", db_set),
+            collection: String::new(),
+            description: String::new(),
+            cell_type: String::new(),
+            tissue: String::new(),
+            antibody: String::new(),
+            treatment: String::new(),
+            data_source: String::new(),
+            db_set_size: 0,
         }
     }
 
@@ -339,7 +383,7 @@ mod tests {
         let output = String::from_utf8(buf).unwrap();
 
         // Check header
-        assert!(output.starts_with("userSet\tdbSet\tpValueLog\t"));
+        assert!(output.starts_with("userSet\tdbSet\tcollection\tpValueLog\t"));
         // Check data lines
         let lines: Vec<&str> = output.lines().collect();
         assert_eq!(lines.len(), 3); // header + 2 data rows

@@ -67,8 +67,8 @@ runLOLA <- function(userSets, userUniverse, regionDB,
   result <- run_lola(user_ptrs, universe_ptr, regionDB,
                      as.integer(minOverlap), direction)
 
-  # Convert to data.frame
-  as.data.frame(result, stringsAsFactors = FALSE)
+  # Convert to data.table
+  data.table::as.data.table(result)
 }
 
 #' List region set filenames in a database

@@ -6,7 +6,7 @@ use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
 use gtars_lola::models::{Direction, LolaConfig, LolaResult};
-use gtars_lola::output::apply_fdr_correction;
+use gtars_lola::output::{annotate_results, apply_fdr_correction};
 use gtars_lola::universe;
 
 // =========================================================================
@@ -149,6 +149,7 @@ pub fn js_run_lola(
     let mut results = run_lola(&region_db.inner.igd, &rs_user, &rs_universe, &config)
         .map_err(|e| JsValue::from_str(&format!("LOLA error: {}", e)))?;
 
+    annotate_results(&mut results, &region_db.inner);
     apply_fdr_correction(&mut results);
 
     results_to_js(&results)
@@ -230,6 +231,7 @@ struct UniverseCheckResult {
 struct LolaResults {
     user_set: Vec<usize>,
     db_set: Vec<usize>,
+    collection: Vec<Option<String>>,
     p_value_log: Vec<f64>,
     odds_ratio: Vec<f64>,
     support: Vec<u64>,
@@ -238,17 +240,33 @@ struct LolaResults {
     rnk_sup: Vec<usize>,
     max_rnk: Vec<usize>,
     mean_rnk: Vec<f64>,
-    b: Vec<u64>,
-    c: Vec<u64>,
-    d: Vec<u64>,
+    b: Vec<i64>,
+    c: Vec<i64>,
+    d: Vec<i64>,
+    description: Vec<Option<String>>,
+    cell_type: Vec<Option<String>>,
+    tissue: Vec<Option<String>>,
+    antibody: Vec<Option<String>>,
+    treatment: Vec<Option<String>>,
+    data_source: Vec<Option<String>>,
     filename: Vec<String>,
     q_value: Vec<Option<f64>>,
+    size: Vec<u64>,
+}
+
+fn empty_to_none(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 fn results_to_js(results: &[LolaResult]) -> Result<JsValue, JsValue> {
     let out = LolaResults {
         user_set: results.iter().map(|r| r.user_set).collect(),
         db_set: results.iter().map(|r| r.db_set).collect(),
+        collection: results.iter().map(|r| empty_to_none(&r.collection)).collect(),
         p_value_log: results.iter().map(|r| r.p_value_log).collect(),
         odds_ratio: results.iter().map(|r| r.odds_ratio).collect(),
         support: results.iter().map(|r| r.support).collect(),
@@ -260,8 +278,15 @@ fn results_to_js(results: &[LolaResult]) -> Result<JsValue, JsValue> {
         b: results.iter().map(|r| r.b).collect(),
         c: results.iter().map(|r| r.c).collect(),
         d: results.iter().map(|r| r.d).collect(),
+        description: results.iter().map(|r| empty_to_none(&r.description)).collect(),
+        cell_type: results.iter().map(|r| empty_to_none(&r.cell_type)).collect(),
+        tissue: results.iter().map(|r| empty_to_none(&r.tissue)).collect(),
+        antibody: results.iter().map(|r| empty_to_none(&r.antibody)).collect(),
+        treatment: results.iter().map(|r| empty_to_none(&r.treatment)).collect(),
+        data_source: results.iter().map(|r| empty_to_none(&r.data_source)).collect(),
         filename: results.iter().map(|r| r.filename.clone()).collect(),
         q_value: results.iter().map(|r| r.q_value).collect(),
+        size: results.iter().map(|r| r.db_set_size).collect(),
     };
 
     serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&format!("{}", e)))

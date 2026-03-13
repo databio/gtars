@@ -338,7 +338,13 @@ fn parse_collection_txt(path: &Path, collection_name: &str) -> CollectionAnno {
         }
     };
 
-    let col_names: Vec<&str> = header.split('\t').collect();
+    let sep = if header.contains(',') && !header.contains('\t') {
+        ','
+    } else {
+        '\t'
+    };
+
+    let col_names: Vec<&str> = header.split(sep).collect();
     let col_map: HashMap<&str, usize> = col_names
         .iter()
         .enumerate()
@@ -356,7 +362,7 @@ fn parse_collection_txt(path: &Path, collection_name: &str) -> CollectionAnno {
         }
     };
 
-    let fields: Vec<&str> = data_line.split('\t').collect();
+    let fields: Vec<&str> = data_line.split(sep).collect();
 
     let get = |key: &str| -> String {
         col_map
@@ -395,7 +401,14 @@ fn parse_index_txt(path: &Path, collection_name: &str) -> Vec<RegionSetAnno> {
         _ => return Vec::new(),
     };
 
-    let col_names: Vec<&str> = header.split('\t').collect();
+    // Auto-detect delimiter: comma or tab (R's fread does this automatically)
+    let sep = if header.contains(',') && !header.contains('\t') {
+        ','
+    } else {
+        '\t'
+    };
+
+    let col_names: Vec<&str> = header.split(sep).collect();
     let col_map: HashMap<&str, usize> = col_names
         .iter()
         .enumerate()
@@ -414,7 +427,7 @@ fn parse_index_txt(path: &Path, collection_name: &str) -> Vec<RegionSetAnno> {
             continue;
         }
 
-        let fields: Vec<&str> = line.split('\t').collect();
+        let fields: Vec<&str> = line.split(sep).collect();
 
         let get = |key: &str| -> String {
             col_map

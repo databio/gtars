@@ -959,7 +959,7 @@ def test_fhr_metadata_persistence(tmp_path):
     store.set_fhr_metadata(meta.digest, fhr)
 
     # Verify sidecar file was written
-    fhr_path = store_path / "collections" / f"{meta.digest}.fhr.json"
+    fhr_path = store_path / "fhr" / f"{meta.digest}.fhr.json"
     assert fhr_path.exists()
     data = json.loads(fhr_path.read_text())
     assert data["genome"] == "Test"

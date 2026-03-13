@@ -10,7 +10,7 @@ use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
 use gtars_lola::models::{Direction, LolaConfig, LolaResult};
-use gtars_lola::output::apply_fdr_correction;
+use gtars_lola::output::{annotate_results, apply_fdr_correction};
 use gtars_lola::universe;
 
 // =========================================================================
@@ -215,6 +215,7 @@ fn py_run_lola<'py>(
     let mut results = run_lola(&region_db.inner.igd, &rs_user, &rs_universe, &config)
         .map_err(|e| PyRuntimeError::new_err(format!("LOLA error: {}", e)))?;
 
+    annotate_results(&mut results, &region_db.inner);
     apply_fdr_correction(&mut results);
 
     results_to_dict(py, &results)
@@ -239,7 +240,15 @@ fn results_to_dict<'py>(
     let mut b_vec = Vec::with_capacity(n);
     let mut c_vec = Vec::with_capacity(n);
     let mut d_vec = Vec::with_capacity(n);
+    let mut collection: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut description: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut cell_type: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut tissue: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut antibody: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut treatment: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut data_source: Vec<Option<String>> = Vec::with_capacity(n);
     let mut filename = Vec::with_capacity(n);
+    let mut db_set_size = Vec::with_capacity(n);
 
     for r in results {
         user_set.push(r.user_set);
@@ -255,7 +264,15 @@ fn results_to_dict<'py>(
         b_vec.push(r.b);
         c_vec.push(r.c);
         d_vec.push(r.d);
+        collection.push(empty_to_none(&r.collection));
+        description.push(empty_to_none(&r.description));
+        cell_type.push(empty_to_none(&r.cell_type));
+        tissue.push(empty_to_none(&r.tissue));
+        antibody.push(empty_to_none(&r.antibody));
+        treatment.push(empty_to_none(&r.treatment));
+        data_source.push(empty_to_none(&r.data_source));
         filename.push(r.filename.clone());
+        db_set_size.push(r.db_set_size);
     }
 
     let q_value: Vec<Option<f64>> = results.iter().map(|r| r.q_value).collect();
@@ -263,6 +280,7 @@ fn results_to_dict<'py>(
     let dict = PyDict::new(py);
     dict.set_item("userSet", user_set)?;
     dict.set_item("dbSet", db_set)?;
+    dict.set_item("collection", collection)?;
     dict.set_item("pValueLog", p_value_log)?;
     dict.set_item("oddsRatio", odds_ratio)?;
     dict.set_item("support", support)?;
@@ -274,8 +292,15 @@ fn results_to_dict<'py>(
     dict.set_item("b", b_vec)?;
     dict.set_item("c", c_vec)?;
     dict.set_item("d", d_vec)?;
+    dict.set_item("description", description)?;
+    dict.set_item("cellType", cell_type)?;
+    dict.set_item("tissue", tissue)?;
+    dict.set_item("antibody", antibody)?;
+    dict.set_item("treatment", treatment)?;
+    dict.set_item("dataSource", data_source)?;
     dict.set_item("filename", filename)?;
     dict.set_item("qValue", q_value)?;
+    dict.set_item("size", db_set_size)?;
 
     Ok(dict)
 }
@@ -366,6 +391,14 @@ fn py_build_restricted_universe(
 // =========================================================================
 // Helpers
 // =========================================================================
+
+fn empty_to_none(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
 
 fn tuples_to_regionset(tuples: Vec<(String, u32, u32)>) -> RegionSet {
     RegionSet::from(

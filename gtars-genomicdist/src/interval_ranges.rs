@@ -541,46 +541,38 @@ impl IntervalRanges for RegionSet {
             events.sort_unstable();
             events.dedup();
 
-            // Sweep-line: collect tagged events, sort, walk with coverage counter
-            let mut tagged_events: Vec<(u32, i8)> = Vec::with_capacity((chr_end - i) * 2);
+            // Walk the sorted, deduplicated boundary events directly.
+            // Between consecutive events, emit a disjoint piece if
+            // any input region covers that span.
+            //
+            // We use a sweep-line with a coverage counter: +1 at each
+            // region start, -1 at each region end. Since events[] is
+            // already sorted and deduped, we just need to know the
+            // coverage change at each event position.
+            //
+            // Build a map: position → net coverage delta
+            let mut delta_map: std::collections::HashMap<u32, i32> =
+                std::collections::HashMap::with_capacity((chr_end - i) * 2);
             for r in &regions[i..chr_end] {
-                tagged_events.push((r.start, 1));  // +1 for start
-                tagged_events.push((r.end, -1));   // -1 for end
+                *delta_map.entry(r.start).or_insert(0) += 1;
+                *delta_map.entry(r.end).or_insert(0) -= 1;
             }
-            // Sort by position; break ties: starts (+1) before ends (-1)
-            tagged_events.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
 
+            // Walk events in order; emit a piece between consecutive
+            // events whenever coverage > 0.
             let mut coverage: i32 = 0;
-            let mut seg_start: Option<u32> = None;
-            for &(pos, delta) in &tagged_events {
-                let prev_coverage = coverage;
-                coverage += delta as i32;
-                if prev_coverage == 0 && coverage > 0 {
-                    seg_start = Some(pos);
-                } else if prev_coverage > 0 && coverage == 0 {
-                    if let Some(start) = seg_start {
-                        // Split this covered span at all boundary points
-                        let boundaries: Vec<u32> = events.iter()
-                            .copied()
-                            .filter(|&e| e > start && e < pos)
-                            .collect();
-                        let mut prev = start;
-                        for b in boundaries {
-                            result.push(Region {
-                                chr: chr.clone(),
-                                start: prev,
-                                end: b,
-                                rest: None,
-                            });
-                            prev = b;
-                        }
-                        result.push(Region {
-                            chr: chr.clone(),
-                            start: prev,
-                            end: pos,
-                            rest: None,
-                        });
-                    }
+            for ei in 0..events.len() {
+                if let Some(&d) = delta_map.get(&events[ei]) {
+                    coverage += d;
+                }
+                // Emit interval [events[ei], events[ei+1]) if covered
+                if coverage > 0 && ei + 1 < events.len() {
+                    result.push(Region {
+                        chr: chr.clone(),
+                        start: events[ei],
+                        end: events[ei + 1],
+                        rest: None,
+                    });
                 }
             }
 
