@@ -508,7 +508,7 @@ impl ReadonlyRefgetStore {
             if let Some(local_path) = &self.local_path {
                 let rgsi_path = local_path.join(format!("collections/{}.rgsi", digest));
                 let _ = fs::remove_file(&rgsi_path);
-                let fhr_path = local_path.join(format!("collections/{}.fhr.json", digest));
+                let fhr_path = local_path.join(format!("fhr/{}.fhr.json", digest));
                 let _ = fs::remove_file(&fhr_path);
             }
             self.write_index_files()?;
@@ -1069,7 +1069,7 @@ impl ReadonlyRefgetStore {
         let aliases_dir = root_path.join("aliases");
         self.aliases.write_to_dir(&aliases_dir)?;
 
-        super::fhr_metadata::write_sidecars(&root_path.join("collections"), &self.fhr_metadata)?;
+        super::fhr_metadata::write_sidecars(&root_path.join("fhr"), &self.fhr_metadata)?;
 
         self.write_rgstore_json(root_path, template)?;
 

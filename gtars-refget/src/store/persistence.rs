@@ -236,7 +236,7 @@ impl ReadonlyRefgetStore {
         };
 
         store.fhr_metadata =
-            fhr_metadata::load_sidecars(&root_path.join("collections"));
+            fhr_metadata::load_sidecars(&root_path.join("fhr"));
 
         Ok(store)
     }

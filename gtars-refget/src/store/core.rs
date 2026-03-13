@@ -60,6 +60,7 @@ impl RefgetStore {
             inner.persist_to_disk = true;
             create_dir_all(cache_path.join("sequences"))?;
             create_dir_all(cache_path.join("collections"))?;
+            create_dir_all(cache_path.join("fhr"))?;
             Ok(Self { inner })
         }
     }

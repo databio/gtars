@@ -176,21 +176,21 @@ pub struct FhrIdentifier {
 
 pub(crate) const SIDECAR_EXTENSION: &str = ".fhr.json";
 
-/// Load all FHR sidecar files from a collections directory.
+/// Load all FHR sidecar files from the FHR directory.
 ///
 /// Scans for `*.fhr.json` files, parses each one, and returns a map
 /// keyed by collection digest. Malformed files are skipped with a warning to stderr.
-pub fn load_sidecars(collections_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
+pub fn load_sidecars(fhr_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
     let mut map = HashMap::new();
-    if !collections_dir.exists() {
+    if !fhr_dir.exists() {
         return map;
     }
-    let entries = match fs::read_dir(collections_dir) {
+    let entries = match fs::read_dir(fhr_dir) {
         Ok(e) => e,
         Err(e) => {
             eprintln!(
                 "Warning: could not read FHR sidecar directory {}: {}",
-                collections_dir.display(),
+                fhr_dir.display(),
                 e
             );
             return map;
@@ -231,14 +231,14 @@ pub fn load_sidecars(collections_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
     map
 }
 
-/// Write all FHR sidecar files to a collections directory.
+/// Write all FHR sidecar files to the FHR directory.
 pub fn write_sidecars(
-    collections_dir: &Path,
+    fhr_dir: &Path,
     metadata: &HashMap<[u8; 32], FhrMetadata>,
 ) -> Result<()> {
     for (key, fhr) in metadata {
         let digest_str = key_to_digest_string(key);
-        let path = collections_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION));
+        let path = fhr_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION));
         write_sidecar(&path, fhr)?;
     }
     Ok(())
@@ -255,14 +255,14 @@ pub fn write_sidecar(path: &Path, metadata: &FhrMetadata) -> Result<()> {
 }
 
 /// Remove a single FHR sidecar file (if it exists). Returns quietly if missing.
-pub fn remove_sidecar(collections_dir: &Path, digest_str: &str) {
-    let path = collections_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION));
+pub fn remove_sidecar(fhr_dir: &Path, digest_str: &str) {
+    let path = fhr_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION));
     let _ = fs::remove_file(path);
 }
 
 /// Build the sidecar file path for a given digest.
-pub fn sidecar_path(collections_dir: &Path, digest_str: &str) -> std::path::PathBuf {
-    collections_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION))
+pub fn sidecar_path(fhr_dir: &Path, digest_str: &str) -> std::path::PathBuf {
+    fhr_dir.join(format!("{}{}", digest_str, SIDECAR_EXTENSION))
 }
 
 /// Load FHR metadata from a standalone JSON file.
@@ -290,7 +290,7 @@ impl ReadonlyRefgetStore {
         if self.persist_to_disk {
             if let Some(ref local_path) = self.local_path {
                 let path = sidecar_path(
-                    &local_path.join("collections"),
+                    &local_path.join("fhr"),
                     collection_digest,
                 );
                 write_sidecar(&path, &metadata)?;
@@ -312,7 +312,7 @@ impl ReadonlyRefgetStore {
         if self.persist_to_disk {
             if let Some(ref local_path) = self.local_path {
                 remove_sidecar(
-                    &local_path.join("collections"),
+                    &local_path.join("fhr"),
                     collection_digest,
                 );
             }
@@ -377,7 +377,7 @@ impl RefgetStore {
         };
 
         for digest_str in &digests {
-            let relative_path = format!("collections/{}.fhr.json", digest_str);
+            let relative_path = format!("fhr/{}.fhr.json", digest_str);
 
             match strategy {
                 SyncStrategy::KeepOurs => {
@@ -952,7 +952,7 @@ mod tests {
     fn test_keep_ours_fhr_first_pull_counts_as_pulled() {
         // "Remote" store: directory with a pre-built FHR JSON sidecar.
         let remote_dir = tempdir().unwrap();
-        let collections_dir = remote_dir.path().join("collections");
+        let collections_dir = remote_dir.path().join("fhr");
         fs::create_dir_all(&collections_dir).unwrap();
 
         // We need a fake digest string to use as the collection identity.
