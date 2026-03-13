@@ -16,6 +16,7 @@ SystemRequirements: Cargo (Rust's package manager), rustc
 Collate:
     'RegionSet-class.R'
     'RegionSet-methods.R'
+    'RegionSetList-class.R'
     'extendr-wrappers.R'
     'genomicdist.R'
     'igd.R'

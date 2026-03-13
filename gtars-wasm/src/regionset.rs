@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::models::BedEntries;
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::bed_classifier::classify_bed;
 use gtars_genomicdist::consensus;
 use gtars_genomicdist::interval_ranges::IntervalRanges;
@@ -331,6 +331,57 @@ impl JsRegionSet {
         JsRegionSet { region_set: result }
     }
 
+}
+
+// =========================================================================
+// JsRegionSetList
+// =========================================================================
+
+/// A collection of RegionSets — the gtars equivalent of GRangesList.
+#[wasm_bindgen(js_name = "RegionSetList")]
+pub struct JsRegionSetList {
+    pub(crate) inner: RegionSetList,
+}
+
+#[wasm_bindgen(js_class = "RegionSetList")]
+impl JsRegionSetList {
+    /// Number of region sets in this list.
+    #[wasm_bindgen(getter)]
+    pub fn length(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Get a region set by 0-based index.
+    pub fn get(&self, index: usize) -> Result<JsRegionSet, JsValue> {
+        self.inner
+            .get(index)
+            .map(|rs| JsRegionSet {
+                region_set: rs.clone(),
+            })
+            .ok_or_else(|| {
+                JsValue::from_str(&format!(
+                    "Index {} out of range (list has {} region sets)",
+                    index,
+                    self.inner.len()
+                ))
+            })
+    }
+
+    /// Flatten all region sets into a single RegionSet (no merging).
+    pub fn concat(&self) -> JsRegionSet {
+        JsRegionSet {
+            region_set: self.inner.concat(),
+        }
+    }
+
+    /// Get the names of the region sets, or null if unnamed.
+    #[wasm_bindgen(getter)]
+    pub fn names(&self) -> JsValue {
+        match &self.inner.names {
+            Some(names) => serde_wasm_bindgen::to_value(names).unwrap_or(JsValue::NULL),
+            None => JsValue::NULL,
+        }
+    }
 }
 
 /// Builder for computing consensus regions from multiple RegionSet objects.

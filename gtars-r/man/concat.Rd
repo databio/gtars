@@ -2,12 +2,12 @@
 % Please edit documentation in R/RegionSet-methods.R
 \name{concat}
 \alias{concat}
-\alias{concat,ANY-method}
+\alias{concat,ANY,ANY-method}
 \title{Combine two region sets without merging}
 \usage{
 concat(x, y)
 
-\S4method{concat}{ANY}(x, y)
+\S4method{concat}{ANY,ANY}(x, y)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}

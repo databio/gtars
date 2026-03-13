@@ -1,6 +1,6 @@
 use extendr_api::prelude::*;
 
-use gtars_core::models::RegionSet;
+use gtars_core::models::{RegionSet, RegionSetList};
 use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
@@ -26,6 +26,15 @@ macro_rules! with_regionset {
         let ext_ptr = <ExternalPtr<RegionSet>>::try_from($ptr)
             .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer".into()))?;
         let $rs = &*ext_ptr;
+        $body
+    }};
+}
+
+macro_rules! with_regionsetlist {
+    ($ptr:expr, $rsl:ident, $body:block) => {{
+        let ext_ptr = <ExternalPtr<RegionSetList>>::try_from($ptr)
+            .map_err(|_| extendr_api::Error::Other("Invalid RegionSetList pointer".into()))?;
+        let $rsl = &*ext_ptr;
         $body
     }};
 }
@@ -456,6 +465,84 @@ pub fn r_regiondb_region_set(db: Robj, index: i32) -> extendr_api::Result<Robj> 
 }
 
 // =========================================================================
+// RegionSetList
+// =========================================================================
+
+/// Create a RegionSetList from a list of RegionSet external pointers.
+/// @export
+/// @param sets_list R list of RegionSet external pointers
+#[extendr(r_name = "regionsetlist_from_sets")]
+pub fn r_regionsetlist_from_sets(sets_list: List) -> extendr_api::Result<Robj> {
+    let sets = extract_region_sets(sets_list)?;
+    Ok(ExternalPtr::new(RegionSetList::new(sets)).into())
+}
+
+/// Extract region sets from a RegionDB by 1-based indices as a RegionSetList.
+/// @export
+/// @param db ExternalPtr to RegionDB
+/// @param indices Integer vector of 1-based indices
+#[extendr(r_name = "regionsetlist_from_db")]
+pub fn r_regionsetlist_from_db(db: Robj, indices: Vec<i32>) -> extendr_api::Result<Robj> {
+    with_regiondb!(db, db_ref, {
+        let idx: Vec<usize> = indices.iter().map(|&i| (i - 1) as usize).collect();
+        let rsl = db_ref.get_region_set_list(&idx);
+        Ok(ExternalPtr::new(rsl).into())
+    })
+}
+
+/// Get the number of region sets in a RegionSetList.
+/// @export
+/// @param rsl ExternalPtr to RegionSetList
+#[extendr(r_name = "regionsetlist_length")]
+pub fn r_regionsetlist_length(rsl: Robj) -> extendr_api::Result<i32> {
+    with_regionsetlist!(rsl, rsl_ref, {
+        Ok(rsl_ref.len() as i32)
+    })
+}
+
+/// Get a single RegionSet from a RegionSetList by 1-based index.
+/// @export
+/// @param rsl ExternalPtr to RegionSetList
+/// @param index 1-based integer index
+#[extendr(r_name = "regionsetlist_get")]
+pub fn r_regionsetlist_get(rsl: Robj, index: i32) -> extendr_api::Result<Robj> {
+    with_regionsetlist!(rsl, rsl_ref, {
+        let i = (index - 1) as usize;
+        match rsl_ref.get(i) {
+            Some(rs) => Ok(ExternalPtr::new(rs.clone()).into()),
+            None => Err(extendr_api::Error::Other(format!(
+                "Index {} out of range (list has {} region sets)",
+                index,
+                rsl_ref.len()
+            ))),
+        }
+    })
+}
+
+/// Flatten a RegionSetList into a single RegionSet (no merging).
+/// @export
+/// @param rsl ExternalPtr to RegionSetList
+#[extendr(r_name = "regionsetlist_concat")]
+pub fn r_regionsetlist_concat(rsl: Robj) -> extendr_api::Result<Robj> {
+    with_regionsetlist!(rsl, rsl_ref, {
+        Ok(ExternalPtr::new(rsl_ref.concat()).into())
+    })
+}
+
+/// Get the names from a RegionSetList, or NULL if no names.
+/// @export
+/// @param rsl ExternalPtr to RegionSetList
+#[extendr(r_name = "regionsetlist_names")]
+pub fn r_regionsetlist_names(rsl: Robj) -> extendr_api::Result<Robj> {
+    with_regionsetlist!(rsl, rsl_ref, {
+        match &rsl_ref.names {
+            Some(names) => Ok(names.clone().into()),
+            None => Ok(().into()),
+        }
+    })
+}
+
+// =========================================================================
 // Module registration
 // =========================================================================
 
@@ -471,4 +558,10 @@ extendr_module! {
     fn r_regiondb_anno;
     fn r_regiondb_collection_anno;
     fn r_regiondb_region_set;
+    fn r_regionsetlist_from_sets;
+    fn r_regionsetlist_from_db;
+    fn r_regionsetlist_length;
+    fn r_regionsetlist_get;
+    fn r_regionsetlist_concat;
+    fn r_regionsetlist_names;
 }

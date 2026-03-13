@@ -178,8 +178,27 @@ regionDBCollectionAnno <- function(regionDB) {
 #' @return A RegionSet object
 #' @export
 regionDBRegionSet <- function(regionDB, index) {
+  .Deprecated("getRegionSets")
   ptr <- regiondb_region_set(regionDB, as.integer(index))
   RegionSet(ptr)
+}
+
+#' Get region sets from a RegionDB
+#'
+#' Extracts one or more region sets from a loaded RegionDB by index,
+#' returning them as a RegionSetList.
+#'
+#' @param regionDB An external pointer to a RegionDB (from loadRegionDB)
+#' @param indices Integer vector of 1-based indices. If NULL, returns all.
+#' @return A RegionSetList object
+#' @export
+getRegionSets <- function(regionDB, indices = NULL) {
+  if (is.null(indices)) {
+    n <- length(listRegionSets(regionDB))
+    indices <- seq_len(n)
+  }
+  ptr <- regionsetlist_from_db(regionDB, as.integer(indices))
+  new("RegionSetList", ptr = ptr)
 }
 
 # Helper to extract the external pointer from a RegionSet S4 object

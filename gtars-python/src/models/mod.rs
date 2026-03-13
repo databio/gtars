@@ -7,6 +7,7 @@ mod interval;
 mod partition_list;
 mod region;
 mod region_set;
+mod region_set_list;
 mod signal_matrix;
 pub(crate) mod tss_index;
 
@@ -18,6 +19,7 @@ pub use self::partition_list::PyPartitionList;
 pub use self::region::PyRegion;
 pub use self::region_set::PyChromosomeStatistics;
 pub use self::region_set::PyRegionSet;
+pub use self::region_set_list::PyRegionSetList;
 pub use self::signal_matrix::PySignalMatrix;
 pub use self::tss_index::PyTssIndex;
 
@@ -33,5 +35,6 @@ pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyPartitionList>()?;
     m.add_class::<PySignalMatrix>()?;
     m.add_class::<PyGenomicDistAnnotation>()?;
+    m.add_class::<PyRegionSetList>()?;
     Ok(())
 }

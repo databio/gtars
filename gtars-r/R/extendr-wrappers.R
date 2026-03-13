@@ -409,6 +409,38 @@ regiondb_collection_anno <- function(db) .Call(wrap__r_regiondb_collection_anno,
 #' @param index 1-based integer index into the region sets
 regiondb_region_set <- function(db, index) .Call(wrap__r_regiondb_region_set, db, index)
 
+#' Create a RegionSetList from a list of RegionSet external pointers.
+#' @export
+#' @param sets_list R list of RegionSet external pointers
+regionsetlist_from_sets <- function(sets_list) .Call(wrap__r_regionsetlist_from_sets, sets_list)
+
+#' Extract region sets from a RegionDB by 1-based indices as a RegionSetList.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param indices Integer vector of 1-based indices
+regionsetlist_from_db <- function(db, indices) .Call(wrap__r_regionsetlist_from_db, db, indices)
+
+#' Get the number of region sets in a RegionSetList.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_length <- function(rsl) .Call(wrap__r_regionsetlist_length, rsl)
+
+#' Get a single RegionSet from a RegionSetList by 1-based index.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+#' @param index 1-based integer index
+regionsetlist_get <- function(rsl, index) .Call(wrap__r_regionsetlist_get, rsl, index)
+
+#' Flatten a RegionSetList into a single RegionSet (no merging).
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_concat <- function(rsl) .Call(wrap__r_regionsetlist_concat, rsl)
+
+#' Get the names from a RegionSetList, or NULL if no names.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_names <- function(rsl) .Call(wrap__r_regionsetlist_names, rsl)
+
 #' Create sha512t24u digest
 #' @export
 #' @param readable A readable string representing a sequence.

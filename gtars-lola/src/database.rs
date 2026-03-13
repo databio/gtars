@@ -5,7 +5,7 @@ use std::fs;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
-use gtars_core::models::RegionSet;
+use gtars_core::models::{RegionSet, RegionSetList};
 use gtars_igd::igd::Igd;
 
 use crate::errors::LolaError;
@@ -277,6 +277,22 @@ impl RegionDB {
             })
             .filter_map(|(i, _)| self.region_sets.get(i))
             .collect()
+    }
+
+    /// Extract region sets by index as a `RegionSetList`.
+    ///
+    /// Out-of-bounds indices are silently skipped. Names are populated
+    /// from the corresponding `region_anno` filenames.
+    pub fn get_region_set_list(&self, indices: &[usize]) -> RegionSetList {
+        let sets: Vec<RegionSet> = indices
+            .iter()
+            .filter_map(|&i| self.region_sets.get(i).cloned())
+            .collect();
+        let names: Vec<String> = indices
+            .iter()
+            .filter_map(|&i| self.region_anno.get(i).map(|a| a.filename.clone()))
+            .collect();
+        RegionSetList::with_names(sets, names)
     }
 
     /// Number of region sets in this database.
@@ -642,6 +658,69 @@ mod tests {
         // Other fields from index.txt should still be present
         assert_eq!(db.region_anno[0].cell_type, "K562");
         assert_eq!(db.region_anno[0].tissue, "blood");
+    }
+
+    #[test]
+    fn test_get_region_set_list() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        create_test_lola_db(tmpdir.path());
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+
+        let rsl = db.get_region_set_list(&[0, 1]);
+        assert_eq!(rsl.len(), 2);
+        assert!(rsl.names.is_some());
+        assert_eq!(rsl.names.as_ref().unwrap()[0], "file1.bed");
+        assert_eq!(rsl.names.as_ref().unwrap()[1], "file2.bed");
+
+        // Each set should have regions
+        for rs in rsl.iter() {
+            assert!(!rs.regions.is_empty());
+        }
+    }
+
+    #[test]
+    fn test_get_region_set_list_out_of_bounds_skipped() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        create_test_lola_db(tmpdir.path());
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+
+        let rsl = db.get_region_set_list(&[0, 99999]);
+        assert_eq!(rsl.len(), 1);
+    }
+
+    #[test]
+    fn test_get_region_set_list_concat() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        create_test_lola_db(tmpdir.path());
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+
+        let rsl = db.get_region_set_list(&[0, 1]);
+        let combined = rsl.concat();
+        // file1 has 3 regions, file2 has 2 regions
+        assert_eq!(combined.regions.len(), 5);
+    }
+
+    #[test]
+    fn test_get_region_set_list_by_collection() {
+        let tmpdir = tempfile::tempdir().unwrap();
+        create_test_lola_db(tmpdir.path());
+
+        let db = RegionDB::from_lola_folder(tmpdir.path(), None, None).unwrap();
+
+        // Filter annotation to collection, then pass indices
+        let indices: Vec<usize> = db
+            .region_anno
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.collection == "coll1")
+            .map(|(i, _)| i)
+            .collect();
+
+        let rsl = db.get_region_set_list(&indices);
+        assert_eq!(rsl.len(), 2);
     }
 
     #[test]

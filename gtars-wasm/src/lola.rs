@@ -1,5 +1,6 @@
 use wasm_bindgen::prelude::*;
 
+use crate::regionset::JsRegionSetList;
 use gtars_core::models::{Region, RegionSet};
 use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
@@ -79,6 +80,16 @@ impl JsLolaRegionDB {
     #[wasm_bindgen(js_name = "listRegionSets")]
     pub fn list_region_sets(&self) -> Vec<String> {
         self.inner.list_region_sets(None)
+    }
+
+    /// Extract region sets by 0-based indices as a RegionSetList.
+    ///
+    /// @param indices - Optional array of 0-based indices. If omitted, returns all.
+    #[wasm_bindgen(js_name = "getRegionSets")]
+    pub fn get_region_sets(&self, indices: Option<Vec<usize>>) -> JsRegionSetList {
+        let idx = indices.unwrap_or_else(|| (0..self.inner.num_region_sets()).collect());
+        let rsl = self.inner.get_region_set_list(&idx);
+        JsRegionSetList { inner: rsl }
     }
 }
 

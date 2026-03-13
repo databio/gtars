@@ -34,7 +34,7 @@ pub struct PyRegionSet {
 
 impl PyRegionSet {
     /// Create a PyRegionSet from a RegionSet with default "*" strands
-    fn from_regionset(rs: RegionSet) -> Self {
+    pub fn from_regionset(rs: RegionSet) -> Self {
         let n = rs.regions.len();
         Self {
             regionset: rs,

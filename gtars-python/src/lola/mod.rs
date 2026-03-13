@@ -4,6 +4,7 @@ use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+use crate::models::PyRegionSetList;
 use gtars_core::models::{Region, RegionSet};
 use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
@@ -105,6 +106,35 @@ impl PyRegionDB {
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect());
         self.inner.list_region_sets(coll_refs.as_deref())
+    }
+
+    /// Extract region sets by 0-based index as a RegionSetList.
+    ///
+    /// If indices is None, returns all region sets.
+    #[pyo3(signature = (indices=None))]
+    fn get_region_sets(&self, indices: Option<Vec<usize>>) -> PyRegionSetList {
+        let idx = indices.unwrap_or_else(|| (0..self.inner.num_region_sets()).collect());
+        let rsl = self.inner.get_region_set_list(&idx);
+        PyRegionSetList::from_inner(rsl)
+    }
+
+    /// Get per-file annotations as a list of dicts.
+    #[getter]
+    fn region_anno<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let mut result = Vec::new();
+        for a in &self.inner.region_anno {
+            let d = PyDict::new(py);
+            d.set_item("filename", &a.filename)?;
+            d.set_item("cellType", &a.cell_type)?;
+            d.set_item("description", &a.description)?;
+            d.set_item("tissue", &a.tissue)?;
+            d.set_item("dataSource", &a.data_source)?;
+            d.set_item("antibody", &a.antibody)?;
+            d.set_item("treatment", &a.treatment)?;
+            d.set_item("collection", &a.collection)?;
+            result.push(d);
+        }
+        Ok(result)
     }
 
     fn __repr__(&self) -> String {
