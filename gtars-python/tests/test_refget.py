@@ -161,15 +161,18 @@ class TestRefget:
         with pytest.raises(Exception):
             store.add_sequence_collection_from_fasta("nonexistent.fa")
 
-        # Test getting non-existent sequence
+        # Test getting non-existent sequence raises KeyError
         bogus_digest = "not_a_sequence"
-        assert store.get_sequence(bogus_digest) is None
+        with pytest.raises(KeyError):
+            store.get_sequence(bogus_digest)
 
-        # Test invalid substring parameters
+        # Test invalid substring parameters raise KeyError
         sha512 = "iYtREV555dUFKg2_agSJW6suquUyPpMw"
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
-        assert store.get_substring(sha512, 10, 5) is None  # end < start
-        assert store.get_substring(sha512, 0, 100) is None  # end > length
+        with pytest.raises(KeyError):
+            store.get_substring(sha512, 10, 5)  # end < start
+        with pytest.raises(KeyError):
+            store.get_substring(sha512, 0, 100)  # end > length
 
     def test_store_collection_operations(self):
         """Test collection-related operations"""
@@ -496,11 +499,12 @@ GGGG
         store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get expected digest
-        result = digest_fasta(fasta_path)
-        expected_digest = result.digest
+        fasta_result = digest_fasta(fasta_path)
+        expected_digest = fasta_result.digest
 
-        # Test list_collections - now returns metadata objects
-        collections = store.list_collections()
+        # Test list_collections - now returns paginated dict
+        result = store.list_collections()
+        collections = result["results"]
         assert len(collections) == 1
         assert collections[0].digest == expected_digest
 
@@ -509,9 +513,9 @@ GGGG
         assert meta is not None
         assert meta.digest == expected_digest
         assert meta.n_sequences == 3
-        assert meta.names_digest == result.lvl1.names_digest
-        assert meta.sequences_digest == result.lvl1.sequences_digest
-        assert meta.lengths_digest == result.lvl1.lengths_digest
+        assert meta.names_digest == fasta_result.lvl1.names_digest
+        assert meta.sequences_digest == fasta_result.lvl1.sequences_digest
+        assert meta.lengths_digest == fasta_result.lvl1.lengths_digest
 
         # Test str/repr
         assert expected_digest in str(meta)
@@ -636,7 +640,7 @@ GGGG
         store.add_sequence_collection_from_fasta(fasta_path)
 
         # Get the collection digest
-        collections = store.list_collections()
+        collections = store.list_collections()["results"]
         assert len(collections) == 1
         digest = collections[0].digest
 
@@ -778,10 +782,10 @@ GGGG
         store.add_sequence_alias("ncbi", "NC_000001.11", digest)
         store.add_sequence_alias("ucsc", "chr1", digest)
 
-        # Forward lookup
-        found = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+        # Forward lookup (metadata)
+        found = store.get_sequence_metadata_by_alias("ncbi", "NC_000001.11")
         assert found is not None
-        assert found.metadata.name == "chr1"
+        assert found.name == "chr1"
 
         # Reverse lookup
         aliases = store.get_aliases_for_sequence(digest)
@@ -800,7 +804,7 @@ GGGG
 
         # Remove alias
         assert store.remove_sequence_alias("ncbi", "NC_000001.11")
-        assert store.get_sequence_by_alias("ncbi", "NC_000001.11") is None
+        assert store.get_sequence_metadata_by_alias("ncbi", "NC_000001.11") is None
 
     def test_collection_aliases(self):
         """Test collection alias add, forward lookup, and reverse lookup."""
@@ -809,7 +813,7 @@ GGGG
 
         store.add_collection_alias("ucsc", "hg38", meta.digest)
 
-        coll = store.get_collection_by_alias("ucsc", "hg38")
+        coll = store.get_collection_metadata_by_alias("ucsc", "hg38")
         assert coll is not None
         assert coll.digest == meta.digest
 
@@ -826,7 +830,48 @@ GGGG
 
         # Reload
         store2 = RefgetStore.open_local(str(store_path))
-        assert store2.get_collection_by_alias("ucsc", "hg38") is not None
+        assert store2.get_collection_metadata_by_alias("ucsc", "hg38") is not None
+
+
+class TestAutoLoadingAliasMethods:
+    """Tests for the auto-loading *_by_alias methods."""
+
+    def test_get_sequence_by_alias_loads(self):
+        """Test that get_sequence_by_alias returns a loaded SequenceRecord."""
+        store = RefgetStore.in_memory()
+        seq = digest_sequence(b"ACGTACGT", name="chr1")
+        store.add_sequence(seq)
+
+        digest = seq.metadata.sha512t24u
+        store.add_sequence_alias("ncbi", "NC_000001.11", digest)
+
+        # Auto-loading lookup returns SequenceRecord
+        found = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+        assert found.metadata.name == "chr1"
+
+    def test_get_collection_by_alias_loads(self):
+        """Test that get_collection_by_alias returns a loaded SequenceCollection."""
+        store = RefgetStore.in_memory()
+        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+
+        store.add_collection_alias("ucsc", "hg38", meta.digest)
+
+        # Auto-loading lookup returns SequenceCollection
+        coll = store.get_collection_by_alias("ucsc", "hg38")
+        assert coll.metadata.digest == meta.digest
+        assert len(coll.sequences) > 0
+
+    def test_get_sequence_by_alias_not_found_returns_none(self):
+        """Test that get_sequence_by_alias returns None for unknown alias."""
+        store = RefgetStore.in_memory()
+        result = store.get_sequence_by_alias("ncbi", "nonexistent")
+        assert result is None
+
+    def test_get_collection_by_alias_not_found_returns_none(self):
+        """Test that get_collection_by_alias returns None for unknown alias."""
+        store = RefgetStore.in_memory()
+        result = store.get_collection_by_alias("ucsc", "nonexistent")
+        assert result is None
 
 
 # =========================================================================
@@ -914,7 +959,7 @@ def test_fhr_metadata_persistence(tmp_path):
     store.set_fhr_metadata(meta.digest, fhr)
 
     # Verify sidecar file was written
-    fhr_path = store_path / "collections" / f"{meta.digest}.fhr.json"
+    fhr_path = store_path / "fhr" / f"{meta.digest}.fhr.json"
     assert fhr_path.exists()
     data = json.loads(fhr_path.read_text())
     assert data["genome"] == "Test"
@@ -982,7 +1027,7 @@ def test_add_sequence_collection_basic():
     store.add_sequence_collection(collection)
 
     # Collection should appear in list_collections
-    collections = store.list_collections()
+    collections = store.list_collections()["results"]
     assert len(collections) == 1
     assert collections[0].digest == collection.digest
 
@@ -1033,7 +1078,7 @@ def test_add_sequence_collection_skip_duplicate():
     store.add_sequence_collection(collection)
 
     # Should still have exactly one collection
-    assert len(store.list_collections()) == 1
+    assert len(store.list_collections()["results"]) == 1
 
 
 def test_add_sequence_collection_force():
@@ -1048,7 +1093,7 @@ def test_add_sequence_collection_force():
     store.add_sequence_collection(collection, force=True)
 
     # Should still have exactly one collection
-    assert len(store.list_collections()) == 1
+    assert len(store.list_collections()["results"]) == 1
 
 
 def test_is_persisting_false_for_memory_store():
@@ -1100,3 +1145,45 @@ def test_refgetstore_compare_two_collections(tmp_path):
     assert "array_elements" in comparison
     assert comparison["digests"]["a"] == meta1.digest
     assert comparison["digests"]["b"] == meta2.digest
+
+
+def test_fasta_namespace_alias_extraction(tmp_path):
+    """Test that namespace aliases are extracted from FASTA headers during loading."""
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(
+        ">chr1 ncbi:NC_000001.11 refseq:NC_000001.11\nACGT\n"
+        ">chr2 ncbi:NC_000002.12\nTGCA\n"
+    )
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection_from_fasta(str(fasta), namespaces=["ncbi", "refseq"])
+
+    # Verify aliases were registered and can be resolved
+    seq = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    assert seq is not None
+    assert seq.metadata.name == "chr1"
+
+    seq = store.get_sequence_by_alias("refseq", "NC_000001.11")
+    assert seq is not None
+    assert seq.metadata.name == "chr1"
+
+    seq = store.get_sequence_by_alias("ncbi", "NC_000002.12")
+    assert seq is not None
+    assert seq.metadata.name == "chr2"
+
+    # Non-existent alias should return None
+    result = store.get_sequence_by_alias("ncbi", "NC_999999.1")
+    assert result is None
+
+
+def test_fasta_no_namespaces_no_aliases(tmp_path):
+    """Test that no aliases are registered when namespaces is not provided."""
+    fasta = tmp_path / "genome.fa"
+    fasta.write_text(">chr1 ncbi:NC_000001.11\nACGT\n")
+
+    store = RefgetStore.in_memory()
+    store.add_sequence_collection_from_fasta(str(fasta))
+
+    # Without namespaces, no aliases are registered; lookup returns None
+    result = store.get_sequence_by_alias("ncbi", "NC_000001.11")
+    assert result is None

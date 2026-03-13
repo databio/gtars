@@ -467,10 +467,12 @@ pub struct SeqColComparison {
 }
 
 /// The digests of the two compared collections.
+/// `b` is `None` when comparing against an externally-provided level-2 body
+/// (i.e., the external collection has no server-side digest).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ComparisonDigests {
     pub a: String,
-    pub b: String,
+    pub b: Option<String>,
 }
 
 /// Which attributes (array names) are in A only, B only, or both.
@@ -535,79 +537,81 @@ impl SequenceCollection {
         }
     }
 
+    /// Build the sorted_sequences array as SQ.-prefixed digest strings, sorted lexicographically.
+    pub fn build_sorted_sequences(&self) -> Vec<String> {
+        let mut seqs: Vec<String> = self
+            .sequences
+            .iter()
+            .map(|r| format!("SQ.{}", r.metadata().sha512t24u))
+            .collect();
+        seqs.sort();
+        seqs
+    }
+
+    /// Build the name_length_pairs array as JSON value objects {"length": N, "name": "X"}.
+    /// Keys are in alphabetical order per canonical JSON.
+    pub fn build_name_length_pairs(&self) -> Vec<serde_json::Value> {
+        self.sequences
+            .iter()
+            .map(|r| {
+                let md = r.metadata();
+                let mut obj = serde_json::Map::new();
+                obj.insert(
+                    "length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(md.length)),
+                );
+                obj.insert(
+                    "name".to_string(),
+                    serde_json::Value::String(md.name.clone()),
+                );
+                serde_json::Value::Object(obj)
+            })
+            .collect()
+    }
+
+    /// Build the sorted_name_length_pairs array as JSON value objects, sorted by their
+    /// canonical JSON digest.
+    pub fn build_sorted_name_length_pairs(&self) -> Vec<serde_json::Value> {
+        let mut pairs_with_digests: Vec<(String, serde_json::Value)> = self
+            .sequences
+            .iter()
+            .map(|r| {
+                let md = r.metadata();
+                let mut obj = serde_json::Map::new();
+                obj.insert(
+                    "length".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(md.length)),
+                );
+                obj.insert(
+                    "name".to_string(),
+                    serde_json::Value::String(md.name.clone()),
+                );
+                let val = serde_json::Value::Object(obj);
+                let digest = sha512t24u(canonicalize_json(&val).as_bytes());
+                (digest, val)
+            })
+            .collect();
+        pairs_with_digests.sort_by(|a, b| a.0.cmp(&b.0));
+        pairs_with_digests.into_iter().map(|(_, v)| v).collect()
+    }
+
     /// Compare this collection with another, following the seqcol spec comparison algorithm.
     ///
     /// Dynamically includes ancillary attributes (name_length_pairs, sorted_name_length_pairs,
     /// sorted_sequences) when present in each collection's metadata.
     pub fn compare(&self, other: &SequenceCollection) -> SeqColComparison {
-        // Build string-array maps for each collection, including ancillary when present
         let arrays_a = self.to_comparison_arrays();
         let arrays_b = other.to_comparison_arrays();
-
-        let a_keys: std::collections::BTreeSet<&str> = arrays_a.keys().map(|s| s.as_str()).collect();
-        let b_keys: std::collections::BTreeSet<&str> = arrays_b.keys().map(|s| s.as_str()).collect();
-
-        let mut a_only = Vec::new();
-        let mut b_only = Vec::new();
-        let mut a_and_b = Vec::new();
-
-        let mut all_keys: Vec<&str> = a_keys.union(&b_keys).copied().collect();
-        all_keys.sort();
-
-        for key in all_keys {
-            let in_a = a_keys.contains(key);
-            let in_b = b_keys.contains(key);
-            match (in_a, in_b) {
-                (true, true) => a_and_b.push(key.to_string()),
-                (true, false) => a_only.push(key.to_string()),
-                (false, true) => b_only.push(key.to_string()),
-                (false, false) => unreachable!(),
-            }
-        }
-
-        let mut a_count = HashMap::new();
-        let mut b_count = HashMap::new();
-        let mut a_and_b_count = HashMap::new();
-        let mut a_and_b_same_order = HashMap::new();
-
-        // Counts for all attributes present in each collection
-        for (k, v) in &arrays_a {
-            a_count.insert(k.clone(), v.len());
-        }
-        for (k, v) in &arrays_b {
-            b_count.insert(k.clone(), v.len());
-        }
-
-        // Element comparison only for shared attributes
-        for attr in &a_and_b {
-            let arr_a = arrays_a.get(attr).unwrap();
-            let arr_b = arrays_b.get(attr).unwrap();
-            let (overlap, same_order) = compare_elements(arr_a, arr_b);
-            a_and_b_count.insert(attr.clone(), overlap);
-            a_and_b_same_order.insert(attr.clone(), same_order);
-        }
-
-        SeqColComparison {
-            digests: ComparisonDigests {
-                a: self.metadata.digest.clone(),
-                b: other.metadata.digest.clone(),
-            },
-            attributes: AttributeComparison {
-                a_only,
-                b_only,
-                a_and_b,
-            },
-            array_elements: ArrayElementComparison {
-                a_count,
-                b_count,
-                a_and_b_count,
-                a_and_b_same_order,
-            },
-        }
+        compare_arrays(
+            arrays_a,
+            arrays_b,
+            self.metadata.digest.clone(),
+            Some(other.metadata.digest.clone()),
+        )
     }
 
     /// Build string arrays for comparison, including ancillary attributes when present.
-    fn to_comparison_arrays(&self) -> HashMap<String, Vec<String>> {
+    pub(crate) fn to_comparison_arrays(&self) -> HashMap<String, Vec<String>> {
         let mut map = HashMap::new();
 
         // Core 3 are always present
@@ -700,6 +704,88 @@ fn compare_elements(a: &[String], b: &[String]) -> (usize, Option<bool>) {
     };
 
     (overlap, same_order)
+}
+
+/// Core comparison algorithm operating on pre-built attribute array maps.
+/// Used by both `SequenceCollection::compare()` and the external-body comparison path.
+pub(crate) fn compare_arrays(
+    arrays_a: HashMap<String, Vec<String>>,
+    arrays_b: HashMap<String, Vec<String>>,
+    digest_a: String,
+    digest_b: Option<String>,
+) -> SeqColComparison {
+    let a_keys: std::collections::BTreeSet<&str> = arrays_a.keys().map(|s| s.as_str()).collect();
+    let b_keys: std::collections::BTreeSet<&str> = arrays_b.keys().map(|s| s.as_str()).collect();
+
+    let mut a_only = Vec::new();
+    let mut b_only = Vec::new();
+    let mut a_and_b = Vec::new();
+
+    let mut all_keys: Vec<&str> = a_keys.union(&b_keys).copied().collect();
+    all_keys.sort();
+
+    for key in all_keys {
+        let in_a = a_keys.contains(key);
+        let in_b = b_keys.contains(key);
+        match (in_a, in_b) {
+            (true, true) => a_and_b.push(key.to_string()),
+            (true, false) => a_only.push(key.to_string()),
+            (false, true) => b_only.push(key.to_string()),
+            (false, false) => unreachable!(),
+        }
+    }
+
+    let mut a_count = HashMap::new();
+    let mut b_count = HashMap::new();
+    let mut a_and_b_count = HashMap::new();
+    let mut a_and_b_same_order = HashMap::new();
+
+    for (k, v) in &arrays_a {
+        a_count.insert(k.clone(), v.len());
+    }
+    for (k, v) in &arrays_b {
+        b_count.insert(k.clone(), v.len());
+    }
+
+    for attr in &a_and_b {
+        let arr_a = arrays_a.get(attr).unwrap();
+        let arr_b = arrays_b.get(attr).unwrap();
+        let (overlap, same_order) = compare_elements(arr_a, arr_b);
+        a_and_b_count.insert(attr.clone(), overlap);
+        a_and_b_same_order.insert(attr.clone(), same_order);
+    }
+
+    SeqColComparison {
+        digests: ComparisonDigests {
+            a: digest_a,
+            b: digest_b,
+        },
+        attributes: AttributeComparison {
+            a_only,
+            b_only,
+            a_and_b,
+        },
+        array_elements: ArrayElementComparison {
+            a_count,
+            b_count,
+            a_and_b_count,
+            a_and_b_same_order,
+        },
+    }
+}
+
+/// Convert a `CollectionLevel2` into the comparison array map format.
+/// Only includes the three core attributes (names, lengths, sequences).
+/// Ancillary attributes are not included because `CollectionLevel2` does not carry them.
+pub(crate) fn level2_to_comparison_arrays(level2: &CollectionLevel2) -> HashMap<String, Vec<String>> {
+    let mut map = HashMap::new();
+    map.insert("names".to_string(), level2.names.clone());
+    map.insert(
+        "lengths".to_string(),
+        level2.lengths.iter().map(|l| l.to_string()).collect(),
+    );
+    map.insert("sequences".to_string(), level2.sequences.clone());
+    map
 }
 
 impl Display for SequenceCollection {
@@ -1123,7 +1209,7 @@ mod tests {
         let collection = SequenceCollection::from_records(records);
         let result = collection.compare(&collection);
 
-        assert_eq!(result.digests.a, result.digests.b);
+        assert_eq!(Some(result.digests.a.as_str()), result.digests.b.as_deref());
         assert_eq!(result.attributes.a_and_b.len(), 3); // core only, no ancillary
         for attr in &result.attributes.a_and_b {
             assert_eq!(result.array_elements.a_and_b_same_order[attr], Some(true));

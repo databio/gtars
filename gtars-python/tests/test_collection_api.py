@@ -32,9 +32,13 @@ class TestCollectionAPI:
     # =========================================================================
 
     def test_list_collections_returns_metadata_list(self, store_with_data):
-        """list_collections() returns a list of SequenceCollectionMetadata."""
-        collections = store_with_data.list_collections()
+        """list_collections() returns a paginated dict with metadata list."""
+        result = store_with_data.list_collections()
 
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert "pagination" in result
+        collections = result["results"]
         assert isinstance(collections, list)
         assert len(collections) == 1  # One FASTA = one collection
 
@@ -50,7 +54,7 @@ class TestCollectionAPI:
 
     def test_list_collections_n_sequences_correct(self, store_with_data):
         """list_collections() reports correct n_sequences."""
-        collections = store_with_data.list_collections()
+        collections = store_with_data.list_collections()["results"]
         meta = collections[0]
 
         assert meta.n_sequences == 3  # base.fa has 3 sequences
@@ -177,9 +181,9 @@ class TestCollectionAPI:
         assert record.decode() is not None
 
     def test_get_sequence_not_found(self, store_with_data):
-        """get_sequence() returns None for non-existent digest."""
-        result = store_with_data.get_sequence("nonexistent_digest")
-        assert result is None
+        """get_sequence() raises KeyError for non-existent digest."""
+        with pytest.raises(KeyError):
+            store_with_data.get_sequence("nonexistent_digest")
 
     # =========================================================================
     # get_sequence_by_name() tests
@@ -200,10 +204,10 @@ class TestCollectionAPI:
         assert len(decoded) == record.metadata.length
 
     def test_get_sequence_by_name_not_found(self, store_with_data, expected_data):
-        """get_sequence_by_name() returns None for non-existent name."""
+        """get_sequence_by_name() raises KeyError for non-existent name."""
         collection_digest = expected_data.digest
-        result = store_with_data.get_sequence_by_name(collection_digest, "nonexistent_seq")
-        assert result is None
+        with pytest.raises(KeyError):
+            store_with_data.get_sequence_by_name(collection_digest, "nonexistent_seq")
 
     # =========================================================================
     # iter_collections() tests
@@ -256,7 +260,7 @@ class TestCollectionAPI:
 
     def test_list_vs_get_collection_consistency(self, store_with_data):
         """list_collections() and get_collection() report same n_sequences."""
-        meta_list = store_with_data.list_collections()
+        meta_list = store_with_data.list_collections()["results"]
         meta = meta_list[0]
 
         full_collection = store_with_data.get_collection(meta.digest)
@@ -282,3 +286,76 @@ class TestCollectionAPI:
         assert meta.length == full.metadata.length
         assert meta.sha512t24u == full.metadata.sha512t24u
         assert meta.md5 == full.metadata.md5
+
+
+class TestListCollectionsPagination:
+    """Test suite for paginated list_collections."""
+
+    @pytest.fixture
+    def store_with_data(self):
+        """Create a store with test data loaded."""
+        store = RefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+        return store
+
+    @pytest.fixture
+    def store_with_two_collections(self):
+        """Create a store with two collections."""
+        store = RefgetStore.in_memory()
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+        store.add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa")
+        return store
+
+    def test_list_collections_returns_paginated_dict(self, store_with_data):
+        """list_collections() returns a dict with 'results' and 'pagination' keys."""
+        result = store_with_data.list_collections()
+        assert isinstance(result, dict)
+        assert "results" in result
+        assert "pagination" in result
+
+    def test_list_collections_pagination_fields(self, store_with_data):
+        """Pagination dict has page, page_size, total."""
+        result = store_with_data.list_collections()
+        pagination = result["pagination"]
+        assert "page" in pagination
+        assert "page_size" in pagination
+        assert "total" in pagination
+        assert pagination["page"] == 0
+        assert pagination["page_size"] == 100
+        assert pagination["total"] == 1
+
+    def test_list_collections_page_size(self, store_with_two_collections):
+        """Request page_size=1, verify only 1 result returned."""
+        result = store_with_two_collections.list_collections(page_size=1)
+        assert len(result["results"]) == 1
+        assert result["pagination"]["total"] == 2
+
+    def test_list_collections_filter_by_names(self, store_with_two_collections):
+        """Filter by a known names_digest, verify filtered results."""
+        # Get a known names_digest
+        all_results = store_with_two_collections.list_collections()["results"]
+        names_digest = all_results[0].names_digest
+
+        result = store_with_two_collections.list_collections(filters={"names": names_digest})
+        assert len(result["results"]) >= 1
+        for meta in result["results"]:
+            assert meta.names_digest == names_digest
+
+    def test_list_collections_filter_and_logic(self, store_with_two_collections):
+        """Filter by names + lengths, verify AND."""
+        all_results = store_with_two_collections.list_collections()["results"]
+        target = all_results[0]
+
+        result = store_with_two_collections.list_collections(
+            filters={"names": target.names_digest, "lengths": target.lengths_digest}
+        )
+        assert len(result["results"]) >= 1
+        for meta in result["results"]:
+            assert meta.names_digest == target.names_digest
+            assert meta.lengths_digest == target.lengths_digest
+
+    def test_list_collections_filter_no_match(self, store_with_data):
+        """Filter by bogus digest, verify empty results."""
+        result = store_with_data.list_collections(filters={"names": "bogus_nonexistent_digest"})
+        assert len(result["results"]) == 0
+        assert result["pagination"]["total"] == 0

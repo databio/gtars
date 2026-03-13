@@ -38,8 +38,17 @@ pip install --force-reinstall ${wheel_path}
 
 Once installed, you can import and use the package in Python. For example:
 
-```
+```python
 from gtars import refget
 sc = refget.digest_fasta("../tests/data/fasta/base.fa")
 sc2 = refget.load_fasta("../tests/data/fasta/base.fa")
+```
+
+### LOLA enrichment analysis
+
+```python
+from gtars.lola import RegionDB, run_lola
+
+db = RegionDB.from_bed_files(["regions1.bed", "regions2.bed"])
+result = run_lola([user_regions], universe_regions, db)
 ```

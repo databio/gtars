@@ -5,5 +5,8 @@ wasm:
 test:
 	cargo test --all --workspace -- --nocapture
 
+test-r:
+	bash gtars-r/test-r.sh
+
 fmt:
 	cargo fmt --all -- --check

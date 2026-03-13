@@ -4,8 +4,8 @@ use gtars_refget::collection::{
     SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
-use gtars_refget::fhr_metadata::FhrMetadata;
-use gtars_refget::store::{RefgetStore, RetrievedSequence, StorageMode};
+use gtars_refget::FhrMetadata;
+use gtars_refget::store::{FastaImportOptions, RefgetStore, RetrievedSequence, StorageMode};
 
 // =========================================================================
 // Helper macro for extracting store from external pointer
@@ -254,7 +254,7 @@ pub fn get_remote_url_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Result<()> {
     with_store!(store_ptr, store, {
         store
-            .add_sequence_collection_from_fasta(file_path)
+            .add_sequence_collection_from_fasta(file_path, FastaImportOptions::new())
             .map(|_| ())
             .map_err(|e| format!("Error importing FASTA: {}", e).into())
     })
@@ -267,11 +267,8 @@ pub fn import_fasta_store(store_ptr: Robj, file_path: &str) -> extendr_api::Resu
 #[extendr]
 pub fn add_fasta_store(store_ptr: Robj, file_path: &str, force: bool) -> extendr_api::Result<List> {
     with_store!(store_ptr, store, {
-        let result = if force {
-            store.add_sequence_collection_from_fasta_force(file_path)
-        } else {
-            store.add_sequence_collection_from_fasta(file_path)
-        };
+        let opts = FastaImportOptions::new().force(force);
+        let result = store.add_sequence_collection_from_fasta(file_path, opts);
         result
             .map(|(metadata, was_new)| {
                 list!(
@@ -372,8 +369,10 @@ pub fn get_substring_store(
 #[extendr]
 pub fn list_collections_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
-        let collections: Vec<Robj> = store
-            .list_collections()
+        let paged = store
+            .list_collections(0, usize::MAX, &[])
+            .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
+        let collections: Vec<Robj> = paged.results
             .into_iter()
             .map(|meta| collection_metadata_to_list(meta).into())
             .collect();
@@ -460,14 +459,13 @@ pub fn iter_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 #[extendr]
 pub fn stats_store(store_ptr: Robj) -> extendr_api::Result<List> {
     with_store_ref!(store_ptr, store, {
-        let stats = store.stats_extended();
+        let stats = store.stats();
         Ok(list!(
             n_sequences = stats.n_sequences as i32,
             n_sequences_loaded = stats.n_sequences_loaded as i32,
             n_collections = stats.n_collections as i32,
             n_collections_loaded = stats.n_collections_loaded as i32,
-            storage_mode = stats.storage_mode,
-            total_disk_size = stats.total_disk_size as i64
+            storage_mode = stats.storage_mode
         ))
     })
 }
@@ -541,7 +539,7 @@ pub fn compare_store(
         store
             .compare(digest_a, digest_b)
             .map(|comparison| {
-                let digests = list!(a = comparison.digests.a, b = comparison.digests.b);
+                let digests = list!(a = comparison.digests.a, b = comparison.digests.b.unwrap_or_default());
                 let attributes = list!(
                     a_only = comparison.attributes.a_only,
                     b_only = comparison.attributes.b_only,
@@ -850,15 +848,15 @@ pub fn add_sequence_alias_store(
 /// @param namespace Alias namespace
 /// @param alias Alias name
 #[extendr]
-pub fn get_sequence_by_alias_store(
+pub fn get_sequence_metadata_by_alias_store(
     store_ptr: Robj,
     namespace: &str,
     alias: &str,
 ) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
         Ok(store
-            .get_sequence_by_alias(namespace, alias)
-            .map(|r| record_to_list(r.clone()).into())
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| metadata_to_list(m.clone()).into())
             .unwrap_or_else(|| Robj::from(())))
     })
 }
@@ -968,15 +966,15 @@ pub fn add_collection_alias_store(
 /// @param namespace Alias namespace
 /// @param alias Alias name
 #[extendr]
-pub fn get_collection_by_alias_store(
+pub fn get_collection_metadata_by_alias_store(
     store_ptr: Robj,
     namespace: &str,
     alias: &str,
 ) -> extendr_api::Result<Robj> {
     with_store_ref!(store_ptr, store, {
         Ok(store
-            .get_collection_by_alias(namespace, alias)
-            .map(|r| collection_metadata_to_list(r.metadata().clone()).into())
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| collection_metadata_to_list(m.clone()).into())
             .unwrap_or_else(|| Robj::from(())))
     })
 }
@@ -1381,7 +1379,7 @@ extendr_module! {
 
     // Sequence aliases
     fn add_sequence_alias_store;
-    fn get_sequence_by_alias_store;
+    fn get_sequence_metadata_by_alias_store;
     fn get_aliases_for_sequence_store;
     fn list_sequence_alias_namespaces_store;
     fn list_sequence_aliases_store;
@@ -1390,7 +1388,7 @@ extendr_module! {
 
     // Collection aliases
     fn add_collection_alias_store;
-    fn get_collection_by_alias_store;
+    fn get_collection_metadata_by_alias_store;
     fn get_aliases_for_collection_store;
     fn list_collection_alias_namespaces_store;
     fn list_collection_aliases_store;

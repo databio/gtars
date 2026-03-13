@@ -14,8 +14,7 @@ use gtars_refget::collection::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::RefgetStore;
-use gtars_refget::store::StorageMode;
+use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -528,7 +527,7 @@ impl PySequenceRecord {
     ///     Optional[str]: The decoded sequence string if data is loaded, None otherwise.
     ///
     /// Example:
-    ///     >>> record = store.get_sequence_by_collection_and_name(digest, "chr1")
+    ///     >>> record = store.get_sequence_by_name(digest, "chr1")
     ///     >>> sequence = record.decode()
     ///     >>> if sequence:
     ///     ...     print(f"First 50 bases: {sequence[:50]}")
@@ -615,6 +614,46 @@ impl PySequenceCollection {
                     e
                 ))
             })
+    }
+
+    /// Write the collection to an RGSI file.
+    ///
+    /// The RGSI file is a TSV index containing collection-level digest headers
+    /// and per-sequence metadata (name, length, alphabet, sha512t24u, md5, description).
+    ///
+    /// Args:
+    ///     file_path (str): Path to the output .rgsi file
+    ///
+    /// Raises:
+    ///     IOError: If the file cannot be written
+    ///
+    /// Example:
+    ///     >>> collection = digest_fasta("genome.fa")
+    ///     >>> collection.write_rgsi("genome.rgsi")
+    fn write_rgsi(&self, file_path: &str) -> PyResult<()> {
+        let rust_collection = SequenceCollection::from(self.clone());
+        rust_collection
+            .write_collection_rgsi(file_path)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Failed to write RGSI: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Get the collection metadata including all digests.
+    ///
+    /// Returns:
+    ///     SequenceCollectionMetadata: Full metadata with digest, n_sequences,
+    ///         and all level 1 digests (including ancillary digests).
+    #[getter]
+    fn metadata(&self) -> PySequenceCollectionMetadata {
+        let mut rust_collection = SequenceCollection::from(self.clone());
+        rust_collection
+            .metadata
+            .compute_ancillary_digests(&rust_collection.sequences);
+        PySequenceCollectionMetadata::from(rust_collection.metadata)
     }
 
     /// Iterate over sequences in the collection.
@@ -867,7 +906,7 @@ impl From<PyStorageMode> for StorageMode {
 #[pyclass(name = "FhrMetadata", module = "gtars.refget")]
 #[derive(Clone)]
 pub struct PyFhrMetadata {
-    inner: gtars_refget::fhr_metadata::FhrMetadata,
+    inner: gtars_refget::FhrMetadata,
 }
 
 #[pymethods]
@@ -879,14 +918,14 @@ impl PyFhrMetadata {
             Some(dict) => {
                 // Convert kwargs dict to JSON string, then deserialize
                 let json_str = dict_to_json_string(dict)?;
-                let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+                let metadata: gtars_refget::FhrMetadata =
                     serde_json::from_str(&json_str).map_err(|e| {
                         PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string())
                     })?;
                 Ok(Self { inner: metadata })
             }
             None => Ok(Self {
-                inner: gtars_refget::fhr_metadata::FhrMetadata::default(),
+                inner: gtars_refget::FhrMetadata::default(),
             }),
         }
     }
@@ -895,7 +934,7 @@ impl PyFhrMetadata {
     fn from_json(path: &str) -> PyResult<Self> {
         let json = std::fs::read_to_string(path)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
-        let metadata: gtars_refget::fhr_metadata::FhrMetadata =
+        let metadata: gtars_refget::FhrMetadata =
             serde_json::from_str(&json)
                 .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         Ok(Self { inner: metadata })
@@ -1036,6 +1075,49 @@ pub struct PyRefgetStore {
 
 #[pymethods]
 impl PyRefgetStore {
+    /// Check whether a valid RefgetStore exists at the given path.
+    ///
+    /// Returns True if the path contains a store manifest file,
+    /// indicating the store has been initialized. Returns False if the
+    /// path does not exist or does not contain a store.
+    ///
+    /// This avoids hardcoding knowledge of the store's internal file format
+    /// (e.g., "rgstore.json") in calling code.
+    ///
+    /// Args:
+    ///     path (str or Path): Path to the store directory.
+    ///
+    /// Returns:
+    ///     bool: True if a store exists at the path, False otherwise.
+    ///
+    /// Example:
+    ///     >>> from gtars.refget import RefgetStore
+    ///     >>> RefgetStore.store_exists("/data/hg38_store")
+    ///     True
+    ///     >>> RefgetStore.store_exists("/tmp/empty")
+    ///     False
+    #[classmethod]
+    fn store_exists(_cls: &Bound<'_, PyType>, path: &Bound<'_, PyAny>) -> bool {
+        let path = path.to_string();
+        RefgetStore::store_exists(path)
+    }
+
+    /// Check if this store exists on disk.
+    ///
+    /// Returns True if the store has a local path and the store metadata file exists there.
+    /// Returns False for memory-only stores or if the store directory is missing.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.on_disk("/data/hg38_store")
+    ///     >>> store.exists()
+    ///     True
+    fn exists(&self) -> bool {
+        match self.inner.local_path() {
+            Some(path) => RefgetStore::store_exists(path),
+            None => false,
+        }
+    }
+
     /// Create a disk-backed RefgetStore.
     ///
     /// Sequences are written to disk immediately and loaded on-demand (lazy loading).
@@ -1247,19 +1329,23 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
+        namespaces: Option<Vec<String>>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
-        let result = if force {
-            self.inner
-                .add_sequence_collection_from_fasta_force(file_path)
-        } else {
-            self.inner.add_sequence_collection_from_fasta(file_path)
-        };
+        let ns_refs: Vec<&str> = namespaces
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        let opts = FastaImportOptions::new()
+            .force(force)
+            .namespaces(&ns_refs);
+        let result = self.inner
+            .add_sequence_collection_from_fasta(file_path, opts);
         result
             .map(|(metadata, was_new)| (PySequenceCollectionMetadata::from(metadata), was_new))
             .map_err(|e| {
@@ -1323,7 +1409,7 @@ impl PyRefgetStore {
     ///     >>> print(f"Found: {record.metadata.name}")
     ///     >>> # Also works with SQ. prefix
     ///     >>> record = store.get_sequence("SQ.aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2")
-    fn get_sequence(&mut self, digest: &str) -> PyResult<PySequenceRecord> {
+    fn get_sequence(&self, digest: &str) -> PyResult<PySequenceRecord> {
         let digest = strip_sq_prefix(digest);
         self.inner
             .get_sequence(digest.as_bytes())
@@ -1358,7 +1444,7 @@ impl PyRefgetStore {
     ///     ...     "chr1"
     ///     ... )
     fn get_sequence_by_name(
-        &mut self,
+        &self,
         collection_digest: &str,
         sequence_name: &str,
     ) -> PyResult<PySequenceRecord> {
@@ -1413,7 +1499,7 @@ impl PyRefgetStore {
     ///     >>> # Get first 1000 bases of chr1
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     ///     >>> print(f"First 50bp: {seq[:50]}")
-    fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
+    fn get_substring(&self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
         let seq_digest = strip_sq_prefix(seq_digest);
         self.inner
             .get_substring(seq_digest, start, end)
@@ -1440,6 +1526,76 @@ impl PyRefgetStore {
         self.inner.storage_mode().into()
     }
 
+    /// Eagerly load all Stub collections to Full.
+    ///
+    /// After this call, read methods like get_collection(), get_collection_level2(),
+    /// compare(), get_attribute(), and get_sequence_by_name() work without
+    /// requiring mutable access.
+    ///
+    /// For the seqcol API use case, this is sufficient -- sequence BYTES
+    /// are not needed (only names, lengths, digest strings).
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.open_remote(cache, url)
+    ///     >>> store.load_all_collections()
+    ///     >>> coll = store.get_collection("abc123")  # now works without mutation
+    fn load_all_collections(&mut self) -> PyResult<()> {
+        self.inner.load_all_collections().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error loading collections: {}",
+                e
+            ))
+        })
+    }
+
+    /// Eagerly load all Stub sequences to Full (fetches actual byte data).
+    ///
+    /// After this call, get_substring(), export_fasta(), and sequence_bytes()
+    /// work without requiring mutable access. For large stores with many
+    /// sequences, prefer load_sequence() for specific sequences.
+    ///
+    /// Example:
+    ///     >>> store.load_all_sequences()
+    ///     >>> seq = store.get_substring("digest", 0, 100)
+    fn load_all_sequences(&mut self) -> PyResult<()> {
+        self.inner.load_all_sequences().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error loading sequences: {}",
+                e
+            ))
+        })
+    }
+
+    /// Load a single collection by digest (Stub -> Full).
+    ///
+    /// After this, get_collection() works for this specific digest.
+    ///
+    /// Args:
+    ///     digest: The collection's SHA-512/24u digest.
+    fn load_collection(&mut self, digest: &str) -> PyResult<()> {
+        self.inner.load_collection(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error loading collection: {}",
+                e
+            ))
+        })
+    }
+
+    /// Load a single sequence's byte data by digest (Stub -> Full).
+    ///
+    /// After this, get_substring() works for this specific digest.
+    ///
+    /// Args:
+    ///     digest: The sequence's SHA-512/24u digest.
+    fn load_sequence(&mut self, digest: &str) -> PyResult<()> {
+        self.inner.load_sequence(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error loading sequence: {}",
+                e
+            ))
+        })
+    }
+
     /// List all sequences in the store (metadata only, no sequence data).
     ///
     /// Returns metadata for all sequences without loading sequence data.
@@ -1459,23 +1615,51 @@ impl PyRefgetStore {
             .collect()
     }
 
-    /// List all collections in the store (metadata only, no sequence data).
+    /// List collections with pagination and optional attribute filtering.
     ///
-    /// Returns metadata for all collections without loading sequence data.
-    /// Use this for browsing/inventory operations.
+    /// Args:
+    ///     page (int): 0-indexed page number. Defaults to 0.
+    ///     page_size (int): Number of results per page. Defaults to 100.
+    ///     filters (dict[str, str], optional): Attribute filters with AND logic.
+    ///         Keys are attribute names (names, lengths, sequences, etc.),
+    ///         values are attribute digests.
     ///
     /// Returns:
-    ///     list[SequenceCollectionMetadata]: List of collection metadata objects.
-    ///
-    /// Example:
-    ///     >>> for meta in store.list_collections():
-    ///     ...     print(f"{meta.digest}: {meta.n_sequences} sequences")
-    fn list_collections(&self) -> Vec<PySequenceCollectionMetadata> {
-        self.inner
-            .list_collections()
+    ///     dict: {"results": list[SequenceCollectionMetadata], "pagination": {"page": int, "page_size": int, "total": int}}
+    #[pyo3(signature = (page=0, page_size=100, filters=None))]
+    fn list_collections(
+        &self,
+        page: usize,
+        page_size: usize,
+        filters: Option<std::collections::HashMap<String, String>>,
+    ) -> PyResult<Py<PyAny>> {
+        let filter_pairs: Vec<(String, String)> = filters
+            .unwrap_or_default()
             .into_iter()
-            .map(|meta| PySequenceCollectionMetadata::from(meta))
-            .collect()
+            .collect();
+        let filter_refs: Vec<(&str, &str)> = filter_pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let result = self.inner
+            .list_collections(page, page_size, &filter_refs)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+
+        Python::attach(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            let results: Vec<PySequenceCollectionMetadata> = result.results
+                .into_iter()
+                .map(PySequenceCollectionMetadata::from)
+                .collect();
+            dict.set_item("results", results.into_pyobject(py).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?)?;
+            let pagination = pyo3::types::PyDict::new(py);
+            pagination.set_item("page", result.pagination.page)?;
+            pagination.set_item("page_size", result.pagination.page_size)?;
+            pagination.set_item("total", result.pagination.total)?;
+            dict.set_item("pagination", pagination)?;
+            Ok(dict.into())
+        })
     }
 
     /// Get a collection with all its sequences loaded.
@@ -1498,6 +1682,35 @@ impl PyRefgetStore {
             PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading collection: {}", e))
         })?;
         Ok(PySequenceCollection::from(collection))
+    }
+
+    /// Remove a collection from the store.
+    ///
+    /// Removes the collection record, its name lookup, FHR metadata, and any
+    /// collection aliases pointing to it. Optionally removes orphaned sequences
+    /// (sequences no longer referenced by any remaining collection).
+    ///
+    /// Args:
+    ///     digest: The collection's SHA-512/24u digest string.
+    ///     remove_orphan_sequences: If True, also remove sequences that are no
+    ///         longer referenced by any remaining collection. Default: False.
+    ///
+    /// Returns:
+    ///     bool: True if the collection was found and removed, False if not found.
+    ///
+    /// Example:
+    ///     >>> removed = store.remove_collection("abc123")
+    ///     >>> removed_with_cleanup = store.remove_collection("abc123", remove_orphan_sequences=True)
+    #[pyo3(signature = (digest, remove_orphan_sequences=false))]
+    fn remove_collection(&mut self, digest: &str, remove_orphan_sequences: bool) -> PyResult<bool> {
+        self.inner
+            .remove_collection(digest, remove_orphan_sequences)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error removing collection: {}",
+                    e
+                ))
+            })
     }
 
     /// Get metadata for a collection by digest.
@@ -1551,7 +1764,7 @@ impl PyRefgetStore {
     /// Example:
     ///     >>> for coll in store.iter_collections():
     ///     ...     print(f"{coll.digest}: {len(coll.sequences)} sequences")
-    fn iter_collections(&mut self) -> Vec<PySequenceCollection> {
+    fn iter_collections(&self) -> Vec<PySequenceCollection> {
         self.inner
             .iter_collections()
             .map(|coll| PySequenceCollection::from(coll))
@@ -1571,7 +1784,7 @@ impl PyRefgetStore {
     /// Example:
     ///     >>> for seq in store.iter_sequences():
     ///     ...     print(f"{seq.metadata.name}: {seq.decode()[:20]}...")
-    fn iter_sequences(&mut self) -> Vec<PySequenceRecord> {
+    fn iter_sequences(&self) -> Vec<PySequenceRecord> {
         self.inner
             .iter_sequences()
             .map(|rec| PySequenceRecord::from(rec))
@@ -1593,7 +1806,7 @@ impl PyRefgetStore {
     ///     >>> print(f"Store has {stats['n_sequences']} sequences")
     ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
     fn stats(&self) -> std::collections::HashMap<String, String> {
-        let extended_stats = self.inner.stats_extended();
+        let extended_stats = self.inner.stats();
         let mut stats = std::collections::HashMap::new();
         stats.insert(
             "n_sequences".to_string(),
@@ -1612,10 +1825,6 @@ impl PyRefgetStore {
             extended_stats.n_collections_loaded.to_string(),
         );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
-        stats.insert(
-            "total_disk_size".to_string(),
-            extended_stats.total_disk_size.to_string(),
-        );
         stats
     }
 
@@ -1925,7 +2134,7 @@ impl PyRefgetStore {
     ///     ...     "output.fa"
     ///     ... )
     fn export_fasta_from_regions(
-        &mut self,
+        &self,
         collection_digest: &str,
         bed_file_path: &Bound<'_, PyAny>,
         output_file_path: &Bound<'_, PyAny>,
@@ -1969,7 +2178,7 @@ impl PyRefgetStore {
     ///     >>> for seq in sequences:
     ///     ...     print(f"{seq.chrom_name}:{seq.start}-{seq.end}")
     fn substrings_from_regions(
-        &mut self,
+        &self,
         collection_digest: &str,
         bed_file_path: &Bound<'_, PyAny>,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
@@ -2027,7 +2236,7 @@ impl PyRefgetStore {
     ///     >>> # Export only chr1 and chr2
     ///     >>> store.export_fasta("uC_UorBNf3YUu1YIDainBhI94CedlNeH", "output.fa", ["chr1", "chr2"], None)
     fn export_fasta(
-        &mut self,
+        &self,
         collection_digest: &str,
         output_path: &Bound<'_, PyAny>,
         sequence_names: Option<Vec<String>>,
@@ -2082,7 +2291,7 @@ impl PyRefgetStore {
     ///     ... ]
     ///     >>> store.export_fasta_by_digests(seq_digests, "output.fa", None)
     fn export_fasta_by_digests(
-        &mut self,
+        &self,
         seq_digests: Vec<String>,
         output_path: &Bound<'_, PyAny>,
         line_width: Option<usize>,
@@ -2118,7 +2327,18 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a sequence alias to the sequence record.
+    /// Resolve a sequence alias to sequence metadata (no data loading).
+    fn get_sequence_metadata_by_alias(
+        &self,
+        namespace: &str,
+        alias: &str,
+    ) -> Option<PySequenceMetadata> {
+        self.inner
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceMetadata::from(m.clone()))
+    }
+
+    /// Resolve a sequence alias and return the loaded sequence record.
     fn get_sequence_by_alias(
         &self,
         namespace: &str,
@@ -2126,7 +2346,8 @@ impl PyRefgetStore {
     ) -> Option<PySequenceRecord> {
         self.inner
             .get_sequence_by_alias(namespace, alias)
-            .map(|r| PySequenceRecord::from(r.clone()))
+            .ok()
+            .map(|record| PySequenceRecord::from(record.clone()))
     }
 
     /// Reverse lookup: find all aliases pointing to this sequence digest.
@@ -2174,15 +2395,27 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
     }
 
-    /// Resolve a collection alias to the collection metadata.
-    fn get_collection_by_alias(
+    /// Resolve a collection alias to collection metadata (no data loading).
+    fn get_collection_metadata_by_alias(
         &self,
         namespace: &str,
         alias: &str,
     ) -> Option<PySequenceCollectionMetadata> {
         self.inner
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceCollectionMetadata::from(m.clone()))
+    }
+
+    /// Resolve a collection alias and return the loaded collection.
+    fn get_collection_by_alias(
+        &mut self,
+        namespace: &str,
+        alias: &str,
+    ) -> Option<PySequenceCollection> {
+        self.inner
             .get_collection_by_alias(namespace, alias)
-            .map(|r| PySequenceCollectionMetadata::from(r.metadata().clone()))
+            .ok()
+            .map(|collection| PySequenceCollection::from(collection))
     }
 
     /// Reverse lookup: find all aliases pointing to this collection digest.
@@ -2258,12 +2491,88 @@ impl PyRefgetStore {
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))
     }
 
+    /// Return available alias namespaces from the store manifest.
+    ///
+    /// Returns:
+    ///     dict: {'sequences': [...], 'collections': [...]}
+    fn available_alias_namespaces(&self) -> PyResult<PyObject> {
+        let aliases = self.inner.available_alias_namespaces();
+        Python::with_gil(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            let seq_list: Vec<&str> = aliases.sequences.iter().map(|s| s.as_str()).collect();
+            let coll_list: Vec<&str> = aliases.collections.iter().map(|s| s.as_str()).collect();
+            dict.set_item("sequences", seq_list)?;
+            dict.set_item("collections", coll_list)?;
+            Ok(dict.into())
+        })
+    }
+
+    /// Pull alias sidecars from the remote store.
+    ///
+    /// Args:
+    ///     namespace: Optional namespace to pull. If None, pulls all advertised namespaces.
+    ///     strategy: 'keep-ours' (default), 'keep-theirs', or 'notify'.
+    ///
+    /// Returns:
+    ///     dict: {pulled, skipped, not_found, conflicts}
+    #[pyo3(signature = (namespace=None, strategy="keep-ours"))]
+    fn pull_aliases(&mut self, namespace: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+        let sync_strategy = parse_sync_strategy(strategy)?;
+        let result = self
+            .inner
+            .pull_aliases(namespace, sync_strategy)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        pull_result_to_pyobject(result)
+    }
+
+    /// Pull FHR metadata sidecars from the remote store.
+    ///
+    /// Args:
+    ///     digest: Optional collection digest. If None, pulls FHR for all known collections.
+    ///     strategy: 'keep-ours' (default), 'keep-theirs', or 'notify'.
+    ///
+    /// Returns:
+    ///     dict: {pulled, skipped, not_found, conflicts}
+    #[pyo3(signature = (digest=None, strategy="keep-ours"))]
+    fn pull_fhr(&mut self, digest: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+        let sync_strategy = parse_sync_strategy(strategy)?;
+        let result = self
+            .inner
+            .pull_fhr(digest, sync_strategy)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(e.to_string()))?;
+        pull_result_to_pyobject(result)
+    }
+
+    /// Convert to a ReadonlyRefgetStore for concurrent read access.
+    ///
+    /// After calling this, the original store is replaced with an empty in-memory
+    /// store and should not be used further. The returned ReadonlyRefgetStore
+    /// provides all read methods with `&self` (no mutable borrow required).
+    ///
+    /// Call `load_all_collections()` (and optionally `load_all_sequences()`)
+    /// before converting.
+    ///
+    /// Returns:
+    ///     ReadonlyRefgetStore: An immutable store suitable for concurrent access.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.open_remote(cache, url)
+    ///     >>> store.load_all_collections()
+    ///     >>> readonly = store.into_readonly()
+    ///     >>> coll = readonly.get_collection("abc123")  # no mutable borrow needed
+    fn into_readonly(&mut self) -> PyResult<PyReadonlyRefgetStore> {
+        let store = std::mem::replace(&mut self.inner, RefgetStore::in_memory());
+        Ok(PyReadonlyRefgetStore {
+            store: store.into_readonly(),
+        })
+    }
+
     fn __str__(&self) -> String {
         format!("{}", self.inner)
     }
 
     fn __repr__(&self) -> String {
-        let (n_sequences, n_collections_loaded, mode_str) = self.inner.stats();
+        let stats = self.inner.stats();
         let persist_str = if self.inner.is_persisting() {
             "persist=on"
         } else {
@@ -2289,8 +2598,8 @@ impl PyRefgetStore {
         };
 
         format!(
-            "RefgetStore(n_sequences={}, n_collections_loaded={}, mode={}, {}, {}, {})",
-            n_sequences, n_collections_loaded, mode_str, persist_str, quiet_str, location
+            "RefgetStore(n_sequences={}, n_sequences_loaded={}, n_collections={}, n_collections_loaded={}, mode={}, {}, {}, {})",
+            stats.n_sequences, stats.n_sequences_loaded, stats.n_collections, stats.n_collections_loaded, stats.storage_mode, persist_str, quiet_str, location
         )
     }
 
@@ -2308,6 +2617,19 @@ impl PyRefgetStore {
     ///     >>> print(f"Store contains {len(store)} sequences")
     fn __len__(&self) -> usize {
         self.inner.sequence_digests().count()
+    }
+
+    /// Clear sequence data from the store to free memory.
+    ///
+    /// Removes all sequence records and decoded cache while preserving
+    /// metadata (collections, name lookups, aliases).
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
+    ///     >>> store.clear()  # frees sequence data, keeps metadata
+    fn clear(&mut self) {
+        self.inner.clear();
     }
 
     /// Iterate over all sequences in the store.
@@ -2361,6 +2683,402 @@ impl PyRefgetStoreIterator {
     }
 }
 
+// =========================================================================
+// PyReadonlyRefgetStore: Immutable store for concurrent reads
+// =========================================================================
+
+/// An immutable RefgetStore for concurrent read access.
+///
+/// All read methods use `&self` (no mutable borrow required), making this
+/// suitable for concurrent access patterns. Obtained by calling
+/// `RefgetStore.into_readonly()` after preloading.
+///
+/// This type has NO write methods and NO constructors -- it is only
+/// obtainable via `RefgetStore.into_readonly()`.
+///
+/// Read methods that require preloaded data (e.g., `get_collection()`) will
+/// error if the data was not loaded before conversion.
+///
+/// Example:
+///     >>> store = RefgetStore.open_remote(cache, url)
+///     >>> store.load_all_collections()
+///     >>> readonly = store.into_readonly()
+///     >>> coll = readonly.get_collection("abc123")
+#[pyclass(name = "ReadonlyRefgetStore", module = "gtars.refget")]
+pub struct PyReadonlyRefgetStore {
+    store: ReadonlyRefgetStore,
+}
+
+#[pymethods]
+impl PyReadonlyRefgetStore {
+    /// Get a collection with all its sequences loaded.
+    fn get_collection(&self, collection_digest: &str) -> PyResult<PySequenceCollection> {
+        let collection = self.store.get_collection(collection_digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading collection: {}", e))
+        })?;
+        Ok(PySequenceCollection::from(collection))
+    }
+
+    /// Get level 1 representation for a collection.
+    fn get_collection_level1(&self, py: Python<'_>, digest: &str) -> PyResult<Py<PyAny>> {
+        let lvl1 = self.store.get_collection_level1(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("names", &lvl1.names)?;
+        dict.set_item("lengths", &lvl1.lengths)?;
+        dict.set_item("sequences", &lvl1.sequences)?;
+        if let Some(ref v) = lvl1.name_length_pairs {
+            dict.set_item("name_length_pairs", v)?;
+        }
+        if let Some(ref v) = lvl1.sorted_name_length_pairs {
+            dict.set_item("sorted_name_length_pairs", v)?;
+        }
+        if let Some(ref v) = lvl1.sorted_sequences {
+            dict.set_item("sorted_sequences", v)?;
+        }
+        Ok(dict.into())
+    }
+
+    /// Get level 2 representation for a collection.
+    fn get_collection_level2(&self, py: Python<'_>, digest: &str) -> PyResult<Py<PyAny>> {
+        let lvl2 = self.store.get_collection_level2(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("names", &lvl2.names)?;
+        dict.set_item("lengths", &lvl2.lengths)?;
+        dict.set_item("sequences", &lvl2.sequences)?;
+        Ok(dict.into())
+    }
+
+    /// Compare two collections by digest.
+    fn compare(&self, py: Python<'_>, digest_a: &str, digest_b: &str) -> PyResult<Py<PyAny>> {
+        let comparison = self.store.compare(digest_a, digest_b).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })?;
+        let digests = pyo3::types::PyDict::new(py);
+        digests.set_item("a", &comparison.digests.a)?;
+        digests.set_item("b", &comparison.digests.b)?;
+
+        let attributes = pyo3::types::PyDict::new(py);
+        attributes.set_item("a_only", &comparison.attributes.a_only)?;
+        attributes.set_item("b_only", &comparison.attributes.b_only)?;
+        attributes.set_item("a_and_b", &comparison.attributes.a_and_b)?;
+
+        let elements = pyo3::types::PyDict::new(py);
+        elements.set_item("a_count", comparison.array_elements.a_count.into_py_dict(py)?)?;
+        elements.set_item("b_count", comparison.array_elements.b_count.into_py_dict(py)?)?;
+        elements.set_item("a_and_b_count", comparison.array_elements.a_and_b_count.into_py_dict(py)?)?;
+        elements.set_item("a_and_b_same_order", comparison.array_elements.a_and_b_same_order.into_py_dict(py)?)?;
+
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("digests", digests)?;
+        dict.set_item("attributes", attributes)?;
+        dict.set_item("array_elements", elements)?;
+        Ok(dict.into())
+    }
+
+    /// Find collections by attribute digest.
+    fn find_collections_by_attribute(
+        &self,
+        attr_name: &str,
+        attr_digest: &str,
+    ) -> PyResult<Vec<String>> {
+        self.store
+            .find_collections_by_attribute(attr_name, attr_digest)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+    }
+
+    /// Get attribute array by digest.
+    fn get_attribute(
+        &self,
+        py: Python<'_>,
+        attr_name: &str,
+        attr_digest: &str,
+    ) -> PyResult<Option<Py<PyAny>>> {
+        let result = self
+            .store
+            .get_attribute(attr_name, attr_digest)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}", e)))?;
+        match result {
+            None => Ok(None),
+            Some(value) => {
+                let json_str = serde_json::to_string(&value).map_err(|e| {
+                    PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "Failed to serialize: {}",
+                        e
+                    ))
+                })?;
+                let py_obj = json_string_to_py(py, &json_str)?;
+                Ok(Some(py_obj))
+            }
+        }
+    }
+
+    /// List collections with pagination and optional attribute filtering.
+    #[pyo3(signature = (page=0, page_size=100, filters=None))]
+    fn list_collections(
+        &self,
+        page: usize,
+        page_size: usize,
+        filters: Option<std::collections::HashMap<String, String>>,
+    ) -> PyResult<Py<PyAny>> {
+        let filter_pairs: Vec<(String, String)> = filters
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+        let filter_refs: Vec<(&str, &str)> = filter_pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let result = self.store
+            .list_collections(page, page_size, &filter_refs)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+
+        Python::attach(|py| {
+            let dict = pyo3::types::PyDict::new(py);
+            let results: Vec<PySequenceCollectionMetadata> = result.results
+                .into_iter()
+                .map(PySequenceCollectionMetadata::from)
+                .collect();
+            dict.set_item("results", results.into_pyobject(py).map_err(|e| PyErr::new::<pyo3::exceptions::PyRuntimeError, _>(format!("{}", e)))?)?;
+            let pagination = pyo3::types::PyDict::new(py);
+            pagination.set_item("page", result.pagination.page)?;
+            pagination.set_item("page_size", result.pagination.page_size)?;
+            pagination.set_item("total", result.pagination.total)?;
+            dict.set_item("pagination", pagination)?;
+            Ok(dict.into())
+        })
+    }
+
+    /// List all sequences (metadata only).
+    fn list_sequences(&self) -> Vec<PySequenceMetadata> {
+        self.store
+            .list_sequences()
+            .into_iter()
+            .map(PySequenceMetadata::from)
+            .collect()
+    }
+
+    /// Get metadata for a collection by digest.
+    fn get_collection_metadata(
+        &self,
+        collection_digest: &str,
+    ) -> Option<PySequenceCollectionMetadata> {
+        self.store
+            .get_collection_metadata(collection_digest)
+            .map(|meta| PySequenceCollectionMetadata::from(meta.clone()))
+    }
+
+    /// Get metadata for a single sequence by digest.
+    fn get_sequence_metadata(&self, digest: &str) -> Option<PySequenceMetadata> {
+        let digest = strip_sq_prefix(digest);
+        self.store
+            .get_sequence_metadata(digest.as_bytes())
+            .map(|meta| PySequenceMetadata::from(meta.clone()))
+    }
+
+    /// Check if a collection is fully loaded.
+    fn is_collection_loaded(&self, collection_digest: &str) -> bool {
+        self.store.is_collection_loaded(collection_digest)
+    }
+
+    /// Returns whether ancillary digests are enabled.
+    fn has_ancillary_digests(&self) -> bool {
+        self.store.has_ancillary_digests()
+    }
+
+    /// Returns whether the attribute index is enabled.
+    fn has_attribute_index(&self) -> bool {
+        self.store.has_attribute_index()
+    }
+
+    /// Returns statistics about the store.
+    fn stats(&self) -> std::collections::HashMap<String, String> {
+        let extended_stats = self.store.stats();
+        let mut stats = std::collections::HashMap::new();
+        stats.insert("n_sequences".to_string(), extended_stats.n_sequences.to_string());
+        stats.insert("n_sequences_loaded".to_string(), extended_stats.n_sequences_loaded.to_string());
+        stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
+        stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
+        stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats
+    }
+
+    /// Retrieve a sequence record by its digest.
+    fn get_sequence(&self, digest: &str) -> PyResult<PySequenceRecord> {
+        let digest = strip_sq_prefix(digest);
+        self.store
+            .get_sequence(digest.as_bytes())
+            .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", digest, e))
+            })
+    }
+
+    /// Retrieve a sequence by collection digest and name.
+    fn get_sequence_by_name(
+        &self,
+        collection_digest: &str,
+        sequence_name: &str,
+    ) -> PyResult<PySequenceRecord> {
+        let collection_digest = strip_sq_prefix(collection_digest);
+        self.store
+            .get_sequence_by_name(collection_digest, sequence_name)
+            .map(|record| PySequenceRecord::from(record.clone()))
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence '{}' not found in collection {} ({})",
+                    sequence_name, collection_digest, e
+                ))
+            })
+    }
+
+    /// Extract a substring from a sequence.
+    fn get_substring(&self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.store
+            .get_substring(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
+            })
+    }
+
+    // --- Alias read methods ---
+
+    /// Resolve a sequence alias to sequence metadata.
+    fn get_sequence_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<PySequenceMetadata> {
+        self.store
+            .get_sequence_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceMetadata::from(m.clone()))
+    }
+
+    /// Resolve a sequence alias and return the loaded sequence record.
+    fn get_sequence_by_alias(&self, namespace: &str, alias: &str) -> Option<PySequenceRecord> {
+        self.store
+            .get_sequence_by_alias(namespace, alias)
+            .ok()
+            .map(|record| PySequenceRecord::from(record.clone()))
+    }
+
+    /// Reverse lookup: find all aliases pointing to this sequence digest.
+    fn get_aliases_for_sequence(&self, digest: &str) -> Vec<(String, String)> {
+        self.store.get_aliases_for_sequence(digest)
+    }
+
+    /// List all sequence alias namespaces.
+    fn list_sequence_alias_namespaces(&self) -> Vec<String> {
+        self.store.list_sequence_alias_namespaces()
+    }
+
+    /// List all aliases in a sequence alias namespace.
+    fn list_sequence_aliases(&self, namespace: &str) -> Option<Vec<String>> {
+        self.store.list_sequence_aliases(namespace)
+    }
+
+    /// Resolve a collection alias to collection metadata.
+    fn get_collection_metadata_by_alias(&self, namespace: &str, alias: &str) -> Option<PySequenceCollectionMetadata> {
+        self.store
+            .get_collection_metadata_by_alias(namespace, alias)
+            .map(|m| PySequenceCollectionMetadata::from(m.clone()))
+    }
+
+    /// Resolve a collection alias and return the loaded collection.
+    fn get_collection_by_alias(&self, namespace: &str, alias: &str) -> Option<PySequenceCollection> {
+        self.store
+            .get_collection_by_alias(namespace, alias)
+            .ok()
+            .map(PySequenceCollection::from)
+    }
+
+    /// Reverse lookup: find all aliases pointing to this collection digest.
+    fn get_aliases_for_collection(&self, digest: &str) -> Vec<(String, String)> {
+        self.store.get_aliases_for_collection(digest)
+    }
+
+    /// List all collection alias namespaces.
+    fn list_collection_alias_namespaces(&self) -> Vec<String> {
+        self.store.list_collection_alias_namespaces()
+    }
+
+    /// List all aliases in a collection alias namespace.
+    fn list_collection_aliases(&self, namespace: &str) -> Option<Vec<String>> {
+        self.store.list_collection_aliases(namespace)
+    }
+
+    // --- FHR metadata read methods ---
+
+    /// Get FHR metadata for a collection.
+    fn get_fhr_metadata(&self, collection_digest: &str) -> Option<PyFhrMetadata> {
+        self.store
+            .get_fhr_metadata(collection_digest)
+            .map(|fhr| PyFhrMetadata { inner: fhr.clone() })
+    }
+
+    /// List all collection digests that have FHR metadata.
+    fn list_fhr_metadata(&self) -> Vec<String> {
+        self.store.list_fhr_metadata()
+    }
+
+    #[getter]
+    fn cache_path(&self) -> Option<String> {
+        self.store.local_path().map(|p| p.display().to_string())
+    }
+
+    #[getter]
+    fn remote_url(&self) -> Option<String> {
+        self.store.remote_source().map(|s| s.to_string())
+    }
+
+    #[getter]
+    fn storage_mode(&self) -> PyStorageMode {
+        self.store.storage_mode().into()
+    }
+
+    fn __str__(&self) -> String {
+        format!("{}", self.store)
+    }
+
+    fn __repr__(&self) -> String {
+        let stats = self.store.stats();
+        format!(
+            "ReadonlyRefgetStore(n_sequences={}, n_collections={}, n_collections_loaded={}, mode={})",
+            stats.n_sequences, stats.n_collections, stats.n_collections_loaded, stats.storage_mode
+        )
+    }
+
+    fn __len__(&self) -> usize {
+        self.store.sequence_digests().count()
+    }
+}
+
+/// Parse a strategy string into a SyncStrategy enum.
+fn parse_sync_strategy(strategy: &str) -> PyResult<SyncStrategy> {
+    match strategy {
+        "keep-ours" => Ok(SyncStrategy::KeepOurs),
+        "keep-theirs" => Ok(SyncStrategy::KeepTheirs),
+        "notify" => Ok(SyncStrategy::Notify),
+        other => Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+            "Unknown sync strategy '{}'. Use 'keep-ours', 'keep-theirs', or 'notify'.",
+            other
+        ))),
+    }
+}
+
+/// Convert a PullResult into a Python dict.
+fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<PyObject> {
+    Python::with_gil(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("pulled", result.pulled)?;
+        dict.set_item("skipped", result.skipped)?;
+        dict.set_item("not_found", result.not_found)?;
+        dict.set_item("conflicts", result.conflicts)?;
+        Ok(dict.into())
+    })
+}
+
 // This represents the Python module to be created
 #[pymodule]
 pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -2380,6 +3098,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;
+    m.add_class::<PyReadonlyRefgetStore>()?;
     m.add_class::<PyRetrievedSequence>()?;
     m.add_class::<PyFhrMetadata>()?;
     Ok(())

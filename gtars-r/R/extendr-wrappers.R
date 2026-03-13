@@ -12,6 +12,315 @@ NULL
 
 `__init__` <- function() .Call(wrap____init__)
 
+#' Load a RegionSet from a BED/narrowPeak/gzip file
+#' @export
+#' @param bed_path Path to a BED, narrowPeak, or gzipped BED file
+load_regionset <- function(bed_path) .Call(wrap__r_load_regionset, bed_path)
+
+#' Create a RegionSet from R vectors (0-based half-open coordinates)
+#' @export
+#' @param chrs Character vector of chromosome names
+#' @param starts Integer vector of start positions (0-based)
+#' @param ends Integer vector of end positions (half-open)
+regionset_from_vectors <- function(chrs, starts, ends) .Call(wrap__r_regionset_from_vectors, chrs, starts, ends)
+
+#' Extract chr/start/end vectors from a RegionSet pointer
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_to_vectors <- function(rs_ptr) .Call(wrap__r_regionset_to_vectors, rs_ptr)
+
+#' Get the number of regions in a RegionSet
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+regionset_length <- function(rs_ptr) .Call(wrap__r_regionset_length, rs_ptr)
+
+#' Calculate region widths (end - start)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_widths <- function(rs_ptr) .Call(wrap__r_calc_widths, rs_ptr)
+
+#' Calculate distances between consecutive regions on each chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_neighbor_distances <- function(rs_ptr) .Call(wrap__r_calc_neighbor_distances, rs_ptr)
+
+#' Calculate distance from each region to its nearest neighbor
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_nearest_neighbors <- function(rs_ptr) .Call(wrap__r_calc_nearest_neighbors, rs_ptr)
+
+#' Calculate per-chromosome statistics
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics, rs_ptr)
+
+#' Calculate region distribution across chromosome bins
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param n_bins Number of bins (default 250)
+r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
+
+#' Load a genome assembly from a FASTA file
+#' @export
+#' @param fasta_path Path to a FASTA file
+load_genome_assembly <- function(fasta_path) .Call(wrap__r_load_genome_assembly, fasta_path)
+
+#' Calculate GC content for each region
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wrap__r_calc_gc_content, rs_ptr, assembly_ptr, ignore_unk_chroms)
+
+#' Calculate per-region dinucleotide frequencies (percentages)
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param assembly_ptr External pointer to a GenomeAssembly
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr)
+
+#' Trim regions to chromosome boundaries
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+r_trim <- function(rs_ptr, chrom_names, chrom_sizes) .Call(wrap__r_trim, rs_ptr, chrom_names, chrom_sizes)
+
+#' Generate promoter regions relative to each region's start
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param upstream Bases upstream of start
+#' @param downstream Bases downstream of start
+r_promoters <- function(rs_ptr, upstream, downstream) .Call(wrap__r_promoters, rs_ptr, upstream, downstream)
+
+#' Merge overlapping and adjacent intervals per chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_reduce <- function(rs_ptr) .Call(wrap__r_reduce, rs_ptr)
+
+#' Set difference: remove portions of A that overlap with B
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_setdiff <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_setdiff, rs_ptr_a, rs_ptr_b)
+
+#' Pairwise intersection by index position
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_pintersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_pintersect, rs_ptr_a, rs_ptr_b)
+
+#' Combine two region sets without merging
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_concat <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_concat, rs_ptr_a, rs_ptr_b)
+
+#' Merge two region sets into a minimal non-overlapping set
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_union <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_union, rs_ptr_a, rs_ptr_b)
+
+#' Nucleotide-level Jaccard similarity between two region sets
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_jaccard <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_jaccard, rs_ptr_a, rs_ptr_b)
+
+#' Shift all regions by a fixed offset
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param offset Integer offset (positive = downstream, negative = upstream)
+r_shift <- function(rs_ptr, offset) .Call(wrap__r_shift, rs_ptr, offset)
+
+#' Generate flanking regions
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param width Flank width in base pairs
+#' @param use_start If TRUE, flank upstream of start; if FALSE, downstream of end
+#' @param both If TRUE, flank on both sides of the anchor
+r_flank <- function(rs_ptr, width, use_start, both) .Call(wrap__r_flank, rs_ptr, width, use_start, both)
+
+#' Resize regions to a fixed width
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param width New width in base pairs
+#' @param fix Anchor point: "start", "end", or "center"
+r_resize <- function(rs_ptr, width, fix) .Call(wrap__r_resize, rs_ptr, width, fix)
+
+#' Narrow regions by specifying a relative sub-range
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param start 1-based relative start (NA to omit)
+#' @param end 1-based relative end (NA to omit)
+#' @param width Width of the sub-range (NA to omit)
+r_narrow <- function(rs_ptr, start, end, width) .Call(wrap__r_narrow, rs_ptr, start, end, width)
+
+#' Break regions into non-overlapping disjoint pieces
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_disjoin <- function(rs_ptr) .Call(wrap__r_disjoin, rs_ptr)
+
+#' Return gaps between regions per chromosome
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
+
+#' Range-level intersection of two region sets
+#' @export
+#' @param rs_ptr_a External pointer to RegionSet A
+#' @param rs_ptr_b External pointer to RegionSet B
+r_intersect <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_intersect, rs_ptr_a, rs_ptr_b)
+
+#' Find all overlapping (queryHits, subjectHits) pairs between two RegionSets
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_find_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_find_overlaps, query_ptr, subject_ptr, minoverlap)
+
+#' Count the number of subject regions overlapping each query region
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param subject_ptr External pointer to subject RegionSet
+#' @param minoverlap Minimum overlap in base pairs (default 1)
+r_count_overlaps <- function(query_ptr, subject_ptr, minoverlap) .Call(wrap__r_count_overlaps, query_ptr, subject_ptr, minoverlap)
+
+#' Compute consensus regions from a list of RegionSet pointers
+#' @export
+#' @param rs_list An R list of external pointers to RegionSets
+r_consensus <- function(rs_list) .Call(wrap__r_consensus, rs_list)
+
+#' Build a PartitionList from RegionSet pointers (genes, exons, optional UTRs)
+#' @export
+#' @param genes_ptr External pointer to genes RegionSet
+#' @param exons_ptr External pointer to exons RegionSet
+#' @param three_utr_ptr External pointer to 3'UTR RegionSet (or NULL)
+#' @param five_utr_ptr External pointer to 5'UTR RegionSet (or NULL)
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions <- function(genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions, genes_ptr, exons_ptr, three_utr_ptr, five_utr_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from RegionSet pointers with strand information
+#' @export
+#' @param genes_chrs Gene chromosome names
+#' @param genes_starts Gene start positions (0-based)
+#' @param genes_ends Gene end positions (half-open)
+#' @param genes_strands Gene strand strings ("+", "-", "*")
+#' @param exons_chrs Exon chromosome names
+#' @param exons_starts Exon start positions (0-based)
+#' @param exons_ends Exon end positions (half-open)
+#' @param exons_strands Exon strand strings
+#' @param three_utr_chrs 3'UTR chrs (empty vector if absent)
+#' @param three_utr_starts 3'UTR starts
+#' @param three_utr_ends 3'UTR ends
+#' @param three_utr_strands 3'UTR strands
+#' @param five_utr_chrs 5'UTR chrs (empty vector if absent)
+#' @param five_utr_starts 5'UTR starts
+#' @param five_utr_ends 5'UTR ends
+#' @param five_utr_strands 5'UTR strands
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_regions_stranded <- function(genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_regions_stranded, genes_chrs, genes_starts, genes_ends, genes_strands, exons_chrs, exons_starts, exons_ends, exons_strands, three_utr_chrs, three_utr_starts, three_utr_ends, three_utr_strands, five_utr_chrs, five_utr_starts, five_utr_ends, five_utr_strands, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Build a PartitionList from a GTF file
+#' @export
+#' @param gtf_path Path to a GTF or GTF.gz file
+#' @param filter_protein_coding Keep only protein-coding genes
+#' @param convert_ensembl_ucsc Prepend "chr" to bare chromosome names
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+r_partition_list_from_gtf <- function(gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_partition_list_from_gtf, gtf_path, filter_protein_coding, convert_ensembl_ucsc, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Assign regions to genomic partitions
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_partitions <- function(rs_ptr, partition_ptr, bp_proportion) .Call(wrap__r_calc_partitions, rs_ptr, partition_ptr, bp_proportion)
+
+#' Calculate observed vs expected partition enrichment
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param partition_ptr External pointer to PartitionList
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes Integer vector of chromosome sizes
+#' @param bp_proportion If TRUE, count base pairs; if FALSE, count regions
+r_calc_expected_partitions <- function(rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion) .Call(wrap__r_calc_expected_partitions, rs_ptr, partition_ptr, chrom_names, chrom_sizes, bp_proportion)
+
+#' Calculate summary signal (overlap query with signal matrix)
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param signal_region_ids Character vector of region IDs (chr_start_end format)
+#' @param condition_names Character vector of condition/column names
+#' @param values_flat Numeric vector of signal values (row-major, length = n_regions * n_conditions)
+#' @param n_regions Number of signal regions
+#' @param n_conditions Number of conditions
+r_calc_summary_signal <- function(rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions) .Call(wrap__r_calc_summary_signal, rs_ptr, signal_region_ids, condition_names, values_flat, `_n_regions`, n_conditions)
+
+#' Calculate absolute distance from each query region to nearest feature midpoint.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_tss_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_tss_distances, query_ptr, features_ptr)
+
+#' Calculate signed distance from each query region to nearest feature.
+#' Returns NA for regions on chromosomes without features.
+#' @export
+#' @param query_ptr External pointer to query RegionSet
+#' @param features_ptr External pointer to features RegionSet
+r_calc_feature_distances <- function(query_ptr, features_ptr) .Call(wrap__r_calc_feature_distances, query_ptr, features_ptr)
+
+#' Load a GDA binary file and return a GenomicDistAnnotation pointer.
+#'
+#' The returned pointer gives access to the gene model, partition list,
+#' and TSS index contained in the pre-compiled binary.
+#' @export
+#' @param path Path to a .bin GDA file (produced by `gtars prep`)
+load_gda_bin <- function(path) .Call(wrap__r_load_gda_bin, path)
+
+#' Extract the gene model from a GDA annotation pointer.
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+gda_gene_model <- function(gda_ptr) .Call(wrap__r_gda_gene_model, gda_ptr)
+
+#' Build a PartitionList from a GDA annotation pointer.
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+#' @param core_prom Core promoter size in bp
+#' @param prox_prom Proximal promoter size in bp
+#' @param chrom_names Chromosome names for trim (empty to skip)
+#' @param chrom_sizes_vec Chromosome sizes for trim (parallel to chrom_names)
+gda_partition_list <- function(gda_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec) .Call(wrap__r_gda_partition_list, gda_ptr, core_prom, prox_prom, chrom_names, chrom_sizes_vec)
+
+#' Derive a TssIndex from a GDA annotation (using strand-aware TSS positions).
+#' @export
+#' @param gda_ptr External pointer to a GenomicDistAnnotation
+gda_tss_index <- function(gda_ptr) .Call(wrap__r_gda_tss_index, gda_ptr)
+
+#' Load a SignalMatrix from a packed binary file.
+#' @export
+#' @param path Path to a .bin signal matrix file (produced by `gtars prep`)
+load_signal_matrix_bin <- function(path) .Call(wrap__r_load_signal_matrix_bin, path)
+
+#' Load a SignalMatrix from a TSV file.
+#' @export
+#' @param path Path to a TSV signal matrix file
+load_signal_matrix_tsv <- function(path) .Call(wrap__r_load_signal_matrix_tsv, path)
+
+#' Calculate summary signal from a SignalMatrix pointer.
+#' @export
+#' @param rs_ptr External pointer to query RegionSet
+#' @param sm_ptr External pointer to a SignalMatrix
+r_calc_summary_signal_from_matrix <- function(rs_ptr, sm_ptr) .Call(wrap__r_calc_summary_signal_from_matrix, rs_ptr, sm_ptr)
+
 #' Write tokens to a gtok file
 #' @export
 #' @param filename A string representing the path to the gtok file.
@@ -32,7 +341,105 @@ r_igd_create <- function(output_path, filelist, db_name) .Call(wrap__r_igd_creat
 #' Search igd with a bed file
 #' @param database_path A string representing the path to the database igd file.
 #' @param query_path A string representing the path to the query bed file.
+#' @return A named list with columns: filename, numRegions, hits (convertible to data.frame)
 r_igd_search <- function(database_path, query_path) .Call(wrap__r_igd_search, database_path, query_path)
+
+#' Load a LOLA region database from a folder.
+#' @export
+#' @param db_location Path to the LOLA database folder
+#' @param collections Optional character vector of collection names to load
+#' @param limit Optional integer limit on files per collection
+load_region_db <- function(db_location, collections, limit) .Call(wrap__r_load_region_db, db_location, collections, limit)
+
+#' Load a region database from BED file paths and optional metadata.
+#' @export
+#' @param bed_files Character vector of paths to BED files
+#' @param filenames Optional character vector of display names for each file
+load_region_db_from_beds <- function(bed_files, filenames) .Call(wrap__r_load_region_db_from_beds, bed_files, filenames)
+
+#' List region set filenames in a database.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param collections Optional character vector filter
+list_region_sets <- function(db, collections) .Call(wrap__r_list_region_sets, db, collections)
+
+#' Run LOLA enrichment analysis.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+#' @param db_ptr ExternalPtr to RegionDB
+#' @param min_overlap Minimum base-pair overlap (default 1)
+#' @param direction "enrichment" or "depletion"
+run_lola <- function(user_sets_list, universe_ptr, db_ptr, min_overlap, direction) .Call(wrap__r_run_lola, user_sets_list, universe_ptr, db_ptr, min_overlap, direction)
+
+#' Check universe appropriateness for user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+check_universe <- function(user_sets_list, universe_ptr) .Call(wrap__r_check_universe, user_sets_list, universe_ptr)
+
+#' Redefine user sets in terms of universe regions.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+#' @param universe_ptr ExternalPtr to universe RegionSet
+redefine_user_sets <- function(user_sets_list, universe_ptr) .Call(wrap__r_redefine_user_sets, user_sets_list, universe_ptr)
+
+#' Build a restricted universe from user sets.
+#' @export
+#' @param user_sets_list R list of RegionSet external pointers
+build_restricted_universe <- function(user_sets_list) .Call(wrap__r_build_restricted_universe, user_sets_list)
+
+#' Get per-file annotations from a RegionDB as a data.frame-like list.
+#'
+#' Returns a list with columns: filename, cellType, description, tissue,
+#' dataSource, antibody, treatment, collection. This matches the structure
+#' of R LOLA's regionDB$regionAnno.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_anno <- function(db) .Call(wrap__r_regiondb_anno, db)
+
+#' Get collection-level annotations from a RegionDB as a data.frame-like list.
+#' @export
+#' @param db ExternalPtr to RegionDB
+regiondb_collection_anno <- function(db) .Call(wrap__r_regiondb_collection_anno, db)
+
+#' Get a single RegionSet from a RegionDB by 1-based index.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param index 1-based integer index into the region sets
+regiondb_region_set <- function(db, index) .Call(wrap__r_regiondb_region_set, db, index)
+
+#' Create a RegionSetList from a list of RegionSet external pointers.
+#' @export
+#' @param sets_list R list of RegionSet external pointers
+regionsetlist_from_sets <- function(sets_list) .Call(wrap__r_regionsetlist_from_sets, sets_list)
+
+#' Extract region sets from a RegionDB by 1-based indices as a RegionSetList.
+#' @export
+#' @param db ExternalPtr to RegionDB
+#' @param indices Integer vector of 1-based indices
+regionsetlist_from_db <- function(db, indices) .Call(wrap__r_regionsetlist_from_db, db, indices)
+
+#' Get the number of region sets in a RegionSetList.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_length <- function(rsl) .Call(wrap__r_regionsetlist_length, rsl)
+
+#' Get a single RegionSet from a RegionSetList by 1-based index.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+#' @param index 1-based integer index
+regionsetlist_get <- function(rsl, index) .Call(wrap__r_regionsetlist_get, rsl, index)
+
+#' Flatten a RegionSetList into a single RegionSet (no merging).
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_concat <- function(rsl) .Call(wrap__r_regionsetlist_concat, rsl)
+
+#' Get the names from a RegionSetList, or NULL if no names.
+#' @export
+#' @param rsl ExternalPtr to RegionSetList
+regionsetlist_names <- function(rsl) .Call(wrap__r_regionsetlist_names, rsl)
 
 #' Create sha512t24u digest
 #' @export
@@ -281,7 +688,7 @@ add_sequence_alias_store <- function(store_ptr, namespace, alias, digest) .Call(
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name
-get_sequence_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_sequence_by_alias_store, store_ptr, namespace, alias)
+get_sequence_metadata_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_sequence_metadata_by_alias_store, store_ptr, namespace, alias)
 
 #' Get all aliases for a sequence
 #' @param store_ptr External pointer to RefgetStore
@@ -320,7 +727,7 @@ add_collection_alias_store <- function(store_ptr, namespace, alias, digest) .Cal
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace
 #' @param alias Alias name
-get_collection_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_collection_by_alias_store, store_ptr, namespace, alias)
+get_collection_metadata_by_alias_store <- function(store_ptr, namespace, alias) .Call(wrap__get_collection_metadata_by_alias_store, store_ptr, namespace, alias)
 
 #' Get all aliases for a collection
 #' @param store_ptr External pointer to RefgetStore
