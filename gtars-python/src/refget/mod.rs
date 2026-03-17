@@ -1828,6 +1828,17 @@ impl PyRefgetStore {
         stats
     }
 
+    /// Get store state metadata (digests and modified timestamp) from rgstore.json.
+    ///
+    /// Returns:
+    ///     dict: Keys include 'modified', 'collections_digest', 'sequences_digest',
+    ///         'aliases_digest', 'fhr_digest'. Missing values are omitted.
+    fn store_metadata(&self) -> PyResult<std::collections::HashMap<String, String>> {
+        self.inner.store_metadata().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })
+    }
+
     /// Get level 1 representation (attribute digests) for a collection.
     ///
     /// Returns a dict with spec-compliant field names (names, lengths, sequences,
@@ -2905,6 +2916,13 @@ impl PyReadonlyRefgetStore {
         stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
         stats
+    }
+
+    /// Get store state metadata (digests and modified timestamp) from rgstore.json.
+    fn store_metadata(&self) -> PyResult<std::collections::HashMap<String, String>> {
+        self.store.store_metadata().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e))
+        })
     }
 
     /// Retrieve a sequence record by its digest.

@@ -140,6 +140,21 @@ pub(crate) struct StoreMetadata {
     /// Available collection alias namespaces (for remote discovery)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub(crate) collection_alias_namespaces: Vec<String>,
+    /// Last-modified timestamp (RFC 3339). Updated on every write_index_files().
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) modified: Option<String>,
+    /// SHA256 digest of collections.rgci
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) collections_digest: Option<String>,
+    /// SHA256 digest of sequences.rgsi
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) sequences_digest: Option<String>,
+    /// SHA256 digest of combined alias data
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) aliases_digest: Option<String>,
+    /// SHA256 digest of combined FHR sidecar data
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) fhr_digest: Option<String>,
 }
 
 pub(crate) fn default_true() -> bool {

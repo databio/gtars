@@ -12,6 +12,7 @@ use std::io::{BufRead, Write};
 use std::path::Path;
 
 use anyhow::{Context, Result};
+use sha2::{Sha256, Digest};
 
 use crate::collection::{
     SequenceCollectionRecordExt,
@@ -89,13 +90,36 @@ impl ReadonlyRefgetStore {
         let collection_index_path = local_path.join("collections.rgci");
         self.write_collections_rgci(&collection_index_path)?;
 
-        self.write_rgstore_json(local_path, template)?;
+        // Compute digests of the files we just wrote
+        let sequences_digest = Self::sha256_file(&sequence_index_path).ok();
+        let collections_digest = Self::sha256_file(&collection_index_path).ok();
+        let aliases_digest = self.compute_aliases_digest();
+        let fhr_digest = self.compute_fhr_digest();
+
+        self.write_rgstore_json_with_digests(
+            local_path, template,
+            collections_digest, sequences_digest,
+            aliases_digest, fhr_digest,
+        )?;
 
         Ok(())
     }
 
     /// Write the rgstore.json metadata file to the given directory.
     pub(crate) fn write_rgstore_json(&self, dir: &Path, seqdata_template: &str) -> Result<()> {
+        self.write_rgstore_json_with_digests(dir, seqdata_template, None, None, None, None)
+    }
+
+    /// Write the rgstore.json metadata file with state digests and modified timestamp.
+    pub(crate) fn write_rgstore_json_with_digests(
+        &self,
+        dir: &Path,
+        seqdata_template: &str,
+        collections_digest: Option<String>,
+        sequences_digest: Option<String>,
+        aliases_digest: Option<String>,
+        fhr_digest: Option<String>,
+    ) -> Result<()> {
         let metadata = StoreMetadata {
             version: 1,
             seqdata_path_template: seqdata_template.to_string(),
@@ -108,6 +132,11 @@ impl ReadonlyRefgetStore {
             attribute_index: self.attribute_index,
             sequence_alias_namespaces: self.aliases.sequence_namespaces(),
             collection_alias_namespaces: self.aliases.collection_namespaces(),
+            modified: Some(Utc::now().to_rfc3339()),
+            collections_digest,
+            sequences_digest,
+            aliases_digest,
+            fhr_digest,
         };
 
         let json = serde_json::to_string_pretty(&metadata)
@@ -172,6 +201,84 @@ impl ReadonlyRefgetStore {
             )?;
         }
         Ok(())
+    }
+
+    /// Read the store metadata from rgstore.json, returning state digests and timestamp.
+    ///
+    /// Returns a HashMap with keys: modified, collections_digest, sequences_digest,
+    /// aliases_digest, fhr_digest. Missing values are omitted from the map.
+    pub fn store_metadata(&self) -> Result<HashMap<String, String>> {
+        let local_path = self.local_path.as_ref().context("local_path not set")?;
+        let json = fs::read_to_string(local_path.join("rgstore.json"))
+            .context("Failed to read rgstore.json")?;
+        let metadata: StoreMetadata =
+            serde_json::from_str(&json).context("Failed to parse store metadata")?;
+
+        let mut map = HashMap::new();
+        if let Some(v) = metadata.modified { map.insert("modified".to_string(), v); }
+        if let Some(v) = metadata.collections_digest { map.insert("collections_digest".to_string(), v); }
+        if let Some(v) = metadata.sequences_digest { map.insert("sequences_digest".to_string(), v); }
+        if let Some(v) = metadata.aliases_digest { map.insert("aliases_digest".to_string(), v); }
+        if let Some(v) = metadata.fhr_digest { map.insert("fhr_digest".to_string(), v); }
+        Ok(map)
+    }
+
+    /// Compute SHA256 digest of a file's contents.
+    fn sha256_file(path: &Path) -> Result<String> {
+        let bytes = fs::read(path)?;
+        let hash = Sha256::digest(&bytes);
+        Ok(format!("{:x}", hash))
+    }
+
+    /// Compute a combined SHA256 digest of all alias namespace files (sorted).
+    /// Alias files live under aliases/sequences/*.tsv and aliases/collections/*.tsv.
+    fn compute_aliases_digest(&self) -> Option<String> {
+        let local_path = self.local_path.as_ref()?;
+        let aliases_dir = local_path.join("aliases");
+        if !aliases_dir.exists() { return None; }
+
+        let mut paths: Vec<_> = Vec::new();
+        for subdir in &["sequences", "collections"] {
+            let sub = aliases_dir.join(subdir);
+            if sub.exists() {
+                if let Ok(entries) = fs::read_dir(&sub) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let p = entry.path();
+                        if p.extension().map_or(false, |e| e == "tsv") {
+                            paths.push(p);
+                        }
+                    }
+                }
+            }
+        }
+        if paths.is_empty() { return None; }
+        paths.sort();
+
+        let mut hasher = Sha256::new();
+        for path in &paths {
+            hasher.update(fs::read(path).ok()?);
+        }
+        Some(format!("{:x}", hasher.finalize()))
+    }
+
+    /// Compute a combined SHA256 digest of all FHR sidecar files (sorted).
+    fn compute_fhr_digest(&self) -> Option<String> {
+        let local_path = self.local_path.as_ref()?;
+        let fhr_dir = local_path.join("fhr");
+        if !fhr_dir.exists() { return None; }
+
+        let mut paths: Vec<_> = fs::read_dir(&fhr_dir).ok()?
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .collect();
+        if paths.is_empty() { return None; }
+        paths.sort();
+
+        let mut hasher = Sha256::new();
+        for path in paths {
+            hasher.update(fs::read(&path).ok()?);
+        }
+        Some(format!("{:x}", hasher.finalize()))
     }
 
     // =========================================================================

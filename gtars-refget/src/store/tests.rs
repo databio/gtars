@@ -1328,3 +1328,106 @@ fn test_clear() {
     assert_eq!(store.sequence_digests().count(), 1);
     assert_eq!(store.collections.len(), 2);
 }
+
+// =========================================================================
+// State digest tests
+// =========================================================================
+
+#[test]
+fn test_rgstore_json_contains_state_digests() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let json = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+    let metadata: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+    assert!(metadata.get("modified").is_some(), "modified field should be present");
+    assert!(metadata.get("collections_digest").is_some(), "collections_digest should be present");
+    assert!(metadata.get("sequences_digest").is_some(), "sequences_digest should be present");
+}
+
+#[test]
+fn test_state_digests_change_on_add() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let meta1 = store.store_metadata().unwrap();
+    let coll_digest1 = meta1.get("collections_digest").cloned().unwrap();
+
+    // Add another collection
+    let fasta2 = dir.path().join("test2.fa");
+    fs::write(&fasta2, ">seq_new\nTTTTAAAA\n").unwrap();
+    store
+        .add_sequence_collection_from_fasta(fasta2.to_str().unwrap(), FastaImportOptions::new())
+        .unwrap();
+
+    let meta2 = store.store_metadata().unwrap();
+    let coll_digest2 = meta2.get("collections_digest").cloned().unwrap();
+
+    assert_ne!(coll_digest1, coll_digest2, "collections_digest should change when a collection is added");
+}
+
+#[test]
+fn test_aliases_digest_changes_on_alias_add() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let meta1 = store.store_metadata().unwrap();
+    assert!(meta1.get("aliases_digest").is_none(), "no aliases yet");
+
+    // Add an alias, then trigger index re-write by adding another collection
+    store.add_sequence_alias("test_ns", "my_alias", &meta.sequences_digest).unwrap();
+
+    let fasta2 = dir.path().join("test2.fa");
+    fs::write(&fasta2, ">alias_test_seq\nAAAACCCC\n").unwrap();
+    store
+        .add_sequence_collection_from_fasta(fasta2.to_str().unwrap(), FastaImportOptions::new())
+        .unwrap();
+
+    let meta2 = store.store_metadata().unwrap();
+    assert!(meta2.get("aliases_digest").is_some(), "aliases_digest should appear after alias + index rewrite");
+}
+
+#[test]
+fn test_old_rgstore_json_without_state_digests_loads() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    fs::create_dir_all(&store_path).unwrap();
+
+    // Write a minimal rgstore.json without the new fields
+    let old_metadata = serde_json::json!({
+        "version": 1,
+        "seqdata_path_template": "sequences/%s2/%s.seq",
+        "collections_path_template": "collections/%s.rgsi",
+        "sequence_index": "sequences.rgsi",
+        "collection_index": "collections.rgci",
+        "mode": "Raw",
+        "created_at": "2026-01-01T00:00:00Z",
+        "ancillary_digests": true,
+        "attribute_index": false
+    });
+    fs::write(store_path.join("rgstore.json"), serde_json::to_string_pretty(&old_metadata).unwrap()).unwrap();
+
+    // Write empty index files
+    fs::write(store_path.join("sequences.rgsi"), "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription\n").unwrap();
+    fs::write(store_path.join("collections.rgci"), "#digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest\tname_length_pairs_digest\tsorted_name_length_pairs_digest\tsorted_sequences_digest\n").unwrap();
+
+    // Should load without error
+    let store = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(store.stats().n_sequences, 0);
+}
