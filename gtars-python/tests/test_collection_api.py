@@ -44,13 +44,13 @@ class TestCollectionAPI:
 
         meta = collections[0]
         # Check it's metadata, not full collection
-        assert hasattr(meta, 'digest')
-        assert hasattr(meta, 'n_sequences')
-        assert hasattr(meta, 'names_digest')
-        assert hasattr(meta, 'sequences_digest')
-        assert hasattr(meta, 'lengths_digest')
+        assert hasattr(meta, "digest")
+        assert hasattr(meta, "n_sequences")
+        assert hasattr(meta, "names_digest")
+        assert hasattr(meta, "sequences_digest")
+        assert hasattr(meta, "lengths_digest")
         # Should NOT have sequences attribute (it's metadata only)
-        assert not hasattr(meta, 'sequences')
+        assert not hasattr(meta, "sequences")
 
     def test_list_collections_n_sequences_correct(self, store_with_data):
         """list_collections() reports correct n_sequences."""
@@ -71,19 +71,21 @@ class TestCollectionAPI:
         assert len(sequences) == 3  # base.fa has 3 sequences
 
         for meta in sequences:
-            assert hasattr(meta, 'name')
-            assert hasattr(meta, 'length')
-            assert hasattr(meta, 'sha512t24u')
-            assert hasattr(meta, 'md5')
-            assert hasattr(meta, 'alphabet')
+            assert hasattr(meta, "name")
+            assert hasattr(meta, "length")
+            assert hasattr(meta, "sha512t24u")
+            assert hasattr(meta, "md5")
+            assert hasattr(meta, "alphabet")
             # Should NOT have sequence data
-            assert not hasattr(meta, 'sequence')
+            assert not hasattr(meta, "sequence")
 
     # =========================================================================
     # get_collection_metadata() tests
     # =========================================================================
 
-    def test_get_collection_metadata_returns_metadata(self, store_with_data, expected_data):
+    def test_get_collection_metadata_returns_metadata(
+        self, store_with_data, expected_data
+    ):
         """get_collection_metadata() returns SequenceCollectionMetadata."""
         digest = expected_data.digest
         meta = store_with_data.get_collection_metadata(digest)
@@ -91,11 +93,11 @@ class TestCollectionAPI:
         assert meta is not None
         assert meta.digest == digest
         assert meta.n_sequences == 3
-        assert hasattr(meta, 'names_digest')
-        assert hasattr(meta, 'sequences_digest')
-        assert hasattr(meta, 'lengths_digest')
+        assert hasattr(meta, "names_digest")
+        assert hasattr(meta, "sequences_digest")
+        assert hasattr(meta, "lengths_digest")
         # Should NOT have sequences
-        assert not hasattr(meta, 'sequences')
+        assert not hasattr(meta, "sequences")
 
     def test_get_collection_metadata_not_found(self, store_with_data):
         """get_collection_metadata() returns None for non-existent digest."""
@@ -106,17 +108,21 @@ class TestCollectionAPI:
     # get_collection() tests
     # =========================================================================
 
-    def test_get_collection_returns_full_collection(self, store_with_data, expected_data):
+    def test_get_collection_returns_full_collection(
+        self, store_with_data, expected_data
+    ):
         """get_collection() returns SequenceCollection with loaded sequences."""
         digest = expected_data.digest
         collection = store_with_data.get_collection(digest)
 
         assert collection is not None
         assert collection.digest == digest
-        assert hasattr(collection, 'sequences')
-        assert hasattr(collection, 'lvl1')
+        assert hasattr(collection, "sequences")
+        assert hasattr(collection, "lvl1")
 
-    def test_get_collection_has_correct_sequence_count(self, store_with_data, expected_data):
+    def test_get_collection_has_correct_sequence_count(
+        self, store_with_data, expected_data
+    ):
         """get_collection() returns collection with correct number of sequences."""
         digest = expected_data.digest
         collection = store_with_data.get_collection(digest)
@@ -139,16 +145,18 @@ class TestCollectionAPI:
     # get_sequence_metadata() tests
     # =========================================================================
 
-    def test_get_sequence_metadata_returns_metadata(self, store_with_data, expected_data):
+    def test_get_sequence_metadata_returns_metadata(
+        self, store_with_data, expected_data
+    ):
         """get_sequence_metadata() returns SequenceMetadata."""
         seq_digest = expected_data.sequences[0].metadata.sha512t24u
         meta = store_with_data.get_sequence_metadata(seq_digest)
 
         assert meta is not None
         assert meta.sha512t24u == seq_digest
-        assert hasattr(meta, 'name')
-        assert hasattr(meta, 'length')
-        assert hasattr(meta, 'md5')
+        assert hasattr(meta, "name")
+        assert hasattr(meta, "length")
+        assert hasattr(meta, "md5")
 
     def test_get_sequence_metadata_not_found(self, store_with_data):
         """get_sequence_metadata() returns None for non-existent digest."""
@@ -159,7 +167,9 @@ class TestCollectionAPI:
     # get_sequence() tests
     # =========================================================================
 
-    def test_get_sequence_returns_record_with_data(self, store_with_data, expected_data):
+    def test_get_sequence_returns_record_with_data(
+        self, store_with_data, expected_data
+    ):
         """get_sequence() returns SequenceRecord with loadable data."""
         seq_digest = expected_data.sequences[0].metadata.sha512t24u
         record = store_with_data.get_sequence(seq_digest)
@@ -189,7 +199,9 @@ class TestCollectionAPI:
     # get_sequence_by_name() tests
     # =========================================================================
 
-    def test_get_sequence_by_name_returns_record_with_data(self, store_with_data, expected_data):
+    def test_get_sequence_by_name_returns_record_with_data(
+        self, store_with_data, expected_data
+    ):
         """get_sequence_by_name() returns SequenceRecord with loadable data."""
         collection_digest = expected_data.digest
         seq_name = expected_data.sequences[0].metadata.name
@@ -221,8 +233,8 @@ class TestCollectionAPI:
         assert len(collections) == 1
 
         coll = collections[0]
-        assert hasattr(coll, 'digest')
-        assert hasattr(coll, 'sequences')
+        assert hasattr(coll, "digest")
+        assert hasattr(coll, "sequences")
         assert len(coll.sequences) == 3
 
     def test_iter_collections_sequences_decodable(self, store_with_data):
@@ -232,7 +244,9 @@ class TestCollectionAPI:
         for coll in collections:
             for seq in coll.sequences:
                 decoded = seq.decode()
-                assert decoded is not None, f"Sequence {seq.metadata.name} not decodable"
+                assert decoded is not None, (
+                    f"Sequence {seq.metadata.name} not decodable"
+                )
 
     # =========================================================================
     # iter_sequences() tests
@@ -275,7 +289,9 @@ class TestCollectionAPI:
 
         assert len(metadata_list) == len(full_list)
 
-    def test_metadata_vs_full_sequence_consistency(self, store_with_data, expected_data):
+    def test_metadata_vs_full_sequence_consistency(
+        self, store_with_data, expected_data
+    ):
         """Metadata from get_sequence_metadata matches get_sequence."""
         seq_digest = expected_data.sequences[0].metadata.sha512t24u
 
@@ -303,7 +319,9 @@ class TestListCollectionsPagination:
         """Create a store with two collections."""
         store = RefgetStore.in_memory()
         store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
-        store.add_sequence_collection_from_fasta("../tests/data/fasta/different_names.fa")
+        store.add_sequence_collection_from_fasta(
+            "../tests/data/fasta/different_names.fa"
+        )
         return store
 
     def test_list_collections_returns_paginated_dict(self, store_with_data):
@@ -336,7 +354,9 @@ class TestListCollectionsPagination:
         all_results = store_with_two_collections.list_collections()["results"]
         names_digest = all_results[0].names_digest
 
-        result = store_with_two_collections.list_collections(filters={"names": names_digest})
+        result = store_with_two_collections.list_collections(
+            filters={"names": names_digest}
+        )
         assert len(result["results"]) >= 1
         for meta in result["results"]:
             assert meta.names_digest == names_digest
@@ -356,6 +376,8 @@ class TestListCollectionsPagination:
 
     def test_list_collections_filter_no_match(self, store_with_data):
         """Filter by bogus digest, verify empty results."""
-        result = store_with_data.list_collections(filters={"names": "bogus_nonexistent_digest"})
+        result = store_with_data.list_collections(
+            filters={"names": "bogus_nonexistent_digest"}
+        )
         assert len(result["results"]) == 0
         assert result["pagination"]["total"] == 0

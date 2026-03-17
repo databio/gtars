@@ -1,8 +1,3 @@
-import os
-from pathlib import Path
-
-import pytest
-
 from gtars.models import RegionSet
 
 

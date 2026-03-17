@@ -36,13 +36,15 @@ def simple_db():
 @pytest.fixture
 def universe():
     """A universe covering a broad range."""
-    return make_regions([
-        ("chr1", 50, 250),
-        ("chr1", 450, 650),
-        ("chr1", 650, 850),
-        ("chr1", 900, 1000),
-        ("chr1", 1100, 1200),
-    ])
+    return make_regions(
+        [
+            ("chr1", 50, 250),
+            ("chr1", 450, 650),
+            ("chr1", 650, 850),
+            ("chr1", 900, 1000),
+            ("chr1", 1100, 1200),
+        ]
+    )
 
 
 class TestRunLola:
@@ -69,8 +71,12 @@ class TestRunLola:
 
     def test_run_lola_depletion(self, simple_db, universe):
         user_set = make_regions([("chr1", 120, 180)])
-        result_enrich = run_lola([user_set], universe, simple_db, direction="enrichment")
-        result_deplete = run_lola([user_set], universe, simple_db, direction="depletion")
+        result_enrich = run_lola(
+            [user_set], universe, simple_db, direction="enrichment"
+        )
+        result_deplete = run_lola(
+            [user_set], universe, simple_db, direction="depletion"
+        )
 
         # p-values should differ between enrichment and depletion
         assert result_enrich["pValueLog"] != result_deplete["pValueLog"]
@@ -78,10 +84,12 @@ class TestRunLola:
 
 class TestCheckUniverse:
     def test_check_universe(self, universe):
-        user_set = make_regions([
-            ("chr1", 120, 180),
-            ("chr1", 500, 550),
-        ])
+        user_set = make_regions(
+            [
+                ("chr1", 120, 180),
+                ("chr1", 500, 550),
+            ]
+        )
         result = check_universe([user_set], universe)
 
         assert "totalRegions" in result

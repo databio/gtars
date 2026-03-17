@@ -23,7 +23,9 @@ from gtars.genomic_distributions import (
     consensus,
 )
 
-DATA_DIR = Path(__file__).resolve().parent.parent.parent / "tests" / "data" / "regionset"
+DATA_DIR = (
+    Path(__file__).resolve().parent.parent.parent / "tests" / "data" / "regionset"
+)
 
 
 def make_regionset(regions):
@@ -48,7 +50,9 @@ class TestRegionSetStatistics:
         assert rs.widths() == rs.region_widths()
 
     def test_neighbor_distances_same_chrom(self):
-        rs = make_regionset([("chr1", 100, 200), ("chr1", 300, 400), ("chr1", 500, 600)])
+        rs = make_regionset(
+            [("chr1", 100, 200), ("chr1", 300, 400), ("chr1", 500, 600)]
+        )
         dists = rs.neighbor_distances()
         assert len(dists) == 2
         assert dists[0] == 100.0  # 300 - 200
@@ -70,9 +74,9 @@ class TestRegionSetStatistics:
         rs = make_regionset([("chr1", 0, 10), ("chr1", 20, 30), ("chr1", 100, 110)])
         nn = rs.nearest_neighbors()
         assert len(nn) == 3
-        assert nn[0] == 10.0   # nearest to [0,10) is [20,30) -> gap=10
-        assert nn[1] == 10.0   # nearest to [20,30) is [0,10) -> gap=10
-        assert nn[2] == 70.0   # nearest to [100,110) is [20,30) -> gap=70
+        assert nn[0] == 10.0  # nearest to [0,10) is [20,30) -> gap=10
+        assert nn[1] == 10.0  # nearest to [20,30) is [0,10) -> gap=10
+        assert nn[2] == 70.0  # nearest to [100,110) is [20,30) -> gap=70
 
     def test_nearest_neighbors_single_region(self):
         rs = make_regionset([("chr1", 0, 10)])
@@ -126,8 +130,8 @@ class TestIntervalRanges:
         rs = make_regionset([("chr1", 1000, 2000)])
         proms = rs.promoters(200, 50)
         assert len(proms) == 1
-        assert proms[0].start == 800   # 1000 - 200
-        assert proms[0].end == 1050    # 1000 + 50
+        assert proms[0].start == 800  # 1000 - 200
+        assert proms[0].end == 1050  # 1000 + 50
 
     def test_promoters_saturates_at_zero(self):
         rs = make_regionset([("chr1", 50, 200)])
@@ -135,11 +139,13 @@ class TestIntervalRanges:
         assert proms[0].start == 0  # saturating subtraction
 
     def test_reduce(self):
-        rs = make_regionset([
-            ("chr1", 0, 10),
-            ("chr1", 5, 15),
-            ("chr1", 20, 30),
-        ])
+        rs = make_regionset(
+            [
+                ("chr1", 0, 10),
+                ("chr1", 5, 15),
+                ("chr1", 20, 30),
+            ]
+        )
         reduced = rs.reduce()
         assert len(reduced) == 2
         assert reduced[0].start == 0
@@ -293,9 +299,12 @@ class TestPartitionList:
         gm = GeneModel.from_gtf(gtf_path)
         pl = PartitionList.from_gene_model(gm, core_prom=100, prox_prom=2000)
         assert len(pl) > 0
-        assert pl.partition_names() == PartitionList.from_gtf(
-            gtf_path, core_prom=100, prox_prom=2000
-        ).partition_names()
+        assert (
+            pl.partition_names()
+            == PartitionList.from_gtf(
+                gtf_path, core_prom=100, prox_prom=2000
+            ).partition_names()
+        )
 
     def test_from_gtf_with_chrom_sizes(self, gtf_path):
         chrom_sizes = {"chr1": 50000, "chr2": 50000}
@@ -370,9 +379,7 @@ class TestGenomicDistAnnotation:
 class TestSignalMatrix:
     @pytest.fixture
     def signal_tsv(self):
-        f = tempfile.NamedTemporaryFile(
-            mode="w", suffix=".tsv", delete=False
-        )
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".tsv", delete=False)
         f.write("V1\tcond_A\tcond_B\n")
         f.write("chr1_100_200\t0.5\t0.3\n")
         f.write("chr1_150_250\t0.2\t0.8\n")
@@ -424,11 +431,13 @@ class TestCalcPartitions:
 
     def test_calc_partitions_priority(self, gtf_path):
         pl = PartitionList.from_gtf(gtf_path, core_prom=100, prox_prom=2000)
-        query = make_regionset([
-            ("chr1", 950, 1050),   # overlaps promoterCore of gene1
-            ("chr1", 2200, 2300),  # overlaps exon of gene1
-            ("chr1", 50000, 50100),  # intergenic
-        ])
+        query = make_regionset(
+            [
+                ("chr1", 950, 1050),  # overlaps promoterCore of gene1
+                ("chr1", 2200, 2300),  # overlaps exon of gene1
+                ("chr1", 50000, 50100),  # intergenic
+            ]
+        )
         result = calc_partitions(query, pl)
         assert "partition" in result
         assert "count" in result
@@ -444,11 +453,13 @@ class TestCalcPartitions:
 
     def test_calc_expected_partitions(self, gtf_path):
         pl = PartitionList.from_gtf(gtf_path, core_prom=100, prox_prom=2000)
-        query = make_regionset([
-            ("chr1", 950, 1050),
-            ("chr1", 2200, 2300),
-            ("chr1", 50000, 50100),
-        ])
+        query = make_regionset(
+            [
+                ("chr1", 950, 1050),
+                ("chr1", 2200, 2300),
+                ("chr1", 50000, 50100),
+            ]
+        )
         chrom_sizes = {"chr1": 100000, "chr2": 100000}
         result = calc_expected_partitions(query, pl, chrom_sizes)
         assert "partition" in result
@@ -470,10 +481,12 @@ class TestCalcSummarySignal:
         f.close()
         try:
             sm = SignalMatrix.from_tsv(f.name)
-            query = make_regionset([
-                ("chr1", 120, 180),  # overlaps rows 1 and 2
-                ("chr1", 350, 380),  # overlaps row 3
-            ])
+            query = make_regionset(
+                [
+                    ("chr1", 120, 180),  # overlaps rows 1 and 2
+                    ("chr1", 350, 380),  # overlaps row 3
+                ]
+            )
             result = calc_summary_signal(query, sm)
             assert "condition_names" in result
             assert "region_labels" in result

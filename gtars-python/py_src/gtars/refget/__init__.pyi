@@ -283,13 +283,10 @@ class FhrMetadata:
     funding: Optional[str]
 
     def __init__(self, **kwargs: Any) -> None: ...
-
     @staticmethod
     def from_json(path: str) -> "FhrMetadata": ...
-
     def to_dict(self) -> dict[str, Any]: ...
     def to_json(self, path: str) -> None: ...
-
     def __repr__(self) -> str: ...
 
 class RefgetStore:
@@ -713,7 +710,9 @@ class RefgetStore:
         """
         ...
 
-    def remove_collection(self, digest: str, remove_orphan_sequences: bool = False) -> bool:
+    def remove_collection(
+        self, digest: str, remove_orphan_sequences: bool = False
+    ) -> bool:
         """Remove a collection from the store.
 
         Args:
@@ -726,7 +725,9 @@ class RefgetStore:
         """
         ...
 
-    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
+    def get_collection_metadata(
+        self, collection_digest: str
+    ) -> Optional[SequenceCollectionMetadata]:
         """Get metadata for a collection by digest.
 
         Returns lightweight metadata without loading the full collection.
@@ -1036,7 +1037,9 @@ class RefgetStore:
         """
         ...
 
-    def find_collections_by_attribute(self, attr_name: str, attr_digest: str) -> List[str]:
+    def find_collections_by_attribute(
+        self, attr_name: str, attr_digest: str
+    ) -> List[str]:
         """Find collections by attribute digest.
 
         Args:
@@ -1189,10 +1192,14 @@ class RefgetStore:
     def add_sequence_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a sequence alias: namespace/alias maps to sequence digest."""
         ...
-    def get_sequence_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceMetadata]:
+    def get_sequence_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceMetadata]:
         """Resolve a sequence alias to sequence metadata (no data loading)."""
         ...
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
+    def get_sequence_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceRecord]:
         """Resolve a sequence alias and return the loaded sequence record.
 
         Returns None if the alias is not found.
@@ -1218,10 +1225,14 @@ class RefgetStore:
     def add_collection_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a collection alias: namespace/alias maps to collection digest."""
         ...
-    def get_collection_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
+    def get_collection_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollectionMetadata]:
         """Resolve a collection alias to collection metadata (no data loading)."""
         ...
-    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollection]:
+    def get_collection_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollection]:
         """Resolve a collection alias and return the loaded collection.
 
         Returns None if the alias is not found.
@@ -1288,7 +1299,6 @@ class RefgetStore:
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
-
 class ReadonlyRefgetStore:
     """An immutable RefgetStore for concurrent read access.
 
@@ -1336,7 +1346,9 @@ class ReadonlyRefgetStore:
         """List collections with pagination and optional attribute filtering."""
         ...
 
-    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
+    def get_collection_metadata(
+        self, collection_digest: str
+    ) -> Optional[SequenceCollectionMetadata]:
         """Get metadata for a collection by digest."""
         ...
 
@@ -1376,7 +1388,9 @@ class ReadonlyRefgetStore:
         """Compare two collections by digest."""
         ...
 
-    def find_collections_by_attribute(self, attr_name: str, attr_digest: str) -> List[str]:
+    def find_collections_by_attribute(
+        self, attr_name: str, attr_digest: str
+    ) -> List[str]:
         """Find collections by attribute digest."""
         ...
 
@@ -1418,7 +1432,9 @@ class ReadonlyRefgetStore:
         """
         ...
 
-    def get_sequence_by_name(self, collection_digest: str, sequence_name: str) -> SequenceRecord:
+    def get_sequence_by_name(
+        self, collection_digest: str, sequence_name: str
+    ) -> SequenceRecord:
         """Retrieve a sequence by collection digest and sequence name.
 
         Args:
@@ -1461,11 +1477,15 @@ class ReadonlyRefgetStore:
     # Alias API (read-only)
     # =========================================================================
 
-    def get_sequence_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceMetadata]:
+    def get_sequence_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceMetadata]:
         """Resolve a sequence alias to sequence metadata."""
         ...
 
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
+    def get_sequence_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceRecord]:
         """Resolve a sequence alias and return the loaded sequence record."""
         ...
 
@@ -1481,11 +1501,15 @@ class ReadonlyRefgetStore:
         """List all aliases in a sequence alias namespace."""
         ...
 
-    def get_collection_metadata_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
+    def get_collection_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollectionMetadata]:
         """Resolve a collection alias to collection metadata."""
         ...
 
-    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollection]:
+    def get_collection_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollection]:
         """Resolve a collection alias and return the loaded collection."""
         ...
 
@@ -1516,7 +1540,6 @@ class ReadonlyRefgetStore:
     def __len__(self) -> int: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
-
 
 def sha512t24u_digest(readable: Union[str, bytes]) -> str:
     """Compute the GA4GH SHA-512/24u digest for a sequence.

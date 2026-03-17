@@ -201,7 +201,7 @@ class TestRefget:
         with tempfile.TemporaryDirectory() as temp_dir_str:
             temp_dir = temp_dir_str
 
-            fasta_content = ">chr1\n" "ATGCATGCATGC\n" ">chr2\n" "GGGGAAAA\n"
+            fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n"
             temp_fasta_path = os.path.join(temp_dir, "test.fa")
             with open(temp_fasta_path, "w") as f:
                 f.write(fasta_content)
@@ -218,11 +218,7 @@ class TestRefget:
             chr2_md5 = md5_digest(b"GGGGAAAA")
 
             # Use only valid entries - errors now propagate instead of being silently skipped
-            bed_content = (
-                "chr1\t0\t5\n"
-                "chr1\t8\t12\n"
-                "chr2\t0\t4"
-            )
+            bed_content = "chr1\t0\t5\nchr1\t8\t12\nchr2\t0\t4"
             temp_bed_path = os.path.join(temp_dir, "test.bed")
             with open(temp_bed_path, "w") as f:
                 f.write(bed_content)
@@ -241,14 +237,12 @@ ATGCAATGC
 GGGG
 """
 
-            assert (
-                output_fa_content.strip() == expected_fa_content.strip()
-            ), "Output FASTA file content mismatch"
+            assert output_fa_content.strip() == expected_fa_content.strip(), (
+                "Output FASTA file content mismatch"
+            )
             print("✓ export_fasta_from_regions binding test passed.")
 
-            vec_result = store.substrings_from_regions(
-                collection_digest, temp_bed_path
-            )
+            vec_result = store.substrings_from_regions(collection_digest, temp_bed_path)
 
             expected_vec = [
                 RetrievedSequence(sequence="ATGCA", chrom_name="chr1", start=0, end=5),
@@ -256,9 +250,9 @@ GGGG
                 RetrievedSequence(sequence="GGGG", chrom_name="chr2", start=0, end=4),
             ]
 
-            assert len(vec_result) == len(
-                expected_vec
-            ), "Length of retrieved sequence list mismatch"
+            assert len(vec_result) == len(expected_vec), (
+                "Length of retrieved sequence list mismatch"
+            )
             for i in range(len(vec_result)):
                 assert vec_result[i].sequence == expected_vec[i].sequence
                 assert vec_result[i].chrom_name == expected_vec[i].chrom_name
@@ -275,8 +269,12 @@ GGGG
         result = digest_fasta(fasta_path)
 
         for seq_record in result.sequences:
-            assert seq_record.sequence is None, "digest_fasta should not load sequence data"
-            assert seq_record.decode() is None, "decode() should return None when data is None"
+            assert seq_record.sequence is None, (
+                "digest_fasta should not load sequence data"
+            )
+            assert seq_record.decode() is None, (
+                "decode() should return None when data is None"
+            )
 
     def test_decode_with_loaded_data(self):
         """Test that decode() returns correct sequences when data is loaded"""
@@ -294,13 +292,21 @@ GGGG
 
         assert len(result.sequences) == len(expected_sequences)
 
-        for seq_record, (expected_name, expected_seq) in zip(result.sequences, expected_sequences):
+        for seq_record, (expected_name, expected_seq) in zip(
+            result.sequences, expected_sequences
+        ):
             assert seq_record.metadata.name == expected_name
-            assert seq_record.sequence is not None, "load_fasta should load sequence data"
+            assert seq_record.sequence is not None, (
+                "load_fasta should load sequence data"
+            )
 
             decoded = seq_record.decode()
-            assert decoded is not None, "decode() should return Some when data is present"
-            assert decoded == expected_seq, f"Decoded sequence for {expected_name} should match expected"
+            assert decoded is not None, (
+                "decode() should return Some when data is present"
+            )
+            assert decoded == expected_seq, (
+                f"Decoded sequence for {expected_name} should match expected"
+            )
 
     def test_decode_with_store_sequences(self):
         """Test decode() with sequences retrieved from a store"""
@@ -317,7 +323,9 @@ GGGG
 
         decoded = seq.decode()
         assert decoded is not None
-        assert decoded == "TTGGGGAA", "Should correctly decode sequence from encoded store"
+        assert decoded == "TTGGGGAA", (
+            "Should correctly decode sequence from encoded store"
+        )
 
     def test_decode_raw_vs_encoded_storage(self):
         """Test that decode() works with both Raw and Encoded storage modes"""
@@ -357,8 +365,12 @@ GGGG
         # But sequences should have data loaded
         assert len(result.sequences) == 3
         for seq_record in result.sequences:
-            assert seq_record.sequence is not None, "load_fasta should load sequence data"
-            assert seq_record.decode() is not None, "Should be able to decode loaded data"
+            assert seq_record.sequence is not None, (
+                "load_fasta should load sequence data"
+            )
+            assert seq_record.decode() is not None, (
+                "Should be able to decode loaded data"
+            )
 
         # Verify digests match digest_fasta
         digest_result = digest_fasta(fasta_path)
@@ -486,9 +498,9 @@ GGGG
         # Test iteration yields SequenceMetadata
         count = 0
         for seq_meta in store:
-            assert hasattr(seq_meta, 'name')
-            assert hasattr(seq_meta, 'length')
-            assert hasattr(seq_meta, 'sha512t24u')
+            assert hasattr(seq_meta, "name")
+            assert hasattr(seq_meta, "length")
+            assert hasattr(seq_meta, "sha512t24u")
             count += 1
         assert count == 3
 
@@ -536,10 +548,10 @@ GGGG
         metadata_list = store.list_sequences()
         assert len(metadata_list) == 3
         for meta in metadata_list:
-            assert hasattr(meta, 'name')
-            assert hasattr(meta, 'length')
-            assert hasattr(meta, 'sha512t24u')
-            assert hasattr(meta, 'md5')
+            assert hasattr(meta, "name")
+            assert hasattr(meta, "length")
+            assert hasattr(meta, "sha512t24u")
+            assert hasattr(meta, "md5")
 
     def test_export_fasta(self):
         """Test export_fasta() exports full collection or subset"""
@@ -646,9 +658,9 @@ GGGG
 
         # Get full collection with sequences
         coll = store.get_collection(digest)
-        assert hasattr(coll, 'digest')
-        assert hasattr(coll, 'sequences')
-        assert hasattr(coll, 'lvl1')
+        assert hasattr(coll, "digest")
+        assert hasattr(coll, "sequences")
+        assert hasattr(coll, "lvl1")
         assert len(coll.sequences) == 3
         # Sequences should have data loaded
         for seq in coll.sequences:
@@ -664,8 +676,8 @@ GGGG
         assert len(collections) == 1
 
         coll = collections[0]
-        assert hasattr(coll, 'digest')
-        assert hasattr(coll, 'sequences')
+        assert hasattr(coll, "digest")
+        assert hasattr(coll, "sequences")
         assert len(coll.sequences) == 3
         # All sequences should have data loaded
         for seq in coll.sequences:
@@ -682,7 +694,7 @@ GGGG
 
         # All sequences should have data loaded
         for seq in sequences:
-            assert hasattr(seq, 'metadata')
+            assert hasattr(seq, "metadata")
             assert seq.decode() is not None
 
     def test_string_representations(self):
@@ -809,7 +821,9 @@ GGGG
     def test_collection_aliases(self):
         """Test collection alias add, forward lookup, and reverse lookup."""
         store = RefgetStore.in_memory()
-        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+        meta, _ = store.add_sequence_collection_from_fasta(
+            "../tests/data/fasta/base.fa"
+        )
 
         store.add_collection_alias("ucsc", "hg38", meta.digest)
 
@@ -824,7 +838,9 @@ GGGG
         """Test that aliases persist across store save/reload."""
         store_path = tmp_path / "store"
         store = RefgetStore.on_disk(str(store_path))
-        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+        meta, _ = store.add_sequence_collection_from_fasta(
+            "../tests/data/fasta/base.fa"
+        )
 
         store.add_collection_alias("ucsc", "hg38", meta.digest)
 
@@ -852,7 +868,9 @@ class TestAutoLoadingAliasMethods:
     def test_get_collection_by_alias_loads(self):
         """Test that get_collection_by_alias returns a loaded SequenceCollection."""
         store = RefgetStore.in_memory()
-        meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
+        meta, _ = store.add_sequence_collection_from_fasta(
+            "../tests/data/fasta/base.fa"
+        )
 
         store.add_collection_alias("ucsc", "hg38", meta.digest)
 
@@ -880,7 +898,7 @@ class TestAutoLoadingAliasMethods:
 
 
 def test_fhr_metadata_empty_by_default():
-    from gtars.refget import RefgetStore, FhrMetadata
+    from gtars.refget import RefgetStore
 
     store = RefgetStore.in_memory()
     meta, _ = store.add_sequence_collection_from_fasta("../tests/data/fasta/base.fa")
@@ -973,7 +991,6 @@ def test_fhr_metadata_persistence(tmp_path):
 
 def test_fhr_metadata_spec_fields():
     """Test creating FhrMetadata with all FHR 1.0 spec fields including new ones."""
-    import json
     from gtars.refget import FhrMetadata
 
     fhr = FhrMetadata(
@@ -1062,7 +1079,9 @@ def test_add_sequence_collection_sequences_retrievable():
     for seq_record in full_collection.sequences:
         digest = seq_record.metadata.sha512t24u
         retrieved = store2.get_sequence(digest)
-        assert retrieved is not None, f"Sequence {digest} should be retrievable from full collection"
+        assert retrieved is not None, (
+            f"Sequence {digest} should be retrievable from full collection"
+        )
         assert retrieved.metadata.length == seq_record.metadata.length
 
 

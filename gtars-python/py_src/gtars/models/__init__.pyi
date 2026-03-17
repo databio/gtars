@@ -332,7 +332,6 @@ class GenomeAssembly:
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 
-
 class TssIndex:
     def __init__(self, path: str) -> "TssIndex":
         """
@@ -364,7 +363,6 @@ class TssIndex:
     def __repr__(self) -> str: ...
     def __len__(self) -> int: ...
 
-
 class GeneModel:
     @staticmethod
     def from_gtf(
@@ -379,12 +377,9 @@ class GeneModel:
 
     @property
     def n_genes(self) -> int: ...
-
     @property
     def n_exons(self) -> int: ...
-
     def __repr__(self) -> str: ...
-
 
 class PartitionList:
     @staticmethod
@@ -422,7 +417,6 @@ class PartitionList:
     def __repr__(self) -> str: ...
     def __len__(self) -> int: ...
 
-
 class SignalMatrix:
     @staticmethod
     def load_bin(path: str) -> "SignalMatrix":
@@ -440,16 +434,12 @@ class SignalMatrix:
 
     @property
     def condition_names(self) -> List[str]: ...
-
     @property
     def n_conditions(self) -> int: ...
-
     @property
     def n_regions(self) -> int: ...
-
     def __repr__(self) -> str: ...
     def __len__(self) -> int: ...
-
 
 class GenomicDistAnnotation:
     @staticmethod
