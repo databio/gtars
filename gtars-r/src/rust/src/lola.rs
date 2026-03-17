@@ -5,7 +5,7 @@ use gtars_igd::igd::Igd;
 use gtars_lola::database::{RegionDB, RegionSetAnno};
 use gtars_lola::enrichment::run_lola;
 use gtars_lola::models::{Direction, LolaConfig};
-use gtars_lola::output::apply_fdr_correction;
+use gtars_lola::output::{annotate_results, apply_fdr_correction};
 use gtars_lola::universe;
 
 // =========================================================================
@@ -55,6 +55,15 @@ fn extract_region_sets(user_sets: List) -> extendr_api::Result<Vec<RegionSet>> {
     Ok(sets)
 }
 
+/// Convert an empty string to None (becomes NA in R).
+fn empty_to_na(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
 /// Convert LOLA results to an R list (data.frame-like structure).
 fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
     let n = results.len();
@@ -62,16 +71,24 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
     let mut db_set = Vec::with_capacity(n);
     let mut p_value_log = Vec::with_capacity(n);
     let mut odds_ratio = Vec::with_capacity(n);
-    let mut support = Vec::with_capacity(n);
-    let mut rnk_pv = Vec::with_capacity(n);
-    let mut rnk_or = Vec::with_capacity(n);
-    let mut rnk_sup = Vec::with_capacity(n);
-    let mut max_rnk = Vec::with_capacity(n);
+    let mut support: Vec<i32> = Vec::with_capacity(n);
+    let mut rnk_pv: Vec<i32> = Vec::with_capacity(n);
+    let mut rnk_or: Vec<i32> = Vec::with_capacity(n);
+    let mut rnk_sup: Vec<i32> = Vec::with_capacity(n);
+    let mut max_rnk: Vec<i32> = Vec::with_capacity(n);
     let mut mean_rnk = Vec::with_capacity(n);
-    let mut b_vec = Vec::with_capacity(n);
-    let mut c_vec = Vec::with_capacity(n);
-    let mut d_vec = Vec::with_capacity(n);
+    let mut b_vec: Vec<i32> = Vec::with_capacity(n);
+    let mut c_vec: Vec<i32> = Vec::with_capacity(n);
+    let mut d_vec: Vec<i32> = Vec::with_capacity(n);
+    let mut collection: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut description: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut cell_type: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut tissue: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut antibody: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut treatment: Vec<Option<String>> = Vec::with_capacity(n);
+    let mut data_source: Vec<Option<String>> = Vec::with_capacity(n);
     let mut filename = Vec::with_capacity(n);
+    let mut db_set_size: Vec<i32> = Vec::with_capacity(n);
 
     let mut q_value: Vec<Option<f64>> = Vec::with_capacity(n);
 
@@ -80,16 +97,24 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         db_set.push((r.db_set + 1) as i32);
         p_value_log.push(r.p_value_log);
         odds_ratio.push(r.odds_ratio);
-        support.push(r.support as f64);
+        support.push(r.support as i32);
         rnk_pv.push(r.rnk_pv as i32);
         rnk_or.push(r.rnk_or as i32);
         rnk_sup.push(r.rnk_sup as i32);
         max_rnk.push(r.max_rnk as i32);
         mean_rnk.push(r.mean_rnk);
-        b_vec.push(r.b as f64);
-        c_vec.push(r.c as f64);
-        d_vec.push(r.d as f64);
+        b_vec.push(r.b as i32);
+        c_vec.push(r.c as i32);
+        d_vec.push(r.d as i32);
+        collection.push(empty_to_na(&r.collection));
+        description.push(empty_to_na(&r.description));
+        cell_type.push(empty_to_na(&r.cell_type));
+        tissue.push(empty_to_na(&r.tissue));
+        antibody.push(empty_to_na(&r.antibody));
+        treatment.push(empty_to_na(&r.treatment));
+        data_source.push(empty_to_na(&r.data_source));
         filename.push(r.filename.clone());
+        db_set_size.push(r.db_set_size as i32);
         q_value.push(r.q_value);
     }
 
@@ -102,9 +127,20 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         })
         .collect();
 
+    // Convert Option<String> to Rstr (NA for None)
+    let to_rstr = |v: &[Option<String>]| -> Vec<Rstr> {
+        v.iter()
+            .map(|s| match s {
+                Some(val) => Rstr::from(val.as_str()),
+                None => Rstr::na(),
+            })
+            .collect()
+    };
+
     list!(
         userSet = user_set,
         dbSet = db_set,
+        collection = to_rstr(&collection),
         pValueLog = p_value_log,
         oddsRatio = odds_ratio,
         support = support,
@@ -116,8 +152,15 @@ fn results_to_list(results: &[gtars_lola::models::LolaResult]) -> List {
         b = b_vec,
         c = c_vec,
         d = d_vec,
+        description = to_rstr(&description),
+        cellType = to_rstr(&cell_type),
+        tissue = to_rstr(&tissue),
+        antibody = to_rstr(&antibody),
+        treatment = to_rstr(&treatment),
+        dataSource = to_rstr(&data_source),
         filename = filename,
-        qValue = q_value_r
+        qValue = q_value_r,
+        size = db_set_size
     )
 }
 
@@ -271,6 +314,7 @@ pub fn r_run_lola(
             let mut results = run_lola(&db.igd, &user_sets, universe, &config)
                 .map_err(|e| extendr_api::Error::Other(format!("LOLA error: {}", e)))?;
 
+            annotate_results(&mut results, db);
             apply_fdr_correction(&mut results);
 
             Ok(results_to_list(&results).into())
@@ -377,36 +421,45 @@ pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
     with_regiondb!(db, db_ref, {
         let n = db_ref.region_anno.len();
         let mut filename = Vec::with_capacity(n);
-        let mut cell_type = Vec::with_capacity(n);
-        let mut description = Vec::with_capacity(n);
-        let mut tissue = Vec::with_capacity(n);
-        let mut data_source = Vec::with_capacity(n);
-        let mut antibody = Vec::with_capacity(n);
-        let mut treatment = Vec::with_capacity(n);
-        let mut collection = Vec::with_capacity(n);
+        let mut cell_type: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut description: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut tissue: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut data_source: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut antibody: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut treatment: Vec<Option<String>> = Vec::with_capacity(n);
+        let mut collection: Vec<Option<String>> = Vec::with_capacity(n);
         let mut size = Vec::with_capacity(n);
 
         for (i, a) in db_ref.region_anno.iter().enumerate() {
             filename.push(a.filename.clone());
-            cell_type.push(a.cell_type.clone());
-            description.push(a.description.clone());
-            tissue.push(a.tissue.clone());
-            data_source.push(a.data_source.clone());
-            antibody.push(a.antibody.clone());
-            treatment.push(a.treatment.clone());
-            collection.push(a.collection.clone());
+            cell_type.push(empty_to_na(&a.cell_type));
+            description.push(empty_to_na(&a.description));
+            tissue.push(empty_to_na(&a.tissue));
+            data_source.push(empty_to_na(&a.data_source));
+            antibody.push(empty_to_na(&a.antibody));
+            treatment.push(empty_to_na(&a.treatment));
+            collection.push(empty_to_na(&a.collection));
             size.push(db_ref.region_sets[i].len() as i32);
         }
 
+        let to_rstr = |v: &[Option<String>]| -> Vec<Rstr> {
+            v.iter()
+                .map(|s| match s {
+                    Some(val) => Rstr::from(val.as_str()),
+                    None => Rstr::na(),
+                })
+                .collect()
+        };
+
         Ok(list!(
             filename = filename,
-            cellType = cell_type,
-            description = description,
-            tissue = tissue,
-            dataSource = data_source,
-            antibody = antibody,
-            treatment = treatment,
-            collection = collection,
+            cellType = to_rstr(&cell_type),
+            description = to_rstr(&description),
+            tissue = to_rstr(&tissue),
+            dataSource = to_rstr(&data_source),
+            antibody = to_rstr(&antibody),
+            treatment = to_rstr(&treatment),
+            collection = to_rstr(&collection),
             size = size
         )
         .into())

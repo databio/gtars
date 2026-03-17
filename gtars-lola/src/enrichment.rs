@@ -160,13 +160,12 @@ impl ContingencyTable {
     }
 
     /// Compute -log10(p-value).
+    ///
+    /// Adds 1e-322 floor to avoid infinity, matching R LOLA's
+    /// `-log10(pValueLog + 10^-322)` behavior. Caps at ~322.
     pub fn p_value_log(&self, direction: Direction) -> f64 {
         let p = self.fisher_pvalue(direction);
-        if p <= 0.0 {
-            f64::INFINITY
-        } else {
-            -p.log10()
-        }
+        -(p + 1e-322_f64).log10()
     }
 }
 
@@ -214,38 +213,34 @@ pub fn run_lola(
         for db_idx in 0..n_db {
             let a = user_hits[db_idx];
 
-            // Validate: user hits cannot exceed universe hits (user must be subset of universe)
-            if a > universe_hits[db_idx] {
-                return Err(LolaError::NegativeContingency {
-                    field: "b",
-                    value: universe_hits[db_idx] as i64 - a as i64,
-                    db_set: db_idx,
-                });
-            }
-            let b = universe_hits[db_idx] - a;
+            // Compute b, c, d as signed values, matching R LOLA behavior.
+            // R LOLA passes negative values through and warns.
+            let b = universe_hits[db_idx] as i64 - a as i64;
+            let c = user_set_size as i64 - a as i64;
+            let d = universe_size as i64 - a as i64 - b - c;
 
-            if a > user_set_size {
-                return Err(LolaError::NegativeContingency {
-                    field: "c",
-                    value: user_set_size as i64 - a as i64,
-                    db_set: db_idx,
-                });
+            let has_negative = b < 0 || c < 0 || d < 0;
+            if has_negative {
+                eprintln!(
+                    "Warning: negative contingency value for db_set {} (user_set {}). \
+                     This means your user sets contain regions outside the universe.",
+                    db_idx, us_idx
+                );
             }
-            let c = user_set_size - a;
 
-            let abc = a + b + c;
-            if abc > universe_size {
-                return Err(LolaError::NegativeContingency {
-                    field: "d",
-                    value: universe_size as i64 - abc as i64,
-                    db_set: db_idx,
-                });
-            }
-            let d = universe_size - abc;
-
-            let ct = ContingencyTable { a, b, c, d };
-            let pv_log = ct.p_value_log(config.direction);
-            let or = ct.odds_ratio();
+            // Only compute Fisher test when all values are non-negative.
+            // For negative rows, return p_value_log=0 and odds_ratio=NaN.
+            let (pv_log, or) = if has_negative {
+                (0.0, f64::NAN)
+            } else {
+                let ct = ContingencyTable {
+                    a,
+                    b: b as u64,
+                    c: c as u64,
+                    d: d as u64,
+                };
+                (ct.p_value_log(config.direction), ct.odds_ratio())
+            };
 
             let filename = if db_idx < igd.file_info.len() {
                 igd.file_info[db_idx].filename.clone()
@@ -269,6 +264,14 @@ pub fn run_lola(
                 d,
                 q_value: None,
                 filename,
+                collection: String::new(),
+                description: String::new(),
+                cell_type: String::new(),
+                tissue: String::new(),
+                antibody: String::new(),
+                treatment: String::new(),
+                data_source: String::new(),
+                db_set_size: 0,
             });
         }
 
@@ -278,7 +281,71 @@ pub fn run_lola(
         all_results.extend(user_results);
     }
 
+    // Sort by descending pValueLog, then ascending meanRnk (matches R LOLA output order)
+    all_results.sort_by(|a, b| {
+        b.p_value_log
+            .partial_cmp(&a.p_value_log)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| {
+                a.mean_rnk
+                    .partial_cmp(&b.mean_rnk)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+    });
+
     Ok(all_results)
+}
+
+/// Compare two f64 values for tie-breaking equality.
+/// NaN == NaN, and normal values use bitwise equality (exact match).
+fn f64_tied(a: f64, b: f64) -> bool {
+    if a.is_nan() && b.is_nan() {
+        return true;
+    }
+    a.to_bits() == b.to_bits()
+}
+
+/// Assign min-rank to a pre-sorted index array (ties.method="min").
+/// `get_val` extracts the ranking key; `set_rank` writes the rank back.
+fn assign_min_ranks_f64(
+    indices: &[usize],
+    results: &mut [LolaResult],
+    get_val: impl Fn(&LolaResult) -> f64,
+    mut set_rank: impl FnMut(&mut LolaResult, usize),
+) {
+    if indices.is_empty() {
+        return;
+    }
+    let mut rank = 1usize; // rank of the current tie group
+    set_rank(&mut results[indices[0]], 1);
+    for i in 1..indices.len() {
+        let prev = get_val(&results[indices[i - 1]]);
+        let curr = get_val(&results[indices[i]]);
+        if !f64_tied(prev, curr) {
+            rank = i + 1; // new group starts at 1-based position
+        }
+        set_rank(&mut results[indices[i]], rank);
+    }
+}
+
+/// Assign min-rank for u64 values.
+fn assign_min_ranks_u64(
+    indices: &[usize],
+    results: &mut [LolaResult],
+    get_val: impl Fn(&LolaResult) -> u64,
+    mut set_rank: impl FnMut(&mut LolaResult, usize),
+) {
+    if indices.is_empty() {
+        return;
+    }
+    let mut rank = 1usize;
+    set_rank(&mut results[indices[0]], 1);
+    for i in 1..indices.len() {
+        if get_val(&results[indices[i - 1]]) != get_val(&results[indices[i]]) {
+            rank = i + 1;
+        }
+        set_rank(&mut results[indices[i]], rank);
+    }
 }
 
 /// Assign ranks to results by p_value_log (descending), odds_ratio (descending),
@@ -289,17 +356,18 @@ fn rank_results(results: &mut [LolaResult]) {
         return;
     }
 
-    // Rank by p_value_log (descending — highest -log10(p) = most significant gets rank 1)
+    // Helper: assign min-rank (ties.method="min") after sorting indices descending.
+    // All tied values get the rank of the first occurrence in sorted order.
     let mut indices: Vec<usize> = (0..n).collect();
+
+    // Rank by p_value_log (descending — highest -log10(p) = most significant gets rank 1)
     indices.sort_by(|&a, &b| {
         results[b]
             .p_value_log
             .partial_cmp(&results[a].p_value_log)
             .unwrap_or(std::cmp::Ordering::Equal)
     });
-    for (rank, &idx) in indices.iter().enumerate() {
-        results[idx].rnk_pv = rank + 1;
-    }
+    assign_min_ranks_f64(&indices, results, |r| r.p_value_log, |r, v| r.rnk_pv = v);
 
     // Rank by odds_ratio (descending, NaN gets worst rank)
     indices.sort_by(|&a, &b| {
@@ -307,20 +375,16 @@ fn rank_results(results: &mut [LolaResult]) {
         let rb = results[b].odds_ratio;
         match (ra.is_nan(), rb.is_nan()) {
             (true, true) => std::cmp::Ordering::Equal,
-            (true, false) => std::cmp::Ordering::Greater,  // NaN sorts last (worst rank)
+            (true, false) => std::cmp::Ordering::Greater,
             (false, true) => std::cmp::Ordering::Less,
             (false, false) => rb.partial_cmp(&ra).unwrap_or(std::cmp::Ordering::Equal),
         }
     });
-    for (rank, &idx) in indices.iter().enumerate() {
-        results[idx].rnk_or = rank + 1;
-    }
+    assign_min_ranks_f64(&indices, results, |r| r.odds_ratio, |r, v| r.rnk_or = v);
 
     // Rank by support (descending)
     indices.sort_by(|&a, &b| results[b].support.cmp(&results[a].support));
-    for (rank, &idx) in indices.iter().enumerate() {
-        results[idx].rnk_sup = rank + 1;
-    }
+    assign_min_ranks_u64(&indices, results, |r| r.support, |r, v| r.rnk_sup = v);
 
     // Compute combined ranks
     for r in results.iter_mut() {
@@ -591,6 +655,7 @@ mod tests {
                 d: 0,
                 q_value: None,
                 filename: "a.bed".into(),
+                ..Default::default()
             },
             LolaResult {
                 user_set: 0,
@@ -598,16 +663,8 @@ mod tests {
                 p_value_log: 10.0,
                 odds_ratio: 1.0,
                 support: 200,
-                rnk_pv: 0,
-                rnk_or: 0,
-                rnk_sup: 0,
-                max_rnk: 0,
-                mean_rnk: 0.0,
-                b: 0,
-                c: 0,
-                d: 0,
-                q_value: None,
                 filename: "b.bed".into(),
+                ..Default::default()
             },
             LolaResult {
                 user_set: 0,
@@ -615,16 +672,8 @@ mod tests {
                 p_value_log: 3.0,
                 odds_ratio: 5.0,
                 support: 50,
-                rnk_pv: 0,
-                rnk_or: 0,
-                rnk_sup: 0,
-                max_rnk: 0,
-                mean_rnk: 0.0,
-                b: 0,
-                c: 0,
-                d: 0,
-                q_value: None,
                 filename: "c.bed".into(),
+                ..Default::default()
             },
         ];
 
@@ -1025,8 +1074,8 @@ mod tests {
     }
 
     #[test]
-    fn test_run_lola_user_not_subset_of_universe() {
-        // User set has regions NOT in the universe — should return NegativeContingency error
+    fn test_run_lola_user_not_subset_of_universe_passes_negative() {
+        // User set has regions NOT in the universe — should warn and pass through negative b
         let sets = vec![(
             "db0.bed".to_string(),
             vec![("chr1".to_string(), 100, 200)],
@@ -1034,7 +1083,7 @@ mod tests {
         let igd = Igd::from_region_sets(sets);
 
         // User has 3 regions that overlap db0, but universe only has 1 that overlaps db0.
-        // This means user_hits > universe_hits, which is invalid.
+        // This means user_hits (3) > universe_hits (1) — b = 1 - 3 = -2.
         let user = make_region_set(vec![
             make_region("chr1", 110, 120),
             make_region("chr1", 130, 140),
@@ -1047,13 +1096,11 @@ mod tests {
         ]);
 
         let result = run_lola(&igd, &[user], &universe, &LolaConfig::default());
-        assert!(result.is_err(), "Expected NegativeContingency error");
-        let err = result.unwrap_err();
-        assert!(
-            matches!(err, LolaError::NegativeContingency { field: "b", .. }),
-            "Expected NegativeContingency for field 'b', got: {}",
-            err
-        );
+        assert!(result.is_ok(), "Should succeed with negative values, not error");
+        let results = result.unwrap();
+        assert!(results[0].b < 0, "b should be negative, got {}", results[0].b);
+        assert_eq!(results[0].p_value_log, 0.0, "p_value_log should be 0 for negative row");
+        assert!(results[0].odds_ratio.is_nan(), "odds_ratio should be NaN for negative row");
     }
 
     #[test]
@@ -1138,16 +1185,8 @@ mod tests {
                 p_value_log: 5.0,
                 odds_ratio: f64::NAN,
                 support: 10,
-                rnk_pv: 0,
-                rnk_or: 0,
-                rnk_sup: 0,
-                max_rnk: 0,
-                mean_rnk: 0.0,
-                b: 0,
-                c: 0,
-                d: 0,
-                q_value: None,
                 filename: "nan.bed".into(),
+                ..Default::default()
             },
             LolaResult {
                 user_set: 0,
@@ -1155,16 +1194,8 @@ mod tests {
                 p_value_log: 3.0,
                 odds_ratio: 2.0,
                 support: 20,
-                rnk_pv: 0,
-                rnk_or: 0,
-                rnk_sup: 0,
-                max_rnk: 0,
-                mean_rnk: 0.0,
-                b: 0,
-                c: 0,
-                d: 0,
-                q_value: None,
                 filename: "real.bed".into(),
+                ..Default::default()
             },
         ];
 

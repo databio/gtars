@@ -51,7 +51,7 @@ pub struct ContingencyTable {
 }
 
 /// Result for a single (user set, DB set) pair.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct LolaResult {
     /// Index of the user set (0-based).
     pub user_set: usize,
@@ -73,12 +73,29 @@ pub struct LolaResult {
     pub max_rnk: usize,
     /// mean(rnk_pv, rnk_or, rnk_sup).
     pub mean_rnk: f64,
-    /// Contingency table values.
-    pub b: u64,
-    pub c: u64,
-    pub d: u64,
+    /// Contingency table values (signed: can be negative when user set
+    /// extends outside the universe, matching R LOLA behavior).
+    pub b: i64,
+    pub c: i64,
+    pub d: i64,
     /// FDR-adjusted p-value (Benjamini-Hochberg). None until computed.
     pub q_value: Option<f64>,
     /// DB set filename (from IGD file_info).
     pub filename: String,
+    /// Collection name this DB set belongs to.
+    pub collection: String,
+    /// Description from index.txt.
+    pub description: String,
+    /// Cell type annotation.
+    pub cell_type: String,
+    /// Tissue annotation.
+    pub tissue: String,
+    /// Antibody annotation.
+    pub antibody: String,
+    /// Treatment annotation.
+    pub treatment: String,
+    /// Data source annotation.
+    pub data_source: String,
+    /// Number of regions in the DB set.
+    pub db_set_size: u64,
 }

@@ -144,12 +144,14 @@ pub fn build_restricted_universe(user_sets: &[RegionSet]) -> RegionSet {
         return RegionSet::from(Vec::<Region>::new());
     }
 
-    // Concatenate all user sets, then reduce (merge overlapping intervals)
+    // Concatenate all user sets, then disjoin (matches R LOLA's
+    // `disjoin(unlist(userSets))` — breaks overlapping intervals
+    // into non-overlapping pieces at every boundary).
     let mut combined = user_sets[0].clone();
     for us in &user_sets[1..] {
         combined = combined.concat(us);
     }
-    combined.reduce()
+    combined.disjoin()
 }
 
 #[cfg(test)]
@@ -298,20 +300,24 @@ mod tests {
 
         let restricted = build_restricted_universe(&[user0, user1]);
 
-        // chr1: [100,200) + [150,250) merge to [100,250); [300,400) stays
-        // chr2: [100,200)
-        assert_eq!(restricted.regions.len(), 3);
+        // disjoin: [100,200) + [150,250) → [100,150), [150,200), [200,250)
+        // plus [300,400) on chr1, [100,200) on chr2
+        assert_eq!(restricted.regions.len(), 5);
 
         let chr1: Vec<&Region> = restricted
             .regions
             .iter()
             .filter(|r| r.chr == "chr1")
             .collect();
-        assert_eq!(chr1.len(), 2);
+        assert_eq!(chr1.len(), 4);
         assert_eq!(chr1[0].start, 100);
-        assert_eq!(chr1[0].end, 250); // merged
-        assert_eq!(chr1[1].start, 300);
-        assert_eq!(chr1[1].end, 400);
+        assert_eq!(chr1[0].end, 150);
+        assert_eq!(chr1[1].start, 150);
+        assert_eq!(chr1[1].end, 200);
+        assert_eq!(chr1[2].start, 200);
+        assert_eq!(chr1[2].end, 250);
+        assert_eq!(chr1[3].start, 300);
+        assert_eq!(chr1[3].end, 400);
 
         let chr2: Vec<&Region> = restricted
             .regions
