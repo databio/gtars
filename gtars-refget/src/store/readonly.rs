@@ -7,6 +7,8 @@ use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
+use indexmap::IndexMap;
+
 use anyhow::{anyhow, Context, Result};
 
 use crate::collection::{read_rgsi_file, SequenceMetadataExt, SequenceRecordExt};
@@ -36,8 +38,8 @@ pub struct ReadonlyRefgetStore {
     /// MD5 digest -> SHA512t24u digest lookup
     pub(crate) md5_lookup: HashMap<[u8; 32], [u8; 32]>,
 
-    /// Collection digest -> {name -> SHA512t24u digest}
-    pub(crate) name_lookup: HashMap<[u8; 32], HashMap<String, [u8; 32]>>,
+    /// Collection digest -> {name -> SHA512t24u digest} (IndexMap preserves FASTA insertion order)
+    pub(crate) name_lookup: HashMap<[u8; 32], IndexMap<String, [u8; 32]>>,
     /// Active sequence collections (now using SequenceCollectionRecord for Stub/Full pattern)
     pub(crate) collections: HashMap<[u8; 32], SequenceCollectionRecord>,
     /// Storage strategy for sequences
@@ -409,12 +411,6 @@ impl ReadonlyRefgetStore {
             ));
         }
 
-        let seq_digests: Vec<[u8; 32]> = self
-            .name_lookup
-            .get(&key)
-            .map(|name_map| name_map.values().cloned().collect())
-            .unwrap_or_default();
-
         let metadata = self
             .collections
             .get(&key)
@@ -422,10 +418,29 @@ impl ReadonlyRefgetStore {
             .metadata()
             .clone();
 
-        let sequences: Vec<SequenceRecord> = seq_digests
-            .iter()
-            .filter_map(|seq_key| self.sequence_store.get(seq_key).cloned())
-            .collect();
+        // Iterate name_lookup for (name, digest) pairs so each record gets the
+        // correct per-collection name, not the last-written global name.
+        let sequences: Vec<SequenceRecord> = self
+            .name_lookup
+            .get(&key)
+            .map(|name_map| {
+                name_map
+                    .iter()
+                    .filter_map(|(name, seq_key)| {
+                        let record = self.sequence_store.get(seq_key)?;
+                        let mut meta = record.metadata().clone();
+                        meta.name = name.clone();
+                        Some(match record.sequence() {
+                            Some(seq) => SequenceRecord::Full {
+                                metadata: meta,
+                                sequence: seq.to_vec(),
+                            },
+                            None => SequenceRecord::Stub(meta),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
 
         Ok(crate::digest::SequenceCollection {
             metadata,
@@ -515,6 +530,43 @@ impl ReadonlyRefgetStore {
         }
 
         Ok(true)
+    }
+
+    // =========================================================================
+    // Import from another store
+    // =========================================================================
+
+    /// Import a single collection (with all its sequences, aliases, and FHR
+    /// metadata) from another store into this store.
+    ///
+    /// The source store must have the collection loaded (call
+    /// `load_collection()` or `load_all_collections()` first).
+    pub fn import_collection(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
+        let collection = source.get_collection(digest)?;
+        self.add_sequence_collection(collection)?;
+
+        // Copy sequence aliases for every sequence in the imported collection
+        let coll_key = digest.to_key();
+        if let Some(name_map) = source.name_lookup.get(&coll_key) {
+            for seq_key in name_map.values() {
+                let seq_digest = key_to_digest_string(seq_key);
+                for (ns, alias) in source.aliases.reverse_lookup_sequence(&seq_digest) {
+                    self.add_sequence_alias(&ns, &alias, &seq_digest)?;
+                }
+            }
+        }
+
+        // Copy collection aliases
+        for (ns, alias) in source.aliases.reverse_lookup_collection(digest) {
+            self.add_collection_alias(&ns, &alias, digest)?;
+        }
+
+        // Copy FHR metadata
+        if let Some(fhr) = source.get_fhr_metadata(digest) {
+            self.set_fhr_metadata(digest, fhr.clone())?;
+        }
+
+        Ok(())
     }
 
     // =========================================================================
@@ -903,7 +955,7 @@ impl ReadonlyRefgetStore {
                 ));
             }
 
-            let mut name_map = HashMap::new();
+            let mut name_map = IndexMap::new();
             for sequence_record in &collection.sequences {
                 let metadata = sequence_record.metadata();
                 let sha512_key = metadata.sha512t24u.to_key();
@@ -938,7 +990,7 @@ impl ReadonlyRefgetStore {
                     Vec::new()
                 };
 
-            let mut name_map = HashMap::new();
+            let mut name_map = IndexMap::new();
             for (metadata, sha512_key, md5_key) in sequences_data {
                 name_map.insert(metadata.name.clone(), sha512_key);
 

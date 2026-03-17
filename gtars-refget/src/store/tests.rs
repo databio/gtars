@@ -1431,3 +1431,292 @@ fn test_old_rgstore_json_without_state_digests_loads() {
     let store = RefgetStore::open_local(&store_path).unwrap();
     assert_eq!(store.stats().n_sequences, 0);
 }
+
+// =========================================================================
+// Order preservation tests
+// =========================================================================
+
+#[test]
+fn test_collection_order_preserved_after_roundtrip() {
+    // Build a FASTA with many sequences in a specific order
+    let fasta_content = "\
+>chr1\nACGTACGT\n\
+>chr2\nGGGGAAAA\n\
+>chr3\nTTTTCCCC\n\
+>chr10\nAAAAAAAA\n\
+>chr11\nCCCCCCCC\n\
+>chr22\nGGGGGGGG\n\
+>chrX\nTTTTTTTT\n\
+>chrY\nACACACCA\n\
+";
+    let expected_names: Vec<&str> = vec!["chr1","chr2","chr3","chr10","chr11","chr22","chrX","chrY"];
+
+    // Write FASTA to a temp dir and add to a disk-backed store
+    let dir = tempdir().unwrap();
+    let fasta_path = dir.path().join("order_test.fa");
+    fs::write(&fasta_path, fasta_content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    store.write().unwrap();
+
+    // Load the collection before reopening and record the names order
+    store.load_all_collections().unwrap();
+    let original_collection = store.get_collection(&digest).unwrap();
+    let original_names: Vec<String> = original_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().name.clone())
+        .collect();
+    assert_eq!(
+        original_names,
+        expected_names,
+        "Names should match FASTA order before roundtrip"
+    );
+
+    // Drop and reopen from disk
+    drop(store);
+    let mut reloaded = RefgetStore::open_local(&store_path).unwrap();
+    reloaded.load_all_collections().unwrap();
+    let reloaded_collection = reloaded.get_collection(&digest).unwrap();
+    let reloaded_names: Vec<String> = reloaded_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().name.clone())
+        .collect();
+
+    assert_eq!(
+        reloaded_names, original_names,
+        "Sequence order must be identical after save/reload roundtrip"
+    );
+
+    // Also verify lengths and digests are in corresponding order
+    let original_lengths: Vec<usize> = original_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().length)
+        .collect();
+    let reloaded_lengths: Vec<usize> = reloaded_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().length)
+        .collect();
+    assert_eq!(
+        reloaded_lengths, original_lengths,
+        "Lengths must be in same order after roundtrip"
+    );
+
+    let original_digests: Vec<String> = original_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().sha512t24u.clone())
+        .collect();
+    let reloaded_digests: Vec<String> = reloaded_collection
+        .sequences
+        .iter()
+        .map(|s| s.metadata().sha512t24u.clone())
+        .collect();
+    assert_eq!(
+        reloaded_digests, original_digests,
+        "SHA512t24u digests must be in same order after roundtrip"
+    );
+}
+
+// =========================================================================
+// Name source tests
+// =========================================================================
+
+/// Test that get_collection() returns per-collection names, not global last-written names.
+///
+/// When the same sequence bytes appear in two collections under different names
+/// (e.g., "chr1" in one, "chr2" in another), get_collection() must return the
+/// correct name for each collection — not the name from whichever was loaded last.
+#[test]
+fn test_shared_sequence_different_names() {
+    let dir = tempdir().unwrap();
+
+    // subset.fa: contains chr1=GGAA (among others)
+    let fasta1_content = ">chrX\nTTGGGGAA\n>chr1\nGGAA\n";
+    let fasta1_path = dir.path().join("subset.fa");
+    fs::write(&fasta1_path, fasta1_content).unwrap();
+
+    // swap_wo_coords.fa: contains chr2=GGAA (same bytes, different name)
+    let fasta2_content = ">chrX\nTTGGGGAA\n>chr2\nGGAA\n>chr1\nGCGC\n";
+    let fasta2_path = dir.path().join("swap_wo_coords.fa");
+    fs::write(&fasta2_path, fasta2_content).unwrap();
+
+    let mut store = RefgetStore::in_memory();
+
+    let (meta1, _) = store
+        .add_sequence_collection_from_fasta(&fasta1_path, FastaImportOptions::new())
+        .unwrap();
+
+    let (meta2, _) = store
+        .add_sequence_collection_from_fasta(&fasta2_path, FastaImportOptions::new())
+        .unwrap();
+
+    // Retrieve the collection from the first FASTA (subset.fa)
+    let coll1 = store.get_collection(&meta1.digest).unwrap();
+    let names1: Vec<&str> = coll1.sequences.iter().map(|s| s.metadata().name.as_str()).collect();
+
+    // The first FASTA has chrX and chr1 — "chr1" must appear, not "chr2"
+    assert!(
+        names1.contains(&"chr1"),
+        "Collection 1 (subset.fa) should contain 'chr1', got: {:?}",
+        names1
+    );
+    assert!(
+        !names1.contains(&"chr2"),
+        "Collection 1 (subset.fa) must NOT contain 'chr2', got: {:?}",
+        names1
+    );
+
+    // Retrieve the collection from the second FASTA (swap_wo_coords.fa)
+    let coll2 = store.get_collection(&meta2.digest).unwrap();
+    let names2: Vec<&str> = coll2.sequences.iter().map(|s| s.metadata().name.as_str()).collect();
+
+    // The second FASTA has chrX, chr2, and chr1 — the sequence GGAA is "chr2" here
+    assert!(
+        names2.contains(&"chr2"),
+        "Collection 2 (swap_wo_coords.fa) should contain 'chr2', got: {:?}",
+        names2
+    );
+}
+
+// =========================================================================
+// Import collection tests
+// =========================================================================
+
+#[test]
+fn test_import_collection_basic() {
+    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let mut target = RefgetStore::in_memory();
+
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Target should have the collection
+    let coll = target.get_collection(&digest).unwrap();
+    assert_eq!(coll.sequences.len(), 2);
+}
+
+#[test]
+fn test_import_collection_copies_sequence_aliases() {
+    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+
+    // Add sequence aliases in source
+    let coll = source.get_collection(&digest).unwrap();
+    let seq0_digest = coll.sequences[0].metadata().sha512t24u.clone();
+    let seq1_digest = coll.sequences[1].metadata().sha512t24u.clone();
+    source.add_sequence_alias("ncbi", "NC_000001.1", &seq0_digest).unwrap();
+    source.add_sequence_alias("ucsc", "chr1", &seq0_digest).unwrap();
+    source.add_sequence_alias("ncbi", "NC_000002.1", &seq1_digest).unwrap();
+
+    let mut target = RefgetStore::in_memory();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Target should have the sequence aliases
+    let ns = target.list_sequence_alias_namespaces();
+    assert!(ns.contains(&"ncbi".to_string()), "Missing ncbi namespace: {:?}", ns);
+    assert!(ns.contains(&"ucsc".to_string()), "Missing ucsc namespace: {:?}", ns);
+
+    // Verify forward lookup
+    let resolved = target.get_sequence_metadata_by_alias("ncbi", "NC_000001.1");
+    assert!(resolved.is_some(), "ncbi alias NC_000001.1 not found in target");
+    assert_eq!(resolved.unwrap().sha512t24u, seq0_digest);
+}
+
+#[test]
+fn test_import_collection_copies_collection_aliases() {
+    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+
+    source.add_collection_alias("insdc", "GCA_000001.1", &digest).unwrap();
+    source.add_collection_alias("refseq", "GCF_000001.1", &digest).unwrap();
+
+    let mut target = RefgetStore::in_memory();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    let ns = target.list_collection_alias_namespaces();
+    assert!(ns.contains(&"insdc".to_string()), "Missing insdc namespace: {:?}", ns);
+    assert!(ns.contains(&"refseq".to_string()), "Missing refseq namespace: {:?}", ns);
+
+    let aliases = target.get_aliases_for_collection(&digest);
+    assert_eq!(aliases.len(), 2, "Expected 2 collection aliases, got {:?}", aliases);
+}
+
+#[test]
+fn test_import_collection_copies_fhr_metadata() {
+    use super::fhr_metadata::FhrMetadata;
+
+    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n");
+
+    let fhr = FhrMetadata {
+        genome: Some("Homo sapiens".to_string()),
+        ..Default::default()
+    };
+    source.set_fhr_metadata(&digest, fhr).unwrap();
+
+    let mut target = RefgetStore::in_memory();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    let fhr = target.get_fhr_metadata(&digest);
+    assert!(fhr.is_some(), "FHR metadata not copied");
+    assert_eq!(fhr.unwrap().genome.as_deref(), Some("Homo sapiens"));
+}
+
+#[test]
+fn test_import_collection_disk_roundtrip_aliases() {
+    // This test catches the bug where aliases loaded from disk aren't available
+    // for reverse lookup during import.
+    let source_dir = tempdir().unwrap();
+    let target_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nATGC\n>chr2\nGGGG\n").unwrap();
+
+    // Create source store on disk, add aliases, then drop it
+    let digest;
+    let seq0_digest;
+    {
+        let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+        let (meta, _) = source
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        digest = meta.digest.clone();
+
+        let coll = source.get_collection(&digest).unwrap();
+        seq0_digest = coll.sequences[0].metadata().sha512t24u.clone();
+
+        source.add_sequence_alias("ncbi", "NC_000001.1", &seq0_digest).unwrap();
+        source.add_collection_alias("insdc", "GCA_000001.1", &digest).unwrap();
+    }
+    // Source is dropped here
+
+    // Reopen from disk (this tests that aliases are loaded from disk)
+    let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+    source.load_all_collections().unwrap();
+
+    // Verify aliases were loaded from disk
+    let seq_ns = source.list_sequence_alias_namespaces();
+    assert!(seq_ns.contains(&"ncbi".to_string()), "Source lost seq aliases after reopen: {:?}", seq_ns);
+    let coll_ns = source.list_collection_alias_namespaces();
+    assert!(coll_ns.contains(&"insdc".to_string()), "Source lost coll aliases after reopen: {:?}", coll_ns);
+
+    // Import into a new disk-backed target
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Verify target has the aliases
+    let ns = target.list_sequence_alias_namespaces();
+    assert!(ns.contains(&"ncbi".to_string()), "Target missing ncbi seq alias: {:?}", ns);
+
+    let resolved = target.get_sequence_metadata_by_alias("ncbi", "NC_000001.1");
+    assert!(resolved.is_some(), "Alias NC_000001.1 not found in target after disk roundtrip");
+    assert_eq!(resolved.unwrap().sha512t24u, seq0_digest);
+
+    let coll_aliases = target.get_aliases_for_collection(&digest);
+    assert_eq!(coll_aliases.len(), 1, "Expected 1 collection alias in target: {:?}", coll_aliases);
+}

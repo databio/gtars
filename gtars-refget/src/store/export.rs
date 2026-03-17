@@ -5,6 +5,8 @@ use super::readonly::ReadonlyRefgetStore;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+
+use indexmap::IndexMap;
 use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -280,7 +282,7 @@ impl ReadonlyRefgetStore {
         let output_path = output_path.as_ref();
         let collection_key = collection_digest.as_ref().to_key();
 
-        let name_to_digest: HashMap<String, [u8; 32]> = self
+        let name_to_digest: IndexMap<String, [u8; 32]> = self
             .name_lookup
             .get(&collection_key)
             .ok_or_else(|| {

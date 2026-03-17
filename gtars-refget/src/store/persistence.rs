@@ -7,6 +7,8 @@ use super::fhr_metadata;
 
 use std::collections::HashMap;
 use std::ffi::OsStr;
+
+use indexmap::IndexMap;
 use std::fs::{self, File, create_dir_all};
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -504,7 +506,7 @@ impl ReadonlyRefgetStore {
                 let collection = read_rgsi_file(&path)?;
                 let collection_digest = collection.metadata.digest.to_key();
 
-                let mut name_map = HashMap::new();
+                let mut name_map = IndexMap::new();
                 for sequence_record in &collection.sequences {
                     let metadata = sequence_record.metadata();
                     name_map.insert(metadata.name.clone(), metadata.sha512t24u.to_key());

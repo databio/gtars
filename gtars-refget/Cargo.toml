@@ -19,6 +19,7 @@ memmap2 = { version = "0.5", optional = true }  # for memory-mapped file I/O
 chrono = { version = "0.4", features = ["serde"] }  # For timestamps
 ureq = { version = "2.10", optional = true }  # Lightweight HTTP for remote fetching
 crossbeam-channel = { version = "0.5", optional = true }  # Bounded channels for pipeline
+indexmap = "2"  # Order-preserving HashMap for name_lookup
 
 # shared workspace dependencies
 anyhow = { workspace = true }

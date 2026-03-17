@@ -1713,6 +1713,22 @@ impl PyRefgetStore {
             })
     }
 
+    /// Import a collection from another store, including sequences, aliases, and FHR metadata.
+    ///
+    /// Args:
+    ///     source: The source RefgetStore to import from.
+    ///     digest: The collection digest to import.
+    fn import_collection(&mut self, source: &mut PyRefgetStore, digest: &str) -> PyResult<()> {
+        self.inner
+            .import_collection(&mut source.inner, digest)
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error importing collection: {}",
+                    e
+                ))
+            })
+    }
+
     /// Get metadata for a collection by digest.
     ///
     /// Returns lightweight metadata without loading the full collection.

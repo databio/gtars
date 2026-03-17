@@ -240,6 +240,20 @@ impl RefgetStore {
         self.inner.remove_collection(digest, remove_orphan_sequences)
     }
 
+    /// Import a collection (with sequences, aliases, FHR) from another store.
+    /// The source must already have the collection loaded.
+    pub fn import_collection_from_readonly(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
+        self.inner.import_collection(source, digest)
+    }
+
+    /// Import a collection from another RefgetStore, lazy-loading the source if needed.
+    pub fn import_collection(&mut self, source: &mut RefgetStore, digest: &str) -> Result<()> {
+        if !source.inner.is_collection_loaded(digest) {
+            source.inner.load_collection(digest)?;
+        }
+        self.inner.import_collection(&source.inner, digest)
+    }
+
     /// Ensure a sequence is decoded into the decoded cache.
     pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
         self.inner.ensure_decoded(seq_digest)
