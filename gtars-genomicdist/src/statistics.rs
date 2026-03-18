@@ -471,10 +471,11 @@ mod tests {
         let file_path = get_test_path("dummy.narrowPeak").unwrap();
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
-        let distribution = region_set.calc_neighbor_distances().unwrap();
-        // Only positive (non-overlapping) distances are included
-        assert!(distribution.len() <= 8);
-        assert!(distribution.iter().all(|&d| d > 0));
+        let distances = region_set.calc_neighbor_distances().unwrap();
+        // 9 regions on chr1 → 8 consecutive pairs, but only 4 have positive gaps.
+        // Sorted: (5,7)(8,10)(11,13)(14,20)(16,18)(17,22)(25,28)(25,32)(27,36)
+        // Gaps:    1     1     1    -4    -1     3    -3    -5
+        assert_eq!(distances, vec![1, 1, 1, 3]);
     }
 
     #[rstest]
@@ -483,10 +484,12 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         let nearest = region_set.calc_nearest_neighbors().unwrap();
-        // Regions are sorted per-chromosome; single-region chroms are skipped
-        assert!(!nearest.is_empty());
-        // All nearest-neighbor distances should be non-negative
-        // (overlapping neighbors get distance 0)
+        // 9 regions on chr1, all-pairs absolute distances (neg→0):
+        //   [1, 1, 1, 0, 0, 3, 0, 0]
+        // Nearest = min(left, right) for interior; single neighbor for endpoints:
+        //   first=1, min(1,1)=1, min(1,1)=1, min(1,0)=0, min(0,0)=0,
+        //   min(0,3)=0, min(3,0)=0, min(0,0)=0, last=0
+        assert_eq!(nearest, vec![1, 1, 1, 0, 0, 0, 0, 0, 0]);
     }
 
     #[rstest]
