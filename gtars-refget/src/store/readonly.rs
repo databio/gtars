@@ -932,7 +932,7 @@ impl ReadonlyRefgetStore {
                     .map(|p| p.join(&relative_path).exists())
                     .unwrap_or(false);
                 let verb = if cached { "Loading" } else { "Downloading" };
-                eprintln!("{} collection {}...", verb, digest_str);
+                eprintln!("{} collection metadata {}...", verb, digest_str);
             }
             let _collection_data =
                 Self::fetch_file(&self.local_path, &self.remote_source, &relative_path, true, false)?;
