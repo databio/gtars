@@ -14,7 +14,7 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 
-use crate::hashkeyable::{HashKeyable, key_to_digest_string};
+use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 
 // =========================================================================
 // Types
@@ -38,7 +38,7 @@ impl AliasKind {
 }
 
 /// Generic alias store: namespace -> { alias -> digest_key }
-type AliasStore = HashMap<String, HashMap<String, [u8; 32]>>;
+type AliasStore = HashMap<String, HashMap<String, DigestKey>>;
 
 /// Manages human-readable aliases for sequences and collections.
 #[derive(Debug)]
@@ -51,18 +51,18 @@ pub struct AliasManager {
 // Private helpers (operate on any AliasStore)
 // =========================================================================
 
-fn alias_add(store: &mut AliasStore, namespace: &str, alias: &str, digest: [u8; 32]) {
+fn alias_add(store: &mut AliasStore, namespace: &str, alias: &str, digest: DigestKey) {
     store
         .entry(namespace.to_string())
         .or_default()
         .insert(alias.to_string(), digest);
 }
 
-fn alias_resolve(store: &AliasStore, namespace: &str, alias: &str) -> Option<[u8; 32]> {
+fn alias_resolve(store: &AliasStore, namespace: &str, alias: &str) -> Option<DigestKey> {
     store.get(namespace).and_then(|ns| ns.get(alias)).copied()
 }
 
-fn alias_reverse_scan(store: &AliasStore, digest: &[u8; 32]) -> Vec<(String, String)> {
+fn alias_reverse_scan(store: &AliasStore, digest: &DigestKey) -> Vec<(String, String)> {
     let mut results = Vec::new();
     for (namespace, aliases) in store {
         for (alias, d) in aliases {
@@ -172,7 +172,7 @@ impl AliasManager {
         alias_add(&mut self.sequence_aliases, namespace, alias, key);
     }
 
-    pub fn resolve_sequence(&self, namespace: &str, alias: &str) -> Option<[u8; 32]> {
+    pub fn resolve_sequence(&self, namespace: &str, alias: &str) -> Option<DigestKey> {
         alias_resolve(&self.sequence_aliases, namespace, alias)
     }
 
@@ -204,7 +204,7 @@ impl AliasManager {
         alias_add(&mut self.collection_aliases, namespace, alias, key);
     }
 
-    pub fn resolve_collection(&self, namespace: &str, alias: &str) -> Option<[u8; 32]> {
+    pub fn resolve_collection(&self, namespace: &str, alias: &str) -> Option<DigestKey> {
         alias_resolve(&self.collection_aliases, namespace, alias)
     }
 

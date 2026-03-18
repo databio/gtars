@@ -16,7 +16,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::hashkeyable::{HashKeyable, key_to_digest_string};
+use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 
 // ============================================================================
 // Types
@@ -180,7 +180,7 @@ pub(crate) const SIDECAR_EXTENSION: &str = ".fhr.json";
 ///
 /// Scans for `*.fhr.json` files, parses each one, and returns a map
 /// keyed by collection digest. Malformed files are skipped with a warning to stderr.
-pub fn load_sidecars(fhr_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
+pub fn load_sidecars(fhr_dir: &Path) -> HashMap<DigestKey, FhrMetadata> {
     let mut map = HashMap::new();
     if !fhr_dir.exists() {
         return map;
@@ -234,7 +234,7 @@ pub fn load_sidecars(fhr_dir: &Path) -> HashMap<[u8; 32], FhrMetadata> {
 /// Write all FHR sidecar files to the FHR directory.
 pub fn write_sidecars(
     fhr_dir: &Path,
-    metadata: &HashMap<[u8; 32], FhrMetadata>,
+    metadata: &HashMap<DigestKey, FhrMetadata>,
 ) -> Result<()> {
     for (key, fhr) in metadata {
         let digest_str = key_to_digest_string(key);

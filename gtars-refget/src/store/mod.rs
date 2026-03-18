@@ -34,6 +34,8 @@ pub use self::fhr_metadata::{
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Read};
 
+pub(crate) use crate::hashkeyable::DigestKey;
+
 
 // =========================================================================
 // Shared constants

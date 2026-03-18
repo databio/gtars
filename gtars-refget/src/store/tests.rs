@@ -6,7 +6,7 @@ use crate::collection::{
     SequenceCollection, SequenceCollectionExt, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
 };
 use crate::digest::{AlphabetType, md5, sha512t24u};
-use crate::hashkeyable::HashKeyable;
+use crate::hashkeyable::{DigestKey, HashKeyable};
 use std::fs;
 use tempfile::tempdir;
 
@@ -42,7 +42,7 @@ fn store_with_one_collection(fasta_content: &str) -> (RefgetStore, String) {
 }
 
 /// Creates a test store with 3 sequences for export testing.
-fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, [u8; 32]) {
+fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestKey) {
     let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n>chr3\nTTTTCCCC\n";
     let temp_fasta_path = temp_path.join("test.fa");
     fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
@@ -395,7 +395,7 @@ fn test_disk_persistence() {
         .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
         .unwrap();
 
-    let sequence_keys: Vec<[u8; 32]> = store.sequence_store.keys().cloned().collect();
+    let sequence_keys: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
     assert_eq!(sequence_keys.len(), 3);
 
     let sha512_key1 = sequence_keys[0];
@@ -579,7 +579,7 @@ fn test_export_fasta_after_load_local() {
     let fasta_path = temp_path.join("test.fa");
     fs::write(&fasta_path, fasta_content).unwrap();
 
-    let collection_digest: [u8; 32];
+    let collection_digest: DigestKey;
     {
         let mut store = RefgetStore::on_disk(&store_path).unwrap();
         store

@@ -21,7 +21,7 @@ use crate::digest::{
     SequenceMetadata, SequenceRecord,
     decode_substring_from_bytes, lookup_alphabet,
 };
-use crate::hashkeyable::HashKeyable;
+use crate::hashkeyable::{DigestKey, HashKeyable};
 
 
 // ============================================================================
@@ -282,7 +282,7 @@ impl ReadonlyRefgetStore {
         let output_path = output_path.as_ref();
         let collection_key = collection_digest.as_ref().to_key();
 
-        let name_to_digest: IndexMap<String, [u8; 32]> = self
+        let name_to_digest: IndexMap<String, DigestKey> = self
             .name_lookup
             .get(&collection_key)
             .ok_or_else(|| {

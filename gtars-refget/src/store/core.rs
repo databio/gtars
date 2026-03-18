@@ -202,7 +202,7 @@ impl RefgetStore {
     }
 
     /// Add a sequence to the store.
-    pub fn add_sequence<T: Into<Option<[u8; 32]>>>(
+    pub fn add_sequence<T: Into<Option<DigestKey>>>(
         &mut self,
         sequence_record: SequenceRecord,
         collection_digest: T,

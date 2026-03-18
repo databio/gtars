@@ -18,7 +18,7 @@ use crate::digest::{
     SequenceRecord,
 };
 use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence};
-use crate::hashkeyable::{HashKeyable, key_to_digest_string};
+use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all};
@@ -34,14 +34,14 @@ use std::fs::{self, create_dir_all};
 #[derive(Debug)]
 pub struct ReadonlyRefgetStore {
     /// SHA512t24u digest -> SequenceRecord (metadata + optional data)
-    pub(crate) sequence_store: HashMap<[u8; 32], SequenceRecord>,
+    pub(crate) sequence_store: HashMap<DigestKey, SequenceRecord>,
     /// MD5 digest -> SHA512t24u digest lookup
-    pub(crate) md5_lookup: HashMap<[u8; 32], [u8; 32]>,
+    pub(crate) md5_lookup: HashMap<DigestKey, DigestKey>,
 
     /// Collection digest -> {name -> SHA512t24u digest} (IndexMap preserves FASTA insertion order)
-    pub(crate) name_lookup: HashMap<[u8; 32], IndexMap<String, [u8; 32]>>,
+    pub(crate) name_lookup: HashMap<DigestKey, IndexMap<String, DigestKey>>,
     /// Active sequence collections (now using SequenceCollectionRecord for Stub/Full pattern)
-    pub(crate) collections: HashMap<[u8; 32], SequenceCollectionRecord>,
+    pub(crate) collections: HashMap<DigestKey, SequenceCollectionRecord>,
     /// Storage strategy for sequences
     pub(crate) mode: StorageMode,
     /// Where the store lives on disk (local store or cache directory)
@@ -63,14 +63,14 @@ pub struct ReadonlyRefgetStore {
     /// Human-readable aliases for sequences and collections.
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
-    pub(crate) fhr_metadata: HashMap<[u8; 32], super::fhr_metadata::FhrMetadata>,
+    pub(crate) fhr_metadata: HashMap<DigestKey, super::fhr_metadata::FhrMetadata>,
     /// Available sequence alias namespaces (from manifest, for remote discovery).
     pub(crate) available_sequence_alias_namespaces: Vec<String>,
     /// Available collection alias namespaces (from manifest, for remote discovery).
     pub(crate) available_collection_alias_namespaces: Vec<String>,
     /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
     /// Populated by ensure_decoded(), read by sequence_bytes().
-    pub(crate) decoded_cache: HashMap<[u8; 32], Vec<u8>>,
+    pub(crate) decoded_cache: HashMap<DigestKey, Vec<u8>>,
 }
 
 impl ReadonlyRefgetStore {
@@ -164,7 +164,7 @@ impl ReadonlyRefgetStore {
         create_dir_all(path.join("sequences"))?;
         create_dir_all(path.join("collections"))?;
 
-        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
+        let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
         for key in keys {
             if let Some(SequenceRecord::Full { metadata, sequence }) = self.sequence_store.get(&key)
             {
@@ -194,7 +194,7 @@ impl ReadonlyRefgetStore {
     }
 
     /// Adds a sequence to the Store
-    pub fn add_sequence<T: Into<Option<[u8; 32]>>>(
+    pub fn add_sequence<T: Into<Option<DigestKey>>>(
         &mut self,
         sequence_record: SequenceRecord,
         collection_digest: T,
@@ -304,7 +304,7 @@ impl ReadonlyRefgetStore {
     // =========================================================================
 
     /// Returns an iterator over all sequence digests in the store
-    pub fn sequence_digests(&self) -> impl Iterator<Item = [u8; 32]> + '_ {
+    pub fn sequence_digests(&self) -> impl Iterator<Item = DigestKey> + '_ {
         self.sequence_store.keys().cloned()
     }
 
@@ -460,7 +460,7 @@ impl ReadonlyRefgetStore {
             return Ok(false);
         }
 
-        let orphan_candidates: Vec<[u8; 32]> = self
+        let orphan_candidates: Vec<DigestKey> = self
             .name_lookup
             .get(&key)
             .map(|name_map| name_map.values().cloned().collect())
@@ -483,7 +483,7 @@ impl ReadonlyRefgetStore {
         }
 
         if remove_orphan_sequences && !orphan_candidates.is_empty() {
-            let mut still_referenced: std::collections::HashSet<[u8; 32]> =
+            let mut still_referenced: std::collections::HashSet<DigestKey> =
                 std::collections::HashSet::new();
             for name_map in self.name_lookup.values() {
                 for seq_key in name_map.values() {
@@ -491,7 +491,7 @@ impl ReadonlyRefgetStore {
                 }
             }
 
-            let orphans: Vec<[u8; 32]> = orphan_candidates
+            let orphans: Vec<DigestKey> = orphan_candidates
                 .into_iter()
                 .filter(|k| !still_referenced.contains(k))
                 .collect();
@@ -687,7 +687,7 @@ impl ReadonlyRefgetStore {
 
     /// Eagerly load all Stub collections to Full.
     pub fn load_all_collections(&mut self) -> Result<()> {
-        let keys: Vec<[u8; 32]> = self.collections.keys().cloned().collect();
+        let keys: Vec<DigestKey> = self.collections.keys().cloned().collect();
         for key in keys {
             self.ensure_collection_loaded(&key)?;
         }
@@ -696,7 +696,7 @@ impl ReadonlyRefgetStore {
 
     /// Eagerly load all Stub sequences to Full.
     pub fn load_all_sequences(&mut self) -> Result<()> {
-        let keys: Vec<[u8; 32]> = self.sequence_store.keys().cloned().collect();
+        let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
         for key in keys {
             self.ensure_sequence_loaded(&key)?;
         }
@@ -903,7 +903,7 @@ impl ReadonlyRefgetStore {
     }
 
     /// Ensure a collection is loaded into the store
-    pub(crate) fn ensure_collection_loaded(&mut self, collection_digest: &[u8; 32]) -> Result<()> {
+    pub(crate) fn ensure_collection_loaded(&mut self, collection_digest: &DigestKey) -> Result<()> {
         if self.name_lookup.contains_key(collection_digest) {
             return Ok(());
         }
@@ -973,7 +973,7 @@ impl ReadonlyRefgetStore {
             let record = SequenceCollectionRecord::from(collection);
             self.collections.insert(*collection_digest, record);
         } else {
-            let sequences_data: Vec<(SequenceMetadata, [u8; 32], [u8; 32])> =
+            let sequences_data: Vec<(SequenceMetadata, DigestKey, DigestKey)> =
                 if let Some(SequenceCollectionRecord::Full { sequences, .. }) =
                     self.collections.get(collection_digest)
                 {
@@ -1007,7 +1007,7 @@ impl ReadonlyRefgetStore {
     }
 
     /// Ensure a sequence is loaded into memory
-    pub(crate) fn ensure_sequence_loaded(&mut self, digest: &[u8; 32]) -> Result<()> {
+    pub(crate) fn ensure_sequence_loaded(&mut self, digest: &DigestKey) -> Result<()> {
         let record = self
             .sequence_store
             .get(digest)
