@@ -1526,6 +1526,92 @@ fn test_collection_order_preserved_after_roundtrip() {
     );
 }
 
+/// Test that multiple collections sharing sequences under different names and different orderings
+/// all preserve their correct per-collection names and element orderings across a disk roundtrip.
+///
+/// This covers the intersection of two previously-fixed bugs:
+/// 1. HashMap ordering (fixed: inner map now IndexMap)
+/// 2. Global name leakage (fixed: get_collection() overrides meta.name from name_lookup)
+#[test]
+fn test_shared_sequences_order_preserved_after_disk_roundtrip() {
+    // FASTA A: base ordering — chrX first, then chr1, then chr2
+    let fasta_a = ">chrX\nTTGGGGAA\n>chr1\nGGAA\n>chr2\nGCGC\n";
+    // FASTA B: different order — chr1 first, same sequences as A
+    let fasta_b = ">chr1\nGGAA\n>chr2\nGCGC\n>chrX\nTTGGGGAA\n";
+    // FASTA C: name swap — chr2 has GGAA, chr1 has GCGC (opposite of A/B)
+    let fasta_c = ">chrX\nTTGGGGAA\n>chr2\nGGAA\n>chr1\nGCGC\n";
+
+    let dir = tempdir().unwrap();
+    let fasta_a_path = dir.path().join("a.fa");
+    let fasta_b_path = dir.path().join("b.fa");
+    let fasta_c_path = dir.path().join("c.fa");
+    fs::write(&fasta_a_path, fasta_a).unwrap();
+    fs::write(&fasta_b_path, fasta_b).unwrap();
+    fs::write(&fasta_c_path, fasta_c).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_quiet(true);
+
+    let (meta_a, _) = store.add_sequence_collection_from_fasta(&fasta_a_path, FastaImportOptions::new()).unwrap();
+    let (meta_b, _) = store.add_sequence_collection_from_fasta(&fasta_b_path, FastaImportOptions::new()).unwrap();
+    let (meta_c, _) = store.add_sequence_collection_from_fasta(&fasta_c_path, FastaImportOptions::new()).unwrap();
+
+    let digest_a = meta_a.digest.clone();
+    let digest_b = meta_b.digest.clone();
+    let digest_c = meta_c.digest.clone();
+
+    // Load collections before write and record level2 output
+    store.load_all_collections().unwrap();
+    let pre_a = store.get_collection_level2(&digest_a).unwrap();
+    let pre_b = store.get_collection_level2(&digest_b).unwrap();
+    let pre_c = store.get_collection_level2(&digest_c).unwrap();
+
+    // Verify pre-write ordering for FASTA A: chrX, chr1, chr2
+    assert_eq!(pre_a.names, vec!["chrX", "chr1", "chr2"], "A: names before roundtrip");
+    // Verify pre-write ordering for FASTA B: chr1, chr2, chrX
+    assert_eq!(pre_b.names, vec!["chr1", "chr2", "chrX"], "B: names before roundtrip");
+    // Verify pre-write ordering for FASTA C: chrX, chr2, chr1 (name swap)
+    assert_eq!(pre_c.names, vec!["chrX", "chr2", "chr1"], "C: names before roundtrip");
+
+    store.write().unwrap();
+
+    // Drop and reopen from disk
+    drop(store);
+    let mut reloaded = RefgetStore::open_local(&store_path).unwrap();
+    reloaded.load_all_collections().unwrap();
+
+    let post_a = reloaded.get_collection_level2(&digest_a).unwrap();
+    let post_b = reloaded.get_collection_level2(&digest_b).unwrap();
+    let post_c = reloaded.get_collection_level2(&digest_c).unwrap();
+
+    // Names must match exactly (order-sensitive) after roundtrip
+    assert_eq!(post_a.names, pre_a.names, "A: names after roundtrip");
+    assert_eq!(post_b.names, pre_b.names, "B: names after roundtrip");
+    assert_eq!(post_c.names, pre_c.names, "C: names after roundtrip");
+
+    // Lengths must match exactly after roundtrip
+    assert_eq!(post_a.lengths, pre_a.lengths, "A: lengths after roundtrip");
+    assert_eq!(post_b.lengths, pre_b.lengths, "B: lengths after roundtrip");
+    assert_eq!(post_c.lengths, pre_c.lengths, "C: lengths after roundtrip");
+
+    // Sequence digests must match exactly after roundtrip
+    assert_eq!(post_a.sequences, pre_a.sequences, "A: sequences after roundtrip");
+    assert_eq!(post_b.sequences, pre_b.sequences, "B: sequences after roundtrip");
+    assert_eq!(post_c.sequences, pre_c.sequences, "C: sequences after roundtrip");
+
+    // Cross-check: FASTA C has chr2=GGAA and chr1=GCGC (opposite of A's chr1=GGAA, chr2=GCGC)
+    // The sequence digest for chr2 in C should equal chr1 in A
+    assert_eq!(
+        post_c.sequences[1], post_a.sequences[1],
+        "C.chr2 and A.chr1 share GGAA bytes, should have same sequence digest"
+    );
+    assert_eq!(
+        post_c.sequences[2], post_a.sequences[2],
+        "C.chr1 and A.chr2 share GCGC bytes, should have same sequence digest"
+    );
+}
+
 // =========================================================================
 // Name source tests
 // =========================================================================
@@ -1591,10 +1677,30 @@ fn test_shared_sequence_different_names() {
 // Import collection tests
 // =========================================================================
 
+/// Helper: create a disk-backed store with one collection from a FASTA string.
+fn disk_store_with_one_collection(fasta_content: &str) -> (RefgetStore, String, tempfile::TempDir, tempfile::TempDir) {
+    let store_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(store_dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    // Load collection so name_lookup is populated
+    store.load_all_collections().unwrap();
+    (store, digest, store_dir, fasta_dir)
+}
+
 #[test]
 fn test_import_collection_basic() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
-    let mut target = RefgetStore::in_memory();
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
 
     target.import_collection(&mut source, &digest).unwrap();
 
@@ -1605,7 +1711,8 @@ fn test_import_collection_basic() {
 
 #[test]
 fn test_import_collection_copies_sequence_aliases() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
 
     // Add sequence aliases in source
     let coll = source.get_collection(&digest).unwrap();
@@ -1615,7 +1722,8 @@ fn test_import_collection_copies_sequence_aliases() {
     source.add_sequence_alias("ucsc", "chr1", &seq0_digest).unwrap();
     source.add_sequence_alias("ncbi", "NC_000002.1", &seq1_digest).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     // Target should have the sequence aliases
@@ -1631,12 +1739,14 @@ fn test_import_collection_copies_sequence_aliases() {
 
 #[test]
 fn test_import_collection_copies_collection_aliases() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
 
     source.add_collection_alias("insdc", "GCA_000001.1", &digest).unwrap();
     source.add_collection_alias("refseq", "GCF_000001.1", &digest).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     let ns = target.list_collection_alias_namespaces();
@@ -1651,7 +1761,8 @@ fn test_import_collection_copies_collection_aliases() {
 fn test_import_collection_copies_fhr_metadata() {
     use super::fhr_metadata::FhrMetadata;
 
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n");
 
     let fhr = FhrMetadata {
         genome: Some("Homo sapiens".to_string()),
@@ -1659,7 +1770,8 @@ fn test_import_collection_copies_fhr_metadata() {
     };
     source.set_fhr_metadata(&digest, fhr).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     let fhr = target.get_fhr_metadata(&digest);
@@ -1682,6 +1794,7 @@ fn test_import_collection_disk_roundtrip_aliases() {
     let seq0_digest;
     {
         let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+        source.set_quiet(true);
         let (meta, _) = source
             .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
             .unwrap();
@@ -1719,4 +1832,138 @@ fn test_import_collection_disk_roundtrip_aliases() {
 
     let coll_aliases = target.get_aliases_for_collection(&digest);
     assert_eq!(coll_aliases.len(), 1, "Expected 1 collection alias in target: {:?}", coll_aliases);
+}
+
+#[test]
+fn test_import_collection_file_copy_roundtrip() {
+    // Verify RGSI and .seq files are byte-for-byte identical after import
+    // when ancillary digests match between source and dest.
+    let (mut source, digest, src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Verify RGSI file is byte-for-byte identical
+    let src_rgsi = fs::read(
+        src_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    let dst_rgsi = fs::read(
+        target_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert_eq!(src_rgsi, dst_rgsi, "RGSI files should be byte-identical");
+
+    // Verify .seq files are byte-for-byte identical
+    let coll = target.get_collection(&digest).unwrap();
+    for seq in &coll.sequences {
+        let seq_digest = &seq.metadata().sha512t24u;
+        let src_seq_path = source.sequence_file_path(seq_digest).unwrap();
+        let dst_seq_path = target.sequence_file_path(seq_digest).unwrap();
+        let src_data = fs::read(&src_seq_path).unwrap();
+        let dst_data = fs::read(&dst_seq_path).unwrap();
+        assert_eq!(src_data, dst_data, "Sequence file for {} should be byte-identical", seq_digest);
+    }
+
+    // Verify in-memory metadata matches
+    let src_coll = source.get_collection(&digest).unwrap();
+    assert_eq!(coll.metadata.digest, src_coll.metadata.digest);
+    assert_eq!(coll.sequences.len(), src_coll.sequences.len());
+    for (src_seq, dst_seq) in src_coll.sequences.iter().zip(coll.sequences.iter()) {
+        assert_eq!(src_seq.metadata().sha512t24u, dst_seq.metadata().sha512t24u);
+        assert_eq!(src_seq.metadata().name, dst_seq.metadata().name);
+        assert_eq!(src_seq.metadata().length, dst_seq.metadata().length);
+    }
+}
+
+#[test]
+fn test_import_collection_ancillary_digest_enrichment() {
+    // Source store has ancillary_digests: false, destination has ancillary_digests: true.
+    // The destination RGSI should contain ancillary digest headers that the source lacks.
+    let source_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nATGC\n>chr2\nGGGG\n").unwrap();
+
+    // Create source store with ancillary_digests: false
+    let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+    source.set_quiet(true);
+    source.disable_ancillary_digests();
+    let (meta, _) = source
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    source.load_all_collections().unwrap();
+
+    // Verify source RGSI lacks ancillary digests
+    let src_rgsi_content = fs::read_to_string(
+        source_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert!(
+        !src_rgsi_content.contains("name_length_pairs_digest"),
+        "Source should NOT have ancillary digests",
+    );
+
+    // Create destination store with ancillary_digests: true (default)
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+    target.enable_ancillary_digests();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Verify destination RGSI has ancillary digest headers
+    let dst_rgsi_content = fs::read_to_string(
+        target_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert!(
+        dst_rgsi_content.contains("name_length_pairs_digest"),
+        "Destination should have ancillary digests. RGSI:\n{}",
+        dst_rgsi_content,
+    );
+    assert!(
+        dst_rgsi_content.contains("sorted_name_length_pairs_digest"),
+        "Destination should have sorted_name_length_pairs_digest",
+    );
+    assert!(
+        dst_rgsi_content.contains("sorted_sequences_digest"),
+        "Destination should have sorted_sequences_digest",
+    );
+
+    // Verify in-memory metadata has non-None ancillary fields
+    let coll_meta = target.get_collection_metadata(&digest).unwrap();
+    assert!(coll_meta.name_length_pairs_digest.is_some(), "name_length_pairs_digest should be Some");
+    assert!(coll_meta.sorted_name_length_pairs_digest.is_some(), "sorted_name_length_pairs_digest should be Some");
+    assert!(coll_meta.sorted_sequences_digest.is_some(), "sorted_sequences_digest should be Some");
+}
+
+#[test]
+fn test_import_collection_mode_mismatch_error() {
+    // Source with Raw mode, destination with Encoded mode should fail.
+    let source_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nATGC\n").unwrap();
+
+    // Create source store in Raw mode
+    let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+    source.set_quiet(true);
+    source.disable_encoding();
+    let (meta, _) = source
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    source.load_all_collections().unwrap();
+
+    // Create destination store in Encoded mode (default)
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+    // target uses Encoded mode by default
+
+    let result = target.import_collection(&mut source, &digest);
+    assert!(result.is_err(), "Should fail with mode mismatch");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("matching storage modes"),
+        "Error should mention storage modes: {}",
+        err_msg,
+    );
 }
