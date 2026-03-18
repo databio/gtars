@@ -79,3 +79,24 @@ class TestOverlapOps:
     def test_overlap_coefficient(self):
         assert self.a.overlap_coefficient(self.a) == 1.0
         assert self.a.overlap_coefficient(self.b) == self.b.overlap_coefficient(self.a)
+
+
+class TestDisjoin:
+    def test_disjoin_breaks_overlaps(self):
+        """Disjoin should split overlapping regions at every boundary."""
+        rs = _rs(("chr1", 0, 100), ("chr1", 50, 150))
+        result = rs.disjoin()
+        # Two overlapping regions [0,100) and [50,150) produce three disjoint pieces:
+        # [0,50), [50,100), [100,150)
+        assert len(result) == 3
+
+    def test_disjoin_nonoverlapping_unchanged(self):
+        """Non-overlapping regions should pass through unchanged."""
+        rs = _rs(("chr1", 0, 100), ("chr1", 200, 300))
+        result = rs.disjoin()
+        assert len(result) == 2
+
+    def test_disjoin_empty(self):
+        rs = _rs()
+        result = rs.disjoin()
+        assert len(result) == 0

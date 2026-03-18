@@ -377,6 +377,16 @@ impl PyRegionSet {
         Ok(Self::from_regionset(rs))
     }
 
+    /// Break all regions into non-overlapping disjoint pieces.
+    ///
+    /// Every boundary in the input becomes a boundary in the output.
+    /// The result tiles the covered positions exactly, with no overlaps.
+    fn disjoin(&self) -> PyResult<Self> {
+        let rs = self.regionset.disjoin();
+        // Merge op — strand lost
+        Ok(Self::from_regionset(rs))
+    }
+
     fn setdiff(&self, other: &PyRegionSet) -> PyResult<Self> {
         let rs = self.regionset.setdiff(&other.regionset);
         Ok(Self::from_regionset(rs))

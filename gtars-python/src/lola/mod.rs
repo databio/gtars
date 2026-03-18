@@ -137,6 +137,22 @@ impl PyRegionDB {
         Ok(result)
     }
 
+    /// Get collection-level annotations as a list of dicts.
+    #[getter]
+    fn collection_anno<'py>(&self, py: Python<'py>) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let mut result = Vec::new();
+        for a in &self.inner.collection_anno {
+            let d = PyDict::new(py);
+            d.set_item("collectionname", &a.collection_name)?;
+            d.set_item("collector", &a.collector)?;
+            d.set_item("date", &a.date)?;
+            d.set_item("source", &a.source)?;
+            d.set_item("description", &a.description)?;
+            result.push(d);
+        }
+        Ok(result)
+    }
+
     fn __repr__(&self) -> String {
         format!(
             "RegionDB({} region sets, {} contigs)",

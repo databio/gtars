@@ -106,3 +106,23 @@ setMethod("concat", c("RegionSetList", "missing"), function(x, y) {
   ptr <- regionsetlist_concat(x@ptr)
   .rs_from_ptr(ptr)
 })
+
+# =========================================================================
+# Pairwise Jaccard similarity matrix
+# =========================================================================
+
+#' Pairwise Jaccard similarity matrix
+#'
+#' @description Computes nucleotide-level Jaccard similarity for all pairs of
+#'   region sets. Returns an N x N symmetric matrix with 1.0 on the diagonal.
+#'
+#' @param x A RegionSetList
+#' @return A numeric matrix of Jaccard similarities
+#' @export
+setGeneric("pairwise_jaccard", function(x) standardGeneric("pairwise_jaccard"))
+
+#' @rdname pairwise_jaccard
+#' @export
+setMethod("pairwise_jaccard", "RegionSetList", function(x) {
+  .Call(wrap__r_pairwise_jaccard, x@ptr)
+})

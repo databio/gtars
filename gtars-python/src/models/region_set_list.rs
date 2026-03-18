@@ -3,6 +3,7 @@ use pyo3::prelude::*;
 
 use crate::models::PyRegionSet;
 use gtars_core::models::{RegionSet, RegionSetList};
+use gtars_genomicdist::pairwise_jaccard;
 
 /// A collection of RegionSets — the gtars equivalent of GRangesList.
 #[pyclass(name = "RegionSetList", module = "gtars.models")]
@@ -65,6 +66,18 @@ impl PyRegionSetList {
 
     fn __repr__(&self) -> String {
         format!("RegionSetList({} region sets)", self.inner.len())
+    }
+
+    /// Compute pairwise Jaccard similarity for all pairs of region sets.
+    ///
+    /// Returns an N x N list of lists (symmetric matrix) with 1.0 on the diagonal.
+    fn pairwise_jaccard(&self) -> Vec<Vec<f64>> {
+        let sets: Vec<RegionSet> = (0..self.inner.len())
+            .filter_map(|i| self.inner.get(i).cloned())
+            .collect();
+        let flat = pairwise_jaccard(&sets);
+        let n = sets.len();
+        (0..n).map(|i| flat[i * n..(i + 1) * n].to_vec()).collect()
     }
 }
 

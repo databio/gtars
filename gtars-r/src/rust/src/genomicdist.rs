@@ -2,12 +2,13 @@ use std::collections::HashMap;
 
 use extendr_api::prelude::*;
 
-use gtars_core::models::{Region, RegionSet};
+use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_overlaprs::RegionSetOverlaps;
 use gtars_genomicdist::{
     calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
     consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
+    pairwise_jaccard,
     CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
@@ -459,6 +460,44 @@ pub fn r_jaccard(rs_ptr_a: Robj, rs_ptr_b: Robj) -> extendr_api::Result<f64> {
     let ext_b = <ExternalPtr<RegionSet>>::try_from(rs_ptr_b)
         .map_err(|_| extendr_api::Error::Other("Invalid RegionSet pointer (b)".into()))?;
     Ok(ext_a.jaccard(&*ext_b))
+}
+
+/// Pairwise Jaccard similarity matrix for a RegionSetList.
+/// @export
+/// @param rsl_ptr External pointer to a RegionSetList
+#[extendr(r_name = "r_pairwise_jaccard")]
+pub fn r_pairwise_jaccard(rsl_ptr: Robj) -> extendr_api::Result<Robj> {
+    let ext = <ExternalPtr<RegionSetList>>::try_from(rsl_ptr)
+        .map_err(|_| extendr_api::Error::Other("Invalid RegionSetList pointer".into()))?;
+    let rsl = &*ext;
+    let sets: Vec<&RegionSet> = (0..rsl.len()).filter_map(|i| rsl.get(i)).collect();
+    let owned: Vec<RegionSet> = sets.into_iter().cloned().collect();
+    let flat = pairwise_jaccard(&owned);
+    build_r_matrix(flat, rsl)
+}
+
+/// Helper: reshape a flat N*N Vec<f64> into an R matrix with dimnames.
+fn build_r_matrix(flat: Vec<f64>, rsl: &RegionSetList) -> extendr_api::Result<Robj> {
+    let n = rsl.len();
+    // R matrices are column-major, our flat vec is row-major — transpose
+    let mut col_major = vec![0.0f64; n * n];
+    for i in 0..n {
+        for j in 0..n {
+            col_major[j * n + i] = flat[i * n + j];
+        }
+    }
+    let matrix = RMatrix::new_matrix(n, n, |r, c| col_major[c * n + r]);
+    let mut robj: Robj = matrix.into();
+
+    // Set dimnames if available
+    if let Some(names) = &rsl.names {
+        let names_robj: Robj = names.iter().collect::<Vec<_>>().into();
+        let dimnames = List::from_values(&[names_robj.clone(), names_robj]);
+        robj.set_attrib(extendr_api::symbol::dim_symbol(), Robj::from([n as i32, n as i32]))?;
+        robj.set_attrib(extendr_api::symbol::dimnames_symbol(), dimnames)?;
+    }
+
+    Ok(robj)
 }
 
 /// Shift all regions by a fixed offset
@@ -1222,6 +1261,7 @@ extendr_module! {
     fn r_concat;
     fn r_union;
     fn r_jaccard;
+    fn r_pairwise_jaccard;
     fn r_shift;
     fn r_flank;
     fn r_resize;
