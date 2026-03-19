@@ -1268,7 +1268,7 @@ impl RegionSetListOps for RegionSetList {
         let mut acc = self.get(0)?.clone();
         for i in 1..n {
             if let Some(other) = self.get(i) {
-                acc = acc.pintersect(other);
+                acc = acc.intersect(other);
             }
         }
         Some(acc)
@@ -2554,5 +2554,284 @@ mod tests {
         let b = make_regionset(vec![("chr1", 5, 25)]).reduce();
         // overlap with [0,10): [5,10)=5bp, overlap with [20,30): [20,25)=5bp
         assert_eq!(super::merge_intersection_bp(&a, &b), 10);
+    }
+
+    // ── RegionSetListOps tests ─────────────────────────────────────────
+
+    fn make_rsl(sets: Vec<RegionSet>) -> RegionSetList {
+        RegionSetList::from(sets)
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count() {
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 150), ("chr1", 250, 350)]);
+        let rsl = make_rsl(vec![a, b]);
+        // a has 2 regions, b has 2 regions, both overlap each other
+        let count = rsl.pintersect_count(0, 1).unwrap();
+        assert_eq!(count, 2); // both pairs overlap
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count_no_overlap() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let rsl = make_rsl(vec![a, b]);
+        // paired by index: chr1:0-10 vs chr1:100-200 → no genomic overlap,
+        // but pintersect produces a zero-width region (start=end) per pair
+        let count = rsl.pintersect_count(0, 1).unwrap();
+        assert_eq!(count, 1); // zero-width region still counted
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count_out_of_bounds() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.pintersect_count(0, 5).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_jaccard_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a, b]);
+        let j = rsl.jaccard_at(0, 1).unwrap();
+        assert!((j - 1.0).abs() < 1e-9, "identical sets should have jaccard=1.0");
+    }
+
+    #[rstest]
+    fn test_rsl_jaccard_at_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let rsl = make_rsl(vec![a, b]);
+        let j = rsl.jaccard_at(0, 1).unwrap();
+        assert!((j - 0.0).abs() < 1e-9, "disjoint sets should have jaccard=0.0");
+    }
+
+    #[rstest]
+    fn test_rsl_union_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        let u = rsl.union_at(0, 1).unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 0);
+        assert_eq!(u.regions[0].end, 150);
+    }
+
+    #[rstest]
+    fn test_rsl_setdiff_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        let diff = rsl.setdiff_at(0, 1).unwrap();
+        // a minus b: chr1:0-50
+        assert_eq!(diff.regions.len(), 1);
+        assert_eq!(diff.regions[0].start, 0);
+        assert_eq!(diff.regions[0].end, 50);
+    }
+
+    #[rstest]
+    fn test_rsl_region_count() {
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        assert_eq!(rsl.region_count(0).unwrap(), 2);
+        assert_eq!(rsl.region_count(1).unwrap(), 1);
+        assert!(rsl.region_count(5).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_union_all() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 200)]);
+        let c = make_regionset(vec![("chr1", 150, 300)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let u = rsl.union_all().unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 0);
+        assert_eq!(u.regions[0].end, 300);
+    }
+
+    #[rstest]
+    fn test_rsl_union_all_empty() {
+        let rsl = make_rsl(vec![]);
+        assert!(rsl.union_all().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_union_all_single() {
+        let a = make_regionset(vec![("chr1", 10, 50)]);
+        let rsl = make_rsl(vec![a]);
+        let u = rsl.union_all().unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 10);
+        assert_eq!(u.regions[0].end, 50);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all() {
+        // Three overlapping sets — intersection is the region shared by all three
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 30, 200)]);
+        let c = make_regionset(vec![("chr1", 60, 150)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let inter = rsl.intersect_all().unwrap();
+        assert_eq!(inter.regions.len(), 1);
+        assert_eq!(inter.regions[0].start, 60);
+        assert_eq!(inter.regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 50)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let rsl = make_rsl(vec![a, b]);
+        let inter = rsl.intersect_all().unwrap();
+        assert_eq!(inter.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_empty() {
+        let rsl = make_rsl(vec![]);
+        assert!(rsl.intersect_all().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_different_sizes() {
+        // This is the case where pintersect would give wrong results:
+        // sets have different numbers of regions, but share genomic coverage
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 250)]);
+        let rsl = make_rsl(vec![a, b]);
+        let inter = rsl.intersect_all().unwrap();
+        // Shared coverage: [50,100) and [200,250)
+        assert_eq!(inter.regions.len(), 2);
+        assert_eq!(inter.regions[0].start, 50);
+        assert_eq!(inter.regions[0].end, 100);
+        assert_eq!(inter.regions[1].start, 200);
+        assert_eq!(inter.regions[1].end, 250);
+    }
+
+    #[rstest]
+    fn test_rsl_union_except() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let c = make_regionset(vec![("chr1", 400, 500)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        // union_except(1) = union of sets 0 and 2 (skip set 1)
+        let ue = rsl.union_except(1).unwrap();
+        assert_eq!(ue.regions.len(), 2);
+        assert_eq!(ue.regions[0].start, 0);
+        assert_eq!(ue.regions[0].end, 100);
+        assert_eq!(ue.regions[1].start, 400);
+        assert_eq!(ue.regions[1].end, 500);
+    }
+
+    #[rstest]
+    fn test_rsl_union_except_too_small() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.union_except(0).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_n2() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let rsl = make_rsl(vec![a, b]);
+        let (full_union, excepts) = rsl.bulk_union_except().unwrap();
+
+        // Full union covers both regions
+        assert_eq!(full_union.regions.len(), 2);
+
+        // except[0] = union of everything except set 0 = set 1
+        assert_eq!(excepts.len(), 2);
+        assert_eq!(excepts[0].regions.len(), 1);
+        assert_eq!(excepts[0].regions[0].start, 200);
+        assert_eq!(excepts[0].regions[0].end, 300);
+
+        // except[1] = union of everything except set 1 = set 0
+        assert_eq!(excepts[1].regions.len(), 1);
+        assert_eq!(excepts[1].regions[0].start, 0);
+        assert_eq!(excepts[1].regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_n3() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let c = make_regionset(vec![("chr1", 400, 500)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let (full_union, excepts) = rsl.bulk_union_except().unwrap();
+
+        assert_eq!(full_union.regions.len(), 3);
+        assert_eq!(excepts.len(), 3);
+
+        // except[0] = union(b, c)
+        assert_eq!(excepts[0].regions.len(), 2);
+        assert_eq!(excepts[0].regions[0].start, 200);
+        assert_eq!(excepts[0].regions[1].start, 400);
+
+        // except[1] = union(a, c)
+        assert_eq!(excepts[1].regions.len(), 2);
+        assert_eq!(excepts[1].regions[0].start, 0);
+        assert_eq!(excepts[1].regions[1].start, 400);
+
+        // except[2] = union(a, b)
+        assert_eq!(excepts[2].regions.len(), 2);
+        assert_eq!(excepts[2].regions[0].start, 0);
+        assert_eq!(excepts[2].regions[1].start, 200);
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_too_small() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.bulk_union_except().is_none());
+
+        let rsl_empty = make_rsl(vec![]);
+        assert!(rsl_empty.bulk_union_except().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_matches_union_except() {
+        // Verify bulk algorithm produces same results as individual union_except calls
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr2", 50, 200)]);
+        let b = make_regionset(vec![("chr1", 80, 180), ("chr2", 100, 300)]);
+        let c = make_regionset(vec![("chr1", 150, 250)]);
+        let d = make_regionset(vec![("chr2", 0, 150)]);
+        let rsl = make_rsl(vec![a, b, c, d]);
+
+        let (_, bulk_excepts) = rsl.bulk_union_except().unwrap();
+
+        for i in 0..4 {
+            let individual = rsl.union_except(i).unwrap();
+            assert_eq!(
+                bulk_excepts[i].regions.len(),
+                individual.regions.len(),
+                "region count mismatch at index {}",
+                i
+            );
+            for (j, (bulk_r, indiv_r)) in bulk_excepts[i]
+                .regions
+                .iter()
+                .zip(individual.regions.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    bulk_r.chr, indiv_r.chr,
+                    "chr mismatch at except[{}][{}]", i, j
+                );
+                assert_eq!(
+                    bulk_r.start, indiv_r.start,
+                    "start mismatch at except[{}][{}]", i, j
+                );
+                assert_eq!(
+                    bulk_r.end, indiv_r.end,
+                    "end mismatch at except[{}][{}]", i, j
+                );
+            }
+        }
     }
 }

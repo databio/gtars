@@ -482,4 +482,55 @@ mod tests {
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("NA")); // q_value should be NA
     }
+
+    #[test]
+    fn test_results_to_columns_basic() {
+        let results = vec![
+            make_result(0, 0, 3.0),
+            make_result(1, 2, 5.0),
+        ];
+        let c = results_to_columns(&results);
+
+        assert_eq!(c.user_set.len(), 2);
+        assert_eq!(c.user_set, vec![0, 1]);
+        assert_eq!(c.db_set, vec![0, 2]);
+        assert_eq!(c.p_value_log, vec![3.0, 5.0]);
+        assert_eq!(c.odds_ratio, vec![1.0, 1.0]);
+        assert_eq!(c.support, vec![10, 10]);
+        assert_eq!(c.b, vec![5, 5]);
+        assert_eq!(c.c, vec![5, 5]);
+        assert_eq!(c.d, vec![100, 100]);
+        assert_eq!(c.filename, vec!["file0.bed", "file2.bed"]);
+        assert_eq!(c.db_set_size, vec![0, 0]);
+        // empty strings → None
+        assert_eq!(c.collection, vec![None, None]);
+        assert_eq!(c.description, vec![None, None]);
+        assert_eq!(c.cell_type, vec![None, None]);
+        assert_eq!(c.tissue, vec![None, None]);
+        assert_eq!(c.antibody, vec![None, None]);
+        assert_eq!(c.treatment, vec![None, None]);
+        assert_eq!(c.data_source, vec![None, None]);
+    }
+
+    #[test]
+    fn test_results_to_columns_empty() {
+        let c = results_to_columns(&[]);
+        assert!(c.user_set.is_empty());
+        assert!(c.filename.is_empty());
+    }
+
+    #[test]
+    fn test_results_to_columns_with_metadata() {
+        let mut r = make_result(0, 0, 1.0);
+        r.collection = "ENCODE".to_string();
+        r.cell_type = "K562".to_string();
+        r.tissue = String::new(); // stays None
+        r.q_value = Some(0.05);
+
+        let c = results_to_columns(&[r]);
+        assert_eq!(c.collection, vec![Some("ENCODE".to_string())]);
+        assert_eq!(c.cell_type, vec![Some("K562".to_string())]);
+        assert_eq!(c.tissue, vec![None]);
+        assert_eq!(c.q_value, vec![Some(0.05)]);
+    }
 }
