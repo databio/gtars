@@ -487,6 +487,54 @@ impl JsRegionSetList {
             .ok_or_else(|| JsValue::from_str("Index out of range or list too small"))
     }
 
+    /// Compute all N union-except results in O(n) via prefix/suffix.
+    /// Returns { union: RegionSet, excepts: RegionSet[] }.
+    #[wasm_bindgen(js_name = "bulkUnionExcept")]
+    pub fn bulk_union_except(&self) -> Result<JsValue, JsValue> {
+        let (full_union, excepts) = self.inner.bulk_union_except()
+            .ok_or_else(|| JsValue::from_str("Need at least 2 sets"))?;
+
+        #[derive(serde::Serialize)]
+        struct BulkResult {
+            union_regions: u32,
+            union_nucleotides: u32,
+            except_unique: Vec<u32>,
+        }
+
+        // For each file, compute setdiff(file_i, union_except_i).len()
+        let mut except_unique = Vec::with_capacity(excepts.len());
+        for (i, ue) in excepts.iter().enumerate() {
+            if let Some(rs) = self.inner.get(i) {
+                except_unique.push(rs.setdiff(ue).len() as u32);
+            } else {
+                except_unique.push(0);
+            }
+        }
+
+        let result = BulkResult {
+            union_regions: full_union.len() as u32,
+            union_nucleotides: full_union.nucleotides_length() as u32,
+            except_unique,
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
+    }
+
+    /// Union of all sets.
+    #[wasm_bindgen(js_name = "unionAll")]
+    pub fn union_all(&self) -> Result<JsRegionSet, JsValue> {
+        self.inner.union_all()
+            .map(|rs| JsRegionSet { region_set: rs })
+            .ok_or_else(|| JsValue::from_str("Empty list"))
+    }
+
+    /// Intersection of all sets.
+    #[wasm_bindgen(js_name = "intersectAll")]
+    pub fn intersect_all(&self) -> Result<JsRegionSet, JsValue> {
+        self.inner.intersect_all()
+            .map(|rs| JsRegionSet { region_set: rs })
+            .ok_or_else(|| JsValue::from_str("Empty list"))
+    }
+
     /// Compute pairwise Jaccard similarity for all pairs of region sets.
     ///
     /// Returns { matrix: number[][], names: string[] | null }.

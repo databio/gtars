@@ -1156,6 +1156,13 @@ pub trait RegionSetListOps {
     fn setdiff_at(&self, i: usize, j: usize) -> Option<RegionSet>;
     fn region_count(&self, i: usize) -> Option<u32>;
     fn union_except(&self, skip: usize) -> Option<RegionSet>;
+    /// Compute union-of-all and all N union-except results in O(n) unions
+    /// using prefix/suffix arrays. Returns (full_union, vec_of_union_except).
+    fn bulk_union_except(&self) -> Option<(RegionSet, Vec<RegionSet>)>;
+    /// Fold all sets into a single union.
+    fn union_all(&self) -> Option<RegionSet>;
+    /// Fold all sets into a single intersection.
+    fn intersect_all(&self) -> Option<RegionSet>;
 }
 
 impl RegionSetListOps for RegionSetList {
@@ -1200,6 +1207,68 @@ impl RegionSetListOps for RegionSetList {
             if k == skip { continue; }
             if let Some(other) = self.get(k) {
                 acc = acc.union(other);
+            }
+        }
+        Some(acc)
+    }
+
+    fn bulk_union_except(&self) -> Option<(RegionSet, Vec<RegionSet>)> {
+        let n = self.len();
+        if n < 2 { return None; }
+
+        // prefix[i] = union(set[0]..=set[i])
+        let mut prefix = Vec::with_capacity(n);
+        prefix.push(self.get(0)?.clone());
+        for i in 1..n {
+            let prev = &prefix[i - 1];
+            prefix.push(prev.union(self.get(i)?));
+        }
+
+        // suffix[i] = union(set[i]..=set[n-1])
+        let mut suffix: Vec<RegionSet> = (0..n)
+            .map(|i| self.get(i).unwrap().clone())
+            .collect();
+        // Build from right: suffix[i] = union(set[i], suffix[i+1])
+        for i in (0..n - 1).rev() {
+            suffix[i] = self.get(i)?.union(&suffix[i + 1]);
+        }
+
+        let full_union = prefix[n - 1].clone();
+
+        // union_except[i] = union(prefix[i-1], suffix[i+1])
+        let mut results = Vec::with_capacity(n);
+        for i in 0..n {
+            let except = match (i > 0, i < n - 1) {
+                (false, true) => suffix[1].clone(),
+                (true, false) => prefix[i - 1].clone(),
+                (true, true) => prefix[i - 1].union(&suffix[i + 1]),
+                (false, false) => unreachable!(), // n >= 2
+            };
+            results.push(except);
+        }
+
+        Some((full_union, results))
+    }
+
+    fn union_all(&self) -> Option<RegionSet> {
+        let n = self.len();
+        if n == 0 { return None; }
+        let mut acc = self.get(0)?.clone();
+        for i in 1..n {
+            if let Some(other) = self.get(i) {
+                acc = acc.union(other);
+            }
+        }
+        Some(acc)
+    }
+
+    fn intersect_all(&self) -> Option<RegionSet> {
+        let n = self.len();
+        if n == 0 { return None; }
+        let mut acc = self.get(0)?.clone();
+        for i in 1..n {
+            if let Some(other) = self.get(i) {
+                acc = acc.pintersect(other);
             }
         }
         Some(acc)
