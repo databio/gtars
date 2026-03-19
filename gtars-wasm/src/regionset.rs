@@ -345,6 +345,25 @@ pub struct JsRegionSetList {
 
 #[wasm_bindgen(js_class = "RegionSetList")]
 impl JsRegionSetList {
+    /// Create an empty RegionSetList. Use `add()` to populate it.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Self {
+        JsRegionSetList {
+            inner: RegionSetList::new(Vec::new()),
+        }
+    }
+
+    /// Add a RegionSet to this list, with an optional name.
+    pub fn add(&mut self, set: &JsRegionSet, name: Option<String>) {
+        self.inner.region_sets.push(set.region_set.clone());
+        if let Some(n) = name {
+            self.inner
+                .names
+                .get_or_insert_with(Vec::new)
+                .push(n);
+        }
+    }
+
     /// Number of region sets in this list.
     #[wasm_bindgen(getter)]
     pub fn length(&self) -> usize {
