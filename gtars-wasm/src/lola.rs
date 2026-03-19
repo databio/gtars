@@ -91,6 +91,28 @@ impl JsLolaRegionDB {
         let rsl = self.inner.get_region_set_list(&idx);
         JsRegionSetList { inner: rsl }
     }
+
+    /// Collection-level annotations from the RegionDB.
+    ///
+    /// @returns Array of objects with keys: collectionname, collector, date, source, description
+    #[wasm_bindgen(getter, js_name = "collectionAnno")]
+    pub fn collection_anno(&self) -> Result<JsValue, JsValue> {
+        let annos: Vec<CollectionAnnoJs> = self
+            .inner
+            .collection_anno
+            .iter()
+            .map(|a| CollectionAnnoJs {
+                collectionname: a.collection_name.clone(),
+                collector: a.collector.clone(),
+                date: a.date.clone(),
+                source: a.source.clone(),
+                description: a.description.clone(),
+            })
+            .collect();
+
+        serde_wasm_bindgen::to_value(&annos)
+            .map_err(|e| JsValue::from_str(&format!("{}", e)))
+    }
 }
 
 // =========================================================================
@@ -213,6 +235,15 @@ pub fn js_check_universe(
 struct DbEntry {
     regions: Vec<(String, u32, u32)>,
     name: String,
+}
+
+#[derive(serde::Serialize)]
+struct CollectionAnnoJs {
+    collectionname: String,
+    collector: String,
+    date: String,
+    source: String,
+    description: String,
 }
 
 #[derive(serde::Serialize)]

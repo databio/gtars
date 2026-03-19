@@ -40,6 +40,7 @@ pub use bed_classifier::classify_bed;
 pub use gtars_core::models::CoordinateMode;
 pub use consensus::{ConsensusRegion, consensus};
 pub use interval_ranges::IntervalRanges;
+pub use interval_ranges::pairwise_jaccard;
 pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,

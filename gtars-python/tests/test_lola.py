@@ -47,6 +47,44 @@ def universe():
     )
 
 
+@pytest.fixture
+def lolacore_db():
+    """Load a RegionDB from the LOLA-format test folder (has collection.txt)."""
+    import os
+
+    db_path = os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "tests",
+        "data",
+        "lola_multi_db",
+    )
+    return RegionDB.from_folder(db_path)
+
+
+class TestCollectionAnno:
+    def test_collection_anno_returns_list(self, lolacore_db):
+        annos = lolacore_db.collection_anno
+        assert isinstance(annos, list)
+        assert len(annos) >= 1
+
+    def test_collection_anno_keys(self, lolacore_db):
+        annos = lolacore_db.collection_anno
+        expected_keys = {"collectionname", "collector", "date", "source", "description"}
+        assert set(annos[0].keys()) == expected_keys
+
+    def test_collection_anno_values(self, lolacore_db):
+        annos = lolacore_db.collection_anno
+        # collection1 has: Nathan, 2015-04-01, UCSC Genome Browser, ...
+        names = [a["collectionname"] for a in annos]
+        assert "collection1" in names
+
+    def test_collection_anno_empty_for_bed_files(self, simple_db):
+        """RegionDB built from BED files should have no collection annotations."""
+        assert simple_db.collection_anno == []
+
+
 class TestRunLola:
     def test_run_lola_basic(self, simple_db, universe):
         user_set = make_regions([("chr1", 120, 180)])

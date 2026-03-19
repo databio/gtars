@@ -382,6 +382,33 @@ impl JsRegionSetList {
             None => JsValue::NULL,
         }
     }
+
+    /// Compute pairwise Jaccard similarity for all pairs of region sets.
+    ///
+    /// Returns { matrix: number[][], names: string[] | null }.
+    #[wasm_bindgen(js_name = "pairwiseJaccard")]
+    pub fn pairwise_jaccard(&self) -> Result<JsValue, JsValue> {
+        let sets: Vec<RegionSet> = (0..self.inner.len())
+            .filter_map(|i| self.inner.get(i).cloned())
+            .collect();
+        let n = sets.len();
+        let flat = gtars_genomicdist::pairwise_jaccard(&sets);
+        let matrix: Vec<Vec<f64>> = (0..n)
+            .map(|i| flat[i * n..(i + 1) * n].to_vec())
+            .collect();
+
+        #[derive(serde::Serialize)]
+        struct PairwiseResult {
+            matrix: Vec<Vec<f64>>,
+            names: Option<Vec<String>>,
+        }
+
+        let result = PairwiseResult {
+            matrix,
+            names: self.inner.names.clone(),
+        };
+        serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
+    }
 }
 
 /// Builder for computing consensus regions from multiple RegionSet objects.

@@ -127,6 +127,11 @@ r_union <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_union, rs_ptr_a, rs_ptr_b)
 #' @param rs_ptr_b External pointer to RegionSet B
 r_jaccard <- function(rs_ptr_a, rs_ptr_b) .Call(wrap__r_jaccard, rs_ptr_a, rs_ptr_b)
 
+#' Pairwise Jaccard similarity matrix for a RegionSetList.
+#' @export
+#' @param rsl_ptr External pointer to a RegionSetList
+r_pairwise_jaccard <- function(rsl_ptr) .Call(wrap__r_pairwise_jaccard, rsl_ptr)
+
 #' Shift all regions by a fixed offset
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
