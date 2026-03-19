@@ -22,8 +22,6 @@ anyhow = { workspace = true }
 serde_json = { workspace = true }
 pyo3 = { version = "0.27.1", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
-[target.'cfg(target_os = "linux")'.dependencies]
-tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }
 
 # our code (optional, behind feature flags)
 gtars-core = { path = "../gtars-core", features=["bigbed", "http"], optional = true }
@@ -34,3 +32,6 @@ gtars-io = { path = "../gtars-io", optional = true }
 gtars-igd = { path = "../gtars-igd", optional = true }
 gtars-lola = { path = "../gtars-lola", optional = true }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }
