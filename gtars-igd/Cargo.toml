@@ -8,6 +8,7 @@ repository = "https://github.com/databio/gtars"
 
 [dependencies]
 byteorder.workspace = true
+anyhow.workspace = true
 # our code
 gtars-core = { path = "../gtars-core", version="0.5.2" }
 gtars-overlaprs ={ path = "../gtars-overlaprs", version="0.5.1", optional = true}
@@ -17,9 +18,6 @@ bloomfilter = { version = "3.0.1", optional = true}
 rstest = "0.26.1"
 tempfile = "3.23.0"
 pretty_assertions = "1.4.1"
-
-# shared workspace dependencies
-anyhow = { workspace = true }
 
 [features]
 # Feature 'bloom' links to the dependency key 'bloom' (which is the correct crate name).

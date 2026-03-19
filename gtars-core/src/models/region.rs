@@ -1,10 +1,13 @@
 use md5::{Digest, Md5};
 use std::fmt::{self, Display};
 
+use super::coords::CoordinateMode;
+
 ///
 /// Region struct, representation of one Region in RegionSet files
 ///
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Region {
     pub chr: String,
     pub start: u32,
@@ -48,11 +51,36 @@ impl Region {
         format!("{:x}", chrom_hash)
     }
 
+    /// Calculate the midpoint of this region: `start + width / 2`.
     ///
-    /// Calculate mid point
-    ///
+    /// NOTE: R's GenomicDistributions computes midpoints using banker's
+    /// rounding in 1-based coordinates: `start + round((end - start) / 2)`.
+    /// For regions with width ≡ 2 (mod 4), this picks the left-of-center
+    /// base while our formula picks right-of-center, causing a ±1 bp
+    /// difference in ~2.6% of feature distance calculations. This is a
+    /// known discrepancy; to match GD exactly, change the formula to:
+    /// `if w % 4 == 2 { start + w/2 - 1 } else { start + w/2 }`.
     pub fn mid_point(&self) -> u32 {
         self.start + self.width() / 2
+    }
+
+    /// Calculate midpoint using the specified coordinate convention.
+    ///
+    /// - `Bed` (default): floor division → `start + width / 2`
+    /// - `GRanges`: banker's rounding in 1-based coords →
+    ///   `if w % 4 == 2 { start + w/2 - 1 } else { start + w/2 }`
+    pub fn mid_point_with_mode(&self, mode: CoordinateMode) -> u32 {
+        match mode {
+            CoordinateMode::Bed => self.start + self.width() / 2,
+            CoordinateMode::GRanges => {
+                let w = self.width();
+                if w % 4 == 2 {
+                    self.start + w / 2 - 1
+                } else {
+                    self.start + w / 2
+                }
+            }
+        }
     }
 }
 

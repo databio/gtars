@@ -13,7 +13,7 @@ and compiled via PyO3. This stub file provides the Python interface definition
 and structured documentation that tools can parse properly.
 """
 
-from typing import Any, Union, Optional, List, Iterator
+from typing import Any, Dict, Union, Optional, List, Iterator
 from enum import Enum
 from os import PathLike
 
@@ -283,13 +283,10 @@ class FhrMetadata:
     funding: Optional[str]
 
     def __init__(self, **kwargs: Any) -> None: ...
-
     @staticmethod
     def from_json(path: str) -> "FhrMetadata": ...
-
     def to_dict(self) -> dict[str, Any]: ...
     def to_json(self, path: str) -> None: ...
-
     def __repr__(self) -> str: ...
 
 class RefgetStore:
@@ -386,6 +383,31 @@ class RefgetStore:
 
             store = RefgetStore.in_memory()
             store.add_sequence_collection_from_fasta("genome.fa")
+        """
+        ...
+
+    @classmethod
+    def store_exists(cls, path: Union[str, PathLike]) -> bool:
+        """Check whether a valid RefgetStore exists at the given path.
+
+        Returns True if the path contains a store manifest file,
+        indicating the store has been initialized. Returns False if the
+        path does not exist or does not contain a store.
+
+        This avoids hardcoding knowledge of the store's internal file
+        format in calling code.
+
+        Args:
+            path: Path to the store directory.
+
+        Returns:
+            True if a store exists at the path, False otherwise.
+
+        Example::
+
+            from gtars.refget import RefgetStore
+            RefgetStore.store_exists("/data/hg38_store")  # True
+            RefgetStore.store_exists("/tmp/empty")  # False
         """
         ...
 
@@ -565,7 +587,10 @@ class RefgetStore:
         ...
 
     def add_sequence_collection_from_fasta(
-        self, file_path: Union[str, PathLike], force: bool = False
+        self,
+        file_path: Union[str, PathLike],
+        force: bool = False,
+        namespaces: Optional[List[str]] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -576,6 +601,9 @@ class RefgetStore:
             file_path: Path to the FASTA file to import.
             force: If True, overwrite existing collections/sequences.
                 If False (default), skip duplicates.
+            namespaces: Optional list of namespace prefixes to extract aliases from
+                FASTA headers. For example, ["ncbi", "refseq"] will scan headers
+                for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
 
         Returns:
             A tuple containing:
@@ -590,6 +618,11 @@ class RefgetStore:
             store = RefgetStore.in_memory()
             metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
             print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest}")
+
+            # Extract aliases from FASTA headers
+            metadata, was_new = store.add_sequence_collection_from_fasta(
+                "genome.fa", namespaces=["ncbi", "refseq"]
+            )
         """
         ...
 
@@ -645,23 +678,56 @@ class RefgetStore:
     # Collection API
     # =========================================================================
 
-    def list_collections(self) -> List[SequenceCollectionMetadata]:
-        """List all collection metadata in the store.
+    def list_collections(
+        self,
+        page: int = 0,
+        page_size: int = 100,
+        filters: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """List collections with pagination and optional attribute filtering.
 
-        Returns metadata for all collections without loading full collection data.
-        Use this for browsing/inventory operations.
+        Args:
+            page: 0-indexed page number.
+            page_size: Number of results per page.
+            filters: Optional attribute filters (AND logic). Keys are attribute
+                names (names, lengths, sequences, name_length_pairs,
+                sorted_name_length_pairs, sorted_sequences), values are digests.
 
         Returns:
-            List of metadata for all collections.
+            Dict with "results" (list of SequenceCollectionMetadata) and
+            "pagination" (dict with page, page_size, total).
 
         Example::
 
-            for meta in store.list_collections():
-                print(f"Collection {meta.digest}: {meta.n_sequences} sequences")
+            # Get first page of all collections
+            result = store.list_collections()
+            for meta in result["results"]:
+                print(f"{meta.digest}: {meta.n_sequences} sequences")
+            print(f"Total: {result['pagination']['total']}")
+
+            # Filter by names digest
+            result = store.list_collections(filters={"names": "abc123"})
         """
         ...
 
-    def get_collection_metadata(self, collection_digest: str) -> Optional[SequenceCollectionMetadata]:
+    def remove_collection(
+        self, digest: str, remove_orphan_sequences: bool = False
+    ) -> bool:
+        """Remove a collection from the store.
+
+        Args:
+            digest: The collection's SHA-512/24u digest string.
+            remove_orphan_sequences: If True, also remove sequences no longer
+                referenced by any remaining collection. Default: False.
+
+        Returns:
+            True if the collection was found and removed, False if not found.
+        """
+        ...
+
+    def get_collection_metadata(
+        self, collection_digest: str
+    ) -> Optional[SequenceCollectionMetadata]:
         """Get metadata for a collection by digest.
 
         Returns lightweight metadata without loading the full collection.
@@ -885,7 +951,6 @@ class RefgetStore:
                 - 'n_collections': Total number of collections (Stub + Full)
                 - 'n_collections_loaded': Number of collections with sequences loaded (Full)
                 - 'storage_mode': Storage mode ('Raw' or 'Encoded')
-                - 'total_disk_size': Total size of all files on disk in bytes
 
         Note:
             n_collections_loaded only reflects collections fully loaded in memory.
@@ -972,7 +1037,9 @@ class RefgetStore:
         """
         ...
 
-    def find_collections_by_attribute(self, attr_name: str, attr_digest: str) -> List[str]:
+    def find_collections_by_attribute(
+        self, attr_name: str, attr_digest: str
+    ) -> List[str]:
         """Find collections by attribute digest.
 
         Args:
@@ -1125,8 +1192,18 @@ class RefgetStore:
     def add_sequence_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a sequence alias: namespace/alias maps to sequence digest."""
         ...
-    def get_sequence_by_alias(self, namespace: str, alias: str) -> Optional[SequenceRecord]:
-        """Resolve a sequence alias to the sequence record."""
+    def get_sequence_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceMetadata]:
+        """Resolve a sequence alias to sequence metadata (no data loading)."""
+        ...
+    def get_sequence_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceRecord]:
+        """Resolve a sequence alias and return the loaded sequence record.
+
+        Returns None if the alias is not found.
+        """
         ...
     def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this sequence digest."""
@@ -1148,8 +1225,18 @@ class RefgetStore:
     def add_collection_alias(self, namespace: str, alias: str, digest: str) -> None:
         """Add a collection alias: namespace/alias maps to collection digest."""
         ...
-    def get_collection_by_alias(self, namespace: str, alias: str) -> Optional[SequenceCollectionMetadata]:
-        """Resolve a collection alias to the collection metadata."""
+    def get_collection_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollectionMetadata]:
+        """Resolve a collection alias to collection metadata (no data loading)."""
+        ...
+    def get_collection_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollection]:
+        """Resolve a collection alias and return the loaded collection.
+
+        Returns None if the alias is not found.
+        """
         ...
     def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:
         """Reverse lookup: find all (namespace, alias) pairs pointing to this collection digest."""
@@ -1184,8 +1271,273 @@ class RefgetStore:
         """Load FHR metadata from a JSON file and attach it to a collection."""
         ...
 
+    def into_readonly(self) -> "ReadonlyRefgetStore":
+        """Convert to a ReadonlyRefgetStore for concurrent read access.
+
+        Consumes this store (replacing it with an empty in-memory store)
+        and returns a ReadonlyRefgetStore whose read methods all use ``&self``
+        (no mutable borrow), making it suitable for ``Arc<ReadonlyRefgetStore>``
+        in servers.
+
+        Call ``load_all_collections()`` or ``load_collection()`` before
+        converting, since ReadonlyRefgetStore cannot lazy-load.
+
+        Returns:
+            ReadonlyRefgetStore: An immutable store suitable for concurrent access.
+
+        Example::
+
+            store = RefgetStore.open_remote("/cache", "https://example.com")
+            store.load_all_collections()
+            readonly = store.into_readonly()
+            coll = readonly.get_collection("abc123")
+        """
+        ...
+
     def __len__(self) -> int: ...
     def __iter__(self) -> Iterator[SequenceMetadata]: ...
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+class ReadonlyRefgetStore:
+    """An immutable RefgetStore for concurrent read access.
+
+    All read methods use immutable references, making this suitable for
+    concurrent access patterns (e.g., shared across threads in a server).
+
+    This type has NO write methods and NO constructors -- it is only
+    obtainable via ``RefgetStore.into_readonly()``.
+
+    Read methods that require preloaded data (e.g., ``get_collection()``)
+    will error if the data was not loaded before conversion.
+
+    Attributes:
+        cache_path: Local directory path where the store is located or cached.
+            None for in-memory stores.
+        remote_url: Remote URL of the store if loaded remotely, None otherwise.
+        storage_mode: Current storage mode (Raw or Encoded).
+
+    Example::
+
+        store = RefgetStore.open_remote("/cache", "https://example.com")
+        store.load_all_collections()
+        readonly = store.into_readonly()
+        coll = readonly.get_collection("abc123")
+    """
+
+    cache_path: Optional[str]
+    remote_url: Optional[str]
+
+    @property
+    def storage_mode(self) -> StorageMode:
+        """Current storage mode (Raw or Encoded)."""
+        ...
+
+    # =========================================================================
+    # Collection API
+    # =========================================================================
+
+    def list_collections(
+        self,
+        page: int = 0,
+        page_size: int = 100,
+        filters: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """List collections with pagination and optional attribute filtering."""
+        ...
+
+    def get_collection_metadata(
+        self, collection_digest: str
+    ) -> Optional[SequenceCollectionMetadata]:
+        """Get metadata for a collection by digest."""
+        ...
+
+    def get_collection(self, collection_digest: str) -> SequenceCollection:
+        """Get a collection by digest with all sequences loaded.
+
+        Requires that the collection was preloaded before conversion.
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+
+        Returns:
+            The collection with all sequence data loaded.
+
+        Raises:
+            IOError: If the collection was not preloaded.
+        """
+        ...
+
+    def is_collection_loaded(self, collection_digest: str) -> bool:
+        """Check if a collection is fully loaded."""
+        ...
+
+    # =========================================================================
+    # Seqcol Features
+    # =========================================================================
+
+    def get_collection_level1(self, digest: str) -> dict:
+        """Get level 1 representation (attribute digests) for a collection."""
+        ...
+
+    def get_collection_level2(self, digest: str) -> dict:
+        """Get level 2 representation (full arrays) for a collection."""
+        ...
+
+    def compare(self, digest_a: str, digest_b: str) -> dict:
+        """Compare two collections by digest."""
+        ...
+
+    def find_collections_by_attribute(
+        self, attr_name: str, attr_digest: str
+    ) -> List[str]:
+        """Find collections by attribute digest."""
+        ...
+
+    def get_attribute(self, attr_name: str, attr_digest: str) -> Optional[list]:
+        """Get attribute array by digest."""
+        ...
+
+    def has_ancillary_digests(self) -> bool:
+        """Returns whether ancillary digests are enabled."""
+        ...
+
+    def has_attribute_index(self) -> bool:
+        """Returns whether the on-disk attribute index is enabled."""
+        ...
+
+    # =========================================================================
+    # Sequence API
+    # =========================================================================
+
+    def list_sequences(self) -> List[SequenceMetadata]:
+        """List all sequence metadata in the store."""
+        ...
+
+    def get_sequence_metadata(self, seq_digest: str) -> Optional[SequenceMetadata]:
+        """Get metadata for a sequence by digest."""
+        ...
+
+    def get_sequence(self, digest: str) -> SequenceRecord:
+        """Retrieve a sequence record by its digest.
+
+        Args:
+            digest: Sequence digest (SHA-512/24u or MD5).
+
+        Returns:
+            The sequence record with data.
+
+        Raises:
+            KeyError: If the sequence is not found.
+        """
+        ...
+
+    def get_sequence_by_name(
+        self, collection_digest: str, sequence_name: str
+    ) -> SequenceRecord:
+        """Retrieve a sequence by collection digest and sequence name.
+
+        Args:
+            collection_digest: The collection's SHA-512/24u digest.
+            sequence_name: Name of the sequence within that collection.
+
+        Returns:
+            The sequence record with data.
+
+        Raises:
+            KeyError: If the sequence is not found.
+        """
+        ...
+
+    def get_substring(self, seq_digest: str, start: int, end: int) -> str:
+        """Extract a substring from a sequence.
+
+        Args:
+            seq_digest: Sequence digest (SHA-512/24u).
+            start: Start position (0-based, inclusive).
+            end: End position (0-based, exclusive).
+
+        Returns:
+            The substring sequence.
+
+        Raises:
+            KeyError: If the sequence is not found.
+        """
+        ...
+
+    # =========================================================================
+    # Store Info
+    # =========================================================================
+
+    def stats(self) -> dict:
+        """Returns statistics about the store."""
+        ...
+
+    # =========================================================================
+    # Alias API (read-only)
+    # =========================================================================
+
+    def get_sequence_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceMetadata]:
+        """Resolve a sequence alias to sequence metadata."""
+        ...
+
+    def get_sequence_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceRecord]:
+        """Resolve a sequence alias and return the loaded sequence record."""
+        ...
+
+    def get_aliases_for_sequence(self, digest: str) -> list[tuple[str, str]]:
+        """Reverse lookup: find all (namespace, alias) pairs for this sequence."""
+        ...
+
+    def list_sequence_alias_namespaces(self) -> list[str]:
+        """List all sequence alias namespaces."""
+        ...
+
+    def list_sequence_aliases(self, namespace: str) -> Optional[list[str]]:
+        """List all aliases in a sequence alias namespace."""
+        ...
+
+    def get_collection_metadata_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollectionMetadata]:
+        """Resolve a collection alias to collection metadata."""
+        ...
+
+    def get_collection_by_alias(
+        self, namespace: str, alias: str
+    ) -> Optional[SequenceCollection]:
+        """Resolve a collection alias and return the loaded collection."""
+        ...
+
+    def get_aliases_for_collection(self, digest: str) -> list[tuple[str, str]]:
+        """Reverse lookup: find all (namespace, alias) pairs for this collection."""
+        ...
+
+    def list_collection_alias_namespaces(self) -> list[str]:
+        """List all collection alias namespaces."""
+        ...
+
+    def list_collection_aliases(self, namespace: str) -> Optional[list[str]]:
+        """List all aliases in a collection alias namespace."""
+        ...
+
+    # =========================================================================
+    # FHR Metadata (read-only)
+    # =========================================================================
+
+    def get_fhr_metadata(self, collection_digest: str) -> Optional[FhrMetadata]:
+        """Get FHR metadata for a collection."""
+        ...
+
+    def list_fhr_metadata(self) -> list[str]:
+        """List all collection digests that have FHR metadata."""
+        ...
+
+    def __len__(self) -> int: ...
     def __str__(self) -> str: ...
     def __repr__(self) -> str: ...
 

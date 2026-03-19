@@ -14,12 +14,14 @@ pub enum BedClassifierError {
 
 #[derive(Error, Debug)]
 pub enum GtarsGenomicDistError {
-    #[error("Custom Error.")]
+    #[error("{0}")]
     CustomError(String),
     #[error("Error getting sequence for region.")]
     GCContentError(String, u32, u32, String),
     #[error("No TSS's found for region. Double-check your index!")]
     TSSContentError(String),
+    #[error("Signal matrix parse error: {0}")]
+    SignalMatrixError(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
