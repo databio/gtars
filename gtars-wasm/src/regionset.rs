@@ -4,7 +4,7 @@ use crate::models::BedEntries;
 use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::bed_classifier::classify_bed;
 use gtars_genomicdist::consensus;
-use gtars_genomicdist::interval_ranges::IntervalRanges;
+use gtars_genomicdist::interval_ranges::{IntervalRanges, RegionSetListOps};
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
@@ -400,6 +400,91 @@ impl JsRegionSetList {
             Some(names) => serde_wasm_bindgen::to_value(names).unwrap_or(JsValue::NULL),
             None => JsValue::NULL,
         }
+    }
+
+    /// Build a RegionSetList directly from arrays of BED entries.
+    ///
+    /// @param entries - Array of arrays: [[[chr, start, end, rest], ...], ...]
+    /// @param names - Optional array of names, one per set
+    #[wasm_bindgen(js_name = "fromEntries")]
+    pub fn from_entries(entries: &JsValue, names: &JsValue) -> Result<JsRegionSetList, JsValue> {
+        let all_entries: Vec<BedEntries> =
+            serde_wasm_bindgen::from_value(entries.clone())?;
+        let names_vec: Option<Vec<String>> = if names.is_null() || names.is_undefined() {
+            None
+        } else {
+            Some(serde_wasm_bindgen::from_value(names.clone())?)
+        };
+
+        let mut sets = Vec::with_capacity(all_entries.len());
+        for bed_entries in all_entries {
+            let regions: Vec<Region> = bed_entries
+                .0
+                .into_iter()
+                .map(|be| Region {
+                    chr: be.0,
+                    start: be.1,
+                    end: be.2,
+                    rest: Some(be.3),
+                })
+                .collect();
+            let mut rs = RegionSet::from(regions);
+            rs.sort();
+            sets.push(rs);
+        }
+
+        Ok(JsRegionSetList {
+            inner: RegionSetList {
+                region_sets: sets,
+                names: names_vec,
+                path: None,
+            },
+        })
+    }
+
+    /// Number of regions in the set at the given index.
+    #[wasm_bindgen(js_name = "regionCount")]
+    pub fn region_count(&self, index: usize) -> Result<u32, JsValue> {
+        self.inner.region_count(index)
+            .ok_or_else(|| JsValue::from_str("Index out of range"))
+    }
+
+    /// Number of overlapping regions between two sets by index.
+    #[wasm_bindgen(js_name = "pintersectCount")]
+    pub fn pintersect_count(&self, i: usize, j: usize) -> Result<u32, JsValue> {
+        self.inner.pintersect_count(i, j)
+            .ok_or_else(|| JsValue::from_str("Index out of range"))
+    }
+
+    /// Jaccard similarity between two sets by index.
+    #[wasm_bindgen(js_name = "jaccardAt")]
+    pub fn jaccard_at(&self, i: usize, j: usize) -> Result<f64, JsValue> {
+        self.inner.jaccard_at(i, j)
+            .ok_or_else(|| JsValue::from_str("Index out of range"))
+    }
+
+    /// Union of two sets by index.
+    #[wasm_bindgen(js_name = "unionAt")]
+    pub fn union_at(&self, i: usize, j: usize) -> Result<JsRegionSet, JsValue> {
+        self.inner.union_at(i, j)
+            .map(|rs| JsRegionSet { region_set: rs })
+            .ok_or_else(|| JsValue::from_str("Index out of range"))
+    }
+
+    /// Setdiff of two sets by index (set[i] minus set[j]).
+    #[wasm_bindgen(js_name = "setdiffAt")]
+    pub fn setdiff_at(&self, i: usize, j: usize) -> Result<JsRegionSet, JsValue> {
+        self.inner.setdiff_at(i, j)
+            .map(|rs| JsRegionSet { region_set: rs })
+            .ok_or_else(|| JsValue::from_str("Index out of range"))
+    }
+
+    /// Union of all sets except the one at the given index.
+    #[wasm_bindgen(js_name = "unionExcept")]
+    pub fn union_except(&self, skip: usize) -> Result<JsRegionSet, JsValue> {
+        self.inner.union_except(skip)
+            .map(|rs| JsRegionSet { region_set: rs })
+            .ok_or_else(|| JsValue::from_str("Index out of range or list too small"))
     }
 
     /// Compute pairwise Jaccard similarity for all pairs of region sets.

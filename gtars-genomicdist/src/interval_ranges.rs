@@ -1140,6 +1140,72 @@ pub fn pairwise_jaccard(sets: &[RegionSet]) -> Vec<f64> {
     matrix
 }
 
+// --- Indexed operations on RegionSetList ---
+//
+// These let callers operate on pairs by index without cloning full RegionSets
+// across an FFI boundary (wasm, Python, R).
+
+use gtars_core::models::RegionSetList;
+
+/// Indexed pair operations on a RegionSetList.
+pub trait RegionSetListOps {
+    fn pintersect_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn pintersect_count(&self, i: usize, j: usize) -> Option<u32>;
+    fn jaccard_at(&self, i: usize, j: usize) -> Option<f64>;
+    fn union_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn setdiff_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn region_count(&self, i: usize) -> Option<u32>;
+    fn union_except(&self, skip: usize) -> Option<RegionSet>;
+}
+
+impl RegionSetListOps for RegionSetList {
+    fn pintersect_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.pintersect(b))
+    }
+
+    fn pintersect_count(&self, i: usize, j: usize) -> Option<u32> {
+        self.pintersect_at(i, j).map(|rs| rs.len() as u32)
+    }
+
+    fn jaccard_at(&self, i: usize, j: usize) -> Option<f64> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.jaccard(b))
+    }
+
+    fn union_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.union(b))
+    }
+
+    fn setdiff_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.setdiff(b))
+    }
+
+    fn region_count(&self, i: usize) -> Option<u32> {
+        self.get(i).map(|rs| rs.len() as u32)
+    }
+
+    fn union_except(&self, skip: usize) -> Option<RegionSet> {
+        let n = self.len();
+        if n < 2 { return None; }
+        let first = if skip == 0 { 1 } else { 0 };
+        let mut acc = self.get(first)?.clone();
+        for k in (first + 1)..n {
+            if k == skip { continue; }
+            if let Some(other) = self.get(k) {
+                acc = acc.union(other);
+            }
+        }
+        Some(acc)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
