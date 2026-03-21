@@ -157,8 +157,7 @@ jobs:
     secrets: inherit
 
   publish-wasm:
-    if: ${{ always() && inputs.wasm != false && needs.publish-all-crates.result == 'success' }}
-    needs: publish-all-crates
+    if: ${{ always() && inputs.wasm != false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
