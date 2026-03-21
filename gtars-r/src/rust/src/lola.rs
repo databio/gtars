@@ -9,6 +9,19 @@ use gtars_lola::output::{annotate_results, apply_fdr_correction};
 use gtars_lola::universe;
 
 // =========================================================================
+// Helpers
+// =========================================================================
+
+/// Convert an empty string to None (for R NA), non-empty to Some.
+fn empty_to_na(s: &str) -> Option<String> {
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
+}
+
+// =========================================================================
 // Helper macros
 // =========================================================================
 
