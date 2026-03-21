@@ -41,6 +41,7 @@ pub use gtars_core::models::CoordinateMode;
 pub use consensus::{ConsensusRegion, consensus};
 pub use interval_ranges::IntervalRanges;
 pub use interval_ranges::pairwise_jaccard;
+pub use interval_ranges::RegionSetListOps;
 pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
