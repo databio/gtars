@@ -1200,7 +1200,7 @@ impl RegionSetListOps for RegionSetList {
 
     fn union_except(&self, skip: usize) -> Option<RegionSet> {
         let n = self.len();
-        if n < 2 { return None; }
+        if n < 2 || skip >= n { return None; }
         let first = if skip == 0 { 1 } else { 0 };
         let mut acc = self.get(first)?.clone();
         for k in (first + 1)..n {
@@ -1224,14 +1224,13 @@ impl RegionSetListOps for RegionSetList {
             prefix.push(prev.union(self.get(i)?));
         }
 
-        // suffix[i] = union(set[i]..=set[n-1])
-        let mut suffix: Vec<RegionSet> = (0..n)
-            .map(|i| self.get(i).unwrap().clone())
-            .collect();
-        // Build from right: suffix[i] = union(set[i], suffix[i+1])
+        // suffix[i] = union(set[i]..=set[n-1]), built incrementally from right
+        let mut suffix = vec![None; n];
+        suffix[n - 1] = Some(self.get(n - 1)?.clone());
         for i in (0..n - 1).rev() {
-            suffix[i] = self.get(i)?.union(&suffix[i + 1]);
+            suffix[i] = Some(self.get(i)?.union(suffix[i + 1].as_ref().unwrap()));
         }
+        let suffix: Vec<RegionSet> = suffix.into_iter().map(|s| s.unwrap()).collect();
 
         let full_union = prefix[n - 1].clone();
 

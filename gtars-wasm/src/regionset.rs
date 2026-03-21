@@ -355,13 +355,13 @@ impl JsRegionSetList {
 
     /// Add a RegionSet to this list, with an optional name.
     pub fn add(&mut self, set: &JsRegionSet, name: Option<String>) {
+        let idx = self.inner.region_sets.len();
         self.inner.region_sets.push(set.region_set.clone());
-        if let Some(n) = name {
-            self.inner
-                .names
-                .get_or_insert_with(Vec::new)
-                .push(n);
-        }
+        let name_val = name.unwrap_or_else(|| format!("set_{}", idx));
+        self.inner
+            .names
+            .get_or_insert_with(Vec::new)
+            .push(name_val);
     }
 
     /// Number of region sets in this list.
