@@ -125,13 +125,13 @@ impl PyRegionDB {
         for a in &self.inner.region_anno {
             let d = PyDict::new(py);
             d.set_item("filename", &a.filename)?;
-            d.set_item("cellType", &a.cell_type)?;
-            d.set_item("description", &a.description)?;
-            d.set_item("tissue", &a.tissue)?;
-            d.set_item("dataSource", &a.data_source)?;
-            d.set_item("antibody", &a.antibody)?;
-            d.set_item("treatment", &a.treatment)?;
-            d.set_item("collection", &a.collection)?;
+            d.set_item("cellType", a.cell_type.as_deref())?;
+            d.set_item("description", a.description.as_deref())?;
+            d.set_item("tissue", a.tissue.as_deref())?;
+            d.set_item("dataSource", a.data_source.as_deref())?;
+            d.set_item("antibody", a.antibody.as_deref())?;
+            d.set_item("treatment", a.treatment.as_deref())?;
+            d.set_item("collection", a.collection.as_deref())?;
             result.push(d);
         }
         Ok(result)

@@ -15,7 +15,7 @@ pub fn annotate_results(results: &mut [LolaResult], db: &RegionDB) {
             let anno = &db.region_anno[r.db_set];
             r.collection = anno.collection.clone();
             // Truncate description to 80 chars (matches R LOLA behavior)
-            r.description = anno.description.chars().take(80).collect();
+            r.description = anno.description.as_ref().map(|d| d.chars().take(80).collect());
             r.cell_type = anno.cell_type.clone();
             r.tissue = anno.tissue.clone();
             r.antibody = anno.antibody.clone();
@@ -136,10 +136,6 @@ pub struct LolaColumnar {
     pub db_set_size: Vec<u64>,
 }
 
-fn empty_to_none(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
-}
-
 /// Convert a slice of LolaResults into column-oriented vectors.
 pub fn results_to_columns(results: &[LolaResult]) -> LolaColumnar {
     let n = results.len();
@@ -184,13 +180,13 @@ pub fn results_to_columns(results: &[LolaResult]) -> LolaColumnar {
         c.d.push(r.d);
         c.q_value.push(r.q_value);
         c.filename.push(r.filename.clone());
-        c.collection.push(empty_to_none(&r.collection));
-        c.description.push(empty_to_none(&r.description));
-        c.cell_type.push(empty_to_none(&r.cell_type));
-        c.tissue.push(empty_to_none(&r.tissue));
-        c.antibody.push(empty_to_none(&r.antibody));
-        c.treatment.push(empty_to_none(&r.treatment));
-        c.data_source.push(empty_to_none(&r.data_source));
+        c.collection.push(r.collection.clone());
+        c.description.push(r.description.clone());
+        c.cell_type.push(r.cell_type.clone());
+        c.tissue.push(r.tissue.clone());
+        c.antibody.push(r.antibody.clone());
+        c.treatment.push(r.treatment.clone());
+        c.data_source.push(r.data_source.clone());
         c.db_set_size.push(r.db_set_size);
     }
     c
@@ -215,14 +211,13 @@ pub fn write_results_tsv<W: Write>(
             .q_value
             .map(|q| format!("{:.6e}", q))
             .unwrap_or_else(|| "NA".to_string());
-
         writeln!(
             writer,
             "{}\t{}\t{}\t{:.4}\t{:.4}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t\
              {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             r.user_set + 1, // 1-based for R compatibility
             r.db_set + 1,
-            r.collection,
+            r.collection.as_deref().unwrap_or(""),
             r.p_value_log,
             r.odds_ratio,
             r.support,
@@ -234,12 +229,12 @@ pub fn write_results_tsv<W: Write>(
             r.b,
             r.c,
             r.d,
-            r.description,
-            r.cell_type,
-            r.tissue,
-            r.antibody,
-            r.treatment,
-            r.data_source,
+            r.description.as_deref().unwrap_or(""),
+            r.cell_type.as_deref().unwrap_or(""),
+            r.tissue.as_deref().unwrap_or(""),
+            r.antibody.as_deref().unwrap_or(""),
+            r.treatment.as_deref().unwrap_or(""),
+            r.data_source.as_deref().unwrap_or(""),
             r.filename,
             qv,
             r.db_set_size,
@@ -271,13 +266,13 @@ mod tests {
             d: 100,
             q_value: None,
             filename: format!("file{}.bed", db_set),
-            collection: String::new(),
-            description: String::new(),
-            cell_type: String::new(),
-            tissue: String::new(),
-            antibody: String::new(),
-            treatment: String::new(),
-            data_source: String::new(),
+            collection: None,
+            description: None,
+            cell_type: None,
+            tissue: None,
+            antibody: None,
+            treatment: None,
+            data_source: None,
             db_set_size: 0,
         }
     }
@@ -522,9 +517,9 @@ mod tests {
     #[test]
     fn test_results_to_columns_with_metadata() {
         let mut r = make_result(0, 0, 1.0);
-        r.collection = "ENCODE".to_string();
-        r.cell_type = "K562".to_string();
-        r.tissue = String::new(); // stays None
+        r.collection = Some("ENCODE".to_string());
+        r.cell_type = Some("K562".to_string());
+        r.tissue = None; // stays None
         r.q_value = Some(0.05);
 
         let c = results_to_columns(&[r]);

@@ -9,19 +9,6 @@ use gtars_lola::output::{annotate_results, apply_fdr_correction};
 use gtars_lola::universe;
 
 // =========================================================================
-// Helpers
-// =========================================================================
-
-/// Convert an empty string to None (for R NA), non-empty to Some.
-fn empty_to_na(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
-}
-
-// =========================================================================
 // Helper macros
 // =========================================================================
 
@@ -395,13 +382,13 @@ pub fn r_regiondb_anno(db: Robj) -> extendr_api::Result<Robj> {
 
         for (i, a) in db_ref.region_anno.iter().enumerate() {
             filename.push(a.filename.clone());
-            cell_type.push(empty_to_na(&a.cell_type));
-            description.push(empty_to_na(&a.description));
-            tissue.push(empty_to_na(&a.tissue));
-            data_source.push(empty_to_na(&a.data_source));
-            antibody.push(empty_to_na(&a.antibody));
-            treatment.push(empty_to_na(&a.treatment));
-            collection.push(empty_to_na(&a.collection));
+            cell_type.push(a.cell_type.clone());
+            description.push(a.description.clone());
+            tissue.push(a.tissue.clone());
+            data_source.push(a.data_source.clone());
+            antibody.push(a.antibody.clone());
+            treatment.push(a.treatment.clone());
+            collection.push(a.collection.clone());
             size.push(db_ref.region_sets[i].len() as i32);
         }
 

@@ -83,19 +83,19 @@ pub struct LolaResult {
     /// DB set filename (from IGD file_info).
     pub filename: String,
     /// Collection name this DB set belongs to.
-    pub collection: String,
+    pub collection: Option<String>,
     /// Description from index.txt.
-    pub description: String,
+    pub description: Option<String>,
     /// Cell type annotation.
-    pub cell_type: String,
+    pub cell_type: Option<String>,
     /// Tissue annotation.
-    pub tissue: String,
+    pub tissue: Option<String>,
     /// Antibody annotation.
-    pub antibody: String,
+    pub antibody: Option<String>,
     /// Treatment annotation.
-    pub treatment: String,
+    pub treatment: Option<String>,
     /// Data source annotation.
-    pub data_source: String,
+    pub data_source: Option<String>,
     /// Number of regions in the DB set.
     pub db_set_size: u64,
 }
