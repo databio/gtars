@@ -15,6 +15,7 @@ wasm-bindgen = "0.2.93"
 serde = { version = "1.0", features = ["derive"] }
 serde-wasm-bindgen = "0.4"
 serde_json = "1.0"
+flate2 = { workspace = true }
 getrandom = { version = "0.2.16", features = ["js"] }
 
 # our code
