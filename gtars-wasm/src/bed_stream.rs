@@ -111,16 +111,37 @@ impl BedStreamParser {
 
         let parts: Vec<&str> = trimmed.split('\t').collect();
         if parts.len() < 3 {
+            eprintln!(
+                "BED parse warning: expected at least 3 tab-separated fields, got {} in line: {:?}",
+                parts.len(),
+                trimmed
+            );
             return;
         }
 
         let start = match parts[1].parse::<u32>() {
             Ok(v) => v,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!(
+                    "BED parse warning: invalid start coordinate {:?} in line {:?}: {}",
+                    parts[1],
+                    trimmed,
+                    e
+                );
+                return;
+            }
         };
         let end = match parts[2].parse::<u32>() {
             Ok(v) => v,
-            Err(_) => return,
+            Err(e) => {
+                eprintln!(
+                    "BED parse warning: invalid end coordinate {:?} in line {:?}: {}",
+                    parts[2],
+                    trimmed,
+                    e
+                );
+                return;
+            }
         };
 
         let rest = if parts.len() > 3 {
