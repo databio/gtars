@@ -36,9 +36,11 @@ use std::io::Cursor;
 /// such as bed file.
 ///
 #[derive(Clone, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct RegionSet {
     pub regions: Vec<Region>,
     pub header: Option<String>,
+    #[cfg_attr(feature = "serde", serde(skip))]
     pub path: Option<PathBuf>,
 }
 
@@ -68,11 +70,6 @@ impl TryFrom<&Path> for RegionSet {
                 match get_dynamic_reader_from_url(path) {
                     Ok(reader) => reader,
                     Err(_) => {
-                        // Extract bbid from the path (e.g., the file stem)
-                        let bbid = path.to_str().ok_or_else(|| {
-                            RegionSetError::InvalidBedbaseIdentifier(format!("{:?}", path))
-                        })?;
-
                         return Err(RegionSetError::InvalidPathOrUrl(format!("{:?}", path)));
 
                         // // This code should be disabled, because it potentially breaks bedboss pipeline
@@ -214,12 +211,10 @@ impl TryFrom<PathBuf> for RegionSet {
 
 impl From<Vec<Region>> for RegionSet {
     fn from(regions: Vec<Region>) -> Self {
-        let path = None;
-
         RegionSet {
             regions,
             header: None,
-            path,
+            path: None,
         }
     }
 }
@@ -402,7 +397,13 @@ impl RegionSet {
     /// Iterate unique chromosomes located in RegionSet
     ///
     pub fn iter_chroms(&self) -> impl Iterator<Item = &String> {
-        let unique_chroms: HashSet<&String> = self.regions.iter().map(|r| &r.chr).collect();
+        let mut seen = HashSet::new();
+        let mut unique_chroms = Vec::new();
+        for r in &self.regions {
+            if seen.insert(&r.chr) {
+                unique_chroms.push(&r.chr);
+            }
+        }
         unique_chroms.into_iter()
     }
 
@@ -550,6 +551,24 @@ impl RegionSet {
         mid_points
     }
 
+    /// Calculate midpoints using the specified coordinate convention.
+    ///
+    /// See [`Region::mid_point_with_mode`] for details on how each mode computes the midpoint.
+    pub fn calc_mid_points_with_mode(
+        &self,
+        mode: super::coords::CoordinateMode,
+    ) -> HashMap<String, Vec<u32>> {
+        let mut mid_points: HashMap<String, Vec<u32>> = HashMap::new();
+        for chromosome in self.iter_chroms() {
+            let mut chr_mid_points: Vec<u32> = Vec::new();
+            for region in self.iter_chr_regions(chromosome) {
+                chr_mid_points.push(region.mid_point_with_mode(mode));
+            }
+            mid_points.insert(chromosome.clone(), chr_mid_points);
+        }
+        mid_points
+    }
+
     ///
     /// Get number of regions in RegionSet
     ///
@@ -638,7 +657,6 @@ impl Display for RegionSet {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fmt::Error;
 
     use pretty_assertions::assert_eq;
     use rstest::*;

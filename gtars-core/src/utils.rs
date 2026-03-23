@@ -12,6 +12,7 @@ use anyhow::{Context, Result};
 #[cfg(feature = "http")]
 use flate2::read::GzDecoder;
 use flate2::read::MultiGzDecoder;
+#[cfg(feature = "http")]
 use std::error::Error;
 #[cfg(feature = "http")]
 use ureq::{get, Error as UreqError};

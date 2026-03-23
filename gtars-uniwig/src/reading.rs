@@ -1,5 +1,5 @@
 use crate::utils::Chromosome;
-use flate2::read::GzDecoder;
+use flate2::read::MultiGzDecoder;
 use gtars_core::utils::get_file_info;
 use noodles::bam;
 use std::error::Error;
@@ -25,7 +25,7 @@ pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> 
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
+        true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
     };
 
@@ -54,7 +54,7 @@ pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> 
             // Initial chromosome
             chromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
-            chromosome.starts.push((parsed_start, default_score));
+            chromosome.starts.push((parsed_start + 1, default_score)); // Convert 0-based BED to 1-based
             chromosome.ends.push((parsed_end, default_score));
             continue;
         }
@@ -74,7 +74,7 @@ pub fn create_chrom_vec_default_score(combinedbedpath: &str) -> Vec<Chromosome> 
             chromosome.ends = vec![]
         }
 
-        chromosome.starts.push((parsed_start, default_score));
+        chromosome.starts.push((parsed_start + 1, default_score)); // Convert 0-based BED to 1-based
         chromosome.ends.push((parsed_end, default_score));
     }
 
@@ -114,7 +114,7 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
 
     // We must encapsulate in a box and use a dynamic Read trait so that either case could continue.
     let reader: Box<dyn Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(file)),
+        true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
     };
 
@@ -144,7 +144,7 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
             // Initial chromosome
             npchromosome.chrom = String::from(parsed_chr.trim());
             chrom = String::from(parsed_chr.trim());
-            npchromosome.starts.push((parsed_start, parsed_score));
+            npchromosome.starts.push((parsed_start + 1, parsed_score)); // Convert 0-based BED to 1-based
             npchromosome.ends.push((parsed_end, parsed_score));
             continue;
         }
@@ -166,7 +166,7 @@ pub fn create_chrom_vec_scores(combinedbedpath: &str) -> Vec<Chromosome> {
             npchromosome.ends = vec![]
         }
 
-        npchromosome.starts.push((parsed_start, parsed_score));
+        npchromosome.starts.push((parsed_start + 1, parsed_score)); // Convert 0-based BED to 1-based
         npchromosome.ends.push((parsed_end, parsed_score));
     }
 

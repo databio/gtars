@@ -145,6 +145,39 @@ pub fn write_to_wig_file(
     buf.flush().unwrap();
 }
 
+/// Write output to a variableStep wiggle file (only non-zero positions)
+pub fn write_to_wig_file_variable(
+    counts: &[u32],
+    filename: String,
+    chromname: String,
+    start_position: i32,
+    stepsize: i32,
+    chrom_size: i32,
+) {
+    let path = std::path::Path::new(&filename).parent().unwrap();
+    let _ = create_dir_all(path);
+
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(filename)
+        .unwrap();
+
+    let wig_header = format!("variableStep chrom={}", chromname);
+    file.write_all(wig_header.as_ref()).unwrap();
+    file.write_all(b"\n").unwrap();
+
+    let mut buf = BufWriter::new(file);
+
+    for (i, &count) in counts.iter().enumerate().take(chrom_size as usize) {
+        if count > 0 {
+            let position = start_position + (i as i32 * stepsize);
+            writeln!(&mut buf, "{}\t{}", position, count).unwrap();
+        }
+    }
+    buf.flush().unwrap();
+}
+
 /// Write output to bedgraph file
 pub fn write_to_bed_graph_file(
     count_info: &(Vec<u32>, Vec<u32>, Vec<u32>),

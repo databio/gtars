@@ -16,7 +16,7 @@ use super::consts::{
     DEFAULT_BEDFILE_EXT, DEFAULT_BEDFILE_SUBFOLDER, DEFAULT_BEDSET_EXT, DEFAULT_BEDSET_SUBFOLDER,
 };
 use super::utils::{get_default_bedbase_api, get_default_cache_folder};
-use gtars_core::models::bed_set::BedSet;
+use gtars_core::models::region_set_list::RegionSetList;
 use gtars_core::models::region_set::RegionSet;
 
 /// Builder for constructing a [`BBClient`] with custom configuration.
@@ -218,13 +218,13 @@ impl BBClient {
     /// - bedset_id: unique identifier of a BED set
     ///
     /// # Returns
-    /// - the BedSet object of the loaded bed set
-    pub fn load_bedset(&mut self, bedset_id: &str) -> Result<BedSet> {
+    /// - the RegionSetList object of the loaded bed set
+    pub fn load_bedset(&mut self, bedset_id: &str) -> Result<RegionSetList> {
         let bedset_path = self.bedset_path(bedset_id, Some(true));
 
         if bedset_path.exists() {
             println!("Loading cached BED file from {:?}", bedset_path.display());
-            return BedSet::try_from(bedset_path);
+            return RegionSetList::try_from(bedset_path);
         }
 
         let bed_data = self.download_bedset_data(bedset_id).unwrap();
@@ -241,7 +241,7 @@ impl BBClient {
             false,
         );
 
-        Ok(BedSet::from(region_sets))
+        Ok(RegionSetList::from(region_sets))
     }
 
     ///  Add a BED file to the cache
@@ -296,11 +296,11 @@ impl BBClient {
 
     ///  Add a BED set to the cache
     /// # Arguments
-    /// - bedset: the BED set to be added, a BedSet class
+    /// - bedset: the BED set to be added, a RegionSetList class
     ///
     /// # Returns
-    /// - the identifier if the BedSet object
-    pub fn add_bedset_to_cache(&mut self, bedset: BedSet) -> Result<String> {
+    /// - the identifier if the RegionSetList object
+    pub fn add_bedset_to_cache(&mut self, bedset: RegionSetList) -> Result<String> {
         let bedset_id = bedset.identifier();
         let bedset_path = self.bedset_path(&bedset_id, Some(true));
         if bedset_path.exists() {
@@ -331,7 +331,7 @@ impl BBClient {
     /// - folder_path: path to the folder where bed files are stored
     ///
     /// # Returns
-    /// - the identifier if the BedSet object
+    /// - the identifier if the RegionSetList object
     pub fn add_local_folder_as_bedset(&mut self, folder_path: PathBuf) -> Result<String> {
         let mut region_sets = Vec::new();
         for entry in read_dir(&folder_path).expect("Failed to read directory") {
@@ -343,7 +343,7 @@ impl BBClient {
                 region_sets.push(rs);
             }
         }
-        let bedset = BedSet::from(region_sets);
+        let bedset = RegionSetList::from(region_sets);
         Ok(self.add_bedset_to_cache(bedset).unwrap())
     }
 
@@ -352,9 +352,9 @@ impl BBClient {
     /// - file_path: path to the file of bedset info
     ///
     /// # Returns
-    /// - the identifier if the BedSet object
+    /// - the identifier if the RegionSetList object
     pub fn add_local_file_as_bedset(&mut self, file_path: PathBuf) -> Result<String> {
-        let bedset = BedSet::try_from(file_path).unwrap();
+        let bedset = RegionSetList::try_from(file_path).unwrap();
         Ok(self.add_bedset_to_cache(bedset).unwrap())
     }
 

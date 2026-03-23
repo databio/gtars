@@ -31,6 +31,15 @@ fn write_rgsi_impl<P: AsRef<Path>>(
     writeln!(file, "##names_digest={}", metadata.names_digest)?;
     writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
     writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
+    if let Some(ref nlp) = metadata.name_length_pairs_digest {
+        writeln!(file, "##name_length_pairs_digest={}", nlp)?;
+    }
+    if let Some(ref snlp) = metadata.sorted_name_length_pairs_digest {
+        writeln!(file, "##sorted_name_length_pairs_digest={}", snlp)?;
+    }
+    if let Some(ref ss) = metadata.sorted_sequences_digest {
+        writeln!(file, "##sorted_sequences_digest={}", ss)?;
+    }
     writeln!(
         file,
         "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
@@ -278,7 +287,9 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
     let mut names_digest = String::new();
     let mut sequences_digest = String::new();
     let mut lengths_digest = String::new();
-
+    let mut name_length_pairs_digest: Option<String> = None;
+    let mut sorted_name_length_pairs_digest: Option<String> = None;
+    let mut sorted_sequences_digest: Option<String> = None;
     for line in reader.lines() {
         let line = line?;
 
@@ -291,6 +302,9 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
                         "names_digest" => names_digest = value.to_string(),
                         "sequences_digest" => sequences_digest = value.to_string(),
                         "lengths_digest" => lengths_digest = value.to_string(),
+                        "name_length_pairs_digest" => name_length_pairs_digest = Some(value.to_string()),
+                        "sorted_name_length_pairs_digest" => sorted_name_length_pairs_digest = Some(value.to_string()),
+                        "sorted_sequences_digest" => sorted_sequences_digest = Some(value.to_string()),
                         _ => {} // Ignore unknown metadata keys
                     }
                 }
@@ -336,6 +350,9 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
             names_digest: lvl1.names_digest,
             sequences_digest: lvl1.sequences_digest,
             lengths_digest: lvl1.lengths_digest,
+            name_length_pairs_digest,
+            sorted_name_length_pairs_digest,
+            sorted_sequences_digest,
             file_path: Some(file_path.as_ref().to_path_buf()),
         }
     };
@@ -410,7 +427,7 @@ mod tests {
 
     #[test]
     fn test_sequence_collection_from_fasta() {
-        let seqcol = SequenceCollection::from_fasta("../tests/data/fasta/base.fa")
+        let seqcol = SequenceCollection::from_path_no_cache("../tests/data/fasta/base.fa")
             .expect("Failed to load FASTA");
 
         assert_eq!(seqcol.sequences.len(), 3);
@@ -517,5 +534,45 @@ mod tests {
 
         let content = fs::read(&file_path).expect("Failed to read file");
         assert!(!content.is_empty());
+    }
+
+    #[test]
+    fn test_rgsi_round_trip_ancillary_digests() {
+        use tempfile::tempdir;
+
+        let mut seqcol =
+            digest_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
+
+        // Compute ancillary digests before writing
+        seqcol
+            .metadata
+            .compute_ancillary_digests(&seqcol.sequences);
+        assert!(seqcol.metadata.name_length_pairs_digest.is_some());
+        assert!(seqcol.metadata.sorted_name_length_pairs_digest.is_some());
+        assert!(seqcol.metadata.sorted_sequences_digest.is_some());
+
+        // Write RGSI
+        let dir = tempdir().expect("Failed to create temp dir");
+        let rgsi_path = dir.path().join("test_ancillary.rgsi");
+        seqcol
+            .write_collection_rgsi(&rgsi_path)
+            .expect("Failed to write RGSI");
+
+        // Read it back
+        let loaded = read_rgsi_file(&rgsi_path).expect("Failed to read RGSI");
+
+        // Ancillary digests should be preserved
+        assert_eq!(
+            loaded.metadata.name_length_pairs_digest,
+            seqcol.metadata.name_length_pairs_digest
+        );
+        assert_eq!(
+            loaded.metadata.sorted_name_length_pairs_digest,
+            seqcol.metadata.sorted_name_length_pairs_digest
+        );
+        assert_eq!(
+            loaded.metadata.sorted_sequences_digest,
+            seqcol.metadata.sorted_sequences_digest
+        );
     }
 }

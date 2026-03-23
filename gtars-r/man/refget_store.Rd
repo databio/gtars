@@ -2,25 +2,23 @@
 % Please edit documentation in R/refget.R
 \name{refget_store}
 \alias{refget_store}
-\title{global refget store}
+\title{Create an in-memory RefgetStore}
 \usage{
-refget_store(mode)
+refget_store(mode = "encoded")
 }
 \arguments{
-\item{mode}{either 'raw' or 'encoded'}
+\item{mode}{Storage mode: "raw" or "encoded" (default: "encoded")}
 }
 \value{
-a RefgetStore object
+A RefgetStore object
 }
 \description{
-create a pointer to a new global refget store rust object
+Create a new in-memory RefgetStore for storing sequences.
 }
 \examples{
 \dontrun{
-store <- refget_store('raw')
-fasta_path <- '../../gtars/tests/data/fasta/base.fa'
-import_fasta(store, fasta_path)
-seq <- get_sequence_by_id(store, 'iYtREV555dUFKg2_agSJW6suquUyPpMw')
+store <- refget_store()
+store <- refget_store("raw")
 }
 
 }

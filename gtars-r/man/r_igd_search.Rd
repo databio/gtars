@@ -11,6 +11,9 @@ r_igd_search(database_path, query_path)
 
 \item{query_path}{A string representing the path to the query bed file.}
 }
+\value{
+A named list with columns: filename, numRegions, hits (convertible to data.frame)
+}
 \description{
 Search igd with a bed file
 }
