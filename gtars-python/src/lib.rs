@@ -5,6 +5,8 @@ static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
 use pyo3::prelude::*;
 use pyo3::types::PyDict;
 
+#[cfg(feature = "bm25")]
+mod bm25;
 #[cfg(feature = "genomic_distributions")]
 mod genomic_distributions;
 #[cfg(feature = "models")]
@@ -25,6 +27,13 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     let sys = PyModule::import(py, "sys")?;
     let binding = sys.getattr("modules")?;
     let sys_modules: &Bound<'_, PyDict> = binding.cast()?;
+
+    #[cfg(feature = "bm25")]
+    {
+        let bm25_module = pyo3::wrap_pymodule!(bm25::bm25);
+        m.add_wrapped(bm25_module)?;
+        sys_modules.set_item("gtars.bm25", m.getattr("bm25")?)?;
+    }
 
     #[cfg(feature = "refget")]
     {

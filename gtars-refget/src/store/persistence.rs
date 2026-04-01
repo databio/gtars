@@ -188,7 +188,11 @@ impl ReadonlyRefgetStore {
             "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
         )?;
 
-        for result_sr in self.sequence_store.values() {
+        // Sort by sha512t24u digest for deterministic output (sequence_store is a HashMap).
+        let mut entries: Vec<&SequenceRecord> = self.sequence_store.values().collect();
+        entries.sort_by(|a, b| a.metadata().sha512t24u.cmp(&b.metadata().sha512t24u));
+
+        for result_sr in entries {
             let result = result_sr.metadata();
             let description = result.description.as_deref().unwrap_or("");
             writeln!(

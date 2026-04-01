@@ -1,3 +1,4 @@
+mod bed_stream;
 mod asset;
 mod lola;
 mod models;
@@ -12,15 +13,6 @@ mod utils;
 
 use wasm_bindgen::prelude::*;
 
-// Re-export refget functions at the top level
+// Re-export functions at the top level
+pub use bed_stream::*;
 pub use refget::*;
-
-#[wasm_bindgen]
-pub fn greet(name: &str) {
-    alert(&format!("Hello, {}!", name));
-}
-
-#[wasm_bindgen]
-extern "C" {
-    fn alert(s: &str);
-}

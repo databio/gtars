@@ -1,6 +1,6 @@
 [package]
 name = "gtars-py"
-version = "0.8.0"
+version = "0.8.1"
 edition = "2024"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -9,13 +9,14 @@ name = "gtars"
 crate-type = ["cdylib"]
 
 [features]
-default = ["refget", "tokenizers", "genomic_distributions", "models", "utils", "lola"]
+default = ["refget", "tokenizers", "genomic_distributions", "models", "utils", "lola", "bm25"]
 refget = ["dep:gtars-refget"]
 tokenizers = ["dep:gtars-tokenizers", "dep:gtars-core"]
 genomic_distributions = ["dep:gtars-genomicdist"]
 models = ["dep:gtars-core", "dep:gtars-genomicdist", "dep:gtars-overlaprs"]
 utils = ["dep:gtars-core", "dep:gtars-io"]
 lola = ["dep:gtars-lola", "dep:gtars-igd", "dep:gtars-core"]
+bm25 = ["dep:gtars-bm25"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -24,6 +25,7 @@ pyo3 = { version = "0.27.1", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
 # our code (optional, behind feature flags)
+gtars-bm25 = { path = "../gtars-bm25", optional = true }
 gtars-core = { path = "../gtars-core", features=["bigbed", "http"], optional = true }
 gtars-genomicdist = { path = "../gtars-genomicdist", optional = true }
 gtars-refget = { path = "../gtars-refget", optional = true }

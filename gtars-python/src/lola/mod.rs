@@ -125,13 +125,13 @@ impl PyRegionDB {
         for a in &self.inner.region_anno {
             let d = PyDict::new(py);
             d.set_item("filename", &a.filename)?;
-            d.set_item("cellType", &a.cell_type)?;
-            d.set_item("description", &a.description)?;
-            d.set_item("tissue", &a.tissue)?;
-            d.set_item("dataSource", &a.data_source)?;
-            d.set_item("antibody", &a.antibody)?;
-            d.set_item("treatment", &a.treatment)?;
-            d.set_item("collection", &a.collection)?;
+            d.set_item("cellType", a.cell_type.as_deref())?;
+            d.set_item("description", a.description.as_deref())?;
+            d.set_item("tissue", a.tissue.as_deref())?;
+            d.set_item("dataSource", a.data_source.as_deref())?;
+            d.set_item("antibody", a.antibody.as_deref())?;
+            d.set_item("treatment", a.treatment.as_deref())?;
+            d.set_item("collection", a.collection.as_deref())?;
             result.push(d);
         }
         Ok(result)
@@ -242,82 +242,33 @@ fn results_to_dict<'py>(
     py: Python<'py>,
     results: &[LolaResult],
 ) -> PyResult<Bound<'py, PyDict>> {
-    let n = results.len();
-    let mut user_set = Vec::with_capacity(n);
-    let mut db_set = Vec::with_capacity(n);
-    let mut p_value_log = Vec::with_capacity(n);
-    let mut odds_ratio = Vec::with_capacity(n);
-    let mut support = Vec::with_capacity(n);
-    let mut rnk_pv = Vec::with_capacity(n);
-    let mut rnk_or = Vec::with_capacity(n);
-    let mut rnk_sup = Vec::with_capacity(n);
-    let mut max_rnk = Vec::with_capacity(n);
-    let mut mean_rnk = Vec::with_capacity(n);
-    let mut b_vec = Vec::with_capacity(n);
-    let mut c_vec = Vec::with_capacity(n);
-    let mut d_vec = Vec::with_capacity(n);
-    let mut collection: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut description: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut cell_type: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut tissue: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut antibody: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut treatment: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut data_source: Vec<Option<String>> = Vec::with_capacity(n);
-    let mut filename = Vec::with_capacity(n);
-    let mut db_set_size = Vec::with_capacity(n);
+    use gtars_lola::output::results_to_columns;
 
-    for r in results {
-        user_set.push(r.user_set);
-        db_set.push(r.db_set);
-        p_value_log.push(r.p_value_log);
-        odds_ratio.push(r.odds_ratio);
-        support.push(r.support);
-        rnk_pv.push(r.rnk_pv);
-        rnk_or.push(r.rnk_or);
-        rnk_sup.push(r.rnk_sup);
-        max_rnk.push(r.max_rnk);
-        mean_rnk.push(r.mean_rnk);
-        b_vec.push(r.b);
-        c_vec.push(r.c);
-        d_vec.push(r.d);
-        collection.push(empty_to_none(&r.collection));
-        description.push(empty_to_none(&r.description));
-        cell_type.push(empty_to_none(&r.cell_type));
-        tissue.push(empty_to_none(&r.tissue));
-        antibody.push(empty_to_none(&r.antibody));
-        treatment.push(empty_to_none(&r.treatment));
-        data_source.push(empty_to_none(&r.data_source));
-        filename.push(r.filename.clone());
-        db_set_size.push(r.db_set_size);
-    }
-
-    let q_value: Vec<Option<f64>> = results.iter().map(|r| r.q_value).collect();
-
+    let c = results_to_columns(results);
     let dict = PyDict::new(py);
-    dict.set_item("userSet", user_set)?;
-    dict.set_item("dbSet", db_set)?;
-    dict.set_item("collection", collection)?;
-    dict.set_item("pValueLog", p_value_log)?;
-    dict.set_item("oddsRatio", odds_ratio)?;
-    dict.set_item("support", support)?;
-    dict.set_item("rnkPV", rnk_pv)?;
-    dict.set_item("rnkOR", rnk_or)?;
-    dict.set_item("rnkSup", rnk_sup)?;
-    dict.set_item("maxRnk", max_rnk)?;
-    dict.set_item("meanRnk", mean_rnk)?;
-    dict.set_item("b", b_vec)?;
-    dict.set_item("c", c_vec)?;
-    dict.set_item("d", d_vec)?;
-    dict.set_item("description", description)?;
-    dict.set_item("cellType", cell_type)?;
-    dict.set_item("tissue", tissue)?;
-    dict.set_item("antibody", antibody)?;
-    dict.set_item("treatment", treatment)?;
-    dict.set_item("dataSource", data_source)?;
-    dict.set_item("filename", filename)?;
-    dict.set_item("qValue", q_value)?;
-    dict.set_item("size", db_set_size)?;
-
+    dict.set_item("userSet", c.user_set)?;
+    dict.set_item("dbSet", c.db_set)?;
+    dict.set_item("collection", c.collection)?;
+    dict.set_item("pValueLog", c.p_value_log)?;
+    dict.set_item("oddsRatio", c.odds_ratio)?;
+    dict.set_item("support", c.support)?;
+    dict.set_item("rnkPV", c.rnk_pv)?;
+    dict.set_item("rnkOR", c.rnk_or)?;
+    dict.set_item("rnkSup", c.rnk_sup)?;
+    dict.set_item("maxRnk", c.max_rnk)?;
+    dict.set_item("meanRnk", c.mean_rnk)?;
+    dict.set_item("b", c.b)?;
+    dict.set_item("c", c.c)?;
+    dict.set_item("d", c.d)?;
+    dict.set_item("description", c.description)?;
+    dict.set_item("cellType", c.cell_type)?;
+    dict.set_item("tissue", c.tissue)?;
+    dict.set_item("antibody", c.antibody)?;
+    dict.set_item("treatment", c.treatment)?;
+    dict.set_item("dataSource", c.data_source)?;
+    dict.set_item("filename", c.filename)?;
+    dict.set_item("qValue", c.q_value)?;
+    dict.set_item("size", c.db_set_size)?;
     Ok(dict)
 }
 
@@ -407,14 +358,6 @@ fn py_build_restricted_universe(
 // =========================================================================
 // Helpers
 // =========================================================================
-
-fn empty_to_none(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
-}
 
 fn tuples_to_regionset(tuples: Vec<(String, u32, u32)>) -> RegionSet {
     RegionSet::from(
