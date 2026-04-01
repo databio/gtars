@@ -44,7 +44,7 @@ permissions:
 
 jobs:
   publish-single-crate:
-    if: ${{ inputs.crates != 'none' && inputs.crates != 'all' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.crates != 'none' && inputs.crates != 'all' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -56,7 +56,7 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-all-crates:
-    if: ${{ inputs.crates == 'all' || inputs.crates == '' }}
+    if: ${{ github.event_name == 'release' || inputs.crates == 'all' || inputs.crates == '' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -145,20 +145,19 @@ jobs:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
   publish-python:
-    if: ${{ inputs.python != false }}
+    if: ${{ always() && inputs.python != false && needs.publish-all-crates.result == 'success' }}
     needs: publish-all-crates
     uses: ./.github/workflows/build-python-bindings.yml
     secrets: inherit
 
   publish-cli:
-    if: ${{ inputs.cli != false }}
+    if: ${{ always() && inputs.cli != false && needs.publish-all-crates.result == 'success' }}
     needs: publish-all-crates
     uses: ./.github/workflows/build-binaries.yml
     secrets: inherit
 
   publish-wasm:
-    if: ${{ always() && inputs.wasm != false && (needs.publish-all-crates.result == 'success' || needs.publish-all-crates.result == 'skipped') }}
-    needs: publish-all-crates
+    if: ${{ always() && inputs.wasm != false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

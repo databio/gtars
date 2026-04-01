@@ -1,6 +1,7 @@
 #![allow(nonstandard_style)]
 
 pub mod create;
+pub mod igd;
 pub mod search;
 
 #[cfg(feature = "bloom")]
@@ -353,6 +354,329 @@ mod tests {
 
         // Add to the database (hash table)
         igd_add(&mut igd, &mut hash_table, chromosome, start, end, 0, 0);
+    }
+
+    // ---- Old vs New API correctness benchmarks ----
+
+    use crate::igd::Igd;
+    use gtars_core::models::RegionSet;
+
+    /// Helper: get the path to shared test data (one level above crate root).
+    fn test_data_path(relative: &str) -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("tests/data")
+            .join(relative)
+    }
+
+    /// Helper: parse old `igd_search` result lines into a map of filename -> nhits.
+    /// Format is: "index\tnRegions\tnHits\tfilename" (only files with hits > 0).
+    fn parse_old_search_results(results: &[String]) -> HashMap<String, u64> {
+        let mut map = HashMap::new();
+        // First line is a header; subsequent lines are "idx\tnr\tnhits\tfilename"
+        for line in results.iter().skip(1) {
+            let cols: Vec<&str> = line.split('\t').collect();
+            if cols.len() >= 4 {
+                let nhits: u64 = cols[2].parse().unwrap();
+                let filename = cols[3].trim().to_string();
+                map.insert(filename, nhits);
+            }
+        }
+        map
+    }
+
+    #[rstest]
+    fn test_igd_old_vs_new_single_file() {
+        // Build from igd_file_list_01 (1 BED file, 8 regions) using both APIs,
+        // query with the same query1.bed regions, and compare hit counts.
+
+        let bed_dir = test_data_path("igd_file_list_01");
+        let query_path = test_data_path("igd_query_files/query1.bed");
+
+        // --- Old API: create on disk, then search ---
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut db_output = tempdir.path().to_string_lossy().to_string();
+        db_output.push('/');
+        let demo_name = String::from("demo");
+
+        let bed_dir_str = bed_dir.to_string_lossy().to_string();
+        let _old_igd = create_igd_f(&db_output, &bed_dir_str, &demo_name);
+
+        let igd_file = format!("{}demo.igd", db_output);
+        let query_path_str = query_path.to_string_lossy().to_string();
+        let old_results = igd_search(&igd_file, &query_path_str)
+            .expect("igd_search failed");
+        let old_hits = parse_old_search_results(&old_results);
+
+        // --- New API: build in-memory, query with RegionSet ---
+        let new_igd = Igd::from_bed_dir(&bed_dir).unwrap();
+        let query_rs = RegionSet::try_from(query_path.as_path()).unwrap();
+        let new_hits = new_igd.count_set_overlaps(&query_rs, 1);
+
+        // Compare: the new API returns hits indexed by file order.
+        // The old API returns hits keyed by filename (only files with hits > 0).
+        for (i, fi) in new_igd.file_info.iter().enumerate() {
+            let old_count = old_hits.get(&fi.filename).copied().unwrap_or(0);
+            assert_eq!(
+                new_hits[i], old_count,
+                "Hit count mismatch for file '{}': new={}, old={}",
+                fi.filename, new_hits[i], old_count
+            );
+        }
+
+        // Sanity check: the single file in list_01 has 8 regions, query1.bed also
+        // has 8 regions that are identical, so we expect 8 self-overlaps.
+        assert_eq!(new_hits[0], 8, "Expected 8 hits for self-overlap query");
+    }
+
+    #[rstest]
+    fn test_igd_old_vs_new_multi_file() {
+        // Build from igd_file_list_02 (2 BED files), query with query1.bed,
+        // and compare per-file hit counts between old and new API.
+
+        let bed_dir = test_data_path("igd_file_list_02");
+        let query_path = test_data_path("igd_query_files/query1.bed");
+
+        // --- Old API ---
+        let tempdir = tempfile::tempdir().unwrap();
+        let mut db_output = tempdir.path().to_string_lossy().to_string();
+        db_output.push('/');
+        let demo_name = String::from("demo");
+
+        let bed_dir_str = bed_dir.to_string_lossy().to_string();
+        let _old_igd = create_igd_f(&db_output, &bed_dir_str, &demo_name);
+
+        let igd_file = format!("{}demo.igd", db_output);
+        let query_path_str = query_path.to_string_lossy().to_string();
+        let old_results = igd_search(&igd_file, &query_path_str)
+            .expect("igd_search failed");
+        let old_hits = parse_old_search_results(&old_results);
+
+        // --- New API ---
+        let new_igd = Igd::from_bed_dir(&bed_dir).unwrap();
+        let query_rs = RegionSet::try_from(query_path.as_path()).unwrap();
+        let new_hits = new_igd.count_set_overlaps(&query_rs, 1);
+
+        // Old API only reports files with hits > 0, so missing entries mean 0 hits.
+        for (i, fi) in new_igd.file_info.iter().enumerate() {
+            let old_count = old_hits.get(&fi.filename).copied().unwrap_or(0);
+            assert_eq!(
+                new_hits[i], old_count,
+                "Hit count mismatch for file '{}': new={}, old={}",
+                fi.filename, new_hits[i], old_count
+            );
+        }
+    }
+
+    #[rstest]
+    fn test_igd_old_vs_new_disk_format() {
+        // Build with new API, save to disk, load with old API's get_igd_info,
+        // and verify structural consistency (contigs, tile counts, region counts).
+
+        let bed_dir = test_data_path("igd_file_list_01");
+
+        // Build and save with new API
+        let new_igd = Igd::from_bed_dir(&bed_dir).unwrap();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let igd_path = tmpdir.path().join("demo.igd");
+        new_igd.save(&igd_path).unwrap();
+
+        // Load with old API
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
+        let igd_path_str = igd_path.to_string_lossy().to_string();
+        let mut old_from_disk =
+            get_igd_info(&igd_path_str, &mut hash_table).expect("Could not load IGD");
+        let tsv_path = get_tsv_path(&igd_path_str).unwrap();
+        get_file_info_tsv(tsv_path, &mut old_from_disk).unwrap();
+
+        // Verify number of contigs matches
+        assert_eq!(
+            new_igd.contigs.len(),
+            old_from_disk.nCtg as usize,
+            "Number of contigs should match"
+        );
+
+        // Verify number of files matches
+        assert_eq!(
+            new_igd.num_files(),
+            old_from_disk.nFiles as usize,
+            "Number of files should match"
+        );
+
+        // Verify tile counts per contig match
+        for (k, contig) in new_igd.contigs.iter().enumerate() {
+            assert_eq!(
+                contig.tiles.len(),
+                old_from_disk.nCnt[k].len(),
+                "Tile count mismatch for contig '{}'",
+                contig.name
+            );
+
+            // Verify region counts per tile match
+            for (l, tile) in contig.tiles.iter().enumerate() {
+                assert_eq!(
+                    tile.records.len() as i32,
+                    old_from_disk.nCnt[k][l],
+                    "Region count mismatch for contig '{}', tile {}",
+                    contig.name,
+                    l
+                );
+            }
+        }
+
+        // Verify contig names match (old API stores them in cName)
+        for (k, contig) in new_igd.contigs.iter().enumerate() {
+            assert_eq!(
+                contig.name,
+                old_from_disk.cName[k],
+                "Contig name mismatch at index {}",
+                k
+            );
+        }
+    }
+
+    /// Helper: collect all .bed files from nested lola_multi_db structure into
+    /// a flat temp directory (for old API) and return (tempdir, bed_paths).
+    fn flatten_lola_beds(db_path: &Path) -> (tempfile::TempDir, Vec<PathBuf>) {
+        use std::fs;
+        let flat_dir = tempfile::tempdir().unwrap();
+        let mut bed_paths: Vec<PathBuf> = Vec::new();
+
+        // Walk collection*/regions/*.bed
+        for collection in fs::read_dir(db_path).unwrap() {
+            let collection = collection.unwrap().path();
+            let regions_dir = collection.join("regions");
+            if !regions_dir.is_dir() {
+                continue;
+            }
+            for entry in fs::read_dir(&regions_dir).unwrap() {
+                let src = entry.unwrap().path();
+                if src.extension().and_then(|e| e.to_str()) == Some("bed") {
+                    // Use collection_filename to avoid name collisions
+                    let col_name = collection.file_name().unwrap().to_string_lossy();
+                    let file_name = src.file_name().unwrap().to_string_lossy();
+                    let dest_name = format!("{}_{}", col_name, file_name);
+                    let dest = flat_dir.path().join(&dest_name);
+                    fs::copy(&src, &dest).unwrap();
+                    bed_paths.push(dest);
+                }
+            }
+        }
+        bed_paths.sort();
+        (flat_dir, bed_paths)
+    }
+
+    #[rstest]
+    fn test_igd_old_vs_new_lola_multi_db() {
+        // Build from lola_multi_db (6 BED files across 2 collections) using both
+        // APIs, query with each BED file as a query, and compare per-file hit counts.
+
+        let db_path = test_data_path("lola_multi_db");
+        let (flat_dir, bed_paths) = flatten_lola_beds(&db_path);
+
+        // --- Old API: create on disk from flat dir, then search ---
+        let old_tempdir = tempfile::tempdir().unwrap();
+        let mut db_output = old_tempdir.path().to_string_lossy().to_string();
+        db_output.push('/');
+        let demo_name = String::from("lola_demo");
+
+        let flat_dir_str = flat_dir.path().to_string_lossy().to_string();
+        let _old_igd = create_igd_f(&db_output, &flat_dir_str, &demo_name);
+        let igd_file = format!("{}lola_demo.igd", db_output);
+
+        // --- New API: build in-memory from same file paths ---
+        let new_igd = Igd::from_bed_files(bed_paths.clone()).unwrap();
+
+        // Query with each BED file and compare results
+        for query_bed in &bed_paths {
+            let query_path_str = query_bed.to_string_lossy().to_string();
+            let old_results = igd_search(&igd_file, &query_path_str)
+                .expect("igd_search failed");
+            let old_hits = parse_old_search_results(&old_results);
+
+            let query_rs = RegionSet::try_from(query_bed.as_path()).unwrap();
+            let new_hits = new_igd.count_set_overlaps(&query_rs, 1);
+
+            for (i, fi) in new_igd.file_info.iter().enumerate() {
+                let old_count = old_hits.get(&fi.filename).copied().unwrap_or(0);
+                assert_eq!(
+                    new_hits[i], old_count,
+                    "Hit count mismatch for db file '{}' queried with '{}': new={}, old={}",
+                    fi.filename,
+                    query_bed.file_name().unwrap().to_string_lossy(),
+                    new_hits[i],
+                    old_count
+                );
+            }
+        }
+    }
+
+    #[rstest]
+    fn test_igd_old_vs_new_lola_multi_db_disk_format() {
+        // Build from lola_multi_db with the new API, save to disk, load with
+        // the old API, and verify structural consistency.
+
+        let db_path = test_data_path("lola_multi_db");
+        let (_flat_dir, bed_paths) = flatten_lola_beds(&db_path);
+
+        // Build and save with new API
+        let new_igd = Igd::from_bed_files(bed_paths).unwrap();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let igd_path = tmpdir.path().join("lola_demo.igd");
+        new_igd.save(&igd_path).unwrap();
+
+        // Load with old API
+        let mut hash_table: HashMap<String, i32> = HashMap::new();
+        let igd_path_str = igd_path.to_string_lossy().to_string();
+        let mut old_from_disk =
+            get_igd_info(&igd_path_str, &mut hash_table).expect("Could not load IGD");
+        let tsv_path = get_tsv_path(&igd_path_str).unwrap();
+        get_file_info_tsv(tsv_path, &mut old_from_disk).unwrap();
+
+        // Verify contig count
+        assert_eq!(
+            new_igd.contigs.len(),
+            old_from_disk.nCtg as usize,
+            "Number of contigs should match"
+        );
+
+        // Verify file count
+        assert_eq!(
+            new_igd.num_files(),
+            old_from_disk.nFiles as usize,
+            "Number of files should match"
+        );
+
+        // Verify tile counts and region counts per contig
+        for (k, contig) in new_igd.contigs.iter().enumerate() {
+            assert_eq!(
+                contig.tiles.len(),
+                old_from_disk.nCnt[k].len(),
+                "Tile count mismatch for contig '{}'",
+                contig.name
+            );
+
+            for (l, tile) in contig.tiles.iter().enumerate() {
+                assert_eq!(
+                    tile.records.len() as i32,
+                    old_from_disk.nCnt[k][l],
+                    "Region count mismatch for contig '{}', tile {}",
+                    contig.name,
+                    l
+                );
+            }
+        }
+
+        // Verify contig names match
+        for (k, contig) in new_igd.contigs.iter().enumerate() {
+            assert_eq!(
+                contig.name,
+                old_from_disk.cName[k],
+                "Contig name mismatch at index {}",
+                k
+            );
+        }
     }
 
     #[rstest]

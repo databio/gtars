@@ -6,7 +6,7 @@
 //! Note: Unit tests for the decode() method itself (including edge cases,
 //! different alphabets, encoding schemes) are in src/collection.rs
 
-use gtars_refget::store::RefgetStore;
+use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use std::io::Write;
 use tempfile::NamedTempFile;
 
@@ -31,13 +31,13 @@ fn test_decode_workflow_encoded() {
     // Create an encoded (bit-packed) store (default mode)
     let mut store = RefgetStore::in_memory();
     store
-        .add_sequence_collection_from_fasta(fasta_path)
+        .add_sequence_collection_from_fasta(fasta_path, FastaImportOptions::new())
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections = store.list_collections();
-    assert!(!collections.is_empty(), "No collections found");
-    let collection_digest = collections[0].digest.clone();
+    let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+    assert!(!collections.results.is_empty(), "No collections found");
+    let collection_digest = collections.results[0].digest.clone();
 
     // Expected sequences
     let expected = vec![
@@ -76,13 +76,13 @@ fn test_decode_workflow_raw() {
     let mut store = RefgetStore::in_memory();
     store.disable_encoding(); // Switch to Raw mode
     store
-        .add_sequence_collection_from_fasta(fasta_path)
+        .add_sequence_collection_from_fasta(fasta_path, FastaImportOptions::new())
         .expect("Failed to import FASTA");
 
     // Get the collection digest
-    let collections = store.list_collections();
-    assert!(!collections.is_empty(), "No collections found");
-    let collection_digest = collections[0].digest.clone();
+    let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+    assert!(!collections.results.is_empty(), "No collections found");
+    let collection_digest = collections.results[0].digest.clone();
 
     // Verify sequences decode correctly with raw storage
     let record = store

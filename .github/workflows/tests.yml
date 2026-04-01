@@ -19,5 +19,33 @@ jobs:
       with:
         r-version: '4.4'
     
+    - name: Set R library path
+      run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
+
     - name: Run tests
       run: cargo test --verbose --workspace --all-features
+
+    - name: Install R dependencies
+      run: Rscript -e 'install.packages(c("testthat", "data.table", "BiocManager"), repos="https://cloud.r-project.org"); BiocManager::install(c("BiocGenerics", "IRanges"))'
+
+    - name: Install R package
+      run: R CMD INSTALL gtars-r
+
+    - name: Run R tests
+      run: Rscript -e 'testthat::test_dir("gtars-r/tests/testthat")'
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+    - name: Install uv
+      uses: astral-sh/setup-uv@v4
+    - name: Build and install Python bindings
+      working-directory: ./gtars-python
+      run: |
+        uv venv
+        uv pip install maturin pytest pytest-cov
+        uv run maturin develop --release
+    - name: Run Python tests
+      working-directory: ./gtars-python
+      run: uv run pytest tests/ -v

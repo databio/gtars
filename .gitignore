@@ -14,6 +14,7 @@ Cargo.lock
 *.pdb
 
 .venv
+uv.lock
 /.idea/genimtools.iml
 /.idea/modules.xml
 /.idea/.gitignore
@@ -23,9 +24,39 @@ bin/
 /.idea/gtars.iml
 /gtars/tests/data/test1.bw
 
+.claude/
 .DS_Store
 .Rhistory
 tests/data/out/region_scoring_count.csv.gz
 /gtars-refget/tests/store_test/rgstore.json
 /gtars-refget/tests/store_test/sequences.rgsi
 libgtars.dylib.dSYM/
+
+# Large benchmark data and validation files
+tests/data/interval_ranges_benchmark/
+tests/data/partitions_benchmark/
+gtars-genomicdist/examples/benchmark_*.rs
+gtars-genomicdist/examples/partitions_demo.rs
+gtars-genomicdist/tests/
+*.annotation.gtf.gz
+tests/data/fasta/sacCer3.fa
+tests/data/fasta/sacCer3.rgsi
+gtars-r/tests/hg19.fa
+gtars-r/tests/hg19.fa.gz
+gtars-r/tests/*.bed
+gtars-r/tests/LOLACore*
+gtars-r/tests/ext/
+gtars-r/tests/export_reference_data.R
+gtars-r/tests/ref/
+
+# R examples directory (Rmds, rendered HTML, large FASTA)
+gtars-r/tests/examples/*.html
+gtars-r/tests/examples/*.Rmd
+gtars-r/tests/examples/sacCer3.fa
+
+CHANGELOG.md
+
+gtars-sc/
+gtars-r/tourney_suite/
+gtars-r/runs/
+gtars-r/test-r.sh
