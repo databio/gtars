@@ -31,6 +31,7 @@ tests/data/out/region_scoring_count.csv.gz
 /gtars-refget/tests/store_test/rgstore.json
 /gtars-refget/tests/store_test/sequences.rgsi
 libgtars.dylib.dSYM/
+gtars-bm25/tests/demo_cache/
 
 # Large benchmark data and validation files
 tests/data/interval_ranges_benchmark/
