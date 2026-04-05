@@ -15,30 +15,23 @@ def calc_gc_content(
     ...
 
 def calc_dinucl_freq(
-    rs: RegionSet, genome: GenomeAssembly
-) -> Dict[str, int]:
-    """
-    Global dinucleotide frequencies (one count per dinucleotide, pooled across all regions).
-
-    :param rs: RegionSet object
-    :param genome: GenomeAssembly object (reference genome)
-    :return: dict mapping dinucleotide names (e.g. "Aa", "Cg") to total counts
-    """
-    ...
-
-def calc_dinucl_freq_per_region(
-    rs: RegionSet, genome: GenomeAssembly
+    rs: RegionSet, genome: GenomeAssembly, raw_counts: bool = False
 ) -> Dict[str, object]:
     """
-    Per-region dinucleotide frequencies as percentages (0–100).
+    Per-region dinucleotide frequencies, matching R GenomicDistributions ``calcDinuclFreq``.
 
     :param rs: RegionSet object
     :param genome: GenomeAssembly object (reference genome)
+    :param raw_counts: if False (default), return percentages (0–100) per row;
+        if True, return raw integer-valued counts
     :return: dict with keys:
         - ``region_labels``: list of ``chr_start_end`` strings (one per region)
         - ``dinucleotides``: list of 16 dinucleotide names in canonical order
         - ``frequencies``: list of lists — one row per region, 16 values per row
           matching ``dinucleotides`` order
+
+    For pooled global counts across all regions, sum each column of the
+    raw-counts matrix.
     """
     ...
 

@@ -6,7 +6,7 @@ use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
 use gtars_overlaprs::RegionSetOverlaps;
 use gtars_genomicdist::{
-    calc_dinucl_freq, calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal,
+    calc_dinucl_freq, calc_gc_content, calc_summary_signal,
     chrom_karyotype_key, consensus, genome_partition_list, calc_expected_partitions,
     calc_partitions, pairwise_jaccard,
     CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
@@ -315,55 +315,34 @@ pub fn r_calc_gc_content(
     })
 }
 
-/// Calculate global dinucleotide frequencies across all regions
+/// Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)
 ///
-/// Returns a named integer vector mapping each dinucleotide (AA, AC, ..., TT)
-/// to its total count across all regions in the RegionSet.
+/// Returns a list with a ``region`` column and 16 dinucleotide columns
+/// (AA, AC, ..., TT). When ``raw_counts`` is FALSE (default), each row sums
+/// to 100 (percentages). When TRUE, values are raw integer counts.
+///
+/// For pooled global counts, sum each dinucleotide column across rows
+/// (with ``raw_counts=TRUE``).
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 /// @param assembly_ptr External pointer to a GenomeAssembly
+/// @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
 #[extendr(r_name = "r_calc_dinucl_freq")]
-pub fn r_calc_dinucl_freq_global(
+pub fn r_calc_dinucl_freq(
     rs_ptr: Robj,
     assembly_ptr: Robj,
+    raw_counts: Robj,
 ) -> extendr_api::Result<List> {
+    // Default to false when NULL/missing — matches Python and R GenomicDistributions defaults
+    let raw = if raw_counts.is_null() {
+        false
+    } else {
+        <bool>::try_from(&raw_counts)
+            .map_err(|_| extendr_api::Error::Other("raw_counts must be logical".into()))?
+    };
     with_regionset!(rs_ptr, rs, {
         with_assembly!(assembly_ptr, asm, {
-            let freqs = calc_dinucl_freq(rs, asm)
-                .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
-            // Build ordered (name, count) pairs using canonical DINUCL_ORDER
-            let mut pairs: Vec<(&str, Robj)> = Vec::with_capacity(16);
-            let mut name_storage: Vec<String> = Vec::with_capacity(16);
-            for dn in DINUCL_ORDER.iter() {
-                let count = freqs.get(dn).copied().unwrap_or(0);
-                name_storage.push(
-                    dn.to_string()
-                        .unwrap_or_else(|_| "??".into())
-                        .to_uppercase(),
-                );
-                // count is u64 — push as f64 for R (no native u64)
-                pairs.push(("", Robj::from(count as f64)));
-            }
-            // Rebuild pairs with real names from name_storage
-            let pairs_named: Vec<(&str, Robj)> = name_storage
-                .iter()
-                .zip(pairs.into_iter())
-                .map(|(name, (_, robj))| (name.as_str(), robj))
-                .collect();
-            Ok(List::from_pairs(pairs_named))
-        })
-    })
-}
-
-/// Calculate per-region dinucleotide frequencies (percentages)
-/// @export
-/// @param rs_ptr External pointer to a RegionSet
-/// @param assembly_ptr External pointer to a GenomeAssembly
-#[extendr(r_name = "r_calc_dinucl_freq_per_region")]
-pub fn r_calc_dinucl_freq_per_region(rs_ptr: Robj, assembly_ptr: Robj) -> extendr_api::Result<List> {
-    with_regionset!(rs_ptr, rs, {
-        with_assembly!(assembly_ptr, asm, {
-            let (labels, matrix) = calc_dinucl_freq_per_region(rs, asm)
+            let (labels, matrix) = calc_dinucl_freq(rs, asm, raw)
                 .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
             // Build column names (uppercase to match GD: AA, AC, AG, ...)
@@ -1305,8 +1284,7 @@ extendr_module! {
     // GC / Dinucleotide
     fn r_load_genome_assembly;
     fn r_calc_gc_content;
-    fn r_calc_dinucl_freq_global;
-    fn r_calc_dinucl_freq_per_region;
+    fn r_calc_dinucl_freq;
     // Interval Ranges
     fn r_trim;
     fn r_promoters;

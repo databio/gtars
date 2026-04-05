@@ -20,34 +20,31 @@ pub fn py_calc_gc_content(
     Ok(result)
 }
 
-#[pyfunction(name = "calc_dinucl_freq")]
-pub fn py_calc_dinucl_freq(
-    rs: &PyRegionSet,
-    genome: &PyGenomeAssembly,
-) -> anyhow::Result<HashMap<String, u64>> {
-    let frequencies = statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly)?;
-    let mut freq_map: HashMap<String, u64> = HashMap::new();
-    for (di, freq) in frequencies {
-        freq_map.insert(di.to_string()?, freq);
-    }
-    Ok(freq_map)
-}
-
-/// Per-region dinucleotide frequencies as percentages (0–100).
+/// Per-region dinucleotide frequencies, matching R GenomicDistributions `calcDinuclFreq`.
 ///
-/// Returns a dict with:
+/// Arguments:
+///   - ``rs``: RegionSet
+///   - ``genome``: GenomeAssembly (reference)
+///   - ``raw_counts``: if False (default), return percentages (0–100) per row;
+///     if True, return raw integer-valued counts
+///
+/// Returns a dict:
 ///   - ``region_labels``: list of ``chr_start_end`` strings (one per region)
 ///   - ``dinucleotides``: list of 16 dinucleotide names in canonical order
 ///   - ``frequencies``: list of lists — one row per region, 16 values per row
 ///     matching ``dinucleotides`` order
-#[pyfunction(name = "calc_dinucl_freq_per_region")]
-pub fn py_calc_dinucl_freq_per_region<'py>(
+///
+/// For pooled global counts, sum each column of the raw-counts matrix.
+#[pyfunction(name = "calc_dinucl_freq")]
+#[pyo3(signature = (rs, genome, raw_counts = false))]
+pub fn py_calc_dinucl_freq<'py>(
     py: Python<'py>,
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
+    raw_counts: bool,
 ) -> anyhow::Result<Bound<'py, PyDict>> {
     let (labels, matrix) =
-        statistics::calc_dinucl_freq_per_region(&rs.regionset, &genome.genome_assembly)?;
+        statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly, raw_counts)?;
     let dinucl_names: Vec<String> = statistics::DINUCL_ORDER
         .iter()
         .map(|d| d.to_string().unwrap_or_default())

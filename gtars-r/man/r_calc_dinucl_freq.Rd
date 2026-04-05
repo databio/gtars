@@ -2,15 +2,23 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{r_calc_dinucl_freq}
 \alias{r_calc_dinucl_freq}
-\title{Calculate per-region dinucleotide frequencies (percentages)}
+\title{Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)}
 \usage{
-r_calc_dinucl_freq(rs_ptr, assembly_ptr)
+r_calc_dinucl_freq(rs_ptr, assembly_ptr, raw_counts)
 }
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}
 
 \item{assembly_ptr}{External pointer to a GenomeAssembly}
+
+\item{raw_counts}{Return raw counts instead of percentages (default FALSE, matches R upstream)}
 }
 \description{
-Calculate per-region dinucleotide frequencies (percentages)
+Returns a list with a \code{region} column and 16 dinucleotide columns
+(AA, AC, ..., TT). When \code{raw_counts} is FALSE (default), each row sums
+to 100 (percentages). When TRUE, values are raw integer counts.
+}
+\details{
+For pooled global counts, sum each dinucleotide column across rows
+(with \code{raw_counts=TRUE}).
 }
