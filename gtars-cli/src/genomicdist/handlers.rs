@@ -9,12 +9,13 @@ use serde::Serialize;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::models::{ChromosomeStatistics, RegionBin, Strand, TssIndex};
+use gtars_genomicdist::models::{ChromosomeStatistics, GenomeAssembly, RegionBin, Strand, TssIndex};
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
     GeneModel, GenomicDistAnnotation, ExpectedPartitionResult, PartitionResult,
     calc_expected_partitions, calc_partitions, genome_partition_list,
     SignalMatrix, calc_summary_signal, ConditionStats,
+    calc_gc_content, calc_dinucl_freq, DINUCL_ORDER,
     median_abs_distance,
 };
 
@@ -28,6 +29,32 @@ struct GenomicDistOutput {
     expected_partitions: Option<ExpectedPartitionResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     open_signal: Option<OpenSignalOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gc_content: Option<GcContentOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dinucl_freq: Option<DinuclFreqOutput>,
+}
+
+#[derive(Serialize)]
+struct GcContentOutput {
+    /// Mean GC content across all regions (0–1)
+    mean: f64,
+    /// Per-region GC content values (0–1), one per region in input order
+    per_region: Vec<f64>,
+}
+
+#[derive(Serialize)]
+struct DinuclFreqOutput {
+    /// Dinucleotide names in canonical order (matches DINUCL_ORDER)
+    dinucleotides: Vec<String>,
+    /// `chr_start_end` label per region
+    region_labels: Vec<String>,
+    /// Per-region matrix: outer is regions, inner is 16 values matching
+    /// `dinucleotides` order. Percentages (0–100) by default, or raw counts
+    /// if --dinucl-raw-counts flag was passed.
+    frequencies: Vec<[f64; 16]>,
+    /// Whether `frequencies` are raw counts (true) or percentages (false)
+    raw_counts: bool,
 }
 
 #[derive(Serialize)]
@@ -65,6 +92,8 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     let chrom_sizes_path = matches.get_one::<String>("chrom-sizes");
     let output_path = matches.get_one::<String>("output");
     let signal_matrix_path = matches.get_one::<String>("signal-matrix");
+    let fasta_path = matches.get_one::<String>("fasta");
+    let ignore_unk_chroms = matches.get_flag("ignore-unk-chroms");
     let n_bins: u32 = matches
         .get_one::<String>("bins")
         .unwrap()
@@ -229,6 +258,40 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         None => None,
     };
 
+    // --- Optional: GC content + dinucleotide frequencies (require FASTA) ---
+    let dinucl_raw_counts = matches.get_flag("dinucl-raw-counts");
+    let (gc_content_out, dinucl_freq_out) = match fasta_path {
+        Some(p) => {
+            let assembly = GenomeAssembly::try_from(p.as_str())
+                .map_err(|e| anyhow::anyhow!("Failed to load FASTA: {}", e))?;
+            let gc_per_region = calc_gc_content(&rs, &assembly, ignore_unk_chroms)
+                .map_err(|e| anyhow::anyhow!("Failed to compute GC content: {}", e))?;
+            let gc_mean = if gc_per_region.is_empty() {
+                0.0
+            } else {
+                gc_per_region.iter().sum::<f64>() / gc_per_region.len() as f64
+            };
+            let gc_out = GcContentOutput {
+                mean: gc_mean,
+                per_region: gc_per_region,
+            };
+
+            let (labels, matrix) = calc_dinucl_freq(&rs, &assembly, dinucl_raw_counts)
+                .map_err(|e| anyhow::anyhow!("Failed to compute dinucl freq: {}", e))?;
+            let dinucl_out = DinuclFreqOutput {
+                dinucleotides: DINUCL_ORDER
+                    .iter()
+                    .map(|d| d.to_string().unwrap_or_default())
+                    .collect(),
+                region_labels: labels,
+                frequencies: matrix,
+                raw_counts: dinucl_raw_counts,
+            };
+            (Some(gc_out), Some(dinucl_out))
+        }
+        None => (None, None),
+    };
+
     // --- Build output ---
     let output = GenomicDistOutput {
         scalars: Scalars {
@@ -247,6 +310,8 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         },
         expected_partitions,
         open_signal,
+        gc_content: gc_content_out,
+        dinucl_freq: dinucl_freq_out,
     };
 
     let compact = matches.get_flag("compact");

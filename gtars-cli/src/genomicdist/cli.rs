@@ -44,6 +44,24 @@ pub fn create_genomicdist_cli() -> Command {
                 .help("Path to open signal matrix TSV (enables cell-type open chromatin enrichment)"),
         )
         .arg(
+            Arg::new("fasta")
+                .long("fasta")
+                .required(false)
+                .help("Path to genome FASTA file (enables GC content + dinucleotide frequencies)"),
+        )
+        .arg(
+            Arg::new("ignore-unk-chroms")
+                .long("ignore-unk-chroms")
+                .action(clap::ArgAction::SetTrue)
+                .help("When computing GC content, skip regions on chromosomes not in the FASTA (default: error)"),
+        )
+        .arg(
+            Arg::new("dinucl-raw-counts")
+                .long("dinucl-raw-counts")
+                .action(clap::ArgAction::SetTrue)
+                .help("Return raw per-region dinucleotide counts instead of percentages (matches R GenomicDistributions' rawCounts=TRUE)"),
+        )
+        .arg(
             Arg::new("promoter-upstream")
                 .long("promoter-upstream")
                 .required(false)

@@ -11,7 +11,8 @@ r_calc_gc_content(rs_ptr, assembly_ptr, ignore_unk_chroms)
 
 \item{assembly_ptr}{External pointer to a GenomeAssembly}
 
-\item{ignore_unk_chroms}{Skip regions on chromosomes not in the assembly}
+\item{ignore_unk_chroms}{Skip regions on chromosomes not in the assembly.
+Pass NULL (the default) or FALSE to error on unknown chromosomes.}
 }
 \description{
 Calculate GC content for each region

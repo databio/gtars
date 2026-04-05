@@ -55,8 +55,18 @@ class TestRegionSetStatistics:
         )
         dists = rs.neighbor_distances()
         assert len(dists) == 2
-        assert dists[0] == 100.0  # 300 - 200
-        assert dists[1] == 100.0  # 500 - 400
+        assert dists[0] == 100  # 300 - 200
+        assert dists[1] == 100  # 500 - 400
+        # Return type is List[int] (no None/sentinel wrapping)
+        assert all(isinstance(d, int) for d in dists)
+
+    def test_nearest_neighbors_return_type(self):
+        # Confirm no None/Optional wrapping — the core function skips
+        # single-region chroms rather than emitting sentinels.
+        rs = make_regionset([("chr1", 0, 10), ("chr1", 20, 30)])
+        nn = rs.nearest_neighbors()
+        assert all(isinstance(d, int) for d in nn)
+        assert None not in nn
 
     def test_neighbor_distances_overlapping(self):
         rs = make_regionset([("chr1", 100, 300), ("chr1", 200, 400)])

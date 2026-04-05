@@ -69,14 +69,23 @@ load_genome_assembly <- function(fasta_path) .Call(wrap__r_load_genome_assembly,
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param assembly_ptr External pointer to a GenomeAssembly
-#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly.
+#'   Pass NULL (the default) or FALSE to error on unknown chromosomes.
 r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wrap__r_calc_gc_content, rs_ptr, assembly_ptr, ignore_unk_chroms)
 
-#' Calculate per-region dinucleotide frequencies (percentages)
+#' Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)
+#'
+#' Returns a list with a ``region`` column and 16 dinucleotide columns
+#' (AA, AC, ..., TT). When ``raw_counts`` is FALSE (default), each row sums
+#' to 100 (percentages). When TRUE, values are raw integer counts.
+#'
+#' For pooled global counts, sum each dinucleotide column across rows
+#' (with ``raw_counts=TRUE``).
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param assembly_ptr External pointer to a GenomeAssembly
-r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr)
+#' @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr, raw_counts) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr, raw_counts)
 
 #' Trim regions to chromosome boundaries
 #' @export

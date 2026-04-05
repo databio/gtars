@@ -52,7 +52,12 @@ pub trait GenomicIntervalSetStatistics {
     /// For each pair of adjacent regions on the same chromosome, returns the
     /// signed gap: `next.start - current.end`. Positive values indicate a gap,
     /// negative values indicate overlapping regions, zero means adjacent/abutting.
-    /// Regions on chromosomes with fewer than 2 regions are skipped.
+    ///
+    /// Regions on chromosomes with fewer than 2 regions are skipped (they have
+    /// no neighbors to measure against). Output length equals the total number
+    /// of *gaps* across all multi-region chromosomes — generally shorter than
+    /// the input region count. Output is not aligned 1:1 with input regions.
+    /// No sentinel values are emitted.
     fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError>;
 
     /// Compute the distance from each region to its nearest neighbor.
@@ -60,6 +65,13 @@ pub trait GenomicIntervalSetStatistics {
     /// For each region, takes the minimum absolute distance to its upstream
     /// and downstream neighbors. First and last regions on each chromosome
     /// use their only neighbor's distance. Overlapping neighbors have distance 0.
+    ///
+    /// Regions on chromosomes with only one region are skipped (they have no
+    /// neighbors). Output length equals the total number of regions across all
+    /// multi-region chromosomes — generally shorter than the input region
+    /// count, and NOT aligned 1:1 with input regions. No sentinel values are
+    /// emitted. Callers who need 1:1 alignment must filter their input to
+    /// multi-region chromosomes first.
     ///
     /// Port of R GenomicDistributions `calcNearestNeighbors()`.
     fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
@@ -351,38 +363,6 @@ pub fn calc_gc_content(
     Ok(gc_contents)
 }
 
-///
-///  Calculate Dinucleotide frequencies
-///
-/// Arguments:
-/// - region_set: RegionSet object
-/// - genome: GenomeAssembly object (reference genome)
-/// Return: Result of hashmap of dinucleotide and frequencies e.g. 'Aa: 13142'
-pub fn calc_dinucl_freq(
-    region_set: &RegionSet,
-    genome: &GenomeAssembly,
-) -> Result<HashMap<Dinucleotide, u64>, GtarsGenomicDistError> {
-    let mut dinucl_freqs: HashMap<Dinucleotide, u64> = HashMap::new();
-
-    for chr in region_set.iter_chroms() {
-        for region in region_set.iter_chr_regions(chr) {
-            let seq = genome.seq_from_region(region)?;
-            for aas in seq.windows(2) {
-                let dinucl = Dinucleotide::from_bytes(aas);
-                match dinucl {
-                    Some(dinucl) => {
-                        let current_freq = dinucl_freqs.entry(dinucl).or_insert(0);
-                        *current_freq += 1;
-                    }
-                    None => continue,
-                }
-            }
-        }
-    }
-
-    Ok(dinucl_freqs)
-}
-
 /// Canonical ordering of dinucleotides, matching GenomicDistributions' column order.
 pub const DINUCL_ORDER: [Dinucleotide; 16] = [
     Dinucleotide::Aa, Dinucleotide::Ac, Dinucleotide::Ag, Dinucleotide::At,
@@ -391,17 +371,41 @@ pub const DINUCL_ORDER: [Dinucleotide; 16] = [
     Dinucleotide::Ta, Dinucleotide::Tc, Dinucleotide::Tg, Dinucleotide::Tt,
 ];
 
-/// Per-region dinucleotide frequencies as percentages.
+/// Per-region dinucleotide frequencies.
 ///
-/// Returns a tuple of (region_labels, frequency_matrix) where:
-/// - `region_labels` is `chr_start_end` for each region
-/// - `frequency_matrix` is a `Vec<[f64; 16]>` — one row per region, columns
-///   in [`DINUCL_ORDER`] order, values are percentages (0–100).
+/// Matches R GenomicDistributions `calcDinuclFreq`: one row per region,
+/// 16 dinucleotide columns in [`DINUCL_ORDER`] order.
 ///
-/// This matches the output format of R's GenomicDistributions::calcDinuclFreq.
-pub fn calc_dinucl_freq_per_region(
+/// Arguments:
+/// - `region_set`: RegionSet object
+/// - `genome`: GenomeAssembly object (reference genome)
+/// - `raw_counts`: if `true`, return raw integer-valued counts;
+///   if `false`, return percentages (0–100) per row (matches R default)
+///
+/// Returns a tuple `(region_labels, frequency_matrix)`:
+/// - `region_labels`: `chr_start_end` for each region
+/// - `frequency_matrix`: `Vec<[f64; 16]>` — one row per region
+///
+/// For pooled global counts across all regions, sum the columns of the
+/// raw-counts matrix:
+/// ```no_run
+/// # use gtars_genomicdist::{calc_dinucl_freq, DINUCL_ORDER};
+/// # use gtars_genomicdist::models::GenomeAssembly;
+/// # use gtars_core::models::RegionSet;
+/// # fn example(rs: &RegionSet, assembly: &GenomeAssembly) -> Result<(), Box<dyn std::error::Error>> {
+/// let (_, matrix) = calc_dinucl_freq(rs, assembly, true)?;
+/// let mut totals = [0.0f64; 16];
+/// for row in &matrix {
+///     for (i, &c) in row.iter().enumerate() {
+///         totals[i] += c;
+///     }
+/// }
+/// # Ok(()) }
+/// ```
+pub fn calc_dinucl_freq(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
+    raw_counts: bool,
 ) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
     let mut labels: Vec<String> = Vec::new();
     let mut matrix: Vec<[f64; 16]> = Vec::new();
@@ -420,19 +424,25 @@ pub fn calc_dinucl_freq_per_region(
                 }
             }
 
-            let freqs: [f64; 16] = if total > 0 {
-                let mut f = [0.0f64; 16];
+            let row: [f64; 16] = if raw_counts {
+                let mut r = [0.0f64; 16];
                 for (i, &c) in counts.iter().enumerate() {
-                    f[i] = (c as f64 / total as f64) * 100.0;
+                    r[i] = c as f64;
                 }
-                f
+                r
+            } else if total > 0 {
+                let mut r = [0.0f64; 16];
+                for (i, &c) in counts.iter().enumerate() {
+                    r[i] = (c as f64 / total as f64) * 100.0;
+                }
+                r
             } else {
                 [0.0; 16]
             };
 
             labels.push(format!("{}_{}_{}",
                 region.chr, region.start, region.end));
-            matrix.push(freqs);
+            matrix.push(row);
         }
     }
 
@@ -586,8 +596,8 @@ mod tests {
     // --- Dinucleotide frequency ---
 
     #[rstest]
-    fn test_calc_dinucl_freq() {
-        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA
+    fn test_calc_dinucl_freq_raw_counts() {
+        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA (3 total)
         let path = get_fasta_path("base.fa");
         let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
@@ -595,19 +605,25 @@ mod tests {
             Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let freq = calc_dinucl_freq(&rs, &ga).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, true).unwrap();
 
-        assert_eq!(*freq.get(&Dinucleotide::Gg).unwrap_or(&0), 1);
-        assert_eq!(*freq.get(&Dinucleotide::Ga).unwrap_or(&0), 1);
-        assert_eq!(*freq.get(&Dinucleotide::Aa).unwrap_or(&0), 1);
+        assert_eq!(labels, vec!["chr1_0_4"]);
+        assert_eq!(matrix.len(), 1);
+        let row = &matrix[0];
+        let gg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gg).unwrap();
+        let ga_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Ga).unwrap();
+        let aa_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Aa).unwrap();
+        assert_eq!(row[gg_idx], 1.0);
+        assert_eq!(row[ga_idx], 1.0);
+        assert_eq!(row[aa_idx], 1.0);
         // total should be 3 (4 bases → 3 dinucleotides)
-        let total: u64 = freq.values().sum();
-        assert_eq!(total, 3);
+        let total: f64 = row.iter().sum();
+        assert_eq!(total, 3.0);
     }
 
     #[rstest]
-    fn test_calc_dinucl_freq_per_region() {
-        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC
+    fn test_calc_dinucl_freq_percentages() {
+        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC (percentages)
         let path = get_fasta_path("base.fa");
         let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
@@ -615,14 +631,13 @@ mod tests {
             Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let (labels, matrix) = calc_dinucl_freq_per_region(&rs, &ga).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, false).unwrap();
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0], "chr2_0_4");
         assert_eq!(matrix.len(), 1);
 
         // GC appears 2/3 times, CG appears 1/3 times
-        // Find indices in DINUCL_ORDER
         let gc_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gc).unwrap();
         let cg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Cg).unwrap();
 
@@ -630,9 +645,32 @@ mod tests {
         assert!((row[gc_idx] - 200.0 / 3.0).abs() < 0.1); // ~66.67%
         assert!((row[cg_idx] - 100.0 / 3.0).abs() < 0.1);  // ~33.33%
 
-        // all other dinucleotides should be 0
+        // percentages sum to 100
         let total: f64 = row.iter().sum();
         assert!((total - 100.0).abs() < 0.1);
+    }
+
+    #[rstest]
+    fn test_calc_dinucl_freq_global_derivable() {
+        // Global counts are derivable by column-summing the raw-counts matrix.
+        // Two regions: chr1=GGAA, chr2=GCGC → pooled: GG×1, GA×1, AA×1, GC×2, CG×1 = 6 total
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let (_, matrix) = calc_dinucl_freq(&rs, &ga, true).unwrap();
+
+        let mut totals = [0.0f64; 16];
+        for row in &matrix {
+            for (i, &c) in row.iter().enumerate() {
+                totals[i] += c;
+            }
+        }
+        let grand: f64 = totals.iter().sum();
+        assert_eq!(grand, 6.0);
     }
 
     // --- Empty RegionSet edge cases ---
