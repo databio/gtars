@@ -34,6 +34,13 @@ pub trait GenomicIntervalSetStatistics {
     /// Like `region_distribution_with_bins` but uses actual chromosome sizes
     /// to create bins per-chromosome, matching R's `getGenomeBins(chromSizes)`.
     /// Each chromosome gets `n_bins` bins sized to that chromosome's length.
+    ///
+    /// Regions on chromosomes not present in `chrom_sizes` are skipped.
+    /// Regions whose midpoint falls beyond the stated chromosome size are also
+    /// skipped (common with assembly mismatches, e.g. an hg19 BED paired with
+    /// hg38 chrom_sizes). The total bin count may therefore be lower than the
+    /// input region count; callers who need to detect mismatches can compare
+    /// `sum(bin.n)` against their input region count.
     fn region_distribution_with_chrom_sizes(
         &self,
         n_bins: u32,
@@ -186,6 +193,13 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let bin_size = (chrom_size / n_bins).max(1);
 
             let mid = region.mid_point();
+            // Skip regions whose midpoint falls beyond the stated chromosome size
+            // (e.g. BED file assembled against a different reference than the one
+            // supplied by chrom_sizes). Without this, rid would exceed n_bins and
+            // produce bins with end < start.
+            if mid >= chrom_size {
+                continue;
+            }
             let rid = mid / bin_size;
             let bin_start = rid * bin_size;
             let bin_end = (bin_start + bin_size).min(chrom_size);
@@ -745,6 +759,38 @@ mod tests {
             "total bin count ({}) should equal number of regions ({})",
             total_n, n_regions
         );
+    }
+
+    #[rstest]
+    fn test_region_distribution_with_chrom_sizes_skips_out_of_range() {
+        // Regions whose midpoint falls beyond the stated chromosome size are
+        // silently skipped (assembly mismatch case). Previously this produced
+        // bins with end < start or rid >= n_bins.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 200, rest: None },  // mid=150, in range
+            Region { chr: "chr1".into(), start: 800, end: 900, rest: None },  // mid=850, in range
+            Region { chr: "chr1".into(), start: 1200, end: 1300, rest: None },// mid=1250, out of range (chrom_size=1000)
+            Region { chr: "chr2".into(), start: 300, end: 400, rest: None },  // mid=350, in range
+            Region { chr: "chr2".into(), start: 2000, end: 2100, rest: None },// mid=2050, out of range
+            Region { chr: "chr3".into(), start: 0, end: 100, rest: None },    // chr3 not in chrom_sizes
+        ];
+        let rs = RegionSet::from(regions);
+        let mut chrom_sizes = HashMap::new();
+        chrom_sizes.insert("chr1".to_string(), 1000u32);
+        chrom_sizes.insert("chr2".to_string(), 500u32);
+
+        let bins = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
+
+        // Every bin should have end > start and rid < n_bins
+        for bin in bins.values() {
+            assert!(bin.end > bin.start, "bin {:?} has end <= start", bin);
+            assert!(bin.rid < 10, "bin {:?} has rid >= n_bins", bin);
+        }
+
+        // Total counted regions: 2 (chr1) + 1 (chr2) = 3
+        // (chr1's third region, chr2's second, and chr3's only region are all skipped)
+        let total: u32 = bins.values().map(|b| b.n).sum();
+        assert_eq!(total, 3, "expected 3 in-range regions counted");
     }
 
     #[rstest]

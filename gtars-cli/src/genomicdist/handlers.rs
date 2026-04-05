@@ -91,7 +91,22 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     // --- Unconditional computations ---
     let widths = rs.calc_widths();
     let chromosome_stats = rs.chromosome_statistics();
-    let region_dist_map = rs.region_distribution_with_bins(n_bins);
+    let region_dist_map = match explicit_chrom_sizes.as_ref() {
+        Some(cs) => rs.region_distribution_with_chrom_sizes(n_bins, cs),
+        None => {
+            eprintln!(
+                "warning: --chrom-sizes not provided; using BED-file-derived bin width."
+            );
+            eprintln!(
+                "         Outputs will NOT be comparable across files or aligned with"
+            );
+            eprintln!(
+                "         reference genome positions. Pass --chrom-sizes <file> for"
+            );
+            eprintln!("         reference-aligned bins.");
+            rs.region_distribution_with_bins(n_bins)
+        }
+    };
     let neighbor_distances = rs
         .calc_neighbor_distances()
         .map_err(|e| anyhow::anyhow!("Failed to compute neighbor distances: {}", e))?;

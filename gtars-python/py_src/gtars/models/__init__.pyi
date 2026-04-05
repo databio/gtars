@@ -138,11 +138,26 @@ class RegionSet:
         """
         ...
 
-    def distribution(self, n_bins: int = 250) -> List[Dict[str, object]]:
+    def distribution(
+        self,
+        n_bins: int = 250,
+        chrom_sizes: Optional[Dict[str, int]] = None,
+    ) -> List[Dict[str, object]]:
         """
         Region distribution across genomic bins.
 
-        :param n_bins: number of bins (default 250)
+        :param n_bins: number of bins for the longest chromosome (default 250)
+        :param chrom_sizes: optional mapping of chromosome name to length. When provided,
+            per-chromosome bin sizes are derived from the reference genome
+            (bin_size = chrom_size / n_bins per chrom). This produces outputs that are
+            comparable across BED files and aligned with reference genome positions.
+            When absent, bin size is derived from the BED file's observed max end
+            coordinate — outputs will NOT be comparable across files.
+
+            When ``chrom_sizes`` is provided, regions on chromosomes not listed in
+            ``chrom_sizes`` are skipped, as are regions whose midpoint falls beyond
+            the stated chromosome size (common with assembly mismatches). The summed
+            bin counts may therefore be lower than the input region count.
         :return: list of dicts with keys: chr, start, end, n, rid
         """
         ...

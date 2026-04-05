@@ -104,6 +104,38 @@ class TestRegionSetStatistics:
         dist = rs.distribution()
         assert len(dist) > 0
 
+    def test_distribution_with_chrom_sizes(self):
+        """Passing chrom_sizes uses reference-derived per-chrom bin sizes."""
+        rs = make_regionset([("chr1", 0, 100), ("chr2", 200, 300)])
+        # chr1 size 1000, chr2 size 500, 10 bins each → chr1 bin=100, chr2 bin=50
+        chrom_sizes = {"chr1": 1000, "chr2": 500}
+        dist = rs.distribution(10, chrom_sizes)
+        assert isinstance(dist, list)
+        # chr1 bin width should be 100 (1000/10)
+        chr1_bins = [d for d in dist if d["chr"] == "chr1"]
+        assert all(d["end"] - d["start"] == 100 for d in chr1_bins)
+        # chr2 bin width should be 50 (500/10)
+        chr2_bins = [d for d in dist if d["chr"] == "chr2"]
+        assert all(d["end"] - d["start"] == 50 for d in chr2_bins)
+
+    def test_distribution_chrom_sizes_skips_out_of_range(self):
+        """Regions beyond stated chrom_size are skipped (assembly mismatch case)."""
+        # chr1 size 1000: region at mid=1250 is out of range
+        # chr2 size 500:  region at mid=2050 is out of range
+        rs = make_regionset([
+            ("chr1", 100, 200),    # mid=150, in range
+            ("chr1", 1200, 1300),  # mid=1250, out of range
+            ("chr2", 200, 300),    # mid=250, in range
+            ("chr2", 2000, 2100),  # mid=2050, out of range
+        ])
+        chrom_sizes = {"chr1": 1000, "chr2": 500}
+        dist = rs.distribution(10, chrom_sizes)
+        # 2 of 4 regions should be in bins; bins are well-formed (no end < start)
+        total_in_bins = sum(d["n"] for d in dist)
+        assert total_in_bins == 2
+        assert all(d["end"] > d["start"] for d in dist)
+        assert all(d["rid"] < 10 for d in dist)
+
 
 # =========================================================================
 # Interval range operations
