@@ -142,7 +142,7 @@ class RegionSet:
         self,
         n_bins: int = 250,
         chrom_sizes: Optional[Dict[str, int]] = None,
-    ) -> Dict[str, object]:
+    ) -> List[Dict[str, object]]:
         """
         Region distribution across genomic bins.
 
@@ -153,13 +153,12 @@ class RegionSet:
             comparable across BED files and aligned with reference genome positions.
             When absent, bin size is derived from the BED file's observed max end
             coordinate — outputs will NOT be comparable across files.
-        :return: a dict with two keys:
-            - ``bins``: list of dicts with keys ``chr``, ``start``, ``end``, ``n``, ``rid``
-            - ``out_of_range``: dict mapping chromosome name to count of regions that
-              were skipped because their midpoint fell beyond the stated chromosome
-              size. Populated only when ``chrom_sizes`` is provided. A non-empty value
-              signals an assembly mismatch between the BED file and the chrom_sizes
-              you supplied (e.g. hg19 BED paired with hg38 chrom_sizes).
+
+            When ``chrom_sizes`` is provided, regions on chromosomes not listed in
+            ``chrom_sizes`` are skipped, as are regions whose midpoint falls beyond
+            the stated chromosome size (common with assembly mismatches). The summed
+            bin counts may therefore be lower than the input region count.
+        :return: list of dicts with keys: chr, start, end, n, rid
         """
         ...
 

@@ -92,26 +92,7 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     let widths = rs.calc_widths();
     let chromosome_stats = rs.chromosome_statistics();
     let region_dist_map = match explicit_chrom_sizes.as_ref() {
-        Some(cs) => {
-            let result = rs.region_distribution_with_chrom_sizes(n_bins, cs);
-            if !result.out_of_range.is_empty() {
-                let total: u32 = result.out_of_range.values().sum();
-                eprintln!(
-                    "warning: {} region(s) skipped because their midpoint fell beyond the",
-                    total
-                );
-                eprintln!(
-                    "         stated chromosome size (possible assembly mismatch between BED"
-                );
-                eprintln!("         file and --chrom-sizes). Per-chromosome counts:");
-                let mut entries: Vec<_> = result.out_of_range.iter().collect();
-                entries.sort_by(|a, b| a.0.cmp(b.0));
-                for (chr, count) in entries {
-                    eprintln!("           {}: {}", chr, count);
-                }
-            }
-            result.bins
-        }
+        Some(cs) => rs.region_distribution_with_chrom_sizes(n_bins, cs),
         None => {
             eprintln!(
                 "warning: --chrom-sizes not provided; using BED-file-derived bin width."
