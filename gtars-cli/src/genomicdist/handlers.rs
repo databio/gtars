@@ -91,7 +91,41 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     // --- Unconditional computations ---
     let widths = rs.calc_widths();
     let chromosome_stats = rs.chromosome_statistics();
-    let region_dist_map = rs.region_distribution_with_bins(n_bins);
+    let region_dist_map = match explicit_chrom_sizes.as_ref() {
+        Some(cs) => {
+            let result = rs.region_distribution_with_chrom_sizes(n_bins, cs);
+            if !result.out_of_range.is_empty() {
+                let total: u32 = result.out_of_range.values().sum();
+                eprintln!(
+                    "warning: {} region(s) skipped because their midpoint fell beyond the",
+                    total
+                );
+                eprintln!(
+                    "         stated chromosome size (possible assembly mismatch between BED"
+                );
+                eprintln!("         file and --chrom-sizes). Per-chromosome counts:");
+                let mut entries: Vec<_> = result.out_of_range.iter().collect();
+                entries.sort_by(|a, b| a.0.cmp(b.0));
+                for (chr, count) in entries {
+                    eprintln!("           {}: {}", chr, count);
+                }
+            }
+            result.bins
+        }
+        None => {
+            eprintln!(
+                "warning: --chrom-sizes not provided; using BED-file-derived bin width."
+            );
+            eprintln!(
+                "         Outputs will NOT be comparable across files or aligned with"
+            );
+            eprintln!(
+                "         reference genome positions. Pass --chrom-sizes <file> for"
+            );
+            eprintln!("         reference-aligned bins.");
+            rs.region_distribution_with_bins(n_bins)
+        }
+    };
     let neighbor_distances = rs
         .calc_neighbor_distances()
         .map_err(|e| anyhow::anyhow!("Failed to compute neighbor distances: {}", e))?;

@@ -220,7 +220,7 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
 pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom_lengths: Robj) -> extendr_api::Result<List> {
     let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
     with_regionset!(rs_ptr, rs, {
-        let dist = if !chrom_names.is_null() && !chrom_lengths.is_null() {
+        let (dist, out_of_range) = if !chrom_names.is_null() && !chrom_lengths.is_null() {
             let names: Vec<String> = chrom_names.as_str_iter()
                 .ok_or_else(|| extendr_api::Error::Other("chrom_names must be character".into()))?
                 .map(|s| s.to_string())
@@ -233,9 +233,10 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom
                 .into_iter()
                 .zip(lengths.into_iter().map(|v| v as u32))
                 .collect();
-            rs.region_distribution_with_chrom_sizes(n_bins_u32, &chrom_sizes)
+            let r = rs.region_distribution_with_chrom_sizes(n_bins_u32, &chrom_sizes);
+            (r.bins, r.out_of_range)
         } else {
-            rs.region_distribution_with_bins(n_bins_u32)
+            (rs.region_distribution_with_bins(n_bins_u32), HashMap::new())
         };
         let mut bins: Vec<_> = dist.into_values().collect();
         bins.sort_by(|a, b| {
@@ -258,12 +259,24 @@ pub fn r_region_distribution(rs_ptr: Robj, n_bins: i32, chrom_names: Robj, chrom
             rids.push(bin.rid as i32);
         }
 
+        // Collect out_of_range entries as parallel vectors for R
+        let mut oor_chrs: Vec<String> = Vec::new();
+        let mut oor_counts: Vec<i32> = Vec::new();
+        let mut oor_entries: Vec<_> = out_of_range.into_iter().collect();
+        oor_entries.sort_by(|a, b| chrom_karyotype_key(&a.0).cmp(&chrom_karyotype_key(&b.0)));
+        for (chr, count) in oor_entries {
+            oor_chrs.push(chr);
+            oor_counts.push(count as i32);
+        }
+
         Ok(list!(
             chr = chrs,
             start = starts,
             end = ends,
             n = counts,
-            rid = rids
+            rid = rids,
+            out_of_range_chr = oor_chrs,
+            out_of_range_count = oor_counts
         ))
     })
 }

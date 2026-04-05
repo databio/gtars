@@ -176,10 +176,40 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
     }
 
+    /// Region distribution across genomic bins.
+    ///
+    /// When `chrom_sizes` is provided (JS object: `{chr: length, ...}`), per-chromosome
+    /// bin sizes are derived from the reference genome (bin_size = chrom_size / n_bins
+    /// per chrom). Outputs are comparable across BED files and aligned with reference
+    /// genome positions.
+    ///
+    /// When `chrom_sizes` is null/undefined, bin size is derived from the BED file's
+    /// observed max end coordinate — outputs will NOT be comparable across files.
+    ///
+    /// Returns a JS object `{ bins: [...], outOfRange: {...} }` where `outOfRange`
+    /// is populated only when `chrom_sizes` is provided and some regions' midpoints
+    /// fell beyond the stated chromosome size (assembly mismatch). `outOfRange` is
+    /// always an empty object when `chrom_sizes` is not provided.
     #[wasm_bindgen(js_name = "regionDistribution")]
-    pub fn region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
-        let distribution: HashMap<String, RegionBin> =
-            self.region_set.region_distribution_with_bins(n_bins);
+    pub fn region_distribution(
+        &self,
+        n_bins: u32,
+        chrom_sizes: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        let (distribution, out_of_range): (HashMap<String, RegionBin>, HashMap<String, u32>) =
+            if chrom_sizes.is_null() || chrom_sizes.is_undefined() {
+                (
+                    self.region_set.region_distribution_with_bins(n_bins),
+                    HashMap::new(),
+                )
+            } else {
+                let cs: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes)
+                    .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+                let r = self
+                    .region_set
+                    .region_distribution_with_chrom_sizes(n_bins, &cs);
+                (r.bins, r.out_of_range)
+            };
 
         let mut result_vector: Vec<JsRegionDistribution> = vec![];
 
@@ -192,7 +222,18 @@ impl JsRegionSet {
                 rid: value.rid,
             })
         }
-        serde_wasm_bindgen::to_value(&result_vector).map_err(|e| e.into())
+
+        #[derive(serde::Serialize)]
+        struct Output<'a> {
+            bins: &'a Vec<JsRegionDistribution>,
+            #[serde(rename = "outOfRange")]
+            out_of_range: HashMap<String, u32>,
+        }
+        serde_wasm_bindgen::to_value(&Output {
+            bins: &result_vector,
+            out_of_range,
+        })
+        .map_err(|e| e.into())
     }
 
     #[wasm_bindgen(getter, js_name = "classify")]

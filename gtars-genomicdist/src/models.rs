@@ -131,6 +131,22 @@ pub struct RegionBin {
     pub rid: u32,
 }
 
+/// Result of `region_distribution_with_chrom_sizes`.
+///
+/// Returns both the per-chromosome bins and a count of regions that were skipped
+/// because their midpoint fell beyond the stated chromosome size (common when the
+/// BED file's assembly doesn't match the provided chrom_sizes — e.g. hg19 BED
+/// paired with hg38 chrom_sizes). Callers should surface non-empty
+/// `out_of_range` to the user so assembly mismatches don't go silent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegionDistResult {
+    /// Per-chromosome bins with region counts, keyed by `{chr}-{start}-{end}`.
+    pub bins: HashMap<String, RegionBin>,
+    /// Per-chromosome counts of regions whose midpoint fell beyond the stated
+    /// chromosome size (and were therefore skipped). Empty when all regions fit.
+    pub out_of_range: HashMap<String, u32>,
+}
+
 pub struct GenomeAssembly {
     seq_map: HashMap<String, Vec<u8>>,
 }

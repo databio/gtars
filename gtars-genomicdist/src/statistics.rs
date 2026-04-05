@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use gtars_core::models::{Region, RegionSet};
 
 use crate::errors::GtarsGenomicDistError;
-use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin};
+use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin, RegionDistResult};
 
 /// Trait for computing statistics and distributions of genomic intervals.
 pub trait GenomicIntervalSetStatistics {
@@ -34,11 +34,17 @@ pub trait GenomicIntervalSetStatistics {
     /// Like `region_distribution_with_bins` but uses actual chromosome sizes
     /// to create bins per-chromosome, matching R's `getGenomeBins(chromSizes)`.
     /// Each chromosome gets `n_bins` bins sized to that chromosome's length.
+    ///
+    /// Regions on chromosomes not present in `chrom_sizes` are skipped.
+    /// Regions whose midpoint falls beyond the stated chromosome size are also
+    /// skipped; their per-chromosome counts are returned in
+    /// [`RegionDistResult::out_of_range`] so callers can surface assembly
+    /// mismatches (e.g. an hg19 BED paired with hg38 chrom_sizes).
     fn region_distribution_with_chrom_sizes(
         &self,
         n_bins: u32,
         chrom_sizes: &HashMap<String, u32>,
-    ) -> HashMap<String, RegionBin>;
+    ) -> RegionDistResult;
 
     /// Compute distances between consecutive regions on each chromosome.
     ///
@@ -171,12 +177,16 @@ impl GenomicIntervalSetStatistics for RegionSet {
         &self,
         n_bins: u32,
         chrom_sizes: &HashMap<String, u32>,
-    ) -> HashMap<String, RegionBin> {
+    ) -> RegionDistResult {
         if self.regions.is_empty() || n_bins == 0 {
-            return HashMap::new();
+            return RegionDistResult {
+                bins: HashMap::new(),
+                out_of_range: HashMap::new(),
+            };
         }
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
+        let mut out_of_range: HashMap<String, u32> = HashMap::new();
 
         for region in &self.regions {
             let chrom_size = match chrom_sizes.get(&region.chr) {
@@ -186,6 +196,14 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let bin_size = (chrom_size / n_bins).max(1);
 
             let mid = region.mid_point();
+            // Skip regions whose midpoint falls beyond the stated chromosome size
+            // (e.g. BED file assembled against a different reference than the one
+            // supplied by chrom_sizes). Track per-chromosome counts so callers can
+            // surface assembly mismatches.
+            if mid >= chrom_size {
+                *out_of_range.entry(region.chr.clone()).or_insert(0) += 1;
+                continue;
+            }
             let rid = mid / bin_size;
             let bin_start = rid * bin_size;
             let bin_end = (bin_start + bin_size).min(chrom_size);
@@ -207,7 +225,10 @@ impl GenomicIntervalSetStatistics for RegionSet {
             }
         }
 
-        plot_results
+        RegionDistResult {
+            bins: plot_results,
+            out_of_range,
+        }
     }
 
     fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError> {
@@ -745,6 +766,79 @@ mod tests {
             "total bin count ({}) should equal number of regions ({})",
             total_n, n_regions
         );
+    }
+
+    #[rstest]
+    fn test_region_distribution_with_chrom_sizes_out_of_range() {
+        // Regions whose midpoint falls beyond the stated chromosome size should
+        // be skipped and reported in out_of_range, not silently produce bins
+        // with end < start or rid >= n_bins.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 100, end: 200, rest: None },  // mid=150, in range
+            Region { chr: "chr1".into(), start: 800, end: 900, rest: None },  // mid=850, in range
+            Region { chr: "chr1".into(), start: 1200, end: 1300, rest: None },// mid=1250, out of range (chrom_size=1000)
+            Region { chr: "chr2".into(), start: 300, end: 400, rest: None },  // mid=350, in range
+            Region { chr: "chr2".into(), start: 2000, end: 2100, rest: None },// mid=2050, out of range
+            Region { chr: "chr2".into(), start: 3000, end: 3100, rest: None },// mid=3050, out of range
+            Region { chr: "chr3".into(), start: 0, end: 100, rest: None },    // chr3 not in chrom_sizes
+        ];
+        let rs = RegionSet::from(regions);
+        let mut chrom_sizes = HashMap::new();
+        chrom_sizes.insert("chr1".to_string(), 1000u32);
+        chrom_sizes.insert("chr2".to_string(), 500u32);
+
+        let result = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
+
+        // Every bin should have end > start (not the old buggy end < start)
+        for bin in result.bins.values() {
+            assert!(
+                bin.end > bin.start,
+                "bin {:?} has end <= start",
+                bin
+            );
+            assert!(
+                bin.rid < 10,
+                "bin {:?} has rid >= n_bins (10)",
+                bin
+            );
+        }
+
+        // chr1 should have 2 in-range regions counted
+        let chr1_total: u32 = result.bins.values()
+            .filter(|b| b.chr == "chr1")
+            .map(|b| b.n)
+            .sum();
+        assert_eq!(chr1_total, 2, "chr1 should have 2 in-range regions");
+
+        // chr2 should have 1 in-range region counted
+        let chr2_total: u32 = result.bins.values()
+            .filter(|b| b.chr == "chr2")
+            .map(|b| b.n)
+            .sum();
+        assert_eq!(chr2_total, 1, "chr2 should have 1 in-range region");
+
+        // out_of_range: 1 on chr1, 2 on chr2
+        assert_eq!(result.out_of_range.get("chr1"), Some(&1));
+        assert_eq!(result.out_of_range.get("chr2"), Some(&2));
+        // chr3 is not in chrom_sizes — skipped entirely, not reported in out_of_range
+        assert_eq!(result.out_of_range.get("chr3"), None);
+    }
+
+    #[rstest]
+    fn test_region_distribution_with_chrom_sizes_all_in_range() {
+        // Happy path: all regions within chromosome bounds, out_of_range is empty.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 100, rest: None },
+            Region { chr: "chr1".into(), start: 500, end: 600, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let mut chrom_sizes = HashMap::new();
+        chrom_sizes.insert("chr1".to_string(), 1000u32);
+
+        let result = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
+        assert!(result.out_of_range.is_empty());
+        let total: u32 = result.bins.values().map(|b| b.n).sum();
+        assert_eq!(total, 2);
     }
 
     #[rstest]

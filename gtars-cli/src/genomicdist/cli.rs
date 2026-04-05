@@ -24,7 +24,7 @@ pub fn create_genomicdist_cli() -> Command {
             Arg::new("chrom-sizes")
                 .long("chrom-sizes")
                 .required(false)
-                .help("Path to chrom.sizes file (enables expected partitions and promoter trimming)"),
+                .help("Path to chrom.sizes file. When provided, region distribution uses a per-chromosome bin size derived from the reference genome (stable across files). Also enables expected partitions and promoter trimming."),
         )
         .arg(
             arg!(--output <OUTPUT>)
