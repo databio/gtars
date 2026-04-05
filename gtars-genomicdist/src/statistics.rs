@@ -52,7 +52,12 @@ pub trait GenomicIntervalSetStatistics {
     /// For each pair of adjacent regions on the same chromosome, returns the
     /// signed gap: `next.start - current.end`. Positive values indicate a gap,
     /// negative values indicate overlapping regions, zero means adjacent/abutting.
-    /// Regions on chromosomes with fewer than 2 regions are skipped.
+    ///
+    /// Regions on chromosomes with fewer than 2 regions are skipped (they have
+    /// no neighbors to measure against). Output length equals the total number
+    /// of *gaps* across all multi-region chromosomes — generally shorter than
+    /// the input region count. Output is not aligned 1:1 with input regions.
+    /// No sentinel values are emitted.
     fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError>;
 
     /// Compute the distance from each region to its nearest neighbor.
@@ -60,6 +65,13 @@ pub trait GenomicIntervalSetStatistics {
     /// For each region, takes the minimum absolute distance to its upstream
     /// and downstream neighbors. First and last regions on each chromosome
     /// use their only neighbor's distance. Overlapping neighbors have distance 0.
+    ///
+    /// Regions on chromosomes with only one region are skipped (they have no
+    /// neighbors). Output length equals the total number of regions across all
+    /// multi-region chromosomes — generally shorter than the input region
+    /// count, and NOT aligned 1:1 with input regions. No sentinel values are
+    /// emitted. Callers who need 1:1 alignment must filter their input to
+    /// multi-region chromosomes first.
     ///
     /// Port of R GenomicDistributions `calcNearestNeighbors()`.
     fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;

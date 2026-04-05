@@ -124,17 +124,22 @@ class RegionSet:
         """
         ...
 
-    def neighbor_distances(self) -> List[Optional[float]]:
+    def neighbor_distances(self) -> List[int]:
         """
-        Distances between consecutive regions on each chromosome.
-        Returns None for missing values.
+        Signed gaps between consecutive regions on each chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        fewer than 2 regions are skipped (no neighbors to measure against).
+        Output is NOT aligned 1:1 with input regions.
         """
         ...
 
-    def nearest_neighbors(self) -> List[Optional[float]]:
+    def nearest_neighbors(self) -> List[int]:
         """
-        Distance from each region to its nearest neighbor.
-        Returns None for regions with no neighbor on the same chromosome.
+        Distance from each region to its nearest neighbor on the same chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        only one region are skipped. Output is NOT aligned 1:1 with input regions.
         """
         ...
 
