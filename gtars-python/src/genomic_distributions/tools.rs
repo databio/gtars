@@ -20,19 +20,44 @@ pub fn py_calc_gc_content(
     Ok(result)
 }
 
-#[pyfunction(name = "calc_dinucleotide_frequency")]
-pub fn py_calc_dinucleotide_frequency(
+#[pyfunction(name = "calc_dinucl_freq")]
+pub fn py_calc_dinucl_freq(
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
 ) -> anyhow::Result<HashMap<String, u64>> {
     let frequencies = statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly)?;
     let mut freq_map: HashMap<String, u64> = HashMap::new();
-    // Convert Dinucleotide to String and push to HashMap
     for (di, freq) in frequencies {
         freq_map.insert(di.to_string()?, freq);
     }
-
     Ok(freq_map)
+}
+
+/// Per-region dinucleotide frequencies as percentages (0–100).
+///
+/// Returns a dict with:
+///   - ``region_labels``: list of ``chr_start_end`` strings (one per region)
+///   - ``dinucleotides``: list of 16 dinucleotide names in canonical order
+///   - ``frequencies``: list of lists — one row per region, 16 values per row
+///     matching ``dinucleotides`` order
+#[pyfunction(name = "calc_dinucl_freq_per_region")]
+pub fn py_calc_dinucl_freq_per_region<'py>(
+    py: Python<'py>,
+    rs: &PyRegionSet,
+    genome: &PyGenomeAssembly,
+) -> anyhow::Result<Bound<'py, PyDict>> {
+    let (labels, matrix) =
+        statistics::calc_dinucl_freq_per_region(&rs.regionset, &genome.genome_assembly)?;
+    let dinucl_names: Vec<String> = statistics::DINUCL_ORDER
+        .iter()
+        .map(|d| d.to_string().unwrap_or_default())
+        .collect();
+    let freqs_nested: Vec<Vec<f64>> = matrix.into_iter().map(|row| row.to_vec()).collect();
+    let result = PyDict::new(py);
+    result.set_item("region_labels", labels)?;
+    result.set_item("dinucleotides", dinucl_names)?;
+    result.set_item("frequencies", freqs_nested)?;
+    Ok(result)
 }
 
 #[pyfunction(name = "calc_partitions")]

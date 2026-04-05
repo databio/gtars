@@ -9,12 +9,13 @@ use serde::Serialize;
 
 use gtars_core::models::{Region, RegionSet};
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::models::{ChromosomeStatistics, RegionBin, Strand, TssIndex};
+use gtars_genomicdist::models::{ChromosomeStatistics, GenomeAssembly, RegionBin, Strand, TssIndex};
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
     GeneModel, GenomicDistAnnotation, ExpectedPartitionResult, PartitionResult,
     calc_expected_partitions, calc_partitions, genome_partition_list,
     SignalMatrix, calc_summary_signal, ConditionStats,
+    calc_gc_content, calc_dinucl_freq, calc_dinucl_freq_per_region, DINUCL_ORDER,
     median_abs_distance,
 };
 
@@ -28,6 +29,30 @@ struct GenomicDistOutput {
     expected_partitions: Option<ExpectedPartitionResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
     open_signal: Option<OpenSignalOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    gc_content: Option<GcContentOutput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dinucl_freq: Option<HashMap<String, u64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    dinucl_freq_per_region: Option<DinuclFreqPerRegionOutput>,
+}
+
+#[derive(Serialize)]
+struct GcContentOutput {
+    /// Mean GC content across all regions (0–1)
+    mean: f64,
+    /// Per-region GC content values (0–1), one per region in input order
+    per_region: Vec<f64>,
+}
+
+#[derive(Serialize)]
+struct DinuclFreqPerRegionOutput {
+    /// Dinucleotide names in canonical order (matches DINUCL_ORDER)
+    dinucleotides: Vec<String>,
+    /// `chr_start_end` label per region
+    region_labels: Vec<String>,
+    /// Frequency matrix: outer is regions, inner is percentages per dinucleotide
+    frequencies: Vec<[f64; 16]>,
 }
 
 #[derive(Serialize)]
@@ -65,6 +90,8 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     let chrom_sizes_path = matches.get_one::<String>("chrom-sizes");
     let output_path = matches.get_one::<String>("output");
     let signal_matrix_path = matches.get_one::<String>("signal-matrix");
+    let fasta_path = matches.get_one::<String>("fasta");
+    let ignore_unk_chroms = matches.get_flag("ignore-unk-chroms");
     let n_bins: u32 = matches
         .get_one::<String>("bins")
         .unwrap()
@@ -229,6 +256,47 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         None => None,
     };
 
+    // --- Optional: GC content + dinucleotide frequencies (require FASTA) ---
+    let (gc_content_out, dinucl_freq_out, dinucl_per_region_out) = match fasta_path {
+        Some(p) => {
+            let assembly = GenomeAssembly::try_from(p.as_str())
+                .map_err(|e| anyhow::anyhow!("Failed to load FASTA: {}", e))?;
+            let gc_per_region = calc_gc_content(&rs, &assembly, ignore_unk_chroms)
+                .map_err(|e| anyhow::anyhow!("Failed to compute GC content: {}", e))?;
+            let gc_mean = if gc_per_region.is_empty() {
+                0.0
+            } else {
+                gc_per_region.iter().sum::<f64>() / gc_per_region.len() as f64
+            };
+            let gc_out = GcContentOutput {
+                mean: gc_mean,
+                per_region: gc_per_region,
+            };
+
+            let dinucl_global = calc_dinucl_freq(&rs, &assembly)
+                .map_err(|e| anyhow::anyhow!("Failed to compute dinucl freq: {}", e))?;
+            // Convert Dinucleotide keys to strings, ordered canonically
+            let mut dinucl_global_map: HashMap<String, u64> = HashMap::new();
+            for dn in DINUCL_ORDER.iter() {
+                let count = dinucl_global.get(dn).copied().unwrap_or(0);
+                dinucl_global_map.insert(dn.to_string().unwrap_or_default(), count);
+            }
+
+            let (labels, matrix) = calc_dinucl_freq_per_region(&rs, &assembly)
+                .map_err(|e| anyhow::anyhow!("Failed to compute dinucl freq per region: {}", e))?;
+            let per_region = DinuclFreqPerRegionOutput {
+                dinucleotides: DINUCL_ORDER
+                    .iter()
+                    .map(|d| d.to_string().unwrap_or_default())
+                    .collect(),
+                region_labels: labels,
+                frequencies: matrix,
+            };
+            (Some(gc_out), Some(dinucl_global_map), Some(per_region))
+        }
+        None => (None, None, None),
+    };
+
     // --- Build output ---
     let output = GenomicDistOutput {
         scalars: Scalars {
@@ -247,6 +315,9 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         },
         expected_partitions,
         open_signal,
+        gc_content: gc_content_out,
+        dinucl_freq: dinucl_freq_out,
+        dinucl_freq_per_region: dinucl_per_region_out,
     };
 
     let compact = matches.get_flag("compact");
