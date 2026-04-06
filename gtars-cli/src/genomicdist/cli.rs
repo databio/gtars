@@ -47,13 +47,19 @@ pub fn create_genomicdist_cli() -> Command {
             Arg::new("fasta")
                 .long("fasta")
                 .required(false)
-                .help("Path to genome FASTA file (enables GC content + dinucleotide frequencies)"),
+                .help("Path to genome FASTA file (enables GC content; also enables dinucleotide frequencies when --dinucl-freq is set). Requires a .fai index alongside the FASTA (e.g. hg38.fa + hg38.fa.fai)."),
         )
         .arg(
             Arg::new("ignore-unk-chroms")
                 .long("ignore-unk-chroms")
                 .action(clap::ArgAction::SetTrue)
                 .help("When computing GC content, skip regions on chromosomes not in the FASTA (default: error)"),
+        )
+        .arg(
+            Arg::new("dinucl-freq")
+                .long("dinucl-freq")
+                .action(clap::ArgAction::SetTrue)
+                .help("Compute per-region dinucleotide frequencies (expensive for wide regions; opt-in even when --fasta is provided)"),
         )
         .arg(
             Arg::new("dinucl-raw-counts")

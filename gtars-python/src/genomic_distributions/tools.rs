@@ -36,15 +36,20 @@ pub fn py_calc_gc_content(
 ///
 /// For pooled global counts, sum each column of the raw-counts matrix.
 #[pyfunction(name = "calc_dinucl_freq")]
-#[pyo3(signature = (rs, genome, raw_counts = false))]
+#[pyo3(signature = (rs, genome, raw_counts = false, ignore_unk_chroms = false))]
 pub fn py_calc_dinucl_freq<'py>(
     py: Python<'py>,
     rs: &PyRegionSet,
     genome: &PyGenomeAssembly,
     raw_counts: bool,
+    ignore_unk_chroms: bool,
 ) -> anyhow::Result<Bound<'py, PyDict>> {
-    let (labels, matrix) =
-        statistics::calc_dinucl_freq(&rs.regionset, &genome.genome_assembly, raw_counts)?;
+    let (labels, matrix) = statistics::calc_dinucl_freq(
+        &rs.regionset,
+        &genome.genome_assembly,
+        raw_counts,
+        ignore_unk_chroms,
+    )?;
     let dinucl_names: Vec<String> = statistics::DINUCL_ORDER
         .iter()
         .map(|d| d.to_string().unwrap_or_default())

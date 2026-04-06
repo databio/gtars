@@ -381,6 +381,8 @@ pub const DINUCL_ORDER: [Dinucleotide; 16] = [
 /// - `genome`: GenomeAssembly object (reference genome)
 /// - `raw_counts`: if `true`, return raw integer-valued counts;
 ///   if `false`, return percentages (0–100) per row (matches R default)
+/// - `ignore_unk_chroms`: if `true`, skip regions on chromosomes not in
+///   the assembly; if `false`, error on unknown chromosomes
 ///
 /// Returns a tuple `(region_labels, frequency_matrix)`:
 /// - `region_labels`: `chr_start_end` for each region
@@ -393,7 +395,7 @@ pub const DINUCL_ORDER: [Dinucleotide; 16] = [
 /// # use gtars_genomicdist::models::GenomeAssembly;
 /// # use gtars_core::models::RegionSet;
 /// # fn example(rs: &RegionSet, assembly: &GenomeAssembly) -> Result<(), Box<dyn std::error::Error>> {
-/// let (_, matrix) = calc_dinucl_freq(rs, assembly, true)?;
+/// let (_, matrix) = calc_dinucl_freq(rs, assembly, true, false)?;
 /// let mut totals = [0.0f64; 16];
 /// for row in &matrix {
 ///     for (i, &c) in row.iter().enumerate() {
@@ -406,13 +408,25 @@ pub fn calc_dinucl_freq(
     region_set: &RegionSet,
     genome: &GenomeAssembly,
     raw_counts: bool,
+    ignore_unk_chroms: bool,
 ) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
     let mut labels: Vec<String> = Vec::new();
     let mut matrix: Vec<[f64; 16]> = Vec::new();
 
     for chr in region_set.iter_chroms() {
+        if ignore_unk_chroms && !genome.contains_chr(chr) {
+            continue;
+        }
         for region in region_set.iter_chr_regions(chr) {
-            let seq = genome.seq_from_region(region)?;
+            let seq = match genome.seq_from_region(region) {
+                Ok(s) => s,
+                Err(e) => {
+                    if ignore_unk_chroms {
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
             let mut counts = [0u64; 16];
             let mut total: u64 = 0;
 
@@ -605,7 +619,7 @@ mod tests {
             Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, true).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, true, false).unwrap();
 
         assert_eq!(labels, vec!["chr1_0_4"]);
         assert_eq!(matrix.len(), 1);
@@ -631,7 +645,7 @@ mod tests {
             Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, false).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, false, false).unwrap();
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0], "chr2_0_4");
@@ -661,7 +675,7 @@ mod tests {
             Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let (_, matrix) = calc_dinucl_freq(&rs, &ga, true).unwrap();
+        let (_, matrix) = calc_dinucl_freq(&rs, &ga, true, false).unwrap();
 
         let mut totals = [0.0f64; 16];
         for row in &matrix {
