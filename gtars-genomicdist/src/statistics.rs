@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use gtars_core::models::{Region, RegionSet};
 
 use crate::errors::GtarsGenomicDistError;
-use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin, RegionDistResult};
+use crate::models::{ChromosomeStatistics, Dinucleotide, RegionBin, SequenceAccess};
 
 /// Trait for computing statistics and distributions of genomic intervals.
 pub trait GenomicIntervalSetStatistics {
@@ -37,21 +37,27 @@ pub trait GenomicIntervalSetStatistics {
     ///
     /// Regions on chromosomes not present in `chrom_sizes` are skipped.
     /// Regions whose midpoint falls beyond the stated chromosome size are also
-    /// skipped; their per-chromosome counts are returned in
-    /// [`RegionDistResult::out_of_range`] so callers can surface assembly
-    /// mismatches (e.g. an hg19 BED paired with hg38 chrom_sizes).
+    /// skipped (common with assembly mismatches, e.g. an hg19 BED paired with
+    /// hg38 chrom_sizes). The total bin count may therefore be lower than the
+    /// input region count; callers who need to detect mismatches can compare
+    /// `sum(bin.n)` against their input region count.
     fn region_distribution_with_chrom_sizes(
         &self,
         n_bins: u32,
         chrom_sizes: &HashMap<String, u32>,
-    ) -> RegionDistResult;
+    ) -> HashMap<String, RegionBin>;
 
     /// Compute distances between consecutive regions on each chromosome.
     ///
     /// For each pair of adjacent regions on the same chromosome, returns the
     /// signed gap: `next.start - current.end`. Positive values indicate a gap,
     /// negative values indicate overlapping regions, zero means adjacent/abutting.
-    /// Regions on chromosomes with fewer than 2 regions are skipped.
+    ///
+    /// Regions on chromosomes with fewer than 2 regions are skipped (they have
+    /// no neighbors to measure against). Output length equals the total number
+    /// of *gaps* across all multi-region chromosomes — generally shorter than
+    /// the input region count. Output is not aligned 1:1 with input regions.
+    /// No sentinel values are emitted.
     fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError>;
 
     /// Compute the distance from each region to its nearest neighbor.
@@ -59,6 +65,13 @@ pub trait GenomicIntervalSetStatistics {
     /// For each region, takes the minimum absolute distance to its upstream
     /// and downstream neighbors. First and last regions on each chromosome
     /// use their only neighbor's distance. Overlapping neighbors have distance 0.
+    ///
+    /// Regions on chromosomes with only one region are skipped (they have no
+    /// neighbors). Output length equals the total number of regions across all
+    /// multi-region chromosomes — generally shorter than the input region
+    /// count, and NOT aligned 1:1 with input regions. No sentinel values are
+    /// emitted. Callers who need 1:1 alignment must filter their input to
+    /// multi-region chromosomes first.
     ///
     /// Port of R GenomicDistributions `calcNearestNeighbors()`.
     fn calc_nearest_neighbors(&self) -> Result<Vec<u32>, GtarsGenomicDistError>;
@@ -177,16 +190,12 @@ impl GenomicIntervalSetStatistics for RegionSet {
         &self,
         n_bins: u32,
         chrom_sizes: &HashMap<String, u32>,
-    ) -> RegionDistResult {
+    ) -> HashMap<String, RegionBin> {
         if self.regions.is_empty() || n_bins == 0 {
-            return RegionDistResult {
-                bins: HashMap::new(),
-                out_of_range: HashMap::new(),
-            };
+            return HashMap::new();
         }
 
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
-        let mut out_of_range: HashMap<String, u32> = HashMap::new();
 
         for region in &self.regions {
             let chrom_size = match chrom_sizes.get(&region.chr) {
@@ -198,10 +207,9 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let mid = region.mid_point();
             // Skip regions whose midpoint falls beyond the stated chromosome size
             // (e.g. BED file assembled against a different reference than the one
-            // supplied by chrom_sizes). Track per-chromosome counts so callers can
-            // surface assembly mismatches.
+            // supplied by chrom_sizes). Without this, rid would exceed n_bins and
+            // produce bins with end < start.
             if mid >= chrom_size {
-                *out_of_range.entry(region.chr.clone()).or_insert(0) += 1;
                 continue;
             }
             let rid = mid / bin_size;
@@ -225,10 +233,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
             }
         }
 
-        RegionDistResult {
-            bins: plot_results,
-            out_of_range,
-        }
+        plot_results
     }
 
     fn calc_neighbor_distances(&self) -> Result<Vec<i64>, GtarsGenomicDistError> {
@@ -306,7 +311,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
 ///
 pub fn calc_gc_content(
     region_set: &RegionSet,
-    genome: &GenomeAssembly,
+    genome: &(impl SequenceAccess + ?Sized),
     ignore_unk_chroms: bool,
 ) -> Result<Vec<f64>, GtarsGenomicDistError> {
     // for region in region_set
@@ -320,11 +325,11 @@ pub fn calc_gc_content(
         for region in region_set.iter_chr_regions(chr) {
             let mut gc_count: u32 = 0;
             let mut total_count: u32 = 0;
-            let seq = genome.seq_from_region(region);
+            let seq = genome.get_sequence(region);
 
             match seq {
                 Ok(seq) => {
-                    for base in seq {
+                    for &base in &seq {
                         match base.to_ascii_lowercase() {
                             b'g' | b'c' => {
                                 gc_count += 1;
@@ -358,38 +363,6 @@ pub fn calc_gc_content(
     Ok(gc_contents)
 }
 
-///
-///  Calculate Dinucleotide frequencies
-///
-/// Arguments:
-/// - region_set: RegionSet object
-/// - genome: GenomeAssembly object (reference genome)
-/// Return: Result of hashmap of dinucleotide and frequencies e.g. 'Aa: 13142'
-pub fn calc_dinucl_freq(
-    region_set: &RegionSet,
-    genome: &GenomeAssembly,
-) -> Result<HashMap<Dinucleotide, u64>, GtarsGenomicDistError> {
-    let mut dinucl_freqs: HashMap<Dinucleotide, u64> = HashMap::new();
-
-    for chr in region_set.iter_chroms() {
-        for region in region_set.iter_chr_regions(chr) {
-            let seq = genome.seq_from_region(region)?;
-            for aas in seq.windows(2) {
-                let dinucl = Dinucleotide::from_bytes(aas);
-                match dinucl {
-                    Some(dinucl) => {
-                        let current_freq = dinucl_freqs.entry(dinucl).or_insert(0);
-                        *current_freq += 1;
-                    }
-                    None => continue,
-                }
-            }
-        }
-    }
-
-    Ok(dinucl_freqs)
-}
-
 /// Canonical ordering of dinucleotides, matching GenomicDistributions' column order.
 pub const DINUCL_ORDER: [Dinucleotide; 16] = [
     Dinucleotide::Aa, Dinucleotide::Ac, Dinucleotide::Ag, Dinucleotide::At,
@@ -398,24 +371,62 @@ pub const DINUCL_ORDER: [Dinucleotide; 16] = [
     Dinucleotide::Ta, Dinucleotide::Tc, Dinucleotide::Tg, Dinucleotide::Tt,
 ];
 
-/// Per-region dinucleotide frequencies as percentages.
+/// Per-region dinucleotide frequencies.
 ///
-/// Returns a tuple of (region_labels, frequency_matrix) where:
-/// - `region_labels` is `chr_start_end` for each region
-/// - `frequency_matrix` is a `Vec<[f64; 16]>` — one row per region, columns
-///   in [`DINUCL_ORDER`] order, values are percentages (0–100).
+/// Matches R GenomicDistributions `calcDinuclFreq`: one row per region,
+/// 16 dinucleotide columns in [`DINUCL_ORDER`] order.
 ///
-/// This matches the output format of R's GenomicDistributions::calcDinuclFreq.
-pub fn calc_dinucl_freq_per_region(
+/// Arguments:
+/// - `region_set`: RegionSet object
+/// - `genome`: GenomeAssembly object (reference genome)
+/// - `raw_counts`: if `true`, return raw integer-valued counts;
+///   if `false`, return percentages (0–100) per row (matches R default)
+/// - `ignore_unk_chroms`: if `true`, skip regions on chromosomes not in
+///   the assembly; if `false`, error on unknown chromosomes
+///
+/// Returns a tuple `(region_labels, frequency_matrix)`:
+/// - `region_labels`: `chr_start_end` for each region
+/// - `frequency_matrix`: `Vec<[f64; 16]>` — one row per region
+///
+/// For pooled global counts across all regions, sum the columns of the
+/// raw-counts matrix:
+/// ```no_run
+/// # use gtars_genomicdist::{calc_dinucl_freq, DINUCL_ORDER};
+/// # use gtars_genomicdist::models::GenomeAssembly;
+/// # use gtars_core::models::RegionSet;
+/// # fn example(rs: &RegionSet, assembly: &GenomeAssembly) -> Result<(), Box<dyn std::error::Error>> {
+/// let (_, matrix) = calc_dinucl_freq(rs, assembly, true, false)?;
+/// let mut totals = [0.0f64; 16];
+/// for row in &matrix {
+///     for (i, &c) in row.iter().enumerate() {
+///         totals[i] += c;
+///     }
+/// }
+/// # Ok(()) }
+/// ```
+pub fn calc_dinucl_freq(
     region_set: &RegionSet,
-    genome: &GenomeAssembly,
+    genome: &(impl SequenceAccess + ?Sized),
+    raw_counts: bool,
+    ignore_unk_chroms: bool,
 ) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
     let mut labels: Vec<String> = Vec::new();
     let mut matrix: Vec<[f64; 16]> = Vec::new();
 
     for chr in region_set.iter_chroms() {
+        if ignore_unk_chroms && !genome.contains_chr(chr) {
+            continue;
+        }
         for region in region_set.iter_chr_regions(chr) {
-            let seq = genome.seq_from_region(region)?;
+            let seq = match genome.get_sequence(region) {
+                Ok(s) => s,
+                Err(e) => {
+                    if ignore_unk_chroms {
+                        continue;
+                    }
+                    return Err(e);
+                }
+            };
             let mut counts = [0u64; 16];
             let mut total: u64 = 0;
 
@@ -427,19 +438,25 @@ pub fn calc_dinucl_freq_per_region(
                 }
             }
 
-            let freqs: [f64; 16] = if total > 0 {
-                let mut f = [0.0f64; 16];
+            let row: [f64; 16] = if raw_counts {
+                let mut r = [0.0f64; 16];
                 for (i, &c) in counts.iter().enumerate() {
-                    f[i] = (c as f64 / total as f64) * 100.0;
+                    r[i] = c as f64;
                 }
-                f
+                r
+            } else if total > 0 {
+                let mut r = [0.0f64; 16];
+                for (i, &c) in counts.iter().enumerate() {
+                    r[i] = (c as f64 / total as f64) * 100.0;
+                }
+                r
             } else {
                 [0.0; 16]
             };
 
             labels.push(format!("{}_{}_{}",
                 region.chr, region.start, region.end));
-            matrix.push(freqs);
+            matrix.push(row);
         }
     }
 
@@ -449,6 +466,7 @@ pub fn calc_dinucl_freq_per_region(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::GenomeAssembly;
 
     use pretty_assertions::assert_eq;
     use rstest::*;
@@ -593,8 +611,8 @@ mod tests {
     // --- Dinucleotide frequency ---
 
     #[rstest]
-    fn test_calc_dinucl_freq() {
-        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA
+    fn test_calc_dinucl_freq_raw_counts() {
+        // base.fa: chr1=GGAA → dinucleotides: GG, GA, AA (3 total)
         let path = get_fasta_path("base.fa");
         let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
@@ -602,19 +620,25 @@ mod tests {
             Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let freq = calc_dinucl_freq(&rs, &ga).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, true, false).unwrap();
 
-        assert_eq!(*freq.get(&Dinucleotide::Gg).unwrap_or(&0), 1);
-        assert_eq!(*freq.get(&Dinucleotide::Ga).unwrap_or(&0), 1);
-        assert_eq!(*freq.get(&Dinucleotide::Aa).unwrap_or(&0), 1);
+        assert_eq!(labels, vec!["chr1_0_4"]);
+        assert_eq!(matrix.len(), 1);
+        let row = &matrix[0];
+        let gg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gg).unwrap();
+        let ga_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Ga).unwrap();
+        let aa_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Aa).unwrap();
+        assert_eq!(row[gg_idx], 1.0);
+        assert_eq!(row[ga_idx], 1.0);
+        assert_eq!(row[aa_idx], 1.0);
         // total should be 3 (4 bases → 3 dinucleotides)
-        let total: u64 = freq.values().sum();
-        assert_eq!(total, 3);
+        let total: f64 = row.iter().sum();
+        assert_eq!(total, 3.0);
     }
 
     #[rstest]
-    fn test_calc_dinucl_freq_per_region() {
-        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC
+    fn test_calc_dinucl_freq_percentages() {
+        // base.fa: chr2=GCGC → dinucleotides: GC, CG, GC (percentages)
         let path = get_fasta_path("base.fa");
         let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
 
@@ -622,14 +646,13 @@ mod tests {
             Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
         ];
         let rs = RegionSet::from(regions);
-        let (labels, matrix) = calc_dinucl_freq_per_region(&rs, &ga).unwrap();
+        let (labels, matrix) = calc_dinucl_freq(&rs, &ga, false, false).unwrap();
 
         assert_eq!(labels.len(), 1);
         assert_eq!(labels[0], "chr2_0_4");
         assert_eq!(matrix.len(), 1);
 
         // GC appears 2/3 times, CG appears 1/3 times
-        // Find indices in DINUCL_ORDER
         let gc_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Gc).unwrap();
         let cg_idx = DINUCL_ORDER.iter().position(|d| *d == Dinucleotide::Cg).unwrap();
 
@@ -637,9 +660,32 @@ mod tests {
         assert!((row[gc_idx] - 200.0 / 3.0).abs() < 0.1); // ~66.67%
         assert!((row[cg_idx] - 100.0 / 3.0).abs() < 0.1);  // ~33.33%
 
-        // all other dinucleotides should be 0
+        // percentages sum to 100
         let total: f64 = row.iter().sum();
         assert!((total - 100.0).abs() < 0.1);
+    }
+
+    #[rstest]
+    fn test_calc_dinucl_freq_global_derivable() {
+        // Global counts are derivable by column-summing the raw-counts matrix.
+        // Two regions: chr1=GGAA, chr2=GCGC → pooled: GG×1, GA×1, AA×1, GC×2, CG×1 = 6 total
+        let path = get_fasta_path("base.fa");
+        let ga = GenomeAssembly::try_from(path.to_str().unwrap()).unwrap();
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+        let (_, matrix) = calc_dinucl_freq(&rs, &ga, true, false).unwrap();
+
+        let mut totals = [0.0f64; 16];
+        for row in &matrix {
+            for (i, &c) in row.iter().enumerate() {
+                totals[i] += c;
+            }
+        }
+        let grand: f64 = totals.iter().sum();
+        assert_eq!(grand, 6.0);
     }
 
     // --- Empty RegionSet edge cases ---
@@ -769,17 +815,16 @@ mod tests {
     }
 
     #[rstest]
-    fn test_region_distribution_with_chrom_sizes_out_of_range() {
-        // Regions whose midpoint falls beyond the stated chromosome size should
-        // be skipped and reported in out_of_range, not silently produce bins
-        // with end < start or rid >= n_bins.
+    fn test_region_distribution_with_chrom_sizes_skips_out_of_range() {
+        // Regions whose midpoint falls beyond the stated chromosome size are
+        // silently skipped (assembly mismatch case). Previously this produced
+        // bins with end < start or rid >= n_bins.
         let regions = vec![
             Region { chr: "chr1".into(), start: 100, end: 200, rest: None },  // mid=150, in range
             Region { chr: "chr1".into(), start: 800, end: 900, rest: None },  // mid=850, in range
             Region { chr: "chr1".into(), start: 1200, end: 1300, rest: None },// mid=1250, out of range (chrom_size=1000)
             Region { chr: "chr2".into(), start: 300, end: 400, rest: None },  // mid=350, in range
             Region { chr: "chr2".into(), start: 2000, end: 2100, rest: None },// mid=2050, out of range
-            Region { chr: "chr2".into(), start: 3000, end: 3100, rest: None },// mid=3050, out of range
             Region { chr: "chr3".into(), start: 0, end: 100, rest: None },    // chr3 not in chrom_sizes
         ];
         let rs = RegionSet::from(regions);
@@ -787,58 +832,18 @@ mod tests {
         chrom_sizes.insert("chr1".to_string(), 1000u32);
         chrom_sizes.insert("chr2".to_string(), 500u32);
 
-        let result = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
+        let bins = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
 
-        // Every bin should have end > start (not the old buggy end < start)
-        for bin in result.bins.values() {
-            assert!(
-                bin.end > bin.start,
-                "bin {:?} has end <= start",
-                bin
-            );
-            assert!(
-                bin.rid < 10,
-                "bin {:?} has rid >= n_bins (10)",
-                bin
-            );
+        // Every bin should have end > start and rid < n_bins
+        for bin in bins.values() {
+            assert!(bin.end > bin.start, "bin {:?} has end <= start", bin);
+            assert!(bin.rid < 10, "bin {:?} has rid >= n_bins", bin);
         }
 
-        // chr1 should have 2 in-range regions counted
-        let chr1_total: u32 = result.bins.values()
-            .filter(|b| b.chr == "chr1")
-            .map(|b| b.n)
-            .sum();
-        assert_eq!(chr1_total, 2, "chr1 should have 2 in-range regions");
-
-        // chr2 should have 1 in-range region counted
-        let chr2_total: u32 = result.bins.values()
-            .filter(|b| b.chr == "chr2")
-            .map(|b| b.n)
-            .sum();
-        assert_eq!(chr2_total, 1, "chr2 should have 1 in-range region");
-
-        // out_of_range: 1 on chr1, 2 on chr2
-        assert_eq!(result.out_of_range.get("chr1"), Some(&1));
-        assert_eq!(result.out_of_range.get("chr2"), Some(&2));
-        // chr3 is not in chrom_sizes — skipped entirely, not reported in out_of_range
-        assert_eq!(result.out_of_range.get("chr3"), None);
-    }
-
-    #[rstest]
-    fn test_region_distribution_with_chrom_sizes_all_in_range() {
-        // Happy path: all regions within chromosome bounds, out_of_range is empty.
-        let regions = vec![
-            Region { chr: "chr1".into(), start: 0, end: 100, rest: None },
-            Region { chr: "chr1".into(), start: 500, end: 600, rest: None },
-        ];
-        let rs = RegionSet::from(regions);
-        let mut chrom_sizes = HashMap::new();
-        chrom_sizes.insert("chr1".to_string(), 1000u32);
-
-        let result = rs.region_distribution_with_chrom_sizes(10, &chrom_sizes);
-        assert!(result.out_of_range.is_empty());
-        let total: u32 = result.bins.values().map(|b| b.n).sum();
-        assert_eq!(total, 2);
+        // Total counted regions: 2 (chr1) + 1 (chr2) = 3
+        // (chr1's third region, chr2's second, and chr3's only region are all skipped)
+        let total: u32 = bins.values().map(|b| b.n).sum();
+        assert_eq!(total, 3, "expected 3 in-range regions counted");
     }
 
     #[rstest]

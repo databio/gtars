@@ -50,4 +50,4 @@ pub use models::{SortedRegionSet, Strand, StrandedRegionSet};
 pub use signal::{calc_summary_signal, ConditionStats, SignalMatrix, SignalSummaryResult};
 pub use statistics::GenomicIntervalSetStatistics;
 pub use utils::{chrom_karyotype_key, median_abs_distance};
-pub use statistics::{calc_dinucl_freq, calc_dinucl_freq_per_region, calc_gc_content, DINUCL_ORDER};
+pub use statistics::{calc_dinucl_freq, calc_gc_content, DINUCL_ORDER};

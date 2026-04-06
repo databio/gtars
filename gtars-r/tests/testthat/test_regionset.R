@@ -82,9 +82,10 @@ test_that("widths returns correct values", {
   # dummy.bed: chr1:2-6, chr1:4-7, chr1:5-9, chr1:7-12
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   w <- widths(rs)
-  expect_type(w, "integer")
+  # doubles instead of integers: u32 widths can exceed i32::MAX (2.1 Gbp)
+  expect_type(w, "double")
   expect_equal(length(w), 4L)
-  expect_equal(w[1], 4L)
+  expect_equal(w[1], 4)
 })
 
 test_that("neighborDistances returns numeric vector", {
@@ -98,7 +99,8 @@ test_that("nearestNeighbors returns numeric vector", {
   skip_if_no_data()
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   nn <- nearestNeighbors(rs)
-  expect_type(nn, "integer")
+  # doubles instead of integers: distances can be chromosome-scale
+  expect_type(nn, "double")
 })
 
 test_that("chromosomeStatistics returns data.frame", {
