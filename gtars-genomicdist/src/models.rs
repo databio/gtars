@@ -1,9 +1,12 @@
 use crate::errors::GtarsGenomicDistError;
 use bio::io::fasta;
 use gtars_core::models::{CoordinateMode, Region, RegionSet};
+use memmap2::Mmap;
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug};
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::Path;
 
 /// A `RegionSet` that is guaranteed to be sorted by (chr, start).
@@ -131,29 +134,31 @@ pub struct RegionBin {
     pub rid: u32,
 }
 
-/// Result of `region_distribution_with_chrom_sizes`.
+/// Trait for types that provide sequence access to a reference genome.
 ///
-/// Returns both the per-chromosome bins and a count of regions that were skipped
-/// because their midpoint fell beyond the stated chromosome size (common when the
-/// BED file's assembly doesn't match the provided chrom_sizes — e.g. hg19 BED
-/// paired with hg38 chrom_sizes). Callers should surface non-empty
-/// `out_of_range` to the user so assembly mismatches don't go silent.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RegionDistResult {
-    /// Per-chromosome bins with region counts, keyed by `{chr}-{start}-{end}`.
-    pub bins: HashMap<String, RegionBin>,
-    /// Per-chromosome counts of regions whose midpoint fell beyond the stated
-    /// chromosome size (and were therefore skipped). Empty when all regions fit.
-    pub out_of_range: HashMap<String, u32>,
+/// Implemented by [`GenomeAssembly`] (in-memory HashMap) and
+/// [`BinaryGenomeAssembly`] (mmap .fab binary). Functions like
+/// `calc_gc_content` accept `&impl SequenceAccess` to work with either.
+pub trait SequenceAccess {
+    /// Get the sequence for a genomic region. Returns owned bytes.
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError>;
+
+    /// Check whether a chromosome exists in the assembly.
+    fn contains_chr(&self, chr: &str) -> bool;
 }
 
+/// In-memory genome assembly backed by a HashMap of chromosome sequences.
+///
+/// Loads the entire FASTA into memory on construction. Slower to construct
+/// (~2s for hg38) but provides zero-copy `&[u8]` access to sequences,
+/// making per-region operations like GC content highly vectorizable.
+/// No `.fai` index required.
 pub struct GenomeAssembly {
     seq_map: HashMap<String, Vec<u8>>,
 }
 
 impl TryFrom<&str> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
-
     fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
         GenomeAssembly::try_from(Path::new(value))
     }
@@ -161,9 +166,7 @@ impl TryFrom<&str> for GenomeAssembly {
 
 impl TryFrom<String> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
-
     fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
-        // println!("Converting String to Path: {}", value);
         GenomeAssembly::try_from(Path::new(&value))
     }
 }
@@ -171,16 +174,11 @@ impl TryFrom<String> for GenomeAssembly {
 impl TryFrom<&Path> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
 
-    ///
-    /// Create a new [GenomeAssembly] from fasta file
-    ///
     fn try_from(value: &Path) -> Result<GenomeAssembly, GtarsGenomicDistError> {
         let file = File::open(value)?;
         let genome = fasta::Reader::new(file);
-
         let records = genome.records();
 
-        // store the genome in a hashmap
         let mut seq_map: HashMap<String, Vec<u8>> = HashMap::new();
         for record in records {
             match record {
@@ -195,13 +193,12 @@ impl TryFrom<&Path> for GenomeAssembly {
                 }
             }
         }
-
         Ok(GenomeAssembly { seq_map })
     }
 }
 
 impl GenomeAssembly {
-    pub fn seq_from_region<'a>(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
+    pub fn seq_from_region(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
         let chr = &coords.chr;
         let start = coords.start as usize;
         let end = coords.end as usize;
@@ -212,10 +209,7 @@ impl GenomeAssembly {
             } else {
                 Err(GtarsGenomicDistError::CustomError(format!(
                     "Invalid range: start={}, end={} for chromosome {} with length {}",
-                    start,
-                    end,
-                    chr,
-                    seq.len()
+                    start, end, chr, seq.len()
                 )))
             }
         } else {
@@ -228,6 +222,235 @@ impl GenomeAssembly {
 
     pub fn contains_chr(&self, chr: &str) -> bool {
         self.seq_map.contains_key(chr)
+    }
+}
+
+impl SequenceAccess for GenomeAssembly {
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
+        self.seq_from_region(coords).map(|s| s.to_vec())
+    }
+
+    fn contains_chr(&self, chr: &str) -> bool {
+        self.seq_map.contains_key(chr)
+    }
+}
+
+// --- Binary FASTA (.fab) format ---
+
+const FAB_MAGIC: &[u8; 4] = b"GFAB";
+const FAB_VERSION: u8 = 1;
+
+/// Memory-mapped genome assembly backed by a binary FASTA (.fab) file.
+///
+/// The .fab format stores sequences contiguously without line wrapping,
+/// enabling mmap + zero-copy `&[u8]` access with both instant construction
+/// and zero-copy per-region performance.
+///
+/// Create .fab files with [`BinaryGenomeAssembly::write_from_fasta`] or
+/// via `gtars prep --fasta <file>`.
+#[derive(Debug)]
+pub struct BinaryGenomeAssembly {
+    mmap: Mmap,
+    /// name → (offset_in_file, sequence_length)
+    index: HashMap<String, (usize, usize)>,
+}
+
+impl BinaryGenomeAssembly {
+    /// Open a .fab binary FASTA file via mmap.
+    pub fn from_file(path: &Path) -> Result<Self, GtarsGenomicDistError> {
+        let file = File::open(path).map_err(|e| {
+            GtarsGenomicDistError::CustomError(format!(
+                "Failed to open .fab file '{}': {}",
+                path.display(), e
+            ))
+        })?;
+        let mmap = unsafe { Mmap::map(&file) }.map_err(|e| {
+            GtarsGenomicDistError::CustomError(format!(
+                "Failed to mmap .fab file '{}': {}",
+                path.display(), e
+            ))
+        })?;
+
+        // Parse header
+        if mmap.len() < 9 {
+            return Err(GtarsGenomicDistError::CustomError(
+                "Invalid .fab file: too short".into(),
+            ));
+        }
+        if &mmap[0..4] != FAB_MAGIC {
+            return Err(GtarsGenomicDistError::CustomError(
+                "Invalid .fab file: bad magic bytes".into(),
+            ));
+        }
+        let version = mmap[4];
+        if version != FAB_VERSION {
+            return Err(GtarsGenomicDistError::CustomError(format!(
+                "Unsupported .fab version: {} (expected {})",
+                version, FAB_VERSION
+            )));
+        }
+        let n_chroms = u32::from_le_bytes(mmap[5..9].try_into().unwrap()) as usize;
+
+        // Parse index
+        let mut pos = 9;
+        let mut index = HashMap::with_capacity(n_chroms);
+        for _ in 0..n_chroms {
+            if pos + 2 > mmap.len() {
+                return Err(GtarsGenomicDistError::CustomError(
+                    "Invalid .fab file: truncated index".into(),
+                ));
+            }
+            let name_len = u16::from_le_bytes(mmap[pos..pos + 2].try_into().unwrap()) as usize;
+            pos += 2;
+            if pos + name_len + 16 > mmap.len() {
+                return Err(GtarsGenomicDistError::CustomError(
+                    "Invalid .fab file: truncated index entry".into(),
+                ));
+            }
+            let name = std::str::from_utf8(&mmap[pos..pos + name_len])
+                .map_err(|e| {
+                    GtarsGenomicDistError::CustomError(format!(
+                        "Invalid .fab file: non-UTF8 chromosome name: {}",
+                        e
+                    ))
+                })?
+                .to_string();
+            pos += name_len;
+            let offset =
+                u64::from_le_bytes(mmap[pos..pos + 8].try_into().unwrap()) as usize;
+            pos += 8;
+            let length =
+                u64::from_le_bytes(mmap[pos..pos + 8].try_into().unwrap()) as usize;
+            pos += 8;
+            index.insert(name, (offset, length));
+        }
+
+        Ok(BinaryGenomeAssembly { mmap, index })
+    }
+
+    /// Get the sequence for a region as a zero-copy `&[u8]` slice.
+    pub fn seq_from_region(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
+        let chr = &coords.chr;
+        let start = coords.start as usize;
+        let end = coords.end as usize;
+
+        let &(offset, length) = self.index.get(chr).ok_or_else(|| {
+            GtarsGenomicDistError::CustomError(format!(
+                "Unknown chromosome found in region set: {}",
+                chr
+            ))
+        })?;
+
+        if end > length || start > end {
+            return Err(GtarsGenomicDistError::CustomError(format!(
+                "Invalid range: start={}, end={} for chromosome {} with length {}",
+                start, end, chr, length
+            )));
+        }
+
+        let file_start = offset + start;
+        let file_end = offset + end;
+        if file_end > self.mmap.len() {
+            return Err(GtarsGenomicDistError::CustomError(format!(
+                "Corrupted .fab file: sequence data for {} extends beyond file boundary",
+                chr
+            )));
+        }
+
+        Ok(&self.mmap[file_start..file_end])
+    }
+
+    pub fn contains_chr(&self, chr: &str) -> bool {
+        self.index.contains_key(chr)
+    }
+
+    /// Convert a FASTA file to .fab binary format.
+    pub fn write_from_fasta(
+        fasta_path: &Path,
+        output_path: &Path,
+    ) -> Result<(), GtarsGenomicDistError> {
+        // Read all sequences into memory (same as GenomeAssembly)
+        let file = File::open(fasta_path)?;
+        let reader = fasta::Reader::new(file);
+
+        let mut chroms: Vec<(String, Vec<u8>)> = Vec::new();
+        for record in reader.records() {
+            let record = record.map_err(|e| {
+                GtarsGenomicDistError::CustomError(format!(
+                    "Error reading FASTA: {}", e
+                ))
+            })?;
+            chroms.push((record.id().to_string(), record.seq().to_owned()));
+        }
+
+        // Compute index: header size first
+        let mut header_size: usize = 4 + 1 + 4; // magic + version + n_chroms
+        for (name, _) in &chroms {
+            header_size += 2 + name.len() + 8 + 8; // name_len + name + offset + length
+        }
+
+        // Write
+        let out = File::create(output_path).map_err(|e| {
+            GtarsGenomicDistError::CustomError(format!(
+                "Failed to create .fab file '{}': {}",
+                output_path.display(), e
+            ))
+        })?;
+        let mut w = BufWriter::new(out);
+
+        // Header
+        w.write_all(FAB_MAGIC)?;
+        w.write_all(&[FAB_VERSION])?;
+        w.write_all(&(chroms.len() as u32).to_le_bytes())?;
+
+        // Index
+        let mut offset = header_size;
+        for (name, seq) in &chroms {
+            w.write_all(&(name.len() as u16).to_le_bytes())?;
+            w.write_all(name.as_bytes())?;
+            w.write_all(&(offset as u64).to_le_bytes())?;
+            w.write_all(&(seq.len() as u64).to_le_bytes())?;
+            offset += seq.len();
+        }
+
+        // Sequences
+        for (_, seq) in &chroms {
+            w.write_all(seq)?;
+        }
+
+        w.flush()?;
+        Ok(())
+    }
+}
+
+impl TryFrom<&str> for BinaryGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
+        BinaryGenomeAssembly::from_file(Path::new(value))
+    }
+}
+
+impl TryFrom<String> for BinaryGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
+        BinaryGenomeAssembly::from_file(Path::new(&value))
+    }
+}
+
+impl TryFrom<&Path> for BinaryGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &Path) -> Result<Self, GtarsGenomicDistError> {
+        BinaryGenomeAssembly::from_file(value)
+    }
+}
+
+impl SequenceAccess for BinaryGenomeAssembly {
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
+        self.seq_from_region(coords).map(|s| s.to_vec())
+    }
+
+    fn contains_chr(&self, chr: &str) -> bool {
+        self.index.contains_key(chr)
     }
 }
 
@@ -686,6 +909,80 @@ mod tests {
         let ga = GenomeAssembly::try_from(path.to_str().unwrap().to_string());
         assert!(ga.is_ok());
         assert!(ga.unwrap().contains_chr("chr1"));
+    }
+
+    #[test]
+    fn test_binary_genome_assembly_round_trip() {
+        // Write .fab from base.fa, then read it back and verify sequences match
+        let fasta_path = get_fasta_path("base.fa");
+        let fab_path = fasta_path.with_extension("fa.test.fab");
+
+        BinaryGenomeAssembly::write_from_fasta(&fasta_path, &fab_path).unwrap();
+        let bga = BinaryGenomeAssembly::from_file(&fab_path).unwrap();
+
+        // Verify chromosomes exist
+        assert!(bga.contains_chr("chr1"));
+        assert!(bga.contains_chr("chr2"));
+        assert!(bga.contains_chr("chrX"));
+        assert!(!bga.contains_chr("chr3"));
+
+        // Verify sequences match HashMap GenomeAssembly
+        let ga = GenomeAssembly::try_from(fasta_path.as_path()).unwrap();
+
+        let region1 = Region { chr: "chr1".into(), start: 0, end: 4, rest: None };
+        assert_eq!(bga.seq_from_region(&region1).unwrap(), ga.seq_from_region(&region1).unwrap());
+        assert_eq!(bga.seq_from_region(&region1).unwrap(), b"GGAA");
+
+        let region2 = Region { chr: "chrX".into(), start: 2, end: 6, rest: None };
+        assert_eq!(bga.seq_from_region(&region2).unwrap(), ga.seq_from_region(&region2).unwrap());
+        assert_eq!(bga.seq_from_region(&region2).unwrap(), b"GGGG");
+
+        // Out-of-bounds error
+        let bad_region = Region { chr: "chr1".into(), start: 0, end: 100, rest: None };
+        assert!(bga.seq_from_region(&bad_region).is_err());
+
+        // Unknown chromosome error
+        let unk_region = Region { chr: "chr99".into(), start: 0, end: 1, rest: None };
+        assert!(bga.seq_from_region(&unk_region).is_err());
+
+        // Clean up
+        std::fs::remove_file(&fab_path).ok();
+    }
+
+    #[test]
+    fn test_binary_genome_assembly_bad_magic() {
+        let dir = tempfile::tempdir().unwrap();
+        let fab_path = dir.path().join("bad.fab");
+        // Need at least 9 bytes to pass the "too short" check
+        std::fs::write(&fab_path, b"XXXX\x01\x00\x00\x00\x00").unwrap();
+        let result = BinaryGenomeAssembly::from_file(&fab_path);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("bad magic"));
+    }
+
+    #[test]
+    fn test_binary_genome_assembly_gc_parity() {
+        // Verify calc_gc_content produces identical results from .fab and HashMap
+        use crate::statistics::calc_gc_content;
+
+        let fasta_path = get_fasta_path("base.fa");
+        let fab_path = fasta_path.with_extension("fa.test2.fab");
+        BinaryGenomeAssembly::write_from_fasta(&fasta_path, &fab_path).unwrap();
+
+        let ga = GenomeAssembly::try_from(fasta_path.as_path()).unwrap();
+        let bga = BinaryGenomeAssembly::from_file(&fab_path).unwrap();
+
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 0, end: 4, rest: None },
+            Region { chr: "chr2".into(), start: 0, end: 4, rest: None },
+        ];
+        let rs = RegionSet::from(regions);
+
+        let gc_hashmap = calc_gc_content(&rs, &ga, false).unwrap();
+        let gc_fab = calc_gc_content(&rs, &bga, false).unwrap();
+        assert_eq!(gc_hashmap, gc_fab);
+
+        std::fs::remove_file(&fab_path).ok();
     }
 
     #[test]

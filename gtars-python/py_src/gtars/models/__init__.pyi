@@ -124,17 +124,22 @@ class RegionSet:
         """
         ...
 
-    def neighbor_distances(self) -> List[Optional[float]]:
+    def neighbor_distances(self) -> List[int]:
         """
-        Distances between consecutive regions on each chromosome.
-        Returns None for missing values.
+        Signed gaps between consecutive regions on each chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        fewer than 2 regions are skipped (no neighbors to measure against).
+        Output is NOT aligned 1:1 with input regions.
         """
         ...
 
-    def nearest_neighbors(self) -> List[Optional[float]]:
+    def nearest_neighbors(self) -> List[int]:
         """
-        Distance from each region to its nearest neighbor.
-        Returns None for regions with no neighbor on the same chromosome.
+        Distance from each region to its nearest neighbor on the same chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        only one region are skipped. Output is NOT aligned 1:1 with input regions.
         """
         ...
 
@@ -142,7 +147,7 @@ class RegionSet:
         self,
         n_bins: int = 250,
         chrom_sizes: Optional[Dict[str, int]] = None,
-    ) -> Dict[str, object]:
+    ) -> List[Dict[str, object]]:
         """
         Region distribution across genomic bins.
 
@@ -153,13 +158,12 @@ class RegionSet:
             comparable across BED files and aligned with reference genome positions.
             When absent, bin size is derived from the BED file's observed max end
             coordinate — outputs will NOT be comparable across files.
-        :return: a dict with two keys:
-            - ``bins``: list of dicts with keys ``chr``, ``start``, ``end``, ``n``, ``rid``
-            - ``out_of_range``: dict mapping chromosome name to count of regions that
-              were skipped because their midpoint fell beyond the stated chromosome
-              size. Populated only when ``chrom_sizes`` is provided. A non-empty value
-              signals an assembly mismatch between the BED file and the chrom_sizes
-              you supplied (e.g. hg19 BED paired with hg38 chrom_sizes).
+
+            When ``chrom_sizes`` is provided, regions on chromosomes not listed in
+            ``chrom_sizes`` are skipped, as are regions whose midpoint falls beyond
+            the stated chromosome size (common with assembly mismatches). The summed
+            bin counts may therefore be lower than the input region count.
+        :return: list of dicts with keys: chr, start, end, n, rid
         """
         ...
 
@@ -342,6 +346,20 @@ class GenomeAssembly:
     def __init__(self, path: str) -> "GenomeAssembly":
         """
         :param path: path to the fasta file
+        """
+        ...
+
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+class BinaryGenomeAssembly:
+    def __init__(self, path: str) -> "BinaryGenomeAssembly":
+        """
+        Open a .fab binary FASTA file for zero-copy mmap access.
+
+        Create .fab files with ``gtars prep --fasta <file>``.
+
+        :param path: path to the .fab file
         """
         ...
 
