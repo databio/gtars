@@ -1,9 +1,11 @@
 use crate::errors::GtarsGenomicDistError;
+use bio::io::fasta;
 use faimm::IndexedFasta;
 use gtars_core::models::{CoordinateMode, Region, RegionSet};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::fs::File;
 use std::path::Path;
 
 /// A `RegionSet` that is guaranteed to be sorted by (chr, start).
@@ -131,13 +133,31 @@ pub struct RegionBin {
     pub rid: u32,
 }
 
+/// Trait for types that provide sequence access to a reference genome.
+///
+/// Implemented by both [`GenomeAssembly`] (in-memory HashMap) and
+/// [`IndexedGenomeAssembly`] (faimm mmap). Functions like `calc_gc_content`
+/// accept `&impl SequenceAccess` to work with either.
+pub trait SequenceAccess {
+    /// Get the sequence for a genomic region. Returns owned bytes.
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError>;
+
+    /// Check whether a chromosome exists in the assembly.
+    fn contains_chr(&self, chr: &str) -> bool;
+}
+
+/// In-memory genome assembly backed by a HashMap of chromosome sequences.
+///
+/// Loads the entire FASTA into memory on construction. Slower to construct
+/// (~2s for hg38) but provides zero-copy `&[u8]` access to sequences,
+/// making per-region operations like GC content highly vectorizable.
+/// No `.fai` index required.
 pub struct GenomeAssembly {
-    fasta: IndexedFasta,
+    seq_map: HashMap<String, Vec<u8>>,
 }
 
 impl TryFrom<&str> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
-
     fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
         GenomeAssembly::try_from(Path::new(value))
     }
@@ -145,9 +165,7 @@ impl TryFrom<&str> for GenomeAssembly {
 
 impl TryFrom<String> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
-
     fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
-        // println!("Converting String to Path: {}", value);
         GenomeAssembly::try_from(Path::new(&value))
     }
 }
@@ -155,12 +173,100 @@ impl TryFrom<String> for GenomeAssembly {
 impl TryFrom<&Path> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
 
-    /// Create a new [GenomeAssembly] from a FASTA file with a `.fai` index.
-    ///
-    /// Uses memory-mapped I/O via faimm — the FASTA file is not read into
-    /// memory. Requires a samtools-compatible `.fai` index alongside the
-    /// FASTA (e.g. `hg38.fa` + `hg38.fa.fai`).
     fn try_from(value: &Path) -> Result<GenomeAssembly, GtarsGenomicDistError> {
+        let file = File::open(value)?;
+        let genome = fasta::Reader::new(file);
+        let records = genome.records();
+
+        let mut seq_map: HashMap<String, Vec<u8>> = HashMap::new();
+        for record in records {
+            match record {
+                Ok(record) => {
+                    seq_map.insert(record.id().to_string(), record.seq().to_owned());
+                }
+                Err(e) => {
+                    return Err(GtarsGenomicDistError::CustomError(format!(
+                        "Error reading genome file: {}",
+                        e
+                    )));
+                }
+            }
+        }
+        Ok(GenomeAssembly { seq_map })
+    }
+}
+
+impl GenomeAssembly {
+    pub fn seq_from_region(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
+        let chr = &coords.chr;
+        let start = coords.start as usize;
+        let end = coords.end as usize;
+
+        if let Some(seq) = self.seq_map.get(chr) {
+            if end <= seq.len() && start <= end {
+                Ok(&seq[start..end])
+            } else {
+                Err(GtarsGenomicDistError::CustomError(format!(
+                    "Invalid range: start={}, end={} for chromosome {} with length {}",
+                    start, end, chr, seq.len()
+                )))
+            }
+        } else {
+            Err(GtarsGenomicDistError::CustomError(format!(
+                "Unknown chromosome found in region set: {}",
+                chr
+            )))
+        }
+    }
+
+    pub fn contains_chr(&self, chr: &str) -> bool {
+        self.seq_map.contains_key(chr)
+    }
+}
+
+impl SequenceAccess for GenomeAssembly {
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
+        self.seq_from_region(coords).map(|s| s.to_vec())
+    }
+
+    fn contains_chr(&self, chr: &str) -> bool {
+        self.seq_map.contains_key(chr)
+    }
+}
+
+/// Memory-mapped genome assembly backed by faimm.
+///
+/// Near-instant construction via mmap — the FASTA file is not read into
+/// memory. Requires a samtools-compatible `.fai` index alongside the FASTA
+/// (e.g. `hg38.fa` + `hg38.fa.fai`). Best for CLI subprocesses where
+/// construction cost dominates and OS page cache warms across invocations.
+///
+/// Per-region access returns `Vec<u8>` (must strip FASTA line-wrap newlines),
+/// so tight loops over many large regions are slower than [GenomeAssembly]'s
+/// zero-copy `&[u8]` slices.
+pub struct IndexedGenomeAssembly {
+    fasta: IndexedFasta,
+}
+
+impl TryFrom<&str> for IndexedGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: &str) -> Result<Self, GtarsGenomicDistError> {
+        IndexedGenomeAssembly::try_from(Path::new(value))
+    }
+}
+
+impl TryFrom<String> for IndexedGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+    fn try_from(value: String) -> Result<Self, GtarsGenomicDistError> {
+        IndexedGenomeAssembly::try_from(Path::new(&value))
+    }
+}
+
+impl TryFrom<&Path> for IndexedGenomeAssembly {
+    type Error = GtarsGenomicDistError;
+
+    /// Create a new [IndexedGenomeAssembly] from a FASTA file with a `.fai` index.
+    fn try_from(value: &Path) -> Result<IndexedGenomeAssembly, GtarsGenomicDistError> {
         let fasta = IndexedFasta::from_file(value).map_err(|e| {
             let msg = format!("{}", e);
             if msg.contains("fai") || msg.contains("index") || msg.contains("No such file") {
@@ -177,24 +283,16 @@ impl TryFrom<&Path> for GenomeAssembly {
                 ))
             }
         })?;
-        Ok(GenomeAssembly { fasta })
+        Ok(IndexedGenomeAssembly { fasta })
     }
 }
 
-impl GenomeAssembly {
-    /// Get the sequence for a region as an owned Vec.
-    ///
-    /// For hot loops over many/large regions, prefer [`with_region_bases`] to
-    /// avoid allocating a Vec per region.
+impl IndexedGenomeAssembly {
     pub fn seq_from_region(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
         self.with_region_view(coords, |view| view.bases().copied().collect())
     }
 
     /// Stream bases for a region through a closure without allocating.
-    ///
-    /// The closure receives a `FastaView` whose `.bases()` yields `&u8`
-    /// (newlines already stripped). Use this for GC counting, dinucleotide
-    /// scanning, or any operation that doesn't need a contiguous `&[u8]`.
     pub fn with_region_view<F, R>(
         &self,
         coords: &Region,
@@ -225,6 +323,16 @@ impl GenomeAssembly {
     }
 
     pub fn contains_chr(&self, chr: &str) -> bool {
+        self.fasta.fai().tid(chr).is_some()
+    }
+}
+
+impl SequenceAccess for IndexedGenomeAssembly {
+    fn get_sequence(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
+        self.seq_from_region(coords)
+    }
+
+    fn contains_chr(&self, chr: &str) -> bool {
         self.fasta.fai().tid(chr).is_some()
     }
 }

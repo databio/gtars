@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use gtars_core::models::{Region, RegionSet};
 
 use crate::errors::GtarsGenomicDistError;
-use crate::models::{ChromosomeStatistics, Dinucleotide, GenomeAssembly, RegionBin};
+use crate::models::{ChromosomeStatistics, Dinucleotide, RegionBin, SequenceAccess};
 
 /// Trait for computing statistics and distributions of genomic intervals.
 pub trait GenomicIntervalSetStatistics {
@@ -311,7 +311,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
 ///
 pub fn calc_gc_content(
     region_set: &RegionSet,
-    genome: &GenomeAssembly,
+    genome: &(impl SequenceAccess + ?Sized),
     ignore_unk_chroms: bool,
 ) -> Result<Vec<f64>, GtarsGenomicDistError> {
     // for region in region_set
@@ -325,11 +325,11 @@ pub fn calc_gc_content(
         for region in region_set.iter_chr_regions(chr) {
             let mut gc_count: u32 = 0;
             let mut total_count: u32 = 0;
-            let seq = genome.seq_from_region(region);
+            let seq = genome.get_sequence(region);
 
             match seq {
                 Ok(seq) => {
-                    for base in seq {
+                    for &base in &seq {
                         match base.to_ascii_lowercase() {
                             b'g' | b'c' => {
                                 gc_count += 1;
@@ -406,7 +406,7 @@ pub const DINUCL_ORDER: [Dinucleotide; 16] = [
 /// ```
 pub fn calc_dinucl_freq(
     region_set: &RegionSet,
-    genome: &GenomeAssembly,
+    genome: &(impl SequenceAccess + ?Sized),
     raw_counts: bool,
     ignore_unk_chroms: bool,
 ) -> Result<(Vec<String>, Vec<[f64; 16]>), GtarsGenomicDistError> {
@@ -418,7 +418,7 @@ pub fn calc_dinucl_freq(
             continue;
         }
         for region in region_set.iter_chr_regions(chr) {
-            let seq = match genome.seq_from_region(region) {
+            let seq = match genome.get_sequence(region) {
                 Ok(s) => s,
                 Err(e) => {
                     if ignore_unk_chroms {
@@ -466,6 +466,7 @@ pub fn calc_dinucl_freq(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::GenomeAssembly;
 
     use pretty_assertions::assert_eq;
     use rstest::*;
