@@ -182,7 +182,27 @@ impl TryFrom<&Path> for GenomeAssembly {
 }
 
 impl GenomeAssembly {
+    /// Get the sequence for a region as an owned Vec.
+    ///
+    /// For hot loops over many/large regions, prefer [`with_region_bases`] to
+    /// avoid allocating a Vec per region.
     pub fn seq_from_region(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
+        self.with_region_view(coords, |view| view.bases().copied().collect())
+    }
+
+    /// Stream bases for a region through a closure without allocating.
+    ///
+    /// The closure receives a `FastaView` whose `.bases()` yields `&u8`
+    /// (newlines already stripped). Use this for GC counting, dinucleotide
+    /// scanning, or any operation that doesn't need a contiguous `&[u8]`.
+    pub fn with_region_view<F, R>(
+        &self,
+        coords: &Region,
+        f: F,
+    ) -> Result<R, GtarsGenomicDistError>
+    where
+        F: FnOnce(&faimm::FastaView<'_>) -> R,
+    {
         let chr = &coords.chr;
         let start = coords.start as usize;
         let end = coords.end as usize;
@@ -201,7 +221,7 @@ impl GenomeAssembly {
             ))
         })?;
 
-        Ok(view.bases().copied().collect())
+        Ok(f(&view))
     }
 
     pub fn contains_chr(&self, chr: &str) -> bool {
