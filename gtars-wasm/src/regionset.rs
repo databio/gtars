@@ -176,10 +176,31 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&result).map_err(|e| e.into())
     }
 
+    /// Region distribution across genomic bins.
+    ///
+    /// When `chrom_sizes` is provided (JS object: `{chr: length, ...}`), per-chromosome
+    /// bin sizes are derived from the reference genome (bin_size = chrom_size / n_bins
+    /// per chrom). Outputs are comparable across BED files and aligned with reference
+    /// genome positions. Regions on chroms not in `chrom_sizes`, or whose midpoint
+    /// falls beyond the stated chromosome size, are silently skipped.
+    ///
+    /// When `chrom_sizes` is null/undefined, bin size is derived from the BED file's
+    /// observed max end coordinate — outputs will NOT be comparable across files.
     #[wasm_bindgen(js_name = "regionDistribution")]
-    pub fn region_distribution(&self, n_bins: u32) -> Result<JsValue, JsValue> {
+    pub fn region_distribution(
+        &self,
+        n_bins: u32,
+        chrom_sizes: JsValue,
+    ) -> Result<JsValue, JsValue> {
         let distribution: HashMap<String, RegionBin> =
-            self.region_set.region_distribution_with_bins(n_bins);
+            if chrom_sizes.is_null() || chrom_sizes.is_undefined() {
+                self.region_set.region_distribution_with_bins(n_bins)
+            } else {
+                let cs: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes)
+                    .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+                self.region_set
+                    .region_distribution_with_chrom_sizes(n_bins, &cs)
+            };
 
         let mut result_vector: Vec<JsRegionDistribution> = vec![];
 

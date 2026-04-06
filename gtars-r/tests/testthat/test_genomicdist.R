@@ -18,9 +18,10 @@ test_that("calcWidth returns correct widths", {
   skip_if_no_data()
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   w <- calcWidth(rs)
-  expect_type(w, "integer")
+  # doubles instead of integers: u32 widths can exceed i32::MAX (2.1 Gbp)
+  expect_type(w, "double")
   expect_equal(length(w), 4L)
-  expect_equal(w[1], 4L)
+  expect_equal(w[1], 4)
 })
 
 test_that("calcNeighborDist returns distances", {
@@ -34,7 +35,9 @@ test_that("calcNearestNeighbors returns distances", {
   skip_if_no_data()
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   nn <- calcNearestNeighbors(rs)
-  expect_type(nn, "integer")
+  # doubles instead of integers: distances can be chromosome-scale,
+  # approaching or exceeding i32::MAX for concatenated/genome-scale regions
+  expect_type(nn, "double")
   expect_equal(length(nn), length(rs))
 })
 
@@ -77,6 +80,23 @@ test_that("calcDinuclFreq returns data.frame with 16 dinucleotide columns", {
   expect_true(is.data.frame(freq))
   # 16 dinucleotides + region column
   expect_true(ncol(freq) >= 16)
+  # Default rawCounts=FALSE: each row sums to 100
+  num_cols <- freq[, sapply(freq, is.numeric)]
+  expect_equal(sum(num_cols[1, ]), 100, tolerance = 1e-6)
+})
+
+test_that("calcDinuclFreq rawCounts=TRUE returns integer counts", {
+  fasta_path <- file.path(test_path(), "..", "..", "..", "tests", "data", "fasta", "base.fa")
+  skip_if_not(file.exists(fasta_path), "Test FASTA file not found")
+
+  assembly <- loadGenomeAssembly(fasta_path)
+  # base.fa: chrX = "TTGGGGAA" (8bp) → 7 dinucleotide windows
+  df <- data.frame(chr = "chrX", start = 0L, end = 8L)
+  freq <- calcDinuclFreq(df, assembly, rawCounts = TRUE)
+  expect_true(is.data.frame(freq))
+  num_cols <- freq[, sapply(freq, is.numeric)]
+  # 8 bases → 7 dinucleotides
+  expect_equal(sum(num_cols[1, ]), 7)
 })
 
 # =========================================================================

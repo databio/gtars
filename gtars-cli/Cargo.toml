@@ -38,7 +38,7 @@ name = "gtars"
 path = "src/main.rs"
 
 [features]
-default = []
+default = ["scoring", "uniwig", "bbcache", "igd", "fragsplit", "overlaprs", "genomicdist"]
 scoring = ["dep:gtars-scoring"]
 uniwig = ["dep:gtars-uniwig"]
 bbcache = ["dep:gtars-bbcache"]

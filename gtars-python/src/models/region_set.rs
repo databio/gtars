@@ -298,43 +298,38 @@ impl PyRegionSet {
         self.regionset.calc_widths()
     }
 
-    fn neighbor_distances(&self) -> PyResult<Vec<Option<f64>>> {
-        let dists = self
-            .regionset
+    /// Signed gaps between consecutive regions on each chromosome.
+    ///
+    /// Output length may be shorter than input region count — chromosomes with
+    /// fewer than 2 regions are skipped (no neighbors to measure against). Output
+    /// is not aligned 1:1 with input regions.
+    fn neighbor_distances(&self) -> PyResult<Vec<i64>> {
+        self.regionset
             .calc_neighbor_distances()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(dists
-            .into_iter()
-            .map(|d| {
-                if d == i64::MAX {
-                    None
-                } else {
-                    Some(d as f64)
-                }
-            })
-            .collect())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    fn nearest_neighbors(&self) -> PyResult<Vec<Option<f64>>> {
-        let dists = self
-            .regionset
+    /// Distance from each region to its nearest neighbor on the same chromosome.
+    ///
+    /// Output length may be shorter than input region count — chromosomes with
+    /// only one region are skipped. Output is not aligned 1:1 with input regions.
+    fn nearest_neighbors(&self) -> PyResult<Vec<u32>> {
+        self.regionset
             .calc_nearest_neighbors()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(dists
-            .into_iter()
-            .map(|d| {
-                if d == u32::MAX {
-                    None
-                } else {
-                    Some(d as f64)
-                }
-            })
-            .collect())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    #[pyo3(signature = (n_bins = 250))]
-    fn distribution<'py>(&self, py: Python<'py>, n_bins: u32) -> PyResult<Vec<Bound<'py, PyDict>>> {
-        let bins = self.regionset.region_distribution_with_bins(n_bins);
+    #[pyo3(signature = (n_bins = 250, chrom_sizes = None))]
+    fn distribution<'py>(
+        &self,
+        py: Python<'py>,
+        n_bins: u32,
+        chrom_sizes: Option<HashMap<String, u32>>,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let bins = match chrom_sizes {
+            Some(cs) => self.regionset.region_distribution_with_chrom_sizes(n_bins, &cs),
+            None => self.regionset.region_distribution_with_bins(n_bins),
+        };
         let mut sorted_bins: Vec<_> = bins.into_values().collect();
         sorted_bins.sort_by(|a, b| {
             a.chr
