@@ -1,9 +1,9 @@
 use crate::errors::GtarsGenomicDistError;
-use bio::io::fasta;
+use faimm::IndexedFasta;
 use gtars_core::models::{CoordinateMode, Region, RegionSet};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt::Debug};
-use std::fs::File;
+use std::collections::HashMap;
+use std::fmt::Debug;
 use std::path::Path;
 
 /// A `RegionSet` that is guaranteed to be sorted by (chr, start).
@@ -132,7 +132,7 @@ pub struct RegionBin {
 }
 
 pub struct GenomeAssembly {
-    seq_map: HashMap<String, Vec<u8>>,
+    fasta: IndexedFasta,
 }
 
 impl TryFrom<&str> for GenomeAssembly {
@@ -155,63 +155,57 @@ impl TryFrom<String> for GenomeAssembly {
 impl TryFrom<&Path> for GenomeAssembly {
     type Error = GtarsGenomicDistError;
 
+    /// Create a new [GenomeAssembly] from a FASTA file with a `.fai` index.
     ///
-    /// Create a new [GenomeAssembly] from fasta file
-    ///
+    /// Uses memory-mapped I/O via faimm — the FASTA file is not read into
+    /// memory. Requires a samtools-compatible `.fai` index alongside the
+    /// FASTA (e.g. `hg38.fa` + `hg38.fa.fai`).
     fn try_from(value: &Path) -> Result<GenomeAssembly, GtarsGenomicDistError> {
-        let file = File::open(value)?;
-        let genome = fasta::Reader::new(file);
-
-        let records = genome.records();
-
-        // store the genome in a hashmap
-        let mut seq_map: HashMap<String, Vec<u8>> = HashMap::new();
-        for record in records {
-            match record {
-                Ok(record) => {
-                    seq_map.insert(record.id().to_string(), record.seq().to_owned());
-                }
-                Err(e) => {
-                    return Err(GtarsGenomicDistError::CustomError(format!(
-                        "Error reading genome file: {}",
-                        e
-                    )));
-                }
+        let fasta = IndexedFasta::from_file(value).map_err(|e| {
+            let msg = format!("{}", e);
+            if msg.contains("fai") || msg.contains("index") || msg.contains("No such file") {
+                GtarsGenomicDistError::CustomError(format!(
+                    "Missing .fai index for FASTA file '{}'. Generate with: samtools faidx {}",
+                    value.display(),
+                    value.display()
+                ))
+            } else {
+                GtarsGenomicDistError::CustomError(format!(
+                    "Error opening FASTA file '{}': {}",
+                    value.display(),
+                    e
+                ))
             }
-        }
-
-        Ok(GenomeAssembly { seq_map })
+        })?;
+        Ok(GenomeAssembly { fasta })
     }
 }
 
 impl GenomeAssembly {
-    pub fn seq_from_region<'a>(&self, coords: &Region) -> Result<&[u8], GtarsGenomicDistError> {
+    pub fn seq_from_region(&self, coords: &Region) -> Result<Vec<u8>, GtarsGenomicDistError> {
         let chr = &coords.chr;
         let start = coords.start as usize;
         let end = coords.end as usize;
 
-        if let Some(seq) = self.seq_map.get(chr) {
-            if end <= seq.len() && start <= end {
-                Ok(&seq[start..end])
-            } else {
-                Err(GtarsGenomicDistError::CustomError(format!(
-                    "Invalid range: start={}, end={} for chromosome {} with length {}",
-                    start,
-                    end,
-                    chr,
-                    seq.len()
-                )))
-            }
-        } else {
-            Err(GtarsGenomicDistError::CustomError(format!(
+        let tid = self.fasta.fai().tid(chr).ok_or_else(|| {
+            GtarsGenomicDistError::CustomError(format!(
                 "Unknown chromosome found in region set: {}",
                 chr
-            )))
-        }
+            ))
+        })?;
+
+        let view = self.fasta.view(tid, start, end).map_err(|e| {
+            GtarsGenomicDistError::CustomError(format!(
+                "Invalid range: start={}, end={} for chromosome {}: {}",
+                start, end, chr, e
+            ))
+        })?;
+
+        Ok(view.bases().copied().collect())
     }
 
     pub fn contains_chr(&self, chr: &str) -> bool {
-        self.seq_map.contains_key(chr)
+        self.fasta.fai().tid(chr).is_some()
     }
 }
 
