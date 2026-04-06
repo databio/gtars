@@ -327,11 +327,13 @@ pub fn r_calc_gc_content(
 /// @param rs_ptr External pointer to a RegionSet
 /// @param assembly_ptr External pointer to a GenomeAssembly
 /// @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
+/// @param ignore_unk_chroms Skip regions on chromosomes not in the assembly (default FALSE)
 #[extendr(r_name = "r_calc_dinucl_freq")]
 pub fn r_calc_dinucl_freq(
     rs_ptr: Robj,
     assembly_ptr: Robj,
     raw_counts: Robj,
+    ignore_unk_chroms: Robj,
 ) -> extendr_api::Result<List> {
     // Default to false when NULL/missing — matches Python and R GenomicDistributions defaults
     let raw = if raw_counts.is_null() {
@@ -340,9 +342,15 @@ pub fn r_calc_dinucl_freq(
         <bool>::try_from(&raw_counts)
             .map_err(|_| extendr_api::Error::Other("raw_counts must be logical".into()))?
     };
+    let ignore = if ignore_unk_chroms.is_null() {
+        false
+    } else {
+        <bool>::try_from(&ignore_unk_chroms)
+            .map_err(|_| extendr_api::Error::Other("ignore_unk_chroms must be logical".into()))?
+    };
     with_regionset!(rs_ptr, rs, {
         with_assembly!(assembly_ptr, asm, {
-            let (labels, matrix) = calc_dinucl_freq(rs, asm, raw)
+            let (labels, matrix) = calc_dinucl_freq(rs, asm, raw, ignore)
                 .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
             // Build column names (uppercase to match GD: AA, AC, AG, ...)

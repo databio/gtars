@@ -4,7 +4,7 @@
 \alias{r_calc_dinucl_freq}
 \title{Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)}
 \usage{
-r_calc_dinucl_freq(rs_ptr, assembly_ptr, raw_counts)
+r_calc_dinucl_freq(rs_ptr, assembly_ptr, raw_counts, ignore_unk_chroms)
 }
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}
@@ -12,6 +12,8 @@ r_calc_dinucl_freq(rs_ptr, assembly_ptr, raw_counts)
 \item{assembly_ptr}{External pointer to a GenomeAssembly}
 
 \item{raw_counts}{Return raw counts instead of percentages (default FALSE, matches R upstream)}
+
+\item{ignore_unk_chroms}{Skip regions on chromosomes not in the assembly (default FALSE)}
 }
 \description{
 Returns a list with a \code{region} column and 16 dinucleotide columns

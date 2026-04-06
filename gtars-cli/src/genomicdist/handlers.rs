@@ -259,7 +259,12 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     };
 
     // --- Optional: GC content + dinucleotide frequencies (require FASTA) ---
+    // --fasta enables GC content. Dinucleotide frequencies are additionally
+    // opt-in via --dinucl-freq because they can be expensive for region sets
+    // with very wide regions (each dinucleotide window of every region is
+    // inspected; width dominates cost).
     let dinucl_raw_counts = matches.get_flag("dinucl-raw-counts");
+    let compute_dinucl = matches.get_flag("dinucl-freq");
     let (gc_content_out, dinucl_freq_out) = match fasta_path {
         Some(p) => {
             let assembly = GenomeAssembly::try_from(p.as_str())
@@ -276,18 +281,24 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
                 per_region: gc_per_region,
             };
 
-            let (labels, matrix) = calc_dinucl_freq(&rs, &assembly, dinucl_raw_counts)
+            let dinucl_out = if compute_dinucl {
+                let (labels, matrix) = calc_dinucl_freq(
+                    &rs, &assembly, dinucl_raw_counts, ignore_unk_chroms,
+                )
                 .map_err(|e| anyhow::anyhow!("Failed to compute dinucl freq: {}", e))?;
-            let dinucl_out = DinuclFreqOutput {
-                dinucleotides: DINUCL_ORDER
-                    .iter()
-                    .map(|d| d.to_string().unwrap_or_default())
-                    .collect(),
-                region_labels: labels,
-                frequencies: matrix,
-                raw_counts: dinucl_raw_counts,
+                Some(DinuclFreqOutput {
+                    dinucleotides: DINUCL_ORDER
+                        .iter()
+                        .map(|d| d.to_string().unwrap_or_default())
+                        .collect(),
+                    region_labels: labels,
+                    frequencies: matrix,
+                    raw_counts: dinucl_raw_counts,
+                })
+            } else {
+                None
             };
-            (Some(gc_out), Some(dinucl_out))
+            (Some(gc_out), dinucl_out)
         }
         None => (None, None),
     };

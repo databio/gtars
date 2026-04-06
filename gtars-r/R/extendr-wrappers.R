@@ -85,7 +85,8 @@ r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wra
 #' @param rs_ptr External pointer to a RegionSet
 #' @param assembly_ptr External pointer to a GenomeAssembly
 #' @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
-r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr, raw_counts) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr, raw_counts)
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly (default FALSE)
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr, raw_counts, ignore_unk_chroms) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr, raw_counts, ignore_unk_chroms)
 
 #' Trim regions to chromosome boundaries
 #' @export
