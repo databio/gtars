@@ -195,6 +195,13 @@ impl GenomicIntervalSetStatistics for RegionSet {
             return HashMap::new();
         }
 
+        // Proportional binning: the longest chromosome gets n_bins bins,
+        // shorter chromosomes get proportionally fewer. This produces a
+        // uniform bin width (in bp) across all chromosomes so that
+        // positional heatmaps are reference-aligned.
+        let max_chrom_len = chrom_sizes.values().copied().max().unwrap_or(1) as u64;
+        let bin_width = (max_chrom_len / n_bins as u64).max(1);
+
         let mut plot_results: HashMap<String, RegionBin> = HashMap::new();
 
         for region in &self.regions {
@@ -202,7 +209,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
                 Some(&s) => s,
                 None => continue, // skip regions on chromosomes not in chrom_sizes
             };
-            let bin_size = (chrom_size / n_bins).max(1);
+            let bin_size = bin_width as u32;
 
             let mid = region.mid_point();
             // Skip regions whose midpoint falls beyond the stated chromosome size
