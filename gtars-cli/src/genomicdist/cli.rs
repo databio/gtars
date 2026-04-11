@@ -82,6 +82,13 @@ pub fn create_genomicdist_cli() -> Command {
                 .help("Downstream distance (bp) from TSS to define promoter regions"),
         )
         .arg(
+            Arg::new("cluster-radii")
+                .long("cluster-radii")
+                .required(false)
+                .default_value("500,5000,50000")
+                .help("Comma-separated list of stitching radii (bp) for peak_clusters summary statistics. Default probes promoter (500), enhancer (5000), and domain (50000) scales."),
+        )
+        .arg(
             Arg::new("compact")
                 .long("compact")
                 .action(clap::ArgAction::SetTrue)

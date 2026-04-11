@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 use crate::models::PyRegion;
 use gtars_core::models::{Region, RegionSet};
-use gtars_genomicdist::models::ChromosomeStatistics;
+use gtars_genomicdist::models::{
+    ChromosomeStatistics, ClusterStats, DensityHomogeneity, DensityVector, SpacingStats,
+};
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::IntervalRanges;
 use gtars_overlaprs::RegionSetOverlaps;
@@ -21,6 +23,34 @@ pub struct PyChromosomeStatistics {
     pub maximum_region_length: u32,
     pub mean_region_length: f64,
     pub median_region_length: f64,
+}
+
+/// Python wrapper around `gtars_genomicdist::models::SpacingStats`.
+#[pyclass(name = "SpacingStats", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PySpacingStats {
+    pub inner: SpacingStats,
+}
+
+/// Python wrapper around `gtars_genomicdist::models::ClusterStats`.
+#[pyclass(name = "ClusterStats", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PyClusterStats {
+    pub inner: ClusterStats,
+}
+
+/// Python wrapper around `gtars_genomicdist::models::DensityVector`.
+#[pyclass(name = "DensityVector", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PyDensityVector {
+    pub inner: DensityVector,
+}
+
+/// Python wrapper around `gtars_genomicdist::models::DensityHomogeneity`.
+#[pyclass(name = "DensityHomogeneity", module = "gtars.models")]
+#[derive(Clone, Debug)]
+pub struct PyDensityHomogeneity {
+    pub inner: DensityHomogeneity,
 }
 
 #[pyclass(name = "RegionSet", module = "gtars.models")]
@@ -507,6 +537,64 @@ impl PyRegionSet {
 
         result
     }
+
+    /// Return gaps between regions per chromosome, bounded by chrom sizes.
+    ///
+    /// Emits leading gaps, inter-region gaps, trailing gaps (to chrom_size),
+    /// and full-chromosome gaps for any chromosome in ``chrom_sizes`` that
+    /// has no regions at all.
+    fn gaps(&self, chrom_sizes: HashMap<String, u32>) -> PyResult<Self> {
+        let rs = self.regionset.gaps(&chrom_sizes);
+        Ok(Self::from_regionset(rs))
+    }
+
+    /// Summary statistics over inter-region spacings. Wraps
+    /// ``neighbor_distances()``.
+    fn inter_peak_spacing(&self) -> PySpacingStats {
+        PySpacingStats {
+            inner: self.regionset.calc_inter_peak_spacing(),
+        }
+    }
+
+    /// Cluster-level summary statistics at a given stitching radius.
+    /// Wraps ``cluster(radius_bp)``.
+    #[pyo3(signature = (radius_bp))]
+    fn peak_clusters(&self, radius_bp: u32) -> PyClusterStats {
+        PyClusterStats {
+            inner: self.regionset.calc_peak_clusters(radius_bp),
+        }
+    }
+
+    /// Dense zero-padded per-window peak count vector, ordered by
+    /// karyotypic chromosome order and bin index.
+    ///
+    /// Args:
+    ///     chrom_sizes: mapping of chromosome name → size in bp
+    ///     n_bins: target number of bins (longest chromosome gets n_bins;
+    ///             shorter chromosomes get proportionally fewer)
+    fn density_vector(
+        &self,
+        chrom_sizes: HashMap<String, u32>,
+        n_bins: u32,
+    ) -> PyDensityVector {
+        PyDensityVector {
+            inner: self.regionset.calc_density_vector(&chrom_sizes, n_bins),
+        }
+    }
+
+    /// Summary statistics over the dense per-window count vector
+    /// (variance, CV, Gini). Wraps ``density_vector()``.
+    fn density_homogeneity(
+        &self,
+        chrom_sizes: HashMap<String, u32>,
+        n_bins: u32,
+    ) -> PyDensityHomogeneity {
+        PyDensityHomogeneity {
+            inner: self
+                .regionset
+                .calc_density_homogeneity(&chrom_sizes, n_bins),
+        }
+    }
 }
 
 #[pymethods]
@@ -549,5 +637,170 @@ impl PyChromosomeStatistics {
     #[getter]
     fn get_median_region_length(&self) -> f64 {
         self.median_region_length
+    }
+}
+
+// ── Spatial-arrangement summary getters ─────────────────────────────────
+
+#[pymethods]
+impl PySpacingStats {
+    #[getter]
+    fn n_gaps(&self) -> usize {
+        self.inner.n_gaps
+    }
+    #[getter]
+    fn mean(&self) -> f64 {
+        self.inner.mean
+    }
+    #[getter]
+    fn median(&self) -> f64 {
+        self.inner.median
+    }
+    #[getter]
+    fn std(&self) -> f64 {
+        self.inner.std
+    }
+    #[getter]
+    fn iqr(&self) -> f64 {
+        self.inner.iqr
+    }
+    #[getter]
+    fn log_mean(&self) -> f64 {
+        self.inner.log_mean
+    }
+    #[getter]
+    fn log_std(&self) -> f64 {
+        self.inner.log_std
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "SpacingStats(n_gaps={}, mean={:.3}, median={:.3}, std={:.3}, iqr={:.3}, log_mean={:.3}, log_std={:.3})",
+            self.inner.n_gaps,
+            self.inner.mean,
+            self.inner.median,
+            self.inner.std,
+            self.inner.iqr,
+            self.inner.log_mean,
+            self.inner.log_std
+        )
+    }
+}
+
+#[pymethods]
+impl PyClusterStats {
+    #[getter]
+    fn radius_bp(&self) -> u32 {
+        self.inner.radius_bp
+    }
+    #[getter]
+    fn n_clusters(&self) -> usize {
+        self.inner.n_clusters
+    }
+    #[getter]
+    fn n_clustered_peaks(&self) -> usize {
+        self.inner.n_clustered_peaks
+    }
+    #[getter]
+    fn mean_cluster_size(&self) -> f64 {
+        self.inner.mean_cluster_size
+    }
+    #[getter]
+    fn max_cluster_size(&self) -> usize {
+        self.inner.max_cluster_size
+    }
+    #[getter]
+    fn fraction_clustered(&self) -> f64 {
+        self.inner.fraction_clustered
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "ClusterStats(radius_bp={}, n_clusters={}, n_clustered_peaks={}, mean_cluster_size={:.3}, max_cluster_size={}, fraction_clustered={:.3})",
+            self.inner.radius_bp,
+            self.inner.n_clusters,
+            self.inner.n_clustered_peaks,
+            self.inner.mean_cluster_size,
+            self.inner.max_cluster_size,
+            self.inner.fraction_clustered
+        )
+    }
+}
+
+#[pymethods]
+impl PyDensityVector {
+    #[getter]
+    fn n_bins(&self) -> u32 {
+        self.inner.n_bins
+    }
+    #[getter]
+    fn bin_width(&self) -> u32 {
+        self.inner.bin_width
+    }
+    /// Dense per-window count vector (numpy-compatible via list→array).
+    #[getter]
+    fn counts(&self) -> Vec<u32> {
+        self.inner.counts.clone()
+    }
+    /// List of (chromosome_name, start_index) per chromosome in karyotypic
+    /// order. Slice ``counts[start_index : next_chrom_start_index]`` to
+    /// recover per-chromosome subvectors.
+    #[getter]
+    fn chrom_offsets(&self) -> Vec<(String, usize)> {
+        self.inner.chrom_offsets.clone()
+    }
+    fn __len__(&self) -> usize {
+        self.inner.counts.len()
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "DensityVector(n_bins={}, bin_width={}, len={}, chroms={})",
+            self.inner.n_bins,
+            self.inner.bin_width,
+            self.inner.counts.len(),
+            self.inner.chrom_offsets.len()
+        )
+    }
+}
+
+#[pymethods]
+impl PyDensityHomogeneity {
+    #[getter]
+    fn bin_width(&self) -> u32 {
+        self.inner.bin_width
+    }
+    #[getter]
+    fn n_windows(&self) -> usize {
+        self.inner.n_windows
+    }
+    #[getter]
+    fn n_nonzero_windows(&self) -> usize {
+        self.inner.n_nonzero_windows
+    }
+    #[getter]
+    fn mean_count(&self) -> f64 {
+        self.inner.mean_count
+    }
+    #[getter]
+    fn variance(&self) -> f64 {
+        self.inner.variance
+    }
+    #[getter]
+    fn cv(&self) -> f64 {
+        self.inner.cv
+    }
+    #[getter]
+    fn gini(&self) -> f64 {
+        self.inner.gini
+    }
+    fn __repr__(&self) -> String {
+        format!(
+            "DensityHomogeneity(bin_width={}, n_windows={}, n_nonzero={}, mean={:.3}, variance={:.3}, cv={:.3}, gini={:.3})",
+            self.inner.bin_width,
+            self.inner.n_windows,
+            self.inner.n_nonzero_windows,
+            self.inner.mean_count,
+            self.inner.variance,
+            self.inner.cv,
+            self.inner.gini
+        )
     }
 }

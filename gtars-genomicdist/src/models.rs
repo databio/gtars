@@ -134,6 +134,127 @@ pub struct RegionBin {
     pub rid: u32,
 }
 
+/// Summary statistics over the distribution of inter-region spacings.
+///
+/// "Spacing" here means the bp distance between the end of one region and the
+/// start of the next region on the same chromosome, counting only positive
+/// gaps (overlapping / abutting neighbors are excluded, matching
+/// `calc_neighbor_distances`). Cross-chromosome pairs are never counted.
+///
+/// Empty / singleton inputs return `n_gaps = 0` and NaN for all float fields,
+/// matching numpy's behavior on empty arrays.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpacingStats {
+    /// Number of positive inter-region gaps (excludes overlaps and abutting).
+    pub n_gaps: usize,
+    /// Mean gap length in bp.
+    pub mean: f64,
+    /// Median gap length in bp.
+    pub median: f64,
+    /// Population standard deviation of gap lengths in bp.
+    pub std: f64,
+    /// Interquartile range (Q3 − Q1) of gap lengths in bp.
+    pub iqr: f64,
+    /// Mean of `log10(gap + 1)`. Gap distributions are heavy-tailed;
+    /// the log-transformed mean is a more robust central tendency.
+    pub log_mean: f64,
+    /// Population standard deviation of `log10(gap + 1)`.
+    pub log_std: f64,
+}
+
+/// Summary statistics over peak clusters at a given stitching radius.
+///
+/// A cluster is a maximal set of regions connected via single-linkage,
+/// where two regions link if the bp distance between `prev.end` and
+/// `next.start` is at most `radius_bp`. Clusters are chromosome-scoped
+/// (two regions on different chromosomes can never link).
+///
+/// "Clustered peaks" means peaks belonging to a cluster of size > 1 —
+/// singletons do not count. `mean_cluster_size` is averaged over clusters
+/// of size > 1 only; if there are no such clusters it is NaN.
+///
+/// Empty inputs return zero counts and NaN for `fraction_clustered`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterStats {
+    /// Stitching radius in bp (pass-through from the call).
+    pub radius_bp: u32,
+    /// Total number of distinct clusters (singletons count as size-1 clusters).
+    pub n_clusters: usize,
+    /// Number of peaks belonging to a cluster of size > 1.
+    pub n_clustered_peaks: usize,
+    /// Mean size of clusters with size > 1. NaN if no such clusters.
+    pub mean_cluster_size: f64,
+    /// Size of the largest cluster (0 for empty input).
+    pub max_cluster_size: usize,
+    /// `n_clustered_peaks / total_peaks`. NaN if input is empty.
+    pub fraction_clustered: f64,
+}
+
+/// Dense per-window peak-count vector and the binning that produced it.
+///
+/// Unlike `region_distribution_with_chrom_sizes`, which returns only bins
+/// that contain ≥1 region, this struct carries the full zero-padded vector
+/// with one entry per window on every chromosome in `chrom_sizes`.
+///
+/// `counts` is ordered by karyotypic chromosome order (`chrom_karyotype_key`)
+/// and then by bin index within each chromosome. `chrom_offsets` records the
+/// start index of each chromosome's slice in `counts`, so callers can
+/// recover per-chromosome subvectors without re-binning.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DensityVector {
+    /// Target number of bins (matches the longest chromosome). Shorter
+    /// chromosomes get proportionally fewer bins.
+    pub n_bins: u32,
+    /// Bin width in bp, computed as `max(chrom_sizes) / n_bins` (floored,
+    /// minimum 1 to avoid zero-sized bins).
+    pub bin_width: u32,
+    /// Dense zero-padded per-window peak counts. Length ==
+    /// sum over chromosomes of `ceil(chrom_size / bin_width)`.
+    pub counts: Vec<u32>,
+    /// `(chr, start_index)` per chromosome, in karyotypic order. Slice
+    /// `counts[start_index .. next_chrom_start_index]` for per-chromosome
+    /// vectors.
+    pub chrom_offsets: Vec<(String, usize)>,
+}
+
+/// Summary of how evenly peaks are distributed across genome windows.
+///
+/// Derived from a dense per-window count vector (see `DensityVector`).
+/// A Poisson-distributed peak set has `cv ≈ 1`; clustered sets have
+/// `cv >> 1`; evenly-spread sets have `cv << 1`.
+///
+/// **Note on Gini:** the Gini coefficient has a known bias toward high
+/// values for sparse count distributions (many zero-count windows). For
+/// typical TF-binding BED files over hg38 at 1 Mb bins the bias is small,
+/// but for very sparse inputs (hundreds of peaks over thousands of bins)
+/// the reported Gini will exaggerate concentration. `n_nonzero_windows`
+/// is reported alongside so callers can detect the regime.
+///
+/// Empty-input convention (no chrom_sizes or zero regions in a populated
+/// `chrom_sizes`): `n_windows` may still be > 0 (empty RegionSet over
+/// populated chrom_sizes means all windows are zero); `mean = 0`,
+/// `variance = 0`, `cv = NaN`, `gini = 0`. If `chrom_sizes` itself is
+/// empty, all fields are zero or NaN.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DensityHomogeneity {
+    /// Bin width in bp used for this summary.
+    pub bin_width: u32,
+    /// Total number of bins (including zero-count bins).
+    pub n_windows: usize,
+    /// Number of bins containing at least one peak.
+    pub n_nonzero_windows: usize,
+    /// Mean peak count per window.
+    pub mean_count: f64,
+    /// Population variance of per-window counts.
+    pub variance: f64,
+    /// Coefficient of variation, `sqrt(variance) / mean_count`.
+    /// NaN if `mean_count == 0`.
+    pub cv: f64,
+    /// Gini coefficient of per-window counts, in `[0, 1]`.
+    /// `0` = perfectly even, `1` = all peaks in a single bin.
+    pub gini: f64,
+}
+
 /// Trait for types that provide sequence access to a reference genome.
 ///
 /// Implemented by [`GenomeAssembly`] (in-memory HashMap) and

@@ -181,12 +181,145 @@ test_that("disjoin returns non-overlapping pieces", {
   expect_true(length(rs_dj) >= 1L)
 })
 
-test_that("gaps returns inter-region gaps", {
+test_that("gaps returns inter-region gaps bounded by chrom_sizes", {
   skip_if_no_data()
-  # dummy.bed regions all overlap, so gaps may be empty
-  rs <- RegionSet(file.path(data_dir, "dummy.bed"))
-  rs_gaps <- gaps(rs)
+  # Three non-overlapping peaks → leading, 2 inter-region, trailing = 4 gaps.
+  df <- data.frame(
+    chr = "chr1",
+    start = c(10L, 30L, 50L),
+    end   = c(20L, 40L, 60L)
+  )
+  rs <- RegionSet(df)
+  chrom_sizes <- c(chr1 = 100L)
+  rs_gaps <- gaps(rs, chrom_sizes = chrom_sizes)
   expect_s4_class(rs_gaps, "RegionSet")
+  expect_equal(length(rs_gaps), 4L)
+})
+
+test_that("gaps errors when chrom_sizes is missing", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  expect_error(gaps(rs), "chrom_sizes")
+})
+
+test_that("gaps emits full-chromosome gap for empty chromosomes", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  chrom_sizes <- c(chr1 = 100L, chr2 = 50L)
+  rs_gaps <- gaps(rs, chrom_sizes = chrom_sizes)
+  gaps_df <- as.data.frame(rs_gaps)
+  chr2 <- gaps_df[gaps_df$chr == "chr2", ]
+  expect_equal(nrow(chr2), 1L)
+  expect_equal(chr2$start, 0L)
+  expect_equal(chr2$end, 50L)
+})
+
+# =========================================================================
+# Spatial-arrangement summary statistics
+# =========================================================================
+
+test_that("clusterRegions returns cluster IDs", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(0L, 13L, 100L),
+    end   = c(10L, 20L, 110L)
+  )
+  rs <- RegionSet(df)
+  ids <- clusterRegions(rs, maxGap = 5L)
+  expect_length(ids, 3L)
+  expect_equal(ids[1], ids[2])   # first two are within 5bp → same cluster
+  expect_false(ids[1] == ids[3]) # third is far away
+})
+
+test_that("interPeakSpacing returns scalar summary", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(0L, 20L, 40L, 60L),
+    end   = c(10L, 30L, 50L, 70L)
+  )
+  rs <- RegionSet(df)
+  s <- interPeakSpacing(rs)
+  expect_equal(s$n_gaps, 3)
+  expect_equal(s$mean, 10)
+  expect_equal(s$median, 10)
+  expect_equal(s$std, 0)
+  expect_equal(s$iqr, 0)
+})
+
+test_that("interPeakSpacing returns NaN for empty input", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  s <- interPeakSpacing(rs)
+  expect_equal(s$n_gaps, 0)
+  expect_true(is.nan(s$mean))
+})
+
+test_that("peakClusters summarizes cluster distribution", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(0L, 13L, 100L, 113L, 122L, 500L),
+    end   = c(10L, 20L, 110L, 120L, 130L, 510L)
+  )
+  rs <- RegionSet(df)
+  c <- peakClusters(rs, radius_bp = 5L)
+  expect_equal(c$radius_bp, 5)
+  expect_equal(c$n_clusters, 3)
+  expect_equal(c$n_clustered_peaks, 5)
+  expect_equal(c$max_cluster_size, 3)
+  expect_equal(c$mean_cluster_size, 2.5)
+  expect_equal(c$fraction_clustered, 5 / 6)
+})
+
+test_that("densityVector returns dense zero-padded counts", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(5L, 25L, 45L, 65L, 85L),
+    end   = c(15L, 35L, 55L, 75L, 95L)
+  )
+  rs <- RegionSet(df)
+  dv <- densityVector(rs, chrom_sizes = c(chr1 = 100L), nBins = 5L)
+  expect_equal(dv$n_bins, 5)
+  expect_equal(dv$bin_width, 20)
+  expect_equal(as.numeric(dv$counts), c(1, 1, 1, 1, 1))
+  expect_equal(dv$chrom_offset_names, "chr1")
+  expect_equal(dv$chrom_offset_indices, 0)
+})
+
+test_that("densityVector errors when chrom_sizes is missing", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  expect_error(densityVector(rs, nBins = 5L), "chrom_sizes")
+})
+
+test_that("densityHomogeneity over even distribution gives CV=0, Gini=0", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(5L, 25L, 45L, 65L, 85L),
+    end   = c(15L, 35L, 55L, 75L, 95L)
+  )
+  rs <- RegionSet(df)
+  h <- densityHomogeneity(rs, chrom_sizes = c(chr1 = 100L), nBins = 5L)
+  expect_equal(h$n_windows, 5)
+  expect_equal(h$n_nonzero_windows, 5)
+  expect_equal(h$mean_count, 1)
+  expect_equal(h$cv, 0)
+  expect_equal(h$gini, 0)
+})
+
+test_that("densityHomogeneity over empty RegionSet returns NaN CV", {
+  # Empty RegionSet over populated chrom_sizes.
+  df <- data.frame(
+    chr = character(0),
+    start = integer(0),
+    end = integer(0)
+  )
+  rs <- RegionSet(df)
+  h <- densityHomogeneity(rs, chrom_sizes = c(chr1 = 100L), nBins = 5L)
+  expect_equal(h$n_windows, 5)
+  expect_equal(h$n_nonzero_windows, 0)
+  expect_equal(h$mean_count, 0)
+  expect_true(is.nan(h$cv))
+  expect_equal(h$gini, 0)
 })
 
 # =========================================================================

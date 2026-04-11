@@ -9,6 +9,11 @@ use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
 
+#[inline]
+fn to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| e.into())
+}
+
 #[wasm_bindgen(js_name = "ChromosomeStatistics")]
 #[derive(serde::Serialize)]
 pub struct JsChromosomeStatistics {
@@ -255,6 +260,64 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&nearest).map_err(|e| e.into())
     }
 
+    /// Single-linkage cluster IDs for each region.
+    ///
+    /// Two regions on the same chromosome are assigned the same cluster
+    /// when the bp gap between them is at most `max_gap`. Chromosome
+    /// boundaries always break clusters. Returns a `Uint32Array`-compatible
+    /// JS array in the original region order.
+    #[wasm_bindgen(js_name = "cluster")]
+    pub fn cluster(&self, max_gap: u32) -> Result<JsValue, JsValue> {
+        let ids = self.region_set.cluster(max_gap);
+        to_js(&ids)
+    }
+
+    /// Summary statistics over the distribution of inter-region spacings.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::SpacingStats`.
+    #[wasm_bindgen(js_name = "interPeakSpacing")]
+    pub fn inter_peak_spacing(&self) -> Result<JsValue, JsValue> {
+        to_js(&self.region_set.calc_inter_peak_spacing())
+    }
+
+    /// Cluster-level summary statistics at a given stitching radius.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::ClusterStats`.
+    #[wasm_bindgen(js_name = "peakClusters")]
+    pub fn peak_clusters(&self, radius_bp: u32) -> Result<JsValue, JsValue> {
+        to_js(&self.region_set.calc_peak_clusters(radius_bp))
+    }
+
+    /// Dense zero-padded per-window peak count vector.
+    ///
+    /// `chrom_sizes` is a JS object of the form `{chr: length, ...}`.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::DensityVector`.
+    #[wasm_bindgen(js_name = "densityVector")]
+    pub fn density_vector(
+        &self,
+        chrom_sizes: &JsValue,
+        n_bins: u32,
+    ) -> Result<JsValue, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        to_js(&self.region_set.calc_density_vector(&sizes, n_bins))
+    }
+
+    /// Summary statistics over the dense per-window count vector
+    /// (variance, CV, Gini). Returns a plain JS object with fields
+    /// matching `gtars_genomicdist::models::DensityHomogeneity`.
+    #[wasm_bindgen(js_name = "densityHomogeneity")]
+    pub fn density_homogeneity(
+        &self,
+        chrom_sizes: &JsValue,
+        n_bins: u32,
+    ) -> Result<JsValue, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        to_js(&self.region_set.calc_density_homogeneity(&sizes, n_bins))
+    }
+
     // ── Interval range methods ──────────────────────────────────────
 
     #[wasm_bindgen(js_name = "trim")]
@@ -341,9 +404,11 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(js_name = "gaps")]
-    pub fn gaps(&self) -> JsRegionSet {
-        let result = self.region_set.gaps();
-        JsRegionSet { region_set: result }
+    pub fn gaps(&self, chrom_sizes: &JsValue) -> Result<JsRegionSet, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        let result = self.region_set.gaps(&sizes);
+        Ok(JsRegionSet { region_set: result })
     }
 
     #[wasm_bindgen(js_name = "intersect")]

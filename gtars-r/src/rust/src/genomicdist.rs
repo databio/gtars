@@ -12,6 +12,7 @@ use gtars_genomicdist::{
     CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
+use gtars_genomicdist::models::{ClusterStats, DensityHomogeneity, DensityVector, SpacingStats};
 
 // =========================================================================
 // Helper macros
@@ -224,6 +225,158 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
             maximum_region_length = max_len,
             mean_region_length = mean_len,
             median_region_length = median_len
+        ))
+    })
+}
+
+/// Cluster nearby regions via single-linkage with a stitching radius.
+///
+/// Returns an integer vector of cluster IDs in original region order.
+/// Regions within `max_gap` bp of another region on the same chromosome
+/// are assigned the same cluster. Chromosome boundaries always break clusters.
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param max_gap Maximum bp gap between regions to link (non-negative)
+#[extendr(r_name = "r_cluster")]
+pub fn r_cluster(rs_ptr: Robj, max_gap: i32) -> extendr_api::Result<Vec<f64>> {
+    let max_gap_u32 = checked_u32(max_gap, "max_gap")?;
+    with_regionset!(rs_ptr, rs, {
+        let ids = rs.cluster(max_gap_u32);
+        // u32 IDs → f64 to match the other count/ID returns in this module.
+        Ok(ids.into_iter().map(|id| id as f64).collect())
+    })
+}
+
+/// Summary statistics over the distribution of inter-region spacings.
+///
+/// Wraps `calc_neighbor_distances()`: computes mean, median, standard
+/// deviation, IQR, and log-space mean/std over the positive inter-region
+/// gaps. Overlapping and abutting neighbors are excluded. Cross-chromosome
+/// pairs are never counted.
+///
+/// Returns a named list with NaN float fields when the input has zero
+/// positive gaps (empty, singleton per chromosome, or all-overlapping).
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+#[extendr(r_name = "r_calc_inter_peak_spacing")]
+pub fn r_calc_inter_peak_spacing(rs_ptr: Robj) -> extendr_api::Result<List> {
+    with_regionset!(rs_ptr, rs, {
+        let s: SpacingStats = rs.calc_inter_peak_spacing();
+        Ok(list!(
+            n_gaps = s.n_gaps as f64,
+            mean = s.mean,
+            median = s.median,
+            std = s.std,
+            iqr = s.iqr,
+            log_mean = s.log_mean,
+            log_std = s.log_std
+        ))
+    })
+}
+
+/// Cluster-level summary statistics at a given stitching radius.
+///
+/// Wraps `cluster(radius_bp)` and reduces the per-region cluster ID
+/// vector to scalar summary stats: number of clusters, clustered-peak
+/// count, mean / max cluster size (over clusters of size > 1), and
+/// fraction of peaks belonging to a cluster.
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param radius_bp Stitching radius in bp (non-negative)
+#[extendr(r_name = "r_calc_peak_clusters")]
+pub fn r_calc_peak_clusters(rs_ptr: Robj, radius_bp: i32) -> extendr_api::Result<List> {
+    let radius_u32 = checked_u32(radius_bp, "radius_bp")?;
+    with_regionset!(rs_ptr, rs, {
+        let c: ClusterStats = rs.calc_peak_clusters(radius_u32);
+        Ok(list!(
+            radius_bp = c.radius_bp as f64,
+            n_clusters = c.n_clusters as f64,
+            n_clustered_peaks = c.n_clustered_peaks as f64,
+            mean_cluster_size = c.mean_cluster_size,
+            max_cluster_size = c.max_cluster_size as f64,
+            fraction_clustered = c.fraction_clustered
+        ))
+    })
+}
+
+/// Dense zero-padded per-window peak count vector.
+///
+/// Unlike `r_region_distribution` (which returns only non-empty bins),
+/// this returns the full zero-padded count vector with one entry per
+/// window on every chromosome in `chrom_sizes`, ordered by karyotypic
+/// chromosome order and bin index. Suitable for ML feature extraction.
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param n_bins Target number of bins for the longest chromosome
+/// @param chrom_names Character vector of chromosome names
+/// @param chrom_sizes_vec Integer vector of chromosome sizes
+#[extendr(r_name = "r_calc_density_vector")]
+pub fn r_calc_density_vector(
+    rs_ptr: Robj,
+    n_bins: i32,
+    chrom_names: Vec<String>,
+    chrom_sizes_vec: Vec<i32>,
+) -> extendr_api::Result<List> {
+    let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
+    let chrom_sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?;
+    with_regionset!(rs_ptr, rs, {
+        let dv: DensityVector = rs.calc_density_vector(&chrom_sizes, n_bins_u32);
+        let counts: Vec<f64> = dv.counts.iter().map(|&c| c as f64).collect();
+        let offset_chrs: Vec<String> = dv
+            .chrom_offsets
+            .iter()
+            .map(|(c, _)| c.clone())
+            .collect();
+        let offset_idx: Vec<f64> = dv
+            .chrom_offsets
+            .iter()
+            .map(|(_, i)| *i as f64)
+            .collect();
+        Ok(list!(
+            n_bins = dv.n_bins as f64,
+            bin_width = dv.bin_width as f64,
+            counts = counts,
+            chrom_offset_names = offset_chrs,
+            chrom_offset_indices = offset_idx
+        ))
+    })
+}
+
+/// Summary statistics over the dense per-window count vector.
+///
+/// Returns mean, population variance, coefficient of variation, Gini
+/// coefficient, and the count of nonzero windows. Gini is biased high
+/// for very sparse count distributions; inspect `n_nonzero_windows`
+/// before interpreting Gini on sparse peak sets.
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param n_bins Target number of bins for the longest chromosome
+/// @param chrom_names Character vector of chromosome names
+/// @param chrom_sizes_vec Integer vector of chromosome sizes
+#[extendr(r_name = "r_calc_density_homogeneity")]
+pub fn r_calc_density_homogeneity(
+    rs_ptr: Robj,
+    n_bins: i32,
+    chrom_names: Vec<String>,
+    chrom_sizes_vec: Vec<i32>,
+) -> extendr_api::Result<List> {
+    let n_bins_u32 = checked_u32(n_bins, "n_bins")?;
+    let chrom_sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?;
+    with_regionset!(rs_ptr, rs, {
+        let h: DensityHomogeneity = rs.calc_density_homogeneity(&chrom_sizes, n_bins_u32);
+        Ok(list!(
+            bin_width = h.bin_width as f64,
+            n_windows = h.n_windows as f64,
+            n_nonzero_windows = h.n_nonzero_windows as f64,
+            mean_count = h.mean_count,
+            variance = h.variance,
+            cv = h.cv,
+            gini = h.gini
         ))
     })
 }
@@ -633,13 +786,26 @@ pub fn r_disjoin(rs_ptr: Robj) -> extendr_api::Result<Robj> {
     })
 }
 
-/// Return gaps between regions per chromosome
+/// Return gaps between regions per chromosome, bounded by chrom sizes
+///
+/// Emits the peak-free intervals of each chromosome listed in `chrom_sizes`,
+/// including leading gaps (from 0), inter-region gaps, trailing gaps
+/// (to `chrom_size`), and full-chromosome gaps for chromosomes with no
+/// regions. Regions on chromosomes not present in `chrom_sizes` are skipped.
+///
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
+/// @param chrom_names Character vector of chromosome names
+/// @param chrom_sizes_vec Integer vector of chromosome sizes
 #[extendr(r_name = "r_gaps")]
-pub fn r_gaps(rs_ptr: Robj) -> extendr_api::Result<Robj> {
+pub fn r_gaps(
+    rs_ptr: Robj,
+    chrom_names: Vec<String>,
+    chrom_sizes_vec: Vec<i32>,
+) -> extendr_api::Result<Robj> {
+    let chrom_sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?;
     with_regionset!(rs_ptr, rs, {
-        let result = rs.gaps();
+        let result = rs.gaps(&chrom_sizes);
         Ok(ExternalPtr::new(result).into())
     })
 }
@@ -1309,6 +1475,12 @@ extendr_module! {
     fn r_calc_nearest_neighbors;
     fn r_chromosome_statistics;
     fn r_region_distribution;
+    // Spatial-arrangement summary statistics
+    fn r_cluster;
+    fn r_calc_inter_peak_spacing;
+    fn r_calc_peak_clusters;
+    fn r_calc_density_vector;
+    fn r_calc_density_homogeneity;
     // GC / Dinucleotide
     fn r_load_genome_assembly;
     fn r_load_binary_genome_assembly;

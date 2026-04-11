@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 class Region:
     chr: str
@@ -24,6 +24,79 @@ class ChromosomeStatistics:
     median_region_length: float
     start_nucleotide_position: int
     end_nucleotide_position: int
+
+class SpacingStats:
+    """
+    Summary statistics over the distribution of inter-region spacings.
+
+    Returned by ``RegionSet.inter_peak_spacing()``. All float fields are
+    NaN when ``n_gaps`` is 0 (empty, singleton-per-chromosome, or
+    all-overlapping inputs).
+    """
+    n_gaps: int
+    mean: float
+    median: float
+    std: float
+    iqr: float
+    log_mean: float
+    log_std: float
+
+    def __repr__(self) -> str: ...
+
+class ClusterStats:
+    """
+    Cluster-level summary statistics at a given stitching radius.
+
+    Returned by ``RegionSet.peak_clusters(radius_bp)``. ``mean_cluster_size``
+    and ``fraction_clustered`` are NaN for empty inputs.
+    """
+    radius_bp: int
+    n_clusters: int
+    n_clustered_peaks: int
+    mean_cluster_size: float
+    max_cluster_size: int
+    fraction_clustered: float
+
+    def __repr__(self) -> str: ...
+
+class DensityVector:
+    """
+    Dense per-window peak count vector and its chromosome binning.
+
+    Returned by ``RegionSet.density_vector(chrom_sizes, n_bins)``. Unlike
+    ``distribution()`` (which returns only non-empty bins), this carries
+    the full zero-padded vector, ordered by karyotypic chromosome order
+    and then bin index.
+    """
+    n_bins: int
+    bin_width: int
+    counts: List[int]
+    chrom_offsets: List[Tuple[str, int]]
+
+    def __len__(self) -> int: ...
+    def __repr__(self) -> str: ...
+
+class DensityHomogeneity:
+    """
+    Summary of how evenly peaks are distributed across genome windows.
+
+    Returned by ``RegionSet.density_homogeneity(chrom_sizes, n_bins)``.
+    Poisson-distributed peaks give cv ≈ 1; clustered sets give cv >> 1;
+    evenly-spread sets give cv << 1.
+
+    Note: the Gini coefficient is biased high for very sparse count
+    distributions (many zero-count windows). Check ``n_nonzero_windows``
+    before interpreting Gini on sparse peak sets.
+    """
+    bin_width: int
+    n_windows: int
+    n_nonzero_windows: int
+    mean_count: float
+    variance: float
+    cv: float
+    gini: float
+
+    def __repr__(self) -> str: ...
 
 class RegionSet:
     regions: List[Region]
@@ -328,6 +401,71 @@ class RegionSet:
     def chromosome_statistics(self) -> Dict[str, ChromosomeStatistics]:
         """
         Get a dictionary of ChromosomeStatistics for each chromosome in the RegionSet
+        """
+        ...
+
+    def gaps(self, chrom_sizes: Dict[str, int]) -> "RegionSet":
+        """
+        Return gaps between regions per chromosome, bounded by chrom sizes.
+
+        Emits leading gaps (from 0), inter-region gaps, trailing gaps
+        (to ``chrom_size``), and full-chromosome gaps for any chromosome
+        in ``chrom_sizes`` that has no regions. Regions on chromosomes
+        not listed in ``chrom_sizes`` are skipped.
+        """
+        ...
+
+    def inter_peak_spacing(self) -> SpacingStats:
+        """
+        Summary statistics over the distribution of inter-region spacings.
+
+        Wraps ``neighbor_distances()`` and reduces to scalar mean / median /
+        std / IQR / log-mean / log-std. Useful as a descriptive scalar
+        summary of how regularly peaks are spaced.
+        """
+        ...
+
+    def peak_clusters(self, radius_bp: int) -> ClusterStats:
+        """
+        Cluster-level summary statistics at a given stitching radius.
+
+        Wraps ``cluster(radius_bp)``: groups regions into single-linkage
+        connected components where two regions link if the bp gap between
+        ``prev.end`` and ``next.start`` is at most ``radius_bp``.
+        Chromosome-scoped (no cross-chromosome linking).
+        """
+        ...
+
+    def density_vector(
+        self,
+        chrom_sizes: Dict[str, int],
+        n_bins: int,
+    ) -> DensityVector:
+        """
+        Dense zero-padded per-window peak count vector.
+
+        Unlike ``distribution()`` (which returns only non-empty bins), this
+        returns the full zero-padded count vector with one entry per window
+        on every chromosome in ``chrom_sizes``, ordered by karyotypic
+        chromosome order and bin index. Suitable for ML feature extraction.
+        """
+        ...
+
+    def density_homogeneity(
+        self,
+        chrom_sizes: Dict[str, int],
+        n_bins: int,
+    ) -> DensityHomogeneity:
+        """
+        Summary statistics over the dense per-window count vector.
+
+        Returns mean, population variance, coefficient of variation, Gini
+        coefficient, and the count of nonzero windows. Useful as a scalar
+        measure of peak spatial evenness.
+
+        Note: Gini is biased high for very sparse count distributions;
+        consult ``n_nonzero_windows`` before interpreting Gini on sparse
+        peak sets.
         """
         ...
 

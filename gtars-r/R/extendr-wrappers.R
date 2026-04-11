@@ -60,6 +60,71 @@ r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics,
 #' @param n_bins Number of bins (default 250)
 r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
 
+#' Cluster nearby regions via single-linkage with a stitching radius.
+#'
+#' Returns an integer vector of cluster IDs in original region order.
+#' Regions within `max_gap` bp of another region on the same chromosome
+#' are assigned the same cluster. Chromosome boundaries always break clusters.
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param max_gap Maximum bp gap between regions to link (non-negative)
+r_cluster <- function(rs_ptr, max_gap) .Call(wrap__r_cluster, rs_ptr, max_gap)
+
+#' Summary statistics over the distribution of inter-region spacings.
+#'
+#' Wraps `calc_neighbor_distances()`: computes mean, median, standard
+#' deviation, IQR, and log-space mean/std over the positive inter-region
+#' gaps. Overlapping and abutting neighbors are excluded. Cross-chromosome
+#' pairs are never counted.
+#'
+#' Returns a named list with NaN float fields when the input has zero
+#' positive gaps (empty, singleton per chromosome, or all-overlapping).
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+r_calc_inter_peak_spacing <- function(rs_ptr) .Call(wrap__r_calc_inter_peak_spacing, rs_ptr)
+
+#' Cluster-level summary statistics at a given stitching radius.
+#'
+#' Wraps `cluster(radius_bp)` and reduces the per-region cluster ID
+#' vector to scalar summary stats: number of clusters, clustered-peak
+#' count, mean / max cluster size (over clusters of size > 1), and
+#' fraction of peaks belonging to a cluster.
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param radius_bp Stitching radius in bp (non-negative)
+r_calc_peak_clusters <- function(rs_ptr, radius_bp) .Call(wrap__r_calc_peak_clusters, rs_ptr, radius_bp)
+
+#' Dense zero-padded per-window peak count vector.
+#'
+#' Unlike `r_region_distribution` (which returns only non-empty bins),
+#' this returns the full zero-padded count vector with one entry per
+#' window on every chromosome in `chrom_sizes`, ordered by karyotypic
+#' chromosome order and bin index. Suitable for ML feature extraction.
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param n_bins Target number of bins for the longest chromosome
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes_vec Integer vector of chromosome sizes
+r_calc_density_vector <- function(rs_ptr, n_bins, chrom_names, chrom_sizes_vec) .Call(wrap__r_calc_density_vector, rs_ptr, n_bins, chrom_names, chrom_sizes_vec)
+
+#' Summary statistics over the dense per-window count vector.
+#'
+#' Returns mean, population variance, coefficient of variation, Gini
+#' coefficient, and the count of nonzero windows. Gini is biased high
+#' for very sparse count distributions; inspect `n_nonzero_windows`
+#' before interpreting Gini on sparse peak sets.
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param n_bins Target number of bins for the longest chromosome
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes_vec Integer vector of chromosome sizes
+r_calc_density_homogeneity <- function(rs_ptr, n_bins, chrom_names, chrom_sizes_vec) .Call(wrap__r_calc_density_homogeneity, rs_ptr, n_bins, chrom_names, chrom_sizes_vec)
+
 #' Load a genome assembly from a FASTA file
 #' @export
 #' @param fasta_path Path to a FASTA file
@@ -181,10 +246,18 @@ r_narrow <- function(rs_ptr, start, end, width) .Call(wrap__r_narrow, rs_ptr, st
 #' @param rs_ptr External pointer to a RegionSet
 r_disjoin <- function(rs_ptr) .Call(wrap__r_disjoin, rs_ptr)
 
-#' Return gaps between regions per chromosome
+#' Return gaps between regions per chromosome, bounded by chrom sizes
+#'
+#' Emits the peak-free intervals of each chromosome listed in `chrom_sizes`,
+#' including leading gaps (from 0), inter-region gaps, trailing gaps
+#' (to `chrom_size`), and full-chromosome gaps for chromosomes with no
+#' regions. Regions on chromosomes not present in `chrom_sizes` are skipped.
+#'
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
-r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes_vec Integer vector of chromosome sizes
+r_gaps <- function(rs_ptr, chrom_names, chrom_sizes_vec) .Call(wrap__r_gaps, rs_ptr, chrom_names, chrom_sizes_vec)
 
 #' Range-level intersection of two region sets
 #' @export
