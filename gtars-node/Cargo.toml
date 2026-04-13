@@ -10,6 +10,7 @@ crate-type = ["cdylib"]
 napi = "2"
 napi-derive = "2"
 anyhow = { workspace = true }
+serde_json = { workspace = true }
 gtars-refget = { path = "../gtars-refget" }
 
 [build-dependencies]

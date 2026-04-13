@@ -39,7 +39,6 @@ pub struct StoreStatsJs {
     pub n_collections: u32,
     pub n_collections_loaded: u32,
     pub storage_mode: String,
-    pub total_disk_size: f64,
 }
 
 // -- Main wrapper class --
@@ -81,7 +80,7 @@ impl RefgetStore {
 
     #[napi]
     pub fn get_sequence(&self, digest: String) -> Result<String> {
-        let mut store = self.inner.lock().map_err(lock_err)?;
+        let store = self.inner.lock().map_err(lock_err)?;
         let record = store.get_sequence(&digest).map_err(to_napi_err)?;
         record
             .decode()
@@ -90,7 +89,7 @@ impl RefgetStore {
 
     #[napi]
     pub fn get_substring(&self, digest: String, start: u32, end: u32) -> Result<String> {
-        let mut store = self.inner.lock().map_err(lock_err)?;
+        let store = self.inner.lock().map_err(lock_err)?;
         store
             .get_substring(&digest, start as usize, end as usize)
             .map_err(to_napi_err)
@@ -102,7 +101,7 @@ impl RefgetStore {
         collection_digest: String,
         name: String,
     ) -> Result<String> {
-        let mut store = self.inner.lock().map_err(lock_err)?;
+        let store = self.inner.lock().map_err(lock_err)?;
         let record = store
             .get_sequence_by_name(&collection_digest, &name)
             .map_err(to_napi_err)?;
@@ -116,8 +115,11 @@ impl RefgetStore {
     #[napi]
     pub fn list_collections(&self) -> Result<Vec<CollectionMetadataJs>> {
         let store = self.inner.lock().map_err(lock_err)?;
-        Ok(store
-            .list_collections()
+        let paged = store
+            .list_collections(0, usize::MAX, &[])
+            .map_err(to_napi_err)?;
+        Ok(paged
+            .results
             .into_iter()
             .map(|m| CollectionMetadataJs {
                 digest: m.digest,
@@ -180,14 +182,13 @@ impl RefgetStore {
     #[napi]
     pub fn stats(&self) -> Result<StoreStatsJs> {
         let store = self.inner.lock().map_err(lock_err)?;
-        let s = store.stats_extended();
+        let s = store.stats();
         Ok(StoreStatsJs {
             n_sequences: s.n_sequences as u32,
             n_sequences_loaded: s.n_sequences_loaded as u32,
             n_collections: s.n_collections as u32,
             n_collections_loaded: s.n_collections_loaded as u32,
             storage_mode: s.storage_mode,
-            total_disk_size: s.total_disk_size as f64,
         })
     }
 
@@ -223,4 +224,19 @@ impl RefgetStore {
         store.write_store_to_dir(&path, None).map_err(to_napi_err)
     }
 
+    // -- Seqcol comparison --
+
+    /// Compare two sequence collections by digest.
+    /// Returns the comparison result as a JSON string (call JSON.parse() on the JS side).
+    #[napi]
+    pub fn compare(
+        &self,
+        digest_a: String,
+        digest_b: String,
+    ) -> Result<String> {
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        let comparison = store.compare(&digest_a, &digest_b).map_err(to_napi_err)?;
+        serde_json::to_string(&comparison)
+            .map_err(|e| napi::Error::from_reason(format!("Serialization error: {}", e)))
+    }
 }
