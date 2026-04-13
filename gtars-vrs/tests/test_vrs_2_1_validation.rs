@@ -24,17 +24,34 @@ use serde_json::Value;
 
 /// Find the validation directory relative to the workspace root.
 fn validation_dir() -> PathBuf {
+    // Check VRS_SPEC_DIR env var first, then fall back to sibling repo convention
+    if let Ok(dir) = std::env::var("VRS_SPEC_DIR") {
+        let p = PathBuf::from(dir).join("validation");
+        if p.exists() {
+            return p;
+        }
+    }
+
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest.parent().unwrap();
-    let dir = repo_root.join("vrs-spec/validation");
-    assert!(
-        dir.exists(),
-        "Validation directory not found at {:?}. Clone the VRS spec repo first:\n  \
-         git clone --branch '2.1.0-connect_2026_#10' --depth 1 \
-         https://github.com/ga4gh/vrs.git vrs-spec",
-        dir
-    );
-    dir
+    let repo_root = manifest.parent().unwrap(); // gtars repo root
+    // Try sibling to gtars (workspace repos/ layout)
+    let sibling = repo_root.parent().unwrap().join("vrs-spec/validation");
+    // Try inside gtars (standalone checkout)
+    let inside = repo_root.join("vrs-spec/validation");
+
+    if sibling.exists() {
+        sibling
+    } else if inside.exists() {
+        inside
+    } else {
+        panic!(
+            "VRS validation directory not found. Either:\n  \
+             1. Set VRS_SPEC_DIR env var to the vrs-spec repo root, or\n  \
+             2. Clone as a sibling: cd {:?} && git clone --branch \
+             '2.1.0-connect_2026_#10' --depth 1 https://github.com/ga4gh/vrs.git vrs-spec",
+            repo_root.parent().unwrap()
+        );
+    }
 }
 
 fn load_yaml(filename: &str) -> Value {
