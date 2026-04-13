@@ -234,6 +234,10 @@ jobs:
         run: |
           npm install
           npx napi prepublish -t npm --skip-gh-release
+          # napi prepublish generates index.js/index.d.ts but may not copy .node files
+          # into platform dirs; copy them explicitly
+          cp gtars-node.linux-x64-gnu.node npm/linux-x64-gnu/ 2>/dev/null || true
+          cp gtars-node.darwin-arm64.node npm/darwin-arm64/ 2>/dev/null || true
           ls -la npm/*/
       - name: Publish platform packages
         working-directory: gtars-node
