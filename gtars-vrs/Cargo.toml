@@ -22,3 +22,4 @@ gtars-refget = { path = "../gtars-refget", version = "0.7.0" }
 
 [dev-dependencies]
 tempfile = "3.8.1"
+serde_yaml = "0.9"
