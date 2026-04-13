@@ -47,8 +47,29 @@ class ClusterStats:
     """
     Cluster-level summary statistics at a given stitching radius.
 
-    Returned by ``RegionSet.peak_clusters(radius_bp)``. ``mean_cluster_size``
-    and ``fraction_clustered`` are NaN for empty inputs.
+    Returned by ``RegionSet.peak_clusters(radius_bp, min_cluster_size)``.
+
+    ``min_cluster_size`` applies uniformly to every size-dependent field
+    except ``max_cluster_size`` (which is always the biggest cluster in
+    the input regardless of filter). The identity
+    ``n_clusters * mean_cluster_size == n_clustered_peaks`` holds at any
+    threshold.
+
+    **Default** ``min_cluster_size = 2``: fields describe "clusters of at
+    least 2 peaks". ``n_clusters`` excludes singletons,
+    ``n_clustered_peaks`` is peaks with at least one neighbor within
+    ``radius_bp``, ``mean_cluster_size`` is their average size, and
+    ``fraction_clustered`` is ``n_clustered_peaks / total_peaks``. This
+    matches the typical "how clustered are my peaks?" use case.
+
+    **Pass** ``min_cluster_size=1`` to get the simple-average view —
+    ``mean_cluster_size`` becomes ``total_peaks / n_clusters``, but
+    ``n_clustered_peaks`` degenerates to ``total_peaks`` and
+    ``fraction_clustered`` to ``1.0`` (tautologies under this threshold).
+
+    ``mean_cluster_size`` and ``fraction_clustered`` are NaN for empty
+    inputs. ``mean_cluster_size`` is also NaN when no clusters meet the
+    threshold (e.g. all singletons with ``min_cluster_size=2``).
     """
     radius_bp: int
     n_clusters: int
@@ -455,7 +476,11 @@ class RegionSet:
         """
         ...
 
-    def peak_clusters(self, radius_bp: int) -> ClusterStats:
+    def peak_clusters(
+        self,
+        radius_bp: int,
+        min_cluster_size: int = 2,
+    ) -> ClusterStats:
         """
         Cluster-level summary statistics at a given stitching radius.
 
@@ -463,6 +488,28 @@ class RegionSet:
         connected components where two regions link if the bp gap between
         ``prev.end`` and ``next.start`` is at most ``radius_bp``.
         Chromosome-scoped (no cross-chromosome linking).
+
+        :param radius_bp: stitching radius in bp.
+        :param min_cluster_size: minimum cluster size that qualifies
+            clusters for inclusion in the size-dependent fields of the
+            returned ``ClusterStats`` (``n_clusters``,
+            ``n_clustered_peaks``, ``mean_cluster_size``, and
+            ``fraction_clustered``). ``max_cluster_size`` is always
+            unfiltered.
+
+            **Default 2**: every field describes "clusters with at least
+            2 peaks". Matches typical enhancer-clustering or
+            super-enhancer-stitching analyses and gives
+            ``fraction_clustered`` a useful meaning (fraction of peaks
+            with at least one neighbor within ``radius_bp``).
+
+            **Pass 1** to include singletons and get the simple-average
+            view — ``mean_cluster_size`` becomes ``total_peaks /
+            n_clusters`` but ``n_clustered_peaks`` degenerates to
+            ``total_peaks`` and ``fraction_clustered`` to ``1.0``.
+
+            The identity ``n_clusters * mean_cluster_size ==
+            n_clustered_peaks`` holds at any threshold.
         """
         ...
 

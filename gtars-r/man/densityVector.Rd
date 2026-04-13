@@ -17,7 +17,7 @@ densityVector(x, chrom_sizes, nBins = 250L, ...)
 
 \item{chrom_sizes}{Named integer vector of chromosome sizes (required)}
 
-\item{nBins}{Target number of bins for the longest chromosome}
+\item{nBins}{Target bin count for the longest chromosome — see Details.}
 
 \item{...}{ignored}
 }
@@ -30,4 +30,27 @@ Returns the full zero-padded peak count vector across the
 genome, ordered by karyotypic chromosome order and bin index. Unlike
 \code{distribution}, empty bins are included. Suitable for ML feature
 extraction.
+}
+\details{
+\strong{\code{nBins} is a target, not the total window count.} It is
+the target bin count for the longest chromosome in \code{chrom_sizes},
+not the length of the returned \code{counts} vector. Bin width is
+derived as \code{max(chrom_sizes) / nBins} (floored, minimum 1 bp),
+and every chromosome is tiled with windows of that width. The total
+number of bins returned is \code{sum(ceil(size / bin_width))} across
+\code{chrom_sizes}, which can substantially exceed \code{nBins} when
+many chromosomes are present. To target a specific bin width in bp,
+pass \code{nBins = floor(max(chrom_sizes) / desired_width_bp)}.
+
+\strong{Per-chromosome bin width.} The last bin on each chromosome is
+narrower than \code{bin_width} whenever \code{chrom_size} is not an
+exact multiple of \code{bin_width}. Chromosomes shorter than
+\code{bin_width} (common with UCSC alt / random / unplaced contigs
+such as \code{chrUn_*}, \code{*_random}, \code{*_alt}) reduce to a
+single bin whose effective width equals the chromosome size rather
+than \code{bin_width}. Entries in \code{counts} are therefore counts
+per bin, not counts per \code{bin_width} bp — bins of different
+effective widths are not directly comparable as densities when
+\code{chrom_sizes} contains contigs significantly shorter than
+\code{bin_width}.
 }

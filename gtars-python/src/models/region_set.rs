@@ -557,11 +557,32 @@ impl PyRegionSet {
     }
 
     /// Cluster-level summary statistics at a given stitching radius.
+    ///
     /// Wraps ``cluster(radius_bp)``.
-    #[pyo3(signature = (radius_bp))]
-    fn peak_clusters(&self, radius_bp: u32) -> PyClusterStats {
+    ///
+    /// ``min_cluster_size`` applies uniformly to every size-dependent
+    /// field in the returned ``ClusterStats`` except ``max_cluster_size``
+    /// (which is always the biggest cluster in the input). The
+    /// arithmetic identity ``n_clusters * mean_cluster_size ==
+    /// n_clustered_peaks`` holds at any threshold.
+    ///
+    /// The **default ``min_cluster_size = 2``** means every field
+    /// describes "clusters of at least 2 peaks" — the scientifically
+    /// meaningful view for enhancer clustering, super-enhancer
+    /// stitching, etc. ``fraction_clustered`` is then the fraction of
+    /// peaks with at least one neighbor within ``radius_bp``.
+    ///
+    /// Pass ``min_cluster_size=1`` to include singletons. Under this
+    /// threshold ``mean_cluster_size`` becomes the simple
+    /// ``total_peaks / n_clusters`` average, but ``n_clustered_peaks``
+    /// degenerates to ``total_peaks`` and ``fraction_clustered`` to
+    /// ``1.0`` (every peak is in a cluster of size ≥ 1).
+    #[pyo3(signature = (radius_bp, min_cluster_size = 2))]
+    fn peak_clusters(&self, radius_bp: u32, min_cluster_size: usize) -> PyClusterStats {
         PyClusterStats {
-            inner: self.regionset.calc_peak_clusters(radius_bp),
+            inner: self
+                .regionset
+                .calc_peak_clusters(radius_bp, min_cluster_size),
         }
     }
 

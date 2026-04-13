@@ -4,16 +4,37 @@
 \alias{r_calc_peak_clusters}
 \title{Cluster-level summary statistics at a given stitching radius.}
 \usage{
-r_calc_peak_clusters(rs_ptr, radius_bp)
+r_calc_peak_clusters(rs_ptr, radius_bp, min_cluster_size)
 }
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}
 
 \item{radius_bp}{Stitching radius in bp (non-negative)}
+
+\item{min_cluster_size}{Minimum cluster size that qualifies clusters
+for inclusion in the size-dependent fields (all except
+\code{max_cluster_size}). The R wrapper defaults this to 2L.}
 }
 \description{
 Wraps \code{cluster(radius_bp)} and reduces the per-region cluster ID
 vector to scalar summary stats: number of clusters, clustered-peak
-count, mean / max cluster size (over clusters of size > 1), and
-fraction of peaks belonging to a cluster.
+count, mean / max cluster size, and fraction of peaks belonging to
+a cluster.
+}
+\details{
+\code{min_cluster_size} applies uniformly to every size-dependent field
+except \code{max_cluster_size} (which is always the biggest cluster in
+the input regardless of filter). \code{n_clusters}, \code{n_clustered_peaks},
+\code{mean_cluster_size}, and \code{fraction_clustered} all restrict to
+clusters with size >= \code{min_cluster_size}. The arithmetic identity
+\code{n_clusters * mean_cluster_size == n_clustered_peaks} holds at any
+threshold.
+
+The R \code{peakClusters} wrapper defaults \code{min_cluster_size = 2L}, which
+produces the scientifically meaningful "multi-peak clusters only"
+view used by typical enhancer/super-enhancer analyses. Pass
+\code{min_cluster_size = 1L} to include singletons — \code{mean_cluster_size}
+becomes the simple \code{total_peaks / n_clusters} but
+\code{n_clustered_peaks} degenerates to \code{total_peaks} and
+\code{fraction_clustered} to \code{1.0}.
 }

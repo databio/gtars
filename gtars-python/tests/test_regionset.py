@@ -146,8 +146,11 @@ class TestSpatialStats:
         assert math.isnan(s.mean)
         assert math.isnan(s.std)
 
-    def test_peak_clusters_mixed(self):
-        """Two clusters + one singleton at radius 5."""
+    def test_peak_clusters_mixed_default(self):
+        """Two clusters + one singleton at radius 5. Default
+        min_cluster_size=2 excludes the singleton uniformly: n_clusters,
+        n_clustered_peaks, mean_cluster_size, and fraction_clustered
+        all describe multi-peak clusters only."""
         rs = _rs(
             ("chr1", 0, 10),
             ("chr1", 13, 20),
@@ -157,11 +160,35 @@ class TestSpatialStats:
             ("chr1", 500, 510),
         )
         c = rs.peak_clusters(5)
-        assert c.n_clusters == 3
-        assert c.n_clustered_peaks == 5
-        assert c.max_cluster_size == 3
-        assert c.mean_cluster_size == 2.5
+        assert c.n_clusters == 2  # multi-peak only, singleton excluded
+        assert c.n_clustered_peaks == 5  # peaks in the two multi-peak clusters
+        assert c.max_cluster_size == 3  # unfiltered, still the biggest cluster
+        assert c.mean_cluster_size == 2.5  # (2 + 3) / 2
+        # Arithmetic identity holds: 2 * 2.5 == 5
+        assert c.n_clusters * c.mean_cluster_size == c.n_clustered_peaks
+        # fraction_clustered uses raw total (6), not filtered count.
         assert abs(c.fraction_clustered - 5 / 6) < 1e-10
+
+    def test_peak_clusters_mixed_min_1_simple_average(self):
+        """Same fixture, min_cluster_size=1 includes every connected
+        component including the singleton. Mean degenerates to
+        total_peaks / n_clusters = 6 / 3 = 2.0."""
+        rs = _rs(
+            ("chr1", 0, 10),
+            ("chr1", 13, 20),
+            ("chr1", 100, 110),
+            ("chr1", 113, 120),
+            ("chr1", 122, 130),
+            ("chr1", 500, 510),
+        )
+        c = rs.peak_clusters(5, min_cluster_size=1)
+        assert c.n_clusters == 3  # includes the singleton
+        assert c.n_clustered_peaks == 6  # == total_peaks under min=1
+        assert c.max_cluster_size == 3
+        assert c.mean_cluster_size == 2.0
+        # Identity still holds: 3 * 2.0 == 6
+        assert c.n_clusters * c.mean_cluster_size == c.n_clustered_peaks
+        assert c.fraction_clustered == 1.0  # tautological under min=1
 
     def test_peak_clusters_empty(self):
         c = _rs().peak_clusters(100)

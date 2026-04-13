@@ -189,28 +189,62 @@ setMethod("interPeakSpacing", "ANY", function(x, ...) {
 #' Peak cluster summary statistics
 #'
 #' @description Cluster-level summary at a given stitching radius:
-#'   number of clusters, clustered-peak count, mean / max cluster size
-#'   (over clusters of size > 1), and fraction of peaks belonging to a
-#'   cluster.
+#'   number of clusters, clustered-peak count, mean / max cluster size,
+#'   and fraction of peaks belonging to a cluster.
+#'
+#' @details
+#' \code{min_cluster_size} applies uniformly to every size-dependent
+#' field except \code{max_cluster_size} (which is always the biggest
+#' cluster in the input regardless of filter). \code{n_clusters},
+#' \code{n_clustered_peaks}, \code{mean_cluster_size}, and
+#' \code{fraction_clustered} all restrict to clusters with size at
+#' least \code{min_cluster_size}. The arithmetic identity
+#' \code{n_clusters * mean_cluster_size == n_clustered_peaks} holds at
+#' any threshold.
+#'
+#' \strong{Default \code{min_cluster_size = 2L}}: every reported field
+#' describes "clusters with at least 2 peaks". This matches the typical
+#' enhancer-clustering / super-enhancer-stitching use case;
+#' \code{fraction_clustered} is then the fraction of peaks with at
+#' least one neighbor within \code{radius_bp}, and
+#' \code{mean_cluster_size} is the average size of multi-peak clusters.
+#'
+#' \strong{Pass \code{min_cluster_size = 1L}} to include singletons. Under
+#' this threshold \code{mean_cluster_size} becomes the simple
+#' \code{total_peaks / n_clusters} average, but \code{n_clustered_peaks}
+#' degenerates to \code{total_peaks} and \code{fraction_clustered} to
+#' \code{1.0} (every peak is in a cluster of size >= 1).
+#'
+#' Higher values progressively restrict to larger clusters.
+#'
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param radius_bp Stitching radius in bp (non-negative)
+#' @param min_cluster_size Minimum cluster size that qualifies clusters
+#'   for inclusion in all size-dependent fields except
+#'   \code{max_cluster_size}. Default \code{2L}.
 #' @param ... ignored
 #' @return A named list with fields: radius_bp, n_clusters,
 #'   n_clustered_peaks, mean_cluster_size, max_cluster_size,
 #'   fraction_clustered.
 #' @export
-setGeneric("peakClusters", function(x, radius_bp, ...) standardGeneric("peakClusters"))
+setGeneric("peakClusters",
+           function(x, radius_bp, min_cluster_size = 2L, ...) standardGeneric("peakClusters"))
 
 #' @rdname peakClusters
 #' @export
-setMethod("peakClusters", "RegionSet", function(x, radius_bp, ...) {
-  .Call(wrap__r_calc_peak_clusters, .ptr(x), as.integer(radius_bp))
+setMethod("peakClusters", "RegionSet", function(x, radius_bp, min_cluster_size = 2L, ...) {
+  .Call(
+    wrap__r_calc_peak_clusters,
+    .ptr(x),
+    as.integer(radius_bp),
+    as.integer(min_cluster_size)
+  )
 })
 
 #' @rdname peakClusters
 #' @export
-setMethod("peakClusters", "ANY", function(x, radius_bp, ...) {
-  peakClusters(RegionSet(x), radius_bp = radius_bp)
+setMethod("peakClusters", "ANY", function(x, radius_bp, min_cluster_size = 2L, ...) {
+  peakClusters(RegionSet(x), radius_bp = radius_bp, min_cluster_size = min_cluster_size)
 })
 
 #' Dense per-window peak count vector

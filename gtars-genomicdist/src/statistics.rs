@@ -111,9 +111,41 @@ pub trait GenomicIntervalSetStatistics {
     /// Returns a `ClusterStats` summarizing the cluster size distribution.
     /// For empty inputs `mean_cluster_size` and `fraction_clustered` are NaN.
     ///
+    /// # `min_cluster_size` applies uniformly
+    ///
+    /// `min_cluster_size` restricts every size-dependent field in
+    /// `ClusterStats` (except `max_cluster_size`, which is inherently
+    /// the max over all clusters):
+    ///
+    /// - `n_clusters` counts clusters with size ≥ `min_cluster_size`.
+    /// - `n_clustered_peaks` counts peaks in those clusters.
+    /// - `mean_cluster_size` averages sizes of those clusters.
+    /// - `fraction_clustered` is `n_clustered_peaks / total_peaks`
+    ///   (where `total_peaks` is the raw, unfiltered input count).
+    ///
+    /// This guarantees the arithmetic identity
+    /// `n_clusters * mean_cluster_size == n_clustered_peaks`.
+    ///
+    /// # Choosing a value
+    ///
+    /// - **`min_cluster_size = 2`** (the standard default used by
+    ///   bindings): all reported fields describe "clusters of at least
+    ///   two peaks", matching typical enhancer-clustering /
+    ///   super-enhancer-stitching analyses. `fraction_clustered` is
+    ///   then the fraction of peaks with at least one neighbor within
+    ///   `radius_bp`. NaN for `mean_cluster_size` if no multi-peak
+    ///   clusters exist.
+    /// - **`min_cluster_size = 1`** includes every connected component
+    ///   (singletons too). `mean_cluster_size` becomes the simple
+    ///   `total_peaks / n_clusters` average; `n_clustered_peaks ==
+    ///   total_peaks` and `fraction_clustered == 1.0` by definition.
+    ///   Useful for the simple-mean view, but the size-count fields
+    ///   become tautological.
+    /// - **Higher values** progressively restrict to larger clusters.
+    ///
     /// Useful for characterizing enhancer clusters, super-enhancer stitching
     /// distances, or any ChIP-seq-style "how clustered are my peaks?" question.
-    fn calc_peak_clusters(&self, radius_bp: u32) -> ClusterStats;
+    fn calc_peak_clusters(&self, radius_bp: u32, min_cluster_size: usize) -> ClusterStats;
 
     /// Compute the dense per-window peak count vector across the genome.
     ///
@@ -467,7 +499,7 @@ impl GenomicIntervalSetStatistics for RegionSet {
         }
     }
 
-    fn calc_peak_clusters(&self, radius_bp: u32) -> ClusterStats {
+    fn calc_peak_clusters(&self, radius_bp: u32, min_cluster_size: usize) -> ClusterStats {
         let ids = self.cluster(radius_bp);
         let total = ids.len();
 
@@ -489,19 +521,32 @@ impl GenomicIntervalSetStatistics for RegionSet {
             sizes[id as usize] += 1;
         }
 
-        let n_clusters = sizes.len();
+        // max_cluster_size is inherently over all clusters and is not
+        // affected by min_cluster_size — "the biggest cluster" is a
+        // fixed concept regardless of any size filter.
         let max_cluster_size = *sizes.iter().max().unwrap_or(&0);
 
-        // Clusters of size > 1 and peaks belonging to them.
-        let nontrivial_sizes: Vec<usize> =
-            sizes.iter().copied().filter(|&s| s > 1).collect();
-        let n_clustered_peaks: usize = nontrivial_sizes.iter().sum();
-        let mean_cluster_size = if nontrivial_sizes.is_empty() {
+        // All other size-dependent fields apply the min_cluster_size
+        // filter uniformly. This preserves the arithmetic identity
+        // n_clusters * mean_cluster_size == n_clustered_peaks for any
+        // threshold and avoids the mixed-semantics trap Sanghoon flagged.
+        let included_sizes: Vec<usize> = sizes
+            .iter()
+            .copied()
+            .filter(|&s| s >= min_cluster_size)
+            .collect();
+
+        let n_clusters = included_sizes.len();
+        let n_clustered_peaks: usize = included_sizes.iter().sum();
+        let mean_cluster_size = if included_sizes.is_empty() {
             f64::NAN
         } else {
-            nontrivial_sizes.iter().sum::<usize>() as f64 / nontrivial_sizes.len() as f64
+            n_clustered_peaks as f64 / n_clusters as f64
         };
 
+        // fraction_clustered uses the raw total (not filtered) so the
+        // denominator answers "what fraction of all my peaks belong to
+        // a qualifying cluster?". Input can't be zero here (handled above).
         let fraction_clustered = n_clustered_peaks as f64 / total as f64;
 
         ClusterStats {
@@ -1383,11 +1428,14 @@ mod tests {
     // --- calc_peak_clusters ---
 
     #[test]
-    fn test_peak_clusters_all_singletons() {
-        // Regions far apart, no clustering at radius 0.
+    fn test_peak_clusters_all_singletons_min_2() {
+        // Three regions far apart, no clustering at radius 0.
+        // With min_cluster_size=2 (default), no clusters meet the
+        // threshold — all size-count fields collapse to zero, mean NaN.
+        // max_cluster_size is still 1 (unfiltered).
         let rs = make_rs(&[("chr1", 0, 10), ("chr1", 100, 110), ("chr1", 200, 210)]);
-        let c = rs.calc_peak_clusters(0);
-        assert_eq!(c.n_clusters, 3);
+        let c = rs.calc_peak_clusters(0, 2);
+        assert_eq!(c.n_clusters, 0);
         assert_eq!(c.n_clustered_peaks, 0);
         assert_eq!(c.max_cluster_size, 1);
         assert!(c.mean_cluster_size.is_nan());
@@ -1395,8 +1443,23 @@ mod tests {
     }
 
     #[test]
+    fn test_peak_clusters_all_singletons_min_1() {
+        // Same fixture with min_cluster_size=1: every singleton counts.
+        // n_clustered_peaks == total_peaks, fraction_clustered == 1.0.
+        let rs = make_rs(&[("chr1", 0, 10), ("chr1", 100, 110), ("chr1", 200, 210)]);
+        let c = rs.calc_peak_clusters(0, 1);
+        assert_eq!(c.n_clusters, 3);
+        assert_eq!(c.n_clustered_peaks, 3);
+        assert_eq!(c.max_cluster_size, 1);
+        assert!((c.mean_cluster_size - 1.0).abs() < 1e-10);
+        assert!((c.fraction_clustered - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
     fn test_peak_clusters_one_big_cluster() {
         // Five regions all within 5bp of each other → single cluster of size 5.
+        // Stats are identical under min=1 and min=2 because the only cluster
+        // has size 5 which meets either threshold.
         let rs = make_rs(&[
             ("chr1", 0, 10),
             ("chr1", 13, 20),
@@ -1404,7 +1467,7 @@ mod tests {
             ("chr1", 33, 40),
             ("chr1", 42, 50),
         ]);
-        let c = rs.calc_peak_clusters(5);
+        let c = rs.calc_peak_clusters(5, 2);
         assert_eq!(c.n_clusters, 1);
         assert_eq!(c.n_clustered_peaks, 5);
         assert_eq!(c.max_cluster_size, 5);
@@ -1413,11 +1476,13 @@ mod tests {
     }
 
     #[test]
-    fn test_peak_clusters_mixed() {
+    fn test_peak_clusters_mixed_min_2_default() {
         // Two clusters + one singleton at radius 5:
         //   cluster A: (0,10),(13,20)  — size 2
         //   cluster B: (100,110),(113,120),(122,130) — size 3
         //   singleton: (500, 510)
+        // With min_cluster_size=2 (default): only the two multi-peak
+        // clusters are counted. All size-dependent fields agree on that.
         let rs = make_rs(&[
             ("chr1", 0, 10),
             ("chr1", 13, 20),
@@ -1426,28 +1491,80 @@ mod tests {
             ("chr1", 122, 130),
             ("chr1", 500, 510),
         ]);
-        let c = rs.calc_peak_clusters(5);
-        assert_eq!(c.n_clusters, 3);
+        let c = rs.calc_peak_clusters(5, 2);
+        assert_eq!(c.n_clusters, 2);
         assert_eq!(c.n_clustered_peaks, 5); // 2 + 3
         assert_eq!(c.max_cluster_size, 3);
-        // Mean over nontrivial clusters only: (2 + 3) / 2 = 2.5
         assert!((c.mean_cluster_size - 2.5).abs() < 1e-10);
+        // Arithmetic identity: 2 * 2.5 == 5
+        assert!(
+            (c.n_clusters as f64 * c.mean_cluster_size - c.n_clustered_peaks as f64).abs()
+                < 1e-10
+        );
+        // fraction_clustered uses raw total (6), not filtered count.
         assert!((c.fraction_clustered - 5.0 / 6.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_peak_clusters_mixed_min_1_simple_average() {
+        // Same fixture, min_cluster_size=1: every cluster counted.
+        // Simple mean = total / n_clusters = 6 / 3 = 2.0.
+        // n_clustered_peaks degenerates to total_peaks; fraction = 1.0.
+        let rs = make_rs(&[
+            ("chr1", 0, 10),
+            ("chr1", 13, 20),
+            ("chr1", 100, 110),
+            ("chr1", 113, 120),
+            ("chr1", 122, 130),
+            ("chr1", 500, 510),
+        ]);
+        let c = rs.calc_peak_clusters(5, 1);
+        assert_eq!(c.n_clusters, 3);
+        assert_eq!(c.n_clustered_peaks, 6); // includes the singleton now
+        assert_eq!(c.max_cluster_size, 3);
+        assert!((c.mean_cluster_size - 2.0).abs() < 1e-10);
+        // Identity still holds: 3 * 2.0 == 6
+        assert!(
+            (c.n_clusters as f64 * c.mean_cluster_size - c.n_clustered_peaks as f64).abs()
+                < 1e-10
+        );
+        assert!((c.fraction_clustered - 1.0).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_peak_clusters_mixed_min_3() {
+        // Same fixture, min_cluster_size=3: only the size-3 cluster qualifies.
+        let rs = make_rs(&[
+            ("chr1", 0, 10),
+            ("chr1", 13, 20),
+            ("chr1", 100, 110),
+            ("chr1", 113, 120),
+            ("chr1", 122, 130),
+            ("chr1", 500, 510),
+        ]);
+        let c = rs.calc_peak_clusters(5, 3);
+        assert_eq!(c.n_clusters, 1);
+        assert_eq!(c.n_clustered_peaks, 3);
+        assert_eq!(c.max_cluster_size, 3); // unfiltered
+        assert!((c.mean_cluster_size - 3.0).abs() < 1e-10);
+        assert!((c.fraction_clustered - 3.0 / 6.0).abs() < 1e-10);
     }
 
     #[test]
     fn test_peak_clusters_cross_chromosome() {
         // Two regions on different chromosomes should never cluster.
+        // With min=2 (default), neither cluster qualifies → all zero.
         let rs = make_rs(&[("chr1", 0, 10), ("chr2", 0, 10)]);
-        let c = rs.calc_peak_clusters(1_000_000);
-        assert_eq!(c.n_clusters, 2);
+        let c = rs.calc_peak_clusters(1_000_000, 2);
+        assert_eq!(c.n_clusters, 0);
         assert_eq!(c.n_clustered_peaks, 0);
+        assert_eq!(c.max_cluster_size, 1); // inherent max over all clusters
     }
 
     #[test]
     fn test_peak_clusters_empty() {
         let rs = make_rs(&[]);
-        let c = rs.calc_peak_clusters(100);
+        let c = rs.calc_peak_clusters(100, 2);
         assert_eq!(c.n_clusters, 0);
         assert_eq!(c.n_clustered_peaks, 0);
         assert_eq!(c.max_cluster_size, 0);

@@ -6,16 +6,20 @@
 \alias{peakClusters,ANY-method}
 \title{Peak cluster summary statistics}
 \usage{
-peakClusters(x, radius_bp, ...)
+peakClusters(x, radius_bp, min_cluster_size = 2L, ...)
 
-\S4method{peakClusters}{RegionSet}(x, radius_bp, ...)
+\S4method{peakClusters}{RegionSet}(x, radius_bp, min_cluster_size = 2L, ...)
 
-\S4method{peakClusters}{ANY}(x, radius_bp, ...)
+\S4method{peakClusters}{ANY}(x, radius_bp, min_cluster_size = 2L, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}
 
 \item{radius_bp}{Stitching radius in bp (non-negative)}
+
+\item{min_cluster_size}{Minimum cluster size that qualifies clusters
+for inclusion in all size-dependent fields except
+\code{max_cluster_size}. Default \code{2L}.}
 
 \item{...}{ignored}
 }
@@ -26,7 +30,31 @@ fraction_clustered.
 }
 \description{
 Cluster-level summary at a given stitching radius:
-number of clusters, clustered-peak count, mean / max cluster size
-(over clusters of size > 1), and fraction of peaks belonging to a
-cluster.
+number of clusters, clustered-peak count, mean / max cluster size,
+and fraction of peaks belonging to a cluster.
+}
+\details{
+\code{min_cluster_size} applies uniformly to every size-dependent
+field except \code{max_cluster_size} (which is always the biggest
+cluster in the input regardless of filter). \code{n_clusters},
+\code{n_clustered_peaks}, \code{mean_cluster_size}, and
+\code{fraction_clustered} all restrict to clusters with size at
+least \code{min_cluster_size}. The arithmetic identity
+\code{n_clusters * mean_cluster_size == n_clustered_peaks} holds at
+any threshold.
+
+\strong{Default \code{min_cluster_size = 2L}}: every reported field
+describes "clusters with at least 2 peaks". This matches the typical
+enhancer-clustering / super-enhancer-stitching use case;
+\code{fraction_clustered} is then the fraction of peaks with at
+least one neighbor within \code{radius_bp}, and
+\code{mean_cluster_size} is the average size of multi-peak clusters.
+
+\strong{Pass \code{min_cluster_size = 1L}} to include singletons. Under
+this threshold \code{mean_cluster_size} becomes the simple
+\code{total_peaks / n_clusters} average, but \code{n_clustered_peaks}
+degenerates to \code{total_peaks} and \code{fraction_clustered} to
+\code{1.0} (every peak is in a cluster of size >= 1).
+
+Higher values progressively restrict to larger clusters.
 }

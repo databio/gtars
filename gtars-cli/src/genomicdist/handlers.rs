@@ -147,6 +147,13 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
                 .with_context(|| format!("--cluster-radii entry must be a non-negative integer, got '{}'", s))
         })
         .collect::<Result<_>>()?;
+    // Default 2 matches the binding-layer default: every size-dependent
+    // ClusterStats field describes "multi-peak clusters only".
+    let cluster_min_size: usize = matches
+        .get_one::<String>("cluster-min-size")
+        .unwrap()
+        .parse()
+        .context("--cluster-min-size must be a positive integer")?;
 
     // Load BED file
     let rs = RegionSet::try_from(bed_path.as_str())
@@ -184,11 +191,17 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     // Spatial-arrangement summary statistics. inter_peak_spacing wraps
     // calc_neighbor_distances and is always safe to compute. peak_clusters
     // is evaluated at each user-supplied radius (default: promoter / enhancer
-    // / domain scales) to build a multi-scale spatial fingerprint.
+    // / domain scales) to build a multi-scale spatial fingerprint. The
+    // --cluster-min-size flag (default 2) applies uniformly to every
+    // size-dependent field in each ClusterStats (n_clusters,
+    // n_clustered_peaks, mean_cluster_size, fraction_clustered); at the
+    // default it describes "multi-peak clusters only", the scientifically
+    // meaningful view. Pass --cluster-min-size 1 for the simple-average
+    // "include singletons" world.
     let inter_peak_spacing = rs.calc_inter_peak_spacing();
     let peak_clusters: Vec<ClusterStats> = cluster_radii
         .iter()
-        .map(|&r| rs.calc_peak_clusters(r))
+        .map(|&r| rs.calc_peak_clusters(r, cluster_min_size))
         .collect();
 
     // Convert region distribution HashMap to sorted Vec

@@ -9,7 +9,8 @@ r_calc_density_vector(rs_ptr, n_bins, chrom_names, chrom_sizes_vec)
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}
 
-\item{n_bins}{Target number of bins for the longest chromosome}
+\item{n_bins}{Target bin count for the longest chromosome — not the
+total number of bins returned. See the function description.}
 
 \item{chrom_names}{Character vector of chromosome names}
 
@@ -20,4 +21,16 @@ Unlike \code{r_region_distribution} (which returns only non-empty bins),
 this returns the full zero-padded count vector with one entry per
 window on every chromosome in \code{chrom_sizes}, ordered by karyotypic
 chromosome order and bin index. Suitable for ML feature extraction.
+}
+\details{
+\code{n_bins} is the target bin count for the \strong{longest chromosome} in
+\code{chrom_sizes}, not the total length of the returned \code{counts} vector.
+Bin width is derived as \code{max(chrom_sizes) / n_bins} (floored, minimum
+1 bp); shorter chromosomes get \code{ceil(size / bin_width)} bins each.
+The total number of bins is \code{sum(ceil(size / bin_width))} across
+\code{chrom_sizes} and can substantially exceed \code{n_bins}. The last bin on
+each chromosome is narrower than \code{bin_width} when the chromosome
+size is not an exact multiple, and chromosomes shorter than
+\code{bin_width} reduce to a single narrower bin. See the \code{densityVector}
+R wrapper documentation for the full semantic.
 }

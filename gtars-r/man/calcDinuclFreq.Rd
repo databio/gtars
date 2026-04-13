@@ -4,7 +4,7 @@
 \alias{calcDinuclFreq}
 \title{Calculate dinucleotide frequency}
 \usage{
-calcDinuclFreq(query, ref, rawCounts = FALSE)
+calcDinuclFreq(query, ref, rawCounts = FALSE, ignoreUnknownChroms = FALSE)
 }
 \arguments{
 \item{query}{A GRanges object, file path, data.frame, or RegionSet}
@@ -13,6 +13,9 @@ calcDinuclFreq(query, ref, rawCounts = FALSE)
 
 \item{rawCounts}{If TRUE, return raw integer counts; if FALSE (default),
 return percentages per row (each row sums to 100)}
+
+\item{ignoreUnknownChroms}{If TRUE, skip regions on chromosomes not in
+the assembly. If FALSE (default), error on unknown chromosomes.}
 }
 \value{
 A data.frame with a \code{region} column and 16 dinucleotide

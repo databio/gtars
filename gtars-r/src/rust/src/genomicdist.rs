@@ -280,17 +280,41 @@ pub fn r_calc_inter_peak_spacing(rs_ptr: Robj) -> extendr_api::Result<List> {
 ///
 /// Wraps `cluster(radius_bp)` and reduces the per-region cluster ID
 /// vector to scalar summary stats: number of clusters, clustered-peak
-/// count, mean / max cluster size (over clusters of size > 1), and
-/// fraction of peaks belonging to a cluster.
+/// count, mean / max cluster size, and fraction of peaks belonging to
+/// a cluster.
+///
+/// `min_cluster_size` applies uniformly to every size-dependent field
+/// except `max_cluster_size` (which is always the biggest cluster in
+/// the input regardless of filter). `n_clusters`, `n_clustered_peaks`,
+/// `mean_cluster_size`, and `fraction_clustered` all restrict to
+/// clusters with size >= `min_cluster_size`. The arithmetic identity
+/// `n_clusters * mean_cluster_size == n_clustered_peaks` holds at any
+/// threshold.
+///
+/// The R `peakClusters` wrapper defaults `min_cluster_size = 2L`, which
+/// produces the scientifically meaningful "multi-peak clusters only"
+/// view used by typical enhancer/super-enhancer analyses. Pass
+/// `min_cluster_size = 1L` to include singletons — `mean_cluster_size`
+/// becomes the simple `total_peaks / n_clusters` but
+/// `n_clustered_peaks` degenerates to `total_peaks` and
+/// `fraction_clustered` to `1.0`.
 ///
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 /// @param radius_bp Stitching radius in bp (non-negative)
+/// @param min_cluster_size Minimum cluster size that qualifies clusters
+///   for inclusion in the size-dependent fields (all except
+///   `max_cluster_size`). The R wrapper defaults this to 2L.
 #[extendr(r_name = "r_calc_peak_clusters")]
-pub fn r_calc_peak_clusters(rs_ptr: Robj, radius_bp: i32) -> extendr_api::Result<List> {
+pub fn r_calc_peak_clusters(
+    rs_ptr: Robj,
+    radius_bp: i32,
+    min_cluster_size: i32,
+) -> extendr_api::Result<List> {
     let radius_u32 = checked_u32(radius_bp, "radius_bp")?;
+    let min_usize = checked_u32(min_cluster_size, "min_cluster_size")? as usize;
     with_regionset!(rs_ptr, rs, {
-        let c: ClusterStats = rs.calc_peak_clusters(radius_u32);
+        let c: ClusterStats = rs.calc_peak_clusters(radius_u32, min_usize);
         Ok(list!(
             radius_bp = c.radius_bp as f64,
             n_clusters = c.n_clusters as f64,

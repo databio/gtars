@@ -254,7 +254,9 @@ test_that("interPeakSpacing returns NaN for empty input", {
   expect_true(is.nan(s$mean))
 })
 
-test_that("peakClusters summarizes cluster distribution", {
+test_that("peakClusters default min_cluster_size=2L filters uniformly", {
+  # Two clusters of size 2 and 3, plus one singleton (size 1).
+  # Default min=2 excludes the singleton from every size-dependent field.
   df <- data.frame(
     chr = "chr1",
     start = c(0L, 13L, 100L, 113L, 122L, 500L),
@@ -263,11 +265,31 @@ test_that("peakClusters summarizes cluster distribution", {
   rs <- RegionSet(df)
   c <- peakClusters(rs, radius_bp = 5L)
   expect_equal(c$radius_bp, 5)
-  expect_equal(c$n_clusters, 3)
-  expect_equal(c$n_clustered_peaks, 5)
-  expect_equal(c$max_cluster_size, 3)
-  expect_equal(c$mean_cluster_size, 2.5)
+  expect_equal(c$n_clusters, 2)  # singleton excluded
+  expect_equal(c$n_clustered_peaks, 5)  # 2 + 3
+  expect_equal(c$max_cluster_size, 3)  # unfiltered max
+  expect_equal(c$mean_cluster_size, 2.5)  # (2 + 3) / 2
+  # Arithmetic identity: 2 * 2.5 == 5
+  expect_equal(c$n_clusters * c$mean_cluster_size, c$n_clustered_peaks)
+  # fraction_clustered uses raw total (6), not filtered count.
   expect_equal(c$fraction_clustered, 5 / 6)
+})
+
+test_that("peakClusters min_cluster_size=1L gives simple total/n_clusters mean", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(0L, 13L, 100L, 113L, 122L, 500L),
+    end   = c(10L, 20L, 110L, 120L, 130L, 510L)
+  )
+  rs <- RegionSet(df)
+  c <- peakClusters(rs, radius_bp = 5L, min_cluster_size = 1L)
+  expect_equal(c$n_clusters, 3)  # includes the singleton
+  expect_equal(c$n_clustered_peaks, 6)  # == total_peaks under min=1
+  expect_equal(c$max_cluster_size, 3)
+  # Simple mean = total_peaks / n_clusters = 6 / 3 = 2
+  expect_equal(c$mean_cluster_size, 2)
+  # fraction_clustered is 1.0 by construction at min=1.
+  expect_equal(c$fraction_clustered, 1)
 })
 
 test_that("densityVector returns dense zero-padded counts", {

@@ -17,7 +17,8 @@ densityHomogeneity(x, chrom_sizes, nBins = 250L, ...)
 
 \item{chrom_sizes}{Named integer vector of chromosome sizes (required)}
 
-\item{nBins}{Target number of bins for the longest chromosome}
+\item{nBins}{Target bin count for the longest chromosome — see
+\code{\link{densityVector}} for the full semantic.}
 
 \item{...}{ignored}
 }
@@ -31,6 +32,14 @@ windows: mean, population variance, coefficient of variation, Gini
 coefficient, and count of nonzero windows.
 }
 \details{
+See \code{\link{densityVector}} for the definition of \code{nBins}
+(target bin count for the longest chromosome, not the total window
+count) and for the treatment of chromosomes shorter than the derived
+bin width. Both affect the interpretation of the statistics below —
+short contigs in \code{chrom_sizes} each contribute a narrow
+single-bin entry which dilutes \code{mean_count}, inflates
+\code{n_windows}, and raises \code{gini}.
+
 The Gini coefficient is biased high for very sparse count
 distributions (many zero-count windows). Check \code{n_nonzero_windows}
 before interpreting Gini on sparse peak sets.

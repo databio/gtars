@@ -283,9 +283,31 @@ impl JsRegionSet {
     /// Cluster-level summary statistics at a given stitching radius.
     /// Returns a plain JS object with fields matching
     /// `gtars_genomicdist::models::ClusterStats`.
+    ///
+    /// `min_cluster_size` applies uniformly to every size-dependent
+    /// field except `max_cluster_size` (which is always the biggest
+    /// cluster in the input regardless of filter). The identity
+    /// `n_clusters * mean_cluster_size == n_clustered_peaks` holds at
+    /// any threshold.
+    ///
+    /// Typical call is `peakClusters(radius_bp, 2)` — the default
+    /// other binding layers use. Under this threshold every field
+    /// describes "clusters with at least 2 peaks", matching typical
+    /// enhancer-clustering analyses. Pass `min_cluster_size = 1` to
+    /// include singletons and get the simple-average view (where
+    /// `n_clustered_peaks == total_peaks` and
+    /// `fraction_clustered == 1.0` trivially).
     #[wasm_bindgen(js_name = "peakClusters")]
-    pub fn peak_clusters(&self, radius_bp: u32) -> Result<JsValue, JsValue> {
-        to_js(&self.region_set.calc_peak_clusters(radius_bp))
+    pub fn peak_clusters(
+        &self,
+        radius_bp: u32,
+        min_cluster_size: usize,
+    ) -> Result<JsValue, JsValue> {
+        to_js(
+            &self
+                .region_set
+                .calc_peak_clusters(radius_bp, min_cluster_size),
+        )
     }
 
     /// Dense zero-padded per-window peak count vector.

@@ -89,6 +89,13 @@ pub fn create_genomicdist_cli() -> Command {
                 .help("Comma-separated list of stitching radii (bp) for peak_clusters summary statistics. Default probes promoter (500), enhancer (5000), and domain (50000) scales."),
         )
         .arg(
+            Arg::new("cluster-min-size")
+                .long("cluster-min-size")
+                .required(false)
+                .default_value("2")
+                .help("Minimum cluster size that qualifies clusters for inclusion in n_clusters, n_clustered_peaks, mean_cluster_size, and fraction_clustered. max_cluster_size is always unfiltered. Default 2 (multi-peak clusters only, the typical enhancer-clustering view). Pass 1 to include singletons and get the simple 'total / n_clusters' mean (where n_clustered_peaks then equals total_peaks and fraction_clustered equals 1.0)."),
+        )
+        .arg(
             Arg::new("compact")
                 .long("compact")
                 .action(clap::ArgAction::SetTrue)

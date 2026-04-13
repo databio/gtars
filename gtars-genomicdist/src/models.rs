@@ -169,24 +169,61 @@ pub struct SpacingStats {
 /// `next.start` is at most `radius_bp`. Clusters are chromosome-scoped
 /// (two regions on different chromosomes can never link).
 ///
-/// "Clustered peaks" means peaks belonging to a cluster of size > 1 —
-/// singletons do not count. `mean_cluster_size` is averaged over clusters
-/// of size > 1 only; if there are no such clusters it is NaN.
+/// # The `min_cluster_size` filter applies uniformly
 ///
-/// Empty inputs return zero counts and NaN for `fraction_clustered`.
+/// Every size-dependent field except `max_cluster_size` is restricted
+/// to clusters with size ≥ the `min_cluster_size` parameter passed to
+/// `calc_peak_clusters`. The same threshold drives `n_clusters`,
+/// `n_clustered_peaks`, `mean_cluster_size`, and `fraction_clustered`
+/// so they always answer the same question about the same subset of
+/// clusters.
+///
+/// **Default is `min_cluster_size = 2`** — the default ClusterStats
+/// answers "how clustered are my peaks, counting only groups of at
+/// least 2?". This matches the scientifically meaningful use case
+/// (enhancer clustering, super-enhancer stitching) and makes the
+/// arithmetic identity `n_clusters * mean_cluster_size ==
+/// n_clustered_peaks` hold at the default.
+///
+/// **Pass `min_cluster_size = 1`** to get the "every connected
+/// component including singletons" view: `n_clusters` then counts all
+/// clusters, `n_clustered_peaks == total_peaks`,
+/// `fraction_clustered == 1.0` trivially, and `mean_cluster_size` is
+/// the simple average `total_peaks / n_clusters`. Useful when you want
+/// the simple mean, but most size-related fields become tautological
+/// at this threshold.
+///
+/// `max_cluster_size` is always the largest cluster in the input
+/// regardless of filter — the maximum is inherent and unaffected by
+/// the threshold.
+///
+/// Empty inputs return zero counts and NaN for `mean_cluster_size` and
+/// `fraction_clustered`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClusterStats {
     /// Stitching radius in bp (pass-through from the call).
     pub radius_bp: u32,
-    /// Total number of distinct clusters (singletons count as size-1 clusters).
+    /// Number of clusters with size ≥ `min_cluster_size`. With the
+    /// default `min_cluster_size = 2`, this counts only multi-peak
+    /// clusters and excludes singletons.
     pub n_clusters: usize,
-    /// Number of peaks belonging to a cluster of size > 1.
+    /// Number of peaks belonging to a cluster with size ≥
+    /// `min_cluster_size`. With default `min_cluster_size = 2`, this is
+    /// "peaks with at least one neighbor within `radius_bp`". With
+    /// `min_cluster_size = 1`, this degenerates to `total_peaks`.
     pub n_clustered_peaks: usize,
-    /// Mean size of clusters with size > 1. NaN if no such clusters.
+    /// Mean size of clusters with size ≥ `min_cluster_size`. The
+    /// identity `n_clusters * mean_cluster_size == n_clustered_peaks`
+    /// holds exactly. NaN when no clusters meet the threshold (empty
+    /// input, or `min_cluster_size > max_cluster_size`).
     pub mean_cluster_size: f64,
-    /// Size of the largest cluster (0 for empty input).
+    /// Size of the largest cluster in the input, regardless of
+    /// `min_cluster_size`. 0 for empty input.
     pub max_cluster_size: usize,
-    /// `n_clustered_peaks / total_peaks`. NaN if input is empty.
+    /// `n_clustered_peaks / total_peaks`, where `total_peaks` is the
+    /// **raw input count** (not filtered). With default
+    /// `min_cluster_size = 2`, this is the fraction of peaks in
+    /// multi-peak clusters. NaN if input is empty.
     pub fraction_clustered: f64,
 }
 

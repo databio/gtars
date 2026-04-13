@@ -89,13 +89,32 @@ r_calc_inter_peak_spacing <- function(rs_ptr) .Call(wrap__r_calc_inter_peak_spac
 #'
 #' Wraps `cluster(radius_bp)` and reduces the per-region cluster ID
 #' vector to scalar summary stats: number of clusters, clustered-peak
-#' count, mean / max cluster size (over clusters of size > 1), and
-#' fraction of peaks belonging to a cluster.
+#' count, mean / max cluster size, and fraction of peaks belonging to
+#' a cluster.
+#'
+#' `min_cluster_size` applies uniformly to every size-dependent field
+#' except `max_cluster_size` (which is always the biggest cluster in
+#' the input regardless of filter). `n_clusters`, `n_clustered_peaks`,
+#' `mean_cluster_size`, and `fraction_clustered` all restrict to
+#' clusters with size >= `min_cluster_size`. The arithmetic identity
+#' `n_clusters * mean_cluster_size == n_clustered_peaks` holds at any
+#' threshold.
+#'
+#' The R `peakClusters` wrapper defaults `min_cluster_size = 2L`, which
+#' produces the scientifically meaningful "multi-peak clusters only"
+#' view used by typical enhancer/super-enhancer analyses. Pass
+#' `min_cluster_size = 1L` to include singletons — `mean_cluster_size`
+#' becomes the simple `total_peaks / n_clusters` but
+#' `n_clustered_peaks` degenerates to `total_peaks` and
+#' `fraction_clustered` to `1.0`.
 #'
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param radius_bp Stitching radius in bp (non-negative)
-r_calc_peak_clusters <- function(rs_ptr, radius_bp) .Call(wrap__r_calc_peak_clusters, rs_ptr, radius_bp)
+#' @param min_cluster_size Minimum cluster size that qualifies clusters
+#'   for inclusion in the size-dependent fields (all except
+#'   `max_cluster_size`). The R wrapper defaults this to 2L.
+r_calc_peak_clusters <- function(rs_ptr, radius_bp, min_cluster_size) .Call(wrap__r_calc_peak_clusters, rs_ptr, radius_bp, min_cluster_size)
 
 #' Dense zero-padded per-window peak count vector.
 #'
@@ -104,9 +123,21 @@ r_calc_peak_clusters <- function(rs_ptr, radius_bp) .Call(wrap__r_calc_peak_clus
 #' window on every chromosome in `chrom_sizes`, ordered by karyotypic
 #' chromosome order and bin index. Suitable for ML feature extraction.
 #'
+#' `n_bins` is the target bin count for the **longest chromosome** in
+#' `chrom_sizes`, not the total length of the returned `counts` vector.
+#' Bin width is derived as `max(chrom_sizes) / n_bins` (floored, minimum
+#' 1 bp); shorter chromosomes get `ceil(size / bin_width)` bins each.
+#' The total number of bins is `sum(ceil(size / bin_width))` across
+#' `chrom_sizes` and can substantially exceed `n_bins`. The last bin on
+#' each chromosome is narrower than `bin_width` when the chromosome
+#' size is not an exact multiple, and chromosomes shorter than
+#' `bin_width` reduce to a single narrower bin. See the `densityVector`
+#' R wrapper documentation for the full semantic.
+#'
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
-#' @param n_bins Target number of bins for the longest chromosome
+#' @param n_bins Target bin count for the longest chromosome — not the
+#'   total number of bins returned. See the function description.
 #' @param chrom_names Character vector of chromosome names
 #' @param chrom_sizes_vec Integer vector of chromosome sizes
 r_calc_density_vector <- function(rs_ptr, n_bins, chrom_names, chrom_sizes_vec) .Call(wrap__r_calc_density_vector, rs_ptr, n_bins, chrom_names, chrom_sizes_vec)
@@ -118,9 +149,16 @@ r_calc_density_vector <- function(rs_ptr, n_bins, chrom_names, chrom_sizes_vec) 
 #' for very sparse count distributions; inspect `n_nonzero_windows`
 #' before interpreting Gini on sparse peak sets.
 #'
+#' `n_bins` is the target bin count for the longest chromosome (see
+#' `r_calc_density_vector` for the full semantic), not the total window
+#' count. Short contigs in `chrom_sizes` each contribute a narrow
+#' single-bin entry which dilutes `mean_count`, inflates `n_windows`,
+#' and raises `gini`.
+#'
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
-#' @param n_bins Target number of bins for the longest chromosome
+#' @param n_bins Target bin count for the longest chromosome — not the
+#'   total number of bins returned. See `r_calc_density_vector`.
 #' @param chrom_names Character vector of chromosome names
 #' @param chrom_sizes_vec Integer vector of chromosome sizes
 r_calc_density_homogeneity <- function(rs_ptr, n_bins, chrom_names, chrom_sizes_vec) .Call(wrap__r_calc_density_homogeneity, rs_ptr, n_bins, chrom_names, chrom_sizes_vec)
