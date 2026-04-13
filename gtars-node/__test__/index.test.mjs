@@ -32,6 +32,25 @@ describe('RefgetStore', () => {
     assert.ok(stats.nSequences > 0)
   })
 
+  it('retrieves a full sequence', () => {
+    const seq = store.getSequence('iYtREV555dUFKg2_agSJW6suquUyPpMw')
+    assert.equal(seq, 'TTGGGGAA')
+  })
+
+  it('retrieves collection metadata', () => {
+    const collections = store.listCollections()
+    const meta = store.getCollectionMetadata(collections[0].digest)
+    assert.ok(meta)
+    assert.equal(meta.nSequences, 3)
+  })
+
+  it('compares two collections', () => {
+    const collections = store.listCollections()
+    const digest = collections[0].digest
+    const result = JSON.parse(store.compare(digest, digest))
+    assert.ok(result)
+  })
+
   it('throws on invalid digest', () => {
     assert.throws(() => store.getSequence('nonexistent'), /not found/i)
   })
