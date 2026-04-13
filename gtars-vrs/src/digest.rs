@@ -117,17 +117,15 @@ pub fn allele_digest(allele: &Allele) -> String {
         AlleleState::ReferenceLengthExpression {
             length,
             repeat_subunit_length,
-            sequence,
+            ..
         } => {
-            let mut obj = json!({
+            // ga4gh.inherent for RLE is ["length", "repeatSubunitLength", "type"]
+            // sequence is NOT an inherent property and must be excluded from digest
+            json!({
                 "length": length,
                 "repeatSubunitLength": repeat_subunit_length,
                 "type": "ReferenceLengthExpression"
-            });
-            if let Some(seq) = sequence {
-                obj["sequence"] = serde_json::Value::String(seq.clone());
-            }
-            obj
+            })
         }
     };
     let json_val = json!({
