@@ -130,6 +130,37 @@ pub trait GenomicIntervalSetStatistics {
     ///
     /// Returns an empty `DensityVector` if `chrom_sizes` is empty or
     /// `n_bins == 0`.
+    ///
+    /// # `n_bins` semantics
+    ///
+    /// `n_bins` is the **target bin count for the longest chromosome in
+    /// `chrom_sizes`**, not the total number of bins returned. Bin width is
+    /// derived as `max(chrom_sizes.values()) / n_bins` (floored, minimum 1
+    /// bp), and every chromosome is then tiled with windows of that width.
+    /// Shorter chromosomes therefore receive proportionally fewer bins —
+    /// specifically `ceil(chrom_size / bin_width)` — so the total length of
+    /// `counts` is
+    ///
+    /// ```text
+    /// sum(ceil(chrom_size / bin_width)) for chrom in chrom_sizes
+    /// ```
+    ///
+    /// which can substantially exceed `n_bins` when `chrom_sizes` contains
+    /// many chromosomes. To target a specific bin width in bp, set
+    /// `n_bins` to `max_chrom_len / desired_bin_width_bp`.
+    ///
+    /// # Per-chromosome bin width
+    ///
+    /// The last bin on each chromosome is narrower than `bin_width` whenever
+    /// `chrom_size` is not an exact multiple of `bin_width`. Chromosomes
+    /// shorter than `bin_width` (common with UCSC alt / random / unplaced
+    /// contigs like `chrUn_*`, `*_random`, `*_alt`) reduce to a single bin
+    /// whose effective width equals the chromosome size rather than
+    /// `bin_width`. `counts[i]` is therefore a count per bin, not a count
+    /// per `bin_width` bp — bins of different effective widths are not
+    /// directly comparable as densities, and consumers computing per-bp
+    /// rates should be aware of this when `chrom_sizes` includes contigs
+    /// significantly shorter than `bin_width`.
     fn calc_density_vector(
         &self,
         chrom_sizes: &HashMap<String, u32>,
@@ -142,6 +173,13 @@ pub trait GenomicIntervalSetStatistics {
     /// then computes mean, population variance, coefficient of variation,
     /// Gini coefficient, and the count of nonzero windows. Useful as a
     /// scalar measure of peak spatial evenness.
+    ///
+    /// See `calc_density_vector` for the definition of `n_bins` (it is the
+    /// target bin count for the longest chromosome, not the total window
+    /// count) and for the treatment of chromosomes shorter than the derived
+    /// `bin_width`. Both affect the interpretation of the statistics below —
+    /// short contigs each contribute a narrow single-bin entry which dilutes
+    /// `mean_count`, inflates `n_windows`, and raises `gini`.
     ///
     /// **Gini bias note:** the Gini coefficient is biased toward high
     /// values for sparse count distributions (many zero-count windows).

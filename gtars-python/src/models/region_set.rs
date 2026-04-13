@@ -570,8 +570,13 @@ impl PyRegionSet {
     ///
     /// Args:
     ///     chrom_sizes: mapping of chromosome name → size in bp
-    ///     n_bins: target number of bins (longest chromosome gets n_bins;
-    ///             shorter chromosomes get proportionally fewer)
+    ///     n_bins: target bin count for the **longest chromosome** in
+    ///             chrom_sizes (not the total window count). Bin width
+    ///             is ``max(chrom_sizes) // n_bins``; shorter chromosomes
+    ///             get ``ceil(size / bin_width)`` bins each. Total
+    ///             windows returned is typically larger than n_bins.
+    ///             See the DensityVector docstring for details on
+    ///             per-chromosome bin width and short-contig handling.
     fn density_vector(
         &self,
         chrom_sizes: HashMap<String, u32>,
@@ -584,6 +589,12 @@ impl PyRegionSet {
 
     /// Summary statistics over the dense per-window count vector
     /// (variance, CV, Gini). Wraps ``density_vector()``.
+    ///
+    /// ``n_bins`` is the target bin count for the longest chromosome,
+    /// not the total window count — see :py:meth:`density_vector` for
+    /// the full semantic. Short contigs in ``chrom_sizes`` each
+    /// contribute a narrow single-bin entry which dilutes
+    /// ``mean_count``, inflates ``n_windows``, and raises ``gini``.
     fn density_homogeneity(
         &self,
         chrom_sizes: HashMap<String, u32>,

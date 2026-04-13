@@ -67,6 +67,28 @@ class DensityVector:
     ``distribution()`` (which returns only non-empty bins), this carries
     the full zero-padded vector, ordered by karyotypic chromosome order
     and then bin index.
+
+    Notes
+    -----
+    ``n_bins`` is the **target bin count for the longest chromosome in
+    chrom_sizes**, not the total length of ``counts``. Bin width is
+    derived as ``max(chrom_sizes.values()) // n_bins`` (minimum 1 bp),
+    and every chromosome is tiled with windows of that width. The length
+    of ``counts`` is ``sum(ceil(chrom_size / bin_width))`` across
+    chromosomes in ``chrom_sizes``, which can substantially exceed
+    ``n_bins`` when many chromosomes are present. To target a specific
+    bin width in bp, pass ``n_bins = max_chrom_len // desired_width``.
+
+    The last bin on each chromosome is narrower than ``bin_width``
+    whenever ``chrom_size`` is not an exact multiple of ``bin_width``.
+    Chromosomes shorter than ``bin_width`` (common with UCSC alt /
+    random / unplaced contigs like ``chrUn_*``, ``*_random``, ``*_alt``)
+    reduce to a single bin whose effective width equals the chromosome
+    size rather than ``bin_width``. Entries in ``counts`` are therefore
+    counts per bin, not counts per ``bin_width`` bp — bins of different
+    effective widths are not directly comparable as densities when
+    ``chrom_sizes`` contains contigs significantly shorter than
+    ``bin_width``.
     """
     n_bins: int
     bin_width: int
@@ -84,7 +106,15 @@ class DensityHomogeneity:
     Poisson-distributed peaks give cv ≈ 1; clustered sets give cv >> 1;
     evenly-spread sets give cv << 1.
 
-    Note: the Gini coefficient is biased high for very sparse count
+    Notes
+    -----
+    See ``DensityVector`` for the definition of ``n_bins`` (target bin
+    count for the longest chromosome, not the total window count) and
+    for the treatment of chromosomes shorter than the derived bin width.
+    Short contigs each contribute a narrow single-bin entry which
+    dilutes ``mean_count``, inflates ``n_windows``, and raises ``gini``.
+
+    The Gini coefficient is biased high for very sparse count
     distributions (many zero-count windows). Check ``n_nonzero_windows``
     before interpreting Gini on sparse peak sets.
     """
@@ -448,6 +478,20 @@ class RegionSet:
         returns the full zero-padded count vector with one entry per window
         on every chromosome in ``chrom_sizes``, ordered by karyotypic
         chromosome order and bin index. Suitable for ML feature extraction.
+
+        :param chrom_sizes: mapping of chromosome name to length in bp.
+        :param n_bins: **target bin count for the longest chromosome in
+            chrom_sizes** — not the length of the returned ``counts``.
+            Bin width is derived as ``max(chrom_sizes.values()) //
+            n_bins`` (minimum 1 bp); shorter chromosomes get
+            proportionally fewer bins. Total window count is
+            ``sum(ceil(size / bin_width))`` across ``chrom_sizes`` and
+            can substantially exceed ``n_bins``.
+        :return: a ``DensityVector`` — see its docstring for per-chromosome
+            bin-width behavior and the treatment of short contigs (the
+            last bin on each chromosome and all bins on chromosomes
+            shorter than ``bin_width`` are narrower than ``bin_width``,
+            so counts are per bin, not per ``bin_width`` bp).
         """
         ...
 
@@ -463,9 +507,17 @@ class RegionSet:
         coefficient, and the count of nonzero windows. Useful as a scalar
         measure of peak spatial evenness.
 
-        Note: Gini is biased high for very sparse count distributions;
-        consult ``n_nonzero_windows`` before interpreting Gini on sparse
-        peak sets.
+        :param chrom_sizes: mapping of chromosome name to length in bp.
+        :param n_bins: **target bin count for the longest chromosome**,
+            not the total window count — see
+            :py:meth:`RegionSet.density_vector` for the full semantic.
+            Short contigs in ``chrom_sizes`` each contribute a narrow
+            single-bin entry which dilutes ``mean_count``, inflates
+            ``n_windows``, and raises ``gini``.
+        :return: a ``DensityHomogeneity``. Note: Gini is biased high for
+            very sparse count distributions; consult
+            ``n_nonzero_windows`` before interpreting Gini on sparse
+            peak sets.
         """
         ...
 

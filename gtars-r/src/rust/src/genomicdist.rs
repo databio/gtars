@@ -309,9 +309,21 @@ pub fn r_calc_peak_clusters(rs_ptr: Robj, radius_bp: i32) -> extendr_api::Result
 /// window on every chromosome in `chrom_sizes`, ordered by karyotypic
 /// chromosome order and bin index. Suitable for ML feature extraction.
 ///
+/// `n_bins` is the target bin count for the **longest chromosome** in
+/// `chrom_sizes`, not the total length of the returned `counts` vector.
+/// Bin width is derived as `max(chrom_sizes) / n_bins` (floored, minimum
+/// 1 bp); shorter chromosomes get `ceil(size / bin_width)` bins each.
+/// The total number of bins is `sum(ceil(size / bin_width))` across
+/// `chrom_sizes` and can substantially exceed `n_bins`. The last bin on
+/// each chromosome is narrower than `bin_width` when the chromosome
+/// size is not an exact multiple, and chromosomes shorter than
+/// `bin_width` reduce to a single narrower bin. See the `densityVector`
+/// R wrapper documentation for the full semantic.
+///
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
-/// @param n_bins Target number of bins for the longest chromosome
+/// @param n_bins Target bin count for the longest chromosome — not the
+///   total number of bins returned. See the function description.
 /// @param chrom_names Character vector of chromosome names
 /// @param chrom_sizes_vec Integer vector of chromosome sizes
 #[extendr(r_name = "r_calc_density_vector")]
@@ -353,9 +365,16 @@ pub fn r_calc_density_vector(
 /// for very sparse count distributions; inspect `n_nonzero_windows`
 /// before interpreting Gini on sparse peak sets.
 ///
+/// `n_bins` is the target bin count for the longest chromosome (see
+/// `r_calc_density_vector` for the full semantic), not the total window
+/// count. Short contigs in `chrom_sizes` each contribute a narrow
+/// single-bin entry which dilutes `mean_count`, inflates `n_windows`,
+/// and raises `gini`.
+///
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
-/// @param n_bins Target number of bins for the longest chromosome
+/// @param n_bins Target bin count for the longest chromosome — not the
+///   total number of bins returned. See `r_calc_density_vector`.
 /// @param chrom_names Character vector of chromosome names
 /// @param chrom_sizes_vec Integer vector of chromosome sizes
 #[extendr(r_name = "r_calc_density_homogeneity")]

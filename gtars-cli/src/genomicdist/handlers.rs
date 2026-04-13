@@ -36,12 +36,17 @@ struct GenomicDistOutput {
     /// to 500 / 5 000 / 50 000 bp for promoter / enhancer / domain scales).
     peak_clusters: Vec<ClusterStats>,
     /// Dense zero-padded per-window peak count vector. Only computed
-    /// when `--chrom-sizes` is provided.
+    /// when `--chrom-sizes` is provided. `counts.len()` is
+    /// `sum(ceil(size / bin_width))` across chromosomes in the
+    /// `--chrom-sizes` file — typically much larger than `--bins`,
+    /// which is the *target* bin count for the longest chromosome.
     #[serde(skip_serializing_if = "Option::is_none")]
     density_vector: Option<DensityVector>,
     /// Scalar homogeneity summary (variance / CV / Gini) over the
     /// dense per-window count vector. Only computed when
-    /// `--chrom-sizes` is provided.
+    /// `--chrom-sizes` is provided. Short contigs in the chrom sizes
+    /// file each contribute a narrow single-bin entry which dilutes
+    /// `mean_count`, inflates `n_windows`, and raises `gini`.
     #[serde(skip_serializing_if = "Option::is_none")]
     density_homogeneity: Option<DensityHomogeneity>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -35,7 +35,7 @@ pub fn create_genomicdist_cli() -> Command {
             arg!(--bins <BINS>)
                 .required(false)
                 .default_value("250")
-                .help("Number of bins for region distribution"),
+                .help("Target bin count for the longest chromosome in --chrom-sizes. Bin width is derived as max_chrom_len/bins; shorter chromosomes get proportionally fewer bins. Total windows returned by density_vector/density_homogeneity is typically larger than this value (sum of ceil(size/bin_width) across chromosomes). Pass bins = max_chrom_len / desired_bin_width_bp to target a specific bin width."),
         )
         .arg(
             Arg::new("signal-matrix")

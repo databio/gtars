@@ -200,16 +200,43 @@ pub struct ClusterStats {
 /// and then by bin index within each chromosome. `chrom_offsets` records the
 /// start index of each chromosome's slice in `counts`, so callers can
 /// recover per-chromosome subvectors without re-binning.
+///
+/// # `n_bins` is a target, not the total
+///
+/// `n_bins` is the **target bin count for the longest chromosome in
+/// `chrom_sizes`**, not the length of `counts`. Bin width is derived as
+/// `max(chrom_sizes.values()) / n_bins` (floored, minimum 1 bp), and every
+/// chromosome is tiled with windows of that width. The length of `counts`
+/// is `sum(ceil(chrom_size / bin_width))` over all chromosomes in
+/// `chrom_sizes`, which can substantially exceed `n_bins` when many
+/// chromosomes are present. To target a specific bin width in bp, set
+/// `n_bins` to `max_chrom_len / desired_bin_width_bp`.
+///
+/// # Per-chromosome bin width
+///
+/// The last bin on each chromosome is narrower than `bin_width` whenever
+/// `chrom_size` is not an exact multiple of `bin_width`. Chromosomes
+/// shorter than `bin_width` (common with UCSC alt / random / unplaced
+/// contigs) reduce to a single bin whose effective width equals the
+/// chromosome size rather than `bin_width`. Individual entries in
+/// `counts` are therefore counts per bin, not counts per `bin_width` bp —
+/// bins of different effective widths are not directly comparable as
+/// densities when `chrom_sizes` contains contigs significantly shorter
+/// than `bin_width`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DensityVector {
-    /// Target number of bins (matches the longest chromosome). Shorter
-    /// chromosomes get proportionally fewer bins.
+    /// Target bin count for the longest chromosome in `chrom_sizes`.
+    /// Shorter chromosomes get proportionally fewer bins. **Not** the
+    /// total length of `counts`.
     pub n_bins: u32,
     /// Bin width in bp, computed as `max(chrom_sizes) / n_bins` (floored,
-    /// minimum 1 to avoid zero-sized bins).
+    /// minimum 1 to avoid zero-sized bins). The last bin on each
+    /// chromosome and all bins on chromosomes shorter than `bin_width`
+    /// have narrower effective widths — see the struct-level docs.
     pub bin_width: u32,
     /// Dense zero-padded per-window peak counts. Length ==
-    /// sum over chromosomes of `ceil(chrom_size / bin_width)`.
+    /// `sum(ceil(chrom_size / bin_width))` over all chromosomes in
+    /// `chrom_sizes`.
     pub counts: Vec<u32>,
     /// `(chr, start_index)` per chromosome, in karyotypic order. Slice
     /// `counts[start_index .. next_chrom_start_index]` for per-chromosome
@@ -222,6 +249,13 @@ pub struct DensityVector {
 /// Derived from a dense per-window count vector (see `DensityVector`).
 /// A Poisson-distributed peak set has `cv ≈ 1`; clustered sets have
 /// `cv >> 1`; evenly-spread sets have `cv << 1`.
+///
+/// See `DensityVector` for the definition of `n_bins` (it is the target
+/// bin count for the longest chromosome, not the total window count)
+/// and for the treatment of chromosomes shorter than the derived
+/// `bin_width`. Both affect the interpretation of the statistics below —
+/// short contigs each contribute a narrow single-bin entry which dilutes
+/// `mean_count`, inflates `n_windows`, and raises `gini`.
 ///
 /// **Note on Gini:** the Gini coefficient has a known bias toward high
 /// values for sparse count distributions (many zero-count windows). For
@@ -237,9 +271,14 @@ pub struct DensityVector {
 /// empty, all fields are zero or NaN.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DensityHomogeneity {
-    /// Bin width in bp used for this summary.
+    /// Bin width in bp used for this summary. The last bin on each
+    /// chromosome (and all bins on chromosomes shorter than this value)
+    /// is narrower; counts are per-bin, not per-bp.
     pub bin_width: u32,
-    /// Total number of bins (including zero-count bins).
+    /// Total number of bins (including zero-count bins). Each chromosome
+    /// contributes `ceil(chrom_size / bin_width)` bins, so this can be
+    /// substantially larger than the `n_bins` parameter when
+    /// `chrom_sizes` has many entries.
     pub n_windows: usize,
     /// Number of bins containing at least one peak.
     pub n_nonzero_windows: usize,

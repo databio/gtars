@@ -293,6 +293,22 @@ impl JsRegionSet {
     /// `chrom_sizes` is a JS object of the form `{chr: length, ...}`.
     /// Returns a plain JS object with fields matching
     /// `gtars_genomicdist::models::DensityVector`.
+    ///
+    /// `n_bins` is the **target bin count for the longest chromosome
+    /// in `chrom_sizes`**, not the length of the returned `counts`
+    /// array. Bin width is `max(chrom_sizes) / n_bins` (floored,
+    /// minimum 1 bp); shorter chromosomes get proportionally fewer
+    /// bins, so the total bin count is
+    /// `sum(ceil(size / bin_width))` across `chrom_sizes` and can
+    /// substantially exceed `n_bins`.
+    ///
+    /// The last bin on each chromosome is narrower than `bin_width`
+    /// when `chrom_size` is not an exact multiple of `bin_width`, and
+    /// chromosomes shorter than `bin_width` (common with UCSC alt /
+    /// random / unplaced contigs) reduce to a single bin whose
+    /// effective width equals the chromosome size. `counts[i]` is a
+    /// count per bin, not per `bin_width` bp — bins of different
+    /// effective widths are not directly comparable as densities.
     #[wasm_bindgen(js_name = "densityVector")]
     pub fn density_vector(
         &self,
@@ -307,6 +323,13 @@ impl JsRegionSet {
     /// Summary statistics over the dense per-window count vector
     /// (variance, CV, Gini). Returns a plain JS object with fields
     /// matching `gtars_genomicdist::models::DensityHomogeneity`.
+    ///
+    /// See `densityVector` for the definition of `n_bins` (target bin
+    /// count for the longest chromosome, not the total window count)
+    /// and for the treatment of chromosomes shorter than the derived
+    /// `bin_width`. Short contigs in `chrom_sizes` each contribute a
+    /// narrow single-bin entry which dilutes `mean_count`, inflates
+    /// `n_windows`, and raises `gini`.
     #[wasm_bindgen(js_name = "densityHomogeneity")]
     pub fn density_homogeneity(
         &self,

@@ -219,9 +219,32 @@ setMethod("peakClusters", "ANY", function(x, radius_bp, ...) {
 #'   genome, ordered by karyotypic chromosome order and bin index. Unlike
 #'   \code{distribution}, empty bins are included. Suitable for ML feature
 #'   extraction.
+#'
+#' @details
+#' \strong{\code{nBins} is a target, not the total window count.} It is
+#' the target bin count for the longest chromosome in \code{chrom_sizes},
+#' not the length of the returned \code{counts} vector. Bin width is
+#' derived as \code{max(chrom_sizes) / nBins} (floored, minimum 1 bp),
+#' and every chromosome is tiled with windows of that width. The total
+#' number of bins returned is \code{sum(ceil(size / bin_width))} across
+#' \code{chrom_sizes}, which can substantially exceed \code{nBins} when
+#' many chromosomes are present. To target a specific bin width in bp,
+#' pass \code{nBins = floor(max(chrom_sizes) / desired_width_bp)}.
+#'
+#' \strong{Per-chromosome bin width.} The last bin on each chromosome is
+#' narrower than \code{bin_width} whenever \code{chrom_size} is not an
+#' exact multiple of \code{bin_width}. Chromosomes shorter than
+#' \code{bin_width} (common with UCSC alt / random / unplaced contigs
+#' such as \code{chrUn_*}, \code{*_random}, \code{*_alt}) reduce to a
+#' single bin whose effective width equals the chromosome size rather
+#' than \code{bin_width}. Entries in \code{counts} are therefore counts
+#' per bin, not counts per \code{bin_width} bp — bins of different
+#' effective widths are not directly comparable as densities when
+#' \code{chrom_sizes} contains contigs significantly shorter than
+#' \code{bin_width}.
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param chrom_sizes Named integer vector of chromosome sizes (required)
-#' @param nBins Target number of bins for the longest chromosome
+#' @param nBins Target bin count for the longest chromosome — see Details.
 #' @param ... ignored
 #' @return A named list with fields: n_bins, bin_width, counts (numeric
 #'   vector), chrom_offset_names, chrom_offset_indices.
@@ -256,12 +279,22 @@ setMethod("densityVector", "ANY", function(x, chrom_sizes, nBins = 250L, ...) {
 #'   windows: mean, population variance, coefficient of variation, Gini
 #'   coefficient, and count of nonzero windows.
 #'
-#' @details The Gini coefficient is biased high for very sparse count
-#'   distributions (many zero-count windows). Check ``n_nonzero_windows``
-#'   before interpreting Gini on sparse peak sets.
+#' @details
+#' See \code{\link{densityVector}} for the definition of \code{nBins}
+#' (target bin count for the longest chromosome, not the total window
+#' count) and for the treatment of chromosomes shorter than the derived
+#' bin width. Both affect the interpretation of the statistics below —
+#' short contigs in \code{chrom_sizes} each contribute a narrow
+#' single-bin entry which dilutes \code{mean_count}, inflates
+#' \code{n_windows}, and raises \code{gini}.
+#'
+#' The Gini coefficient is biased high for very sparse count
+#' distributions (many zero-count windows). Check \code{n_nonzero_windows}
+#' before interpreting Gini on sparse peak sets.
 #' @param x A RegionSet, GRanges, file path, or data.frame
 #' @param chrom_sizes Named integer vector of chromosome sizes (required)
-#' @param nBins Target number of bins for the longest chromosome
+#' @param nBins Target bin count for the longest chromosome — see
+#'   \code{\link{densityVector}} for the full semantic.
 #' @param ... ignored
 #' @return A named list with fields: bin_width, n_windows,
 #'   n_nonzero_windows, mean_count, variance, cv, gini.
