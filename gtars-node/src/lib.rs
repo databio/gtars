@@ -76,11 +76,12 @@ impl RefgetStore {
         }
     }
 
-    // -- Sequence retrieval --
+    // -- Sequence retrieval (auto-loads stubs from disk/remote) --
 
     #[napi]
     pub fn get_sequence(&self, digest: String) -> Result<String> {
-        let store = self.inner.lock().map_err(lock_err)?;
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        store.load_sequence(&digest).map_err(to_napi_err)?;
         let record = store.get_sequence(&digest).map_err(to_napi_err)?;
         record
             .decode()
@@ -89,7 +90,8 @@ impl RefgetStore {
 
     #[napi]
     pub fn get_substring(&self, digest: String, start: u32, end: u32) -> Result<String> {
-        let store = self.inner.lock().map_err(lock_err)?;
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        store.load_sequence(&digest).map_err(to_napi_err)?;
         store
             .get_substring(&digest, start as usize, end as usize)
             .map_err(to_napi_err)
@@ -101,7 +103,15 @@ impl RefgetStore {
         collection_digest: String,
         name: String,
     ) -> Result<String> {
-        let store = self.inner.lock().map_err(lock_err)?;
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        // Load the collection first to populate the name lookup
+        store.load_collection(&collection_digest).map_err(to_napi_err)?;
+        let record = store
+            .get_sequence_by_name(&collection_digest, &name)
+            .map_err(to_napi_err)?;
+        // Get the digest so we can load the sequence data
+        let seq_digest = record.metadata().sha512t24u.clone();
+        store.load_sequence(&seq_digest).map_err(to_napi_err)?;
         let record = store
             .get_sequence_by_name(&collection_digest, &name)
             .map_err(to_napi_err)?;
@@ -113,10 +123,18 @@ impl RefgetStore {
     // -- Listing / metadata --
 
     #[napi]
-    pub fn list_collections(&self) -> Result<Vec<CollectionMetadataJs>> {
+    pub fn list_collections(
+        &self,
+        page: Option<u32>,
+        page_size: Option<u32>,
+    ) -> Result<Vec<CollectionMetadataJs>> {
         let store = self.inner.lock().map_err(lock_err)?;
         let paged = store
-            .list_collections(0, usize::MAX, &[])
+            .list_collections(
+                page.unwrap_or(0) as usize,
+                page_size.map_or(usize::MAX, |s| s as usize),
+                &[],
+            )
             .map_err(to_napi_err)?;
         Ok(paged
             .results

@@ -1,10 +1,16 @@
 {
   "name": "@databio/gtars-node-darwin-arm64",
-  "version": "0.0.1",
-  "os": ["darwin"],
-  "cpu": ["arm64"],
+  "version": "0.0.2",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
   "main": "gtars-node.darwin-arm64.node",
-  "files": ["gtars-node.darwin-arm64.node"],
+  "files": [
+    "gtars-node.darwin-arm64.node"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">= 10"

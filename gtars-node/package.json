@@ -1,6 +1,6 @@
 {
   "name": "@databio/gtars-node",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Native Node.js bindings for gtars (genomic tools and region sets)",
   "main": "index.js",
   "types": "index.d.ts",
