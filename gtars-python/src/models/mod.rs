@@ -17,8 +17,10 @@ pub use self::genome_assembly::{PyBinaryGenomeAssembly, PyGenomeAssembly};
 pub use self::interval::PyInterval;
 pub use self::partition_list::PyPartitionList;
 pub use self::region::PyRegion;
-pub use self::region_set::PyChromosomeStatistics;
-pub use self::region_set::PyRegionSet;
+pub use self::region_set::{
+    PyChromosomeStatistics, PyClusterStats, PyDensityHomogeneity, PyDensityVector, PyRegionSet,
+    PySpacingStats,
+};
 pub use self::region_set_list::PyRegionSetList;
 pub use self::signal_matrix::PySignalMatrix;
 pub use self::tss_index::PyTssIndex;
@@ -29,6 +31,10 @@ pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyInterval>()?;
     m.add_class::<PyRegionSet>()?;
     m.add_class::<PyChromosomeStatistics>()?;
+    m.add_class::<PySpacingStats>()?;
+    m.add_class::<PyClusterStats>()?;
+    m.add_class::<PyDensityVector>()?;
+    m.add_class::<PyDensityHomogeneity>()?;
     m.add_class::<PyGenomeAssembly>()?;
     m.add_class::<PyBinaryGenomeAssembly>()?;
     m.add_class::<PyTssIndex>()?;
