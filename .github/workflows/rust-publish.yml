@@ -241,12 +241,14 @@ jobs:
           ls -la npm/*/
       - name: Publish platform packages
         working-directory: gtars-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           FAILED=0
           for dir in npm/*/; do
             if [ -f "$dir/package.json" ]; then
               echo "Publishing $dir..."
-              if ! npm publish "$dir" --provenance --access public; then
+              if ! npm publish "$dir" --access public; then
                 echo "::warning::Failed to publish $dir"
                 FAILED=$((FAILED + 1))
               fi
@@ -257,7 +259,9 @@ jobs:
           fi
       - name: Publish main package
         working-directory: gtars-node
-        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --ignore-scripts
 
   create-tags:
     if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
