@@ -1,0 +1,16 @@
+[package]
+name = "gtars-napi"
+version = "0.7.0"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+napi = "2"
+napi-derive = "2"
+anyhow = { workspace = true }
+gtars-refget = { path = "../gtars-refget" }
+
+[build-dependencies]
+napi-build = "2"
