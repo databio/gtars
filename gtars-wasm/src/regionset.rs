@@ -9,6 +9,11 @@ use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
 
+#[inline]
+fn to_js<T: serde::Serialize>(value: &T) -> Result<JsValue, JsValue> {
+    serde_wasm_bindgen::to_value(value).map_err(|e| e.into())
+}
+
 #[wasm_bindgen(js_name = "ChromosomeStatistics")]
 #[derive(serde::Serialize)]
 pub struct JsChromosomeStatistics {
@@ -255,6 +260,109 @@ impl JsRegionSet {
         serde_wasm_bindgen::to_value(&nearest).map_err(|e| e.into())
     }
 
+    /// Single-linkage cluster IDs for each region.
+    ///
+    /// Two regions on the same chromosome are assigned the same cluster
+    /// when the bp gap between them is at most `max_gap`. Chromosome
+    /// boundaries always break clusters. Returns a `Uint32Array`-compatible
+    /// JS array in the original region order.
+    #[wasm_bindgen(js_name = "cluster")]
+    pub fn cluster(&self, max_gap: u32) -> Result<JsValue, JsValue> {
+        let ids = self.region_set.cluster(max_gap);
+        to_js(&ids)
+    }
+
+    /// Summary statistics over the distribution of inter-region spacings.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::SpacingStats`.
+    #[wasm_bindgen(js_name = "interPeakSpacing")]
+    pub fn inter_peak_spacing(&self) -> Result<JsValue, JsValue> {
+        to_js(&self.region_set.calc_inter_peak_spacing())
+    }
+
+    /// Cluster-level summary statistics at a given stitching radius.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::ClusterStats`.
+    ///
+    /// `min_cluster_size` applies uniformly to every size-dependent
+    /// field except `max_cluster_size` (which is always the biggest
+    /// cluster in the input regardless of filter). The identity
+    /// `n_clusters * mean_cluster_size == n_clustered_peaks` holds at
+    /// any threshold.
+    ///
+    /// Typical call is `peakClusters(radius_bp, 2)` — the default
+    /// other binding layers use. Under this threshold every field
+    /// describes "clusters with at least 2 peaks", matching typical
+    /// enhancer-clustering analyses. Pass `min_cluster_size = 1` to
+    /// include singletons and get the simple-average view (where
+    /// `n_clustered_peaks == total_peaks` and
+    /// `fraction_clustered == 1.0` trivially).
+    #[wasm_bindgen(js_name = "peakClusters")]
+    pub fn peak_clusters(
+        &self,
+        radius_bp: u32,
+        min_cluster_size: usize,
+    ) -> Result<JsValue, JsValue> {
+        to_js(
+            &self
+                .region_set
+                .calc_peak_clusters(radius_bp, min_cluster_size),
+        )
+    }
+
+    /// Dense zero-padded per-window peak count vector.
+    ///
+    /// `chrom_sizes` is a JS object of the form `{chr: length, ...}`.
+    /// Returns a plain JS object with fields matching
+    /// `gtars_genomicdist::models::DensityVector`.
+    ///
+    /// `n_bins` is the **target bin count for the longest chromosome
+    /// in `chrom_sizes`**, not the length of the returned `counts`
+    /// array. Bin width is `max(chrom_sizes) / n_bins` (floored,
+    /// minimum 1 bp); shorter chromosomes get proportionally fewer
+    /// bins, so the total bin count is
+    /// `sum(ceil(size / bin_width))` across `chrom_sizes` and can
+    /// substantially exceed `n_bins`.
+    ///
+    /// The last bin on each chromosome is narrower than `bin_width`
+    /// when `chrom_size` is not an exact multiple of `bin_width`, and
+    /// chromosomes shorter than `bin_width` (common with UCSC alt /
+    /// random / unplaced contigs) reduce to a single bin whose
+    /// effective width equals the chromosome size. `counts[i]` is a
+    /// count per bin, not per `bin_width` bp — bins of different
+    /// effective widths are not directly comparable as densities.
+    #[wasm_bindgen(js_name = "densityVector")]
+    pub fn density_vector(
+        &self,
+        chrom_sizes: &JsValue,
+        n_bins: u32,
+    ) -> Result<JsValue, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        to_js(&self.region_set.calc_density_vector(&sizes, n_bins))
+    }
+
+    /// Summary statistics over the dense per-window count vector
+    /// (variance, CV, Gini). Returns a plain JS object with fields
+    /// matching `gtars_genomicdist::models::DensityHomogeneity`.
+    ///
+    /// See `densityVector` for the definition of `n_bins` (target bin
+    /// count for the longest chromosome, not the total window count)
+    /// and for the treatment of chromosomes shorter than the derived
+    /// `bin_width`. Short contigs in `chrom_sizes` each contribute a
+    /// narrow single-bin entry which dilutes `mean_count`, inflates
+    /// `n_windows`, and raises `gini`.
+    #[wasm_bindgen(js_name = "densityHomogeneity")]
+    pub fn density_homogeneity(
+        &self,
+        chrom_sizes: &JsValue,
+        n_bins: u32,
+    ) -> Result<JsValue, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        to_js(&self.region_set.calc_density_homogeneity(&sizes, n_bins))
+    }
+
     // ── Interval range methods ──────────────────────────────────────
 
     #[wasm_bindgen(js_name = "trim")]
@@ -341,9 +449,11 @@ impl JsRegionSet {
     }
 
     #[wasm_bindgen(js_name = "gaps")]
-    pub fn gaps(&self) -> JsRegionSet {
-        let result = self.region_set.gaps();
-        JsRegionSet { region_set: result }
+    pub fn gaps(&self, chrom_sizes: &JsValue) -> Result<JsRegionSet, JsValue> {
+        let sizes: HashMap<String, u32> = serde_wasm_bindgen::from_value(chrom_sizes.clone())
+            .map_err(|e| JsValue::from_str(&format!("chrom_sizes: {}", e)))?;
+        let result = self.region_set.gaps(&sizes);
+        Ok(JsRegionSet { region_set: result })
     }
 
     #[wasm_bindgen(js_name = "intersect")]

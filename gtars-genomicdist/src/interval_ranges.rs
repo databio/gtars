@@ -138,11 +138,26 @@ pub trait IntervalRanges {
     /// tiles the covered positions exactly, with no overlaps.
     fn disjoin(&self) -> RegionSet;
 
-    /// Return the gaps between regions per chromosome.
+    /// Return the gaps between regions per chromosome, bounded by chromosome sizes.
     ///
-    /// Reduces the input first, then emits intervals between consecutive
-    /// reduced regions on each chromosome.
-    fn gaps(&self) -> RegionSet;
+    /// Reduces the input first, then emits intervals that tile the peak-free
+    /// regions of each chromosome listed in `chrom_sizes`:
+    ///
+    /// - a **leading gap** from position 0 to the first region's start
+    ///   (omitted if the first region starts at 0),
+    /// - an **inter-region gap** between each consecutive pair of reduced
+    ///   regions,
+    /// - a **trailing gap** from the last region's end to the chromosome
+    ///   size (omitted if the last region already reaches the chromosome
+    ///   end, or extends past it due to assembly mismatch),
+    /// - a **full-chromosome gap** `0..chrom_size` for any chromosome in
+    ///   `chrom_sizes` that has no regions at all.
+    ///
+    /// Regions on chromosomes not present in `chrom_sizes` are skipped.
+    /// Regions that extend past the stated chromosome size are clipped to
+    /// `chrom_size` when computing the trailing gap, matching the
+    /// clipping behavior of `trim()`.
+    fn gaps(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet;
 
     /// Range-level intersection of two region sets.
     ///
@@ -584,43 +599,96 @@ impl IntervalRanges for RegionSet {
         RegionSet::from(result)
     }
 
-    fn gaps(&self) -> RegionSet {
+    fn gaps(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet {
         let reduced = self.reduce();
-        if reduced.regions.is_empty() {
-            return RegionSet::from(Vec::<Region>::new());
+
+        // Group reduced regions by chromosome so we can emit per-chrom gaps
+        // and also detect chromosomes with zero regions (full-chrom gaps).
+        let mut by_chr: HashMap<&str, Vec<&Region>> = HashMap::new();
+        for r in &reduced.regions {
+            // Skip chromosomes we don't have a size for — can't bound trailing gaps,
+            // and including leading gaps for unknown-size chromosomes is misleading.
+            if chrom_sizes.contains_key(&r.chr) {
+                by_chr.entry(r.chr.as_str()).or_default().push(r);
+            }
         }
 
         let mut result: Vec<Region> = Vec::new();
 
-        let mut i = 0;
-        while i < reduced.regions.len() {
-            let chr = &reduced.regions[i].chr;
-            let mut j = i + 1;
-            // Leading gap from position 0 to the first region on this chromosome
-            if reduced.regions[i].start > 0 {
-                result.push(Region {
-                    chr: chr.clone(),
-                    start: 0,
-                    end: reduced.regions[i].start,
-                    rest: None,
-                });
+        // Emit gaps for every chromosome named in chrom_sizes, not just those
+        // present in the input — this way a chromosome with zero regions
+        // contributes a full-chromosome gap, matching bedtools complement.
+        for (chr_name, &chrom_size) in chrom_sizes.iter() {
+            if chrom_size == 0 {
+                continue;
             }
-            while j < reduced.regions.len() && reduced.regions[j].chr == *chr {
-                // Gap between consecutive reduced regions
-                let gap_start = reduced.regions[j - 1].end;
-                let gap_end = reduced.regions[j].start;
-                if gap_start < gap_end {
+
+            match by_chr.get(chr_name.as_str()) {
+                None => {
+                    // No regions on this chromosome — whole chromosome is a gap.
                     result.push(Region {
-                        chr: chr.clone(),
-                        start: gap_start,
-                        end: gap_end,
+                        chr: chr_name.clone(),
+                        start: 0,
+                        end: chrom_size,
                         rest: None,
                     });
                 }
-                j += 1;
+                Some(regions) => {
+                    // Leading gap from 0 to the first region's start.
+                    if regions[0].start > 0 {
+                        // Leading gap is clipped to chrom_size as a safety net:
+                        // if the first region starts past chrom_size (assembly
+                        // mismatch) we still produce a valid [0, chrom_size) gap.
+                        let lead_end = regions[0].start.min(chrom_size);
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: 0,
+                            end: lead_end,
+                            rest: None,
+                        });
+                    }
+
+                    // Inter-region gaps.
+                    for pair in regions.windows(2) {
+                        let gap_start = pair[0].end;
+                        let gap_end = pair[1].start;
+                        if gap_start < gap_end {
+                            // Clip both bounds to chrom_size so the whole emitted
+                            // gap lies within the chromosome.
+                            let cs = chrom_size;
+                            let clipped_start = gap_start.min(cs);
+                            let clipped_end = gap_end.min(cs);
+                            if clipped_start < clipped_end {
+                                result.push(Region {
+                                    chr: chr_name.clone(),
+                                    start: clipped_start,
+                                    end: clipped_end,
+                                    rest: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // Trailing gap from last region's end to chrom_size.
+                    let last_end = regions[regions.len() - 1].end;
+                    if last_end < chrom_size {
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: last_end,
+                            end: chrom_size,
+                            rest: None,
+                        });
+                    }
+                }
             }
-            i = j.max(i + 1);
         }
+
+        // Karyotypic chromosome ordering so output is stable across runs.
+        result.sort_by(|a, b| {
+            crate::utils::chrom_karyotype_key(&a.chr)
+                .cmp(&crate::utils::chrom_karyotype_key(&b.chr))
+                .then(a.start.cmp(&b.start))
+        });
 
         RegionSet::from(result)
     }
@@ -2394,6 +2462,187 @@ mod tests {
         // idx 0 (chr1:100-110) should get cluster 1
         assert_eq!(ids[0], 1); // original idx 0 maps to cluster 1
         assert_eq!(ids[1], 0); // original idx 1 maps to cluster 0
+    }
+
+    // ── gaps tests ──────────────────────────────────────────────────────
+
+    fn chrom_sizes(entries: &[(&str, u32)]) -> HashMap<String, u32> {
+        entries
+            .iter()
+            .map(|(c, s)| (c.to_string(), *s))
+            .collect()
+    }
+
+    #[test]
+    fn test_gaps_basic() {
+        // Three peaks on chr1 with gaps between them; leading + trailing
+        // gaps also present.
+        let rs = make_regionset(vec![
+            ("chr1", 10, 20),
+            ("chr1", 30, 40),
+            ("chr1", 50, 60),
+        ]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(&str, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.as_str(), r.start, r.end))
+            .collect();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1", 0, 10),   // leading
+                ("chr1", 20, 30),  // between peak 1 and 2
+                ("chr1", 40, 50),  // between peak 2 and 3
+                ("chr1", 60, 100), // trailing
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gaps_peak_at_origin_no_leading() {
+        // First peak starts at 0 — no leading gap.
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(10, 20), (30, 100)]);
+    }
+
+    #[test]
+    fn test_gaps_peak_at_chrom_end_no_trailing() {
+        // Last peak ends at chrom_size — no trailing gap.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 100)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[test]
+    fn test_gaps_peak_past_chrom_end_clipped() {
+        // Last peak extends past chrom_size — should be clipped, no trailing.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 150)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[test]
+    fn test_gaps_empty_regionset_populated_chrom_sizes() {
+        // No regions, but chrom_sizes has entries — emit whole-chrom gaps.
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let cs = chrom_sizes(&[("chr1", 100), ("chr2", 50)]);
+        let result = rs.gaps(&cs);
+        let mut gaps: Vec<(String, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.clone(), r.start, r.end))
+            .collect();
+        gaps.sort();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1".to_string(), 0, 100),
+                ("chr2".to_string(), 0, 50),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gaps_empty_regionset_empty_chrom_sizes() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let cs: HashMap<String, u32> = HashMap::new();
+        let result = rs.gaps(&cs);
+        assert!(result.regions.is_empty());
+    }
+
+    #[test]
+    fn test_gaps_chromosome_not_in_chrom_sizes_skipped() {
+        // Peak on chr2 with no chr2 entry in chrom_sizes — should be ignored.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr2", 5, 15)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        // Only chr1 gaps emitted.
+        for r in &result.regions {
+            assert_eq!(r.chr, "chr1");
+        }
+    }
+
+    #[test]
+    fn test_gaps_full_chrom_gap_for_unrepresented_chrom() {
+        // chrom_sizes has chr2 but input has no chr2 peaks — emit whole chr2.
+        let rs = make_regionset(vec![("chr1", 10, 20)]);
+        let cs = chrom_sizes(&[("chr1", 100), ("chr2", 200)]);
+        let result = rs.gaps(&cs);
+        let chr2_gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .filter(|r| r.chr == "chr2")
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(chr2_gaps, vec![(0, 200)]);
+    }
+
+    #[test]
+    fn test_gaps_overlapping_peaks_reduced() {
+        // Overlapping peaks get merged by reduce() before gap computation.
+        let rs = make_regionset(vec![
+            ("chr1", 10, 30),
+            ("chr1", 25, 40), // overlaps with previous
+            ("chr1", 50, 60),
+        ]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        // After reduce: [10,40], [50,60] → gaps: [0,10], [40,50], [60,100]
+        assert_eq!(gaps, vec![(0, 10), (40, 50), (60, 100)]);
+    }
+
+    #[test]
+    fn test_gaps_karyotypic_ordering() {
+        // Output should be karyotypically ordered regardless of chrom_sizes insertion order.
+        let rs = make_regionset(vec![
+            ("chr2", 10, 20),
+            ("chr1", 10, 20),
+            ("chr10", 10, 20),
+        ]);
+        let cs = chrom_sizes(&[("chr10", 100), ("chr1", 100), ("chr2", 100)]);
+        let result = rs.gaps(&cs);
+        // First gap on each chr; collect chr names in order of appearance.
+        let order: Vec<&str> = result
+            .regions
+            .iter()
+            .map(|r| r.chr.as_str())
+            .scan("", |prev, chr| {
+                if chr != *prev {
+                    *prev = chr;
+                    Some(chr)
+                } else {
+                    Some("") // repeat, skip
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(order, vec!["chr1", "chr2", "chr10"]);
     }
 
     #[test]

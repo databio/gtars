@@ -134,6 +134,203 @@ pub struct RegionBin {
     pub rid: u32,
 }
 
+/// Summary statistics over the distribution of inter-region spacings.
+///
+/// "Spacing" here means the bp distance between the end of one region and the
+/// start of the next region on the same chromosome, counting only positive
+/// gaps (overlapping / abutting neighbors are excluded, matching
+/// `calc_neighbor_distances`). Cross-chromosome pairs are never counted.
+///
+/// Empty / singleton inputs return `n_gaps = 0` and NaN for all float fields,
+/// matching numpy's behavior on empty arrays.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpacingStats {
+    /// Number of positive inter-region gaps (excludes overlaps and abutting).
+    pub n_gaps: usize,
+    /// Mean gap length in bp.
+    pub mean: f64,
+    /// Median gap length in bp.
+    pub median: f64,
+    /// Population standard deviation of gap lengths in bp.
+    pub std: f64,
+    /// Interquartile range (Q3 − Q1) of gap lengths in bp.
+    pub iqr: f64,
+    /// Mean of `log10(gap + 1)`. Gap distributions are heavy-tailed;
+    /// the log-transformed mean is a more robust central tendency.
+    pub log_mean: f64,
+    /// Population standard deviation of `log10(gap + 1)`.
+    pub log_std: f64,
+}
+
+/// Summary statistics over peak clusters at a given stitching radius.
+///
+/// A cluster is a maximal set of regions connected via single-linkage,
+/// where two regions link if the bp distance between `prev.end` and
+/// `next.start` is at most `radius_bp`. Clusters are chromosome-scoped
+/// (two regions on different chromosomes can never link).
+///
+/// # The `min_cluster_size` filter applies uniformly
+///
+/// Every size-dependent field except `max_cluster_size` is restricted
+/// to clusters with size ≥ the `min_cluster_size` parameter passed to
+/// `calc_peak_clusters`. The same threshold drives `n_clusters`,
+/// `n_clustered_peaks`, `mean_cluster_size`, and `fraction_clustered`
+/// so they always answer the same question about the same subset of
+/// clusters.
+///
+/// **Default is `min_cluster_size = 2`** — the default ClusterStats
+/// answers "how clustered are my peaks, counting only groups of at
+/// least 2?". This matches the scientifically meaningful use case
+/// (enhancer clustering, super-enhancer stitching) and makes the
+/// arithmetic identity `n_clusters * mean_cluster_size ==
+/// n_clustered_peaks` hold at the default.
+///
+/// **Pass `min_cluster_size = 1`** to get the "every connected
+/// component including singletons" view: `n_clusters` then counts all
+/// clusters, `n_clustered_peaks == total_peaks`,
+/// `fraction_clustered == 1.0` trivially, and `mean_cluster_size` is
+/// the simple average `total_peaks / n_clusters`. Useful when you want
+/// the simple mean, but most size-related fields become tautological
+/// at this threshold.
+///
+/// `max_cluster_size` is always the largest cluster in the input
+/// regardless of filter — the maximum is inherent and unaffected by
+/// the threshold.
+///
+/// Empty inputs return zero counts and NaN for `mean_cluster_size` and
+/// `fraction_clustered`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClusterStats {
+    /// Stitching radius in bp (pass-through from the call).
+    pub radius_bp: u32,
+    /// Number of clusters with size ≥ `min_cluster_size`. With the
+    /// default `min_cluster_size = 2`, this counts only multi-peak
+    /// clusters and excludes singletons.
+    pub n_clusters: usize,
+    /// Number of peaks belonging to a cluster with size ≥
+    /// `min_cluster_size`. With default `min_cluster_size = 2`, this is
+    /// "peaks with at least one neighbor within `radius_bp`". With
+    /// `min_cluster_size = 1`, this degenerates to `total_peaks`.
+    pub n_clustered_peaks: usize,
+    /// Mean size of clusters with size ≥ `min_cluster_size`. The
+    /// identity `n_clusters * mean_cluster_size == n_clustered_peaks`
+    /// holds exactly. NaN when no clusters meet the threshold (empty
+    /// input, or `min_cluster_size > max_cluster_size`).
+    pub mean_cluster_size: f64,
+    /// Size of the largest cluster in the input, regardless of
+    /// `min_cluster_size`. 0 for empty input.
+    pub max_cluster_size: usize,
+    /// `n_clustered_peaks / total_peaks`, where `total_peaks` is the
+    /// **raw input count** (not filtered). With default
+    /// `min_cluster_size = 2`, this is the fraction of peaks in
+    /// multi-peak clusters. NaN if input is empty.
+    pub fraction_clustered: f64,
+}
+
+/// Dense per-window peak-count vector and the binning that produced it.
+///
+/// Unlike `region_distribution_with_chrom_sizes`, which returns only bins
+/// that contain ≥1 region, this struct carries the full zero-padded vector
+/// with one entry per window on every chromosome in `chrom_sizes`.
+///
+/// `counts` is ordered by karyotypic chromosome order (`chrom_karyotype_key`)
+/// and then by bin index within each chromosome. `chrom_offsets` records the
+/// start index of each chromosome's slice in `counts`, so callers can
+/// recover per-chromosome subvectors without re-binning.
+///
+/// # `n_bins` is a target, not the total
+///
+/// `n_bins` is the **target bin count for the longest chromosome in
+/// `chrom_sizes`**, not the length of `counts`. Bin width is derived as
+/// `max(chrom_sizes.values()) / n_bins` (floored, minimum 1 bp), and every
+/// chromosome is tiled with windows of that width. The length of `counts`
+/// is `sum(ceil(chrom_size / bin_width))` over all chromosomes in
+/// `chrom_sizes`, which can substantially exceed `n_bins` when many
+/// chromosomes are present. To target a specific bin width in bp, set
+/// `n_bins` to `max_chrom_len / desired_bin_width_bp`.
+///
+/// # Per-chromosome bin width
+///
+/// The last bin on each chromosome is narrower than `bin_width` whenever
+/// `chrom_size` is not an exact multiple of `bin_width`. Chromosomes
+/// shorter than `bin_width` (common with UCSC alt / random / unplaced
+/// contigs) reduce to a single bin whose effective width equals the
+/// chromosome size rather than `bin_width`. Individual entries in
+/// `counts` are therefore counts per bin, not counts per `bin_width` bp —
+/// bins of different effective widths are not directly comparable as
+/// densities when `chrom_sizes` contains contigs significantly shorter
+/// than `bin_width`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DensityVector {
+    /// Target bin count for the longest chromosome in `chrom_sizes`.
+    /// Shorter chromosomes get proportionally fewer bins. **Not** the
+    /// total length of `counts`.
+    pub n_bins: u32,
+    /// Bin width in bp, computed as `max(chrom_sizes) / n_bins` (floored,
+    /// minimum 1 to avoid zero-sized bins). The last bin on each
+    /// chromosome and all bins on chromosomes shorter than `bin_width`
+    /// have narrower effective widths — see the struct-level docs.
+    pub bin_width: u32,
+    /// Dense zero-padded per-window peak counts. Length ==
+    /// `sum(ceil(chrom_size / bin_width))` over all chromosomes in
+    /// `chrom_sizes`.
+    pub counts: Vec<u32>,
+    /// `(chr, start_index)` per chromosome, in karyotypic order. Slice
+    /// `counts[start_index .. next_chrom_start_index]` for per-chromosome
+    /// vectors.
+    pub chrom_offsets: Vec<(String, usize)>,
+}
+
+/// Summary of how evenly peaks are distributed across genome windows.
+///
+/// Derived from a dense per-window count vector (see `DensityVector`).
+/// A Poisson-distributed peak set has `cv ≈ 1`; clustered sets have
+/// `cv >> 1`; evenly-spread sets have `cv << 1`.
+///
+/// See `DensityVector` for the definition of `n_bins` (it is the target
+/// bin count for the longest chromosome, not the total window count)
+/// and for the treatment of chromosomes shorter than the derived
+/// `bin_width`. Both affect the interpretation of the statistics below —
+/// short contigs each contribute a narrow single-bin entry which dilutes
+/// `mean_count`, inflates `n_windows`, and raises `gini`.
+///
+/// **Note on Gini:** the Gini coefficient has a known bias toward high
+/// values for sparse count distributions (many zero-count windows). For
+/// typical TF-binding BED files over hg38 at 1 Mb bins the bias is small,
+/// but for very sparse inputs (hundreds of peaks over thousands of bins)
+/// the reported Gini will exaggerate concentration. `n_nonzero_windows`
+/// is reported alongside so callers can detect the regime.
+///
+/// Empty-input convention (no chrom_sizes or zero regions in a populated
+/// `chrom_sizes`): `n_windows` may still be > 0 (empty RegionSet over
+/// populated chrom_sizes means all windows are zero); `mean = 0`,
+/// `variance = 0`, `cv = NaN`, `gini = 0`. If `chrom_sizes` itself is
+/// empty, all fields are zero or NaN.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DensityHomogeneity {
+    /// Bin width in bp used for this summary. The last bin on each
+    /// chromosome (and all bins on chromosomes shorter than this value)
+    /// is narrower; counts are per-bin, not per-bp.
+    pub bin_width: u32,
+    /// Total number of bins (including zero-count bins). Each chromosome
+    /// contributes `ceil(chrom_size / bin_width)` bins, so this can be
+    /// substantially larger than the `n_bins` parameter when
+    /// `chrom_sizes` has many entries.
+    pub n_windows: usize,
+    /// Number of bins containing at least one peak.
+    pub n_nonzero_windows: usize,
+    /// Mean peak count per window.
+    pub mean_count: f64,
+    /// Population variance of per-window counts.
+    pub variance: f64,
+    /// Coefficient of variation, `sqrt(variance) / mean_count`.
+    /// NaN if `mean_count == 0`.
+    pub cv: f64,
+    /// Gini coefficient of per-window counts, in `[0, 1]`.
+    /// `0` = perfectly even, `1` = all peaks in a single bin.
+    pub gini: f64,
+}
+
 /// Trait for types that provide sequence access to a reference genome.
 ///
 /// Implemented by [`GenomeAssembly`] (in-memory HashMap) and

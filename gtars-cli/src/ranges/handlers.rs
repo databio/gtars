@@ -122,7 +122,11 @@ pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
         }
         Some(("gaps", m)) => {
             let rs = load_input(m)?;
-            let result = rs.gaps();
+            let cs_path = m
+                .get_one::<String>("chrom-sizes")
+                .expect("--chrom-sizes is required");
+            let chrom_sizes = get_chrom_sizes(cs_path);
+            let result = rs.gaps(&chrom_sizes);
             write_output(&result, m.get_one::<String>("output"))
         }
         Some(("intersect", m)) => {

@@ -2,13 +2,20 @@
 % Please edit documentation in R/extendr-wrappers.R
 \name{r_gaps}
 \alias{r_gaps}
-\title{Return gaps between regions per chromosome}
+\title{Return gaps between regions per chromosome, bounded by chrom sizes}
 \usage{
-r_gaps(rs_ptr)
+r_gaps(rs_ptr, chrom_names, chrom_sizes_vec)
 }
 \arguments{
 \item{rs_ptr}{External pointer to a RegionSet}
+
+\item{chrom_names}{Character vector of chromosome names}
+
+\item{chrom_sizes_vec}{Integer vector of chromosome sizes}
 }
 \description{
-Return gaps between regions per chromosome
+Emits the peak-free intervals of each chromosome listed in \code{chrom_sizes},
+including leading gaps (from 0), inter-region gaps, trailing gaps
+(to \code{chrom_size}), and full-chromosome gaps for chromosomes with no
+regions. Regions on chromosomes not present in \code{chrom_sizes} are skipped.
 }

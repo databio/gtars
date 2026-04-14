@@ -4,22 +4,31 @@
 \alias{gaps,RegionSet-method}
 \alias{gaps,character-method}
 \alias{gaps,data.frame-method}
-\title{Return gaps between regions per chromosome}
+\title{Return gaps between regions per chromosome, bounded by chromosome sizes}
 \usage{
-\S4method{gaps}{RegionSet}(x, start = NA, end = NA, ...)
+\S4method{gaps}{RegionSet}(x, start = NA, end = NA, chrom_sizes = NULL, ...)
 
-\S4method{gaps}{character}(x, start = NA, end = NA, ...)
+\S4method{gaps}{character}(x, start = NA, end = NA, chrom_sizes = NULL, ...)
 
-\S4method{gaps}{data.frame}(x, start = NA, end = NA, ...)
+\S4method{gaps}{data.frame}(x, start = NA, end = NA, chrom_sizes = NULL, ...)
 }
 \arguments{
 \item{x}{A RegionSet, GRanges, file path, or data.frame}
 
+\item{start, end}{Ignored. Accepted only for compatibility with the
+\code{IRanges::gaps} generic signature; use \code{chrom_sizes} instead.}
+
+\item{chrom_sizes}{Named integer vector of chromosome sizes (name =
+chromosome, value = size in bp). Required.}
+
 \item{...}{ignored}
 }
 \value{
-A RegionSet with gap regions
+A RegionSet containing the gap intervals
 }
 \description{
-Return gaps between regions per chromosome
+Emits the peak-free intervals of each chromosome listed in \code{chrom_sizes}:
+leading gaps from 0, inter-region gaps, trailing gaps to the chromosome
+end, and full-chromosome gaps for any chromosome with no regions.
+Regions on chromosomes not listed in \code{chrom_sizes} are skipped.
 }

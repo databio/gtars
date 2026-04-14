@@ -100,3 +100,145 @@ class TestDisjoin:
         rs = _rs()
         result = rs.disjoin()
         assert len(result) == 0
+
+
+class TestGaps:
+    def test_gaps_basic(self):
+        """Gaps should emit leading, inter-region, and trailing gaps."""
+        rs = _rs(("chr1", 10, 20), ("chr1", 30, 40), ("chr1", 50, 60))
+        result = rs.gaps({"chr1": 100})
+        coords = [(r.start, r.end) for r in result]
+        assert coords == [(0, 10), (20, 30), (40, 50), (60, 100)]
+
+    def test_gaps_full_chrom_for_empty(self):
+        """A chromosome in chrom_sizes with no regions yields a full-chrom gap."""
+        rs = _rs(("chr1", 10, 20))
+        result = rs.gaps({"chr1": 100, "chr2": 50})
+        chr2 = [(r.start, r.end) for r in result if r.chr == "chr2"]
+        assert chr2 == [(0, 50)]
+
+    def test_gaps_empty(self):
+        rs = _rs()
+        result = rs.gaps({})
+        assert len(result) == 0
+
+
+class TestSpatialStats:
+    def test_inter_peak_spacing_regular_array(self):
+        """Evenly-spaced peaks produce zero std / zero IQR."""
+        rs = _rs(
+            ("chr1", 0, 10),
+            ("chr1", 20, 30),
+            ("chr1", 40, 50),
+            ("chr1", 60, 70),
+        )
+        s = rs.inter_peak_spacing()
+        assert s.n_gaps == 3
+        assert s.mean == 10.0
+        assert s.median == 10.0
+        assert s.std == 0.0
+        assert s.iqr == 0.0
+
+    def test_inter_peak_spacing_empty(self):
+        s = _rs().inter_peak_spacing()
+        assert s.n_gaps == 0
+        import math
+        assert math.isnan(s.mean)
+        assert math.isnan(s.std)
+
+    def test_peak_clusters_mixed_default(self):
+        """Two clusters + one singleton at radius 5. Default
+        min_cluster_size=2 excludes the singleton uniformly: n_clusters,
+        n_clustered_peaks, mean_cluster_size, and fraction_clustered
+        all describe multi-peak clusters only."""
+        rs = _rs(
+            ("chr1", 0, 10),
+            ("chr1", 13, 20),
+            ("chr1", 100, 110),
+            ("chr1", 113, 120),
+            ("chr1", 122, 130),
+            ("chr1", 500, 510),
+        )
+        c = rs.peak_clusters(5)
+        assert c.n_clusters == 2  # multi-peak only, singleton excluded
+        assert c.n_clustered_peaks == 5  # peaks in the two multi-peak clusters
+        assert c.max_cluster_size == 3  # unfiltered, still the biggest cluster
+        assert c.mean_cluster_size == 2.5  # (2 + 3) / 2
+        # Arithmetic identity holds: 2 * 2.5 == 5
+        assert c.n_clusters * c.mean_cluster_size == c.n_clustered_peaks
+        # fraction_clustered uses raw total (6), not filtered count.
+        assert abs(c.fraction_clustered - 5 / 6) < 1e-10
+
+    def test_peak_clusters_mixed_min_1_simple_average(self):
+        """Same fixture, min_cluster_size=1 includes every connected
+        component including the singleton. Mean degenerates to
+        total_peaks / n_clusters = 6 / 3 = 2.0."""
+        rs = _rs(
+            ("chr1", 0, 10),
+            ("chr1", 13, 20),
+            ("chr1", 100, 110),
+            ("chr1", 113, 120),
+            ("chr1", 122, 130),
+            ("chr1", 500, 510),
+        )
+        c = rs.peak_clusters(5, min_cluster_size=1)
+        assert c.n_clusters == 3  # includes the singleton
+        assert c.n_clustered_peaks == 6  # == total_peaks under min=1
+        assert c.max_cluster_size == 3
+        assert c.mean_cluster_size == 2.0
+        # Identity still holds: 3 * 2.0 == 6
+        assert c.n_clusters * c.mean_cluster_size == c.n_clustered_peaks
+        assert c.fraction_clustered == 1.0  # tautological under min=1
+
+    def test_peak_clusters_empty(self):
+        c = _rs().peak_clusters(100)
+        assert c.n_clusters == 0
+        assert c.max_cluster_size == 0
+        assert c.radius_bp == 100
+
+    def test_density_vector_single_chrom(self):
+        """5 peaks in 5 consecutive bins → counts [1,1,1,1,1]."""
+        rs = _rs(
+            ("chr1", 5, 15),
+            ("chr1", 25, 35),
+            ("chr1", 45, 55),
+            ("chr1", 65, 75),
+            ("chr1", 85, 95),
+        )
+        dv = rs.density_vector({"chr1": 100}, 5)
+        assert list(dv.counts) == [1, 1, 1, 1, 1]
+        assert dv.bin_width == 20
+        assert len(dv) == 5
+        assert dv.chrom_offsets == [("chr1", 0)]
+
+    def test_density_vector_zero_padding(self):
+        """Empty RegionSet produces a zero-padded vector."""
+        dv = _rs().density_vector({"chr1": 100}, 5)
+        assert list(dv.counts) == [0, 0, 0, 0, 0]
+
+    def test_density_homogeneity_even_distribution(self):
+        """Perfectly even distribution → CV = 0, Gini = 0."""
+        rs = _rs(
+            ("chr1", 5, 15),
+            ("chr1", 25, 35),
+            ("chr1", 45, 55),
+            ("chr1", 65, 75),
+            ("chr1", 85, 95),
+        )
+        h = rs.density_homogeneity({"chr1": 100}, 5)
+        assert h.n_windows == 5
+        assert h.n_nonzero_windows == 5
+        assert h.mean_count == 1.0
+        assert h.cv == 0.0
+        assert h.gini == 0.0
+
+    def test_density_homogeneity_empty_regionset(self):
+        """Empty RegionSet over populated chrom_sizes: Gini=0, CV=NaN."""
+        import math
+
+        h = _rs().density_homogeneity({"chr1": 100}, 5)
+        assert h.n_windows == 5
+        assert h.n_nonzero_windows == 0
+        assert h.mean_count == 0.0
+        assert h.gini == 0.0
+        assert math.isnan(h.cv)
