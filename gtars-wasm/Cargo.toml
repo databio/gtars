@@ -36,6 +36,13 @@ console_error_panic_hook = { version = "0.1.7", optional = true }
 [dev-dependencies]
 wasm-bindgen-test = "0.3.34"
 
-[profile.release]
-# Tell `rustc` to optimize for small code size.
-opt-level = "s"
+# NOTE: profile sections in non-root workspace members are silently ignored
+# by cargo, so this block has no effect here. Left commented as a marker for
+# future work — to actually apply size optimization to the wasm bundle, this
+# needs to move to the workspace root Cargo.toml (e.g. as
+# `[profile.release.package.gtars-js]` for a per-package override, or as a
+# custom `wasm-release` profile inheriting from release).
+#
+# [profile.release]
+# # Tell `rustc` to optimize for small code size.
+# opt-level = "s"
