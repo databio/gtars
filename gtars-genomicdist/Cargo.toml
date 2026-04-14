@@ -1,6 +1,6 @@
 [package]
 name = "gtars-genomicdist"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2024"
 description = "Rust port of GenomicDistributions: tools for computing statistics for genomic interval sets"
 license = "MIT"
