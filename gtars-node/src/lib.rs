@@ -1,6 +1,11 @@
+use std::io::Read;
 use std::sync::Mutex;
 
 use napi::bindgen_prelude::*;
+use napi::threadsafe_function::{
+    ErrorStrategy, ThreadsafeFunction, ThreadsafeFunctionCallMode,
+};
+use napi::JsFunction;
 use napi_derive::napi;
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore as RustRefgetStore};
@@ -256,5 +261,78 @@ impl RefgetStore {
         let comparison = store.compare(&digest_a, &digest_b).map_err(to_napi_err)?;
         serde_json::to_string(&comparison)
             .map_err(|e| napi::Error::from_reason(format!("Serialization error: {}", e)))
+    }
+
+    // -- Streaming --
+
+    /// Stream a (sub)sequence to JavaScript callbacks.
+    ///
+    /// Spawns a background thread that reads the sequence in chunks and
+    /// invokes `on_chunk(Buffer)` for each chunk, `on_error(message)` on
+    /// failure, or `on_end()` on successful completion. Exactly one of
+    /// `on_end` or `on_error` is invoked as the terminal callback. The
+    /// JS-side `streamSequence` wrapper constructs a `Readable` from these
+    /// callbacks.
+    #[napi]
+    pub fn stream_sequence_internal(
+        &self,
+        digest: String,
+        start: Option<u32>,
+        end: Option<u32>,
+        on_chunk: JsFunction,
+        on_error: JsFunction,
+        on_end: JsFunction,
+    ) -> Result<()> {
+        // Build the reader under the mutex, then drop the lock so the worker
+        // thread never contends with JS callers.
+        let reader: Box<dyn Read + Send> = {
+            let mut store = self.inner.lock().map_err(lock_err)?;
+            // Auto-load the sequence metadata/data from disk/remote if needed.
+            store.load_sequence(&digest).map_err(to_napi_err)?;
+            store
+                .stream_sequence(&digest, start, end)
+                .map_err(to_napi_err)?
+        };
+
+        // Build threadsafe functions for the three JS callbacks.
+        let tsfn_chunk: ThreadsafeFunction<Vec<u8>, ErrorStrategy::Fatal> = on_chunk
+            .create_threadsafe_function(0, |ctx| {
+                let buf: Vec<u8> = ctx.value;
+                ctx.env.create_buffer_with_data(buf).map(|b| vec![b.into_raw()])
+            })?;
+        let tsfn_error: ThreadsafeFunction<String, ErrorStrategy::Fatal> = on_error
+            .create_threadsafe_function(0, |ctx| {
+                let s: String = ctx.value;
+                ctx.env.create_string(&s).map(|v| vec![v])
+            })?;
+        let tsfn_end: ThreadsafeFunction<(), ErrorStrategy::Fatal> = on_end
+            .create_threadsafe_function(0, |_ctx| Ok(Vec::<napi::JsUndefined>::new()))?;
+
+        std::thread::spawn(move || {
+            let mut reader = reader;
+            let mut buf = [0u8; 65536];
+            loop {
+                match reader.read(&mut buf) {
+                    Ok(0) => {
+                        tsfn_end.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                        break;
+                    }
+                    Ok(n) => {
+                        let chunk = buf[..n].to_vec();
+                        // Blocking so the tsfn queue applies backpressure.
+                        tsfn_chunk.call(chunk, ThreadsafeFunctionCallMode::Blocking);
+                    }
+                    Err(e) => {
+                        tsfn_error.call(
+                            format!("stream decode error: {}", e),
+                            ThreadsafeFunctionCallMode::NonBlocking,
+                        );
+                        break;
+                    }
+                }
+            }
+        });
+
+        Ok(())
     }
 }

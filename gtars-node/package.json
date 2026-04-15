@@ -2,8 +2,8 @@
   "name": "@databio/gtars-node",
   "version": "0.0.2",
   "description": "Native Node.js bindings for gtars (genomic tools and region sets)",
-  "main": "index.js",
-  "types": "index.d.ts",
+  "main": "wrapper.js",
+  "types": "wrapper.d.ts",
   "repository": {
     "type": "git",
     "url": "https://github.com/databio/gtars"
@@ -11,7 +11,9 @@
   "license": "MIT",
   "files": [
     "index.js",
-    "index.d.ts"
+    "index.d.ts",
+    "wrapper.js",
+    "wrapper.d.ts"
   ],
   "napi": {
     "name": "gtars-node",
@@ -26,7 +28,7 @@
   "scripts": {
     "build": "napi build --platform --release",
     "build:debug": "napi build --platform",
-    "test": "node --test __test__/index.test.mjs",
+    "test": "node --test __test__/",
     "prepublishOnly": "napi prepublish -t npm"
   },
   "devDependencies": {

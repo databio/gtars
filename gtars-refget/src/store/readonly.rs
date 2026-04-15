@@ -1073,9 +1073,29 @@ impl ReadonlyRefgetStore {
         }
 
         let sha = metadata.sha512t24u.clone();
+
+        // 6. Build the source reader. In-memory Full records are streamed
+        // directly from their encoded byte buffer. Otherwise try the
+        // on-disk path (local_path / remote_source).
+        if let SequenceRecord::Full { sequence, .. } = record {
+            let slice: Vec<u8> = sequence[byte_start as usize..byte_end as usize].to_vec();
+            let source: Box<dyn Read + Send> = Box::new(std::io::Cursor::new(slice));
+            return match self.mode {
+                StorageMode::Encoded => Ok(Box::new(StreamingDecoder::new(
+                    source,
+                    alphabet,
+                    leading_skip_bits,
+                    bases_to_emit,
+                ))),
+                StorageMode::Raw => {
+                    debug_assert_eq!(leading_skip_bits, 0);
+                    Ok(source)
+                }
+            };
+        }
+
         let relpath = self.resolve_seq_file_relpath(&sha)?;
 
-        // 6. Build the source reader.
         let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
             let full = local.join(&relpath);
             if full.exists() {

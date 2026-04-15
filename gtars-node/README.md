@@ -128,6 +128,33 @@ Sequences are lazy-loaded automatically — when you call `getSequence` or `getS
 
 **Note:** `listSequences()` returns all sequences at once. For large stores (500k+ sequences), use `stats()` to check the count first and prefer `getSequenceMetadata(digest)` for individual lookups.
 
+### Streaming
+
+`streamSequence` returns a Node `stream.Readable` that emits ASCII sequence bytes as they are decoded from the underlying store — no full-sequence buffering on the JS side. This is the recommended path for HTTP refget servers that want to pipe sequence bytes directly to the response body with bounded memory usage.
+
+| Method | Returns |
+|--------|---------|
+| `streamSequence(digest, start?, end?)` | `stream.Readable` yielding ASCII bases |
+
+Example — an Express handler for `GET /sequence/:digest`:
+
+```javascript
+const { RefgetStore } = require('@databio/gtars-node')
+const express = require('express')
+
+const store = RefgetStore.openLocal('/path/to/store')
+const app = express()
+
+app.get('/sequence/:digest', (req, res) => {
+  const stream = store.streamSequence(req.params.digest)
+  stream.on('error', (err) => {
+    res.status(/not found/i.test(err.message) ? 404 : 500).send(err.message)
+  })
+  res.setHeader('Content-Type', 'text/vnd.ga4gh.refget.v2.0.0+plain')
+  stream.pipe(res)
+})
+```
+
 ### Mutation and persistence
 
 | Method | Description |
