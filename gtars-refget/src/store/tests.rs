@@ -2215,6 +2215,103 @@ fn test_stream_sequence_bounded_memory_full_record() {
 }
 
 #[test]
+fn test_stream_sequence_bounded_memory_stub_record() {
+    // Regression guard for the production path: the Node proxy opens a store
+    // via `open_local` / `open_remote`, so records are `Stub` (metadata only,
+    // never loaded into memory) and `stream_sequence` must fall back to the
+    // on-disk `.seq` file (or HTTP Range GET) without buffering the whole
+    // file. This test directly measures peak allocation on that Stub-backed
+    // path — analogous to `test_stream_sequence_bounded_memory_full_record`
+    // but for the disk-streaming branch.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+
+    // Measure peak at two very different sizes; the bound must not depend
+    // on SEQ_LEN. (A full-file buffer would scale linearly; a fixed-size
+    // BufReader would stay constant.) We drain into a fixed-size scratch
+    // buffer — not `read_to_end` — because `read_to_end`'s geometric Vec
+    // growth introduces transient realloc peaks of ~0.5 * SEQ_LEN that
+    // swamp the actual streaming memory and falsely suggest scaling.
+    for &SEQ_LEN in &[1_000_000usize, 16_000_000] {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let digest;
+    {
+        let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+        builder.set_encoding_mode(StorageMode::Raw);
+        builder
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        digest = first_seq_digest(&builder);
+        // Drop `builder` here — `add_sequence_collection_from_fasta` populates
+        // an in-memory Full record; we want a fresh open so records are Stub.
+    }
+
+    // Reopen the store fresh — records should be Stub (metadata only).
+    let store = RefgetStore::open_local(&store_path).unwrap();
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(
+            !rec.is_loaded(),
+            "expected Stub record after open_local, got Full"
+        );
+    }
+
+    // Reset peak AFTER opening the store so we don't count store-open
+    // allocations.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    // Drain into a fixed-size buffer, checksumming as we go.
+    // Avoids `read_to_end`'s geometric Vec growth, whose realloc
+    // doubles transiently dominate peak (giving a false ~0.5N signal).
+    let mut scratch = [0u8; 8192];
+    let mut total = 0usize;
+    let mut checksum: u64 = 0;
+    loop {
+        let n = reader.read(&mut scratch).unwrap();
+        if n == 0 { break; }
+        for &b in &scratch[..n] { checksum = checksum.wrapping_add(b as u64); }
+        total += n;
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    assert_eq!(total, SEQ_LEN);
+    let expected_checksum: u64 = seq.iter().map(|&b| b as u64).sum();
+    assert_eq!(checksum, expected_checksum);
+
+    // A full-file buffer in the Stub fallback would give peak_delta
+    // proportional to SEQ_LEN. A BufReader-based stream is constant
+    // (~8 KiB default). 64 KiB leaves headroom for allocator noise.
+    assert!(
+        peak_delta < 64 * 1024,
+        "stream_sequence (Stub path) peak allocation {} bytes exceeds \
+         64 KiB at SEQ_LEN={} — streaming is not O(1) in sequence size",
+        peak_delta, SEQ_LEN,
+    );
+    }
+}
+
+#[test]
 fn test_stream_sequence_no_preload_for_stub_record() {
     // Structural assertion for fix B: streaming must work when the record is
     // a Stub (not in memory), pulling bytes directly from the backing store,
