@@ -1967,3 +1967,150 @@ fn test_import_collection_mode_mismatch_error() {
         err_msg,
     );
 }
+
+// =========================================================================
+// stream_sequence tests
+// =========================================================================
+
+fn first_seq_digest(store: &RefgetStore) -> String {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone()
+}
+
+fn first_seq_length(store: &RefgetStore) -> usize {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .length
+}
+
+fn build_on_disk_store(mode: StorageMode) -> (tempfile::TempDir, RefgetStore, String, usize) {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+    let length = first_seq_length(&store);
+    (dir, store, digest, length)
+}
+
+#[test]
+fn test_stream_sequence_local_full() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+}
+
+#[test]
+fn test_stream_sequence_local_substring() {
+    use std::io::Read;
+    let (_dir, mut store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    store.load_sequence(&digest).unwrap();
+    let ranges: Vec<(u32, u32)> = vec![
+        (0, 4),
+        (1, 5),
+        (2, 10),
+        (5, 6),
+        (0, length as u32),
+        (length as u32 - 1, length as u32),
+    ];
+    for (s, e) in ranges {
+        let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+
+        let expected = store.get_substring(&digest, s as usize, e as usize).unwrap();
+        assert_eq!(
+            String::from_utf8(streamed).unwrap(),
+            expected,
+            "mismatch for range {}..{}",
+            s,
+            e
+        );
+    }
+}
+
+#[test]
+fn test_stream_sequence_raw_mode() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Raw);
+    let mut reader = store.stream_sequence(&digest, Some(2), Some(8)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(&out[..], b"GTACGT");
+    assert!(length >= 8);
+}
+
+#[test]
+fn test_stream_sequence_zero_length() {
+    use std::io::Read;
+    let (_dir, store, digest, _) = build_on_disk_store(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, Some(5), Some(5)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert!(out.is_empty());
+}
+
+#[test]
+fn test_stream_sequence_invalid_range() {
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    assert!(store.stream_sequence(&digest, Some(5), Some(3)).is_err());
+    assert!(
+        store
+            .stream_sequence(&digest, Some(0), Some(length as u32 + 1))
+            .is_err()
+    );
+}
+
+#[test]
+fn test_stream_sequence_bounded_memory() {
+    use std::io::Read;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let mut content = String::from(">chr1\n");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(1_000_000);
+    for i in 0..1_000_000 {
+        seq.push(bases[i % 4]);
+    }
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut buf = [0u8; 4096];
+    let mut collected = Vec::with_capacity(1_000_000);
+    loop {
+        let n = reader.read(&mut buf).unwrap();
+        if n == 0 {
+            break;
+        }
+        collected.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(collected, seq);
+}

@@ -17,11 +17,52 @@ use crate::digest::{
     SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
     SequenceRecord,
 };
-use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence};
+use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, StreamingDecoder};
 use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 use crate::seqcol::metadata_matches_attribute;
 
-use std::fs::{self, create_dir_all};
+use std::fs::{self, create_dir_all, File};
+use std::io::{BufReader, Read, Seek, SeekFrom};
+
+/// Open a bounded HTTP byte range against a remote refget store and return
+/// a `Read` yielding exactly `byte_end - byte_start` bytes.
+#[cfg(feature = "http")]
+fn open_remote_range(
+    remote: &str,
+    relpath: &Path,
+    byte_start: u64,
+    byte_end: u64,
+) -> Result<Box<dyn Read + Send>> {
+    let relpath_str = relpath
+        .to_str()
+        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+    let url = if remote.ends_with('/') {
+        format!("{}{}", remote, relpath_str)
+    } else {
+        format!("{}/{}", remote, relpath_str)
+    };
+
+    let byte_len = byte_end - byte_start;
+    let last_byte = byte_end.saturating_sub(1);
+    let response = ureq::get(&url)
+        .set("Range", &format!("bytes={}-{}", byte_start, last_byte))
+        .call()
+        .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
+
+    Ok(Box::new(response.into_reader().take(byte_len)))
+}
+
+#[cfg(not(feature = "http"))]
+fn open_remote_range(
+    _remote: &str,
+    _relpath: &Path,
+    _byte_start: u64,
+    _byte_end: u64,
+) -> Result<Box<dyn Read + Send>> {
+    Err(anyhow!(
+        "Remote streaming requires the 'http' feature to be enabled"
+    ))
+}
 
 /// Core refget store with `&self` read methods, suitable for `Arc` sharing in servers.
 ///
@@ -942,6 +983,132 @@ impl ReadonlyRefgetStore {
                 let raw_slice: &[u8] = &sequence[start..end];
                 String::from_utf8(raw_slice.to_vec())
                     .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+            }
+        }
+    }
+
+    // =========================================================================
+    // Streaming retrieval
+    // =========================================================================
+
+    /// Resolve the relative on-disk/remote path for a sequence's encoded bytes.
+    fn resolve_seq_file_relpath(&self, digest: &str) -> Result<PathBuf> {
+        let template = self
+            .seqdata_path_template
+            .as_deref()
+            .unwrap_or(DEFAULT_SEQDATA_PATH_TEMPLATE);
+        let relpath = Self::expand_template(digest, template);
+        let relpath_str = relpath
+            .to_str()
+            .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+        Self::sanitize_relative_path(relpath_str)?;
+        Ok(relpath)
+    }
+
+    /// Stream a (sub)sequence as decoded ASCII bases without loading the full
+    /// sequence into memory.
+    ///
+    /// Opens a bounded byte window on the backing store (local file via
+    /// `seek`+`take`, or remote via HTTP `Range: bytes=`), and wraps it in a
+    /// [`StreamingDecoder`] when the store is in `Encoded` mode. In `Raw`
+    /// mode the bounded byte source is returned directly, since bytes and
+    /// bases are 1:1.
+    ///
+    /// Memory use is O(1) in the sequence length.
+    pub fn stream_sequence<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        start: Option<u32>,
+        end: Option<u32>,
+    ) -> Result<Box<dyn Read + Send>> {
+        // 1. Resolve digest (MD5 -> SHA512t24u fallback).
+        let digest_key = sha512_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        // 2. Fetch metadata only (do not load bytes).
+        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+            anyhow!(
+                "Sequence not found: {}",
+                String::from_utf8_lossy(sha512_digest.as_ref())
+            )
+        })?;
+        let metadata = record.metadata();
+
+        // 3. Resolve bounds.
+        let length = metadata.length as u64;
+        let start = start.map(|s| s as u64).unwrap_or(0);
+        let end = end.map(|e| e as u64).unwrap_or(length);
+        if start > end || end > length {
+            return Err(anyhow!(
+                "Invalid stream range: start={}, end={}, length={}",
+                start,
+                end,
+                length
+            ));
+        }
+
+        // 4. Look up alphabet and compute bits-per-base.
+        let alphabet = crate::digest::lookup_alphabet(&metadata.alphabet);
+        let bps = match self.mode {
+            StorageMode::Encoded => alphabet.bits_per_symbol as u64,
+            StorageMode::Raw => 8,
+        };
+
+        // 5. Compute byte range + leading-skip bits.
+        let start_bit = start * bps;
+        let end_bit = end * bps;
+        let byte_start = start_bit / 8;
+        let byte_end = end_bit.div_ceil(8);
+        let leading_skip_bits = (start_bit - byte_start * 8) as u8;
+        let bases_to_emit = end - start;
+        let byte_len = byte_end - byte_start;
+
+        // Fast path for empty range.
+        if bases_to_emit == 0 {
+            return Ok(Box::new(std::io::empty()));
+        }
+
+        let sha = metadata.sha512t24u.clone();
+        let relpath = self.resolve_seq_file_relpath(&sha)?;
+
+        // 6. Build the source reader.
+        let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
+            let full = local.join(&relpath);
+            if full.exists() {
+                let mut file = File::open(&full)
+                    .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
+                file.seek(SeekFrom::Start(byte_start))
+                    .context("Failed to seek in local seq file")?;
+                Box::new(BufReader::new(file).take(byte_len))
+            } else if let Some(remote) = self.remote_source.as_ref() {
+                open_remote_range(remote, &relpath, byte_start, byte_end)?
+            } else {
+                return Err(anyhow!(
+                    "Sequence file missing locally and no remote source: {}",
+                    full.display()
+                ));
+            }
+        } else if let Some(remote) = self.remote_source.as_ref() {
+            open_remote_range(remote, &relpath, byte_start, byte_end)?
+        } else {
+            return Err(anyhow!("No backing source configured for sequence {}", sha));
+        };
+
+        // 7. Dispatch on mode.
+        match self.mode {
+            StorageMode::Encoded => Ok(Box::new(StreamingDecoder::new(
+                source,
+                alphabet,
+                leading_skip_bits,
+                bases_to_emit,
+            ))),
+            StorageMode::Raw => {
+                debug_assert_eq!(leading_skip_bits, 0);
+                Ok(source)
             }
         }
     }

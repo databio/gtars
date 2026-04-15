@@ -56,6 +56,7 @@ pub use digest::{
     SequenceCollectionRecord,
     SequenceEncoder,
     SequenceMetadata,
+    StreamingDecoder,
     // Types
     SequenceRecord,
     canonicalize_json,
