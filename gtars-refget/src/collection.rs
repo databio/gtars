@@ -418,7 +418,7 @@ mod tests {
                 alphabet: AlphabetType::Dna2bit,
                 fai: None,
             },
-            sequence: encoded_data,
+            sequence: std::sync::Arc::new(encoded_data),
         };
 
         let decoded = record.decode().expect("Should decode encoded data");

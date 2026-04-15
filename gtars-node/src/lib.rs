@@ -285,10 +285,15 @@ impl RefgetStore {
     ) -> Result<()> {
         // Build the reader under the mutex, then drop the lock so the worker
         // thread never contends with JS callers.
+        //
+        // Note: we deliberately do NOT call `load_sequence` here. Pulling the
+        // entire sequence into memory before streaming defeats the O(1) memory
+        // guarantee of `stream_sequence` — peak memory would grow to roughly
+        // 2x the encoded sequence for chromosome-sized reads. `stream_sequence`
+        // already falls back to the on-disk / remote byte source when the
+        // record is a `Stub`, so no pre-loading is required.
         let reader: Box<dyn Read + Send> = {
-            let mut store = self.inner.lock().map_err(lock_err)?;
-            // Auto-load the sequence metadata/data from disk/remote if needed.
-            store.load_sequence(&digest).map_err(to_napi_err)?;
+            let store = self.inner.lock().map_err(lock_err)?;
             store
                 .stream_sequence(&digest, start, end)
                 .map_err(to_napi_err)?

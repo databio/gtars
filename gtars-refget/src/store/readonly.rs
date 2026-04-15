@@ -23,6 +23,41 @@ use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
+use std::sync::Arc;
+
+/// A `Read` adapter that yields a byte range from a shared `Arc<Vec<u8>>`
+/// buffer without cloning the backing data.
+///
+/// Used by `stream_sequence` when the target sequence is already resident
+/// in memory as `SequenceRecord::Full`. The alternative of slicing+cloning
+/// would allocate a second copy of the (possibly chromosome-sized) buffer
+/// and defeat the O(1) memory guarantee of streaming.
+pub(crate) struct ArcSliceReader {
+    buf: Arc<Vec<u8>>,
+    pos: usize,
+    end: usize,
+}
+
+impl ArcSliceReader {
+    pub(crate) fn new(buf: Arc<Vec<u8>>, start: usize, end: usize) -> Self {
+        debug_assert!(start <= end);
+        debug_assert!(end <= buf.len());
+        Self { buf, pos: start, end }
+    }
+}
+
+impl Read for ArcSliceReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self.end - self.pos;
+        if remaining == 0 {
+            return Ok(0);
+        }
+        let n = remaining.min(out.len());
+        out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
 
 /// Open a bounded HTTP byte range against a remote refget store and return
 /// a `Read` yielding exactly `byte_end - byte_start` bytes.
@@ -184,12 +219,15 @@ impl ReadonlyRefgetStore {
                     match (self.mode, new_mode) {
                         (StorageMode::Raw, StorageMode::Encoded) => {
                             let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence = encode_sequence(&*sequence, alphabet);
+                            *sequence = std::sync::Arc::new(encode_sequence(&sequence[..], alphabet));
                         }
                         (StorageMode::Encoded, StorageMode::Raw) => {
                             let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence =
-                                decode_string_from_bytes(&*sequence, metadata.length, alphabet);
+                            *sequence = std::sync::Arc::new(decode_string_from_bytes(
+                                &sequence[..],
+                                metadata.length,
+                                alphabet,
+                            ));
                         }
                         _ => {}
                     }
@@ -495,10 +533,10 @@ impl ReadonlyRefgetStore {
                         })?;
                         let mut meta = record.metadata().clone();
                         meta.name = name.clone();
-                        Ok(match record.sequence() {
+                        Ok(match record.sequence_arc() {
                             Some(seq) => SequenceRecord::Full {
                                 metadata: meta,
-                                sequence: seq.to_vec(),
+                                sequence: seq,
                             },
                             None => SequenceRecord::Stub(meta),
                         })
@@ -1096,8 +1134,15 @@ impl ReadonlyRefgetStore {
         // directly from their encoded byte buffer. Otherwise try the
         // on-disk path (local_path / remote_source).
         if let SequenceRecord::Full { sequence, .. } = record {
-            let slice: Vec<u8> = sequence[byte_start as usize..byte_end as usize].to_vec();
-            let source: Box<dyn Read + Send> = Box::new(std::io::Cursor::new(slice));
+            // Share ownership of the already-resident buffer instead of
+            // cloning the byte range. This keeps peak allocation O(1) in
+            // the sequence size.
+            let shared = Arc::clone(sequence);
+            let source: Box<dyn Read + Send> = Box::new(ArcSliceReader::new(
+                shared,
+                byte_start as usize,
+                byte_end as usize,
+            ));
             return match self.mode {
                 StorageMode::Encoded => Ok(Box::new(StreamingDecoder::new(
                     source,

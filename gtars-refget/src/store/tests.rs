@@ -136,7 +136,7 @@ fn test_mode_switching() {
             .unwrap();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
@@ -164,7 +164,7 @@ fn test_mode_switching() {
         store.disable_encoding();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
         assert_eq!(seq_before, seq_after);
@@ -333,7 +333,7 @@ fn test_global_refget_store() {
 
     let record = SequenceRecord::Full {
         metadata: seq_metadata.clone(),
-        sequence: sequence.to_vec(),
+        sequence: std::sync::Arc::new(sequence.to_vec()),
     };
 
     collection.sequences.push(record);
@@ -2113,4 +2113,149 @@ fn test_stream_sequence_bounded_memory() {
         collected.extend_from_slice(&buf[..n]);
     }
     assert_eq!(collected, seq);
+}
+
+// =========================================================================
+// Bounded-memory tests for stream_sequence
+// =========================================================================
+//
+// These tests verify the O(1) memory claim of `stream_sequence`: regardless
+// of sequence size, neither the Rust decoder nor the napi binding should
+// materialize the full (sub)sequence in memory.
+
+/// Install peak_alloc as the global allocator (tests-only) so we can measure
+/// allocation deltas.
+#[global_allocator]
+static PEAK_ALLOC: peak_alloc::PeakAlloc = peak_alloc::PeakAlloc;
+
+/// Serialize allocator-sensitive tests so concurrent tests don't pollute the
+/// process-wide peak counter.
+static ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn test_stream_sequence_bounded_memory_full_record() {
+    use std::io::Read;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+
+    // Build a large FASTA (~1M bases) and import into an in-memory store in
+    // Encoded mode. The in-memory store holds the encoded sequence as a
+    // `SequenceRecord::Full { sequence: Vec<u8>, .. }` — for a 2-bit alphabet
+    // that's ~250 KB encoded, decoding to ~1 MB raw bases.
+    const SEQ_LEN: usize = 1_000_000;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    // Use Raw mode so the Full record holds SEQ_LEN bytes verbatim. The old
+    // buggy code path cloned that entire buffer during streaming; with the
+    // Arc-backed reader it must not.
+    store.set_encoding_mode(StorageMode::Raw);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    // Confirm the record is Full (in-memory resident).
+    {
+        use crate::hashkeyable::HashKeyable;
+        let key = digest.to_key();
+        let rec = store.sequence_store.get(&key).unwrap();
+        assert!(rec.is_loaded(), "expected Full record for in-memory store");
+    }
+
+    // Measure peak allocation across stream_sequence + drain. The whole
+    // buffer is already resident; streaming should not allocate another
+    // copy of it.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    {
+        let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+        let mut chunk = [0u8; 4096];
+        let mut total = 0usize;
+        loop {
+            let n = reader.read(&mut chunk).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        assert_eq!(total, SEQ_LEN);
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    // Streaming must not allocate anywhere near the sequence size. The
+    // previous bug cloned the entire byte range (1 MB for this test); with
+    // the fix, allocations are bounded by a few reader frames. The bound
+    // below is loose enough to tolerate concurrent test allocator noise
+    // but tight enough to catch a full-buffer clone (which would be
+    // >= SEQ_LEN bytes).
+    let bound: usize = SEQ_LEN / 4; // 250 KiB; a clone would cost >= 1 MiB.
+    assert!(
+        peak_delta < bound,
+        "stream_sequence peak allocation delta {} bytes exceeds bound {} bytes \
+         (SEQ_LEN={} bytes raw). \
+         Streaming is cloning the buffer instead of sharing ownership.",
+        peak_delta,
+        bound,
+        SEQ_LEN,
+    );
+}
+
+#[test]
+fn test_stream_sequence_no_preload_for_stub_record() {
+    // Structural assertion for fix B: streaming must work when the record is
+    // a Stub (not in memory), pulling bytes directly from the backing store,
+    // without populating the in-memory cache. This lets the napi layer drop
+    // its pre-`load_sequence` call.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+
+    // Drop the in-memory sequence buffer back to Stub, preserving metadata.
+    let mut store = store;
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap().clone();
+        let meta = rec.metadata().clone();
+        store
+            .inner
+            .sequence_store
+            .insert(key, SequenceRecord::Stub(meta));
+    }
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(!rec.is_loaded(), "expected Stub before stream_sequence");
+    }
+
+    // Stream without calling load_sequence() first.
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+
+    // And the store should still be a Stub (no pre-loading side effect).
+    let key = digest.to_key();
+    let rec = store.inner.sequence_store.get(&key).unwrap();
+    assert!(
+        !rec.is_loaded(),
+        "stream_sequence must not populate the in-memory Full record"
+    );
 }
