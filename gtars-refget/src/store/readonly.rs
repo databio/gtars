@@ -44,10 +44,28 @@ fn open_remote_range(
 
     let byte_len = byte_end - byte_start;
     let last_byte = byte_end.saturating_sub(1);
-    let response = ureq::get(&url)
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .timeout_read(std::time::Duration::from_secs(60))
+        .build();
+    let response = agent
+        .get(&url)
         .set("Range", &format!("bytes={}-{}", byte_start, last_byte))
         .call()
         .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
+
+    // Guard against servers that ignore the Range header and return the full
+    // body with HTTP 200 instead of a 206 Partial Content slice. Wrapping the
+    // full body here would silently produce wrong bases, so refuse outright.
+    let status = response.status();
+    if status != 206 {
+        return Err(anyhow!(
+            "Remote server did not honor Range header (got HTTP {}); \
+             refusing to stream to avoid silent data corruption. URL: {}",
+            status,
+            url
+        ));
+    }
 
     Ok(Box::new(response.into_reader().take(byte_len)))
 }
@@ -1577,3 +1595,98 @@ impl Display for ReadonlyRefgetStore {
 
 // Extension traits used by collection.rs
 use crate::collection::SequenceCollectionRecordExt;
+
+#[cfg(all(test, feature = "http"))]
+mod open_remote_range_tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+    /// Spin up an HTTP server that DELIBERATELY IGNORES the Range header,
+    /// responding 200 OK with the full body. Models a misbehaving CDN/origin.
+    /// Returns (base_url, shutdown_fn).
+    fn start_range_ignoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
+        use std::io::{Read as _, Write as _};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            listener.set_nonblocking(false).ok();
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let _ = stream.read(&mut buf).unwrap_or(0);
+                        // Respond 200 OK with the full body, ignoring the Range header.
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(&body);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
+
+    /// When a remote server ignores the Range header and returns 200 + full body,
+    /// `open_remote_range` MUST return an error rather than silently wrapping the
+    /// wrong bytes in a StreamingDecoder. Otherwise callers get silent corruption.
+    #[test]
+    fn test_open_remote_range_rejects_non_206_response() {
+        let full_body: Vec<u8> = (0u8..=255).collect();
+        let (base_url, shutdown) = start_range_ignoring_server(full_body.clone());
+
+        // Request only a middle slice: bytes 10..20.
+        let result = open_remote_range(
+            &base_url,
+            std::path::Path::new("seq.dat"),
+            10,
+            20,
+        );
+
+        shutdown();
+
+        match result {
+            Err(e) => {
+                let msg = format!("{}", e);
+                assert!(
+                    msg.contains("Range") || msg.contains("206") || msg.contains("status"),
+                    "expected a Range/206/status error, got: {}",
+                    msg
+                );
+            }
+            Ok(mut reader) => {
+                use std::io::Read as _;
+                let mut got = Vec::new();
+                reader.read_to_end(&mut got).unwrap();
+                // If we got here, the bug is live: the reader yielded bytes
+                // that are NOT the requested 10..20 slice. The `.take(byte_len)`
+                // in the buggy code returns the FIRST `byte_len` bytes of the
+                // full body, i.e. 0..10, instead of the requested 10..20.
+                assert_eq!(
+                    got,
+                    full_body[10..20],
+                    "BUG: open_remote_range silently returned wrong bytes \
+                     when server ignored the Range header. Got {:?}, expected {:?}. \
+                     The function should have returned an error instead.",
+                    got,
+                    &full_body[10..20]
+                );
+            }
+        }
+    }
+}
