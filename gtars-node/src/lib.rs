@@ -1,5 +1,7 @@
 use std::io::Read;
 use std::sync::Mutex;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use napi::bindgen_prelude::*;
 use napi::threadsafe_function::{
@@ -18,12 +20,33 @@ fn lock_err(e: std::sync::PoisonError<impl std::fmt::Debug>) -> napi::Error {
     napi::Error::from_reason(format!("Lock poisoned: {:?}", e))
 }
 
+/// Convert a JS `BigInt` to `u64`, surfacing a napi error when the value
+/// would lose precision (negative or >u64::MAX).
+fn bigint_to_u64(b: BigInt, name: &str) -> Result<u64> {
+    let (sign_bit, value, lossless) = b.get_u64();
+    if sign_bit {
+        return Err(napi::Error::from_reason(format!(
+            "{} must be non-negative",
+            name
+        )));
+    }
+    if !lossless {
+        return Err(napi::Error::from_reason(format!(
+            "{} exceeds u64 range",
+            name
+        )));
+    }
+    Ok(value)
+}
+
 // -- Metadata return types (plain JS objects via #[napi(object)]) --
 
 #[napi(object, js_name = "SequenceMetadata")]
 pub struct SequenceMetadataJs {
     pub name: String,
-    pub length: u32,
+    /// Sequence length in bases. Returned as `BigInt` since assemblies
+    /// >4 Gb (some plant genomes) cannot fit in `u32`.
+    pub length: BigInt,
     pub sha512t24u: String,
     pub md5: String,
 }
@@ -94,7 +117,14 @@ impl RefgetStore {
     }
 
     #[napi]
-    pub fn get_substring(&self, digest: String, start: u32, end: u32) -> Result<String> {
+    pub fn get_substring(
+        &self,
+        digest: String,
+        start: BigInt,
+        end: BigInt,
+    ) -> Result<String> {
+        let start = bigint_to_u64(start, "start")?;
+        let end = bigint_to_u64(end, "end")?;
         let mut store = self.inner.lock().map_err(lock_err)?;
         store.load_sequence(&digest).map_err(to_napi_err)?;
         store
@@ -162,7 +192,7 @@ impl RefgetStore {
             .into_iter()
             .map(|m| SequenceMetadataJs {
                 name: m.name,
-                length: m.length as u32,
+                length: BigInt::from(m.length as u64),
                 sha512t24u: m.sha512t24u,
                 md5: m.md5,
             })
@@ -195,7 +225,7 @@ impl RefgetStore {
         Ok(store.get_sequence_metadata(&digest).map(|m| {
             SequenceMetadataJs {
                 name: m.name.clone(),
-                length: m.length as u32,
+                length: BigInt::from(m.length as u64),
                 sha512t24u: m.sha512t24u.clone(),
                 md5: m.md5.clone(),
             }
@@ -277,12 +307,20 @@ impl RefgetStore {
     pub fn stream_sequence_internal(
         &self,
         digest: String,
-        start: Option<u32>,
-        end: Option<u32>,
+        start: Option<BigInt>,
+        end: Option<BigInt>,
         on_chunk: JsFunction,
         on_error: JsFunction,
         on_end: JsFunction,
     ) -> Result<()> {
+        let start = match start {
+            Some(b) => Some(bigint_to_u64(b, "start")?),
+            None => None,
+        };
+        let end = match end {
+            Some(b) => Some(bigint_to_u64(b, "end")?),
+            None => None,
+        };
         // Build the reader under the mutex, then drop the lock so the worker
         // thread never contends with JS callers.
         //
@@ -295,40 +333,79 @@ impl RefgetStore {
         let reader: Box<dyn Read + Send> = {
             let store = self.inner.lock().map_err(lock_err)?;
             store
-                .stream_sequence(&digest, start.map(|v| v as u64), end.map(|v| v as u64))
+                .stream_sequence(&digest, start, end)
                 .map_err(to_napi_err)?
         };
 
-        // Build threadsafe functions for the three JS callbacks.
+        // Shared abort flag. Flipped to `true` when any of the threadsafe
+        // functions is finalized (which happens when JS releases the last
+        // reference, e.g. after `stream.destroy()`). The reader thread
+        // checks the flag on every iteration so it doesn't spin reading
+        // bytes JS will never consume.
+        let abort = Arc::new(AtomicBool::new(false));
+
+        // `AbortOnDrop` flips the flag when dropped. We move one instance
+        // into each tsfn callback so when napi finalizes the tsfn (releasing
+        // the closure), the guard's `Drop` fires and aborts the reader.
+        struct AbortOnDrop(Arc<AtomicBool>);
+        impl Drop for AbortOnDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        // Build threadsafe functions for the three JS callbacks. Each gets
+        // its own AbortOnDrop guard captured in the callback closure.
+        let chunk_guard = AbortOnDrop(abort.clone());
         let tsfn_chunk: ThreadsafeFunction<Vec<u8>, ErrorStrategy::Fatal> = on_chunk
-            .create_threadsafe_function(0, |ctx| {
+            .create_threadsafe_function(0, move |ctx| {
+                // Reference the guard so the closure owns it (and thus its
+                // Drop runs when the tsfn is finalized).
+                let _ = &chunk_guard;
                 let buf: Vec<u8> = ctx.value;
                 ctx.env.create_buffer_with_data(buf).map(|b| vec![b.into_raw()])
             })?;
+        let error_guard = AbortOnDrop(abort.clone());
         let tsfn_error: ThreadsafeFunction<String, ErrorStrategy::Fatal> = on_error
-            .create_threadsafe_function(0, |ctx| {
+            .create_threadsafe_function(0, move |ctx| {
+                let _ = &error_guard;
                 let s: String = ctx.value;
                 ctx.env.create_string(&s).map(|v| vec![v])
             })?;
+        let end_guard = AbortOnDrop(abort.clone());
         let tsfn_end: ThreadsafeFunction<(), ErrorStrategy::Fatal> = on_end
-            .create_threadsafe_function(0, |_ctx| Ok(Vec::<napi::JsUndefined>::new()))?;
+            .create_threadsafe_function(0, move |_ctx| {
+                let _ = &end_guard;
+                Ok(Vec::<napi::JsUndefined>::new())
+            })?;
 
+        let abort_thread = abort.clone();
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 65536];
             loop {
+                if abort_thread.load(Ordering::SeqCst) {
+                    break;
+                }
                 match reader.read(&mut buf) {
                     Ok(0) => {
-                        tsfn_end.call((), ThreadsafeFunctionCallMode::NonBlocking);
+                        let _ = tsfn_end.call((), ThreadsafeFunctionCallMode::NonBlocking);
                         break;
                     }
                     Ok(n) => {
                         let chunk = buf[..n].to_vec();
                         // Blocking so the tsfn queue applies backpressure.
-                        tsfn_chunk.call(chunk, ThreadsafeFunctionCallMode::Blocking);
+                        // Any non-Ok status (e.g. queue closing because the
+                        // JS side called destroy()) means we should stop
+                        // reading rather than risk a deadlock.
+                        let status = tsfn_chunk
+                            .call(chunk, ThreadsafeFunctionCallMode::Blocking);
+                        if status != napi::Status::Ok {
+                            break;
+                        }
                     }
                     Err(e) => {
-                        tsfn_error.call(
+                        let _ = tsfn_error.call(
                             format!("stream decode error: {}", e),
                             ThreadsafeFunctionCallMode::NonBlocking,
                         );
