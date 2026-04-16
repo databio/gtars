@@ -1,6 +1,6 @@
 {
   "name": "@databio/gtars-node",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Native Node.js bindings for gtars (genomic tools and region sets)",
   "main": "wrapper.js",
   "types": "wrapper.d.ts",
@@ -35,7 +35,7 @@
     "@napi-rs/cli": "^2"
   },
   "optionalDependencies": {
-    "@databio/gtars-node-linux-x64-gnu": "0.0.1",
-    "@databio/gtars-node-darwin-arm64": "0.0.1"
+    "@databio/gtars-node-linux-x64-gnu": "0.1.0",
+    "@databio/gtars-node-darwin-arm64": "0.1.0"
   }
 }
