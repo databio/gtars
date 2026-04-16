@@ -102,7 +102,10 @@ fn open_remote_range(
         ));
     }
 
-    Ok(Box::new(response.into_reader().take(byte_len)))
+    Ok(Box::new(BufReader::with_capacity(
+        64 * 1024,
+        response.into_reader().take(byte_len),
+    )))
 }
 
 #[cfg(not(feature = "http"))]

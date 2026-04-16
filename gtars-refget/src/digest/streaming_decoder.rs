@@ -94,23 +94,29 @@ impl<R: Read> StreamingDecoder<R> {
     /// source is exhausted before the requirement is met.
     fn refill(&mut self, min_bits: u8) -> io::Result<()> {
         while self.bit_buffer_len < min_bits {
-            let mut byte = [0u8; 1];
-            match self.inner.read(&mut byte) {
-                Ok(0) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::UnexpectedEof,
-                        "StreamingDecoder: source ended before all bases were decoded",
-                    ));
+            // Pull up to 6 bytes at a time when the bit buffer has room.
+            // `bit_buffer` is u64 = 64 bits; keep headroom so we never
+            // overflow when shifting in a full byte.
+            let headroom_bits = 64u8.saturating_sub(self.bit_buffer_len);
+            let max_bytes = (headroom_bits / 8) as usize;
+            let want = max_bytes.clamp(1, 6);
+            let mut tmp = [0u8; 6];
+            let n = loop {
+                match self.inner.read(&mut tmp[..want]) {
+                    Ok(0) => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::UnexpectedEof,
+                            "StreamingDecoder: source ended before all bases were decoded",
+                        ));
+                    }
+                    Ok(n) => break n,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => return Err(e),
                 }
-                Ok(_) => {
-                    // Shift in 8 bits (MSB-first: new byte's bits go in the low end
-                    // and become the "next" symbol's bits after older symbols are consumed
-                    // from the top).
-                    self.bit_buffer = (self.bit_buffer << 8) | (byte[0] as u64);
-                    self.bit_buffer_len += 8;
-                }
-                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
-                Err(e) => return Err(e),
+            };
+            for &b in &tmp[..n] {
+                self.bit_buffer = (self.bit_buffer << 8) | (b as u64);
+                self.bit_buffer_len += 8;
             }
         }
         Ok(())
@@ -394,5 +400,62 @@ mod tests {
         let mut buf = [0u8; 16];
         let err = decoder.read(&mut buf).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    /// A reader that yields at most 1 byte per `read` call, simulating the
+    /// worst-case partial-read behaviour of an unbuffered network source.
+    struct TrickleReader<R: Read> {
+        inner: R,
+    }
+
+    impl<R: Read> TrickleReader<R> {
+        fn new(inner: R) -> Self {
+            Self { inner }
+        }
+    }
+
+    impl<R: Read> Read for TrickleReader<R> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if buf.is_empty() {
+                return Ok(0);
+            }
+            // Only ever read 1 byte even when buf is larger.
+            self.inner.read(&mut buf[..1])
+        }
+    }
+
+    #[test]
+    fn test_multi_byte_refill_with_trickle_reader() {
+        // Verifies the multi-byte refill path handles partial reads (1 byte
+        // per call) correctly — the decoder should produce identical output
+        // whether the inner reader yields 1 byte or many at a time.
+        for (alphabet, seq) in fixtures() {
+            let encoded = encode_sequence(seq, alphabet);
+            for start in 0..seq.len() {
+                for end in (start + 1)..=seq.len() {
+                    let (byte_start, byte_end, leading_skip) =
+                        byte_window(start, end, alphabet.bits_per_symbol);
+                    let slice = &encoded[byte_start..byte_end.min(encoded.len())];
+                    let expected = decode_substring_from_bytes(&encoded, start, end, alphabet);
+
+                    let trickle = TrickleReader::new(Cursor::new(slice.to_vec()));
+                    let mut decoder = StreamingDecoder::new(
+                        trickle,
+                        alphabet,
+                        leading_skip,
+                        (end - start) as u64,
+                    );
+                    let mut out = Vec::new();
+                    decoder
+                        .read_to_end(&mut out)
+                        .expect("trickle read failed");
+                    assert_eq!(
+                        out, expected,
+                        "TrickleReader: bps={} range [{}, {}) alphabet",
+                        alphabet.bits_per_symbol, start, end
+                    );
+                }
+            }
+        }
     }
 }
