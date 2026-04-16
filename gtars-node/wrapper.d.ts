@@ -1,52 +1,31 @@
 import { Readable } from 'node:stream'
 
-export interface SequenceMetadata {
-  name: string
-  length: number
-  sha512T24U: string
-  md5: string
-}
+// Re-export the auto-generated types (interfaces, plus the native class
+// type) so consumers see a single surface from the entry point.
+export * from './index.js'
 
-export interface CollectionMetadata {
-  digest: string
-  nSequences: number
-  namesDigest: string
-  sequencesDigest: string
-  lengthsDigest: string
-}
+import { RefgetStore as NativeRefgetStore } from './index.js'
 
-export interface StoreStats {
-  nSequences: number
-  nSequencesLoaded: number
-  nCollections: number
-  nCollectionsLoaded: number
-  storageMode: string
-}
-
-export declare class RefgetStore {
+export declare class RefgetStore extends NativeRefgetStore {
   static openLocal(path: string): RefgetStore
   static openRemote(cachePath: string, url: string): RefgetStore
   static inMemory(): RefgetStore
-  getSequence(digest: string): string
-  getSubstring(digest: string, start: number, end: number): string
-  getSequenceByName(collectionDigest: string, name: string): string
-  listCollections(page?: number | null, pageSize?: number | null): Array<CollectionMetadata>
-  listSequences(): Array<SequenceMetadata>
-  getCollectionMetadata(digest: string): CollectionMetadata | null
-  getSequenceMetadata(digest: string): SequenceMetadata | null
-  stats(): StoreStats
-  ensureDecoded(digest: string): void
-  clearDecodedCache(): void
-  addFasta(fastaPath: string): void
-  write(path: string): void
-  /** Compare two sequence collections by digest. Returns JSON string. */
-  compare(digestA: string, digestB: string): string
+
+  /** Accepts plain `number` or `bigint` for ergonomic call sites. */
+  getSubstring(digest: string, start: number | bigint, end: number | bigint): string
+
   /**
    * Stream a (sub)sequence as a Node `Readable` of ASCII bases.
    *
-   * Bytes flow from the underlying Rust store via a background thread,
+   * Bytes flow from the underlying Rust store via a background thread
    * with bounded memory usage (constant w.r.t. sequence length). Use
-   * `.pipe(res)` to forward directly to an HTTP response body.
+   * `.pipe(res)` to forward directly to an HTTP response body, or
+   * `stream.destroy()` to abort early — the worker thread will exit
+   * promptly via an internal abort flag.
    */
-  streamSequence(digest: string, start?: number, end?: number): Readable
+  streamSequence(
+    digest: string,
+    start?: number | bigint | null,
+    end?: number | bigint | null,
+  ): Readable
 }
