@@ -2024,13 +2024,13 @@ fn test_stream_sequence_local_substring() {
     use std::io::Read;
     let (_dir, mut store, digest, length) = build_on_disk_store(StorageMode::Encoded);
     store.load_sequence(&digest).unwrap();
-    let ranges: Vec<(u32, u32)> = vec![
+    let ranges: Vec<(u64, u64)> = vec![
         (0, 4),
         (1, 5),
         (2, 10),
         (5, 6),
-        (0, length as u32),
-        (length as u32 - 1, length as u32),
+        (0, length as u64),
+        (length as u64 - 1, length as u64),
     ];
     for (s, e) in ranges {
         let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
@@ -2060,6 +2060,22 @@ fn test_stream_sequence_raw_mode() {
 }
 
 #[test]
+fn test_stream_sequence_u64_bounds_compile_and_match() {
+    // Compile-level guarantee: stream_sequence accepts u64 bounds.
+    // Sequences > u32::MAX (>4 Gb) cannot be fixtured in unit tests, but
+    // the arithmetic path (start_bit/end_bit/byte_start/byte_end/bases_to_emit)
+    // is u64 throughout, so this test exercises the widened API surface.
+    use std::io::Read;
+    let (_dir, store, digest, _length) = build_on_disk_store(StorageMode::Encoded);
+    let s: u64 = 0;
+    let e: u64 = 8;
+    let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), 8);
+}
+
+#[test]
 fn test_stream_sequence_zero_length() {
     use std::io::Read;
     let (_dir, store, digest, _) = build_on_disk_store(StorageMode::Encoded);
@@ -2075,7 +2091,7 @@ fn test_stream_sequence_invalid_range() {
     assert!(store.stream_sequence(&digest, Some(5), Some(3)).is_err());
     assert!(
         store
-            .stream_sequence(&digest, Some(0), Some(length as u32 + 1))
+            .stream_sequence(&digest, Some(0), Some(length as u64 + 1))
             .is_err()
     );
 }

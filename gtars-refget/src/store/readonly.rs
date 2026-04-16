@@ -1074,8 +1074,8 @@ impl ReadonlyRefgetStore {
     pub fn stream_sequence<K: AsRef<[u8]>>(
         &self,
         sha512_digest: K,
-        start: Option<u32>,
-        end: Option<u32>,
+        start: Option<u64>,
+        end: Option<u64>,
     ) -> Result<Box<dyn Read + Send>> {
         // 1. Resolve digest (MD5 -> SHA512t24u fallback).
         let digest_key = sha512_digest.to_key();
@@ -1096,8 +1096,8 @@ impl ReadonlyRefgetStore {
 
         // 3. Resolve bounds.
         let length = metadata.length as u64;
-        let start = start.map(|s| s as u64).unwrap_or(0);
-        let end = end.map(|e| e as u64).unwrap_or(length);
+        let start = start.unwrap_or(0);
+        let end = end.unwrap_or(length);
         if start > end || end > length {
             return Err(anyhow!(
                 "Invalid stream range: start={}, end={}, length={}",

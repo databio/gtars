@@ -295,7 +295,7 @@ impl RefgetStore {
         let reader: Box<dyn Read + Send> = {
             let store = self.inner.lock().map_err(lock_err)?;
             store
-                .stream_sequence(&digest, start, end)
+                .stream_sequence(&digest, start.map(|v| v as u64), end.map(|v| v as u64))
                 .map_err(to_napi_err)?
         };
 
