@@ -32,3 +32,4 @@ gtars-core = { path = "../gtars-core", version="0.5.0", optional = true }
 
 [dev-dependencies]
 tempfile = "3.8.1"
+peak_alloc = "0.3"

@@ -37,6 +37,10 @@ on:
         description: 'Publish WASM to NPM'
         type: boolean
         default: true
+      node:
+        description: 'Publish Node native bindings to NPM'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -47,7 +51,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.crates != 'none' && inputs.crates != 'all' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
       - name: Publish ${{ inputs.crates }} to crates.io
@@ -59,7 +63,7 @@ jobs:
     if: ${{ github.event_name == 'release' || inputs.crates == 'all' || inputs.crates == '' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
@@ -160,13 +164,11 @@ jobs:
     if: ${{ always() && inputs.wasm != false }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-node@v4
         with:
           node-version: '20.x'
           registry-url: 'https://registry.npmjs.org'
-      - name: Update npm
-        run: npm install -g npm@latest
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       - name: Build and publish WASM to NPM
@@ -175,12 +177,98 @@ jobs:
           jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
           npm publish --provenance --access public gtars-wasm/pkg/
 
-  create-tags:
-    if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
-    needs: [publish-python, publish-cli, publish-wasm]
+  build-node:
+    if: ${{ always() && inputs.node != false }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        working-directory: gtars-node
+        run: |
+          npm install
+          npx napi build --platform --release --target ${{ matrix.target }}
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-bindings-${{ matrix.target }}
+          path: gtars-node/*.node
+
+  publish-node:
+    if: ${{ always() && inputs.node != false && needs.build-node.result == 'success' }}
+    needs: build-node
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.x'
+          registry-url: 'https://registry.npmjs.org'
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: node-bindings-*
+          path: gtars-node/artifacts
+          merge-multiple: false
+      - name: Move artifacts into place
+        working-directory: gtars-node
+        run: |
+          ls -R artifacts/
+          cp artifacts/*/*.node .
+          ls -la *.node
+      - name: Prepare platform packages
+        working-directory: gtars-node
+        run: |
+          npm install
+          npx napi prepublish -t npm --skip-gh-release
+          # napi prepublish generates index.js/index.d.ts but may not copy .node files
+          # into platform dirs; copy them explicitly
+          cp gtars-node.linux-x64-gnu.node npm/linux-x64-gnu/ 2>/dev/null || true
+          cp gtars-node.darwin-arm64.node npm/darwin-arm64/ 2>/dev/null || true
+          ls -la npm/*/
+      - name: Publish platform packages
+        working-directory: gtars-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          FAILED=0
+          for dir in npm/*/; do
+            if [ -f "$dir/package.json" ]; then
+              echo "Publishing $dir..."
+              if ! npm publish "$dir" --access public; then
+                echo "::warning::Failed to publish $dir"
+                FAILED=$((FAILED + 1))
+              fi
+            fi
+          done
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::$FAILED platform package(s) failed to publish"
+          fi
+      - name: Publish main package
+        working-directory: gtars-node
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --ignore-scripts
+
+  create-tags:
+    if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
+    needs: [publish-python, publish-cli, publish-wasm, publish-node]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
       - name: Extract version from tag
         id: version
         run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
@@ -189,7 +277,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for prefix in py cli wasm; do
+          for prefix in py cli wasm node; do
             TAG="${prefix}-${VERSION}"
             git tag "$TAG"
             git push origin "$TAG"

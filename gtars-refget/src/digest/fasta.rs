@@ -188,7 +188,7 @@ pub(crate) fn parse_fasta_reader<R: BufRead>(
                     if opts.store_sequence {
                         seq_results.push(SequenceRecord::Full {
                             metadata,
-                            sequence: std::mem::take(&mut sequence_data),
+                            sequence: std::sync::Arc::new(std::mem::take(&mut sequence_data)),
                         });
                     } else {
                         seq_results.push(SequenceRecord::Stub(metadata));
@@ -228,7 +228,7 @@ pub(crate) fn parse_fasta_reader<R: BufRead>(
                     if opts.store_sequence {
                         seq_results.push(SequenceRecord::Full {
                             metadata,
-                            sequence: std::mem::take(&mut sequence_data),
+                            sequence: std::sync::Arc::new(std::mem::take(&mut sequence_data)),
                         });
                     } else {
                         seq_results.push(SequenceRecord::Stub(metadata));
