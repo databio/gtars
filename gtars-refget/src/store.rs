@@ -1835,6 +1835,38 @@ impl ReadonlyRefgetStore {
         self.sequence_store.get(&actual_key).and_then(|r| r.sequence())
     }
 
+    /// Check whether a sequence's bytes are already decoded in place
+    /// (i.e. `ensure_decoded()` has been called for it). Cheap HashSet
+    /// lookup; lets callers skip an expensive setup step (e.g. scanning
+    /// an entire VCF to pick which chromosomes to decode) when the
+    /// collection is already fully decoded.
+    pub fn is_sequence_decoded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        self.decoded_keys.contains(&actual_key)
+    }
+
+    /// Check whether a sequence's record is in the `Full` state (bytes
+    /// present in memory, whether encoded or decoded) rather than the
+    /// metadata-only `Stub` state. Useful to distinguish "already loaded
+    /// from disk" from "still on disk" without forcing a load.
+    pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        matches!(
+            self.sequence_store.get(&actual_key),
+            Some(SequenceRecord::Full { .. })
+        )
+    }
+
     /// Get a sequence by collection digest and name, loading data if needed.
     ///
     /// # Example

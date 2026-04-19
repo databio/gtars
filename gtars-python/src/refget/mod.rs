@@ -2761,6 +2761,14 @@ impl PyRefgetStore {
     /// collection, saving ~9 GB of RSS. Chroms not present in the
     /// collection are silently skipped (matches the compute path, which
     /// also skips unknown chroms).
+    ///
+    /// Fast path: if every sequence in the collection is already decoded
+    /// (e.g. the caller explicitly invoked `ensure_collection_decoded`
+    /// or `load_all_sequences` + `ensure_collection_decoded`), skip the
+    /// VCF pre-scan entirely. Scanning a large BGZF VCF to extract the
+    /// chromosome column can take 30-60 s (single-threaded gzip
+    /// decompression), so avoiding it when the decode work is already
+    /// done saves substantial wall-clock time in the `_to_tsv` paths.
     fn decode_vcf_chroms(
         &mut self,
         collection_digest: &str,
@@ -2780,9 +2788,46 @@ impl PyRefgetStore {
             })?;
         let mut name_to_digest: std::collections::HashMap<String, String> =
             std::collections::HashMap::new();
+        let mut collection_digests: Vec<String> = Vec::with_capacity(collection.sequences.len());
         for seq_record in &collection.sequences {
             let meta = seq_record.metadata();
             name_to_digest.insert(meta.name.clone(), meta.sha512t24u.clone());
+            collection_digests.push(meta.sha512t24u.clone());
+        }
+
+        // Fast path 1: if every sequence in the collection is already
+        // decoded, skip both the VCF scan and the decode. Cheap HashSet
+        // lookup per sequence via `is_sequence_decoded`.
+        let all_decoded = !collection_digests.is_empty()
+            && collection_digests
+                .iter()
+                .all(|d| self.inner.is_sequence_decoded(d.as_str()));
+        if all_decoded {
+            return Ok(());
+        }
+
+        // Fast path 2: if every sequence is loaded (Full, just not
+        // decoded), skip the VCF scan and decode them all in place. The
+        // `load_all_sequences()` preload puts the store in this state,
+        // and decoding everything is cheap (~1 s for GRCh38) compared
+        // to scanning a BGZF-compressed VCF (~30-50 s). The memory cost
+        // of decoding every chromosome instead of only the VCF-referenced
+        // ones is only ~3 GB of extra RAM for GRCh38 — a deliberate
+        // trade the caller opted into by calling `load_all_sequences()`.
+        let all_loaded = !collection_digests.is_empty()
+            && collection_digests
+                .iter()
+                .all(|d| self.inner.is_sequence_loaded(d.as_str()));
+        if all_loaded {
+            for digest in &collection_digests {
+                self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to decode sequence {}: {}",
+                        digest, e
+                    ))
+                })?;
+            }
+            return Ok(());
         }
 
         let chroms = gtars_vrs::vcf::unique_chroms_from_vcf(vcf_path).map_err(|e| {
