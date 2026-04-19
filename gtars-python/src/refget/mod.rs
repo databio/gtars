@@ -1073,6 +1073,58 @@ pub struct PyRefgetStore {
     inner: RefgetStore,
 }
 
+// Private helpers for PyRefgetStore. Kept out of the `#[pymethods]` block
+// so they are Rust-only (not exposed to Python).
+impl PyRefgetStore {
+    /// Shared prologue + detach + error-mapping for the parallel `_to_tsv`
+    /// entrypoints. Resolves `num_workers` (auto if 0), builds the
+    /// name-to-digest map, pre-decodes the VCF's referenced chroms, then
+    /// drops the GIL and invokes `compute_fn` in the detached block.
+    fn compute_vrs_ids_to_tsv_inner(
+        &mut self,
+        py: Python<'_>,
+        collection_digest: &str,
+        vcf_path: &str,
+        output_path: &str,
+        num_workers: usize,
+        err_label: &str,
+        compute_fn: fn(
+            &gtars_refget::store::ReadonlyRefgetStore,
+            &std::collections::HashMap<String, String>,
+            &str,
+            &str,
+            usize,
+        ) -> anyhow::Result<usize>,
+    ) -> PyResult<usize> {
+        self.decode_vcf_chroms(collection_digest, vcf_path)?;
+
+        let num_workers = if num_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2).max(1))
+                .unwrap_or(1)
+        } else {
+            num_workers
+        };
+
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+
+        let output_path_owned = output_path.to_string();
+        py.detach(|| {
+            compute_fn(readonly, &name_to_digest, vcf_path, &output_path_owned, num_workers)
+        })
+        .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{}: {}", err_label, e)))
+    }
+}
+
 #[pymethods]
 impl PyRefgetStore {
     /// Check whether a valid RefgetStore exists at the given path.
@@ -2731,46 +2783,15 @@ impl PyRefgetStore {
         output_path: &str,
         num_workers: usize,
     ) -> PyResult<usize> {
-        self.decode_vcf_chroms(collection_digest, vcf_path)?;
-
-        let num_workers = if num_workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get().saturating_sub(2).max(1))
-                .unwrap_or(1)
-        } else {
-            num_workers
-        };
-
-        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
-        let name_to_digest =
-            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
-                |e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to build name_to_digest: {}",
-                        e
-                    ))
-                },
-            )?;
-
-        let output_path_owned = output_path.to_string();
-        let count = py
-            .detach(|| -> anyhow::Result<usize> {
-                gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise_to_tsv(
-                    readonly,
-                    &name_to_digest,
-                    vcf_path,
-                    &output_path_owned,
-                    num_workers,
-                )
-            })
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Blockwise TSV write failed: {}",
-                    e
-                ))
-            })?;
-
-        Ok(count)
+        self.compute_vrs_ids_to_tsv_inner(
+            py,
+            collection_digest,
+            vcf_path,
+            output_path,
+            num_workers,
+            "Blockwise TSV write failed",
+            gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise_to_tsv,
+        )
     }
 
     /// Compute GA4GH VRS Allele identifiers with the BGZF-block parallel
@@ -2790,42 +2811,15 @@ impl PyRefgetStore {
         output_path: &str,
         num_workers: usize,
     ) -> PyResult<usize> {
-        self.decode_vcf_chroms(collection_digest, vcf_path)?;
-        let num_workers = if num_workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get().saturating_sub(2).max(1))
-                .unwrap_or(1)
-        } else {
-            num_workers
-        };
-        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
-        let name_to_digest =
-            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
-                |e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to build name_to_digest: {}",
-                        e
-                    ))
-                },
-            )?;
-        let output_path_owned = output_path.to_string();
-        let count = py
-            .detach(|| -> anyhow::Result<usize> {
-                gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf_to_tsv(
-                    readonly,
-                    &name_to_digest,
-                    vcf_path,
-                    &output_path_owned,
-                    num_workers,
-                )
-            })
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "BGZF-block parallel TSV write failed: {}",
-                    e
-                ))
-            })?;
-        Ok(count)
+        self.compute_vrs_ids_to_tsv_inner(
+            py,
+            collection_digest,
+            vcf_path,
+            output_path,
+            num_workers,
+            "BGZF-block parallel TSV write failed",
+            gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf_to_tsv,
+        )
     }
 
     /// Compute GA4GH VRS Allele identifiers using the blockwise parallel
