@@ -1,0 +1,153 @@
+//! Pure-Rust VRS-ID benchmark matching the `bgzf_tsv` Python contestant.
+//!
+//! Opens a pre-built RefgetStore directory (produced by the benchmark's
+//! `build_store` task), preloads all sequences + decodes them, then runs
+//! `compute_vrs_ids_parallel_bgzf` over a BGZF-compressed VCF. Emits the
+//! same TSV output format as the Python contestants expect: a single
+//! header row plus a single data row with phase-split timings, so a
+//! wrapper script can forward the file to the tourney runner unchanged.
+//!
+//! This mirrors `bgzf_tsv.py` exactly (open store → preload + decode →
+//! compute_vrs_ids_parallel_bgzf → write variants TSV), but without any
+//! Python-binding overhead.
+//!
+//! Usage:
+//!   cargo run --release --example gnomad_vrs_store -- \
+//!       <store_dir> <vcf_bgz_path> <results_tsv> <variants_tsv> [num_workers]
+//!
+//! Arguments:
+//!   store_dir     — RefgetStore directory (as written by RefgetStore::save_local)
+//!   vcf_bgz_path  — BGZF-compressed VCF (plain gzip is rejected)
+//!   results_tsv   — Output path for the single-row phase-timing TSV
+//!   variants_tsv  — Output path for per-variant VRS IDs (chrom/pos/ref/alt/vrs_id)
+//!   num_workers   — Optional: number of VRS worker threads (default: available_parallelism - 2)
+
+use std::io::{BufWriter, Write};
+use std::time::Instant;
+
+use gtars_refget::store::RefgetStore;
+use gtars_vrs::vcf::{build_name_to_digest_readonly, compute_vrs_ids_parallel_bgzf};
+
+fn usage_and_exit(argv0: &str) -> ! {
+    eprintln!(
+        "Usage: {} <store_dir> <vcf_bgz_path> <results_tsv> <variants_tsv> [num_workers]",
+        argv0
+    );
+    std::process::exit(2);
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    if !(5..=6).contains(&args.len()) {
+        usage_and_exit(&args[0]);
+    }
+    let store_dir = &args[1];
+    let vcf_path = &args[2];
+    let results_tsv = &args[3];
+    let variants_tsv = &args[4];
+    let num_workers: usize = if args.len() == 6 {
+        args[5].parse().unwrap_or(0)
+    } else {
+        0
+    };
+    let num_workers = if num_workers == 0 {
+        std::thread::available_parallelism()
+            .map(|n| n.get().saturating_sub(2).max(1))
+            .unwrap_or(1)
+    } else {
+        num_workers
+    };
+
+    // --- Phase 1: open store ---
+    let t0 = Instant::now();
+    let mut store = RefgetStore::open_local(store_dir).expect("Failed to open RefgetStore");
+    let t_open = t0.elapsed();
+
+    // Identify the collection (first one, matching Python contestants).
+    let paged = store
+        .list_collections(0, 10, &[])
+        .expect("Failed to list collections");
+    let collections = &paged.results;
+    assert!(!collections.is_empty(), "No collections in store");
+    let collection_digest = collections[0].digest.clone();
+
+    // --- Phase 2: preload + decode every sequence ---
+    let t1 = Instant::now();
+    store
+        .load_all_sequences()
+        .expect("Failed to load_all_sequences");
+    // Match bgzf_tsv.py: ensure every sequence in the collection is decoded
+    // before handing the ReadonlyRefgetStore to the workers.
+    let collection = store
+        .get_collection(&collection_digest)
+        .expect("Failed to get collection")
+        .clone();
+    for seq_record in &collection.sequences {
+        let digest = seq_record.metadata().sha512t24u.clone();
+        store
+            .ensure_decoded(digest.as_str())
+            .unwrap_or_else(|e| panic!("Failed to decode {}: {}", digest, e));
+    }
+    let t_preload = t1.elapsed();
+
+    // --- Phase 3: convert to readonly and compute in parallel ---
+    let readonly = store.into_readonly();
+    let name_to_digest = build_name_to_digest_readonly(&readonly, &collection_digest)
+        .expect("Failed to build name_to_digest");
+
+    let t2 = Instant::now();
+    let results = compute_vrs_ids_parallel_bgzf(&readonly, &name_to_digest, vcf_path, num_workers)
+        .expect("compute_vrs_ids_parallel_bgzf failed");
+    let t_compute = t2.elapsed();
+    let n = results.len();
+
+    // Write per-variant TSV (matches the Python bgzf_tsv sidecar format).
+    let vf = std::fs::File::create(variants_tsv).expect("Failed to open variants TSV");
+    let mut vw = BufWriter::with_capacity(1 << 20, vf);
+    writeln!(vw, "chrom\tpos\tref\talt\tvrs_id").unwrap();
+    for r in &results {
+        writeln!(
+            vw,
+            "{}\t{}\t{}\t{}\t{}",
+            r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+        )
+        .unwrap();
+    }
+    vw.flush().unwrap();
+
+    let open_s = t_open.as_secs_f64();
+    let preload_s = t_preload.as_secs_f64();
+    let compute_s = t_compute.as_secs_f64();
+    let total_s = open_s + preload_s + compute_s;
+    let vps = if compute_s > 0.0 {
+        n as f64 / compute_s
+    } else {
+        0.0
+    };
+
+    let vcf_basename = std::path::Path::new(vcf_path)
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| vcf_path.to_string());
+
+    // Match the same header as bgzf_tsv.py, with num_workers included.
+    let rf = std::fs::File::create(results_tsv).expect("Failed to open results TSV");
+    let mut rw = BufWriter::new(rf);
+    writeln!(
+        rw,
+        "contestant\tvcf\tn_variants\tnum_workers\topen_s\tpreload_s\tcompute_s\ttotal_s\tvariants_per_sec"
+    )
+    .unwrap();
+    writeln!(
+        rw,
+        "rust_native\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.0}",
+        vcf_basename, n, num_workers, open_s, preload_s, compute_s, total_s, vps
+    )
+    .unwrap();
+    rw.flush().unwrap();
+
+    eprintln!(
+        "[rust_native] n={} workers={} open={:.2}s preload={:.2}s compute={:.2}s total={:.2}s  {:.0} v/s  (wrote {})",
+        n, num_workers, open_s, preload_s, compute_s, total_s, vps, variants_tsv
+    );
+}
