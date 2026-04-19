@@ -17,6 +17,13 @@ sha2 = "0.10.7"
 base64-url = "2.0.0"
 itoa = "1.0"
 
+# Short-string optimization for VrsResult fields to eliminate per-variant
+# heap allocations on the VCF -> VRS hot path. chrom/ref/alt are always
+# <=24 bytes (SSO inline); vrs_id is a fixed-length 41-byte GA4GH VRS
+# identifier (stack-allocated via ArrayString<48>).
+compact_str = "0.8"
+arrayvec = "0.7"
+
 # Parallel VCF processing (reader + worker pool)
 crossbeam-channel = "0.5"
 
