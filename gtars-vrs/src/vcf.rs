@@ -1753,3 +1753,96 @@ pub fn unique_chroms_from_vcf(vcf_path: &str) -> Result<Vec<String>> {
     }
     Ok(seen.into_iter().collect())
 }
+
+/// Decode only the collection sequences referenced by the chromosome
+/// column of a VCF. For a single-chromosome VCF against GRCh38 this
+/// avoids ~3-9 GB of RSS that eager `load_all_sequences` +
+/// full-collection `ensure_decoded` would use.
+///
+/// Three paths:
+///
+/// 1. **Fast path 1 (all decoded):** if every sequence in the collection
+///    is already decoded, return `Ok(())` without scanning the VCF.
+/// 2. **Fast path 2 (all loaded, not decoded):** if every sequence is
+///    loaded but not yet decoded (e.g. the caller just called
+///    `load_all_sequences`), decode them all without scanning the VCF.
+///    Scanning a BGZF-compressed VCF to extract the chromosome column
+///    can take 30-60 s, so this fast path is substantially cheaper than
+///    the slow path when it applies.
+/// 3. **Slow path:** scan the VCF for unique chromosome names via
+///    [`unique_chroms_from_vcf`], then `load_sequence` + `ensure_decoded`
+///    for each referenced chrom. Chroms not in the collection are
+///    silently skipped (matches the compute path behavior — see
+///    `build_name_to_digest_readonly` and
+///    `compute_vrs_ids_parallel_bgzf_with_sink`).
+pub fn decode_vcf_chroms(
+    store: &mut RefgetStore,
+    collection_digest: &str,
+    vcf_path: &str,
+) -> Result<()> {
+    // Use the mutable wrapper's lazy-loading get_collection so the
+    // collection data is auto-loaded if it was only a Stub. Build
+    // name→digest from its sequences.
+    let collection = store
+        .get_collection(collection_digest)
+        .context("Failed to get sequence collection")?;
+    let mut name_to_digest: HashMap<String, String> = HashMap::new();
+    let mut collection_digests: Vec<String> = Vec::with_capacity(collection.sequences.len());
+    for seq_record in &collection.sequences {
+        let meta = seq_record.metadata();
+        name_to_digest.insert(meta.name.clone(), meta.sha512t24u.clone());
+        collection_digests.push(meta.sha512t24u.clone());
+    }
+
+    // Fast path 1: if every sequence in the collection is already
+    // decoded, skip both the VCF scan and the decode. Cheap HashSet
+    // lookup per sequence via `is_sequence_decoded`.
+    let all_decoded = !collection_digests.is_empty()
+        && collection_digests
+            .iter()
+            .all(|d| store.is_sequence_decoded(d.as_str()));
+    if all_decoded {
+        return Ok(());
+    }
+
+    // Fast path 2: if every sequence is loaded (Full, just not
+    // decoded), skip the VCF scan and decode them all in place. The
+    // `load_all_sequences()` preload puts the store in this state,
+    // and decoding everything is cheap (~1 s for GRCh38) compared
+    // to scanning a BGZF-compressed VCF (~30-50 s). The memory cost
+    // of decoding every chromosome instead of only the VCF-referenced
+    // ones is only ~3 GB of extra RAM for GRCh38 — a deliberate
+    // trade the caller opted into by calling `load_all_sequences()`.
+    let all_loaded = !collection_digests.is_empty()
+        && collection_digests
+            .iter()
+            .all(|d| store.is_sequence_loaded(d.as_str()));
+    if all_loaded {
+        for digest in &collection_digests {
+            store
+                .ensure_decoded(digest.as_str())
+                .with_context(|| format!("Failed to decode sequence {}", digest))?;
+        }
+        return Ok(());
+    }
+
+    // Slow path: scan the VCF for unique chromosome names and
+    // load+decode only those sequences.
+    let chroms =
+        unique_chroms_from_vcf(vcf_path).context("Failed to scan VCF for chromosomes")?;
+
+    for chrom in &chroms {
+        if let Some(digest) = name_to_digest.get(chrom) {
+            let digest = digest.clone();
+            // Lazy load the sequence bytes (Stub → Full) from disk
+            // first if not already loaded. Then decode in place.
+            store
+                .load_sequence(digest.as_str())
+                .with_context(|| format!("Failed to load sequence {}", digest))?;
+            store
+                .ensure_decoded(digest.as_str())
+                .with_context(|| format!("Failed to decode sequence {}", digest))?;
+        }
+    }
+    Ok(())
+}

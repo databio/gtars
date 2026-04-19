@@ -9,7 +9,7 @@ use std::io::Write;
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use gtars_vrs::vcf::{
     build_name_to_digest_readonly, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise,
+    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise, decode_vcf_chroms,
 };
 use tempfile::tempdir;
 
@@ -338,6 +338,140 @@ fn test_bgzf_multiallelic() {
     assert_eq!(out[0].alt_allele, "A");
     assert_eq!(out[1].alt_allele, "T");
     assert_eq!(out[2].alt_allele, "C");
+}
+
+// ── decode_vcf_chroms tests ─────────────────────────────────────────────
+
+/// Build a RefgetStore (not yet loaded/decoded) with two chroms and
+/// return the store + its collection digest plus the per-chrom digests.
+/// In contrast to `build_readonly_fixture`, this one does NOT preload or
+/// decode — the caller is expected to exercise `decode_vcf_chroms`.
+fn build_unloaded_store(dir: &std::path::Path) -> (RefgetStore, String, String, String) {
+    let fasta_path = dir.join("test_decode.fa");
+    {
+        let mut f = std::fs::File::create(&fasta_path).unwrap();
+        write!(f, ">chr1\n{}\n>chr2\n{}\n", CHR1, CHR2).unwrap();
+    }
+
+    // Use a disk-backed store so we can write then reopen, which puts
+    // sequences in the Stub state (unloaded + undecoded) and gives us a
+    // realistic "slow path" starting point.
+    let store_dir = dir.join("store_unloaded");
+    {
+        let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+        store
+            .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+            .unwrap();
+        // Drop store to flush any pending writes.
+    }
+
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    let paged = store.list_collections(0, 10, &[]).unwrap();
+    let coll_digest = paged.results[0].digest.clone();
+
+    let coll = store.get_collection(&coll_digest).unwrap().clone();
+    let chr1_digest = coll
+        .sequences
+        .iter()
+        .find(|sr| sr.metadata().name == "chr1")
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone();
+    let chr2_digest = coll
+        .sequences
+        .iter()
+        .find(|sr| sr.metadata().name == "chr2")
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone();
+    (store, coll_digest, chr1_digest, chr2_digest)
+}
+
+#[test]
+fn test_decode_vcf_chroms_slow_path_only_referenced() {
+    let dir = tempdir().unwrap();
+    let (mut store, coll_digest, chr1_digest, chr2_digest) = build_unloaded_store(dir.path());
+
+    // Confirm neither sequence is decoded yet.
+    assert!(!store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(!store.is_sequence_decoded(chr2_digest.as_str()));
+
+    // VCF references only chr1.
+    let vcf_path = dir.path().join("chr1_only.vcf");
+    write_vcf(&vcf_path, "chr1\t10\t.\tA\tG\t.\tPASS\t.\n");
+
+    decode_vcf_chroms(&mut store, &coll_digest, vcf_path.to_str().unwrap()).unwrap();
+
+    // chr1 is decoded (referenced); chr2 is not (not referenced).
+    assert!(
+        store.is_sequence_decoded(chr1_digest.as_str()),
+        "chr1 should be decoded after decode_vcf_chroms"
+    );
+    assert!(
+        !store.is_sequence_decoded(chr2_digest.as_str()),
+        "chr2 should NOT be decoded (not referenced by VCF)"
+    );
+}
+
+#[test]
+fn test_decode_vcf_chroms_unknown_chrom_silently_skipped() {
+    let dir = tempdir().unwrap();
+    let (mut store, coll_digest, chr1_digest, chr2_digest) = build_unloaded_store(dir.path());
+
+    // VCF references a chrom not in the collection.
+    let vcf_path = dir.path().join("unknown.vcf");
+    write_vcf(&vcf_path, "chrX\t10\t.\tA\tG\t.\tPASS\t.\n");
+
+    // Should succeed — unknown chroms are silently skipped.
+    decode_vcf_chroms(&mut store, &coll_digest, vcf_path.to_str().unwrap()).unwrap();
+
+    // Nothing got decoded.
+    assert!(!store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(!store.is_sequence_decoded(chr2_digest.as_str()));
+}
+
+#[test]
+fn test_decode_vcf_chroms_fast_path_all_decoded() {
+    let dir = tempdir().unwrap();
+    let (mut store, coll_digest, chr1_digest, chr2_digest) = build_unloaded_store(dir.path());
+
+    // Pre-decode everything.
+    store.load_all_sequences().unwrap();
+    store.ensure_decoded(chr1_digest.as_str()).unwrap();
+    store.ensure_decoded(chr2_digest.as_str()).unwrap();
+    assert!(store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(store.is_sequence_decoded(chr2_digest.as_str()));
+
+    // Point at a nonexistent VCF path; the fast path must avoid opening it.
+    let nonexistent = dir.path().join("does_not_exist.vcf");
+    decode_vcf_chroms(&mut store, &coll_digest, nonexistent.to_str().unwrap()).unwrap();
+
+    // Still decoded.
+    assert!(store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(store.is_sequence_decoded(chr2_digest.as_str()));
+}
+
+#[test]
+fn test_decode_vcf_chroms_fast_path_all_loaded() {
+    let dir = tempdir().unwrap();
+    let (mut store, coll_digest, chr1_digest, chr2_digest) = build_unloaded_store(dir.path());
+
+    // Load (but don't decode) all sequences.
+    store.load_all_sequences().unwrap();
+    assert!(store.is_sequence_loaded(chr1_digest.as_str()));
+    assert!(store.is_sequence_loaded(chr2_digest.as_str()));
+    assert!(!store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(!store.is_sequence_decoded(chr2_digest.as_str()));
+
+    // Point at a nonexistent VCF path; fast-path-2 must avoid opening it.
+    let nonexistent = dir.path().join("does_not_exist.vcf");
+    decode_vcf_chroms(&mut store, &coll_digest, nonexistent.to_str().unwrap()).unwrap();
+
+    // Both sequences are now decoded (fast path 2 decodes everything).
+    assert!(store.is_sequence_decoded(chr1_digest.as_str()));
+    assert!(store.is_sequence_decoded(chr2_digest.as_str()));
 }
 
 #[test]

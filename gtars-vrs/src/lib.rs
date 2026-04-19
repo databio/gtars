@@ -20,5 +20,5 @@ pub use vcf::{
     VrsResult, build_name_to_digest_readonly, compute_vrs_ids_from_vcf,
     compute_vrs_ids_from_vcf_readonly, compute_vrs_ids_parallel_bgzf,
     compute_vrs_ids_parallel_blockwise, compute_vrs_ids_streaming,
-    compute_vrs_ids_streaming_readonly,
+    compute_vrs_ids_streaming_readonly, decode_vcf_chroms,
 };
