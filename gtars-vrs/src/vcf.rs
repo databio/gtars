@@ -912,15 +912,17 @@ fn read_raw_bgzf_block<R: std::io::Read>(reader: &mut R) -> Result<Option<Vec<u8
         Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(e) => return Err(e.into()),
     }
-    if header[0] != 0x1f || header[1] != 0x8b || header[2] != 0x08 {
-        return Err(anyhow::anyhow!(
-            "Not BGZF: bad gzip magic at block start"
-        ));
-    }
-    if (header[3] & 0x04) == 0 || header[12] != b'B' || header[13] != b'C' {
-        return Err(anyhow::anyhow!(
-            "Not BGZF: missing BC extra-field marker"
-        ));
+    // Some BGZF files (notably gnomAD VCFs) append non-BGZF trailing bytes
+    // after the stream's EOF marker. Match flate2::MultiGzDecoder's behavior
+    // (used by open_vcf) and treat non-BGZF content as end-of-stream.
+    if header[0] != 0x1f
+        || header[1] != 0x8b
+        || header[2] != 0x08
+        || (header[3] & 0x04) == 0
+        || header[12] != b'B'
+        || header[13] != b'C'
+    {
+        return Ok(None);
     }
     let bsize = u16::from_le_bytes([header[16], header[17]]) as usize;
     let total = bsize + 1;
