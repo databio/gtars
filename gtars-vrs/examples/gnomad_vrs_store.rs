@@ -2,13 +2,13 @@
 //!
 //! Opens a pre-built RefgetStore directory (produced by the benchmark's
 //! `build_store` task), preloads all sequences + decodes them, then runs
-//! `compute_vrs_ids_parallel_bgzf` over a BGZF-compressed VCF. Emits the
+//! `compute_vrs_ids_parallel_bgzf_with_sink` over a BGZF-compressed VCF. Emits the
 //! same TSV output format as the Python contestants expect: a single
 //! header row plus a single data row with phase-split timings, so a
 //! wrapper script can forward the file to the tourney runner unchanged.
 //!
 //! This mirrors `bgzf_tsv.py` exactly (open store → preload + decode →
-//! compute_vrs_ids_parallel_bgzf → write variants TSV), but without any
+//! compute_vrs_ids_parallel_bgzf_with_sink → write variants TSV), but without any
 //! Python-binding overhead.
 //!
 //! Usage:

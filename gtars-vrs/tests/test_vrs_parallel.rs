@@ -9,7 +9,7 @@ use std::io::Write;
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use gtars_vrs::vcf::{
     build_name_to_digest_readonly, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise_with_sink,
+    compute_vrs_ids_parallel_bgzf_with_sink, compute_vrs_ids_parallel_blockwise_with_sink,
     decode_vcf_chroms, VrsResult,
 };
 use tempfile::tempdir;
@@ -196,8 +196,15 @@ chr2\t5\t.\tG\tA,T\t.\tPASS\t.\n";
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, plain.to_str().unwrap())
             .unwrap();
-    let bgzf_parallel =
-        compute_vrs_ids_parallel_bgzf(&store, &name_to_digest, bgz.to_str().unwrap(), 4).unwrap();
+    let mut bgzf_parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        &store,
+        &name_to_digest,
+        bgz.to_str().unwrap(),
+        4,
+        |r| bgzf_parallel.push(r),
+    )
+    .unwrap();
 
     assert_eq!(serial.len(), bgzf_parallel.len());
     for (a, b) in serial.iter().zip(bgzf_parallel.iter()) {
@@ -221,11 +228,12 @@ fn test_bgzf_rejects_plain_gzip() {
         writeln!(w, "chr1\t5\t.\tA\tT\t.\tPASS\t.").unwrap();
         w.finish().unwrap();
     }
-    let err = compute_vrs_ids_parallel_bgzf(
+    let err = compute_vrs_ids_parallel_bgzf_with_sink(
         &store,
         &name_to_digest,
         plain_gz.to_str().unwrap(),
         4,
+        |_r| {},
     );
     assert!(err.is_err(), "plain gzip must be rejected");
 }
@@ -250,8 +258,15 @@ fn test_bgzf_spans_multiple_blocks() {
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, plain.to_str().unwrap())
             .unwrap();
-    let bgzf_parallel =
-        compute_vrs_ids_parallel_bgzf(&store, &name_to_digest, bgz.to_str().unwrap(), 8).unwrap();
+    let mut bgzf_parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        &store,
+        &name_to_digest,
+        bgz.to_str().unwrap(),
+        8,
+        |r| bgzf_parallel.push(r),
+    )
+    .unwrap();
 
     assert_eq!(
         serial.len(),
@@ -294,8 +309,15 @@ chr1\t10\t.\tG\tC\t.\tPASS\t.\n",
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, plain.to_str().unwrap())
             .unwrap();
-    let bgzf_parallel =
-        compute_vrs_ids_parallel_bgzf(&store, &name_to_digest, bgz.to_str().unwrap(), 4).unwrap();
+    let mut bgzf_parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        &store,
+        &name_to_digest,
+        bgz.to_str().unwrap(),
+        4,
+        |r| bgzf_parallel.push(r),
+    )
+    .unwrap();
 
     assert_eq!(
         serial.len(),
@@ -328,8 +350,15 @@ fn test_bgzf_unterminated_final_line() {
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, plain.to_str().unwrap())
             .unwrap();
-    let bgzf_parallel =
-        compute_vrs_ids_parallel_bgzf(&store, &name_to_digest, bgz.to_str().unwrap(), 4).unwrap();
+    let mut bgzf_parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        &store,
+        &name_to_digest,
+        bgz.to_str().unwrap(),
+        4,
+        |r| bgzf_parallel.push(r),
+    )
+    .unwrap();
     assert_eq!(serial.len(), 1);
     assert_eq!(bgzf_parallel.len(), 1);
     assert_eq!(serial[0].vrs_id, bgzf_parallel[0].vrs_id);
@@ -341,8 +370,15 @@ fn test_bgzf_multiallelic() {
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
     let bgz = dir.path().join("multi.vcf.gz");
     write_vcf_bgzf(&bgz, "chr2\t5\t.\tG\tA,T,C\t.\tPASS\t.\n");
-    let out =
-        compute_vrs_ids_parallel_bgzf(&store, &name_to_digest, bgz.to_str().unwrap(), 4).unwrap();
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        &store,
+        &name_to_digest,
+        bgz.to_str().unwrap(),
+        4,
+        |r| out.push(r),
+    )
+    .unwrap();
     assert_eq!(out.len(), 3);
     assert_eq!(out[0].alt_allele, "A");
     assert_eq!(out[1].alt_allele, "T");

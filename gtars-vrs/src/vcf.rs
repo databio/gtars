@@ -56,7 +56,7 @@ fn is_bgzf(file: &mut File) -> Result<bool> {
 /// ("invalid BGZF header"). `MultiGzDecoder` stops at the first non-gzip
 /// byte and surfaces that as `ErrorKind::InvalidInput`, which
 /// `read_vcf_line` below already treats as clean EOF. Block-parallel
-/// decompression is still available via `compute_vrs_ids_parallel_bgzf`,
+/// decompression is still available via `compute_vrs_ids_parallel_bgzf_with_sink`,
 /// which does its own raw block I/O and does not route through `open_vcf`.
 /// Uncompressed input is passed through a `BufReader` directly.
 fn open_vcf(path: &str) -> Result<Box<dyn BufRead>> {
@@ -912,7 +912,7 @@ pub fn compute_vrs_ids_parallel_bgzf_with_sink<F: FnMut(VrsResult)>(
     let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
     if !is_bgzf(&mut file)? {
         return Err(anyhow::anyhow!(
-            "compute_vrs_ids_parallel_bgzf requires BGZF input; use compute_vrs_ids_parallel_blockwise for plain gzip"
+            "compute_vrs_ids_parallel_bgzf_with_sink requires BGZF input; use compute_vrs_ids_parallel_blockwise_with_sink for plain gzip"
         ));
     }
 
@@ -1152,25 +1152,6 @@ pub fn compute_vrs_ids_parallel_bgzf_with_sink<F: FnMut(VrsResult)>(
         }
         Ok(count)
     })
-}
-
-/// Collecting wrapper over `compute_vrs_ids_parallel_bgzf_with_sink`.
-/// Returns all results in a `Vec<VrsResult>` in VCF order.
-pub fn compute_vrs_ids_parallel_bgzf(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-    num_workers: usize,
-) -> Result<Vec<VrsResult>> {
-    let mut out: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_bgzf_with_sink(
-        store,
-        name_to_digest,
-        vcf_path,
-        num_workers,
-        |r| out.push(r),
-    )?;
-    Ok(out)
 }
 
 // ── Streaming TSV output entrypoints ────────────────────────────────────
