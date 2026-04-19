@@ -303,29 +303,7 @@ pub fn compute_vrs_ids_from_vcf_readonly(
     Ok(results)
 }
 
-// ── Parallel API (reader thread + worker pool) ──────────────────────────
-
-/// A parsed VCF variant ready for normalization and digest computation.
-/// Sent from the reader thread to worker threads via channel.
-struct ParsedVariant {
-    /// Monotonic 0-based index assigned by the reader (one per emitted ALT).
-    /// Used to restore VCF order in the final output.
-    index: usize,
-    chrom: String,
-    pos: u64,
-    ref_allele: String,
-    alt_allele: String,
-    /// Pre-resolved "SQ.xxx" accession for this chromosome.
-    seq_accession: String,
-    /// SHA512t24u digest key for sequence_bytes() lookup.
-    raw_digest: String,
-}
-
-/// A computed VRS result tagged with its original input index for reordering.
-struct IndexedVrsResult {
-    index: usize,
-    result: VrsResult,
-}
+// ── Parallel API shared constants ───────────────────────────────────────
 
 const PARALLEL_CHANNEL_CAPACITY: usize = 64;
 const PARALLEL_BATCH_SIZE: usize = 1024;
@@ -349,254 +327,14 @@ pub fn build_name_to_digest_readonly(
     Ok(name_to_digest)
 }
 
-/// Compute VRS IDs for all variants in a VCF using a reader thread plus a
-/// pool of worker threads, all operating on a preloaded `ReadonlyRefgetStore`.
-///
-/// The reader thread parses the VCF sequentially (decompression and line
-/// parsing are inherently serial) and forwards `ParsedVariant`s to workers via
-/// a bounded crossbeam channel. Each worker holds its own `DigestWriter` and
-/// computes VRS IDs independently. Results carry input indices so the final
-/// `Vec<VrsResult>` is reordered to match VCF line order for determinism.
-///
-/// Preconditions: every chromosome referenced by the VCF must already be
-/// decoded in `store`. Callers typically preload by calling
-/// `load_all_sequences` on the underlying mutable store before converting
-/// it with `into_readonly`.
-pub fn compute_vrs_ids_parallel(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-    num_workers: usize,
-) -> Result<Vec<VrsResult>> {
-    let num_workers = num_workers.max(1);
-
-    let chrom_accessions: HashMap<String, String> = name_to_digest
-        .iter()
-        .map(|(name, digest)| (name.clone(), format!("SQ.{}", digest)))
-        .collect();
-
-    std::thread::scope(|s| -> Result<Vec<VrsResult>> {
-        // Batching: channels carry Vec<ParsedVariant> / Vec<Result<IndexedVrsResult>>
-        // to amortize channel overhead. With per-variant messaging the channel
-        // send/recv cost dominates the actual digest work (~5 us/variant),
-        // killing parallel scaling. Batches of 1024 drop channel overhead to
-        // <0.1% of per-variant work.
-        let (variant_tx, variant_rx) =
-            crossbeam_channel::bounded::<Vec<ParsedVariant>>(PARALLEL_CHANNEL_CAPACITY);
-        let (result_tx, result_rx) = crossbeam_channel::bounded::<
-            Vec<Result<IndexedVrsResult>>,
-        >(PARALLEL_CHANNEL_CAPACITY);
-
-        // Reader thread: sequential VCF parse, batch ParsedVariants.
-        let reader_handle = s.spawn({
-            let name_to_digest = name_to_digest;
-            let chrom_accessions = &chrom_accessions;
-            move || -> Result<()> {
-                let mut reader = open_vcf(vcf_path)?;
-                let mut line_buf = String::new();
-                let mut index: usize = 0;
-                let mut batch: Vec<ParsedVariant> = Vec::with_capacity(PARALLEL_BATCH_SIZE);
-
-                while read_vcf_line(&mut *reader, &mut line_buf)? {
-                    let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
-                    if line.starts_with('#') || line.is_empty() {
-                        continue;
-                    }
-
-                    let fields: Vec<&str> = line.splitn(10, '\t').collect();
-                    if fields.len() < 5 {
-                        continue;
-                    }
-
-                    let chrom = fields[0];
-                    let pos: u64 = fields[1]
-                        .parse::<u64>()
-                        .context("Invalid POS field")?
-                        .saturating_sub(1);
-                    let ref_allele = fields[3];
-                    let alt_field = fields[4];
-
-                    let seq_accession = match chrom_accessions.get(chrom) {
-                        Some(acc) => acc,
-                        None => continue,
-                    };
-                    let raw_digest = match name_to_digest.get(chrom) {
-                        Some(d) => d,
-                        None => continue,
-                    };
-
-                    for alt in alt_field.split(',') {
-                        if alt.starts_with('<') || alt == "*" || alt == "." {
-                            continue;
-                        }
-                        batch.push(ParsedVariant {
-                            index,
-                            chrom: chrom.to_string(),
-                            pos,
-                            ref_allele: ref_allele.to_string(),
-                            alt_allele: alt.to_string(),
-                            seq_accession: seq_accession.clone(),
-                            raw_digest: raw_digest.clone(),
-                        });
-                        index += 1;
-
-                        if batch.len() >= PARALLEL_BATCH_SIZE {
-                            let full = std::mem::replace(
-                                &mut batch,
-                                Vec::with_capacity(PARALLEL_BATCH_SIZE),
-                            );
-                            if variant_tx.send(full).is_err() {
-                                return Ok(());
-                            }
-                        }
-                    }
-                }
-
-                if !batch.is_empty() && variant_tx.send(batch).is_err() {
-                    return Ok(());
-                }
-                Ok(())
-            }
-        });
-
-        // Worker threads: process batches, return a batch of results.
-        let mut worker_handles = Vec::with_capacity(num_workers);
-        for _ in 0..num_workers {
-            let variant_rx = variant_rx.clone();
-            let result_tx = result_tx.clone();
-            let store_ref: &ReadonlyRefgetStore = store;
-            let handle = s.spawn(move || {
-                let mut digest_writer = DigestWriter::new();
-                while let Ok(pv_batch) = variant_rx.recv() {
-                    let mut out_batch: Vec<Result<IndexedVrsResult>> =
-                        Vec::with_capacity(pv_batch.len());
-                    for pv in pv_batch {
-                        let r: Result<IndexedVrsResult> = (|| {
-                            let sequence =
-                                store_ref.sequence_bytes(pv.raw_digest.as_str()).context(
-                                    format!("Chromosome {} not decoded in store", pv.chrom),
-                                )?;
-                            let norm = normalize(
-                                sequence,
-                                pv.pos,
-                                pv.ref_allele.as_bytes(),
-                                pv.alt_allele.as_bytes(),
-                            )
-                            .context(format!(
-                                "Failed to normalize variant at {}:{}",
-                                pv.chrom,
-                                pv.pos + 1
-                            ))?;
-                            let norm_seq = std::str::from_utf8(&norm.allele).context(format!(
-                                "Normalized allele is not valid UTF-8 at {}:{}",
-                                pv.chrom,
-                                pv.pos + 1
-                            ))?;
-                            let vrs_id = digest_writer.allele_identifier_literal(
-                                &pv.seq_accession,
-                                norm.start,
-                                norm.end,
-                                norm_seq,
-                            );
-                            Ok(IndexedVrsResult {
-                                index: pv.index,
-                                result: VrsResult {
-                                    chrom: pv.chrom,
-                                    pos: pv.pos,
-                                    ref_allele: pv.ref_allele,
-                                    alt_allele: pv.alt_allele,
-                                    vrs_id,
-                                },
-                            })
-                        })();
-                        out_batch.push(r);
-                    }
-                    if result_tx.send(out_batch).is_err() {
-                        break;
-                    }
-                }
-            });
-            worker_handles.push(handle);
-        }
-
-        // Drop our local handles so the channels close once reader and all
-        // workers finish.
-        drop(variant_rx);
-        drop(result_tx);
-
-        // Collect result batches as they arrive.
-        let mut indexed: Vec<IndexedVrsResult> = Vec::new();
-        let mut first_err: Option<anyhow::Error> = None;
-        while let Ok(out_batch) = result_rx.recv() {
-            for r in out_batch {
-                match r {
-                    Ok(ir) => indexed.push(ir),
-                    Err(e) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Surface reader errors.
-        match reader_handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
-            }
-            Err(_) => {
-                if first_err.is_none() {
-                    first_err = Some(anyhow::anyhow!("VCF reader thread panicked"));
-                }
-            }
-        }
-        // Workers have no Result return; join to surface panics.
-        for h in worker_handles {
-            if h.join().is_err() && first_err.is_none() {
-                first_err = Some(anyhow::anyhow!("VRS worker thread panicked"));
-            }
-        }
-
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-
-        indexed.sort_by_key(|i| i.index);
-        Ok(indexed.into_iter().map(|i| i.result).collect())
-    })
-}
-
-/// Convenience wrapper that picks `num_workers` automatically
-/// (`available_parallelism - 2`, min 1).
-pub fn compute_vrs_ids_parallel_auto(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-) -> Result<Vec<VrsResult>> {
-    let num_workers = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(2).max(1))
-        .unwrap_or(1);
-    compute_vrs_ids_parallel(store, name_to_digest, vcf_path, num_workers)
-}
-
 // ── Blockwise parallel API (workers parse) ──────────────────────────────
 //
-// The pipeline variant above keeps all VCF parsing (field split, POS parse,
-// HashMap lookup, ParsedVariant construction with its 5 String allocations)
-// on the reader thread. That thread becomes the new bottleneck once
-// normalize+digest is offloaded, capping speedup at ~1.3× in practice.
-//
-// The blockwise variant below batches *raw* VCF lines on the reader and
-// hands the parse+normalize+digest pipeline to the workers in its entirety.
-// The reader's per-line work collapses to: read_line into a String, skip
+// The blockwise variant batches *raw* VCF lines on the reader and hands the
+// parse+normalize+digest pipeline to the workers in its entirety. The
+// reader's per-line work collapses to: read_line into a String, skip
 // headers, push into a batch Vec. That's ~1 allocation per line, and every
-// hot-path operation that was serialized (field split, parse::<u64>,
-// HashMap lookup, multi-alt expansion, normalize, digest) now runs across
-// the worker pool.
+// hot-path operation (field split, parse::<u64>, HashMap lookup, multi-alt
+// expansion, normalize, digest) runs across the worker pool.
 
 /// A batch of raw VCF data lines, tagged with a monotonic batch id so the
 /// collector can restore VCF order across workers.
@@ -616,8 +354,8 @@ struct LineResultBatch {
 /// each `VrsResult` in VCF order (via a per-batch reorder buffer), holding
 /// at most one batch worth of results at a time — not the full result set.
 ///
-/// Preconditions: identical to `compute_vrs_ids_parallel` — every
-/// chromosome referenced by the VCF must already be decoded in `store`.
+/// Preconditions: every chromosome referenced by the VCF must already be
+/// decoded in `store`.
 pub fn compute_vrs_ids_parallel_blockwise_with_sink<F: FnMut(VrsResult)>(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
@@ -889,19 +627,6 @@ pub fn compute_vrs_ids_parallel_blockwise(
         |r| out.push(r),
     )?;
     Ok(out)
-}
-
-/// Convenience wrapper for the blockwise variant with auto-picked worker
-/// count (`available_parallelism - 2`, min 1).
-pub fn compute_vrs_ids_parallel_blockwise_auto(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-) -> Result<Vec<VrsResult>> {
-    let num_workers = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(2).max(1))
-        .unwrap_or(1);
-    compute_vrs_ids_parallel_blockwise(store, name_to_digest, vcf_path, num_workers)
 }
 
 // ── BGZF-block parallel API ─────────────────────────────────────────────
@@ -1465,19 +1190,6 @@ pub fn compute_vrs_ids_parallel_bgzf(
         |r| out.push(r),
     )?;
     Ok(out)
-}
-
-/// Convenience wrapper for the BGZF-block variant with auto-picked worker
-/// count (`available_parallelism - 2`, min 1).
-pub fn compute_vrs_ids_parallel_bgzf_auto(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-) -> Result<Vec<VrsResult>> {
-    let num_workers = std::thread::available_parallelism()
-        .map(|n| n.get().saturating_sub(2).max(1))
-        .unwrap_or(1);
-    compute_vrs_ids_parallel_bgzf(store, name_to_digest, vcf_path, num_workers)
 }
 
 // ── Streaming TSV output entrypoints ────────────────────────────────────

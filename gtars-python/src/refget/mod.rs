@@ -2645,90 +2645,13 @@ impl PyRefgetStore {
         Ok(py_results)
     }
 
-    /// Compute GA4GH VRS Allele identifiers in parallel using a reader thread
-    /// plus a worker pool on a preloaded read-only view of this store.
-    ///
-    /// Internally, this eagerly decodes every sequence in the given collection
-    /// (so the worker threads only perform read-only slice lookups), then
-    /// dispatches VCF records across `num_workers` worker threads via a
-    /// bounded crossbeam channel. Output preserves VCF line order.
-    ///
-    /// Precondition: call ``load_all_sequences()`` first so that sequence data
-    /// is present in the store (this method only triggers decoding).
-    ///
-    /// Args:
-    ///     collection_digest (str): Digest of the sequence collection.
-    ///     vcf_path (str): Path to a VCF file (plain or gzipped).
-    ///     num_workers (int): Worker thread count. ``0`` means auto
-    ///         (``available_parallelism - 2``, minimum 1).
-    ///
-    /// Returns:
-    ///     list[dict]: Each dict has keys ``chrom, pos, ref, alt, vrs_id``.
-    #[pyo3(signature = (collection_digest, vcf_path, num_workers = 0))]
-    fn compute_vrs_ids_parallel<'py>(
-        &mut self,
-        py: Python<'py>,
-        collection_digest: &str,
-        vcf_path: &str,
-        num_workers: usize,
-    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
-        self.decode_vcf_chroms(collection_digest, vcf_path)?;
-
-        let num_workers = if num_workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get().saturating_sub(2).max(1))
-                .unwrap_or(1)
-        } else {
-            num_workers
-        };
-
-        // Deref &RefgetStore → &ReadonlyRefgetStore for the read-only API.
-        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
-        let name_to_digest =
-            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
-                |e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to build name_to_digest: {}",
-                        e
-                    ))
-                },
-            )?;
-
-        let results = py.detach(|| {
-            gtars_vrs::vcf::compute_vrs_ids_parallel(
-                readonly,
-                &name_to_digest,
-                vcf_path,
-                num_workers,
-            )
-        })
-        .map_err(|e| {
-            pyo3::exceptions::PyRuntimeError::new_err(format!(
-                "Parallel VRS computation failed: {}",
-                e
-            ))
-        })?;
-
-        let mut py_results = Vec::with_capacity(results.len());
-        for r in &results {
-            let dict = pyo3::types::PyDict::new(py);
-            dict.set_item("chrom", &r.chrom)?;
-            dict.set_item("pos", r.pos)?;
-            dict.set_item("ref", &r.ref_allele)?;
-            dict.set_item("alt", &r.alt_allele)?;
-            dict.set_item("vrs_id", &r.vrs_id)?;
-            py_results.push(dict);
-        }
-        Ok(py_results)
-    }
-
     /// Eagerly decode every sequence in a collection. Idempotent (no-op
     /// for sequences already decoded). Kept for backwards compatibility
     /// with callers that want to pay the decode cost upfront. Note: for
     /// single-chromosome VCFs this decodes ~3366 sequences unnecessarily;
-    /// callers that will follow up with `compute_vrs_ids_parallel_*` can
-    /// skip this method — those entrypoints now lazily decode only the
-    /// chromosomes referenced by the VCF.
+    /// callers that will follow up with `compute_vrs_ids_parallel_blockwise`
+    /// / `_bgzf` can skip this method — those entrypoints now lazily decode
+    /// only the chromosomes referenced by the VCF.
     fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
         let collection = self
             .inner
@@ -2988,11 +2911,22 @@ impl PyRefgetStore {
     /// variant: the reader thread only batches raw VCF lines; workers do
     /// all parsing, normalization, and digest computation.
     ///
-    /// Use this when `compute_vrs_ids_parallel` bottlenecks on the reader
-    /// thread (parse + per-variant allocations). Output is identical in
-    /// content and order to both the serial and pipeline paths.
+    /// The workers perform all parsing, normalization, and digest
+    /// computation; the reader only batches raw VCF lines. This is the
+    /// default Python parallel path. Output matches the serial path in
+    /// content and order.
     ///
-    /// Args, returns, and preconditions match `compute_vrs_ids_parallel`.
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection.
+    ///     vcf_path (str): Path to a VCF file (plain or gzipped).
+    ///     num_workers (int): Worker thread count. ``0`` means auto
+    ///         (``available_parallelism - 2``, minimum 1).
+    ///
+    /// Returns:
+    ///     list[dict]: Each dict has keys ``chrom, pos, ref, alt, vrs_id``.
+    ///
+    /// Preconditions: sequences must be decoded; this method auto-decodes
+    /// only the chromosomes referenced by the VCF.
     #[pyo3(signature = (collection_digest, vcf_path, num_workers = 0))]
     fn compute_vrs_ids_parallel_blockwise<'py>(
         &mut self,

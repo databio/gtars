@@ -1,16 +1,15 @@
 //! Tests for the parallel VCF → VRS pipeline.
 //!
-//! Verifies that `compute_vrs_ids_parallel` produces the same results as
-//! `compute_vrs_ids_from_vcf_readonly` (same IDs, same order) across a
-//! variety of VCF shapes.
+//! Verifies that `compute_vrs_ids_parallel_blockwise` and
+//! `compute_vrs_ids_parallel_bgzf` produce the same results as
+//! `compute_vrs_ids_from_vcf_readonly` across a variety of VCF shapes.
 
 use std::io::Write;
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use gtars_vrs::vcf::{
     build_name_to_digest_readonly, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_parallel, compute_vrs_ids_parallel_bgzf,
-    compute_vrs_ids_parallel_blockwise,
+    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise,
 };
 use tempfile::tempdir;
 
@@ -68,115 +67,6 @@ fn write_vcf_bgzf(path: &std::path::Path, body: &str) {
     w.flush().unwrap();
 }
 
-#[test]
-fn test_parallel_matches_sequential() {
-    let dir = tempdir().unwrap();
-    let (store, name_to_digest) = build_readonly_fixture(dir.path());
-
-    let vcf_path = dir.path().join("mixed.vcf");
-    write_vcf(
-        &vcf_path,
-        "\
-chr1\t5\t.\tA\tT\t.\tPASS\t.\n\
-chr1\t10\t.\tG\tC\t.\tPASS\t.\n\
-chr1\t51\t.\tA\tAA\t.\tPASS\t.\n\
-chr1\t51\t.\tAA\tA\t.\tPASS\t.\n\
-chr2\t5\t.\tG\tA,T\t.\tPASS\t.\n\
-chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n",
-    );
-
-    let serial =
-        compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, vcf_path.to_str().unwrap())
-            .unwrap();
-    let parallel =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 4).unwrap();
-
-    assert_eq!(serial.len(), parallel.len());
-    for (a, b) in serial.iter().zip(parallel.iter()) {
-        assert_eq!(a.chrom, b.chrom);
-        assert_eq!(a.pos, b.pos);
-        assert_eq!(a.ref_allele, b.ref_allele);
-        assert_eq!(a.alt_allele, b.alt_allele);
-        assert_eq!(a.vrs_id, b.vrs_id);
-    }
-    assert_eq!(parallel.len(), 6, "symbolic <DEL> should be skipped");
-}
-
-#[test]
-fn test_parallel_single_worker() {
-    let dir = tempdir().unwrap();
-    let (store, name_to_digest) = build_readonly_fixture(dir.path());
-
-    let vcf_path = dir.path().join("single.vcf");
-    write_vcf(
-        &vcf_path,
-        "\
-chr1\t5\t.\tA\tT\t.\tPASS\t.\n\
-chr2\t5\t.\tG\tA\t.\tPASS\t.\n",
-    );
-
-    let out =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 1).unwrap();
-    assert_eq!(out.len(), 2);
-    for r in &out {
-        assert!(r.vrs_id.starts_with("ga4gh:VA."));
-        assert_eq!(r.vrs_id.len(), 9 + 32);
-    }
-}
-
-#[test]
-fn test_parallel_empty_vcf() {
-    let dir = tempdir().unwrap();
-    let (store, name_to_digest) = build_readonly_fixture(dir.path());
-
-    let vcf_path = dir.path().join("empty.vcf");
-    write_vcf(&vcf_path, "");
-
-    let out =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 4).unwrap();
-    assert!(out.is_empty());
-}
-
-#[test]
-fn test_parallel_skips_symbolic_alleles() {
-    let dir = tempdir().unwrap();
-    let (store, name_to_digest) = build_readonly_fixture(dir.path());
-
-    let vcf_path = dir.path().join("sym.vcf");
-    write_vcf(
-        &vcf_path,
-        "\
-chr1\t10\t.\tA\t<DEL>\t.\tPASS\t.\n\
-chr1\t10\t.\tA\t*\t.\tPASS\t.\n\
-chr1\t10\t.\tA\t.\t.\tPASS\t.\n\
-chr1\t11\t.\tC\tG\t.\tPASS\t.\n",
-    );
-
-    let out =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 4).unwrap();
-    assert_eq!(out.len(), 1);
-    assert_eq!(out[0].alt_allele, "G");
-}
-
-#[test]
-fn test_parallel_multiallelic_preserves_order() {
-    let dir = tempdir().unwrap();
-    let (store, name_to_digest) = build_readonly_fixture(dir.path());
-
-    let vcf_path = dir.path().join("multi.vcf");
-    write_vcf(&vcf_path, "chr2\t5\t.\tG\tA,T,C\t.\tPASS\t.\n");
-
-    let out =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 8).unwrap();
-    assert_eq!(out.len(), 3);
-    assert_eq!(out[0].alt_allele, "A");
-    assert_eq!(out[1].alt_allele, "T");
-    assert_eq!(out[2].alt_allele, "C");
-    // Distinct IDs
-    assert_ne!(out[0].vrs_id, out[1].vrs_id);
-    assert_ne!(out[1].vrs_id, out[2].vrs_id);
-}
-
 // ── Blockwise variant tests ────────────────────────────────────────────
 
 #[test]
@@ -206,14 +96,10 @@ chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n",
         4,
     )
     .unwrap();
-    let pipeline =
-        compute_vrs_ids_parallel(&store, &name_to_digest, vcf_path.to_str().unwrap(), 4).unwrap();
 
     assert_eq!(serial.len(), blockwise.len());
-    assert_eq!(serial.len(), pipeline.len());
-    for ((a, b), c) in serial.iter().zip(blockwise.iter()).zip(pipeline.iter()) {
+    for (a, b) in serial.iter().zip(blockwise.iter()) {
         assert_eq!(a.vrs_id, b.vrs_id);
-        assert_eq!(a.vrs_id, c.vrs_id);
         assert_eq!(a.chrom, b.chrom);
         assert_eq!(a.pos, b.pos);
     }
