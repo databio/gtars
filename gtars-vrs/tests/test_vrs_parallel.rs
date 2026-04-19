@@ -1,6 +1,6 @@
 //! Tests for the parallel VCF → VRS pipeline.
 //!
-//! Verifies that `compute_vrs_ids_parallel_blockwise_with_sink` and
+//! Verifies that `compute_vrs_ids_parallel_with_sink` and
 //! `compute_vrs_ids_parallel_bgzf_with_sink` produce the same results as
 //! `compute_vrs_ids_from_vcf_readonly` across a variety of VCF shapes.
 
@@ -9,7 +9,7 @@ use std::io::Write;
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use gtars_vrs::vcf::{
     build_name_to_digest_readonly, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_parallel_bgzf_with_sink, compute_vrs_ids_parallel_blockwise_with_sink,
+    compute_vrs_ids_parallel_bgzf_with_sink, compute_vrs_ids_parallel_with_sink,
     decode_vcf_chroms, VrsResult,
 };
 use tempfile::tempdir;
@@ -68,10 +68,10 @@ fn write_vcf_bgzf(path: &std::path::Path, body: &str) {
     w.flush().unwrap();
 }
 
-// ── Blockwise variant tests ────────────────────────────────────────────
+// ── Parallel variant tests ─────────────────────────────────────────────
 
 #[test]
-fn test_blockwise_matches_sequential() {
+fn test_parallel_matches_sequential() {
     let dir = tempdir().unwrap();
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
 
@@ -90,18 +90,18 @@ chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n",
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, vcf_path.to_str().unwrap())
             .unwrap();
-    let mut blockwise: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
+    let mut parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         4,
-        |r| blockwise.push(r),
+        |r| parallel.push(r),
     )
     .unwrap();
 
-    assert_eq!(serial.len(), blockwise.len());
-    for (a, b) in serial.iter().zip(blockwise.iter()) {
+    assert_eq!(serial.len(), parallel.len());
+    for (a, b) in serial.iter().zip(parallel.iter()) {
         assert_eq!(a.vrs_id, b.vrs_id);
         assert_eq!(a.chrom, b.chrom);
         assert_eq!(a.pos, b.pos);
@@ -109,7 +109,7 @@ chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n",
 }
 
 #[test]
-fn test_blockwise_single_worker() {
+fn test_parallel_single_worker() {
     let dir = tempdir().unwrap();
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
     let vcf_path = dir.path().join("single_bw.vcf");
@@ -118,7 +118,7 @@ fn test_blockwise_single_worker() {
         "chr1\t5\t.\tA\tT\t.\tPASS\t.\nchr2\t5\t.\tG\tA\t.\tPASS\t.\n",
     );
     let mut out: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
+    compute_vrs_ids_parallel_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
@@ -133,13 +133,13 @@ fn test_blockwise_single_worker() {
 }
 
 #[test]
-fn test_blockwise_empty_vcf() {
+fn test_parallel_empty_vcf() {
     let dir = tempdir().unwrap();
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
     let vcf_path = dir.path().join("empty_bw.vcf");
     write_vcf(&vcf_path, "");
     let mut out: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
+    compute_vrs_ids_parallel_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
@@ -151,7 +151,7 @@ fn test_blockwise_empty_vcf() {
 }
 
 #[test]
-fn test_blockwise_skips_symbolic_alleles() {
+fn test_parallel_skips_symbolic_alleles() {
     let dir = tempdir().unwrap();
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
     let vcf_path = dir.path().join("sym_bw.vcf");
@@ -164,7 +164,7 @@ chr1\t10\t.\tA\t.\t.\tPASS\t.\n\
 chr1\t11\t.\tC\tG\t.\tPASS\t.\n",
     );
     let mut out: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
+    compute_vrs_ids_parallel_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
@@ -520,7 +520,7 @@ fn test_decode_vcf_chroms_fast_path_all_loaded() {
 }
 
 #[test]
-fn test_blockwise_preserves_order_across_batches() {
+fn test_parallel_preserves_order_across_batches() {
     // Write enough lines to span multiple 1024-line batches, then assert
     // the VRS IDs come back in VCF order (batch reordering matters).
     let dir = tempdir().unwrap();
@@ -540,19 +540,19 @@ fn test_blockwise_preserves_order_across_batches() {
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, vcf_path.to_str().unwrap())
             .unwrap();
-    let mut blockwise: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
+    let mut parallel: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         8,
-        |r| blockwise.push(r),
+        |r| parallel.push(r),
     )
     .unwrap();
 
     // Skip ref-mismatch failures deterministically by comparing in lockstep.
-    assert_eq!(serial.len(), blockwise.len(), "count mismatch");
-    for (a, b) in serial.iter().zip(blockwise.iter()) {
+    assert_eq!(serial.len(), parallel.len(), "count mismatch");
+    for (a, b) in serial.iter().zip(parallel.iter()) {
         assert_eq!(a.vrs_id, b.vrs_id, "order mismatch at pos {}", a.pos);
     }
 }

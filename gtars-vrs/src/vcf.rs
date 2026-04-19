@@ -327,14 +327,14 @@ pub fn build_name_to_digest_readonly(
     Ok(name_to_digest)
 }
 
-// ── Blockwise parallel API (workers parse) ──────────────────────────────
+// ── Parallel API (workers parse) ────────────────────────────────────────
 //
-// The blockwise variant batches *raw* VCF lines on the reader and hands the
-// parse+normalize+digest pipeline to the workers in its entirety. The
-// reader's per-line work collapses to: read_line into a String, skip
-// headers, push into a batch Vec. That's ~1 allocation per line, and every
-// hot-path operation (field split, parse::<u64>, HashMap lookup, multi-alt
-// expansion, normalize, digest) runs across the worker pool.
+// Reader thread batches *raw* VCF lines; the worker pool does all parsing
+// + normalization + digest. The reader's per-line work collapses to:
+// read_line into a String, skip headers, push into a batch Vec. That's ~1
+// allocation per line, and every hot-path operation (field split,
+// parse::<u64>, HashMap lookup, multi-alt expansion, normalize, digest)
+// runs across the worker pool. See compute_vrs_ids_parallel_with_sink.
 
 /// A batch of raw VCF data lines, tagged with a monotonic batch id so the
 /// collector can restore VCF order across workers.
@@ -350,13 +350,13 @@ struct LineResultBatch {
     results: Vec<Result<VrsResult>>,
 }
 
-/// Streaming core for the blockwise parallel path. Invokes `on_result` for
+/// Streaming core for the parallel path. Invokes `on_result` for
 /// each `VrsResult` in VCF order (via a per-batch reorder buffer), holding
 /// at most one batch worth of results at a time — not the full result set.
 ///
 /// Preconditions: every chromosome referenced by the VCF must already be
 /// decoded in `store`.
-pub fn compute_vrs_ids_parallel_blockwise_with_sink<F: FnMut(VrsResult)>(
+pub fn compute_vrs_ids_parallel_with_sink<F: FnMut(VrsResult)>(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
     vcf_path: &str,
@@ -612,10 +612,10 @@ pub fn compute_vrs_ids_parallel_blockwise_with_sink<F: FnMut(VrsResult)>(
 
 // ── BGZF-block parallel API ─────────────────────────────────────────────
 //
-// The blockwise variant above still routes every VCF byte through one
-// reader thread: it decompresses (via noodles-bgzf MT) and line-batches
-// sequentially before dispatching. That reader is the new ceiling
-// (~3.7× on 14 cores).
+// The parallel variant above still routes every VCF byte through one
+// reader thread: it decompresses (via MultiGzDecoder) and line-batches
+// sequentially before dispatching. That reader is the ceiling (~3.7× on
+// 14 cores).
 //
 // This variant goes one level deeper: the reader thread never decompresses
 // anything. It reads raw compressed BGZF *blocks* (~64 KB each), tagged
@@ -912,7 +912,7 @@ pub fn compute_vrs_ids_parallel_bgzf_with_sink<F: FnMut(VrsResult)>(
     let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
     if !is_bgzf(&mut file)? {
         return Err(anyhow::anyhow!(
-            "compute_vrs_ids_parallel_bgzf_with_sink requires BGZF input; use compute_vrs_ids_parallel_blockwise_with_sink for plain gzip"
+            "compute_vrs_ids_parallel_bgzf_with_sink requires BGZF input; use compute_vrs_ids_parallel_with_sink for plain gzip"
         ));
     }
 
@@ -1192,7 +1192,7 @@ fn append_tsv_line(buf: &mut Vec<u8>, r: &VrsResult) {
     buf.push(b'\n');
 }
 
-/// Per-batch TSV output from a blockwise-TSV worker. `bytes` is a
+/// Per-batch TSV output from a parallel-TSV worker. `bytes` is a
 /// ready-to-write TSV chunk (lines already terminated with `\n`).
 /// Errors are collected separately so the collector can surface the
 /// first one without needing to touch `bytes`.
@@ -1236,7 +1236,7 @@ pub fn compute_vrs_ids_parallel_bgzf_to_tsv(
     let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
     if !is_bgzf(&mut file)? {
         return Err(anyhow::anyhow!(
-            "compute_vrs_ids_parallel_bgzf_to_tsv requires BGZF input; use compute_vrs_ids_parallel_blockwise_to_tsv for plain gzip"
+            "compute_vrs_ids_parallel_bgzf_to_tsv requires BGZF input; use compute_vrs_ids_parallel_to_tsv for plain gzip"
         ));
     }
 
@@ -1505,14 +1505,14 @@ fn memchr_count_newlines(buf: &[u8]) -> usize {
     buf.iter().filter(|&&b| b == b'\n').count()
 }
 
-/// Compute VRS IDs via the blockwise parallel path and stream them
+/// Compute VRS IDs via the parallel path and stream them
 /// directly to a TSV (chrom, pos, ref, alt, vrs_id). Returns the number
 /// of variants written.
 ///
 /// Like `compute_vrs_ids_parallel_bgzf_to_tsv`, TSV formatting happens
 /// on worker threads (parallel) so the collector just reassembles bytes
 /// in VCF order.
-pub fn compute_vrs_ids_parallel_blockwise_to_tsv(
+pub fn compute_vrs_ids_parallel_to_tsv(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
     vcf_path: &str,
