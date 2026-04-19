@@ -10,8 +10,8 @@ use serde::Serialize;
 use gtars_core::models::{Region, RegionSet};
 use gtars_core::utils::get_chrom_sizes;
 use gtars_genomicdist::models::{
-    BinaryGenomeAssembly, ChromosomeStatistics, ClusterStats, DensityHomogeneity, DensityVector,
-    GenomeAssembly, RegionBin, SequenceAccess, SpacingStats, Strand, TssIndex,
+    BinaryGenomeAssembly, ChromosomeStatistics, GenomeAssembly, RegionBin, SequenceAccess,
+    Strand, TssIndex,
 };
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use gtars_genomicdist::{
@@ -28,27 +28,6 @@ struct GenomicDistOutput {
     #[serde(skip_serializing_if = "Option::is_none")]
     partitions: Option<PartitionResult>,
     distributions: Distributions,
-    /// Summary statistics over the distribution of inter-region spacings.
-    /// Always computed (NaN fields if no positive gaps exist).
-    inter_peak_spacing: SpacingStats,
-    /// Peak-cluster summary statistics at each of the requested
-    /// stitching radii (controlled by `--cluster-radii`, defaulting
-    /// to 500 / 5 000 / 50 000 bp for promoter / enhancer / domain scales).
-    peak_clusters: Vec<ClusterStats>,
-    /// Dense zero-padded per-window peak count vector. Only computed
-    /// when `--chrom-sizes` is provided. `counts.len()` is
-    /// `sum(ceil(size / bin_width))` across chromosomes in the
-    /// `--chrom-sizes` file — typically much larger than `--bins`,
-    /// which is the *target* bin count for the longest chromosome.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    density_vector: Option<DensityVector>,
-    /// Scalar homogeneity summary (variance / CV / Gini) over the
-    /// dense per-window count vector. Only computed when
-    /// `--chrom-sizes` is provided. Short contigs in the chrom sizes
-    /// file each contribute a narrow single-bin entry which dilutes
-    /// `mean_count`, inflates `n_windows`, and raises `gini`.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    density_homogeneity: Option<DensityHomogeneity>,
     #[serde(skip_serializing_if = "Option::is_none")]
     expected_partitions: Option<ExpectedPartitionResult>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -133,27 +112,6 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         .unwrap()
         .parse()
         .context("--promoter-downstream must be a positive integer")?;
-    // Parse the comma-separated --cluster-radii flag into Vec<u32>. Empty
-    // entries (e.g. trailing commas) are skipped rather than erroring so
-    // the flag is forgiving of shell variable expansion quirks.
-    let cluster_radii: Vec<u32> = matches
-        .get_one::<String>("cluster-radii")
-        .unwrap()
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| {
-            s.parse::<u32>()
-                .with_context(|| format!("--cluster-radii entry must be a non-negative integer, got '{}'", s))
-        })
-        .collect::<Result<_>>()?;
-    // Default 2 matches the binding-layer default: every size-dependent
-    // ClusterStats field describes "multi-peak clusters only".
-    let cluster_min_size: usize = matches
-        .get_one::<String>("cluster-min-size")
-        .unwrap()
-        .parse()
-        .context("--cluster-min-size must be a positive integer")?;
 
     // Load BED file
     let rs = RegionSet::try_from(bed_path.as_str())
@@ -188,22 +146,6 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
         .calc_nearest_neighbors()
         .map_err(|e| anyhow::anyhow!("Failed to compute nearest neighbors: {}", e))?;
 
-    // Spatial-arrangement summary statistics. inter_peak_spacing wraps
-    // calc_neighbor_distances and is always safe to compute. peak_clusters
-    // is evaluated at each user-supplied radius (default: promoter / enhancer
-    // / domain scales) to build a multi-scale spatial fingerprint. The
-    // --cluster-min-size flag (default 2) applies uniformly to every
-    // size-dependent field in each ClusterStats (n_clusters,
-    // n_clustered_peaks, mean_cluster_size, fraction_clustered); at the
-    // default it describes "multi-peak clusters only", the scientifically
-    // meaningful view. Pass --cluster-min-size 1 for the simple-average
-    // "include singletons" world.
-    let inter_peak_spacing = rs.calc_inter_peak_spacing();
-    let peak_clusters: Vec<ClusterStats> = cluster_radii
-        .iter()
-        .map(|&r| rs.calc_peak_clusters(r, cluster_min_size))
-        .collect();
-
     // Convert region distribution HashMap to sorted Vec
     let mut region_distribution: Vec<RegionBin> = region_dist_map.into_values().collect();
     region_distribution.sort_by_key(|b| (b.rid, b.chr.clone(), b.start));
@@ -236,24 +178,6 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
     };
 
     let chrom_sizes: Option<HashMap<String, u32>> = explicit_chrom_sizes;
-
-    // Density vector + homogeneity require chrom_sizes to define per-chromosome
-    // bin boundaries. When --chrom-sizes isn't provided, skip both with a
-    // warning (matching how expected_partitions and region_distribution are
-    // gated on chrom_sizes).
-    let (density_vector_out, density_homogeneity_out): (
-        Option<DensityVector>,
-        Option<DensityHomogeneity>,
-    ) = match chrom_sizes.as_ref() {
-        Some(cs) => (
-            Some(rs.calc_density_vector(cs, n_bins)),
-            Some(rs.calc_density_homogeneity(cs, n_bins)),
-        ),
-        None => {
-            eprintln!("No --chrom-sizes provided, skipping density_vector / density_homogeneity.");
-            (None, None)
-        }
-    };
 
     // --- TSS distances (signed: negative = upstream, positive = downstream) ---
     let tss_distances: Option<Vec<i64>> = if let Some(tss_p) = tss_path {
@@ -405,10 +329,6 @@ pub fn run_genomicdist(matches: &ArgMatches) -> Result<()> {
             region_distribution,
             chromosome_stats,
         },
-        inter_peak_spacing,
-        peak_clusters,
-        density_vector: density_vector_out,
-        density_homogeneity: density_homogeneity_out,
         expected_partitions,
         open_signal,
         gc_content: gc_content_out,
