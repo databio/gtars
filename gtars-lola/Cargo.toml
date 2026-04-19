@@ -1,6 +1,6 @@
 [package]
 name = "gtars-lola"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 description = "LOLA (Locus Overlap Analysis) for genomic region enrichment testing"
 license = "MIT"

@@ -60,23 +60,49 @@ r_chromosome_statistics <- function(rs_ptr) .Call(wrap__r_chromosome_statistics,
 #' @param n_bins Number of bins (default 250)
 r_region_distribution <- function(rs_ptr, n_bins, chrom_names, chrom_lengths) .Call(wrap__r_region_distribution, rs_ptr, n_bins, chrom_names, chrom_lengths)
 
+#' Cluster nearby regions via single-linkage with a stitching radius.
+#'
+#' Returns an integer vector of cluster IDs in original region order.
+#' Regions within `max_gap` bp of another region on the same chromosome
+#' are assigned the same cluster. Chromosome boundaries always break clusters.
+#'
+#' @export
+#' @param rs_ptr External pointer to a RegionSet
+#' @param max_gap Maximum bp gap between regions to link (non-negative)
+r_cluster <- function(rs_ptr, max_gap) .Call(wrap__r_cluster, rs_ptr, max_gap)
+
 #' Load a genome assembly from a FASTA file
 #' @export
 #' @param fasta_path Path to a FASTA file
 load_genome_assembly <- function(fasta_path) .Call(wrap__r_load_genome_assembly, fasta_path)
 
+#' Load a binary genome assembly from a .fab file
+#' @export
+#' @param fab_path Path to a .fab binary FASTA file (created by gtars prep --fasta)
+load_binary_genome_assembly <- function(fab_path) .Call(wrap__r_load_binary_genome_assembly, fab_path)
+
 #' Calculate GC content for each region
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param assembly_ptr External pointer to a GenomeAssembly
-#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly.
+#'   Pass NULL (the default) or FALSE to error on unknown chromosomes.
 r_calc_gc_content <- function(rs_ptr, assembly_ptr, ignore_unk_chroms) .Call(wrap__r_calc_gc_content, rs_ptr, assembly_ptr, ignore_unk_chroms)
 
-#' Calculate per-region dinucleotide frequencies (percentages)
+#' Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)
+#'
+#' Returns a list with a ``region`` column and 16 dinucleotide columns
+#' (AA, AC, ..., TT). When ``raw_counts`` is FALSE (default), each row sums
+#' to 100 (percentages). When TRUE, values are raw integer counts.
+#'
+#' For pooled global counts, sum each dinucleotide column across rows
+#' (with ``raw_counts=TRUE``).
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
 #' @param assembly_ptr External pointer to a GenomeAssembly
-r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr)
+#' @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
+#' @param ignore_unk_chroms Skip regions on chromosomes not in the assembly (default FALSE)
+r_calc_dinucl_freq <- function(rs_ptr, assembly_ptr, raw_counts, ignore_unk_chroms) .Call(wrap__r_calc_dinucl_freq, rs_ptr, assembly_ptr, raw_counts, ignore_unk_chroms)
 
 #' Trim regions to chromosome boundaries
 #' @export
@@ -166,10 +192,18 @@ r_narrow <- function(rs_ptr, start, end, width) .Call(wrap__r_narrow, rs_ptr, st
 #' @param rs_ptr External pointer to a RegionSet
 r_disjoin <- function(rs_ptr) .Call(wrap__r_disjoin, rs_ptr)
 
-#' Return gaps between regions per chromosome
+#' Return gaps between regions per chromosome, bounded by chrom sizes
+#'
+#' Emits the peak-free intervals of each chromosome listed in `chrom_sizes`,
+#' including leading gaps (from 0), inter-region gaps, trailing gaps
+#' (to `chrom_size`), and full-chromosome gaps for chromosomes with no
+#' regions. Regions on chromosomes not present in `chrom_sizes` are skipped.
+#'
 #' @export
 #' @param rs_ptr External pointer to a RegionSet
-r_gaps <- function(rs_ptr) .Call(wrap__r_gaps, rs_ptr)
+#' @param chrom_names Character vector of chromosome names
+#' @param chrom_sizes_vec Integer vector of chromosome sizes
+r_gaps <- function(rs_ptr, chrom_names, chrom_sizes_vec) .Call(wrap__r_gaps, rs_ptr, chrom_names, chrom_sizes_vec)
 
 #' Range-level intersection of two region sets
 #' @export

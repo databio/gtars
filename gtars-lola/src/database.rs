@@ -24,14 +24,14 @@ pub struct CollectionAnno {
 #[derive(Debug, Clone, Default)]
 pub struct RegionSetAnno {
     pub filename: String,
-    pub cell_type: String,
-    pub description: String,
-    pub tissue: String,
-    pub data_source: String,
-    pub antibody: String,
-    pub treatment: String,
+    pub cell_type: Option<String>,
+    pub description: Option<String>,
+    pub tissue: Option<String>,
+    pub data_source: Option<String>,
+    pub antibody: Option<String>,
+    pub treatment: Option<String>,
     /// Which collection this file belongs to.
-    pub collection: String,
+    pub collection: Option<String>,
 }
 
 /// A LOLA region database: IGD index + original region sets + annotations.
@@ -145,12 +145,12 @@ impl RegionDB {
                         // Fall back to collection description if file-level is empty.
                         let mut anno = anno_map.get(fname).cloned().unwrap_or(RegionSetAnno {
                             filename: fname.clone(),
-                            collection: coll_name.clone(),
+                            collection: Some(coll_name.clone()),
                             ..Default::default()
                         });
-                        if anno.description.is_empty() {
+                        if anno.description.is_none() {
                             // R LOLA uses the collection folder name as fallback
-                            anno.description = coll_name.clone();
+                            anno.description = Some(coll_name.clone());
                         }
                         all_region_anno.push(anno);
                         files_loaded += 1;
@@ -248,7 +248,7 @@ impl RegionDB {
             .iter()
             .filter(|a| {
                 if let Some(filter) = collections {
-                    filter.iter().any(|f| *f == a.collection)
+                    a.collection.as_deref().map_or(false, |c| filter.contains(&c))
                 } else {
                     true
                 }
@@ -269,7 +269,7 @@ impl RegionDB {
             .filter(|(_, a)| {
                 let name_match = filenames.iter().any(|f| *f == a.filename);
                 let coll_match = if let Some(filter) = collections {
-                    filter.iter().any(|f| *f == a.collection)
+                    a.collection.as_deref().map_or(false, |c| filter.contains(&c))
                 } else {
                     true
                 };
@@ -429,23 +429,30 @@ fn parse_index_txt(path: &Path, collection_name: &str) -> Vec<RegionSetAnno> {
 
         let fields: Vec<&str> = line.split(sep).collect();
 
-        let get = |key: &str| -> String {
+        let get_required = |key: &str| -> String {
             col_map
                 .get(key)
                 .and_then(|&i| fields.get(i))
                 .map(|s| s.trim().to_string())
                 .unwrap_or_default()
         };
+        let get_optional = |key: &str| -> Option<String> {
+            col_map
+                .get(key)
+                .and_then(|&i| fields.get(i))
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        };
 
         annos.push(RegionSetAnno {
-            filename: get("filename"),
-            cell_type: get("cellType"),
-            description: get("description"),
-            tissue: get("tissue"),
-            data_source: get("dataSource"),
-            antibody: get("antibody"),
-            treatment: get("treatment"),
-            collection: collection_name.to_string(),
+            filename: get_required("filename"),
+            cell_type: get_optional("cellType"),
+            description: get_optional("description"),
+            tissue: get_optional("tissue"),
+            data_source: get_optional("dataSource"),
+            antibody: get_optional("antibody"),
+            treatment: get_optional("treatment"),
+            collection: Some(collection_name.to_string()),
         });
     }
 
@@ -504,8 +511,8 @@ mod tests {
         assert_eq!(db.collection_anno.len(), 1);
         assert_eq!(db.collection_anno[0].collector, "John");
         assert_eq!(db.region_anno.len(), 2);
-        assert_eq!(db.region_anno[0].cell_type, "K562");
-        assert_eq!(db.region_anno[1].cell_type, "HeLa");
+        assert_eq!(db.region_anno[0].cell_type.as_deref(), Some("K562"));
+        assert_eq!(db.region_anno[1].cell_type.as_deref(), Some("HeLa"));
 
         // Region sets should have correct counts
         assert_eq!(db.region_sets[0].regions.len(), 3); // file1: 3 regions
@@ -599,7 +606,7 @@ mod tests {
 
         let anno = RegionSetAnno {
             filename: "test.bed".to_string(),
-            cell_type: "K562".to_string(),
+            cell_type: Some("K562".to_string()),
             ..Default::default()
         };
 
@@ -665,12 +672,12 @@ mod tests {
         assert_eq!(db.num_region_sets(), 1);
         // R LOLA uses the collection folder name as fallback, not collection.txt description
         assert_eq!(
-            db.region_anno[0].description, "fallback_coll",
+            db.region_anno[0].description.as_deref(), Some("fallback_coll"),
             "Description should fall back to collection folder name when index.txt description is empty"
         );
         // Other fields from index.txt should still be present
-        assert_eq!(db.region_anno[0].cell_type, "K562");
-        assert_eq!(db.region_anno[0].tissue, "blood");
+        assert_eq!(db.region_anno[0].cell_type.as_deref(), Some("K562"));
+        assert_eq!(db.region_anno[0].tissue.as_deref(), Some("blood"));
     }
 
     #[test]
@@ -728,7 +735,7 @@ mod tests {
             .region_anno
             .iter()
             .enumerate()
-            .filter(|(_, a)| a.collection == "coll1")
+            .filter(|(_, a)| a.collection.as_deref() == Some("coll1"))
             .map(|(i, _)| i)
             .collect();
 

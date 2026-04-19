@@ -13,12 +13,11 @@ pub(crate) mod tss_index;
 
 pub use self::gda::PyGenomicDistAnnotation;
 pub use self::gene_model::PyGeneModel;
-pub use self::genome_assembly::PyGenomeAssembly;
+pub use self::genome_assembly::{PyBinaryGenomeAssembly, PyGenomeAssembly};
 pub use self::interval::PyInterval;
 pub use self::partition_list::PyPartitionList;
 pub use self::region::PyRegion;
-pub use self::region_set::PyChromosomeStatistics;
-pub use self::region_set::PyRegionSet;
+pub use self::region_set::{PyChromosomeStatistics, PyRegionSet};
 pub use self::region_set_list::PyRegionSetList;
 pub use self::signal_matrix::PySignalMatrix;
 pub use self::tss_index::PyTssIndex;
@@ -30,6 +29,7 @@ pub fn models(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRegionSet>()?;
     m.add_class::<PyChromosomeStatistics>()?;
     m.add_class::<PyGenomeAssembly>()?;
+    m.add_class::<PyBinaryGenomeAssembly>()?;
     m.add_class::<PyTssIndex>()?;
     m.add_class::<PyGeneModel>()?;
     m.add_class::<PyPartitionList>()?;

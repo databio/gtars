@@ -257,67 +257,63 @@ struct UniverseCheckResult {
     warnings: Vec<String>,
 }
 
-#[derive(serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LolaResults {
-    user_set: Vec<usize>,
-    db_set: Vec<usize>,
-    collection: Vec<Option<String>>,
-    p_value_log: Vec<f64>,
-    odds_ratio: Vec<f64>,
-    support: Vec<u64>,
-    rnk_pv: Vec<usize>,
-    rnk_or: Vec<usize>,
-    rnk_sup: Vec<usize>,
-    max_rnk: Vec<usize>,
-    mean_rnk: Vec<f64>,
-    b: Vec<i64>,
-    c: Vec<i64>,
-    d: Vec<i64>,
-    description: Vec<Option<String>>,
-    cell_type: Vec<Option<String>>,
-    tissue: Vec<Option<String>>,
-    antibody: Vec<Option<String>>,
-    treatment: Vec<Option<String>>,
-    data_source: Vec<Option<String>>,
-    filename: Vec<String>,
-    q_value: Vec<Option<f64>>,
-    size: Vec<u64>,
-}
-
-fn empty_to_none(s: &str) -> Option<String> {
-    if s.is_empty() {
-        None
-    } else {
-        Some(s.to_string())
-    }
-}
-
 fn results_to_js(results: &[LolaResult]) -> Result<JsValue, JsValue> {
-    let out = LolaResults {
-        user_set: results.iter().map(|r| r.user_set).collect(),
-        db_set: results.iter().map(|r| r.db_set).collect(),
-        collection: results.iter().map(|r| empty_to_none(&r.collection)).collect(),
-        p_value_log: results.iter().map(|r| r.p_value_log).collect(),
-        odds_ratio: results.iter().map(|r| r.odds_ratio).collect(),
-        support: results.iter().map(|r| r.support).collect(),
-        rnk_pv: results.iter().map(|r| r.rnk_pv).collect(),
-        rnk_or: results.iter().map(|r| r.rnk_or).collect(),
-        rnk_sup: results.iter().map(|r| r.rnk_sup).collect(),
-        max_rnk: results.iter().map(|r| r.max_rnk).collect(),
-        mean_rnk: results.iter().map(|r| r.mean_rnk).collect(),
-        b: results.iter().map(|r| r.b).collect(),
-        c: results.iter().map(|r| r.c).collect(),
-        d: results.iter().map(|r| r.d).collect(),
-        description: results.iter().map(|r| empty_to_none(&r.description)).collect(),
-        cell_type: results.iter().map(|r| empty_to_none(&r.cell_type)).collect(),
-        tissue: results.iter().map(|r| empty_to_none(&r.tissue)).collect(),
-        antibody: results.iter().map(|r| empty_to_none(&r.antibody)).collect(),
-        treatment: results.iter().map(|r| empty_to_none(&r.treatment)).collect(),
-        data_source: results.iter().map(|r| empty_to_none(&r.data_source)).collect(),
-        filename: results.iter().map(|r| r.filename.clone()).collect(),
-        q_value: results.iter().map(|r| r.q_value).collect(),
-        size: results.iter().map(|r| r.db_set_size).collect(),
+    use gtars_lola::output::results_to_columns;
+
+    let c = results_to_columns(results);
+
+    #[derive(serde::Serialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Out {
+        user_set: Vec<usize>,
+        db_set: Vec<usize>,
+        collection: Vec<Option<String>>,
+        p_value_log: Vec<f64>,
+        odds_ratio: Vec<f64>,
+        support: Vec<u64>,
+        rnk_pv: Vec<usize>,
+        rnk_or: Vec<usize>,
+        rnk_sup: Vec<usize>,
+        max_rnk: Vec<usize>,
+        mean_rnk: Vec<f64>,
+        b: Vec<i64>,
+        c: Vec<i64>,
+        d: Vec<i64>,
+        description: Vec<Option<String>>,
+        cell_type: Vec<Option<String>>,
+        tissue: Vec<Option<String>>,
+        antibody: Vec<Option<String>>,
+        treatment: Vec<Option<String>>,
+        data_source: Vec<Option<String>>,
+        filename: Vec<String>,
+        q_value: Vec<Option<f64>>,
+        size: Vec<u64>,
+    }
+
+    let out = Out {
+        user_set: c.user_set,
+        db_set: c.db_set,
+        collection: c.collection,
+        p_value_log: c.p_value_log,
+        odds_ratio: c.odds_ratio,
+        support: c.support,
+        rnk_pv: c.rnk_pv,
+        rnk_or: c.rnk_or,
+        rnk_sup: c.rnk_sup,
+        max_rnk: c.max_rnk,
+        mean_rnk: c.mean_rnk,
+        b: c.b,
+        c: c.c,
+        d: c.d,
+        description: c.description,
+        cell_type: c.cell_type,
+        tissue: c.tissue,
+        antibody: c.antibody,
+        treatment: c.treatment,
+        data_source: c.data_source,
+        filename: c.filename,
+        q_value: c.q_value,
+        size: c.db_set_size,
     };
 
     serde_wasm_bindgen::to_value(&out).map_err(|e| JsValue::from_str(&format!("{}", e)))

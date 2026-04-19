@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use extendr_api::prelude::*;
 
 use gtars_core::models::{Region, RegionSet, RegionSetList};
-use gtars_genomicdist::models::{GenomeAssembly, TssIndex};
+use gtars_genomicdist::models::{BinaryGenomeAssembly, GenomeAssembly, TssIndex};
 use gtars_overlaprs::RegionSetOverlaps;
 use gtars_genomicdist::{
-    calc_dinucl_freq_per_region, calc_gc_content, calc_summary_signal, chrom_karyotype_key,
-    consensus, genome_partition_list, calc_expected_partitions, calc_partitions,
-    pairwise_jaccard,
+    calc_dinucl_freq, calc_gc_content, calc_summary_signal,
+    chrom_karyotype_key, consensus, genome_partition_list, calc_expected_partitions,
+    calc_partitions, pairwise_jaccard,
     CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
@@ -26,12 +26,22 @@ macro_rules! with_regionset {
     }};
 }
 
+/// Try to extract either a GenomeAssembly or BinaryGenomeAssembly pointer
+/// and call the provided function with `&dyn SequenceAccess`.
 macro_rules! with_assembly {
     ($ptr:expr, $asm:ident, $body:block) => {{
-        let ext_ptr = <ExternalPtr<GenomeAssembly>>::try_from($ptr)
-            .map_err(|_| extendr_api::Error::Other("Invalid GenomeAssembly pointer".into()))?;
-        let $asm = &*ext_ptr;
-        $body
+        use gtars_genomicdist::models::SequenceAccess;
+        if let Ok(ext_ptr) = <ExternalPtr<GenomeAssembly>>::try_from($ptr.clone()) {
+            let $asm: &dyn SequenceAccess = &*ext_ptr;
+            $body
+        } else if let Ok(ext_ptr) = <ExternalPtr<BinaryGenomeAssembly>>::try_from($ptr) {
+            let $asm: &dyn SequenceAccess = &*ext_ptr;
+            $body
+        } else {
+            Err(extendr_api::Error::Other(
+                "Invalid assembly pointer: expected GenomeAssembly or BinaryGenomeAssembly".into(),
+            ))
+        }
     }};
 }
 
@@ -135,9 +145,11 @@ pub fn r_regionset_length(rs_ptr: Robj) -> extendr_api::Result<i32> {
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_widths")]
-pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
+pub fn r_calc_widths(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+    // f64 instead of i32: widths are u32 in Rust and can exceed i32::MAX (2.1 Gbp)
+    // for concatenated/genome-scale regions. f64 safely represents any u32.
     with_regionset!(rs_ptr, rs, {
-        Ok(rs.calc_widths().into_iter().map(|w| w as i32).collect())
+        Ok(rs.calc_widths().into_iter().map(|w| w as f64).collect())
     })
 }
 
@@ -158,12 +170,14 @@ pub fn r_calc_neighbor_distances(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> 
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 #[extendr(r_name = "r_calc_nearest_neighbors")]
-pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<i32>> {
+pub fn r_calc_nearest_neighbors(rs_ptr: Robj) -> extendr_api::Result<Vec<f64>> {
+    // f64 instead of i32: neighbor distances are chromosome-scale (up to ~250M on
+    // hg38) and genome-concatenated BEDs could push past i32::MAX (2.1 Gbp).
     with_regionset!(rs_ptr, rs, {
         let dists = rs
             .calc_nearest_neighbors()
             .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
-        Ok(dists.into_iter().map(|d| d as i32).collect())
+        Ok(dists.into_iter().map(|d| d as f64).collect())
     })
 }
 
@@ -180,21 +194,23 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
         });
 
         let mut chr_names: Vec<String> = Vec::new();
-        let mut n_regions: Vec<i32> = Vec::new();
+        let mut n_regions: Vec<f64> = Vec::new();
         let mut start_pos: Vec<f64> = Vec::new();
         let mut end_pos: Vec<f64> = Vec::new();
-        let mut min_len: Vec<i32> = Vec::new();
-        let mut max_len: Vec<i32> = Vec::new();
+        let mut min_len: Vec<f64> = Vec::new();
+        let mut max_len: Vec<f64> = Vec::new();
         let mut mean_len: Vec<f64> = Vec::new();
         let mut median_len: Vec<f64> = Vec::new();
 
+        // f64 for count and length fields: u32 values can exceed i32::MAX (2.1 Gbp)
+        // for wide regions, and region_count has no upper bound.
         for (chr, s) in &entries {
             chr_names.push(chr.clone());
-            n_regions.push(s.number_of_regions as i32);
+            n_regions.push(s.number_of_regions as f64);
             start_pos.push(s.start_nucleotide_position as f64);
             end_pos.push(s.end_nucleotide_position as f64);
-            min_len.push(s.minimum_region_length as i32);
-            max_len.push(s.maximum_region_length as i32);
+            min_len.push(s.minimum_region_length as f64);
+            max_len.push(s.maximum_region_length as f64);
             mean_len.push(s.mean_region_length);
             median_len.push(s.median_region_length);
         }
@@ -209,6 +225,25 @@ pub fn r_chromosome_statistics(rs_ptr: Robj) -> extendr_api::Result<List> {
             mean_region_length = mean_len,
             median_region_length = median_len
         ))
+    })
+}
+
+/// Cluster nearby regions via single-linkage with a stitching radius.
+///
+/// Returns an integer vector of cluster IDs in original region order.
+/// Regions within `max_gap` bp of another region on the same chromosome
+/// are assigned the same cluster. Chromosome boundaries always break clusters.
+///
+/// @export
+/// @param rs_ptr External pointer to a RegionSet
+/// @param max_gap Maximum bp gap between regions to link (non-negative)
+#[extendr(r_name = "r_cluster")]
+pub fn r_cluster(rs_ptr: Robj, max_gap: i32) -> extendr_api::Result<Vec<f64>> {
+    let max_gap_u32 = checked_u32(max_gap, "max_gap")?;
+    with_regionset!(rs_ptr, rs, {
+        let ids = rs.cluster(max_gap_u32);
+        // u32 IDs → f64 to match the other count/ID returns in this module.
+        Ok(ids.into_iter().map(|id| id as f64).collect())
     })
 }
 
@@ -282,34 +317,79 @@ pub fn r_load_genome_assembly(fasta_path: &str) -> extendr_api::Result<Robj> {
     Ok(ExternalPtr::new(assembly).into())
 }
 
+/// Load a binary genome assembly from a .fab file
+/// @export
+/// @param fab_path Path to a .fab binary FASTA file (created by gtars prep --fasta)
+#[extendr(r_name = "load_binary_genome_assembly")]
+pub fn r_load_binary_genome_assembly(fab_path: &str) -> extendr_api::Result<Robj> {
+    let assembly = BinaryGenomeAssembly::try_from(fab_path)
+        .map_err(|e| extendr_api::Error::Other(format!("Loading .fab: {}", e)))?;
+    Ok(ExternalPtr::new(assembly).into())
+}
+
 /// Calculate GC content for each region
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 /// @param assembly_ptr External pointer to a GenomeAssembly
-/// @param ignore_unk_chroms Skip regions on chromosomes not in the assembly
+/// @param ignore_unk_chroms Skip regions on chromosomes not in the assembly.
+///   Pass NULL (the default) or FALSE to error on unknown chromosomes.
 #[extendr(r_name = "r_calc_gc_content")]
 pub fn r_calc_gc_content(
     rs_ptr: Robj,
     assembly_ptr: Robj,
-    ignore_unk_chroms: bool,
+    ignore_unk_chroms: Robj,
 ) -> extendr_api::Result<Vec<f64>> {
+    // Default to false when NULL/missing — matches Python's default
+    let ignore = if ignore_unk_chroms.is_null() {
+        false
+    } else {
+        <bool>::try_from(&ignore_unk_chroms)
+            .map_err(|_| extendr_api::Error::Other("ignore_unk_chroms must be logical".into()))?
+    };
     with_regionset!(rs_ptr, rs, {
         with_assembly!(assembly_ptr, asm, {
-            calc_gc_content(rs, asm, ignore_unk_chroms)
+            calc_gc_content(rs, asm, ignore)
                 .map_err(|e| extendr_api::Error::Other(format!("{}", e)))
         })
     })
 }
 
-/// Calculate per-region dinucleotide frequencies (percentages)
+/// Calculate per-region dinucleotide frequencies (matches R GenomicDistributions calcDinuclFreq)
+///
+/// Returns a list with a ``region`` column and 16 dinucleotide columns
+/// (AA, AC, ..., TT). When ``raw_counts`` is FALSE (default), each row sums
+/// to 100 (percentages). When TRUE, values are raw integer counts.
+///
+/// For pooled global counts, sum each dinucleotide column across rows
+/// (with ``raw_counts=TRUE``).
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
 /// @param assembly_ptr External pointer to a GenomeAssembly
+/// @param raw_counts Return raw counts instead of percentages (default FALSE, matches R upstream)
+/// @param ignore_unk_chroms Skip regions on chromosomes not in the assembly (default FALSE)
 #[extendr(r_name = "r_calc_dinucl_freq")]
-pub fn r_calc_dinucl_freq(rs_ptr: Robj, assembly_ptr: Robj) -> extendr_api::Result<List> {
+pub fn r_calc_dinucl_freq(
+    rs_ptr: Robj,
+    assembly_ptr: Robj,
+    raw_counts: Robj,
+    ignore_unk_chroms: Robj,
+) -> extendr_api::Result<List> {
+    // Default to false when NULL/missing — matches Python and R GenomicDistributions defaults
+    let raw = if raw_counts.is_null() {
+        false
+    } else {
+        <bool>::try_from(&raw_counts)
+            .map_err(|_| extendr_api::Error::Other("raw_counts must be logical".into()))?
+    };
+    let ignore = if ignore_unk_chroms.is_null() {
+        false
+    } else {
+        <bool>::try_from(&ignore_unk_chroms)
+            .map_err(|_| extendr_api::Error::Other("ignore_unk_chroms must be logical".into()))?
+    };
     with_regionset!(rs_ptr, rs, {
         with_assembly!(assembly_ptr, asm, {
-            let (labels, matrix) = calc_dinucl_freq_per_region(rs, asm)
+            let (labels, matrix) = calc_dinucl_freq(rs, asm, raw, ignore)
                 .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
 
             // Build column names (uppercase to match GD: AA, AC, AG, ...)
@@ -572,13 +652,26 @@ pub fn r_disjoin(rs_ptr: Robj) -> extendr_api::Result<Robj> {
     })
 }
 
-/// Return gaps between regions per chromosome
+/// Return gaps between regions per chromosome, bounded by chrom sizes
+///
+/// Emits the peak-free intervals of each chromosome listed in `chrom_sizes`,
+/// including leading gaps (from 0), inter-region gaps, trailing gaps
+/// (to `chrom_size`), and full-chromosome gaps for chromosomes with no
+/// regions. Regions on chromosomes not present in `chrom_sizes` are skipped.
+///
 /// @export
 /// @param rs_ptr External pointer to a RegionSet
+/// @param chrom_names Character vector of chromosome names
+/// @param chrom_sizes_vec Integer vector of chromosome sizes
 #[extendr(r_name = "r_gaps")]
-pub fn r_gaps(rs_ptr: Robj) -> extendr_api::Result<Robj> {
+pub fn r_gaps(
+    rs_ptr: Robj,
+    chrom_names: Vec<String>,
+    chrom_sizes_vec: Vec<i32>,
+) -> extendr_api::Result<Robj> {
+    let chrom_sizes = chrom_sizes_from_vecs(chrom_names, chrom_sizes_vec)?;
     with_regionset!(rs_ptr, rs, {
-        let result = rs.gaps();
+        let result = rs.gaps(&chrom_sizes);
         Ok(ExternalPtr::new(result).into())
     })
 }
@@ -1248,8 +1341,11 @@ extendr_module! {
     fn r_calc_nearest_neighbors;
     fn r_chromosome_statistics;
     fn r_region_distribution;
+    // Clustering
+    fn r_cluster;
     // GC / Dinucleotide
     fn r_load_genome_assembly;
+    fn r_load_binary_genome_assembly;
     fn r_calc_gc_content;
     fn r_calc_dinucl_freq;
     // Interval Ranges

@@ -1,5 +1,7 @@
 use std::collections::HashMap as StdHashMap;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(feature = "huggingface")]
+use std::path::PathBuf;
 
 use fxhash::FxHashMap as HashMap;
 

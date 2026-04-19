@@ -1,4 +1,4 @@
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 
 class Region:
     chr: str
@@ -124,25 +124,45 @@ class RegionSet:
         """
         ...
 
-    def neighbor_distances(self) -> List[Optional[float]]:
+    def neighbor_distances(self) -> List[int]:
         """
-        Distances between consecutive regions on each chromosome.
-        Returns None for missing values.
+        Signed gaps between consecutive regions on each chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        fewer than 2 regions are skipped (no neighbors to measure against).
+        Output is NOT aligned 1:1 with input regions.
         """
         ...
 
-    def nearest_neighbors(self) -> List[Optional[float]]:
+    def nearest_neighbors(self) -> List[int]:
         """
-        Distance from each region to its nearest neighbor.
-        Returns None for regions with no neighbor on the same chromosome.
+        Distance from each region to its nearest neighbor on the same chromosome.
+
+        Output length may be shorter than input region count — chromosomes with
+        only one region are skipped. Output is NOT aligned 1:1 with input regions.
         """
         ...
 
-    def distribution(self, n_bins: int = 250) -> List[Dict[str, object]]:
+    def distribution(
+        self,
+        n_bins: int = 250,
+        chrom_sizes: Optional[Dict[str, int]] = None,
+    ) -> List[Dict[str, object]]:
         """
         Region distribution across genomic bins.
 
-        :param n_bins: number of bins (default 250)
+        :param n_bins: number of bins for the longest chromosome (default 250)
+        :param chrom_sizes: optional mapping of chromosome name to length. When provided,
+            per-chromosome bin sizes are derived from the reference genome
+            (bin_size = chrom_size / n_bins per chrom). This produces outputs that are
+            comparable across BED files and aligned with reference genome positions.
+            When absent, bin size is derived from the BED file's observed max end
+            coordinate — outputs will NOT be comparable across files.
+
+            When ``chrom_sizes`` is provided, regions on chromosomes not listed in
+            ``chrom_sizes`` are skipped, as are regions whose midpoint falls beyond
+            the stated chromosome size (common with assembly mismatches). The summed
+            bin counts may therefore be lower than the input region count.
         :return: list of dicts with keys: chr, start, end, n, rid
         """
         ...
@@ -311,6 +331,17 @@ class RegionSet:
         """
         ...
 
+    def gaps(self, chrom_sizes: Dict[str, int]) -> "RegionSet":
+        """
+        Return gaps between regions per chromosome, bounded by chrom sizes.
+
+        Emits leading gaps (from 0), inter-region gaps, trailing gaps
+        (to ``chrom_size``), and full-chromosome gaps for any chromosome
+        in ``chrom_sizes`` that has no regions. Regions on chromosomes
+        not listed in ``chrom_sizes`` are skipped.
+        """
+        ...
+
     def __len__(self) -> int:
         """
         Size of the regionset
@@ -326,6 +357,20 @@ class GenomeAssembly:
     def __init__(self, path: str) -> "GenomeAssembly":
         """
         :param path: path to the fasta file
+        """
+        ...
+
+    def __str__(self) -> str: ...
+    def __repr__(self) -> str: ...
+
+class BinaryGenomeAssembly:
+    def __init__(self, path: str) -> "BinaryGenomeAssembly":
+        """
+        Open a .fab binary FASTA file for zero-copy mmap access.
+
+        Create .fab files with ``gtars prep --fasta <file>``.
+
+        :param path: path to the .fab file
         """
         ...
 

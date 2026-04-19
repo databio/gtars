@@ -100,3 +100,26 @@ class TestDisjoin:
         rs = _rs()
         result = rs.disjoin()
         assert len(result) == 0
+
+
+class TestGaps:
+    def test_gaps_basic(self):
+        """Gaps should emit leading, inter-region, and trailing gaps."""
+        rs = _rs(("chr1", 10, 20), ("chr1", 30, 40), ("chr1", 50, 60))
+        result = rs.gaps({"chr1": 100})
+        coords = [(r.start, r.end) for r in result]
+        assert coords == [(0, 10), (20, 30), (40, 50), (60, 100)]
+
+    def test_gaps_full_chrom_for_empty(self):
+        """A chromosome in chrom_sizes with no regions yields a full-chrom gap."""
+        rs = _rs(("chr1", 10, 20))
+        result = rs.gaps({"chr1": 100, "chr2": 50})
+        chr2 = [(r.start, r.end) for r in result if r.chr == "chr2"]
+        assert chr2 == [(0, 50)]
+
+    def test_gaps_empty(self):
+        rs = _rs()
+        result = rs.gaps({})
+        assert len(result) == 0
+
+

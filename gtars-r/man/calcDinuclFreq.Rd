@@ -4,19 +4,26 @@
 \alias{calcDinuclFreq}
 \title{Calculate dinucleotide frequency}
 \usage{
-calcDinuclFreq(query, ref)
+calcDinuclFreq(query, ref, rawCounts = FALSE, ignoreUnknownChroms = FALSE)
 }
 \arguments{
 \item{query}{A GRanges object, file path, data.frame, or RegionSet}
 
 \item{ref}{A GenomeAssembly pointer (from loadGenomeAssembly)}
+
+\item{rawCounts}{If TRUE, return raw integer counts; if FALSE (default),
+return percentages per row (each row sums to 100)}
+
+\item{ignoreUnknownChroms}{If TRUE, skip regions on chromosomes not in
+the assembly. If FALSE (default), error on unknown chromosomes.}
 }
 \value{
 A data.frame with a \code{region} column and 16 dinucleotide
-columns containing frequency percentages.
+columns. For pooled global counts, call \code{colSums(result[, -1])}
+on a \code{rawCounts=TRUE} result.
 }
 \description{
 Calculates the frequency of all 16 dinucleotides for each
-region as percentages. Drop-in replacement for
-GenomicDistributions::calcDinuclFreq.
+region. Drop-in replacement for GenomicDistributions::calcDinuclFreq,
+including the \code{rawCounts} parameter.
 }

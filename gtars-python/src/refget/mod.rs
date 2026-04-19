@@ -2522,9 +2522,9 @@ impl PyRefgetStore {
     ///
     /// Returns:
     ///     dict: {'sequences': [...], 'collections': [...]}
-    fn available_alias_namespaces(&self) -> PyResult<PyObject> {
+    fn available_alias_namespaces(&self) -> PyResult<Py<PyAny>> {
         let aliases = self.inner.available_alias_namespaces();
-        Python::with_gil(|py| {
+        Python::attach(|py| {
             let dict = pyo3::types::PyDict::new(py);
             let seq_list: Vec<&str> = aliases.sequences.iter().map(|s| s.as_str()).collect();
             let coll_list: Vec<&str> = aliases.collections.iter().map(|s| s.as_str()).collect();
@@ -2543,7 +2543,7 @@ impl PyRefgetStore {
     /// Returns:
     ///     dict: {pulled, skipped, not_found, conflicts}
     #[pyo3(signature = (namespace=None, strategy="keep-ours"))]
-    fn pull_aliases(&mut self, namespace: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+    fn pull_aliases(&mut self, namespace: Option<&str>, strategy: &str) -> PyResult<Py<PyAny>> {
         let sync_strategy = parse_sync_strategy(strategy)?;
         let result = self
             .inner
@@ -2561,7 +2561,7 @@ impl PyRefgetStore {
     /// Returns:
     ///     dict: {pulled, skipped, not_found, conflicts}
     #[pyo3(signature = (digest=None, strategy="keep-ours"))]
-    fn pull_fhr(&mut self, digest: Option<&str>, strategy: &str) -> PyResult<PyObject> {
+    fn pull_fhr(&mut self, digest: Option<&str>, strategy: &str) -> PyResult<Py<PyAny>> {
         let sync_strategy = parse_sync_strategy(strategy)?;
         let result = self
             .inner
@@ -3102,8 +3102,8 @@ fn parse_sync_strategy(strategy: &str) -> PyResult<SyncStrategy> {
 }
 
 /// Convert a PullResult into a Python dict.
-fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<PyObject> {
-    Python::with_gil(|py| {
+fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<Py<PyAny>> {
+    Python::attach(|py| {
         let dict = pyo3::types::PyDict::new(py);
         dict.set_item("pulled", result.pulled)?;
         dict.set_item("skipped", result.skipped)?;

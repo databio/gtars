@@ -138,11 +138,26 @@ pub trait IntervalRanges {
     /// tiles the covered positions exactly, with no overlaps.
     fn disjoin(&self) -> RegionSet;
 
-    /// Return the gaps between regions per chromosome.
+    /// Return the gaps between regions per chromosome, bounded by chromosome sizes.
     ///
-    /// Reduces the input first, then emits intervals between consecutive
-    /// reduced regions on each chromosome.
-    fn gaps(&self) -> RegionSet;
+    /// Reduces the input first, then emits intervals that tile the peak-free
+    /// regions of each chromosome listed in `chrom_sizes`:
+    ///
+    /// - a **leading gap** from position 0 to the first region's start
+    ///   (omitted if the first region starts at 0),
+    /// - an **inter-region gap** between each consecutive pair of reduced
+    ///   regions,
+    /// - a **trailing gap** from the last region's end to the chromosome
+    ///   size (omitted if the last region already reaches the chromosome
+    ///   end, or extends past it due to assembly mismatch),
+    /// - a **full-chromosome gap** `0..chrom_size` for any chromosome in
+    ///   `chrom_sizes` that has no regions at all.
+    ///
+    /// Regions on chromosomes not present in `chrom_sizes` are skipped.
+    /// Regions that extend past the stated chromosome size are clipped to
+    /// `chrom_size` when computing the trailing gap, matching the
+    /// clipping behavior of `trim()`.
+    fn gaps(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet;
 
     /// Range-level intersection of two region sets.
     ///
@@ -584,43 +599,96 @@ impl IntervalRanges for RegionSet {
         RegionSet::from(result)
     }
 
-    fn gaps(&self) -> RegionSet {
+    fn gaps(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet {
         let reduced = self.reduce();
-        if reduced.regions.is_empty() {
-            return RegionSet::from(Vec::<Region>::new());
+
+        // Group reduced regions by chromosome so we can emit per-chrom gaps
+        // and also detect chromosomes with zero regions (full-chrom gaps).
+        let mut by_chr: HashMap<&str, Vec<&Region>> = HashMap::new();
+        for r in &reduced.regions {
+            // Skip chromosomes we don't have a size for — can't bound trailing gaps,
+            // and including leading gaps for unknown-size chromosomes is misleading.
+            if chrom_sizes.contains_key(&r.chr) {
+                by_chr.entry(r.chr.as_str()).or_default().push(r);
+            }
         }
 
         let mut result: Vec<Region> = Vec::new();
 
-        let mut i = 0;
-        while i < reduced.regions.len() {
-            let chr = &reduced.regions[i].chr;
-            let mut j = i + 1;
-            // Leading gap from position 0 to the first region on this chromosome
-            if reduced.regions[i].start > 0 {
-                result.push(Region {
-                    chr: chr.clone(),
-                    start: 0,
-                    end: reduced.regions[i].start,
-                    rest: None,
-                });
+        // Emit gaps for every chromosome named in chrom_sizes, not just those
+        // present in the input — this way a chromosome with zero regions
+        // contributes a full-chromosome gap, matching bedtools complement.
+        for (chr_name, &chrom_size) in chrom_sizes.iter() {
+            if chrom_size == 0 {
+                continue;
             }
-            while j < reduced.regions.len() && reduced.regions[j].chr == *chr {
-                // Gap between consecutive reduced regions
-                let gap_start = reduced.regions[j - 1].end;
-                let gap_end = reduced.regions[j].start;
-                if gap_start < gap_end {
+
+            match by_chr.get(chr_name.as_str()) {
+                None => {
+                    // No regions on this chromosome — whole chromosome is a gap.
                     result.push(Region {
-                        chr: chr.clone(),
-                        start: gap_start,
-                        end: gap_end,
+                        chr: chr_name.clone(),
+                        start: 0,
+                        end: chrom_size,
                         rest: None,
                     });
                 }
-                j += 1;
+                Some(regions) => {
+                    // Leading gap from 0 to the first region's start.
+                    if regions[0].start > 0 {
+                        // Leading gap is clipped to chrom_size as a safety net:
+                        // if the first region starts past chrom_size (assembly
+                        // mismatch) we still produce a valid [0, chrom_size) gap.
+                        let lead_end = regions[0].start.min(chrom_size);
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: 0,
+                            end: lead_end,
+                            rest: None,
+                        });
+                    }
+
+                    // Inter-region gaps.
+                    for pair in regions.windows(2) {
+                        let gap_start = pair[0].end;
+                        let gap_end = pair[1].start;
+                        if gap_start < gap_end {
+                            // Clip both bounds to chrom_size so the whole emitted
+                            // gap lies within the chromosome.
+                            let cs = chrom_size;
+                            let clipped_start = gap_start.min(cs);
+                            let clipped_end = gap_end.min(cs);
+                            if clipped_start < clipped_end {
+                                result.push(Region {
+                                    chr: chr_name.clone(),
+                                    start: clipped_start,
+                                    end: clipped_end,
+                                    rest: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // Trailing gap from last region's end to chrom_size.
+                    let last_end = regions[regions.len() - 1].end;
+                    if last_end < chrom_size {
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: last_end,
+                            end: chrom_size,
+                            rest: None,
+                        });
+                    }
+                }
             }
-            i = j.max(i + 1);
         }
+
+        // Karyotypic chromosome ordering so output is stable across runs.
+        result.sort_by(|a, b| {
+            crate::utils::chrom_karyotype_key(&a.chr)
+                .cmp(&crate::utils::chrom_karyotype_key(&b.chr))
+                .then(a.start.cmp(&b.start))
+        });
 
         RegionSet::from(result)
     }
@@ -1138,6 +1206,140 @@ pub fn pairwise_jaccard(sets: &[RegionSet]) -> Vec<f64> {
     }
 
     matrix
+}
+
+// --- Indexed operations on RegionSetList ---
+//
+// These let callers operate on pairs by index without cloning full RegionSets
+// across an FFI boundary (wasm, Python, R).
+
+use gtars_core::models::RegionSetList;
+
+/// Indexed pair operations on a RegionSetList.
+pub trait RegionSetListOps {
+    fn pintersect_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn pintersect_count(&self, i: usize, j: usize) -> Option<u32>;
+    fn jaccard_at(&self, i: usize, j: usize) -> Option<f64>;
+    fn union_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn setdiff_at(&self, i: usize, j: usize) -> Option<RegionSet>;
+    fn region_count(&self, i: usize) -> Option<u32>;
+    fn union_except(&self, skip: usize) -> Option<RegionSet>;
+    /// Compute union-of-all and all N union-except results in O(n) unions
+    /// using prefix/suffix arrays. Returns (full_union, vec_of_union_except).
+    fn bulk_union_except(&self) -> Option<(RegionSet, Vec<RegionSet>)>;
+    /// Fold all sets into a single union.
+    fn union_all(&self) -> Option<RegionSet>;
+    /// Fold all sets into a single intersection.
+    fn intersect_all(&self) -> Option<RegionSet>;
+}
+
+impl RegionSetListOps for RegionSetList {
+    fn pintersect_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.pintersect(b))
+    }
+
+    fn pintersect_count(&self, i: usize, j: usize) -> Option<u32> {
+        self.pintersect_at(i, j).map(|rs| rs.len() as u32)
+    }
+
+    fn jaccard_at(&self, i: usize, j: usize) -> Option<f64> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.jaccard(b))
+    }
+
+    fn union_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.union(b))
+    }
+
+    fn setdiff_at(&self, i: usize, j: usize) -> Option<RegionSet> {
+        let a = self.get(i)?;
+        let b = self.get(j)?;
+        Some(a.setdiff(b))
+    }
+
+    fn region_count(&self, i: usize) -> Option<u32> {
+        self.get(i).map(|rs| rs.len() as u32)
+    }
+
+    fn union_except(&self, skip: usize) -> Option<RegionSet> {
+        let n = self.len();
+        if n < 2 || skip >= n { return None; }
+        let first = if skip == 0 { 1 } else { 0 };
+        let mut acc = self.get(first)?.clone();
+        for k in (first + 1)..n {
+            if k == skip { continue; }
+            if let Some(other) = self.get(k) {
+                acc = acc.union(other);
+            }
+        }
+        Some(acc)
+    }
+
+    fn bulk_union_except(&self) -> Option<(RegionSet, Vec<RegionSet>)> {
+        let n = self.len();
+        if n < 2 { return None; }
+
+        // prefix[i] = union(set[0]..=set[i])
+        let mut prefix = Vec::with_capacity(n);
+        prefix.push(self.get(0)?.clone());
+        for i in 1..n {
+            let prev = &prefix[i - 1];
+            prefix.push(prev.union(self.get(i)?));
+        }
+
+        // suffix[i] = union(set[i]..=set[n-1]), built incrementally from right
+        let mut suffix = vec![None; n];
+        suffix[n - 1] = Some(self.get(n - 1)?.clone());
+        for i in (0..n - 1).rev() {
+            suffix[i] = Some(self.get(i)?.union(suffix[i + 1].as_ref().unwrap()));
+        }
+        let suffix: Vec<RegionSet> = suffix.into_iter().map(|s| s.unwrap()).collect();
+
+        let full_union = prefix[n - 1].clone();
+
+        // union_except[i] = union(prefix[i-1], suffix[i+1])
+        let mut results = Vec::with_capacity(n);
+        for i in 0..n {
+            let except = match (i > 0, i < n - 1) {
+                (false, true) => suffix[1].clone(),
+                (true, false) => prefix[i - 1].clone(),
+                (true, true) => prefix[i - 1].union(&suffix[i + 1]),
+                (false, false) => unreachable!(), // n >= 2
+            };
+            results.push(except);
+        }
+
+        Some((full_union, results))
+    }
+
+    fn union_all(&self) -> Option<RegionSet> {
+        let n = self.len();
+        if n == 0 { return None; }
+        let mut acc = self.get(0)?.clone();
+        for i in 1..n {
+            if let Some(other) = self.get(i) {
+                acc = acc.union(other);
+            }
+        }
+        Some(acc)
+    }
+
+    fn intersect_all(&self) -> Option<RegionSet> {
+        let n = self.len();
+        if n == 0 { return None; }
+        let mut acc = self.get(0)?.clone();
+        for i in 1..n {
+            if let Some(other) = self.get(i) {
+                acc = acc.intersect(other);
+            }
+        }
+        Some(acc)
+    }
 }
 
 #[cfg(test)]
@@ -2262,6 +2464,187 @@ mod tests {
         assert_eq!(ids[1], 0); // original idx 1 maps to cluster 0
     }
 
+    // ── gaps tests ──────────────────────────────────────────────────────
+
+    fn chrom_sizes(entries: &[(&str, u32)]) -> HashMap<String, u32> {
+        entries
+            .iter()
+            .map(|(c, s)| (c.to_string(), *s))
+            .collect()
+    }
+
+    #[test]
+    fn test_gaps_basic() {
+        // Three peaks on chr1 with gaps between them; leading + trailing
+        // gaps also present.
+        let rs = make_regionset(vec![
+            ("chr1", 10, 20),
+            ("chr1", 30, 40),
+            ("chr1", 50, 60),
+        ]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(&str, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.as_str(), r.start, r.end))
+            .collect();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1", 0, 10),   // leading
+                ("chr1", 20, 30),  // between peak 1 and 2
+                ("chr1", 40, 50),  // between peak 2 and 3
+                ("chr1", 60, 100), // trailing
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gaps_peak_at_origin_no_leading() {
+        // First peak starts at 0 — no leading gap.
+        let rs = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(10, 20), (30, 100)]);
+    }
+
+    #[test]
+    fn test_gaps_peak_at_chrom_end_no_trailing() {
+        // Last peak ends at chrom_size — no trailing gap.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 100)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[test]
+    fn test_gaps_peak_past_chrom_end_clipped() {
+        // Last peak extends past chrom_size — should be clipped, no trailing.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 150)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[test]
+    fn test_gaps_empty_regionset_populated_chrom_sizes() {
+        // No regions, but chrom_sizes has entries — emit whole-chrom gaps.
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let cs = chrom_sizes(&[("chr1", 100), ("chr2", 50)]);
+        let result = rs.gaps(&cs);
+        let mut gaps: Vec<(String, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.clone(), r.start, r.end))
+            .collect();
+        gaps.sort();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1".to_string(), 0, 100),
+                ("chr2".to_string(), 0, 50),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_gaps_empty_regionset_empty_chrom_sizes() {
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let cs: HashMap<String, u32> = HashMap::new();
+        let result = rs.gaps(&cs);
+        assert!(result.regions.is_empty());
+    }
+
+    #[test]
+    fn test_gaps_chromosome_not_in_chrom_sizes_skipped() {
+        // Peak on chr2 with no chr2 entry in chrom_sizes — should be ignored.
+        let rs = make_regionset(vec![("chr1", 10, 20), ("chr2", 5, 15)]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        // Only chr1 gaps emitted.
+        for r in &result.regions {
+            assert_eq!(r.chr, "chr1");
+        }
+    }
+
+    #[test]
+    fn test_gaps_full_chrom_gap_for_unrepresented_chrom() {
+        // chrom_sizes has chr2 but input has no chr2 peaks — emit whole chr2.
+        let rs = make_regionset(vec![("chr1", 10, 20)]);
+        let cs = chrom_sizes(&[("chr1", 100), ("chr2", 200)]);
+        let result = rs.gaps(&cs);
+        let chr2_gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .filter(|r| r.chr == "chr2")
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(chr2_gaps, vec![(0, 200)]);
+    }
+
+    #[test]
+    fn test_gaps_overlapping_peaks_reduced() {
+        // Overlapping peaks get merged by reduce() before gap computation.
+        let rs = make_regionset(vec![
+            ("chr1", 10, 30),
+            ("chr1", 25, 40), // overlaps with previous
+            ("chr1", 50, 60),
+        ]);
+        let cs = chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.start, r.end))
+            .collect();
+        // After reduce: [10,40], [50,60] → gaps: [0,10], [40,50], [60,100]
+        assert_eq!(gaps, vec![(0, 10), (40, 50), (60, 100)]);
+    }
+
+    #[test]
+    fn test_gaps_karyotypic_ordering() {
+        // Output should be karyotypically ordered regardless of chrom_sizes insertion order.
+        let rs = make_regionset(vec![
+            ("chr2", 10, 20),
+            ("chr1", 10, 20),
+            ("chr10", 10, 20),
+        ]);
+        let cs = chrom_sizes(&[("chr10", 100), ("chr1", 100), ("chr2", 100)]);
+        let result = rs.gaps(&cs);
+        // First gap on each chr; collect chr names in order of appearance.
+        let order: Vec<&str> = result
+            .regions
+            .iter()
+            .map(|r| r.chr.as_str())
+            .scan("", |prev, chr| {
+                if chr != *prev {
+                    *prev = chr;
+                    Some(chr)
+                } else {
+                    Some("") // repeat, skip
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(order, vec!["chr1", "chr2", "chr10"]);
+    }
+
     #[test]
     fn test_resize_center_large_coords() {
         // Regression: coordinates near u32::MAX/2 should not overflow in midpoint calc
@@ -2419,5 +2802,284 @@ mod tests {
         let b = make_regionset(vec![("chr1", 5, 25)]).reduce();
         // overlap with [0,10): [5,10)=5bp, overlap with [20,30): [20,25)=5bp
         assert_eq!(super::merge_intersection_bp(&a, &b), 10);
+    }
+
+    // ── RegionSetListOps tests ─────────────────────────────────────────
+
+    fn make_rsl(sets: Vec<RegionSet>) -> RegionSetList {
+        RegionSetList::from(sets)
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count() {
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 150), ("chr1", 250, 350)]);
+        let rsl = make_rsl(vec![a, b]);
+        // a has 2 regions, b has 2 regions, both overlap each other
+        let count = rsl.pintersect_count(0, 1).unwrap();
+        assert_eq!(count, 2); // both pairs overlap
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count_no_overlap() {
+        let a = make_regionset(vec![("chr1", 0, 10)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let rsl = make_rsl(vec![a, b]);
+        // paired by index: chr1:0-10 vs chr1:100-200 → no genomic overlap,
+        // but pintersect produces a zero-width region (start=end) per pair
+        let count = rsl.pintersect_count(0, 1).unwrap();
+        assert_eq!(count, 1); // zero-width region still counted
+    }
+
+    #[rstest]
+    fn test_rsl_pintersect_count_out_of_bounds() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.pintersect_count(0, 5).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_jaccard_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a, b]);
+        let j = rsl.jaccard_at(0, 1).unwrap();
+        assert!((j - 1.0).abs() < 1e-9, "identical sets should have jaccard=1.0");
+    }
+
+    #[rstest]
+    fn test_rsl_jaccard_at_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let rsl = make_rsl(vec![a, b]);
+        let j = rsl.jaccard_at(0, 1).unwrap();
+        assert!((j - 0.0).abs() < 1e-9, "disjoint sets should have jaccard=0.0");
+    }
+
+    #[rstest]
+    fn test_rsl_union_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        let u = rsl.union_at(0, 1).unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 0);
+        assert_eq!(u.regions[0].end, 150);
+    }
+
+    #[rstest]
+    fn test_rsl_setdiff_at() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        let diff = rsl.setdiff_at(0, 1).unwrap();
+        // a minus b: chr1:0-50
+        assert_eq!(diff.regions.len(), 1);
+        assert_eq!(diff.regions[0].start, 0);
+        assert_eq!(diff.regions[0].end, 50);
+    }
+
+    #[rstest]
+    fn test_rsl_region_count() {
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 150)]);
+        let rsl = make_rsl(vec![a, b]);
+        assert_eq!(rsl.region_count(0).unwrap(), 2);
+        assert_eq!(rsl.region_count(1).unwrap(), 1);
+        assert!(rsl.region_count(5).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_union_all() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 50, 200)]);
+        let c = make_regionset(vec![("chr1", 150, 300)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let u = rsl.union_all().unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 0);
+        assert_eq!(u.regions[0].end, 300);
+    }
+
+    #[rstest]
+    fn test_rsl_union_all_empty() {
+        let rsl = make_rsl(vec![]);
+        assert!(rsl.union_all().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_union_all_single() {
+        let a = make_regionset(vec![("chr1", 10, 50)]);
+        let rsl = make_rsl(vec![a]);
+        let u = rsl.union_all().unwrap();
+        assert_eq!(u.regions.len(), 1);
+        assert_eq!(u.regions[0].start, 10);
+        assert_eq!(u.regions[0].end, 50);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all() {
+        // Three overlapping sets — intersection is the region shared by all three
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 30, 200)]);
+        let c = make_regionset(vec![("chr1", 60, 150)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let inter = rsl.intersect_all().unwrap();
+        assert_eq!(inter.regions.len(), 1);
+        assert_eq!(inter.regions[0].start, 60);
+        assert_eq!(inter.regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_disjoint() {
+        let a = make_regionset(vec![("chr1", 0, 50)]);
+        let b = make_regionset(vec![("chr1", 100, 200)]);
+        let rsl = make_rsl(vec![a, b]);
+        let inter = rsl.intersect_all().unwrap();
+        assert_eq!(inter.regions.len(), 0);
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_empty() {
+        let rsl = make_rsl(vec![]);
+        assert!(rsl.intersect_all().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_intersect_all_different_sizes() {
+        // This is the case where pintersect would give wrong results:
+        // sets have different numbers of regions, but share genomic coverage
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr1", 200, 300)]);
+        let b = make_regionset(vec![("chr1", 50, 250)]);
+        let rsl = make_rsl(vec![a, b]);
+        let inter = rsl.intersect_all().unwrap();
+        // Shared coverage: [50,100) and [200,250)
+        assert_eq!(inter.regions.len(), 2);
+        assert_eq!(inter.regions[0].start, 50);
+        assert_eq!(inter.regions[0].end, 100);
+        assert_eq!(inter.regions[1].start, 200);
+        assert_eq!(inter.regions[1].end, 250);
+    }
+
+    #[rstest]
+    fn test_rsl_union_except() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let c = make_regionset(vec![("chr1", 400, 500)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        // union_except(1) = union of sets 0 and 2 (skip set 1)
+        let ue = rsl.union_except(1).unwrap();
+        assert_eq!(ue.regions.len(), 2);
+        assert_eq!(ue.regions[0].start, 0);
+        assert_eq!(ue.regions[0].end, 100);
+        assert_eq!(ue.regions[1].start, 400);
+        assert_eq!(ue.regions[1].end, 500);
+    }
+
+    #[rstest]
+    fn test_rsl_union_except_too_small() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.union_except(0).is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_n2() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let rsl = make_rsl(vec![a, b]);
+        let (full_union, excepts) = rsl.bulk_union_except().unwrap();
+
+        // Full union covers both regions
+        assert_eq!(full_union.regions.len(), 2);
+
+        // except[0] = union of everything except set 0 = set 1
+        assert_eq!(excepts.len(), 2);
+        assert_eq!(excepts[0].regions.len(), 1);
+        assert_eq!(excepts[0].regions[0].start, 200);
+        assert_eq!(excepts[0].regions[0].end, 300);
+
+        // except[1] = union of everything except set 1 = set 0
+        assert_eq!(excepts[1].regions.len(), 1);
+        assert_eq!(excepts[1].regions[0].start, 0);
+        assert_eq!(excepts[1].regions[0].end, 100);
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_n3() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let b = make_regionset(vec![("chr1", 200, 300)]);
+        let c = make_regionset(vec![("chr1", 400, 500)]);
+        let rsl = make_rsl(vec![a, b, c]);
+        let (full_union, excepts) = rsl.bulk_union_except().unwrap();
+
+        assert_eq!(full_union.regions.len(), 3);
+        assert_eq!(excepts.len(), 3);
+
+        // except[0] = union(b, c)
+        assert_eq!(excepts[0].regions.len(), 2);
+        assert_eq!(excepts[0].regions[0].start, 200);
+        assert_eq!(excepts[0].regions[1].start, 400);
+
+        // except[1] = union(a, c)
+        assert_eq!(excepts[1].regions.len(), 2);
+        assert_eq!(excepts[1].regions[0].start, 0);
+        assert_eq!(excepts[1].regions[1].start, 400);
+
+        // except[2] = union(a, b)
+        assert_eq!(excepts[2].regions.len(), 2);
+        assert_eq!(excepts[2].regions[0].start, 0);
+        assert_eq!(excepts[2].regions[1].start, 200);
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_too_small() {
+        let a = make_regionset(vec![("chr1", 0, 100)]);
+        let rsl = make_rsl(vec![a]);
+        assert!(rsl.bulk_union_except().is_none());
+
+        let rsl_empty = make_rsl(vec![]);
+        assert!(rsl_empty.bulk_union_except().is_none());
+    }
+
+    #[rstest]
+    fn test_rsl_bulk_union_except_matches_union_except() {
+        // Verify bulk algorithm produces same results as individual union_except calls
+        let a = make_regionset(vec![("chr1", 0, 100), ("chr2", 50, 200)]);
+        let b = make_regionset(vec![("chr1", 80, 180), ("chr2", 100, 300)]);
+        let c = make_regionset(vec![("chr1", 150, 250)]);
+        let d = make_regionset(vec![("chr2", 0, 150)]);
+        let rsl = make_rsl(vec![a, b, c, d]);
+
+        let (_, bulk_excepts) = rsl.bulk_union_except().unwrap();
+
+        for i in 0..4 {
+            let individual = rsl.union_except(i).unwrap();
+            assert_eq!(
+                bulk_excepts[i].regions.len(),
+                individual.regions.len(),
+                "region count mismatch at index {}",
+                i
+            );
+            for (j, (bulk_r, indiv_r)) in bulk_excepts[i]
+                .regions
+                .iter()
+                .zip(individual.regions.iter())
+                .enumerate()
+            {
+                assert_eq!(
+                    bulk_r.chr, indiv_r.chr,
+                    "chr mismatch at except[{}][{}]", i, j
+                );
+                assert_eq!(
+                    bulk_r.start, indiv_r.start,
+                    "start mismatch at except[{}][{}]", i, j
+                );
+                assert_eq!(
+                    bulk_r.end, indiv_r.end,
+                    "end mismatch at except[{}][{}]", i, j
+                );
+            }
+        }
     }
 }

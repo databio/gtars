@@ -96,18 +96,29 @@ calcGCContent <- function(query, ref, ignoreUnkChroms = FALSE) {
 #' Calculate dinucleotide frequency
 #'
 #' @description Calculates the frequency of all 16 dinucleotides for each
-#'   region as percentages. Drop-in replacement for
-#'   GenomicDistributions::calcDinuclFreq.
+#'   region. Drop-in replacement for GenomicDistributions::calcDinuclFreq,
+#'   including the \code{rawCounts} parameter.
 #'
 #' @param query A GRanges object, file path, data.frame, or RegionSet
 #' @param ref A GenomeAssembly pointer (from loadGenomeAssembly)
+#' @param rawCounts If TRUE, return raw integer counts; if FALSE (default),
+#'   return percentages per row (each row sums to 100)
+#' @param ignoreUnknownChroms If TRUE, skip regions on chromosomes not in
+#'   the assembly. If FALSE (default), error on unknown chromosomes.
 #' @return A data.frame with a \code{region} column and 16 dinucleotide
-#'   columns containing frequency percentages.
+#'   columns. For pooled global counts, call \code{colSums(result[, -1])}
+#'   on a \code{rawCounts=TRUE} result.
 #'
 #' @export
-calcDinuclFreq <- function(query, ref) {
+calcDinuclFreq <- function(query, ref, rawCounts = FALSE, ignoreUnknownChroms = FALSE) {
   query <- .ensure_regionset(query)
-  result <- .Call(wrap__r_calc_dinucl_freq, query, ref)
+  result <- .Call(
+    wrap__r_calc_dinucl_freq,
+    query,
+    ref,
+    rawCounts,
+    ignoreUnknownChroms
+  )
   as.data.frame(result, stringsAsFactors = FALSE)
 }
 

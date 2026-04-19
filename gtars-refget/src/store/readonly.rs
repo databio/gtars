@@ -426,11 +426,17 @@ impl ReadonlyRefgetStore {
             .map(|name_map| {
                 name_map
                     .iter()
-                    .filter_map(|(name, seq_key)| {
-                        let record = self.sequence_store.get(seq_key)?;
+                    .map(|(name, seq_key)| {
+                        let record = self.sequence_store.get(seq_key).ok_or_else(|| {
+                            anyhow!(
+                                "Sequence {} not found in store for collection {}",
+                                key_to_digest_string(seq_key),
+                                collection_digest,
+                            )
+                        })?;
                         let mut meta = record.metadata().clone();
                         meta.name = name.clone();
-                        Some(match record.sequence() {
+                        Ok(match record.sequence() {
                             Some(seq) => SequenceRecord::Full {
                                 metadata: meta,
                                 sequence: seq.to_vec(),
@@ -438,8 +444,9 @@ impl ReadonlyRefgetStore {
                             None => SequenceRecord::Stub(meta),
                         })
                     })
-                    .collect()
+                    .collect::<Result<Vec<_>>>()
             })
+            .transpose()?
             .unwrap_or_default();
 
         Ok(crate::digest::SequenceCollection {
@@ -539,11 +546,23 @@ impl ReadonlyRefgetStore {
     /// Import a single collection (with all its sequences, aliases, and FHR
     /// metadata) from another store into this store.
     ///
+    /// Both stores must be disk-backed with matching storage modes.
     /// The source store must have the collection loaded (call
     /// `load_collection()` or `load_all_collections()` first).
     pub fn import_collection(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
-        let collection = source.get_collection(digest)?;
-        self.add_sequence_collection(collection)?;
+        // Both stores must be disk-backed with same mode
+        if source.local_path.is_none() || self.local_path.is_none() || !self.persist_to_disk {
+            return Err(anyhow!("import_collection requires both stores to be disk-backed"));
+        }
+        if source.mode != self.mode {
+            return Err(anyhow!(
+                "import_collection requires matching storage modes (source={:?}, dest={:?})",
+                source.mode,
+                self.mode,
+            ));
+        }
+
+        self.import_collection_file_copy(source, digest)?;
 
         // Copy sequence aliases for every sequence in the imported collection
         let coll_key = digest.to_key();
@@ -565,6 +584,126 @@ impl ReadonlyRefgetStore {
         if let Some(fhr) = source.get_fhr_metadata(digest) {
             self.set_fhr_metadata(digest, fhr.clone())?;
         }
+
+        Ok(())
+    }
+
+    /// File-copy based import: copies RGSI and .seq files directly from
+    /// source to destination, then registers the collection in memory.
+    fn import_collection_file_copy(
+        &mut self,
+        source: &ReadonlyRefgetStore,
+        digest: &str,
+    ) -> Result<()> {
+        use crate::collection::read_rgsi_file;
+
+        // 1. Read the source RGSI file to get collection metadata
+        let src_rgsi_path = source
+            .collection_file_path(digest)
+            .ok_or_else(|| anyhow!("Source store has no local path for collection {}", digest))?;
+        let collection = read_rgsi_file(&src_rgsi_path)
+            .with_context(|| format!("Failed to read source RGSI file: {}", src_rgsi_path.display()))?;
+
+        let mut metadata = collection.metadata.clone();
+
+        // 2. Handle ancillary digests and copy/write the RGSI file
+        let dst_rgsi_path = self
+            .collection_file_path(digest)
+            .ok_or_else(|| anyhow!("Dest store has no local path for collection {}", digest))?;
+        if let Some(parent) = dst_rgsi_path.parent() {
+            create_dir_all(parent)?;
+        }
+
+        let needs_ancillary_rewrite = self.ancillary_digests
+            && metadata.name_length_pairs_digest.is_none();
+
+        if needs_ancillary_rewrite {
+            // Source lacks ancillary digests but destination wants them --
+            // compute them and write a new RGSI file.
+            metadata.compute_ancillary_digests(&collection.sequences);
+            use crate::collection::SequenceCollectionRecordExt;
+            let record = SequenceCollectionRecord::Full {
+                metadata: metadata.clone(),
+                sequences: collection.sequences.iter()
+                    .map(|s| SequenceRecord::Stub(s.metadata().clone()))
+                    .collect(),
+            };
+            record.write_collection_rgsi(&dst_rgsi_path)?;
+        } else {
+            // Byte-for-byte copy of the RGSI file
+            fs::copy(&src_rgsi_path, &dst_rgsi_path)
+                .with_context(|| format!(
+                    "Failed to copy RGSI {} -> {}",
+                    src_rgsi_path.display(),
+                    dst_rgsi_path.display(),
+                ))?;
+        }
+
+        // 3. Copy sequence data files
+        for seq_record in &collection.sequences {
+            let seq_meta = seq_record.metadata();
+            let seq_digest = &seq_meta.sha512t24u;
+
+            let src_seq_path = source
+                .sequence_file_path(seq_digest)
+                .ok_or_else(|| anyhow!("Source has no path for sequence {}", seq_digest))?;
+            let dst_seq_path = self
+                .sequence_file_path(seq_digest)
+                .ok_or_else(|| anyhow!("Dest has no path for sequence {}", seq_digest))?;
+
+            // Skip if destination already has this sequence (dedup across collections)
+            if dst_seq_path.exists() {
+                // Still need to register in memory below
+            } else {
+                if let Some(parent) = dst_seq_path.parent() {
+                    create_dir_all(parent)?;
+                }
+                fs::copy(&src_seq_path, &dst_seq_path).with_context(|| {
+                    format!(
+                        "Failed to copy sequence {} -> {}",
+                        src_seq_path.display(),
+                        dst_seq_path.display(),
+                    )
+                })?;
+            }
+        }
+
+        // 4. Register in memory
+        let coll_key = digest.to_key();
+
+        // Build the collection record with stub sequences
+        let stub_sequences: Vec<SequenceRecord> = collection
+            .sequences
+            .iter()
+            .map(|s| SequenceRecord::Stub(s.metadata().clone()))
+            .collect();
+
+        let record = SequenceCollectionRecord::Full {
+            metadata: metadata.clone(),
+            sequences: stub_sequences,
+        };
+        self.collections.insert(coll_key, record);
+
+        // Register sequences and populate name_lookup
+        let mut name_map = IndexMap::new();
+        for seq_record in &collection.sequences {
+            let seq_meta = seq_record.metadata();
+            let seq_key = seq_meta.sha512t24u.to_key();
+
+            name_map.insert(seq_meta.name.clone(), seq_key);
+
+            // Insert stub into sequence_store (skip if already present -- dedup)
+            if !self.sequence_store.contains_key(&seq_key) {
+                self.sequence_store
+                    .insert(seq_key, SequenceRecord::Stub(seq_meta.clone()));
+                self.md5_lookup
+                    .insert(seq_meta.md5.to_key(), seq_key);
+            }
+        }
+        self.name_lookup.insert(coll_key, name_map);
+
+        // 5. Update index files
+        self.write_index_files()?;
 
         Ok(())
     }
@@ -823,6 +962,23 @@ impl ReadonlyRefgetStore {
             .replace("%s4", digest_str.get(0..4).unwrap_or(digest_str))
             .replace("%s", digest_str);
         PathBuf::from(path_str)
+    }
+
+    /// Return the full filesystem path to a sequence `.seq` file for the given digest.
+    ///
+    /// Returns `None` if the store has no local path or no seqdata path template.
+    pub fn sequence_file_path(&self, seq_digest: &str) -> Option<PathBuf> {
+        let local_path = self.local_path.as_ref()?;
+        let template = self.seqdata_path_template.as_ref()?;
+        Some(local_path.join(Self::expand_template(seq_digest, template)))
+    }
+
+    /// Return the full filesystem path to a collection RGSI file for the given digest.
+    ///
+    /// Returns `None` if the store has no local path.
+    pub fn collection_file_path(&self, coll_digest: &str) -> Option<PathBuf> {
+        let local_path = self.local_path.as_ref()?;
+        Some(local_path.join(format!("collections/{}.rgsi", coll_digest)))
     }
 
     /// Validate a relative path to prevent directory traversal attacks.
