@@ -110,7 +110,12 @@ fn read_vcf_line(reader: &mut dyn BufRead, buf: &mut String) -> Result<bool> {
 
 // ── Streaming APIs (primary) ────────────────────────────────────────────
 
-/// Stream VRS results via callback. Lazily decodes chromosomes, clears cache when done.
+/// Stream VRS results via callback. Lazily decodes chromosomes as it
+/// encounters them. Decoded sequence data is left in the store so the
+/// caller can run additional queries or decide when to reclaim memory
+/// via `store.clear_decoded_cache()` (which downgrades cached records
+/// to `Stub`, so only call it when you are done with the store or have
+/// a disk-backed source to reload from).
 /// Returns the number of results processed.
 pub fn compute_vrs_ids_streaming(
     store: &mut RefgetStore,
@@ -186,7 +191,12 @@ pub fn compute_vrs_ids_streaming(
         }
     }
 
-    store.clear_decoded_cache();
+    // Intentionally do not call store.clear_decoded_cache() here:
+    // since commit 95a7ca5, clear_decoded_cache downgrades decoded
+    // records to Stub, which permanently destroys data for in-memory
+    // stores (no disk backing to reload from). Leaving the cache
+    // populated also keeps subsequent calls on the same store cheap.
+    // Callers that need to reclaim memory can call it explicitly.
     Ok(count)
 }
 
