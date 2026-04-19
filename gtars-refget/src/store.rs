@@ -188,9 +188,13 @@ pub struct ReadonlyRefgetStore {
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
     fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
-    /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
-    /// Populated by ensure_decoded(), read by sequence_bytes().
-    decoded_cache: HashMap<[u8; 32], Vec<u8>>,
+    /// Set of SHA512t24u keys whose `SequenceRecord::Full.sequence` has
+    /// been replaced with decoded (raw UTF-8) bytes by `ensure_decoded`.
+    /// `sequence_bytes()` only returns data for keys in this set. The
+    /// decoded bytes are held in `sequence_store` (single copy), not a
+    /// separate cache — this avoids duplicating the ~3 GB GRCh38 FASTA
+    /// in memory when VRS workflows preload a collection.
+    decoded_keys: std::collections::HashSet<[u8; 32]>,
 }
 
 /// Metadata for the entire store.
@@ -389,7 +393,7 @@ impl ReadonlyRefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
-            decoded_cache: HashMap::new(),
+            decoded_keys: std::collections::HashSet::new(),
         }
     }
 
@@ -1462,7 +1466,7 @@ impl ReadonlyRefgetStore {
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);
                 self.md5_lookup.retain(|_, v| v != orphan_key);
-                self.decoded_cache.remove(orphan_key);
+                self.decoded_keys.remove(orphan_key);
             }
 
             // Delete orphaned sequence files from disk
@@ -1749,14 +1753,21 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Ensure a sequence is loaded and decoded into the decoded cache.
+    /// Ensure a sequence is loaded and decoded in place.
     ///
-    /// Call this during a serial setup phase to populate the cache.
-    /// Once populated, use `sequence_bytes()` for read-only access
-    /// (e.g., from multiple rayon workers sharing `&RefgetStore`).
+    /// Replaces the `SequenceRecord::Full.sequence` bytes with their
+    /// decoded (raw UTF-8) form so `sequence_bytes()` can return them
+    /// directly. Idempotent: subsequent calls are a no-op once a key is
+    /// in `decoded_keys`.
     ///
-    /// Note: decoded sequences are cached indefinitely. For large genomes,
-    /// use `clear_decoded_cache()` to reclaim memory when done.
+    /// For sequences stored Raw (ASCII) the in-place replacement leaves
+    /// the bytes byte-identical. For sequences stored Encoded (2-bit
+    /// packed) the 2-bit payload is discarded and replaced by the full
+    /// UTF-8 bytes, so the store grows from ~0.25 B/base to 1 B/base for
+    /// decoded sequences. This matches what VRS compute needs.
+    ///
+    /// Use `clear_decoded_cache()` to drop decoded sequence data when
+    /// done (downgrades each decoded record back to a `Stub`).
     pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -1765,41 +1776,48 @@ impl ReadonlyRefgetStore {
             .copied()
             .unwrap_or(digest_key);
 
-        if self.decoded_cache.contains_key(&actual_key) {
+        if self.decoded_keys.contains(&actual_key) {
             return Ok(());
         }
 
-        // No longer calls ensure_sequence_loaded -- sequence must already be Full
         let record = self
             .sequence_store
-            .get(&actual_key)
+            .get_mut(&actual_key)
             .ok_or_else(|| anyhow!("Sequence not found"))?;
         let decoded = record
             .decode()
             .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
-
-        self.decoded_cache.insert(actual_key, decoded.into_bytes());
+        record.load_data(decoded.into_bytes());
+        self.decoded_keys.insert(actual_key);
         Ok(())
     }
 
-    /// Clear the decoded sequence cache to reclaim memory.
+    /// Drop decoded sequence bytes to reclaim memory. Each previously
+    /// decoded record is downgraded back to a `Stub`; subsequent
+    /// `sequence_bytes()` calls return `None` until the sequence is
+    /// reloaded and re-decoded.
     pub fn clear_decoded_cache(&mut self) {
-        self.decoded_cache.clear();
+        for key in self.decoded_keys.drain() {
+            if let Some(record) = self.sequence_store.get_mut(&key) {
+                let meta = record.metadata().clone();
+                *record = SequenceRecord::Stub(meta);
+            }
+        }
     }
 
     /// Clear sequence data from the store to free memory.
     ///
-    /// Removes all sequence records and decoded cache. Metadata is
-    /// preserved: collections, name lookups, MD5 lookups, aliases,
-    /// and FHR metadata remain intact.
+    /// Removes all sequence records. Metadata is preserved:
+    /// collections, name lookups, MD5 lookups, aliases, and FHR
+    /// metadata remain intact.
     ///
     /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
         self.sequence_store.clear();
-        self.decoded_cache.clear();
+        self.decoded_keys.clear();
     }
 
-    /// Get decoded sequence bytes from the cache.
+    /// Get decoded sequence bytes in place.
     ///
     /// Takes `&self` — safe for concurrent read access from multiple threads
     /// sharing a `&RefgetStore` reference (e.g., via `Arc` or scoped threads).
@@ -1811,7 +1829,10 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        self.decoded_cache.get(&actual_key).map(|v| v.as_slice())
+        if !self.decoded_keys.contains(&actual_key) {
+            return None;
+        }
+        self.sequence_store.get(&actual_key).and_then(|r| r.sequence())
     }
 
     /// Get a sequence by collection digest and name, loading data if needed.
