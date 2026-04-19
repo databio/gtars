@@ -2672,27 +2672,7 @@ impl PyRefgetStore {
         vcf_path: &str,
         num_workers: usize,
     ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
-        // Eagerly decode every sequence in the collection so workers can
-        // rely on `sequence_bytes(&self)` returning Some.
-        let collection = self
-            .inner
-            .get_collection(collection_digest)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to get sequence collection: {}",
-                    e
-                ))
-            })?
-            .clone();
-        for seq in &collection.sequences {
-            let digest = seq.metadata().sha512t24u.clone();
-            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to decode sequence {}: {}",
-                    digest, e
-                ))
-            })?;
-        }
+        self.decode_vcf_chroms(collection_digest, vcf_path)?;
 
         let num_workers = if num_workers == 0 {
             std::thread::available_parallelism()
@@ -2742,33 +2722,46 @@ impl PyRefgetStore {
         Ok(py_results)
     }
 
-    /// Eagerly decode every sequence in a collection into the
-    /// `sequence_bytes()` cache. Idempotent (no-op for sequences already
-    /// decoded).
-    ///
-    /// This lets callers pay the one-time RLE→bytes decoding cost upfront
-    /// (~10 s on GRCh38), so subsequent `compute_vrs_ids_parallel*` calls
-    /// run at full parallel-Rust speed instead of amortizing decode into
-    /// the first compute.
-    fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
-        let collection = self
-            .inner
-            .get_collection(collection_digest)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to get sequence collection: {}",
-                    e
-                ))
-            })?
-            .clone();
-        for seq in &collection.sequences {
-            let digest = seq.metadata().sha512t24u.clone();
-            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to decode sequence {}: {}",
-                    digest, e
-                ))
-            })?;
+    /// Internal helper: pre-scan the VCF chromosome column and decode
+    /// only those sequences. For single-chromosome VCFs (e.g. gnomAD
+    /// chr22) this avoids eagerly decoding the full 3366-sequence GRCh38
+    /// collection, saving ~9 GB of RSS. Chroms not present in the
+    /// collection are silently skipped (matches the compute path, which
+    /// also skips unknown chroms).
+    fn decode_vcf_chroms(
+        &mut self,
+        collection_digest: &str,
+        vcf_path: &str,
+    ) -> PyResult<()> {
+        // Inspecting the collection first, build name→digest.
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+
+        let chroms = gtars_vrs::vcf::unique_chroms_from_vcf(vcf_path).map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Failed to scan VCF for chromosomes: {}",
+                e
+            ))
+        })?;
+
+        for chrom in &chroms {
+            if let Some(digest) = name_to_digest.get(chrom) {
+                let digest = digest.clone();
+                self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to decode sequence {}: {}",
+                        digest, e
+                    ))
+                })?;
+            }
         }
         Ok(())
     }
@@ -2801,25 +2794,7 @@ impl PyRefgetStore {
         output_path: &str,
         num_workers: usize,
     ) -> PyResult<usize> {
-        let collection = self
-            .inner
-            .get_collection(collection_digest)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to get sequence collection: {}",
-                    e
-                ))
-            })?
-            .clone();
-        for seq in &collection.sequences {
-            let digest = seq.metadata().sha512t24u.clone();
-            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to decode sequence {}: {}",
-                    digest, e
-                ))
-            })?;
-        }
+        self.decode_vcf_chroms(collection_digest, vcf_path)?;
 
         let num_workers = if num_workers == 0 {
             std::thread::available_parallelism()
@@ -2878,25 +2853,7 @@ impl PyRefgetStore {
         output_path: &str,
         num_workers: usize,
     ) -> PyResult<usize> {
-        let collection = self
-            .inner
-            .get_collection(collection_digest)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to get sequence collection: {}",
-                    e
-                ))
-            })?
-            .clone();
-        for seq in &collection.sequences {
-            let digest = seq.metadata().sha512t24u.clone();
-            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to decode sequence {}: {}",
-                    digest, e
-                ))
-            })?;
-        }
+        self.decode_vcf_chroms(collection_digest, vcf_path)?;
         let num_workers = if num_workers == 0 {
             std::thread::available_parallelism()
                 .map(|n| n.get().saturating_sub(2).max(1))
@@ -2951,25 +2908,7 @@ impl PyRefgetStore {
         vcf_path: &str,
         num_workers: usize,
     ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
-        let collection = self
-            .inner
-            .get_collection(collection_digest)
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to get sequence collection: {}",
-                    e
-                ))
-            })?
-            .clone();
-        for seq in &collection.sequences {
-            let digest = seq.metadata().sha512t24u.clone();
-            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Failed to decode sequence {}: {}",
-                    digest, e
-                ))
-            })?;
-        }
+        self.decode_vcf_chroms(collection_digest, vcf_path)?;
 
         let num_workers = if num_workers == 0 {
             std::thread::available_parallelism()
