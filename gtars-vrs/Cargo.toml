@@ -28,6 +28,11 @@ noodles-bgzf = "0.46"
 # Internal dependency
 gtars-refget = { path = "../gtars-refget", version = "0.7.0" }
 
+# Swap the global allocator in example binaries (bench-only; library unaffected).
+# Linux-gated in the examples to match gtars-python's pattern.
+[target.'cfg(target_os = "linux")'.dependencies]
+tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }
+
 [dev-dependencies]
 tempfile = "3.8.1"
 serde_yaml = "0.9"
