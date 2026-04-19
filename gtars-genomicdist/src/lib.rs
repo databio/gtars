@@ -46,10 +46,7 @@ pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
 };
-pub use models::{
-    ClusterStats, DensityHomogeneity, DensityVector, SortedRegionSet, SpacingStats, Strand,
-    StrandedRegionSet,
-};
+pub use models::{SortedRegionSet, Strand, StrandedRegionSet};
 pub use signal::{calc_summary_signal, ConditionStats, SignalMatrix, SignalSummaryResult};
 pub use statistics::GenomicIntervalSetStatistics;
 pub use utils::{chrom_karyotype_key, median_abs_distance};

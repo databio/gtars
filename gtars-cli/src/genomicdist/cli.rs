@@ -35,7 +35,7 @@ pub fn create_genomicdist_cli() -> Command {
             arg!(--bins <BINS>)
                 .required(false)
                 .default_value("250")
-                .help("Target bin count for the longest chromosome in --chrom-sizes. Bin width is derived as max_chrom_len/bins; shorter chromosomes get proportionally fewer bins. Total windows returned by density_vector/density_homogeneity is typically larger than this value (sum of ceil(size/bin_width) across chromosomes). Pass bins = max_chrom_len / desired_bin_width_bp to target a specific bin width."),
+                .help("Number of bins for the region distribution. Bin width is derived as max_chrom_len/bins; shorter chromosomes get proportionally fewer bins."),
         )
         .arg(
             Arg::new("signal-matrix")
@@ -80,20 +80,6 @@ pub fn create_genomicdist_cli() -> Command {
                 .required(false)
                 .default_value("2000")
                 .help("Downstream distance (bp) from TSS to define promoter regions"),
-        )
-        .arg(
-            Arg::new("cluster-radii")
-                .long("cluster-radii")
-                .required(false)
-                .default_value("500,5000,50000")
-                .help("Comma-separated list of stitching radii (bp) for peak_clusters summary statistics. Default probes promoter (500), enhancer (5000), and domain (50000) scales."),
-        )
-        .arg(
-            Arg::new("cluster-min-size")
-                .long("cluster-min-size")
-                .required(false)
-                .default_value("2")
-                .help("Minimum cluster size that qualifies clusters for inclusion in n_clusters, n_clustered_peaks, mean_cluster_size, and fraction_clustered. max_cluster_size is always unfiltered. Default 2 (multi-peak clusters only, the typical enhancer-clustering view). Pass 1 to include singletons and get the simple 'total / n_clusters' mean (where n_clustered_peaks then equals total_peaks and fraction_clustered equals 1.0)."),
         )
         .arg(
             Arg::new("compact")
