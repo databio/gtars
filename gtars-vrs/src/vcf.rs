@@ -7,7 +7,6 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
-use std::num::NonZeroUsize;
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
@@ -46,39 +45,25 @@ fn is_bgzf(file: &mut File) -> Result<bool> {
     Ok(fextra && buf[12] == b'B' && buf[13] == b'C')
 }
 
-/// Number of worker threads for the BGZF multithreaded decoder used by
-/// `open_vcf`. Scales with `available_parallelism` but caps at 4 so
-/// callers that also spawn a big VRS worker pool don't oversubscribe —
-/// e.g. 14 VRS workers + 4 noodles workers + 1 reader = 19 threads on a
-/// 16-core box is tolerable; 14 + 8 + 1 = 23 hurts. For block-parallel
-/// decompression (no `open_vcf` at all), use
-/// `compute_vrs_ids_parallel_bgzf`.
-fn bgzf_worker_count() -> NonZeroUsize {
-    let n = std::thread::available_parallelism()
-        .map(|n| n.get() / 4)
-        .unwrap_or(1)
-        .clamp(1, 4);
-    NonZeroUsize::new(n).unwrap_or(NonZeroUsize::MIN)
-}
-
 /// Open a VCF file, auto-detecting plain/gzip/BGZF compression.
 ///
-/// For BGZF files we use `noodles_bgzf::io::MultithreadedReader`, which
-/// decompresses blocks on a worker pool. For plain gzip (single-stream or
-/// multi-member) we fall back to `flate2::MultiGzDecoder` on a single thread.
+/// All gzip-framed input (plain `.gz` and BGZF `.bgz`) goes through
+/// `flate2::MultiGzDecoder`, which handles single-member gzip, multi-member
+/// gzip, and concatenated BGZF streams uniformly. We deliberately avoid
+/// `noodles_bgzf` here: its 0.46 `Reader` / `MultithreadedReader` both run
+/// every frame through a strict header validator, which rejects gnomAD-style
+/// `.bgz` files that have non-BGZF bytes appended after the BGZF EOF block
+/// ("invalid BGZF header"). `MultiGzDecoder` stops at the first non-gzip
+/// byte and surfaces that as `ErrorKind::InvalidInput`, which
+/// `read_vcf_line` below already treats as clean EOF. Block-parallel
+/// decompression is still available via `compute_vrs_ids_parallel_bgzf`,
+/// which does its own raw block I/O and does not route through `open_vcf`.
 /// Uncompressed input is passed through a `BufReader` directly.
 fn open_vcf(path: &str) -> Result<Box<dyn BufRead>> {
-    let mut file = File::open(path).context(format!("Failed to open VCF: {}", path))?;
+    let file = File::open(path).context(format!("Failed to open VCF: {}", path))?;
     let capacity = 256 * 1024; // 256KB buffer for large VCF files
 
     if path.ends_with(".gz") || path.ends_with(".bgz") {
-        if is_bgzf(&mut file)? {
-            let reader = noodles_bgzf::io::MultithreadedReader::with_worker_count(
-                bgzf_worker_count(),
-                file,
-            );
-            return Ok(Box::new(BufReader::with_capacity(capacity, reader)));
-        }
         Ok(Box::new(BufReader::with_capacity(
             capacity,
             MultiGzDecoder::new(file),
