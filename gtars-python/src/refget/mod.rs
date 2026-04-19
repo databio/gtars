@@ -2843,25 +2843,13 @@ impl PyRefgetStore {
         let output_path_owned = output_path.to_string();
         let count = py
             .detach(|| -> anyhow::Result<usize> {
-                use std::io::Write;
-                let results = gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise(
+                gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise_to_tsv(
                     readonly,
                     &name_to_digest,
                     vcf_path,
+                    &output_path_owned,
                     num_workers,
-                )?;
-                let file = std::fs::File::create(&output_path_owned)?;
-                let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
-                writeln!(w, "chrom\tpos\tref\talt\tvrs_id")?;
-                for r in &results {
-                    writeln!(
-                        w,
-                        "{}\t{}\t{}\t{}\t{}",
-                        r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
-                    )?;
-                }
-                w.flush()?;
-                Ok(results.len())
+                )
             })
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -2929,25 +2917,13 @@ impl PyRefgetStore {
         let output_path_owned = output_path.to_string();
         let count = py
             .detach(|| -> anyhow::Result<usize> {
-                use std::io::Write;
-                let results = gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf(
+                gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf_to_tsv(
                     readonly,
                     &name_to_digest,
                     vcf_path,
+                    &output_path_owned,
                     num_workers,
-                )?;
-                let file = std::fs::File::create(&output_path_owned)?;
-                let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
-                writeln!(w, "chrom\tpos\tref\talt\tvrs_id")?;
-                for r in &results {
-                    writeln!(
-                        w,
-                        "{}\t{}\t{}\t{}\t{}",
-                        r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
-                    )?;
-                }
-                w.flush()?;
-                Ok(results.len())
+                )
             })
             .map_err(|e| {
                 pyo3::exceptions::PyRuntimeError::new_err(format!(

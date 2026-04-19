@@ -602,23 +602,19 @@ struct LineResultBatch {
     results: Vec<Result<VrsResult>>,
 }
 
-/// Compute VRS IDs by batching raw VCF lines on the reader and running the
-/// full parse+normalize+digest pipeline on worker threads.
-///
-/// In contrast to `compute_vrs_ids_parallel`, the reader thread here only
-/// reads lines and enqueues them. All VCF field parsing, chromosome
-/// lookups, normalization, and digest computation happen on workers. This
-/// removes the serial parse/alloc bottleneck observed in the pipeline
-/// variant and scales further with core count.
+/// Streaming core for the blockwise parallel path. Invokes `on_result` for
+/// each `VrsResult` in VCF order (via a per-batch reorder buffer), holding
+/// at most one batch worth of results at a time — not the full result set.
 ///
 /// Preconditions: identical to `compute_vrs_ids_parallel` — every
 /// chromosome referenced by the VCF must already be decoded in `store`.
-pub fn compute_vrs_ids_parallel_blockwise(
+pub fn compute_vrs_ids_parallel_blockwise_with_sink<F: FnMut(VrsResult)>(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
     vcf_path: &str,
     num_workers: usize,
-) -> Result<Vec<VrsResult>> {
+    mut on_result: F,
+) -> Result<usize> {
     let num_workers = num_workers.max(1);
 
     let chrom_accessions: HashMap<String, String> = name_to_digest
@@ -626,7 +622,7 @@ pub fn compute_vrs_ids_parallel_blockwise(
         .map(|(name, digest)| (name.clone(), format!("SQ.{}", digest)))
         .collect();
 
-    std::thread::scope(|s| -> Result<Vec<VrsResult>> {
+    std::thread::scope(|s| -> Result<usize> {
         let (line_tx, line_rx) =
             crossbeam_channel::bounded::<LineBatch>(PARALLEL_CHANNEL_CAPACITY);
         let (result_tx, result_rx) =
@@ -792,28 +788,50 @@ pub fn compute_vrs_ids_parallel_blockwise(
         drop(line_rx);
         drop(result_tx);
 
-        // Collect all result batches, then reorder by batch_id to restore
-        // VCF line order. Memory usage is bounded by total results — same
-        // as the pipeline variant.
-        let mut batches: Vec<LineResultBatch> = Vec::new();
-        while let Ok(rb) = result_rx.recv() {
-            batches.push(rb);
-        }
-        batches.sort_by_key(|b| b.batch_id);
-
+        // Streaming reorder: as batches arrive from workers (in arbitrary
+        // order), buffer out-of-order ones in a HashMap keyed by batch_id.
+        // Emit the contiguous run starting at `next_batch_id` through the
+        // sink, dropping each batch after emission. Memory usage is
+        // bounded by the reorder gap (≤ channel capacity × batch size),
+        // not total variants.
         let mut first_err: Option<anyhow::Error> = None;
-        let total: usize = batches.iter().map(|b| b.results.len()).sum();
-        let mut out: Vec<VrsResult> = Vec::with_capacity(total);
-        for batch in batches {
-            for r in batch.results {
+        let mut pending: HashMap<usize, Vec<Result<VrsResult>>> = HashMap::new();
+        let mut next_batch_id: usize = 0;
+        let mut count: usize = 0;
+
+        let emit = |results: Vec<Result<VrsResult>>,
+                    count: &mut usize,
+                    first_err: &mut Option<anyhow::Error>,
+                    on_result: &mut F| {
+            for r in results {
                 match r {
-                    Ok(v) => out.push(v),
+                    Ok(v) => {
+                        on_result(v);
+                        *count += 1;
+                    }
                     Err(e) => {
                         if first_err.is_none() {
-                            first_err = Some(e);
+                            *first_err = Some(e);
                         }
                     }
                 }
+            }
+        };
+
+        while let Ok(rb) = result_rx.recv() {
+            pending.insert(rb.batch_id, rb.results);
+            while let Some(results) = pending.remove(&next_batch_id) {
+                emit(results, &mut count, &mut first_err, &mut on_result);
+                next_batch_id += 1;
+            }
+        }
+        // Drain any remaining (shouldn't happen if all batches were
+        // received and emitted in order, but handle gracefully).
+        let mut remaining_ids: Vec<usize> = pending.keys().copied().collect();
+        remaining_ids.sort_unstable();
+        for id in remaining_ids {
+            if let Some(results) = pending.remove(&id) {
+                emit(results, &mut count, &mut first_err, &mut on_result);
             }
         }
 
@@ -840,8 +858,27 @@ pub fn compute_vrs_ids_parallel_blockwise(
         if let Some(e) = first_err {
             return Err(e);
         }
-        Ok(out)
+        Ok(count)
     })
+}
+
+/// Collecting wrapper over `compute_vrs_ids_parallel_blockwise_with_sink`.
+/// Returns all results in a `Vec<VrsResult>` in VCF order.
+pub fn compute_vrs_ids_parallel_blockwise(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    num_workers: usize,
+) -> Result<Vec<VrsResult>> {
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
+        store,
+        name_to_digest,
+        vcf_path,
+        num_workers,
+        |r| out.push(r),
+    )?;
+    Ok(out)
 }
 
 /// Convenience wrapper for the blockwise variant with auto-picked worker
@@ -1145,17 +1182,17 @@ fn process_bgzf_block(
     }
 }
 
-/// Compute VRS IDs by distributing BGZF blocks across workers. Each
-/// worker handles decompression + parsing + normalize + digest for its
-/// own blocks; the reader thread only shuffles raw bytes. Requires BGZF
-/// input (plain gzip is rejected — the blockwise variant above is the
-/// right choice there).
-pub fn compute_vrs_ids_parallel_bgzf(
+/// Streaming core for the BGZF-block parallel path. Invokes `on_result`
+/// for each `VrsResult` in VCF order via a per-block reorder buffer. The
+/// collector still needs to stitch cross-block boundary lines, so it
+/// holds one block's tail_fragment at a time — constant extra memory.
+pub fn compute_vrs_ids_parallel_bgzf_with_sink<F: FnMut(VrsResult)>(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
     vcf_path: &str,
     num_workers: usize,
-) -> Result<Vec<VrsResult>> {
+    mut on_result: F,
+) -> Result<usize> {
     let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
     if !is_bgzf(&mut file)? {
         return Err(anyhow::anyhow!(
@@ -1169,7 +1206,7 @@ pub fn compute_vrs_ids_parallel_bgzf(
         .map(|(name, digest)| (name.clone(), format!("SQ.{}", digest)))
         .collect();
 
-    std::thread::scope(|s| -> Result<Vec<VrsResult>> {
+    std::thread::scope(|s| -> Result<usize> {
         let (block_tx, block_rx) =
             crossbeam_channel::bounded::<(usize, Vec<u8>)>(PARALLEL_CHANNEL_CAPACITY);
         let (result_tx, result_rx) =
@@ -1223,60 +1260,72 @@ pub fn compute_vrs_ids_parallel_bgzf(
         drop(block_rx);
         drop(result_tx);
 
-        // Collector: sort blocks, stitch cross-block boundary lines,
-        // emit results in VCF order.
-        let mut blocks: Vec<BgzfBlockResult> = Vec::new();
-        while let Ok(br) = result_rx.recv() {
-            blocks.push(br);
-        }
-        blocks.sort_by_key(|b| b.batch_id);
-
+        // Streaming collector. Blocks arrive from workers in arbitrary
+        // order; buffer out-of-order ones in a HashMap by batch_id and
+        // process the contiguous run starting at `next_batch_id`. Each
+        // processed block's results are emitted through the sink and
+        // dropped, so only one block's tail_fragment and the current
+        // reorder gap sit in memory.
         let mut first_err: Option<anyhow::Error> = None;
-        let mut all_results: Vec<VrsResult> = Vec::new();
+        let mut count: usize = 0;
         let mut prev_tail: Vec<u8> = Vec::new();
         let mut stitch_writer = DigestWriter::new();
+        let mut pending: HashMap<usize, BgzfBlockResult> = HashMap::new();
+        let mut next_batch_id: usize = 0;
 
-        for (i, block) in blocks.into_iter().enumerate() {
+        fn process_block<F: FnMut(VrsResult)>(
+            block: BgzfBlockResult,
+            next_batch_id: usize,
+            prev_tail: &mut Vec<u8>,
+            stitch_writer: &mut DigestWriter,
+            store: &ReadonlyRefgetStore,
+            name_to_digest: &HashMap<String, String>,
+            chrom_accessions: &HashMap<String, String>,
+            on_result: &mut F,
+            count: &mut usize,
+            first_err: &mut Option<anyhow::Error>,
+        ) {
             if !block.had_newline {
-                // Block sits entirely inside a single VCF line that spans
-                // multiple BGZF blocks. Accumulate its bytes into
-                // prev_tail without emitting — the line will complete
-                // (and be processed) when some later block produces its
-                // first `\n`. Also surface any worker errors (e.g.
-                // decompression failure); don't emit bogus results.
+                // Block sits entirely inside a single VCF line that
+                // spans multiple BGZF blocks. Accumulate bytes into
+                // prev_tail; the line will complete when a later block
+                // produces its first `\n`. Surface any worker errors.
                 for r in block.results {
                     if let Err(e) = r {
                         if first_err.is_none() {
-                            first_err = Some(e);
+                            *first_err = Some(e);
                         }
                     }
                 }
                 prev_tail.extend_from_slice(&block.tail_fragment);
-                continue;
+                return;
             }
 
-            // Block contains ≥1 newline. Stitch prev.tail + this.head into
-            // the line that straddles the block boundary and process it.
-            // For i == 0 with an empty prev_tail the "stitched" bytes are
-            // just the first line of the file (typically a header).
-            let mut stitched = std::mem::take(&mut prev_tail);
+            // Block contains ≥1 newline. Stitch prev.tail + this.head
+            // into the line that straddles the boundary and process it.
+            // For next_batch_id == 0 with empty prev_tail the "stitched"
+            // bytes are typically the header line.
+            let mut stitched = std::mem::take(prev_tail);
             stitched.extend_from_slice(&block.head_fragment);
-            if !stitched.is_empty() || i > 0 {
+            if !stitched.is_empty() || next_batch_id > 0 {
                 let mut tmp: Vec<Result<VrsResult>> = Vec::new();
                 process_vcf_line_bytes(
                     &stitched,
                     store,
                     name_to_digest,
-                    &chrom_accessions,
-                    &mut stitch_writer,
+                    chrom_accessions,
+                    stitch_writer,
                     &mut tmp,
                 );
                 for r in tmp {
                     match r {
-                        Ok(v) => all_results.push(v),
+                        Ok(v) => {
+                            on_result(v);
+                            *count += 1;
+                        }
                         Err(e) => {
                             if first_err.is_none() {
-                                first_err = Some(e);
+                                *first_err = Some(e);
                             }
                         }
                     }
@@ -1284,16 +1333,59 @@ pub fn compute_vrs_ids_parallel_bgzf(
             }
             for r in block.results {
                 match r {
-                    Ok(v) => all_results.push(v),
+                    Ok(v) => {
+                        on_result(v);
+                        *count += 1;
+                    }
                     Err(e) => {
                         if first_err.is_none() {
-                            first_err = Some(e);
+                            *first_err = Some(e);
                         }
                     }
                 }
             }
-            prev_tail = block.tail_fragment;
+            *prev_tail = block.tail_fragment;
         }
+
+        while let Ok(br) = result_rx.recv() {
+            pending.insert(br.batch_id, br);
+            while let Some(block) = pending.remove(&next_batch_id) {
+                process_block(
+                    block,
+                    next_batch_id,
+                    &mut prev_tail,
+                    &mut stitch_writer,
+                    store,
+                    name_to_digest,
+                    &chrom_accessions,
+                    &mut on_result,
+                    &mut count,
+                    &mut first_err,
+                );
+                next_batch_id += 1;
+            }
+        }
+        // Drain anything left (only if channel closed with gaps, which
+        // shouldn't happen in practice).
+        let mut remaining_ids: Vec<usize> = pending.keys().copied().collect();
+        remaining_ids.sort_unstable();
+        for id in remaining_ids {
+            if let Some(block) = pending.remove(&id) {
+                process_block(
+                    block,
+                    id,
+                    &mut prev_tail,
+                    &mut stitch_writer,
+                    store,
+                    name_to_digest,
+                    &chrom_accessions,
+                    &mut on_result,
+                    &mut count,
+                    &mut first_err,
+                );
+            }
+        }
+
         // Final unterminated line (if any).
         if !prev_tail.is_empty() {
             let mut tmp: Vec<Result<VrsResult>> = Vec::new();
@@ -1307,7 +1399,10 @@ pub fn compute_vrs_ids_parallel_bgzf(
             );
             for r in tmp {
                 match r {
-                    Ok(v) => all_results.push(v),
+                    Ok(v) => {
+                        on_result(v);
+                        count += 1;
+                    }
                     Err(e) => {
                         if first_err.is_none() {
                             first_err = Some(e);
@@ -1339,8 +1434,27 @@ pub fn compute_vrs_ids_parallel_bgzf(
         if let Some(e) = first_err {
             return Err(e);
         }
-        Ok(all_results)
+        Ok(count)
     })
+}
+
+/// Collecting wrapper over `compute_vrs_ids_parallel_bgzf_with_sink`.
+/// Returns all results in a `Vec<VrsResult>` in VCF order.
+pub fn compute_vrs_ids_parallel_bgzf(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    num_workers: usize,
+) -> Result<Vec<VrsResult>> {
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_bgzf_with_sink(
+        store,
+        name_to_digest,
+        vcf_path,
+        num_workers,
+        |r| out.push(r),
+    )?;
+    Ok(out)
 }
 
 /// Convenience wrapper for the BGZF-block variant with auto-picked worker
@@ -1354,4 +1468,126 @@ pub fn compute_vrs_ids_parallel_bgzf_auto(
         .map(|n| n.get().saturating_sub(2).max(1))
         .unwrap_or(1);
     compute_vrs_ids_parallel_bgzf(store, name_to_digest, vcf_path, num_workers)
+}
+
+// ── Streaming TSV output entrypoints ────────────────────────────────────
+//
+// These pair the parallel compute paths with a direct-to-disk TSV writer
+// so the peak result set never materializes as a `Vec<VrsResult>`. For a
+// run with 11.6M chr22 variants this drops ~2–3 GB of peak RSS.
+
+/// Shared TSV-writer helper. Opens the output file, writes the header row,
+/// returns a `BufWriter` the caller can push lines into.
+fn open_tsv_writer(output_path: &str) -> Result<std::io::BufWriter<std::fs::File>> {
+    use std::io::Write;
+    let file = std::fs::File::create(output_path)
+        .context(format!("Failed to create TSV output {}", output_path))?;
+    let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
+    writeln!(w, "chrom\tpos\tref\talt\tvrs_id")?;
+    Ok(w)
+}
+
+/// Compute VRS IDs via the BGZF-block parallel path and stream them
+/// directly to a TSV (chrom, pos, ref, alt, vrs_id). Returns the number
+/// of variants written. Requires BGZF input.
+pub fn compute_vrs_ids_parallel_bgzf_to_tsv(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    output_path: &str,
+    num_workers: usize,
+) -> Result<usize> {
+    use std::io::Write;
+    let mut w = open_tsv_writer(output_path)?;
+    let mut io_err: Option<std::io::Error> = None;
+    let count = compute_vrs_ids_parallel_bgzf_with_sink(
+        store,
+        name_to_digest,
+        vcf_path,
+        num_workers,
+        |r| {
+            if io_err.is_some() {
+                return;
+            }
+            if let Err(e) = writeln!(
+                w,
+                "{}\t{}\t{}\t{}\t{}",
+                r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+            ) {
+                io_err = Some(e);
+            }
+        },
+    )?;
+    if let Some(e) = io_err {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(count)
+}
+
+/// Compute VRS IDs via the blockwise parallel path and stream them
+/// directly to a TSV (chrom, pos, ref, alt, vrs_id). Returns the number
+/// of variants written.
+pub fn compute_vrs_ids_parallel_blockwise_to_tsv(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    output_path: &str,
+    num_workers: usize,
+) -> Result<usize> {
+    use std::io::Write;
+    let mut w = open_tsv_writer(output_path)?;
+    let mut io_err: Option<std::io::Error> = None;
+    let count = compute_vrs_ids_parallel_blockwise_with_sink(
+        store,
+        name_to_digest,
+        vcf_path,
+        num_workers,
+        |r| {
+            if io_err.is_some() {
+                return;
+            }
+            if let Err(e) = writeln!(
+                w,
+                "{}\t{}\t{}\t{}\t{}",
+                r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+            ) {
+                io_err = Some(e);
+            }
+        },
+    )?;
+    if let Some(e) = io_err {
+        return Err(e.into());
+    }
+    w.flush()?;
+    Ok(count)
+}
+
+// ── Lazy per-chromosome decode helper ───────────────────────────────────
+
+/// Pre-scan a VCF and return the unique chromosome names observed in
+/// column 1 of data lines. Used by the Python bindings to decode only the
+/// chromosomes the VCF actually references instead of the whole
+/// collection (for a single-chromosome VCF this saves ~9 GB of RAM on
+/// GRCh38). Handles plain/gzip/BGZF input via `open_vcf`.
+pub fn unique_chroms_from_vcf(vcf_path: &str) -> Result<Vec<String>> {
+    use std::collections::HashSet;
+    let mut reader = open_vcf(vcf_path)?;
+    let mut line_buf = String::new();
+    let mut seen: HashSet<String> = HashSet::new();
+    while read_vcf_line(&mut *reader, &mut line_buf)? {
+        let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        // First field up to TAB is the chromosome.
+        let chrom = match line.split_once('\t') {
+            Some((c, _)) => c,
+            None => continue,
+        };
+        if !seen.contains(chrom) {
+            seen.insert(chrom.to_string());
+        }
+    }
+    Ok(seen.into_iter().collect())
 }
