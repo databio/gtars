@@ -2701,8 +2701,8 @@ impl PyRefgetStore {
     /// for sequences already decoded). Kept for backwards compatibility
     /// with callers that want to pay the decode cost upfront. Note: for
     /// single-chromosome VCFs this decodes ~3366 sequences unnecessarily;
-    /// callers that will follow up with `compute_vrs_ids_parallel_blockwise`
-    /// / `_bgzf` can skip this method — those entrypoints now lazily decode
+    /// callers that will follow up with `compute_vrs_ids_parallel_blockwise_to_tsv`
+    /// / `_bgzf_to_tsv` can skip this method — those entrypoints now lazily decode
     /// only the chromosomes referenced by the VCF.
     fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
         let collection = self
@@ -2820,84 +2820,6 @@ impl PyRefgetStore {
             "BGZF-block parallel TSV write failed",
             gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf_to_tsv,
         )
-    }
-
-    /// Compute GA4GH VRS Allele identifiers using the blockwise parallel
-    /// variant: the reader thread only batches raw VCF lines; workers do
-    /// all parsing, normalization, and digest computation.
-    ///
-    /// The workers perform all parsing, normalization, and digest
-    /// computation; the reader only batches raw VCF lines. This is the
-    /// default Python parallel path. Output matches the serial path in
-    /// content and order.
-    ///
-    /// Args:
-    ///     collection_digest (str): Digest of the sequence collection.
-    ///     vcf_path (str): Path to a VCF file (plain or gzipped).
-    ///     num_workers (int): Worker thread count. ``0`` means auto
-    ///         (``available_parallelism - 2``, minimum 1).
-    ///
-    /// Returns:
-    ///     list[dict]: Each dict has keys ``chrom, pos, ref, alt, vrs_id``.
-    ///
-    /// Preconditions: sequences must be decoded; this method auto-decodes
-    /// only the chromosomes referenced by the VCF.
-    #[pyo3(signature = (collection_digest, vcf_path, num_workers = 0))]
-    fn compute_vrs_ids_parallel_blockwise<'py>(
-        &mut self,
-        py: Python<'py>,
-        collection_digest: &str,
-        vcf_path: &str,
-        num_workers: usize,
-    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
-        self.decode_vcf_chroms(collection_digest, vcf_path)?;
-
-        let num_workers = if num_workers == 0 {
-            std::thread::available_parallelism()
-                .map(|n| n.get().saturating_sub(2).max(1))
-                .unwrap_or(1)
-        } else {
-            num_workers
-        };
-
-        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
-        let name_to_digest =
-            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
-                |e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to build name_to_digest: {}",
-                        e
-                    ))
-                },
-            )?;
-
-        let results = py
-            .detach(|| {
-                gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise(
-                    readonly,
-                    &name_to_digest,
-                    vcf_path,
-                    num_workers,
-                )
-            })
-            .map_err(|e| {
-                pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "Blockwise parallel VRS computation failed: {}",
-                    e
-                ))
-            })?;
-
-        let mut py_results = Vec::with_capacity(results.len());
-        for r in &results {
-            let dict = pyo3::types::PyDict::new(py);
-            dict.set_item("chrom", &r.chrom)?;
-            dict.set_item("pos", r.pos)?;
-            dict.set_item("ref", &r.ref_allele)?;
-            dict.set_item("alt", &r.alt_allele)?;
-            dict.set_item("vrs_id", &r.vrs_id)?;
-            py_results.push(dict);
-        }
-        Ok(py_results)
     }
 }
 
