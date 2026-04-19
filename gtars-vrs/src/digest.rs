@@ -49,7 +49,7 @@ impl DigestWriter {
         start: u64,
         end: u64,
         sequence: &str,
-    ) -> String {
+    ) -> arrayvec::ArrayString<48> {
         // Step 1: Compute SequenceLocation digest
         // Canonical JSON (keys sorted): {"end":N,"sequenceReference":{"refgetAccession":"...","type":"SequenceReference"},"start":N,"type":"SequenceLocation"}
         self.buf.clear();
@@ -74,7 +74,13 @@ impl DigestWriter {
 
         let allele_digest = sha512t24u_inline(&self.buf);
 
-        format!("ga4gh:VA.{}", allele_digest)
+        // TODO(alloc): sha512t24u_inline still allocates a 32-byte String for
+        // the base64url output. If further alloc wins are wanted, make it write
+        // directly into an &mut ArrayString<32>.
+        let mut out = arrayvec::ArrayString::<48>::new();
+        out.push_str("ga4gh:VA.");
+        out.push_str(&allele_digest); // 32 ASCII bytes, guaranteed to fit
+        out
     }
 }
 
@@ -206,6 +212,7 @@ mod tests {
             "T",
         );
 
-        assert_eq!(generic, fast);
+        assert_eq!(generic, fast.as_str());
+        assert_eq!(fast.len(), 41);
     }
 }
