@@ -610,25 +610,6 @@ pub fn compute_vrs_ids_parallel_blockwise_with_sink<F: FnMut(VrsResult)>(
     })
 }
 
-/// Collecting wrapper over `compute_vrs_ids_parallel_blockwise_with_sink`.
-/// Returns all results in a `Vec<VrsResult>` in VCF order.
-pub fn compute_vrs_ids_parallel_blockwise(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-    num_workers: usize,
-) -> Result<Vec<VrsResult>> {
-    let mut out: Vec<VrsResult> = Vec::new();
-    compute_vrs_ids_parallel_blockwise_with_sink(
-        store,
-        name_to_digest,
-        vcf_path,
-        num_workers,
-        |r| out.push(r),
-    )?;
-    Ok(out)
-}
-
 // ── BGZF-block parallel API ─────────────────────────────────────────────
 //
 // The blockwise variant above still routes every VCF byte through one

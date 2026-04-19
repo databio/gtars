@@ -1,7 +1,7 @@
 //! Tests for the parallel VCF → VRS pipeline.
 //!
-//! Verifies that `compute_vrs_ids_parallel_blockwise` and
-//! `compute_vrs_ids_parallel_bgzf` produce the same results as
+//! Verifies that `compute_vrs_ids_parallel_blockwise_with_sink` and
+//! `compute_vrs_ids_parallel_bgzf_with_sink` produce the same results as
 //! `compute_vrs_ids_from_vcf_readonly` across a variety of VCF shapes.
 
 use std::io::Write;
@@ -9,7 +9,8 @@ use std::io::Write;
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
 use gtars_vrs::vcf::{
     build_name_to_digest_readonly, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise, decode_vcf_chroms,
+    compute_vrs_ids_parallel_bgzf, compute_vrs_ids_parallel_blockwise_with_sink,
+    decode_vcf_chroms, VrsResult,
 };
 use tempfile::tempdir;
 
@@ -89,11 +90,13 @@ chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n",
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, vcf_path.to_str().unwrap())
             .unwrap();
-    let blockwise = compute_vrs_ids_parallel_blockwise(
+    let mut blockwise: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         4,
+        |r| blockwise.push(r),
     )
     .unwrap();
 
@@ -114,11 +117,13 @@ fn test_blockwise_single_worker() {
         &vcf_path,
         "chr1\t5\t.\tA\tT\t.\tPASS\t.\nchr2\t5\t.\tG\tA\t.\tPASS\t.\n",
     );
-    let out = compute_vrs_ids_parallel_blockwise(
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         1,
+        |r| out.push(r),
     )
     .unwrap();
     assert_eq!(out.len(), 2);
@@ -133,11 +138,13 @@ fn test_blockwise_empty_vcf() {
     let (store, name_to_digest) = build_readonly_fixture(dir.path());
     let vcf_path = dir.path().join("empty_bw.vcf");
     write_vcf(&vcf_path, "");
-    let out = compute_vrs_ids_parallel_blockwise(
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         4,
+        |r| out.push(r),
     )
     .unwrap();
     assert!(out.is_empty());
@@ -156,11 +163,13 @@ chr1\t10\t.\tA\t*\t.\tPASS\t.\n\
 chr1\t10\t.\tA\t.\t.\tPASS\t.\n\
 chr1\t11\t.\tC\tG\t.\tPASS\t.\n",
     );
-    let out = compute_vrs_ids_parallel_blockwise(
+    let mut out: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         4,
+        |r| out.push(r),
     )
     .unwrap();
     assert_eq!(out.len(), 1);
@@ -495,11 +504,13 @@ fn test_blockwise_preserves_order_across_batches() {
     let serial =
         compute_vrs_ids_from_vcf_readonly(&store, &name_to_digest, vcf_path.to_str().unwrap())
             .unwrap();
-    let blockwise = compute_vrs_ids_parallel_blockwise(
+    let mut blockwise: Vec<VrsResult> = Vec::new();
+    compute_vrs_ids_parallel_blockwise_with_sink(
         &store,
         &name_to_digest,
         vcf_path.to_str().unwrap(),
         8,
+        |r| blockwise.push(r),
     )
     .unwrap();
 
