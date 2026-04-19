@@ -24,6 +24,10 @@
 //!   num_workers   — Optional: accepted for CLI parity with gnomad_vrs_store, ignored
 //!                   (this binary is single-threaded by construction).
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 

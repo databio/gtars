@@ -22,6 +22,10 @@
 //!   variants_tsv  — Output path for per-variant VRS IDs (chrom/pos/ref/alt/vrs_id)
 //!   num_workers   — Optional: number of VRS worker threads (default: available_parallelism - 2)
 
+#[cfg(target_os = "linux")]
+#[global_allocator]
+static GLOBAL: tikv_jemallocator::Jemalloc = tikv_jemallocator::Jemalloc;
+
 use std::io::{BufWriter, Write};
 use std::time::Instant;
 
