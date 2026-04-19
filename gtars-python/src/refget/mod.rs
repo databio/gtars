@@ -2722,6 +2722,39 @@ impl PyRefgetStore {
         Ok(py_results)
     }
 
+    /// Eagerly decode every sequence in a collection. Idempotent (no-op
+    /// for sequences already decoded). Kept for backwards compatibility
+    /// with callers that want to pay the decode cost upfront. Note: for
+    /// single-chromosome VCFs this decodes ~3366 sequences unnecessarily;
+    /// callers that will follow up with `compute_vrs_ids_parallel_*` can
+    /// skip this method — those entrypoints now lazily decode only the
+    /// chromosomes referenced by the VCF.
+    fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?;
+        let digests: Vec<String> = collection
+            .sequences
+            .iter()
+            .map(|s| s.metadata().sha512t24u.clone())
+            .collect();
+        for digest in digests {
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
     /// Internal helper: pre-scan the VCF chromosome column and decode
     /// only those sequences. For single-chromosome VCFs (e.g. gnomAD
     /// chr22) this avoids eagerly decoding the full 3366-sequence GRCh38
@@ -2733,17 +2766,24 @@ impl PyRefgetStore {
         collection_digest: &str,
         vcf_path: &str,
     ) -> PyResult<()> {
-        // Inspecting the collection first, build name→digest.
-        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
-        let name_to_digest =
-            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
-                |e| {
-                    pyo3::exceptions::PyRuntimeError::new_err(format!(
-                        "Failed to build name_to_digest: {}",
-                        e
-                    ))
-                },
-            )?;
+        // Use the mutable wrapper's lazy-loading get_collection so the
+        // collection data is auto-loaded if it was only a Stub. Build
+        // name→digest from its sequences.
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?;
+        let mut name_to_digest: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        for seq_record in &collection.sequences {
+            let meta = seq_record.metadata();
+            name_to_digest.insert(meta.name.clone(), meta.sha512t24u.clone());
+        }
 
         let chroms = gtars_vrs::vcf::unique_chroms_from_vcf(vcf_path).map_err(|e| {
             pyo3::exceptions::PyRuntimeError::new_err(format!(
@@ -2755,6 +2795,14 @@ impl PyRefgetStore {
         for chrom in &chroms {
             if let Some(digest) = name_to_digest.get(chrom) {
                 let digest = digest.clone();
+                // Lazy load the sequence bytes (Stub → Full) from disk
+                // first if not already loaded. Then decode in place.
+                self.inner.load_sequence(digest.as_str()).map_err(|e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to load sequence {}: {}",
+                        digest, e
+                    ))
+                })?;
                 self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
                     pyo3::exceptions::PyRuntimeError::new_err(format!(
                         "Failed to decode sequence {}: {}",
