@@ -28,7 +28,9 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use gtars_refget::store::RefgetStore;
-use gtars_vrs::vcf::{build_name_to_digest_readonly, compute_vrs_ids_streaming_readonly};
+use gtars_vrs::vcf::{
+    build_name_to_digest_readonly, compute_vrs_ids_streaming_readonly, decode_vcf_chroms,
+};
 
 /// Peak resident set size of the current process, in MB.
 ///
@@ -85,22 +87,13 @@ fn main() {
     assert!(!collections.is_empty(), "No collections in store");
     let collection_digest = collections[0].digest.clone();
 
-    // --- Phase 2: preload + decode every sequence ---
-    // Mirrors gnomad_vrs_store.rs exactly so open+preload time is comparable.
+    // --- Phase 2: decode only the sequences the VCF references ---
+    // Lazy per-chromosome decode — avoids eager `load_all_sequences` +
+    // full-collection `ensure_decoded`, which for a single-chromosome VCF
+    // against GRCh38 would waste ~3-9 GB of RSS and ~15 s of wall-clock.
     let t1 = Instant::now();
-    store
-        .load_all_sequences()
-        .expect("Failed to load_all_sequences");
-    let collection = store
-        .get_collection(&collection_digest)
-        .expect("Failed to get collection")
-        .clone();
-    for seq_record in &collection.sequences {
-        let digest = seq_record.metadata().sha512t24u.clone();
-        store
-            .ensure_decoded(digest.as_str())
-            .unwrap_or_else(|e| panic!("Failed to decode {}: {}", digest, e));
-    }
+    decode_vcf_chroms(&mut store, &collection_digest, vcf_path)
+        .expect("Failed to decode VCF-referenced sequences");
     let t_preload = t1.elapsed();
 
     // --- Phase 3: convert to readonly and compute serially via streaming callback ---

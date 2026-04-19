@@ -26,7 +26,9 @@ use std::io::{BufWriter, Write};
 use std::time::Instant;
 
 use gtars_refget::store::RefgetStore;
-use gtars_vrs::vcf::{build_name_to_digest_readonly, compute_vrs_ids_parallel_bgzf};
+use gtars_vrs::vcf::{
+    build_name_to_digest_readonly, compute_vrs_ids_parallel_bgzf_with_sink, decode_vcf_chroms,
+};
 
 /// Peak resident set size of the current process, in MB.
 ///
@@ -89,23 +91,13 @@ fn main() {
     assert!(!collections.is_empty(), "No collections in store");
     let collection_digest = collections[0].digest.clone();
 
-    // --- Phase 2: preload + decode every sequence ---
+    // --- Phase 2: decode only the sequences the VCF references ---
+    // Lazy per-chromosome decode — avoids eager `load_all_sequences` +
+    // full-collection `ensure_decoded`, which for a single-chromosome VCF
+    // against GRCh38 would waste ~3-9 GB of RSS and ~15 s of wall-clock.
     let t1 = Instant::now();
-    store
-        .load_all_sequences()
-        .expect("Failed to load_all_sequences");
-    // Match bgzf_tsv.py: ensure every sequence in the collection is decoded
-    // before handing the ReadonlyRefgetStore to the workers.
-    let collection = store
-        .get_collection(&collection_digest)
-        .expect("Failed to get collection")
-        .clone();
-    for seq_record in &collection.sequences {
-        let digest = seq_record.metadata().sha512t24u.clone();
-        store
-            .ensure_decoded(digest.as_str())
-            .unwrap_or_else(|e| panic!("Failed to decode {}: {}", digest, e));
-    }
+    decode_vcf_chroms(&mut store, &collection_digest, vcf_path)
+        .expect("Failed to decode VCF-referenced sequences");
     let t_preload = t1.elapsed();
 
     // --- Phase 3: convert to readonly and compute in parallel ---
@@ -113,25 +105,32 @@ fn main() {
     let name_to_digest = build_name_to_digest_readonly(&readonly, &collection_digest)
         .expect("Failed to build name_to_digest");
 
-    let t2 = Instant::now();
-    let results = compute_vrs_ids_parallel_bgzf(&readonly, &name_to_digest, vcf_path, num_workers)
-        .expect("compute_vrs_ids_parallel_bgzf failed");
-    let t_compute = t2.elapsed();
-    let n = results.len();
-
-    // Write per-variant TSV (matches the Python bgzf_tsv sidecar format).
+    // Open the per-variant TSV up front; the sink callback writes each
+    // row directly — no Vec<VrsResult> accumulation. For 11.6M chr22
+    // variants the Vec would peak at ~2-3 GB of transient RSS.
     let vf = std::fs::File::create(variants_tsv).expect("Failed to open variants TSV");
     let mut vw = BufWriter::with_capacity(1 << 20, vf);
     writeln!(vw, "chrom\tpos\tref\talt\tvrs_id").unwrap();
-    for r in &results {
-        writeln!(
-            vw,
-            "{}\t{}\t{}\t{}\t{}",
-            r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
-        )
-        .unwrap();
-    }
-    vw.flush().unwrap();
+
+    let t2 = Instant::now();
+    let n = compute_vrs_ids_parallel_bgzf_with_sink(
+        &readonly,
+        &name_to_digest,
+        vcf_path,
+        num_workers,
+        |r| {
+            writeln!(
+                vw,
+                "{}\t{}\t{}\t{}\t{}",
+                r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+            )
+            .expect("Failed to write variants TSV row");
+        },
+    )
+    .expect("compute_vrs_ids_parallel_bgzf_with_sink failed");
+    let t_compute = t2.elapsed();
+
+    vw.flush().expect("Failed to flush variants TSV");
 
     let open_s = t_open.as_secs_f64();
     let preload_s = t_preload.as_secs_f64();
