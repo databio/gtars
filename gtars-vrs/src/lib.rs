@@ -17,6 +17,10 @@ pub use models::{Allele, AlleleState, SequenceLocation, SequenceReference};
 pub use digest::{allele_digest, allele_identifier, sequence_location_digest};
 pub use normalize::normalize;
 pub use vcf::{
-    VrsResult, compute_vrs_ids_from_vcf, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_streaming, compute_vrs_ids_streaming_readonly,
+    VrsResult, build_name_to_digest_readonly, compute_vrs_ids_from_vcf,
+    compute_vrs_ids_from_vcf_readonly, compute_vrs_ids_parallel,
+    compute_vrs_ids_parallel_auto, compute_vrs_ids_parallel_bgzf,
+    compute_vrs_ids_parallel_bgzf_auto, compute_vrs_ids_parallel_blockwise,
+    compute_vrs_ids_parallel_blockwise_auto, compute_vrs_ids_streaming,
+    compute_vrs_ids_streaming_readonly,
 };

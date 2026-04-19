@@ -17,6 +17,14 @@ sha2 = "0.10.7"
 base64-url = "2.0.0"
 itoa = "1.0"
 
+# Parallel VCF processing (reader + worker pool)
+crossbeam-channel = "0.5"
+
+# BGZF-aware multithreaded decompression for parallel VCF reader.
+# BGZF files decompress block-by-block across a worker pool; plain gzip
+# falls back to flate2::MultiGzDecoder.
+noodles-bgzf = "0.46"
+
 # Internal dependency
 gtars-refget = { path = "../gtars-refget", version = "0.7.0" }
 

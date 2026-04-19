@@ -2644,6 +2644,404 @@ impl PyRefgetStore {
         }
         Ok(py_results)
     }
+
+    /// Compute GA4GH VRS Allele identifiers in parallel using a reader thread
+    /// plus a worker pool on a preloaded read-only view of this store.
+    ///
+    /// Internally, this eagerly decodes every sequence in the given collection
+    /// (so the worker threads only perform read-only slice lookups), then
+    /// dispatches VCF records across `num_workers` worker threads via a
+    /// bounded crossbeam channel. Output preserves VCF line order.
+    ///
+    /// Precondition: call ``load_all_sequences()`` first so that sequence data
+    /// is present in the store (this method only triggers decoding).
+    ///
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection.
+    ///     vcf_path (str): Path to a VCF file (plain or gzipped).
+    ///     num_workers (int): Worker thread count. ``0`` means auto
+    ///         (``available_parallelism - 2``, minimum 1).
+    ///
+    /// Returns:
+    ///     list[dict]: Each dict has keys ``chrom, pos, ref, alt, vrs_id``.
+    #[pyo3(signature = (collection_digest, vcf_path, num_workers = 0))]
+    fn compute_vrs_ids_parallel<'py>(
+        &mut self,
+        py: Python<'py>,
+        collection_digest: &str,
+        vcf_path: &str,
+        num_workers: usize,
+    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+        // Eagerly decode every sequence in the collection so workers can
+        // rely on `sequence_bytes(&self)` returning Some.
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?
+            .clone();
+        for seq in &collection.sequences {
+            let digest = seq.metadata().sha512t24u.clone();
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+
+        let num_workers = if num_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2).max(1))
+                .unwrap_or(1)
+        } else {
+            num_workers
+        };
+
+        // Deref &RefgetStore → &ReadonlyRefgetStore for the read-only API.
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+
+        let results = py.detach(|| {
+            gtars_vrs::vcf::compute_vrs_ids_parallel(
+                readonly,
+                &name_to_digest,
+                vcf_path,
+                num_workers,
+            )
+        })
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!(
+                "Parallel VRS computation failed: {}",
+                e
+            ))
+        })?;
+
+        let mut py_results = Vec::with_capacity(results.len());
+        for r in &results {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("chrom", &r.chrom)?;
+            dict.set_item("pos", r.pos)?;
+            dict.set_item("ref", &r.ref_allele)?;
+            dict.set_item("alt", &r.alt_allele)?;
+            dict.set_item("vrs_id", &r.vrs_id)?;
+            py_results.push(dict);
+        }
+        Ok(py_results)
+    }
+
+    /// Eagerly decode every sequence in a collection into the
+    /// `sequence_bytes()` cache. Idempotent (no-op for sequences already
+    /// decoded).
+    ///
+    /// This lets callers pay the one-time RLE→bytes decoding cost upfront
+    /// (~10 s on GRCh38), so subsequent `compute_vrs_ids_parallel*` calls
+    /// run at full parallel-Rust speed instead of amortizing decode into
+    /// the first compute.
+    fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?
+            .clone();
+        for seq in &collection.sequences {
+            let digest = seq.metadata().sha512t24u.clone();
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+        Ok(())
+    }
+
+    /// Compute GA4GH VRS Allele identifiers with the blockwise parallel
+    /// variant and stream them directly to a TSV file from Rust, bypassing
+    /// per-result PyDict construction.
+    ///
+    /// Building 4.4M PyDicts to return to Python costs ~12 seconds of
+    /// single-threaded GIL-held work, which dominates every other
+    /// optimization. For production-scale runs, writing TSV from Rust and
+    /// returning only the count makes the parallelism actually visible to
+    /// Python callers.
+    ///
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection.
+    ///     vcf_path (str): Path to a VCF file (plain or gzipped/BGZF).
+    ///     output_path (str): Destination TSV. Columns: chrom, pos, ref,
+    ///         alt, vrs_id. A header row is written first.
+    ///     num_workers (int): ``0`` means auto.
+    ///
+    /// Returns:
+    ///     int: Number of VRS results written.
+    #[pyo3(signature = (collection_digest, vcf_path, output_path, num_workers = 0))]
+    fn compute_vrs_ids_parallel_blockwise_to_tsv(
+        &mut self,
+        py: Python<'_>,
+        collection_digest: &str,
+        vcf_path: &str,
+        output_path: &str,
+        num_workers: usize,
+    ) -> PyResult<usize> {
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?
+            .clone();
+        for seq in &collection.sequences {
+            let digest = seq.metadata().sha512t24u.clone();
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+
+        let num_workers = if num_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2).max(1))
+                .unwrap_or(1)
+        } else {
+            num_workers
+        };
+
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+
+        let output_path_owned = output_path.to_string();
+        let count = py
+            .detach(|| -> anyhow::Result<usize> {
+                use std::io::Write;
+                let results = gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise(
+                    readonly,
+                    &name_to_digest,
+                    vcf_path,
+                    num_workers,
+                )?;
+                let file = std::fs::File::create(&output_path_owned)?;
+                let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
+                writeln!(w, "chrom\tpos\tref\talt\tvrs_id")?;
+                for r in &results {
+                    writeln!(
+                        w,
+                        "{}\t{}\t{}\t{}\t{}",
+                        r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+                    )?;
+                }
+                w.flush()?;
+                Ok(results.len())
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Blockwise TSV write failed: {}",
+                    e
+                ))
+            })?;
+
+        Ok(count)
+    }
+
+    /// Compute GA4GH VRS Allele identifiers with the BGZF-block parallel
+    /// variant and stream results to a TSV from Rust. The reader thread
+    /// hands raw compressed BGZF blocks (no decompression, no parsing)
+    /// to workers; each worker decompresses + parses + normalizes +
+    /// digests its own block and returns per-block fragments for
+    /// collector-side boundary stitching. Requires BGZF input.
+    ///
+    /// Args match `compute_vrs_ids_parallel_blockwise_to_tsv`.
+    #[pyo3(signature = (collection_digest, vcf_path, output_path, num_workers = 0))]
+    fn compute_vrs_ids_parallel_bgzf_to_tsv(
+        &mut self,
+        py: Python<'_>,
+        collection_digest: &str,
+        vcf_path: &str,
+        output_path: &str,
+        num_workers: usize,
+    ) -> PyResult<usize> {
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?
+            .clone();
+        for seq in &collection.sequences {
+            let digest = seq.metadata().sha512t24u.clone();
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+        let num_workers = if num_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2).max(1))
+                .unwrap_or(1)
+        } else {
+            num_workers
+        };
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+        let output_path_owned = output_path.to_string();
+        let count = py
+            .detach(|| -> anyhow::Result<usize> {
+                use std::io::Write;
+                let results = gtars_vrs::vcf::compute_vrs_ids_parallel_bgzf(
+                    readonly,
+                    &name_to_digest,
+                    vcf_path,
+                    num_workers,
+                )?;
+                let file = std::fs::File::create(&output_path_owned)?;
+                let mut w = std::io::BufWriter::with_capacity(1 << 20, file);
+                writeln!(w, "chrom\tpos\tref\talt\tvrs_id")?;
+                for r in &results {
+                    writeln!(
+                        w,
+                        "{}\t{}\t{}\t{}\t{}",
+                        r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+                    )?;
+                }
+                w.flush()?;
+                Ok(results.len())
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "BGZF-block parallel TSV write failed: {}",
+                    e
+                ))
+            })?;
+        Ok(count)
+    }
+
+    /// Compute GA4GH VRS Allele identifiers using the blockwise parallel
+    /// variant: the reader thread only batches raw VCF lines; workers do
+    /// all parsing, normalization, and digest computation.
+    ///
+    /// Use this when `compute_vrs_ids_parallel` bottlenecks on the reader
+    /// thread (parse + per-variant allocations). Output is identical in
+    /// content and order to both the serial and pipeline paths.
+    ///
+    /// Args, returns, and preconditions match `compute_vrs_ids_parallel`.
+    #[pyo3(signature = (collection_digest, vcf_path, num_workers = 0))]
+    fn compute_vrs_ids_parallel_blockwise<'py>(
+        &mut self,
+        py: Python<'py>,
+        collection_digest: &str,
+        vcf_path: &str,
+        num_workers: usize,
+    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+        let collection = self
+            .inner
+            .get_collection(collection_digest)
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to get sequence collection: {}",
+                    e
+                ))
+            })?
+            .clone();
+        for seq in &collection.sequences {
+            let digest = seq.metadata().sha512t24u.clone();
+            self.inner.ensure_decoded(digest.as_str()).map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Failed to decode sequence {}: {}",
+                    digest, e
+                ))
+            })?;
+        }
+
+        let num_workers = if num_workers == 0 {
+            std::thread::available_parallelism()
+                .map(|n| n.get().saturating_sub(2).max(1))
+                .unwrap_or(1)
+        } else {
+            num_workers
+        };
+
+        let readonly: &gtars_refget::store::ReadonlyRefgetStore = &*self.inner;
+        let name_to_digest =
+            gtars_vrs::vcf::build_name_to_digest_readonly(readonly, collection_digest).map_err(
+                |e| {
+                    pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        "Failed to build name_to_digest: {}",
+                        e
+                    ))
+                },
+            )?;
+
+        let results = py
+            .detach(|| {
+                gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise(
+                    readonly,
+                    &name_to_digest,
+                    vcf_path,
+                    num_workers,
+                )
+            })
+            .map_err(|e| {
+                pyo3::exceptions::PyRuntimeError::new_err(format!(
+                    "Blockwise parallel VRS computation failed: {}",
+                    e
+                ))
+            })?;
+
+        let mut py_results = Vec::with_capacity(results.len());
+        for r in &results {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("chrom", &r.chrom)?;
+            dict.set_item("pos", r.pos)?;
+            dict.set_item("ref", &r.ref_allele)?;
+            dict.set_item("alt", &r.alt_allele)?;
+            dict.set_item("vrs_id", &r.vrs_id)?;
+            py_results.push(dict);
+        }
+        Ok(py_results)
+    }
 }
 
 /// Iterator for RefgetStore that yields SequenceMetadata.
