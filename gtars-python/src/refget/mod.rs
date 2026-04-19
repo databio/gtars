@@ -2701,7 +2701,7 @@ impl PyRefgetStore {
     /// for sequences already decoded). Kept for backwards compatibility
     /// with callers that want to pay the decode cost upfront. Note: for
     /// single-chromosome VCFs this decodes ~3366 sequences unnecessarily;
-    /// callers that will follow up with `compute_vrs_ids_parallel_blockwise_to_tsv`
+    /// callers that will follow up with `compute_vrs_ids_parallel_to_tsv`
     /// / `_bgzf_to_tsv` can skip this method — those entrypoints now lazily decode
     /// only the chromosomes referenced by the VCF.
     fn ensure_collection_decoded(&mut self, collection_digest: &str) -> PyResult<()> {
@@ -2755,9 +2755,9 @@ impl PyRefgetStore {
             .map_err(|e| pyo3::exceptions::PyRuntimeError::new_err(format!("{:#}", e)))
     }
 
-    /// Compute GA4GH VRS Allele identifiers with the blockwise parallel
-    /// variant and stream them directly to a TSV file from Rust, bypassing
-    /// per-result PyDict construction.
+    /// Compute GA4GH VRS Allele identifiers with the parallel variant and
+    /// stream them directly to a TSV file from Rust, bypassing per-result
+    /// PyDict construction.
     ///
     /// Building 4.4M PyDicts to return to Python costs ~12 seconds of
     /// single-threaded GIL-held work, which dominates every other
@@ -2775,7 +2775,7 @@ impl PyRefgetStore {
     /// Returns:
     ///     int: Number of VRS results written.
     #[pyo3(signature = (collection_digest, vcf_path, output_path, num_workers = 0))]
-    fn compute_vrs_ids_parallel_blockwise_to_tsv(
+    fn compute_vrs_ids_parallel_to_tsv(
         &mut self,
         py: Python<'_>,
         collection_digest: &str,
@@ -2789,8 +2789,8 @@ impl PyRefgetStore {
             vcf_path,
             output_path,
             num_workers,
-            "Blockwise TSV write failed",
-            gtars_vrs::vcf::compute_vrs_ids_parallel_blockwise_to_tsv,
+            "Parallel TSV write failed",
+            gtars_vrs::vcf::compute_vrs_ids_parallel_to_tsv,
         )
     }
 
@@ -2801,7 +2801,7 @@ impl PyRefgetStore {
     /// digests its own block and returns per-block fragments for
     /// collector-side boundary stitching. Requires BGZF input.
     ///
-    /// Args match `compute_vrs_ids_parallel_blockwise_to_tsv`.
+    /// Args match `compute_vrs_ids_parallel_to_tsv`.
     #[pyo3(signature = (collection_digest, vcf_path, output_path, num_workers = 0))]
     fn compute_vrs_ids_parallel_bgzf_to_tsv(
         &mut self,
