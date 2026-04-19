@@ -28,6 +28,24 @@ use std::time::Instant;
 use gtars_refget::store::RefgetStore;
 use gtars_vrs::vcf::{build_name_to_digest_readonly, compute_vrs_ids_parallel_bgzf};
 
+/// Peak resident set size of the current process, in MB.
+///
+/// Reads /proc/self/status VmHWM (Linux-only). Matches the Python
+/// contestants' `max_rss_mb()` helper so values are comparable across
+/// the tourney.
+fn max_rss_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmHWM:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(|kb| (kb as f64 / 1024.0 * 10.0).round() / 10.0)
+        })
+        .unwrap_or(0.0)
+}
+
 fn usage_and_exit(argv0: &str) -> ! {
     eprintln!(
         "Usage: {} <store_dir> <vcf_bgz_path> <results_tsv> <variants_tsv> [num_workers]",
@@ -130,24 +148,25 @@ fn main() {
         .map(|s| s.to_string_lossy().into_owned())
         .unwrap_or_else(|| vcf_path.to_string());
 
-    // Match the same header as bgzf_tsv.py, with num_workers included.
+    // Match the same header as bgzf_tsv.py, with num_workers and max_rss_mb included.
+    let rss = max_rss_mb();
     let rf = std::fs::File::create(results_tsv).expect("Failed to open results TSV");
     let mut rw = BufWriter::new(rf);
     writeln!(
         rw,
-        "contestant\tvcf\tn_variants\tnum_workers\topen_s\tpreload_s\tcompute_s\ttotal_s\tvariants_per_sec"
+        "contestant\tvcf\tn_variants\tnum_workers\topen_s\tpreload_s\tcompute_s\ttotal_s\tvariants_per_sec\tmax_rss_mb"
     )
     .unwrap();
     writeln!(
         rw,
-        "rust_native\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.0}",
-        vcf_basename, n, num_workers, open_s, preload_s, compute_s, total_s, vps
+        "rust_native\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.0}\t{:.1}",
+        vcf_basename, n, num_workers, open_s, preload_s, compute_s, total_s, vps, rss
     )
     .unwrap();
     rw.flush().unwrap();
 
     eprintln!(
-        "[rust_native] n={} workers={} open={:.2}s preload={:.2}s compute={:.2}s total={:.2}s  {:.0} v/s  (wrote {})",
-        n, num_workers, open_s, preload_s, compute_s, total_s, vps, variants_tsv
+        "[rust_native] n={} workers={} open={:.2}s preload={:.2}s compute={:.2}s total={:.2}s  {:.0} v/s  rss={:.1} MB  (wrote {})",
+        n, num_workers, open_s, preload_s, compute_s, total_s, vps, rss, variants_tsv
     );
 }

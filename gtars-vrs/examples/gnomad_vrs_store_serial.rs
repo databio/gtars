@@ -30,6 +30,24 @@ use std::time::Instant;
 use gtars_refget::store::RefgetStore;
 use gtars_vrs::vcf::{build_name_to_digest_readonly, compute_vrs_ids_streaming_readonly};
 
+/// Peak resident set size of the current process, in MB.
+///
+/// Reads /proc/self/status VmHWM (Linux-only). Matches the Python
+/// contestants' `max_rss_mb()` helper so values are comparable across
+/// the tourney.
+fn max_rss_mb() -> f64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmHWM:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|n| n.parse::<u64>().ok())
+                .map(|kb| (kb as f64 / 1024.0 * 10.0).round() / 10.0)
+        })
+        .unwrap_or(0.0)
+}
+
 fn usage_and_exit(argv0: &str) -> ! {
     eprintln!(
         "Usage: {} <store_dir> <vcf_bgz_path> <results_tsv> <variants_tsv> [num_workers]",
@@ -132,25 +150,26 @@ fn main() {
 
     // Match the TSV schema used by gnomad_vrs_store / bgzf_tsv.py exactly:
     //   contestant, vcf, n_variants, num_workers, open_s, preload_s,
-    //   compute_s, total_s, variants_per_sec
+    //   compute_s, total_s, variants_per_sec, max_rss_mb
     // num_workers is 1 — this path is single-threaded.
+    let rss = max_rss_mb();
     let rf = std::fs::File::create(results_tsv).expect("Failed to open results TSV");
     let mut rw = BufWriter::new(rf);
     writeln!(
         rw,
-        "contestant\tvcf\tn_variants\tnum_workers\topen_s\tpreload_s\tcompute_s\ttotal_s\tvariants_per_sec"
+        "contestant\tvcf\tn_variants\tnum_workers\topen_s\tpreload_s\tcompute_s\ttotal_s\tvariants_per_sec\tmax_rss_mb"
     )
     .unwrap();
     writeln!(
         rw,
-        "rust_serial\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.0}",
-        vcf_basename, n, 1, open_s, preload_s, compute_s, total_s, vps
+        "rust_serial\t{}\t{}\t{}\t{:.3}\t{:.3}\t{:.3}\t{:.3}\t{:.0}\t{:.1}",
+        vcf_basename, n, 1, open_s, preload_s, compute_s, total_s, vps, rss
     )
     .unwrap();
     rw.flush().unwrap();
 
     eprintln!(
-        "[rust_serial] n={} workers=1 open={:.2}s preload={:.2}s compute={:.2}s total={:.2}s  {:.0} v/s  (wrote {})",
-        n, open_s, preload_s, compute_s, total_s, vps, variants_tsv
+        "[rust_serial] n={} workers=1 open={:.2}s preload={:.2}s compute={:.2}s total={:.2}s  {:.0} v/s  rss={:.1} MB  (wrote {})",
+        n, open_s, preload_s, compute_s, total_s, vps, rss, variants_tsv
     );
 }
