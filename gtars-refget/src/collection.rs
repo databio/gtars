@@ -102,13 +102,15 @@ impl SequenceRecordExt for SequenceRecord {
         use std::fs::{self, File};
         use std::io::Write;
 
-        let data = match self {
+        let data: &[u8] = match self {
             SequenceRecord::Stub(_) => {
                 return Err(anyhow::anyhow!(
                     "Cannot write file: sequence data not loaded"
                 ));
             }
-            SequenceRecord::Full { sequence, .. } => sequence,
+            SequenceRecord::Full { sequence, .. } => sequence.as_slice(),
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { mmap, .. } => &mmap[..],
         };
 
         // Create parent directories if they don't exist
