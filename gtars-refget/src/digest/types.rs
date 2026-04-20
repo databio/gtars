@@ -8,9 +8,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::PathBuf;
+#[cfg(feature = "filesystem")]
+use std::sync::Arc;
 
 use super::algorithms::{canonicalize_json, md5, sha512t24u};
 use super::alphabet::{AlphabetType, guess_alphabet};
+
+#[cfg(feature = "filesystem")]
+use memmap2::Mmap;
 
 /// Metadata for a single sequence, including its name, length, digests, and alphabet type.
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -64,6 +69,16 @@ pub enum SequenceRecord {
         metadata: SequenceMetadata,
         sequence: Vec<u8>,
     },
+    /// Decoded sequence bytes backed by a file-backed mmap.
+    /// The mmap shares physical pages across all processes that have opened
+    /// this store and called `ensure_decoded` for this digest. Immutable:
+    /// the `.bin` file is written once and never modified.
+    #[cfg(feature = "filesystem")]
+    Mmap {
+        metadata: SequenceMetadata,
+        mmap: Arc<Mmap>,
+        path: PathBuf,
+    },
 }
 
 impl SequenceRecord {
@@ -72,6 +87,8 @@ impl SequenceRecord {
         match self {
             SequenceRecord::Stub(meta) => meta,
             SequenceRecord::Full { metadata, .. } => metadata,
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, .. } => metadata,
         }
     }
 
@@ -80,42 +97,63 @@ impl SequenceRecord {
         match self {
             SequenceRecord::Stub(_) => None,
             SequenceRecord::Full { sequence, .. } => Some(sequence),
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { mmap, .. } => Some(&mmap[..]),
         }
     }
 
-    /// Check if sequence data is loaded (Full) or just metadata (Stub).
+    /// Check if sequence data is loaded (Full or Mmap) or just metadata (Stub).
     pub fn is_loaded(&self) -> bool {
-        matches!(self, SequenceRecord::Full { .. })
+        match self {
+            SequenceRecord::Stub(_) => false,
+            SequenceRecord::Full { .. } => true,
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { .. } => true,
+        }
     }
 
-    /// Load data into a Stub record, or replace data in a Full record (takes ownership)
+    /// Load data into a Stub/Full record, converting to Full (takes ownership).
+    /// Discards any existing Mmap — the new bytes supersede.
     pub fn with_data(self, sequence: Vec<u8>) -> Self {
         let metadata = match self {
             SequenceRecord::Stub(m) => m,
             SequenceRecord::Full { metadata, .. } => metadata,
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, .. } => metadata,
         };
         SequenceRecord::Full { metadata, sequence }
     }
 
     /// Load data into a Stub record in-place, converting it to Full.
-    /// If already Full, replaces the existing sequence data.
-    ///
-    /// This is more efficient than `with_data()` when you have a mutable reference,
-    /// as it avoids cloning the metadata.
+    /// If already Full, replaces the existing sequence data. If Mmap, replaces with Full.
     pub fn load_data(&mut self, sequence: Vec<u8>) {
         match self {
             SequenceRecord::Stub(metadata) => {
-                // Take ownership of metadata without cloning
                 let metadata = std::mem::take(metadata);
                 *self = SequenceRecord::Full { metadata, sequence };
             }
             SequenceRecord::Full {
                 sequence: existing, ..
             } => {
-                // Just replace the sequence data
                 *existing = sequence;
             }
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, .. } => {
+                let metadata = std::mem::take(metadata);
+                *self = SequenceRecord::Full { metadata, sequence };
+            }
         }
+    }
+
+    /// Install an mmap-backed decoded payload, overwriting whatever state the record was in.
+    #[cfg(feature = "filesystem")]
+    pub fn load_mmap(&mut self, mmap: Arc<Mmap>, path: PathBuf) {
+        let metadata = match self {
+            SequenceRecord::Stub(m) => std::mem::take(m),
+            SequenceRecord::Full { metadata, .. } => std::mem::take(metadata),
+            SequenceRecord::Mmap { metadata, .. } => std::mem::take(metadata),
+        };
+        *self = SequenceRecord::Mmap { metadata, mmap, path };
     }
 
     /// Decodes the sequence data to a string.
@@ -134,14 +172,19 @@ impl SequenceRecord {
         use super::alphabet::lookup_alphabet;
         use super::encoder::decode_substring_from_bytes;
 
-        let (metadata, data) = match self {
+        let (metadata, data): (&SequenceMetadata, &[u8]) = match self {
             SequenceRecord::Stub(_) => return None,
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { mmap, .. } => {
+                // Mmap variant always stores decoded raw UTF-8 bytes.
+                return String::from_utf8(mmap[..].to_vec()).ok();
+            }
         };
 
         // For ASCII alphabet (8 bits per symbol), the data is always stored raw
         if metadata.alphabet == AlphabetType::Ascii {
-            return String::from_utf8(data.clone()).ok();
+            return String::from_utf8(data.to_vec()).ok();
         }
 
         // Try to detect if data is raw or encoded
@@ -152,7 +195,7 @@ impl SequenceRecord {
         // If data size matches the expected length (not the encoded size), it's probably raw
         if data.len() == metadata.length {
             // Try to decode as UTF-8
-            if let Ok(raw_string) = String::from_utf8(data.clone()) {
+            if let Ok(raw_string) = String::from_utf8(data.to_vec()) {
                 // Data appears to be raw UTF-8
                 return Some(raw_string);
             }

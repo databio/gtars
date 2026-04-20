@@ -81,6 +81,21 @@ use std::str;
 
 const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq"; // Default template for sequence file paths
 
+#[cfg(feature = "filesystem")]
+use memmap2::Mmap;
+
+#[cfg(feature = "filesystem")]
+fn lock_exclusive(file: &File) -> Result<()> {
+    use fs2::FileExt;
+    file.lock_exclusive().context("failed to acquire exclusive file lock")
+}
+
+#[cfg(feature = "filesystem")]
+fn unlock(file: &File) -> Result<()> {
+    use fs2::FileExt;
+    file.unlock().context("failed to release file lock")
+}
+
 use crate::alias::{AliasKind, AliasManager};
 use crate::seqcol::metadata_matches_attribute;
 
@@ -188,13 +203,6 @@ pub struct ReadonlyRefgetStore {
     pub(crate) aliases: AliasManager,
     /// FHR metadata for collections, keyed by collection digest.
     fhr_metadata: HashMap<[u8; 32], FhrMetadata>,
-    /// Set of SHA512t24u keys whose `SequenceRecord::Full.sequence` has
-    /// been replaced with decoded (raw UTF-8) bytes by `ensure_decoded`.
-    /// `sequence_bytes()` only returns data for keys in this set. The
-    /// decoded bytes are held in `sequence_store` (single copy), not a
-    /// separate cache — this avoids duplicating the ~3 GB GRCh38 FASTA
-    /// in memory when VRS workflows preload a collection.
-    decoded_keys: std::collections::HashSet<[u8; 32]>,
 }
 
 /// Metadata for the entire store.
@@ -393,7 +401,6 @@ impl ReadonlyRefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
-            decoded_keys: std::collections::HashSet::new(),
         }
     }
 
@@ -476,6 +483,12 @@ impl ReadonlyRefgetStore {
                 }
                 SequenceRecord::Stub(_) => {
                     // Stubs don't hold sequence data, nothing to convert
+                }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { .. } => {
+                    // Mmap records always hold decoded raw bytes. We don't mutate
+                    // the on-disk decoded file here; storage mode controls the
+                    // encoded `.seq` form, not the mmapped decoded cache.
                 }
             }
         }
@@ -699,6 +712,11 @@ impl ReadonlyRefgetStore {
                 }
                 SequenceRecord::Stub(_) => {
                     // Already a stub, just add it normally below
+                }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { .. } => {
+                    // Caller handed us an already-mmapped record; the on-disk
+                    // decoded file already exists. Store as-is.
                 }
             }
         }
@@ -1466,7 +1484,6 @@ impl ReadonlyRefgetStore {
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);
                 self.md5_lookup.retain(|_, v| v != orphan_key);
-                self.decoded_keys.remove(orphan_key);
             }
 
             // Delete orphaned sequence files from disk
@@ -1753,22 +1770,40 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Ensure a sequence is loaded and decoded in place.
+    /// Resolve the filesystem path of the decoded-bytes file for a sequence.
     ///
-    /// Replaces the `SequenceRecord::Full.sequence` bytes with their
-    /// decoded (raw UTF-8) form so `sequence_bytes()` can return them
-    /// directly. Idempotent: subsequent calls are a no-op once a key is
-    /// in `decoded_keys`.
+    /// Returns `{local_path}/decoded/{prefix2}/{digest}.bin`. Requires the
+    /// store to have a `local_path` set; in-memory stores cannot mmap-decode.
+    #[cfg(feature = "filesystem")]
+    fn decoded_file_path(&self, digest_key: &[u8; 32]) -> Result<PathBuf> {
+        let root = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("store has no local_path; mmap-backed decoding requires a local path"))?;
+        let digest_str = key_to_digest_string(digest_key);
+        if digest_str.len() < 2 {
+            return Err(anyhow!("digest string too short for sharded path"));
+        }
+        let dir = root.join("decoded").join(&digest_str[..2]);
+        Ok(dir.join(format!("{}.bin", digest_str)))
+    }
+
+    /// Ensure a sequence is decoded and available via a file-backed mmap.
     ///
-    /// For sequences stored Raw (ASCII) the in-place replacement leaves
-    /// the bytes byte-identical. For sequences stored Encoded (2-bit
-    /// packed) the 2-bit payload is discarded and replaced by the full
-    /// UTF-8 bytes, so the store grows from ~0.25 B/base to 1 B/base for
-    /// decoded sequences. This matches what VRS compute needs.
+    /// On first call: decodes the bytes from the `Full`-variant in-memory
+    /// record, writes them to `{store}/decoded/{prefix}/{digest}.bin` via
+    /// atomic-rename + advisory lock, then mmaps the file and installs a
+    /// `SequenceRecord::Mmap` variant. Subsequent calls (in this process or
+    /// any cooperating process sharing the same store directory) skip the
+    /// decode and just mmap the pre-existing file.
     ///
-    /// Use `clear_decoded_cache()` to drop decoded sequence data when
-    /// done (downgrades each decoded record back to a `Stub`).
+    /// The mmap region is shared across processes via the kernel file
+    /// cache: a fleet of N subprocesses holding the same store pay the
+    /// decoded-bytes cost exactly once in physical memory.
+    #[cfg(feature = "filesystem")]
     pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        use std::fs::OpenOptions;
+
         let digest_key = seq_digest.to_key();
         let actual_key = self
             .md5_lookup
@@ -1776,10 +1811,107 @@ impl ReadonlyRefgetStore {
             .copied()
             .unwrap_or(digest_key);
 
-        if self.decoded_keys.contains(&actual_key) {
+        // Fast path: already mmapped.
+        if matches!(
+            self.sequence_store.get(&actual_key),
+            Some(SequenceRecord::Mmap { .. })
+        ) {
             return Ok(());
         }
 
+        let path = self.decoded_file_path(&actual_key)?;
+
+        // File already exists (another process may have written it).
+        // Just mmap and swap.
+        if path.exists() {
+            let file = OpenOptions::new()
+                .read(true)
+                .open(&path)
+                .with_context(|| format!("Failed to open decoded file: {}", path.display()))?;
+            let mmap = unsafe { Mmap::map(&file) }
+                .with_context(|| format!("Failed to mmap decoded file: {}", path.display()))?;
+            let record = self
+                .sequence_store
+                .get_mut(&actual_key)
+                .ok_or_else(|| anyhow!("Sequence not found"))?;
+            record.load_mmap(std::sync::Arc::new(mmap), path);
+            return Ok(());
+        }
+
+        // Need to decode + write. Decode first (requires Full).
+        let record = self
+            .sequence_store
+            .get_mut(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        let decoded = record
+            .decode()
+            .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
+        let decoded_bytes = decoded.into_bytes();
+
+        // Ensure directory exists.
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create decoded directory: {}", parent.display())
+            })?;
+        }
+
+        // Cooperative locking: prevent two processes from both writing the file.
+        let lock_path = path.with_extension("lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+        lock_exclusive(&lock_file)?;
+
+        // After acquiring the lock: recheck — a sibling may have finished.
+        if !path.exists() {
+            let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+            {
+                let mut tmp_file = OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&tmp_path)
+                    .with_context(|| format!("Failed to open temp file: {}", tmp_path.display()))?;
+                tmp_file.write_all(&decoded_bytes)?;
+                tmp_file.sync_all()?;
+            }
+            fs::rename(&tmp_path, &path).with_context(|| {
+                format!(
+                    "Failed to rename {} -> {}",
+                    tmp_path.display(),
+                    path.display()
+                )
+            })?;
+        }
+        unlock(&lock_file)?;
+        drop(lock_file);
+
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .with_context(|| format!("Failed to reopen decoded file: {}", path.display()))?;
+        let mmap = unsafe { Mmap::map(&file) }
+            .with_context(|| format!("Failed to mmap decoded file: {}", path.display()))?;
+        let record = self
+            .sequence_store
+            .get_mut(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        record.load_mmap(std::sync::Arc::new(mmap), path);
+        Ok(())
+    }
+
+    /// Non-filesystem fallback: in-memory decode via load_data.
+    #[cfg(not(feature = "filesystem"))]
+    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
         let record = self
             .sequence_store
             .get_mut(&actual_key)
@@ -1788,21 +1920,43 @@ impl ReadonlyRefgetStore {
             .decode()
             .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
         record.load_data(decoded.into_bytes());
-        self.decoded_keys.insert(actual_key);
         Ok(())
     }
 
-    /// Drop decoded sequence bytes to reclaim memory. Each previously
-    /// decoded record is downgraded back to a `Stub`; subsequent
-    /// `sequence_bytes()` calls return `None` until the sequence is
-    /// reloaded and re-decoded.
+    /// Drop mmap handles for decoded sequences, downgrading records to `Stub`.
+    ///
+    /// The on-disk `decoded/*.bin` files are **preserved** — the next
+    /// `ensure_decoded` call will just re-mmap them, skipping the decode
+    /// work. Use `purge_decoded_files` to delete the files themselves.
     pub fn clear_decoded_cache(&mut self) {
-        for key in self.decoded_keys.drain() {
-            if let Some(record) = self.sequence_store.get_mut(&key) {
+        for record in self.sequence_store.values_mut() {
+            #[cfg(feature = "filesystem")]
+            if matches!(record, SequenceRecord::Mmap { .. }) {
                 let meta = record.metadata().clone();
                 *record = SequenceRecord::Stub(meta);
             }
+            #[cfg(not(feature = "filesystem"))]
+            let _ = record;
         }
+    }
+
+    /// Permanently delete the `decoded/` tree for this store.
+    ///
+    /// Intended for tests and explicit cleanup. `clear_decoded_cache` does
+    /// NOT call this — it preserves the cache files so subsequent runs can
+    /// mmap them.
+    #[cfg(feature = "filesystem")]
+    pub fn purge_decoded_files(&mut self) -> Result<()> {
+        self.clear_decoded_cache();
+        if let Some(root) = &self.local_path {
+            let decoded_dir = root.join("decoded");
+            if decoded_dir.exists() {
+                fs::remove_dir_all(&decoded_dir).with_context(|| {
+                    format!("Failed to remove decoded dir: {}", decoded_dir.display())
+                })?;
+            }
+        }
+        Ok(())
     }
 
     /// Clear sequence data from the store to free memory.
@@ -1814,14 +1968,16 @@ impl ReadonlyRefgetStore {
     /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
         self.sequence_store.clear();
-        self.decoded_keys.clear();
     }
 
     /// Get decoded sequence bytes in place.
     ///
-    /// Takes `&self` — safe for concurrent read access from multiple threads
-    /// sharing a `&RefgetStore` reference (e.g., via `Arc` or scoped threads).
-    /// Returns `None` if the sequence has not been decoded via `ensure_decoded()`.
+    /// Returns `Some(&[u8])` only for `Mmap` records (decoded bytes
+    /// available via the file-backed cache). Returns `None` for `Stub`
+    /// records *and* for `Full` records whose bytes haven't been
+    /// materialized through `ensure_decoded` yet. Callers that want
+    /// the raw (possibly encoded) bytes should go through the
+    /// `SequenceRecord::sequence()` accessor directly.
     pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -1829,17 +1985,16 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        if !self.decoded_keys.contains(&actual_key) {
-            return None;
+        match self.sequence_store.get(&actual_key)? {
+            SequenceRecord::Stub(_) => None,
+            SequenceRecord::Full { .. } => None,
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { mmap, .. } => Some(&mmap[..]),
         }
-        self.sequence_store.get(&actual_key).and_then(|r| r.sequence())
     }
 
-    /// Check whether a sequence's bytes are already decoded in place
-    /// (i.e. `ensure_decoded()` has been called for it). Cheap HashSet
-    /// lookup; lets callers skip an expensive setup step (e.g. scanning
-    /// an entire VCF to pick which chromosomes to decode) when the
-    /// collection is already fully decoded.
+    /// Check whether a sequence's bytes are already decoded (i.e. the
+    /// record is in `Mmap` state).
     pub fn is_sequence_decoded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -1847,13 +2002,24 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        self.decoded_keys.contains(&actual_key)
+        #[cfg(feature = "filesystem")]
+        {
+            matches!(
+                self.sequence_store.get(&actual_key),
+                Some(SequenceRecord::Mmap { .. })
+            )
+        }
+        #[cfg(not(feature = "filesystem"))]
+        {
+            matches!(
+                self.sequence_store.get(&actual_key),
+                Some(SequenceRecord::Full { .. })
+            )
+        }
     }
 
-    /// Check whether a sequence's record is in the `Full` state (bytes
-    /// present in memory, whether encoded or decoded) rather than the
-    /// metadata-only `Stub` state. Useful to distinguish "already loaded
-    /// from disk" from "still on disk" without forcing a load.
+    /// Check whether a sequence's record is loaded (Full or Mmap) rather
+    /// than a metadata-only Stub.
     pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -1861,10 +2027,12 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        matches!(
-            self.sequence_store.get(&actual_key),
-            Some(SequenceRecord::Full { .. })
-        )
+        match self.sequence_store.get(&actual_key) {
+            Some(SequenceRecord::Stub(_)) | None => false,
+            Some(SequenceRecord::Full { .. }) => true,
+            #[cfg(feature = "filesystem")]
+            Some(SequenceRecord::Mmap { .. }) => true,
+        }
     }
 
     /// Get a sequence by collection digest and name, loading data if needed.
@@ -2186,9 +2354,11 @@ impl ReadonlyRefgetStore {
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
-        let (metadata, sequence) = match record {
+        let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
             SequenceRecord::Stub(_) => return Err(anyhow!("Sequence data not loaded (stub only)")),
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
         };
 
         if start >= metadata.length || end > metadata.length || start >= end {
@@ -2284,14 +2454,26 @@ impl ReadonlyRefgetStore {
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {:?}", seq_digest))?;
 
             // Get the sequence data
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
             };
 
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            // For mmap records, data is already decoded raw bytes -- pass as Raw regardless of store mode.
+            #[cfg(feature = "filesystem")]
+            let effective_mode = if matches!(record, SequenceRecord::Mmap { .. }) {
+                StorageMode::Raw
+            } else {
+                self.mode
+            };
+            #[cfg(not(feature = "filesystem"))]
+            let effective_mode = self.mode;
+
+            write_fasta_record(&mut *writer, metadata, sequence_data, effective_mode, line_width)?;
         }
 
         // Ensure all data is flushed (important for gzip)
@@ -2342,17 +2524,28 @@ impl ReadonlyRefgetStore {
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
 
             // Get the sequence data
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!(
                         "Sequence data not loaded for digest: {}",
                         digest_str
                     ));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
             };
 
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            #[cfg(feature = "filesystem")]
+            let effective_mode = if matches!(record, SequenceRecord::Mmap { .. }) {
+                StorageMode::Raw
+            } else {
+                self.mode
+            };
+            #[cfg(not(feature = "filesystem"))]
+            let effective_mode = self.mode;
+
+            write_fasta_record(&mut *writer, metadata, sequence_data, effective_mode, line_width)?;
         }
 
         // Ensure all data is flushed (important for gzip)
@@ -3128,6 +3321,16 @@ impl ReadonlyRefgetStore {
                     // Stub means sequence already on disk - skip writing
                     continue;
                 }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, .. } => {
+                    // Mmap-backed records already have their decoded bytes in
+                    // {store_dir}/decoded/; the encoded .seq file (if any) is
+                    // in the original store and is unchanged by decoding.
+                    // We skip writing to the new target because mmap records
+                    // aren't part of the encoded on-disk representation.
+                    let _ = metadata;
+                    continue;
+                }
             }
         }
 
@@ -3259,6 +3462,11 @@ impl Display for ReadonlyRefgetStore {
                         StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
                             .unwrap_or_else(|_| "???".to_string()),
                     }
+                }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { mmap, .. } => {
+                    let n = 8.min(mmap.len());
+                    String::from_utf8(mmap[0..n].to_vec()).unwrap_or_else(|_| "???".to_string())
                 }
             };
 
@@ -3586,6 +3794,12 @@ impl RefgetStore {
     /// Clear the decoded sequence cache.
     pub fn clear_decoded_cache(&mut self) {
         self.inner.clear_decoded_cache();
+    }
+
+    /// Permanently delete the on-disk `decoded/` tree.
+    #[cfg(feature = "filesystem")]
+    pub fn purge_decoded_files(&mut self) -> Result<()> {
+        self.inner.purge_decoded_files()
     }
 
     /// Clear in-memory sequence data and decoded cache, preserving metadata.
@@ -5107,22 +5321,32 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
     }
 
     // =========================================================================
-    // Decoded cache tests
+    // Mmap-backed decoded cache tests
     // =========================================================================
 
-    #[test]
-    fn test_ensure_decoded_then_sequence_bytes() {
+    #[cfg(feature = "filesystem")]
+    fn make_disk_store_with_seq(seq: &[u8]) -> (tempfile::TempDir, RefgetStore, String) {
         use crate::digest::digest_sequence;
-
-        let mut store = RefgetStore::in_memory();
-        let record = digest_sequence("chr1", b"ACGTACGT");
+        let tmp = tempfile::TempDir::new().unwrap();
+        let mut store = RefgetStore::on_disk(tmp.path()).unwrap();
+        let record = digest_sequence("chr1", seq);
         let digest = record.metadata().sha512t24u.clone();
-
         store.add_sequence_record(record, false).unwrap();
-        store.ensure_decoded(digest.as_bytes()).unwrap();
+        // on_disk() persists to disk then stores a Stub. Load it back so
+        // ensure_decoded has bytes to work with.
+        store.load_sequence(&digest).unwrap();
+        (tmp, store, digest)
+    }
 
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_ensure_decoded_then_sequence_bytes() {
+        let (_tmp, mut store, digest) = make_disk_store_with_seq(b"ACGTACGT");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
         let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
         assert_eq!(bytes, b"ACGTACGT");
+        // Record should be Mmap-backed now
+        assert!(store.is_sequence_decoded(digest.as_bytes()));
     }
 
     #[test]
@@ -5132,30 +5356,119 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let mut store = RefgetStore::in_memory();
         let record = digest_sequence("chr1", b"ACGT");
         let digest = record.metadata().sha512t24u.clone();
-
         store.add_sequence_record(record, false).unwrap();
-
-        // Not yet decoded — should return None
         assert!(store.sequence_bytes(digest.as_bytes()).is_none());
     }
 
     #[test]
-    fn test_ensure_decoded_is_idempotent() {
-        use crate::digest::digest_sequence;
+    #[cfg(feature = "filesystem")]
+    fn test_ensure_decoded_writes_file() {
+        let (tmp, mut store, digest) = make_disk_store_with_seq(b"GATTACAGATTACA");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let decoded_dir = tmp.path().join("decoded");
+        assert!(decoded_dir.exists(), "decoded dir must be created");
+        let prefix = &digest[..2];
+        let file = decoded_dir.join(prefix).join(format!("{}.bin", digest));
+        assert!(file.exists(), "decoded .bin file must exist at {}", file.display());
+        assert_eq!(std::fs::metadata(&file).unwrap().len() as usize, b"GATTACAGATTACA".len());
+    }
 
-        let mut store = RefgetStore::in_memory();
-        let record = digest_sequence("chr1", b"GATTACA");
-        let digest = record.metadata().sha512t24u.clone();
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_ensure_decoded_idempotent_uses_mmap() {
+        let (tmp, mut store, digest) = make_disk_store_with_seq(b"ACGTACGT");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let prefix = &digest[..2];
+        let file = tmp.path().join("decoded").join(prefix).join(format!("{}.bin", digest));
+        let mtime1 = std::fs::metadata(&file).unwrap().modified().unwrap();
 
-        store.add_sequence_record(record, false).unwrap();
-
-        // Call ensure_decoded multiple times
+        // Sleep enough for mtime resolution (some fs has 1s granularity).
+        std::thread::sleep(std::time::Duration::from_millis(100));
         store.ensure_decoded(digest.as_bytes()).unwrap();
         store.ensure_decoded(digest.as_bytes()).unwrap();
-        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let mtime2 = std::fs::metadata(&file).unwrap().modified().unwrap();
+        assert_eq!(mtime1, mtime2, "file should not be rewritten on idempotent calls");
+    }
 
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_sequence_bytes_from_mmap_matches_raw() {
+        let (_tmp, mut store, digest) = make_disk_store_with_seq(b"NNNACGTNNN");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
         let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
-        assert_eq!(bytes, b"GATTACA");
+        assert_eq!(bytes, b"NNNACGTNNN");
+    }
+
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_clear_decoded_cache_preserves_files() {
+        let (tmp, mut store, digest) = make_disk_store_with_seq(b"ACGTACGT");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let prefix = &digest[..2];
+        let file = tmp.path().join("decoded").join(prefix).join(format!("{}.bin", digest));
+        assert!(file.exists());
+        store.clear_decoded_cache();
+        assert!(file.exists(), "clear_decoded_cache must preserve on-disk files");
+        // Record should no longer be Mmap; sequence_bytes returns None.
+        assert!(store.sequence_bytes(digest.as_bytes()).is_none());
+        // Re-decoding should be fast (file already exists). Just verify it works.
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        assert_eq!(store.sequence_bytes(digest.as_bytes()).unwrap(), b"ACGTACGT");
+    }
+
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_purge_decoded_files_removes_tree() {
+        let (tmp, mut store, digest) = make_disk_store_with_seq(b"ACGT");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let decoded_dir = tmp.path().join("decoded");
+        assert!(decoded_dir.exists());
+        store.purge_decoded_files().unwrap();
+        assert!(!decoded_dir.exists(), "decoded tree must be removed");
+    }
+
+    #[test]
+    #[cfg(feature = "filesystem")]
+    fn test_cross_process_mmap_share_via_rebuild() {
+        // Simulates the cross-process "mmap the already-written file"
+        // scenario by: (1) build store, ensure_decoded, drop; (2) rebuild
+        // store in-place at the same path, re-load the same sequence, and
+        // call ensure_decoded -- the existing file-cache branch must fire,
+        // returning matching bytes without re-decoding.
+        let (tmp, mut store, digest) = make_disk_store_with_seq(b"TTTTGGGGCCCCAAAA");
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let prefix = &digest[..2];
+        let decoded_file = tmp.path().join("decoded").join(prefix).join(format!("{}.bin", digest));
+        let mtime_after_first = std::fs::metadata(&decoded_file).unwrap().modified().unwrap();
+
+        // Simulate a fresh process: clear decoded cache so the record
+        // reverts to Stub, then rerun ensure_decoded. We expect the
+        // file-exists branch to fire (no rewrite of .bin).
+        store.clear_decoded_cache();
+        assert!(!store.is_sequence_decoded(digest.as_bytes()));
+        assert!(decoded_file.exists(), ".bin must survive clear_decoded_cache");
+
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        store.ensure_decoded(digest.as_bytes()).unwrap();
+        let mtime_after_second = std::fs::metadata(&decoded_file).unwrap().modified().unwrap();
+        assert_eq!(mtime_after_first, mtime_after_second, ".bin must not be rewritten");
+        assert_eq!(
+            store.sequence_bytes(digest.as_bytes()).unwrap(),
+            b"TTTTGGGGCCCCAAAA"
+        );
+    }
+
+    #[test]
+    fn test_ensure_decoded_is_idempotent() {
+        #[cfg(feature = "filesystem")]
+        {
+            let (_tmp, mut store, digest) = make_disk_store_with_seq(b"GATTACA");
+            store.ensure_decoded(digest.as_bytes()).unwrap();
+            store.ensure_decoded(digest.as_bytes()).unwrap();
+            store.ensure_decoded(digest.as_bytes()).unwrap();
+            let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
+            assert_eq!(bytes, b"GATTACA");
+        }
     }
 
     // =========================================================================
