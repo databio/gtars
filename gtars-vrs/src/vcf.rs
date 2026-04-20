@@ -12,33 +12,17 @@ use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 
-use arrayvec::ArrayString;
-use compact_str::CompactString;
-
 use crate::digest::DigestWriter;
 use crate::normalize::normalize;
 
 /// Result of computing a VRS identifier for a single VCF variant.
-///
-/// Fields use short-string-optimized types so emitted results do not
-/// heap-allocate. On the gnomAD chr22 workload (~11.6M emitted results)
-/// this saves ~46M small `String` allocations relative to using `String`
-/// for every field.
-///
-/// - `chrom`: `CompactString` — SSO inline up to 24 bytes. Chromosome
-///   names (`chr1`..`chrY`, 4-5 bytes) always inline.
-/// - `ref_allele` / `alt_allele`: `CompactString` — SSO inline up to 24
-///   bytes. ~99% SNVs (1 byte), remainder short indels. Inlines in all
-///   realistic cases; allocations only for pathological inputs.
-/// - `vrs_id`: `ArrayString<48>` — fixed-length 41-byte `ga4gh:VA.<32-byte
-///   base64url digest>`. Stack-allocated; no heap touch.
 #[derive(Debug, Clone)]
 pub struct VrsResult {
-    pub chrom: CompactString,
+    pub chrom: String,
     pub pos: u64,
-    pub ref_allele: CompactString,
-    pub alt_allele: CompactString,
-    pub vrs_id: ArrayString<48>,
+    pub ref_allele: String,
+    pub alt_allele: String,
+    pub vrs_id: String,
 }
 
 /// Peek the first 18 bytes to determine if a gzip-framed file is actually BGZF.
@@ -197,10 +181,10 @@ pub fn compute_vrs_ids_streaming(
                 digest_writer.allele_identifier_literal(seq_accession, norm.start, norm.end, norm_seq);
 
             on_result(VrsResult {
-                chrom: CompactString::from(chrom),
+                chrom: chrom.to_string(),
                 pos,
-                ref_allele: CompactString::from(ref_allele),
-                alt_allele: CompactString::from(alt),
+                ref_allele: ref_allele.to_string(),
+                alt_allele: alt.to_string(),
                 vrs_id,
             });
             count += 1;
@@ -282,10 +266,10 @@ pub fn compute_vrs_ids_streaming_readonly(
                 digest_writer.allele_identifier_literal(seq_accession, norm.start, norm.end, norm_seq);
 
             on_result(VrsResult {
-                chrom: CompactString::from(chrom),
+                chrom: chrom.to_string(),
                 pos,
-                ref_allele: CompactString::from(ref_allele),
-                alt_allele: CompactString::from(alt),
+                ref_allele: ref_allele.to_string(),
+                alt_allele: alt.to_string(),
                 vrs_id,
             });
             count += 1;
@@ -527,10 +511,10 @@ pub fn compute_vrs_ids_parallel_with_sink<F: FnMut(VrsResult)>(
                                 norm_seq,
                             );
                             out.push(Ok(VrsResult {
-                                chrom: CompactString::from(chrom),
+                                chrom: chrom.to_string(),
                                 pos,
-                                ref_allele: CompactString::from(ref_allele),
-                                alt_allele: CompactString::from(alt),
+                                ref_allele: ref_allele.to_string(),
+                                alt_allele: alt.to_string(),
                                 vrs_id,
                             }));
                         }
@@ -820,10 +804,10 @@ fn process_vcf_line_bytes(
             norm_seq,
         );
         out.push(Ok(VrsResult {
-            chrom: CompactString::from(chrom),
+            chrom: chrom.to_string(),
             pos,
-            ref_allele: CompactString::from(ref_str),
-            alt_allele: CompactString::from(alt),
+            ref_allele: ref_str.to_string(),
+            alt_allele: alt.to_string(),
             vrs_id,
         }));
     }
