@@ -36,3 +36,4 @@ tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }
 [dev-dependencies]
 tempfile = "3.8.1"
 serde_yaml = "0.9"
+memmap2 = "0.9"
