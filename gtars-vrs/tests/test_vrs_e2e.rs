@@ -3,7 +3,7 @@
 use std::io::Write;
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore};
-use gtars_vrs::vcf::compute_vrs_ids_from_vcf;
+use gtars_vrs::vcf::{compute_vrs_ids_from_vcf, unique_chroms_from_vcf};
 use tempfile::tempdir;
 
 /// Create a test FASTA with a known sequence and a matching VCF with variants.
@@ -110,4 +110,54 @@ fn test_vcf_to_vrs_ids_end_to_end() {
     assert_eq!(multi_a.alt_allele, "A");
     assert_eq!(multi_t.alt_allele, "T");
     assert_ne!(multi_a.vrs_id, multi_t.vrs_id);
+}
+
+/// Regression test for unique_chroms_from_vcf: validates that it correctly
+/// returns all unique chromosomes from a multi-chromosome VCF.
+///
+/// This test protects against the line buffer accumulation bug described in:
+/// https://github.com/databio/gtars/issues/..._
+/// If the string buffer passed to read_line is not cleared between iterations,
+/// read_line appends to the existing buffer, causing split_once('\t') to always
+/// return the first chromosome encountered instead of extracting from each line.
+#[test]
+fn test_unique_chroms_from_vcf_multi_chrom_correctness() {
+    let dir = tempdir().unwrap();
+
+    // Create a VCF with at least 3 different chromosomes
+    let vcf_path = dir.path().join("multi_chrom.vcf");
+    {
+        let mut f = std::fs::File::create(&vcf_path).unwrap();
+        writeln!(f, "##fileformat=VCFv4.2").unwrap();
+        writeln!(f, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO").unwrap();
+        // Variants on chr1
+        writeln!(f, "chr1\t5\t.\tA\tT\t.\tPASS\t.").unwrap();
+        writeln!(f, "chr1\t10\t.\tG\tC\t.\tPASS\t.").unwrap();
+        // Variants on chr2
+        writeln!(f, "chr2\t15\t.\tT\tA\t.\tPASS\t.").unwrap();
+        // Variants on chr3
+        writeln!(f, "chr3\t20\t.\tC\tG\t.\tPASS\t.").unwrap();
+        writeln!(f, "chr3\t25\t.\tG\tA\t.\tPASS\t.").unwrap();
+    }
+
+    // Call unique_chroms_from_vcf
+    let chroms = unique_chroms_from_vcf(vcf_path.to_str().unwrap()).unwrap();
+
+    // Sort for deterministic comparison
+    let mut chroms = chroms;
+    chroms.sort();
+
+    // Should contain all 3 chromosomes
+    assert_eq!(
+        chroms.len(),
+        3,
+        "Expected exactly 3 unique chromosomes, got {}. Chroms: {:?}",
+        chroms.len(),
+        chroms
+    );
+
+    // Verify the expected chromosomes are present
+    assert_eq!(chroms[0], "chr1");
+    assert_eq!(chroms[1], "chr2");
+    assert_eq!(chroms[2], "chr3");
 }

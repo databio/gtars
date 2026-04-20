@@ -92,6 +92,8 @@ fn build_name_to_digest(
 
 /// Read the next non-empty line from a VCF reader. Returns false at EOF.
 fn read_vcf_line(reader: &mut dyn BufRead, buf: &mut String) -> Result<bool> {
+    // IMPORTANT: clear before read_line, which appends to the buffer.
+    // Without this, callers accumulate all previous lines and parsing breaks.
     buf.clear();
     match reader.read_line(buf) {
         Ok(0) => Ok(false),
@@ -432,92 +434,14 @@ pub fn compute_vrs_ids_parallel_with_sink<F: FnMut(VrsResult)>(
                         Vec::with_capacity(line_batch.lines.len());
                     for raw in &line_batch.lines {
                         let line = raw.trim_end_matches('\n').trim_end_matches('\r');
-                        let fields: Vec<&str> = line.splitn(10, '\t').collect();
-                        if fields.len() < 5 {
-                            continue;
-                        }
-
-                        let chrom = fields[0];
-                        let pos: u64 = match fields[1].parse::<u64>() {
-                            Ok(p) => p.saturating_sub(1),
-                            Err(_) => {
-                                out.push(Err(anyhow::anyhow!(
-                                    "Invalid POS field at {}:{}",
-                                    chrom,
-                                    fields[1]
-                                )));
-                                continue;
-                            }
-                        };
-                        let ref_allele = fields[3];
-                        let alt_field = fields[4];
-
-                        let seq_accession = match chrom_accessions_ref.get(chrom) {
-                            Some(acc) => acc.as_str(),
-                            None => continue,
-                        };
-                        let raw_digest = match name_to_digest_ref.get(chrom) {
-                            Some(d) => d,
-                            None => continue,
-                        };
-                        let sequence = match store_ref.sequence_bytes(raw_digest.as_str()) {
-                            Some(b) => b,
-                            None => {
-                                out.push(Err(anyhow::anyhow!(
-                                    "Chromosome {} not decoded in store",
-                                    chrom
-                                )));
-                                continue;
-                            }
-                        };
-
-                        for alt in alt_field.split(',') {
-                            if alt.starts_with('<') || alt == "*" || alt == "." {
-                                continue;
-                            }
-                            let norm = match normalize(
-                                sequence,
-                                pos,
-                                ref_allele.as_bytes(),
-                                alt.as_bytes(),
-                            ) {
-                                Ok(n) => n,
-                                Err(e) => {
-                                    out.push(Err(anyhow::anyhow!(
-                                        "Failed to normalize variant at {}:{}: {}",
-                                        chrom,
-                                        pos + 1,
-                                        e
-                                    )));
-                                    continue;
-                                }
-                            };
-                            let norm_seq = match std::str::from_utf8(&norm.allele) {
-                                Ok(s) => s,
-                                Err(e) => {
-                                    out.push(Err(anyhow::anyhow!(
-                                        "Normalized allele is not valid UTF-8 at {}:{}: {}",
-                                        chrom,
-                                        pos + 1,
-                                        e
-                                    )));
-                                    continue;
-                                }
-                            };
-                            let vrs_id = digest_writer.allele_identifier_literal(
-                                seq_accession,
-                                norm.start,
-                                norm.end,
-                                norm_seq,
-                            );
-                            out.push(Ok(VrsResult {
-                                chrom: chrom.to_string(),
-                                pos,
-                                ref_allele: ref_allele.to_string(),
-                                alt_allele: alt.to_string(),
-                                vrs_id,
-                            }));
-                        }
+                        process_vcf_line_bytes(
+                            line.as_bytes(),
+                            store_ref,
+                            name_to_digest_ref,
+                            chrom_accessions_ref,
+                            &mut digest_writer,
+                            &mut out,
+                        );
                     }
                     if result_tx
                         .send(LineResultBatch {
@@ -1192,326 +1116,8 @@ fn append_tsv_line(buf: &mut Vec<u8>, r: &VrsResult) {
     buf.push(b'\n');
 }
 
-/// Per-batch TSV output from a parallel-TSV worker. `bytes` is a
-/// ready-to-write TSV chunk (lines already terminated with `\n`).
-/// Errors are collected separately so the collector can surface the
-/// first one without needing to touch `bytes`.
-struct LineResultTsvBatch {
-    batch_id: usize,
-    bytes: Vec<u8>,
-    errors: Vec<anyhow::Error>,
-}
-
-/// Per-block TSV output from a BGZF-TSV worker. Mirrors `BgzfBlockResult`
-/// but with pre-formatted TSV bytes instead of `Vec<Result<VrsResult>>`.
-/// The collector still needs the structured `boundary_results` field to
-/// handle the stitched cross-block line (worker can't format that line
-/// itself — it spans two blocks).
-struct BgzfBlockTsvResult {
-    batch_id: usize,
-    head_fragment: Vec<u8>,
-    tail_fragment: Vec<u8>,
-    bytes: Vec<u8>,
-    errors: Vec<anyhow::Error>,
-    had_newline: bool,
-}
-
-/// Compute VRS IDs via the BGZF-block parallel path and stream them
-/// directly to a TSV (chrom, pos, ref, alt, vrs_id). Returns the number
-/// of variants written. Requires BGZF input.
-///
-/// Unlike the `_with_sink` variant, formatting of TSV bytes happens on
-/// worker threads (in parallel), so the collector only reassembles the
-/// pre-formatted bytes in VCF order and writes them. This is critical
-/// for throughput on large VCFs (gnomAD chr22: ~500k v/s vs. ~180k v/s
-/// for the serial-format sink path).
-pub fn compute_vrs_ids_parallel_bgzf_to_tsv(
-    store: &ReadonlyRefgetStore,
-    name_to_digest: &HashMap<String, String>,
-    vcf_path: &str,
-    output_path: &str,
-    num_workers: usize,
-) -> Result<usize> {
-    use std::io::Write;
-    let mut file = File::open(vcf_path).context(format!("Failed to open VCF: {}", vcf_path))?;
-    if !is_bgzf(&mut file)? {
-        return Err(anyhow::anyhow!(
-            "compute_vrs_ids_parallel_bgzf_to_tsv requires BGZF input; use compute_vrs_ids_parallel_to_tsv for plain gzip"
-        ));
-    }
-
-    let num_workers = num_workers.max(1);
-    let chrom_accessions: HashMap<String, String> = name_to_digest
-        .iter()
-        .map(|(name, digest)| (name.clone(), format!("SQ.{}", digest)))
-        .collect();
-
-    let mut w = open_tsv_writer(output_path)?;
-
-    let count = std::thread::scope(|s| -> Result<usize> {
-        let (block_tx, block_rx) =
-            crossbeam_channel::bounded::<(usize, Vec<u8>)>(PARALLEL_CHANNEL_CAPACITY);
-        let (result_tx, result_rx) =
-            crossbeam_channel::bounded::<BgzfBlockTsvResult>(PARALLEL_CHANNEL_CAPACITY);
-
-        // Reader thread: raw block I/O only.
-        let reader_handle = s.spawn(move || -> Result<()> {
-            let mut reader = BufReader::with_capacity(1 << 20, file);
-            let mut batch_id: usize = 0;
-            loop {
-                match read_raw_bgzf_block(&mut reader)? {
-                    Some(block) => {
-                        if block_tx.send((batch_id, block)).is_err() {
-                            return Ok(());
-                        }
-                        batch_id += 1;
-                    }
-                    None => break,
-                }
-            }
-            Ok(())
-        });
-
-        // Workers: decompress + parse + normalize + digest + format-to-TSV.
-        let mut worker_handles = Vec::with_capacity(num_workers);
-        for _ in 0..num_workers {
-            let block_rx = block_rx.clone();
-            let result_tx = result_tx.clone();
-            let store_ref: &ReadonlyRefgetStore = store;
-            let name_to_digest_ref = name_to_digest;
-            let chrom_accessions_ref = &chrom_accessions;
-            let handle = s.spawn(move || {
-                let mut digest_writer = DigestWriter::new();
-                let mut scratch_results: Vec<Result<VrsResult>> = Vec::new();
-                while let Ok((batch_id, raw_block)) = block_rx.recv() {
-                    let br = process_bgzf_block(
-                        batch_id,
-                        &raw_block,
-                        store_ref,
-                        name_to_digest_ref,
-                        chrom_accessions_ref,
-                        &mut digest_writer,
-                    );
-                    // Reformat the block's structured results into TSV
-                    // bytes here (on the worker) so the collector never
-                    // has to do per-result formatting serially.
-                    let mut bytes: Vec<u8> = Vec::with_capacity(br.results.len() * 80);
-                    let mut errors: Vec<anyhow::Error> = Vec::new();
-                    scratch_results.clear();
-                    scratch_results.extend(br.results);
-                    for r in scratch_results.drain(..) {
-                        match r {
-                            Ok(v) => append_tsv_line(&mut bytes, &v),
-                            Err(e) => errors.push(e),
-                        }
-                    }
-                    let tsv_br = BgzfBlockTsvResult {
-                        batch_id: br.batch_id,
-                        head_fragment: br.head_fragment,
-                        tail_fragment: br.tail_fragment,
-                        bytes,
-                        errors,
-                        had_newline: br.had_newline,
-                    };
-                    if result_tx.send(tsv_br).is_err() {
-                        break;
-                    }
-                }
-            });
-            worker_handles.push(handle);
-        }
-
-        drop(block_rx);
-        drop(result_tx);
-
-        // Collector: reassemble blocks in order, stitch boundary lines,
-        // write pre-formatted bytes to disk.
-        let mut first_err: Option<anyhow::Error> = None;
-        let mut count: usize = 0;
-        let mut prev_tail: Vec<u8> = Vec::new();
-        let mut stitch_writer = DigestWriter::new();
-        let mut pending: HashMap<usize, BgzfBlockTsvResult> = HashMap::new();
-        let mut next_batch_id: usize = 0;
-        let mut io_err: Option<std::io::Error> = None;
-
-        let mut process_tsv_block = |block: BgzfBlockTsvResult,
-                                     next_batch_id: usize,
-                                     prev_tail: &mut Vec<u8>,
-                                     stitch_writer: &mut DigestWriter,
-                                     count: &mut usize,
-                                     first_err: &mut Option<anyhow::Error>,
-                                     io_err: &mut Option<std::io::Error>|
-         -> () {
-            for e in block.errors {
-                if first_err.is_none() {
-                    *first_err = Some(e);
-                }
-            }
-            if !block.had_newline {
-                // Interior of a long VCF line: just accumulate bytes.
-                prev_tail.extend_from_slice(&block.tail_fragment);
-                return;
-            }
-            // Stitch prev_tail + head_fragment, process as one line.
-            let mut stitched = std::mem::take(prev_tail);
-            stitched.extend_from_slice(&block.head_fragment);
-            if !stitched.is_empty() || next_batch_id > 0 {
-                let mut tmp: Vec<Result<VrsResult>> = Vec::new();
-                process_vcf_line_bytes(
-                    &stitched,
-                    store,
-                    name_to_digest,
-                    &chrom_accessions,
-                    stitch_writer,
-                    &mut tmp,
-                );
-                // Format the stitched line's results into a local buffer
-                // and write it, then write the worker's pre-formatted
-                // block bytes. Keeping order is critical: the stitched
-                // line is the *first* line of this block, so it writes
-                // before `block.bytes`.
-                let mut stitched_bytes: Vec<u8> = Vec::new();
-                for r in tmp {
-                    match r {
-                        Ok(v) => {
-                            append_tsv_line(&mut stitched_bytes, &v);
-                            *count += 1;
-                        }
-                        Err(e) => {
-                            if first_err.is_none() {
-                                *first_err = Some(e);
-                            }
-                        }
-                    }
-                }
-                if io_err.is_none() {
-                    if let Err(e) = w.write_all(&stitched_bytes) {
-                        *io_err = Some(e);
-                    }
-                }
-            }
-            if io_err.is_none() {
-                if let Err(e) = w.write_all(&block.bytes) {
-                    *io_err = Some(e);
-                }
-            }
-            // bytes.len() / avg_line_len isn't exact — count worker
-            // results accurately by counting `\n` in the bytes buffer.
-            *count += memchr_count_newlines(&block.bytes);
-            *prev_tail = block.tail_fragment;
-        };
-
-        while let Ok(br) = result_rx.recv() {
-            pending.insert(br.batch_id, br);
-            while let Some(block) = pending.remove(&next_batch_id) {
-                process_tsv_block(
-                    block,
-                    next_batch_id,
-                    &mut prev_tail,
-                    &mut stitch_writer,
-                    &mut count,
-                    &mut first_err,
-                    &mut io_err,
-                );
-                next_batch_id += 1;
-            }
-        }
-        // Drain anything left (shouldn't happen in practice).
-        let mut remaining_ids: Vec<usize> = pending.keys().copied().collect();
-        remaining_ids.sort_unstable();
-        for id in remaining_ids {
-            if let Some(block) = pending.remove(&id) {
-                process_tsv_block(
-                    block,
-                    id,
-                    &mut prev_tail,
-                    &mut stitch_writer,
-                    &mut count,
-                    &mut first_err,
-                    &mut io_err,
-                );
-            }
-        }
-
-        // Final unterminated line.
-        if !prev_tail.is_empty() {
-            let mut tmp: Vec<Result<VrsResult>> = Vec::new();
-            process_vcf_line_bytes(
-                &prev_tail,
-                store,
-                name_to_digest,
-                &chrom_accessions,
-                &mut stitch_writer,
-                &mut tmp,
-            );
-            let mut tail_bytes: Vec<u8> = Vec::new();
-            for r in tmp {
-                match r {
-                    Ok(v) => {
-                        append_tsv_line(&mut tail_bytes, &v);
-                        count += 1;
-                    }
-                    Err(e) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
-                    }
-                }
-            }
-            if io_err.is_none() {
-                if let Err(e) = w.write_all(&tail_bytes) {
-                    io_err = Some(e);
-                }
-            }
-        }
-
-        // Surface reader / worker panics.
-        match reader_handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
-            }
-            Err(_) => {
-                if first_err.is_none() {
-                    first_err = Some(anyhow::anyhow!("BGZF reader thread panicked"));
-                }
-            }
-        }
-        for h in worker_handles {
-            if h.join().is_err() && first_err.is_none() {
-                first_err = Some(anyhow::anyhow!("VRS worker thread panicked"));
-            }
-        }
-
-        if let Some(e) = io_err {
-            return Err(e.into());
-        }
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-        Ok(count)
-    })?;
-
-    w.flush()?;
-    Ok(count)
-}
-
-/// Count of `\n` bytes in `buf`. Used to tally TSV lines produced by a
-/// worker when the collector only sees pre-formatted bytes.
-#[inline]
-fn memchr_count_newlines(buf: &[u8]) -> usize {
-    buf.iter().filter(|&&b| b == b'\n').count()
-}
-
-/// Compute VRS IDs via the parallel path and stream them
-/// directly to a TSV (chrom, pos, ref, alt, vrs_id). Returns the number
-/// of variants written.
-///
-/// Like `compute_vrs_ids_parallel_bgzf_to_tsv`, TSV formatting happens
-/// on worker threads (parallel) so the collector just reassembles bytes
-/// in VCF order.
+/// Convenience: compute VRS IDs and write directly to a TSV file.
+/// Delegates to `compute_vrs_ids_parallel_with_sink` with a TSV-writing callback.
 pub fn compute_vrs_ids_parallel_to_tsv(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
@@ -1520,169 +1126,32 @@ pub fn compute_vrs_ids_parallel_to_tsv(
     num_workers: usize,
 ) -> Result<usize> {
     use std::io::Write;
-    let num_workers = num_workers.max(1);
-    let chrom_accessions: HashMap<String, String> = name_to_digest
-        .iter()
-        .map(|(name, digest)| (name.clone(), format!("SQ.{}", digest)))
-        .collect();
-
     let mut w = open_tsv_writer(output_path)?;
-
-    let count = std::thread::scope(|s| -> Result<usize> {
-        let (line_tx, line_rx) =
-            crossbeam_channel::bounded::<LineBatch>(PARALLEL_CHANNEL_CAPACITY);
-        let (result_tx, result_rx) =
-            crossbeam_channel::bounded::<LineResultTsvBatch>(PARALLEL_CHANNEL_CAPACITY);
-
-        let reader_handle = s.spawn(move || -> Result<()> {
-            let mut reader = open_vcf(vcf_path)?;
-            let mut batch: Vec<String> = Vec::with_capacity(PARALLEL_BATCH_SIZE);
-            let mut batch_id: usize = 0;
-            let mut scratch = String::new();
-            loop {
-                scratch.clear();
-                if !read_vcf_line(&mut *reader, &mut scratch)? {
-                    break;
-                }
-                let trimmed = scratch.trim_end_matches('\n').trim_end_matches('\r');
-                if trimmed.is_empty() || trimmed.starts_with('#') {
-                    continue;
-                }
-                let line = std::mem::take(&mut scratch);
-                batch.push(line);
-                if batch.len() >= PARALLEL_BATCH_SIZE {
-                    let full = std::mem::replace(
-                        &mut batch,
-                        Vec::with_capacity(PARALLEL_BATCH_SIZE),
-                    );
-                    if line_tx.send(LineBatch { batch_id, lines: full }).is_err() {
-                        return Ok(());
-                    }
-                    batch_id += 1;
-                }
-            }
-            if !batch.is_empty() {
-                let _ = line_tx.send(LineBatch { batch_id, lines: batch });
-            }
-            Ok(())
-        });
-
-        let mut worker_handles = Vec::with_capacity(num_workers);
-        for _ in 0..num_workers {
-            let line_rx = line_rx.clone();
-            let result_tx = result_tx.clone();
-            let store_ref: &ReadonlyRefgetStore = store;
-            let name_to_digest_ref = name_to_digest;
-            let chrom_accessions_ref = &chrom_accessions;
-            let handle = s.spawn(move || {
-                let mut digest_writer = DigestWriter::new();
-                while let Ok(line_batch) = line_rx.recv() {
-                    let mut results: Vec<Result<VrsResult>> =
-                        Vec::with_capacity(line_batch.lines.len());
-                    for raw in &line_batch.lines {
-                        let line = raw.trim_end_matches('\n').trim_end_matches('\r');
-                        process_vcf_line_bytes(
-                            line.as_bytes(),
-                            store_ref,
-                            name_to_digest_ref,
-                            chrom_accessions_ref,
-                            &mut digest_writer,
-                            &mut results,
-                        );
-                    }
-                    // Parallel-format into bytes on this worker.
-                    let mut bytes: Vec<u8> = Vec::with_capacity(results.len() * 80);
-                    let mut errors: Vec<anyhow::Error> = Vec::new();
-                    for r in results {
-                        match r {
-                            Ok(v) => append_tsv_line(&mut bytes, &v),
-                            Err(e) => errors.push(e),
-                        }
-                    }
-                    if result_tx
-                        .send(LineResultTsvBatch {
-                            batch_id: line_batch.batch_id,
-                            bytes,
-                            errors,
-                        })
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            });
-            worker_handles.push(handle);
-        }
-
-        drop(line_rx);
-        drop(result_tx);
-
-        let mut first_err: Option<anyhow::Error> = None;
-        let mut io_err: Option<std::io::Error> = None;
-        let mut pending: HashMap<usize, LineResultTsvBatch> = HashMap::new();
-        let mut next_batch_id: usize = 0;
-        let mut count: usize = 0;
-
-        let mut emit = |batch: LineResultTsvBatch,
-                        count: &mut usize,
-                        first_err: &mut Option<anyhow::Error>,
-                        io_err: &mut Option<std::io::Error>| {
-            for e in batch.errors {
-                if first_err.is_none() {
-                    *first_err = Some(e);
-                }
-            }
-            *count += memchr_count_newlines(&batch.bytes);
-            if io_err.is_none() {
-                if let Err(e) = w.write_all(&batch.bytes) {
-                    *io_err = Some(e);
-                }
-            }
-        };
-
-        while let Ok(rb) = result_rx.recv() {
-            pending.insert(rb.batch_id, rb);
-            while let Some(batch) = pending.remove(&next_batch_id) {
-                emit(batch, &mut count, &mut first_err, &mut io_err);
-                next_batch_id += 1;
-            }
-        }
-        let mut remaining_ids: Vec<usize> = pending.keys().copied().collect();
-        remaining_ids.sort_unstable();
-        for id in remaining_ids {
-            if let Some(batch) = pending.remove(&id) {
-                emit(batch, &mut count, &mut first_err, &mut io_err);
-            }
-        }
-
-        match reader_handle.join() {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
-            }
-            Err(_) => {
-                if first_err.is_none() {
-                    first_err = Some(anyhow::anyhow!("Reader thread panicked"));
-                }
-            }
-        }
-        for h in worker_handles {
-            if h.join().is_err() && first_err.is_none() {
-                first_err = Some(anyhow::anyhow!("VRS worker thread panicked"));
-            }
-        }
-
-        if let Some(e) = io_err {
-            return Err(e.into());
-        }
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-        Ok(count)
+    let count = compute_vrs_ids_parallel_with_sink(store, name_to_digest, vcf_path, num_workers, |v| {
+        let mut buf = Vec::with_capacity(128);
+        append_tsv_line(&mut buf, &v);
+        let _ = w.write_all(&buf);
     })?;
+    w.flush()?;
+    Ok(count)
+}
 
+/// Convenience: BGZF variant — compute VRS IDs and write directly to a TSV file.
+/// Delegates to `compute_vrs_ids_parallel_bgzf_with_sink` with a TSV-writing callback.
+pub fn compute_vrs_ids_parallel_bgzf_to_tsv(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    output_path: &str,
+    num_workers: usize,
+) -> Result<usize> {
+    use std::io::Write;
+    let mut w = open_tsv_writer(output_path)?;
+    let count = compute_vrs_ids_parallel_bgzf_with_sink(store, name_to_digest, vcf_path, num_workers, |v| {
+        let mut buf = Vec::with_capacity(128);
+        append_tsv_line(&mut buf, &v);
+        let _ = w.write_all(&buf);
+    })?;
     w.flush()?;
     Ok(count)
 }

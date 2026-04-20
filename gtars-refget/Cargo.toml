@@ -8,16 +8,16 @@ repository = "https://github.com/databio/gtars"
 
 [features]
 default = ["filesystem", "http"]
-filesystem = ["memmap2", "fs2", "gtars-core", "crossbeam-channel"]  # File-based operations (not WASM-compatible)
+filesystem = ["memmap2", "fs2", "gtars-core", "crossbeam-channel", "chrono"]  # File-based operations (not WASM-compatible)
 http = ["ureq"]  # HTTP client for remote fetching (not WASM-compatible)
 
 [dependencies]
 sha2 = "0.10.7"
 md-5 = "0.10.5"
 base64-url = "2.0.0"
-memmap2 = { version = "0.5", optional = true }  # for memory-mapped file I/O
+memmap2 = { version = "0.9", optional = true }  # for memory-mapped file I/O
 fs2 = { version = "0.4", optional = true }  # cross-platform advisory file locking
-chrono = { version = "0.4", features = ["serde"] }  # For timestamps
+chrono = { version = "0.4", features = ["serde"], optional = true }  # For timestamps (filesystem stores only)
 ureq = { version = "2.10", optional = true }  # Lightweight HTTP for remote fetching
 crossbeam-channel = { version = "0.5", optional = true }  # Bounded channels for pipeline
 

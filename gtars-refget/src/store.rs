@@ -69,6 +69,7 @@ use crate::fhr_metadata::{self, FhrMetadata};
 use crate::hashkeyable::{HashKeyable, key_to_digest_string};
 use anyhow::anyhow;
 use anyhow::{Context, Result};
+#[cfg(feature = "filesystem")]
 use chrono::Utc;
 use flate2::Compression;
 use flate2::read::MultiGzDecoder;
@@ -2628,6 +2629,7 @@ impl ReadonlyRefgetStore {
     ///
     /// This allows the store to be loaded later via load_local().
     /// Called automatically when adding collections in disk-backed mode.
+    #[cfg(feature = "filesystem")]
     fn write_index_files(&self) -> Result<()> {
         let local_path = self.local_path.as_ref().context("local_path not set")?;
         let template = self
@@ -2652,6 +2654,7 @@ impl ReadonlyRefgetStore {
     ///
     /// Constructs a StoreMetadata from the current store state and writes it as
     /// pretty-printed JSON. This is the single source of truth for metadata serialization.
+    #[cfg(feature = "filesystem")]
     fn write_rgstore_json(&self, dir: &Path, seqdata_template: &str) -> Result<()> {
         let metadata = StoreMetadata {
             version: 1,
