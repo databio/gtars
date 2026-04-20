@@ -2687,11 +2687,11 @@ impl PyRefgetStore {
         let mut py_results = Vec::with_capacity(results.len());
         for r in &results {
             let dict = pyo3::types::PyDict::new(py);
-            dict.set_item("chrom", r.chrom.as_str())?;
+            dict.set_item("chrom", &r.chrom)?;
             dict.set_item("pos", r.pos)?;
-            dict.set_item("ref", r.ref_allele.as_str())?;
-            dict.set_item("alt", r.alt_allele.as_str())?;
-            dict.set_item("vrs_id", r.vrs_id.as_str())?;
+            dict.set_item("ref", &r.ref_allele)?;
+            dict.set_item("alt", &r.alt_allele)?;
+            dict.set_item("vrs_id", &r.vrs_id)?;
             py_results.push(dict);
         }
         Ok(py_results)
