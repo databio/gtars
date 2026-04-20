@@ -12,6 +12,7 @@ pub mod models;
 pub mod digest;
 pub mod normalize;
 pub mod vcf;
+pub mod rgvcf_input;
 
 pub use models::{Allele, AlleleState, SequenceLocation, SequenceReference};
 pub use digest::{allele_digest, allele_identifier, sequence_location_digest};

@@ -27,6 +27,7 @@ noodles-bgzf = "0.46"
 
 # Internal dependency
 gtars-refget = { path = "../gtars-refget", version = "0.7.0" }
+gtars-rgvcf = { path = "../gtars-rgvcf", version = "0.1.0" }
 
 # Swap the global allocator in example binaries (bench-only; library unaffected).
 # Linux-gated in the examples to match gtars-python's pattern.
