@@ -136,7 +136,7 @@ fn test_mode_switching() {
             .unwrap();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
@@ -164,7 +164,7 @@ fn test_mode_switching() {
         store.disable_encoding();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
         assert_eq!(seq_before, seq_after);
@@ -333,7 +333,7 @@ fn test_global_refget_store() {
 
     let record = SequenceRecord::Full {
         metadata: seq_metadata.clone(),
-        sequence: sequence.to_vec(),
+        sequence: std::sync::Arc::new(sequence.to_vec()),
     };
 
     collection.sequences.push(record);
@@ -1965,5 +1965,410 @@ fn test_import_collection_mode_mismatch_error() {
         err_msg.contains("matching storage modes"),
         "Error should mention storage modes: {}",
         err_msg,
+    );
+}
+
+// =========================================================================
+// stream_sequence tests
+// =========================================================================
+
+fn first_seq_digest(store: &RefgetStore) -> String {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone()
+}
+
+fn first_seq_length(store: &RefgetStore) -> usize {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .length
+}
+
+fn build_on_disk_store(mode: StorageMode) -> (tempfile::TempDir, RefgetStore, String, usize) {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+    let length = first_seq_length(&store);
+    (dir, store, digest, length)
+}
+
+#[test]
+fn test_stream_sequence_local_full() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+}
+
+#[test]
+fn test_stream_sequence_local_substring() {
+    use std::io::Read;
+    let (_dir, mut store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    store.load_sequence(&digest).unwrap();
+    let ranges: Vec<(u64, u64)> = vec![
+        (0, 4),
+        (1, 5),
+        (2, 10),
+        (5, 6),
+        (0, length as u64),
+        (length as u64 - 1, length as u64),
+    ];
+    for (s, e) in ranges {
+        let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+
+        let expected = store.get_substring(&digest, s as usize, e as usize).unwrap();
+        assert_eq!(
+            String::from_utf8(streamed).unwrap(),
+            expected,
+            "mismatch for range {}..{}",
+            s,
+            e
+        );
+    }
+}
+
+#[test]
+fn test_stream_sequence_raw_mode() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Raw);
+    let mut reader = store.stream_sequence(&digest, Some(2), Some(8)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(&out[..], b"GTACGT");
+    assert!(length >= 8);
+}
+
+#[test]
+fn test_stream_sequence_u64_bounds_compile_and_match() {
+    // Compile-level guarantee: stream_sequence accepts u64 bounds.
+    // Sequences > u32::MAX (>4 Gb) cannot be fixtured in unit tests, but
+    // the arithmetic path (start_bit/end_bit/byte_start/byte_end/bases_to_emit)
+    // is u64 throughout, so this test exercises the widened API surface.
+    use std::io::Read;
+    let (_dir, store, digest, _length) = build_on_disk_store(StorageMode::Encoded);
+    let s: u64 = 0;
+    let e: u64 = 8;
+    let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), 8);
+}
+
+#[test]
+fn test_stream_sequence_zero_length() {
+    use std::io::Read;
+    let (_dir, store, digest, _) = build_on_disk_store(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, Some(5), Some(5)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert!(out.is_empty());
+}
+
+#[test]
+fn test_stream_sequence_invalid_range() {
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+    assert!(store.stream_sequence(&digest, Some(5), Some(3)).is_err());
+    assert!(
+        store
+            .stream_sequence(&digest, Some(0), Some(length as u64 + 1))
+            .is_err()
+    );
+}
+
+#[test]
+fn test_stream_sequence_bounded_memory() {
+    use std::io::Read;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let mut content = String::from(">chr1\n");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(1_000_000);
+    for i in 0..1_000_000 {
+        seq.push(bases[i % 4]);
+    }
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut buf = [0u8; 4096];
+    let mut collected = Vec::with_capacity(1_000_000);
+    loop {
+        let n = reader.read(&mut buf).unwrap();
+        if n == 0 {
+            break;
+        }
+        collected.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(collected, seq);
+}
+
+// =========================================================================
+// Bounded-memory tests for stream_sequence
+// =========================================================================
+//
+// These tests verify the O(1) memory claim of `stream_sequence`: regardless
+// of sequence size, neither the Rust decoder nor the napi binding should
+// materialize the full (sub)sequence in memory.
+
+/// Install peak_alloc as the global allocator (tests-only) so we can measure
+/// allocation deltas.
+#[global_allocator]
+static PEAK_ALLOC: peak_alloc::PeakAlloc = peak_alloc::PeakAlloc;
+
+/// Serialize allocator-sensitive tests so concurrent tests don't pollute the
+/// process-wide peak counter.
+static ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[test]
+fn test_stream_sequence_bounded_memory_full_record() {
+    use std::io::Read;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+
+    // Build a large FASTA (~1M bases) and import into an in-memory store in
+    // Encoded mode. The in-memory store holds the encoded sequence as a
+    // `SequenceRecord::Full { sequence: Vec<u8>, .. }` — for a 2-bit alphabet
+    // that's ~250 KB encoded, decoding to ~1 MB raw bases.
+    const SEQ_LEN: usize = 1_000_000;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    // Use Raw mode so the Full record holds SEQ_LEN bytes verbatim. The old
+    // buggy code path cloned that entire buffer during streaming; with the
+    // Arc-backed reader it must not.
+    store.set_encoding_mode(StorageMode::Raw);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    // Confirm the record is Full (in-memory resident).
+    {
+        use crate::hashkeyable::HashKeyable;
+        let key = digest.to_key();
+        let rec = store.sequence_store.get(&key).unwrap();
+        assert!(rec.is_loaded(), "expected Full record for in-memory store");
+    }
+
+    // Measure peak allocation across stream_sequence + drain. The whole
+    // buffer is already resident; streaming should not allocate another
+    // copy of it.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    {
+        let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+        let mut chunk = [0u8; 4096];
+        let mut total = 0usize;
+        loop {
+            let n = reader.read(&mut chunk).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        assert_eq!(total, SEQ_LEN);
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    // Streaming must not allocate anywhere near the sequence size. The
+    // previous bug cloned the entire byte range (1 MB for this test); with
+    // the fix, allocations are bounded by a few reader frames. The bound
+    // below is loose enough to tolerate concurrent test allocator noise
+    // but tight enough to catch a full-buffer clone (which would be
+    // >= SEQ_LEN bytes).
+    let bound: usize = SEQ_LEN / 4; // 250 KiB; a clone would cost >= 1 MiB.
+    assert!(
+        peak_delta < bound,
+        "stream_sequence peak allocation delta {} bytes exceeds bound {} bytes \
+         (SEQ_LEN={} bytes raw). \
+         Streaming is cloning the buffer instead of sharing ownership.",
+        peak_delta,
+        bound,
+        SEQ_LEN,
+    );
+}
+
+#[test]
+fn test_stream_sequence_bounded_memory_stub_record() {
+    // Regression guard for the production path: the Node proxy opens a store
+    // via `open_local` / `open_remote`, so records are `Stub` (metadata only,
+    // never loaded into memory) and `stream_sequence` must fall back to the
+    // on-disk `.seq` file (or HTTP Range GET) without buffering the whole
+    // file. This test directly measures peak allocation on that Stub-backed
+    // path — analogous to `test_stream_sequence_bounded_memory_full_record`
+    // but for the disk-streaming branch.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap();
+
+    // Measure peak at two very different sizes; the bound must not depend
+    // on SEQ_LEN. (A full-file buffer would scale linearly; a fixed-size
+    // BufReader would stay constant.) We drain into a fixed-size scratch
+    // buffer — not `read_to_end` — because `read_to_end`'s geometric Vec
+    // growth introduces transient realloc peaks of ~0.5 * SEQ_LEN that
+    // swamp the actual streaming memory and falsely suggest scaling.
+    for &SEQ_LEN in &[1_000_000usize, 16_000_000] {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let digest;
+    {
+        let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+        builder.set_encoding_mode(StorageMode::Raw);
+        builder
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        digest = first_seq_digest(&builder);
+        // Drop `builder` here — `add_sequence_collection_from_fasta` populates
+        // an in-memory Full record; we want a fresh open so records are Stub.
+    }
+
+    // Reopen the store fresh — records should be Stub (metadata only).
+    let store = RefgetStore::open_local(&store_path).unwrap();
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(
+            !rec.is_loaded(),
+            "expected Stub record after open_local, got Full"
+        );
+    }
+
+    // Reset peak AFTER opening the store so we don't count store-open
+    // allocations.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    // Drain into a fixed-size buffer, checksumming as we go.
+    // Avoids `read_to_end`'s geometric Vec growth, whose realloc
+    // doubles transiently dominate peak (giving a false ~0.5N signal).
+    let mut scratch = [0u8; 8192];
+    let mut total = 0usize;
+    let mut checksum: u64 = 0;
+    loop {
+        let n = reader.read(&mut scratch).unwrap();
+        if n == 0 { break; }
+        for &b in &scratch[..n] { checksum = checksum.wrapping_add(b as u64); }
+        total += n;
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    assert_eq!(total, SEQ_LEN);
+    let expected_checksum: u64 = seq.iter().map(|&b| b as u64).sum();
+    assert_eq!(checksum, expected_checksum);
+
+    // A full-file buffer in the Stub fallback would give peak_delta
+    // proportional to SEQ_LEN. A BufReader-based stream is constant
+    // (~8 KiB default). 64 KiB leaves headroom for allocator noise.
+    assert!(
+        peak_delta < 64 * 1024,
+        "stream_sequence (Stub path) peak allocation {} bytes exceeds \
+         64 KiB at SEQ_LEN={} — streaming is not O(1) in sequence size",
+        peak_delta, SEQ_LEN,
+    );
+    }
+}
+
+#[test]
+fn test_stream_sequence_no_preload_for_stub_record() {
+    // Structural assertion for fix B: streaming must work when the record is
+    // a Stub (not in memory), pulling bytes directly from the backing store,
+    // without populating the in-memory cache. This lets the napi layer drop
+    // its pre-`load_sequence` call.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let (_dir, store, digest, length) = build_on_disk_store(StorageMode::Encoded);
+
+    // Drop the in-memory sequence buffer back to Stub, preserving metadata.
+    let mut store = store;
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap().clone();
+        let meta = rec.metadata().clone();
+        store
+            .inner
+            .sequence_store
+            .insert(key, SequenceRecord::Stub(meta));
+    }
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(!rec.is_loaded(), "expected Stub before stream_sequence");
+    }
+
+    // Stream without calling load_sequence() first.
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+
+    // And the store should still be a Stub (no pre-loading side effect).
+    let key = digest.to_key();
+    let rec = store.inner.sequence_store.get(&key).unwrap();
+    assert!(
+        !rec.is_loaded(),
+        "stream_sequence must not populate the in-memory Full record"
     );
 }

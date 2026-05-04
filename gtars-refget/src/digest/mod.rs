@@ -19,6 +19,7 @@ pub mod auto_decompress;
 pub mod encoder;
 pub mod fasta;
 pub mod stream;
+pub mod streaming_decoder;
 pub mod types;
 
 // Re-export commonly used items at the module level
@@ -33,6 +34,7 @@ pub use encoder::{
 };
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;
+pub use streaming_decoder::StreamingDecoder;
 pub use types::{
     ArrayElementComparison, AttributeComparison, CollectionLevel1, CollectionLevel2,
     ComparisonDigests, FaiMetadata, SeqColComparison, SeqColDigestLvl1, SequenceCollection,
