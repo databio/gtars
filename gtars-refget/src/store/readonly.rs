@@ -71,6 +71,13 @@ pub struct ReadonlyRefgetStore {
     /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
     /// Populated by ensure_decoded(), read by sequence_bytes().
     pub(crate) decoded_cache: HashMap<DigestKey, Vec<u8>>,
+    /// Whether the sequence index (sequences.rgsi) has been loaded.
+    /// For remote stores, this starts as `false` and is lazily loaded on first
+    /// sequence access, avoiding the costly download when only browsing collections.
+    pub(crate) sequence_index_loaded: bool,
+    /// The relative path to the sequence index file (from rgstore.json),
+    /// stored for deferred loading in remote stores.
+    pub(crate) sequence_index_path: Option<String>,
 }
 
 impl ReadonlyRefgetStore {
@@ -95,6 +102,8 @@ impl ReadonlyRefgetStore {
             decoded_cache: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
+            sequence_index_loaded: true,
+            sequence_index_path: None,
         }
     }
 
@@ -823,6 +832,42 @@ impl ReadonlyRefgetStore {
     // =========================================================================
     // Loading methods
     // =========================================================================
+
+    /// Ensure the sequence index (sequences.rgsi) is loaded.
+    /// For remote stores this is deferred until first sequence access.
+    /// Returns Ok(()) immediately if already loaded.
+    pub(crate) fn ensure_sequence_index_loaded(&mut self) -> Result<()> {
+        if self.sequence_index_loaded {
+            return Ok(());
+        }
+
+        let seq_index_path = self.sequence_index_path.clone()
+            .ok_or_else(|| anyhow!("No sequence_index_path set for deferred loading"))?;
+
+        if !self.quiet {
+            eprintln!("Downloading sequence index {}...", seq_index_path);
+        }
+
+        let data = Self::fetch_file(
+            &self.local_path,
+            &self.remote_source,
+            &seq_index_path,
+            true,
+            false,
+        )?;
+        let data_str = String::from_utf8(data)
+            .context("sequence index contains invalid UTF-8")?;
+
+        Self::load_sequences_from_reader(self, data_str.as_bytes())?;
+        self.sequence_index_loaded = true;
+        Ok(())
+    }
+
+    /// Explicitly load the sequence index. For servers that want to preload
+    /// all data during startup before converting to `ReadonlyRefgetStore`.
+    pub fn load_sequence_index(&mut self) -> Result<()> {
+        self.ensure_sequence_index_loaded()
+    }
 
     /// Eagerly load all Stub collections to Full.
     pub fn load_all_collections(&mut self) -> Result<()> {

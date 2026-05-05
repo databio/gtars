@@ -1967,3 +1967,65 @@ fn test_import_collection_mode_mismatch_error() {
         err_msg,
     );
 }
+
+// =========================================================================
+// Lazy sequence index loading tests
+// =========================================================================
+
+#[test]
+fn test_list_collections_without_sequence_index() {
+    // Simulate a remote store where the sequence index is not yet loaded.
+    // list_collections should work without triggering the sequence index download.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    // Create a store with a collection
+    let fasta_content = ">chr1\nATGCATGC\n>chr2\nGGGGAAAA\n";
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
+
+    // Re-open and clear the sequence store + mark index as not loaded
+    // (simulating what open_remote now does)
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    // list_collections should work — it only touches collection metadata
+    let result = store.list_collections(0, 100, &[]).unwrap();
+    assert_eq!(result.results.len(), 1, "Should find 1 collection");
+    assert!(!store.inner.sequence_index_loaded, "Sequence index should NOT be loaded after list_collections");
+}
+
+#[test]
+fn test_load_all_sequences_triggers_index_load() {
+    // When calling load_all_sequences on a store with deferred index,
+    // it should lazily load the sequence index first.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let fasta_content = ">chr1\nATGCATGC\n";
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
+
+    // Simulate deferred state
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    assert!(!store.inner.sequence_index_loaded);
+
+    // load_all_sequences should trigger the index load
+    store.load_all_sequences().unwrap();
+    assert!(store.inner.sequence_index_loaded, "Sequence index should be loaded after load_all_sequences");
+    assert!(!store.inner.sequence_store.is_empty(), "Sequences should be populated");
+}

@@ -394,17 +394,10 @@ impl ReadonlyRefgetStore {
         store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
         store.available_collection_alias_namespaces = metadata.collection_alias_namespaces;
 
-        let sequence_index_data = Self::fetch_file(
-            &Some(cache_path.to_path_buf()),
-            &Some(remote_url.clone()),
-            &metadata.sequence_index,
-            true,
-            false,
-        )?;
-        let sequence_index_str = String::from_utf8(sequence_index_data)
-            .context("sequence index contains invalid UTF-8")?;
-
-        Self::load_sequences_from_reader(&mut store, sequence_index_str.as_bytes())?;
+        // Defer sequence index loading — it can be 66+ MB and is only needed
+        // when accessing individual sequences, not for browsing collections.
+        store.sequence_index_loaded = false;
+        store.sequence_index_path = Some(metadata.sequence_index.clone());
 
         if let Some(ref collection_index) = metadata.collection_index {
             if let Ok(collection_index_data) = Self::fetch_file(
