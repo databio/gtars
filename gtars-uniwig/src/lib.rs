@@ -1,3 +1,4 @@
+pub mod bam_header;
 pub mod counting;
 pub mod reading;
 pub mod utils;
@@ -613,7 +614,10 @@ fn process_bam(
         let mut reader = bam::io::indexed_reader::Builder::default()
             .build_from_path(filepath)
             .unwrap();
-        let header = reader.read_header().unwrap();
+        let header = {
+            let mut hr = noodles::bgzf::Reader::new(File::open(filepath).unwrap());
+            crate::bam_header::read_header_lenient(&mut hr).unwrap()
+        };
         match reader.query(&header, &region).map(Box::new) {
             Err(..) => {
                 if debug {
@@ -916,7 +920,10 @@ fn process_bam(
                     let mut reader = bam::io::indexed_reader::Builder::default()
                         .build_from_path(filepath)
                         .unwrap();
-                    let header = reader.read_header().unwrap();
+                    let header = {
+                        let mut hr = noodles::bgzf::Reader::new(File::open(filepath).unwrap());
+                        crate::bam_header::read_header_lenient(&mut hr).unwrap()
+                    };
                     let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
                     // Collect positions from BAM records (score=1 per read)
@@ -1086,9 +1093,12 @@ fn process_bed_in_threads(
     let producer_handle = thread::spawn(move || {
         let region = chromosome_string_cloned.parse().unwrap();
         let mut reader = bam::io::indexed_reader::Builder::default()
-            .build_from_path(fpclone)
+            .build_from_path(&fpclone)
             .unwrap();
-        let header = reader.read_header().unwrap();
+        let header = {
+            let mut hr = noodles::bgzf::Reader::new(File::open(&fpclone).unwrap());
+            crate::bam_header::read_header_lenient(&mut hr).unwrap()
+        };
 
         let mut records = reader.query(&header, &region).map(Box::new).unwrap();
 
@@ -1167,9 +1177,12 @@ fn process_bw_in_threads(
     let producer_handle = thread::spawn(move || {
         let region = chromosome_string_cloned.parse().unwrap();
         let mut reader = bam::io::indexed_reader::Builder::default()
-            .build_from_path(fpclone)
+            .build_from_path(&fpclone)
             .unwrap();
-        let header = reader.read_header().unwrap();
+        let header = {
+            let mut hr = noodles::bgzf::Reader::new(File::open(&fpclone).unwrap());
+            crate::bam_header::read_header_lenient(&mut hr).unwrap()
+        };
 
         let records = reader.query(&header, &region).map(Box::new).unwrap();
 
