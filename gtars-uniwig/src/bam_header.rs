@@ -43,9 +43,12 @@ pub fn read_header_lenient<R: Read>(reader: &mut R) -> io::Result<sam::Header> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
-/// Sanitize SAM header text by inserting `VN:unknown` into any `@PG` record that
-/// lacks a `VN:` tag. All other lines pass through untouched — including malformed
-/// ones, so unrelated header errors still surface from the noodles parser.
+/// Sanitize SAM header text by fixing `@PG` records with missing or empty `VN:` tags.
+/// - If `VN:` is missing entirely, append `VN:unknown`.
+/// - If `VN:` is present but empty (e.g., `VN:` followed by tab or end of line),
+///   replace with `VN:unknown`.
+/// All other lines pass through untouched — including malformed ones, so unrelated
+/// header errors still surface from the noodles parser.
 fn sanitize_sam_header_text(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for line in text.split_inclusive('\n') {
@@ -64,10 +67,42 @@ fn sanitize_sam_header_text(text: &str) -> String {
         let body = &line[..line.len() - nl_len];
         let nl = &line[line.len() - nl_len..];
 
-        let has_vn = body.split('\t').any(|f| f.starts_with("VN:"));
-        if has_vn {
+        // Check for VN field and whether it has a non-empty value
+        let mut has_valid_vn = false;
+        let mut needs_vn_fix = false;
+        for field in body.split('\t') {
+            if field.starts_with("VN:") {
+                let value = &field[3..];
+                if value.is_empty() {
+                    // Empty VN value (e.g., "VN:" with nothing after)
+                    needs_vn_fix = true;
+                } else {
+                    has_valid_vn = true;
+                }
+                break;
+            }
+        }
+
+        if has_valid_vn {
+            // Valid VN present, pass through unchanged
             out.push_str(line);
+        } else if needs_vn_fix {
+            // Empty VN present, replace VN: with VN:unknown
+            let fixed_body: String = body
+                .split('\t')
+                .map(|field| {
+                    if field == "VN:" {
+                        "VN:unknown"
+                    } else {
+                        field
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("\t");
+            out.push_str(&fixed_body);
+            out.push_str(nl);
         } else {
+            // No VN at all, append VN:unknown
             out.push_str(body);
             out.push_str("\tVN:unknown");
             out.push_str(nl);
@@ -142,6 +177,33 @@ mod tests {
     }
 
     #[test]
+    fn sanitize_replaces_empty_vn() {
+        // VN: with empty value should be replaced with VN:unknown
+        let s = "@PG\tID:bowtie2\tPN:bowtie2\tVN:\tCL:bowtie2 -x ref\n";
+        assert_eq!(
+            sanitize_sam_header_text(s),
+            "@PG\tID:bowtie2\tPN:bowtie2\tVN:unknown\tCL:bowtie2 -x ref\n"
+        );
+    }
+
+    #[test]
+    fn sanitize_replaces_empty_vn_at_end() {
+        // VN: at end of line (no trailing fields)
+        let s = "@PG\tID:bowtie2\tPN:bowtie2\tVN:\n";
+        assert_eq!(
+            sanitize_sam_header_text(s),
+            "@PG\tID:bowtie2\tPN:bowtie2\tVN:unknown\n"
+        );
+    }
+
+    #[test]
+    fn sanitize_replaces_empty_vn_crlf() {
+        // Empty VN with CRLF line ending
+        let s = "@PG\tID:x\tVN:\r\n";
+        assert_eq!(sanitize_sam_header_text(s), "@PG\tID:x\tVN:unknown\r\n");
+    }
+
+    #[test]
     fn read_header_accepts_pg_without_vn() -> io::Result<()> {
         let text = b"@HD\tVN:1.6\n@SQ\tSN:chr1\tLN:1000\n@PG\tID:bowtie2\tPN:bowtie2\n";
         let bytes = build_header_bytes(text);
@@ -195,6 +257,21 @@ mod tests {
         // Both programs present.
         let programs = header.programs();
         assert_eq!(programs.as_ref().len(), 2);
+        Ok(())
+    }
+
+    #[test]
+    fn read_header_accepts_pg_with_empty_vn() -> io::Result<()> {
+        // Real-world case: bowtie2 sometimes emits VN: with empty value
+        let text = b"@HD\tVN:1.6\n@SQ\tSN:chr1\tLN:1000\n@PG\tID:bowtie2\tPN:bowtie2\tVN:\tCL:bowtie2\n";
+        let bytes = build_header_bytes(text);
+        let mut reader = &bytes[..];
+        let header = read_header_lenient(&mut reader)?;
+        assert_eq!(header.reference_sequences().len(), 1);
+        assert!(
+            !header.programs().as_ref().is_empty(),
+            "expected @PG record to be parsed"
+        );
         Ok(())
     }
 }
