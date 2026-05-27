@@ -196,9 +196,6 @@ GGGGAAAA
 
     let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
 
-    let (chr1_sha, chr1_md5) = calculate_test_digests(b"ATGCATGCATGC");
-    let (chr2_sha, chr2_md5) = calculate_test_digests(b"GGGGAAAA");
-
     // Test BED-based export
     let bed_content = "\
 chr1\t0\t5
@@ -221,10 +218,7 @@ chr2\t0\t4
     let output_fa_content =
         fs::read_to_string(&temp_output_fa_path).expect("Failed to read output FASTA file");
 
-    let expected_fa_content = format!(
-        ">chr1 12 dna2bit {} {}\nATGCAATGC\n>chr2 8 dna2bit {} {}\nGGGG\n",
-        chr1_sha, chr1_md5, chr2_sha, chr2_md5
-    );
+    let expected_fa_content = ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n";
     assert_eq!(
         output_fa_content.trim(),
         expected_fa_content.trim(),
