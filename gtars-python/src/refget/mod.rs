@@ -756,7 +756,8 @@ impl From<SequenceRecord> for PySequenceRecord {
             },
             SequenceRecord::Full { metadata, sequence } => PySequenceRecord {
                 metadata: PySequenceMetadata::from(metadata),
-                sequence: Some(sequence),
+                // Unwrap the Arc if uniquely held (zero-copy), otherwise clone.
+                sequence: Some(std::sync::Arc::try_unwrap(sequence).unwrap_or_else(|arc| (*arc).clone())),
             },
         }
     }
@@ -800,7 +801,7 @@ impl From<PySequenceRecord> for SequenceRecord {
     fn from(value: PySequenceRecord) -> Self {
         let metadata = SequenceMetadata::from(value.metadata);
         match value.sequence {
-            Some(sequence) => SequenceRecord::Full { metadata, sequence },
+            Some(sequence) => SequenceRecord::Full { metadata, sequence: std::sync::Arc::new(sequence) },
             None => SequenceRecord::Stub(metadata),
         }
     }

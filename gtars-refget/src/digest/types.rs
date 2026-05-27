@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::algorithms::{canonicalize_json, md5, sha512t24u};
 use super::alphabet::{AlphabetType, guess_alphabet};
@@ -59,10 +60,15 @@ pub struct FaiMetadata {
 pub enum SequenceRecord {
     /// A sequence record with only metadata, no sequence data
     Stub(SequenceMetadata),
-    /// A sequence record with both metadata and sequence data
+    /// A sequence record with both metadata and sequence data.
+    ///
+    /// The sequence bytes are held in an `Arc` so that streaming readers
+    /// (see `ReadonlyRefgetStore::stream_sequence`) can share ownership
+    /// without cloning the underlying buffer. This preserves the O(1)
+    /// memory claim of `stream_sequence` for in-memory records.
     Full {
         metadata: SequenceMetadata,
-        sequence: Vec<u8>,
+        sequence: Arc<Vec<u8>>,
     },
 }
 
@@ -79,7 +85,19 @@ impl SequenceRecord {
     pub fn sequence(&self) -> Option<&[u8]> {
         match self {
             SequenceRecord::Stub(_) => None,
-            SequenceRecord::Full { sequence, .. } => Some(sequence),
+            SequenceRecord::Full { sequence, .. } => Some(&sequence[..]),
+        }
+    }
+
+    /// Get the sequence data as a shared Arc, if present.
+    ///
+    /// This lets callers share ownership of the underlying buffer without
+    /// copying. Used by `stream_sequence` to stream bytes from an in-memory
+    /// `Full` record without allocating a second copy.
+    pub fn sequence_arc(&self) -> Option<Arc<Vec<u8>>> {
+        match self {
+            SequenceRecord::Stub(_) => None,
+            SequenceRecord::Full { sequence, .. } => Some(Arc::clone(sequence)),
         }
     }
 
@@ -94,7 +112,10 @@ impl SequenceRecord {
             SequenceRecord::Stub(m) => m,
             SequenceRecord::Full { metadata, .. } => metadata,
         };
-        SequenceRecord::Full { metadata, sequence }
+        SequenceRecord::Full {
+            metadata,
+            sequence: Arc::new(sequence),
+        }
     }
 
     /// Load data into a Stub record in-place, converting it to Full.
@@ -107,13 +128,16 @@ impl SequenceRecord {
             SequenceRecord::Stub(metadata) => {
                 // Take ownership of metadata without cloning
                 let metadata = std::mem::take(metadata);
-                *self = SequenceRecord::Full { metadata, sequence };
+                *self = SequenceRecord::Full {
+                    metadata,
+                    sequence: Arc::new(sequence),
+                };
             }
             SequenceRecord::Full {
                 sequence: existing, ..
             } => {
                 // Just replace the sequence data
-                *existing = sequence;
+                *existing = Arc::new(sequence);
             }
         }
     }
@@ -141,7 +165,7 @@ impl SequenceRecord {
 
         // For ASCII alphabet (8 bits per symbol), the data is always stored raw
         if metadata.alphabet == AlphabetType::Ascii {
-            return String::from_utf8(data.clone()).ok();
+            return String::from_utf8(data.as_ref().clone()).ok();
         }
 
         // Try to detect if data is raw or encoded
@@ -152,14 +176,14 @@ impl SequenceRecord {
         // If data size matches the expected length (not the encoded size), it's probably raw
         if data.len() == metadata.length {
             // Try to decode as UTF-8
-            if let Ok(raw_string) = String::from_utf8(data.clone()) {
+            if let Ok(raw_string) = String::from_utf8(data.as_ref().clone()) {
                 // Data appears to be raw UTF-8
                 return Some(raw_string);
             }
         }
 
         // Data is probably encoded (size matches expected encoded size), try to decode it
-        let decoded_bytes = decode_substring_from_bytes(data, 0, metadata.length, alphabet);
+        let decoded_bytes = decode_substring_from_bytes(&data[..], 0, metadata.length, alphabet);
 
         // Convert to string
         String::from_utf8(decoded_bytes).ok()
@@ -944,7 +968,7 @@ pub fn digest_sequence(name: &str, data: &[u8]) -> SequenceRecord {
     };
     SequenceRecord::Full {
         metadata,
-        sequence: uppercased,
+        sequence: Arc::new(uppercased),
     }
 }
 

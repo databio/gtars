@@ -256,7 +256,7 @@ impl ReadonlyRefgetStore {
                     self.add_sequence_record(
                         SequenceRecord::Full {
                             metadata: metadata.clone(),
-                            sequence: sequence_data,
+                            sequence: std::sync::Arc::new(sequence_data),
                         },
                         true,
                     )?;
@@ -271,7 +271,7 @@ impl ReadonlyRefgetStore {
                     self.add_sequence_record(
                         SequenceRecord::Full {
                             metadata: ready.metadata.clone(),
-                            sequence: ready.sequence_data,
+                            sequence: std::sync::Arc::new(ready.sequence_data),
                         },
                         true,
                     )?;
@@ -439,7 +439,7 @@ impl ReadonlyRefgetStore {
             };
 
             self.add_sequence(
-                SequenceRecord::Full { metadata: dr, sequence: sequence_data },
+                SequenceRecord::Full { metadata: dr, sequence: std::sync::Arc::new(sequence_data) },
                 coll_key,
                 true,
             )?;
