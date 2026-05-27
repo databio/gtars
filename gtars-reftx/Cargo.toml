@@ -1,0 +1,41 @@
+[package]
+name = "gtars-reftx"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance binary transcript store for HGVS coordinate mapping"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+keywords = ["bioinformatics", "hgvs", "transcripts", "coordinate-mapping"]
+categories = ["science", "data-structures"]
+
+[dependencies]
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+memmap2 = "0.9"
+itoa = "1.0"
+base64-url = "3.0"
+
+# Optional: VRS integration
+gtars-vrs = { path = "../gtars-vrs", optional = true }
+
+# Optional: RefgetStore integration for builder
+gtars-refget = { path = "../gtars-refget", optional = true }
+
+[dev-dependencies]
+tempfile = "3.0"
+criterion = "0.5"
+csv = { workspace = true }
+sha2 = "0.10.7"
+
+[features]
+default = []
+vrs = ["gtars-vrs"]
+refget-builder = ["gtars-refget"]
+full = ["vrs", "refget-builder"]
+
+[[bench]]
+name = "lookup"
+harness = false

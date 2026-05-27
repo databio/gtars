@@ -1,0 +1,23 @@
+# Locally-curated reject set for the gtars HGVS parser.
+#
+# Each non-blank, non-comment line MUST fail to parse. These are
+# malformed inputs not covered by the upstream varfish reject file.
+# Format: one HGVS expression per line.
+
+# Mismatched parens in uncertain position.
+NM_004333.6:c.(1799T>A
+
+# Bad coordinate order (start > end).
+NM_004333.6:c.10_5del
+
+# Unknown reference type.
+NC_000007.14:q.123A>T
+
+# Missing colon between accession and reference type.
+NM_000051.3c.1A>T
+
+# Empty edit.
+NM_004333.6:c.100
+
+# Garbage trailing characters.
+NM_004333.6:c.100A>Tjunk

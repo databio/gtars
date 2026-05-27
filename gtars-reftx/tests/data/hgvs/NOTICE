@@ -1,0 +1,40 @@
+HGVS Coordinate-Mapping Test Corpora — Vendored Sources
+========================================================
+
+The TSVs under this directory are vendored verbatim from biocommons/hgvs
+(Apache-2.0). They are used only for regression testing of the gtars-reftx
+coordinate mapper.
+
+------------------------------------------------------------------------
+biocommons/hgvs
+------------------------------------------------------------------------
+Repo:        https://github.com/biocommons/hgvs
+Commit:      fa02ca5ec0c9e28a1a6377b551e41ae77b450ce9
+License:     Apache License 2.0
+Copyright:   Copyright 2014- biocommons contributors. See upstream LICENSE.
+
+Files vendored:
+  biocommons/sample_data/sanity_cp.tsv     (synthetic NM_999999.x transcripts)
+  biocommons/gcp/ADRA2B-dbSNP.tsv
+  biocommons/gcp/BAHCC1-dbSNP.tsv
+  biocommons/gcp/DNAH11-HGMD.tsv
+  biocommons/gcp/DNAH11-dbSNP-NM_001277115.tsv
+  biocommons/gcp/DNAH11-dbSNP-NM_003777.tsv
+  biocommons/gcp/DNAH11-dbSNP.tsv
+  biocommons/gcp/FOLR3-dbSNP.tsv
+  biocommons/gcp/JRK-dbSNP.tsv
+  biocommons/gcp/NEFL-dbSNP.tsv
+  biocommons/gcp/ORAI1-dbSNP.tsv
+  biocommons/gcp/ZCCHC3-dbSNP.tsv
+  biocommons/gcp/noncoding.tsv
+  biocommons/gcp/real.tsv
+  biocommons/gcp/regression.tsv
+
+------------------------------------------------------------------------
+Apache-2.0 NOTICE
+------------------------------------------------------------------------
+Upstream repository is licensed under the Apache License, Version 2.0.
+The full text is at http://www.apache.org/licenses/LICENSE-2.0. The
+upstream repository does not ship a NOTICE file at the SHA pinned above;
+this NOTICE file therefore acts as the attribution record required by
+section 4 of the Apache-2.0 license.

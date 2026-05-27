@@ -1070,7 +1070,7 @@ fn strip_sq_prefix(digest: &str) -> &str {
 ///         )
 #[pyclass(name = "RefgetStore", module = "gtars.refget")]
 pub struct PyRefgetStore {
-    inner: RefgetStore,
+    pub(crate) inner: RefgetStore,
 }
 
 #[pymethods]
@@ -2772,7 +2772,7 @@ impl PyRefgetStoreIterator {
 ///     >>> coll = readonly.get_collection("abc123")
 #[pyclass(name = "ReadonlyRefgetStore", module = "gtars.refget")]
 pub struct PyReadonlyRefgetStore {
-    store: ReadonlyRefgetStore,
+    pub(crate) store: ReadonlyRefgetStore,
 }
 
 #[pymethods]

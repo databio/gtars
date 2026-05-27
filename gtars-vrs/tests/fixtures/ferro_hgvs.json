@@ -1,0 +1,2594 @@
+[
+  {
+    "input": "NC_000001.11:g.12345A>G",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Simple genomic substitution"
+  },
+  {
+    "input": "NC_000001.11:g.12345_12350del",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Genomic deletion range"
+  },
+  {
+    "input": "NC_000001.11:g.12345delA",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Genomic deletion with base"
+  },
+  {
+    "input": "NC_000001.11:g.12345_12346insATG",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Genomic insertion"
+  },
+  {
+    "input": "NC_000001.11:g.12345dup",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Genomic duplication"
+  },
+  {
+    "input": "NC_000001.11:g.12345_12350inv",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Genomic inversion"
+  },
+  {
+    "input": "NM_000088.3:c.459A>G",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Simple CDS substitution"
+  },
+  {
+    "input": "NM_000088.3:c.459del",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "CDS deletion"
+  },
+  {
+    "input": "NM_000088.3:c.459+5G>A",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Intronic substitution (positive offset)"
+  },
+  {
+    "input": "NM_000088.3:c.459-10G>A",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Intronic substitution (negative offset)"
+  },
+  {
+    "input": "NM_000088.3:c.-20G>A",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "5' UTR substitution"
+  },
+  {
+    "input": "NM_000088.3:c.*50G>A",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "3' UTR substitution"
+  },
+  {
+    "input": "NM_000088.3:c.459_460insATG",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "CDS insertion"
+  },
+  {
+    "input": "NM_000088.3:c.459_461delinsATG",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "CDS delins"
+  },
+  {
+    "input": "NR_000001.1:n.100A>G",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Non-coding transcript substitution"
+  },
+  {
+    "input": "NC_012920.1:m.3243A>G",
+    "valid": true,
+    "source": "ferro_parsing",
+    "description": "Mitochondrial substitution"
+  },
+  {
+    "input": "invalid",
+    "valid": false,
+    "source": "ferro_parsing",
+    "description": "Invalid - no accession"
+  },
+  {
+    "input": "NM_000088.3",
+    "valid": false,
+    "source": "ferro_parsing",
+    "description": "Invalid - no variant"
+  },
+  {
+    "input": "NM_000088.3:c.",
+    "valid": false,
+    "source": "ferro_parsing",
+    "description": "Invalid - empty position"
+  },
+  {
+    "input": "NM_000088.3:x.100A>G",
+    "valid": false,
+    "source": "ferro_parsing",
+    "description": "Invalid - unknown coordinate type"
+  },
+  {
+    "input": "NM_000088.3:c.100X>G",
+    "valid": false,
+    "source": "ferro_parsing",
+    "description": "Invalid - bad reference base"
+  },
+  {
+    "input": "NM_003002.4:c.278dup",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "RNA duplication should remain dup not delins (mutalyzer#99)"
+  },
+  {
+    "input": "NM_000088.3:c.2450dupC",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Frameshift duplication - protein should be p.Gly817Trpfs*3 (mutalyzer2#244)"
+  },
+  {
+    "input": "NG_012337.1:g.=",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Unchanged sequence - valid HGVS notation (mutalyzer2#377)"
+  },
+  {
+    "input": "NG_012337.1:g.?",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Unknown variant - valid HGVS notation (mutalyzer2#377)"
+  },
+  {
+    "input": "NM_020451.2:c.1715C>A",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Selenoprotein UGA - should not flag as stop codon (mutalyzer2#296)"
+  },
+  {
+    "input": "NC_000007.14:117530938:A:T",
+    "valid": false,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "SPDI format - not standard HGVS (mutalyzer commits)"
+  },
+  {
+    "input": "NM_000088.3:c.100+1G>A",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Intronic splice site variant"
+  },
+  {
+    "input": "NM_000088.3:c.100-2A>G",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Intronic splice acceptor variant"
+  },
+  {
+    "input": "NM_006019.4:c.303_318dup",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Performance test - this pattern caused 504 timeout in Mutalyzer (mutalyzer#111)"
+  },
+  {
+    "input": "NM_006019.4:c.303_319dup",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Performance test - this pattern caused 504 timeout in Mutalyzer (mutalyzer#111)"
+  },
+  {
+    "input": "NM_006019.4:c.303_320dup",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Performance test - this pattern caused 504 timeout in Mutalyzer (mutalyzer#111)"
+  },
+  {
+    "input": "NM_006019.4:c.303_321dup",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Performance test - this pattern caused 504 timeout in Mutalyzer (mutalyzer#111)"
+  },
+  {
+    "input": "NM_000193.2:c.108_109delinsG",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Delins should produce frameshift, not p.(=) (mutalyzer2#298)"
+  },
+  {
+    "input": "NM_000777.3:c.-5_-1del",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Kozak sequence damage - should be p.? not p.(=) (mutalyzer2#417)"
+  },
+  {
+    "input": "NG_017013.2:g.13262_13263insTAAAA",
+    "valid": true,
+    "source": "ferro_mutalyzer_edge_cases",
+    "description": "Insertion that may be duplication - should suggest g.13258_13262dup (mutalyzer2#428)"
+  },
+  {
+    "input": "NM_000088.3:c.(4_6)_246del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Uncertain c. interval start (biocommons#801)"
+  },
+  {
+    "input": "NM_000088.3:c.4_(245_246)del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Uncertain c. interval end (biocommons#801)"
+  },
+  {
+    "input": "NM_000088.3:c.(?_6)_245del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Unknown start boundary (biocommons#801)"
+  },
+  {
+    "input": "NM_000088.3:c.4_(245_?)del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Unknown end boundary (biocommons#801)"
+  },
+  {
+    "input": "NM_000088.3:c.(?_6)_(245_?)del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Unknown both boundaries (biocommons#801)"
+  },
+  {
+    "input": "NM_000088.3:c.6317G=",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Identity with reference base (biocommons#314)"
+  },
+  {
+    "input": "NM_000088.3:c.*87_*91del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "3' UTR interval deletion - both positions must have * prefix (biocommons#329)"
+  },
+  {
+    "input": "NM_000088.3:c.*1_*100del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "3' UTR range deletion"
+  },
+  {
+    "input": "NM_000088.3:c.-50_-1del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "5' UTR deletion"
+  },
+  {
+    "input": "NM_000088.3:c.100_102delATGinsATG",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Identity as delins - should normalize to c.= (biocommons#409)"
+  },
+  {
+    "input": "NM_000088.3:c.1957_*3del",
+    "valid": true,
+    "source": "ferro_biocommons_edge_cases",
+    "description": "Deletion including stop codon = frameshift (biocommons#774)"
+  },
+  {
+    "input": "NM_000130.5(F5):c.3288A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "F5",
+    "clinvar_id": "746949"
+  },
+  {
+    "input": "NM_006231.4(POLE):c.2346C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "POLE",
+    "clinvar_id": "746904"
+  },
+  {
+    "input": "NM_006254.4(PRKCD):c.792C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRKCD",
+    "clinvar_id": "746753"
+  },
+  {
+    "input": "NM_004321.7(KIF1A):c.1167C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KIF1A",
+    "clinvar_id": "746695"
+  },
+  {
+    "input": "NM_003265.3(TLR3):c.1295A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TLR3",
+    "clinvar_id": "746638"
+  },
+  {
+    "input": "NM_006258.4(PRKG1):c.1719C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRKG1",
+    "clinvar_id": "746611"
+  },
+  {
+    "input": "NM_000117.3(EMD):c.330T>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EMD",
+    "clinvar_id": "746526"
+  },
+  {
+    "input": "NM_138387.3(G6PC3):c.699G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "G6PC3",
+    "clinvar_id": "745904"
+  },
+  {
+    "input": "NM_001250.6(CD40):c.57T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CD40",
+    "clinvar_id": "745831"
+  },
+  {
+    "input": "NM_001035.3(RYR2):c.8838C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR2",
+    "clinvar_id": "745384"
+  },
+  {
+    "input": "NM_006493.4(CLN5):c.435A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CLN5",
+    "clinvar_id": "745192"
+  },
+  {
+    "input": "NM_001065.4(TNFRSF1A):c.672T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TNFRSF1A",
+    "clinvar_id": "744904"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.62355C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "744806"
+  },
+  {
+    "input": "NM_000211.5(ITGB2):c.1968C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ITGB2",
+    "clinvar_id": "744751"
+  },
+  {
+    "input": "NM_000465.4(BARD1):c.2157A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BARD1",
+    "clinvar_id": "744654"
+  },
+  {
+    "input": "NM_000264.5(PTCH1):c.357G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PTCH1",
+    "clinvar_id": "744158"
+  },
+  {
+    "input": "NM_003640.5(ELP1):c.3222+8C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ELP1",
+    "clinvar_id": "744039"
+  },
+  {
+    "input": "NM_198576.4(AGRN):c.2254+8G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AGRN",
+    "clinvar_id": "743995"
+  },
+  {
+    "input": "NM_000246.3(CIITA):c.1803G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CIITA",
+    "clinvar_id": "743974"
+  },
+  {
+    "input": "NM_000257.4(MYH7):c.5070C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MYH7",
+    "clinvar_id": "743955"
+  },
+  {
+    "input": "NM_000530.8(MPZ):c.201C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MPZ",
+    "clinvar_id": "743953"
+  },
+  {
+    "input": "NM_000267.3(NF1):c.3315-5C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NF1",
+    "clinvar_id": "743890"
+  },
+  {
+    "input": "NM_000267.3(NF1):c.6579+7A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NF1",
+    "clinvar_id": "743774"
+  },
+  {
+    "input": "NM_000426.3(LAMA2):c.6618C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LAMA2",
+    "clinvar_id": "743729"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.65586G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "743728"
+  },
+  {
+    "input": "NM_000383.4(AIRE):c.1398C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AIRE",
+    "clinvar_id": "743717"
+  },
+  {
+    "input": "NM_052813.5(CARD9):c.925C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CARD9",
+    "clinvar_id": "743712"
+  },
+  {
+    "input": "NM_152296.5(ATP1A3):c.672C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ATP1A3",
+    "clinvar_id": "743706"
+  },
+  {
+    "input": "NM_000548.5(TSC2):c.849-10A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TSC2",
+    "clinvar_id": "743696"
+  },
+  {
+    "input": "NM_000238.4(KCNH2):c.473-4G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KCNH2",
+    "clinvar_id": "743676"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.9465C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "743675"
+  },
+  {
+    "input": "NM_020070.4(IGLL1):c.492G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IGLL1",
+    "clinvar_id": "743661"
+  },
+  {
+    "input": "NM_002163.4(IRF8):c.825G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IRF8",
+    "clinvar_id": "743656"
+  },
+  {
+    "input": "NM_001458.4(FLNC):c.5212C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FLNC",
+    "clinvar_id": "743634"
+  },
+  {
+    "input": "NM_001113378.2(FANCI):c.819A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCI",
+    "clinvar_id": "743613"
+  },
+  {
+    "input": "NM_004364.4(CEBPA):c.756G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CEBPA",
+    "clinvar_id": "743609"
+  },
+  {
+    "input": "NM_138638.5(CFL2):c.495A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CFL2",
+    "clinvar_id": "743607"
+  },
+  {
+    "input": "NM_020458.4(TTC7A):c.1164C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTC7A",
+    "clinvar_id": "746745"
+  },
+  {
+    "input": "NM_002851.3(PTPRZ1):c.4899C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PTPRZ1",
+    "clinvar_id": "746607"
+  },
+  {
+    "input": "NM_015125.4(CIC):c.3084A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CIC",
+    "clinvar_id": "746579"
+  },
+  {
+    "input": "NM_000232.5(SGCB):c.519G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SGCB",
+    "clinvar_id": "746533"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.795C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "745525"
+  },
+  {
+    "input": "NM_000117.3(EMD):c.714C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EMD",
+    "clinvar_id": "745521"
+  },
+  {
+    "input": "NM_001258392.3(CLPB):c.1620C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CLPB",
+    "clinvar_id": "745484"
+  },
+  {
+    "input": "NM_020975.6(RET):c.843C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RET",
+    "clinvar_id": "745405"
+  },
+  {
+    "input": "NM_000733.4(CD3E):c.103+10T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CD3E",
+    "clinvar_id": "744708"
+  },
+  {
+    "input": "NM_001006658.3(CR2):c.1086A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CR2",
+    "clinvar_id": "744424"
+  },
+  {
+    "input": "NM_002529.3(NTRK1):c.360-9C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NTRK1",
+    "clinvar_id": "744217"
+  },
+  {
+    "input": "NM_000093.5(COL5A1):c.4069-6C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL5A1",
+    "clinvar_id": "744216"
+  },
+  {
+    "input": "NM_000548.5(TSC2):c.3231C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TSC2",
+    "clinvar_id": "744171"
+  },
+  {
+    "input": "NM_001127500.3(MET):c.2415A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MET",
+    "clinvar_id": "744070"
+  },
+  {
+    "input": "NM_000246.3(CIITA):c.772+5G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CIITA",
+    "clinvar_id": "743989"
+  },
+  {
+    "input": "NM_015474.4(SAMHD1):c.490C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SAMHD1",
+    "clinvar_id": "743983"
+  },
+  {
+    "input": "NM_004006.2(DMD):c.6375G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DMD",
+    "clinvar_id": "743967"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.85449C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "743850"
+  },
+  {
+    "input": "NM_177438.2(DICER1):c.3606A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DICER1",
+    "clinvar_id": "743823"
+  },
+  {
+    "input": "NM_020964.3(EPG5):c.7155C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EPG5",
+    "clinvar_id": "743719"
+  },
+  {
+    "input": "NM_004304.5(ALK):c.1866C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ALK",
+    "clinvar_id": "743351"
+  },
+  {
+    "input": "NM_006397.3(RNASEH2A):c.199+9G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RNASEH2A",
+    "clinvar_id": "743039"
+  },
+  {
+    "input": "NM_001458.4(FLNC):c.6801C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FLNC",
+    "clinvar_id": "742627"
+  },
+  {
+    "input": "NM_003764.4(STX11):c.193C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "STX11",
+    "clinvar_id": "742306"
+  },
+  {
+    "input": "NM_000540.3(RYR1):c.4533G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR1",
+    "clinvar_id": "741935"
+  },
+  {
+    "input": "NM_003126.4(SPTA1):c.5457A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SPTA1",
+    "clinvar_id": "741540"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.10800G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "741435"
+  },
+  {
+    "input": "NM_198282.4(STING1):c.380C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "STING1",
+    "clinvar_id": "746622"
+  },
+  {
+    "input": "NM_000551.4(VHL):c.252G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VHL",
+    "clinvar_id": "746562"
+  },
+  {
+    "input": "NM_002661.5(PLCG2):c.2991C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PLCG2",
+    "clinvar_id": "745333"
+  },
+  {
+    "input": "NM_004360.5(CDH1):c.1779C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CDH1",
+    "clinvar_id": "745156"
+  },
+  {
+    "input": "NM_001364905.1(LRBA):c.2275A>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LRBA",
+    "clinvar_id": "743723"
+  },
+  {
+    "input": "NM_001321120.2(TBX4):c.780C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TBX4",
+    "clinvar_id": "743657"
+  },
+  {
+    "input": "NM_001364905.1(LRBA):c.4956G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LRBA",
+    "clinvar_id": "742090"
+  },
+  {
+    "input": "NM_014625.4(NPHS2):c.372C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NPHS2",
+    "clinvar_id": "741670"
+  },
+  {
+    "input": "NM_000092.5(COL4A4):c.4525C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL4A4",
+    "clinvar_id": "740618"
+  },
+  {
+    "input": "NM_001197104.2(KMT2A):c.3974G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KMT2A",
+    "clinvar_id": "738824"
+  },
+  {
+    "input": "NM_000760.4(CSF3R):c.1263G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CSF3R",
+    "clinvar_id": "736598"
+  },
+  {
+    "input": "NM_001083899.2(GP6):c.1459C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GP6",
+    "clinvar_id": "736596"
+  },
+  {
+    "input": "NM_014339.7(IL17RA):c.2076C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IL17RA",
+    "clinvar_id": "735646"
+  },
+  {
+    "input": "NM_004628.5(XPC):c.2418C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "XPC",
+    "clinvar_id": "735340"
+  },
+  {
+    "input": "NM_198576.4(AGRN):c.5838C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AGRN",
+    "clinvar_id": "735310"
+  },
+  {
+    "input": "NM_000023.4(SGCA):c.90A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SGCA",
+    "clinvar_id": "734472"
+  },
+  {
+    "input": "NM_003332.4(TYROBP):c.46C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TYROBP",
+    "clinvar_id": "732760"
+  },
+  {
+    "input": "NM_015243.2(VPS13B):c.2433A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VPS13B",
+    "clinvar_id": "724870"
+  },
+  {
+    "input": "NM_003467.3(CXCR4):c.708G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CXCR4",
+    "clinvar_id": "724626"
+  },
+  {
+    "input": "NM_018965.4(TREM2):c.396C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TREM2",
+    "clinvar_id": "724458"
+  },
+  {
+    "input": "NM_000380.4(XPA):c.213A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "XPA",
+    "clinvar_id": "724230"
+  },
+  {
+    "input": "NM_000433.4(NCF2):c.51G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NCF2",
+    "clinvar_id": "724169"
+  },
+  {
+    "input": "NM_001083116.3(PRF1):c.1140G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRF1",
+    "clinvar_id": "723839"
+  },
+  {
+    "input": "NM_000416.3(IFNGR1):c.40G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IFNGR1",
+    "clinvar_id": "723758"
+  },
+  {
+    "input": "NM_020964.3(EPG5):c.1609G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EPG5",
+    "clinvar_id": "723660"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.7374C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "723381"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.30570C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "723027"
+  },
+  {
+    "input": "NM_000199.5(SGSH):c.1428C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SGSH",
+    "clinvar_id": "722971"
+  },
+  {
+    "input": "NM_002163.4(IRF8):c.537G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IRF8",
+    "clinvar_id": "722802"
+  },
+  {
+    "input": "NM_000330.4(RS1):c.88G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RS1",
+    "clinvar_id": "722780"
+  },
+  {
+    "input": "NM_000407.5(GP1BB):c.544G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GP1BB",
+    "clinvar_id": "721649"
+  },
+  {
+    "input": "NC_000010.11:g.27040170T>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ANKRD26",
+    "clinvar_id": "717238"
+  },
+  {
+    "input": "NM_002473.6(MYH9):c.2085C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MYH9",
+    "clinvar_id": "717124"
+  },
+  {
+    "input": "NM_006949.4(STXBP2):c.822G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "STXBP2",
+    "clinvar_id": "716692"
+  },
+  {
+    "input": "NM_001197104.2(KMT2A):c.7299A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KMT2A",
+    "clinvar_id": "716588"
+  },
+  {
+    "input": "NM_001875.5(CPS1):c.1714G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CPS1",
+    "clinvar_id": "715412"
+  },
+  {
+    "input": "NM_001322934.2(NFKB2):c.2676C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NFKB2",
+    "clinvar_id": "715396"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.11311+9A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "715362"
+  },
+  {
+    "input": "NM_004655.4(AXIN2):c.774G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AXIN2",
+    "clinvar_id": "715293"
+  },
+  {
+    "input": "NM_177550.5(SLC13A5):c.1230C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SLC13A5",
+    "clinvar_id": "715280"
+  },
+  {
+    "input": "NM_001142864.4(PIEZO1):c.3928G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIEZO1",
+    "clinvar_id": "714852"
+  },
+  {
+    "input": "NM_006096.4(NDRG1):c.856-9C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NDRG1",
+    "clinvar_id": "714466"
+  },
+  {
+    "input": "NM_000490.5(AVP):c.150C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AVP",
+    "clinvar_id": "724217"
+  },
+  {
+    "input": "NM_000551.4(VHL):c.340+10C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VHL",
+    "clinvar_id": "723884"
+  },
+  {
+    "input": "NM_000449.3(RFX5):c.477T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RFX5",
+    "clinvar_id": "723738"
+  },
+  {
+    "input": "NM_001365088.1(SLC12A6):c.1017T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SLC12A6",
+    "clinvar_id": "721719"
+  },
+  {
+    "input": "NM_000170.3(GLDC):c.2307C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GLDC",
+    "clinvar_id": "719922"
+  },
+  {
+    "input": "NM_006019.4(TCIRG1):c.1692C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TCIRG1",
+    "clinvar_id": "716565"
+  },
+  {
+    "input": "NM_000383.4(AIRE):c.372G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AIRE",
+    "clinvar_id": "715284"
+  },
+  {
+    "input": "NM_000268.4(NF2):c.939C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NF2",
+    "clinvar_id": "714194"
+  },
+  {
+    "input": "NM_000400.4(ERCC2):c.1632C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ERCC2",
+    "clinvar_id": "712863"
+  },
+  {
+    "input": "NM_000107.3(DDB2):c.644T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DDB2",
+    "clinvar_id": "712077"
+  },
+  {
+    "input": "NM_000930.5(PLAT):c.1629G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PLAT",
+    "clinvar_id": "712061"
+  },
+  {
+    "input": "NM_015378.4(VPS13D):c.11370+4A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VPS13D",
+    "clinvar_id": "711686"
+  },
+  {
+    "input": "NM_000179.3(MSH6):c.1383T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MSH6",
+    "clinvar_id": "710808"
+  },
+  {
+    "input": "NM_002163.4(IRF8):c.1065G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IRF8",
+    "clinvar_id": "710806"
+  },
+  {
+    "input": "NM_021946.4(BCORL1):c.3158A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BCORL1",
+    "clinvar_id": "708706"
+  },
+  {
+    "input": "NM_002299.4(LCT):c.301A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LCT",
+    "clinvar_id": "708530"
+  },
+  {
+    "input": "NM_152383.4(DIS3L2):c.933C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DIS3L2",
+    "clinvar_id": "708503"
+  },
+  {
+    "input": "NM_004369.4(COL6A3):c.913G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL6A3",
+    "clinvar_id": "707797"
+  },
+  {
+    "input": "NM_000426.3(LAMA2):c.4803G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LAMA2",
+    "clinvar_id": "707766"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.13251A>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "707605"
+  },
+  {
+    "input": "NM_000051.3(ATM):c.7968T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ATM",
+    "clinvar_id": "706938"
+  },
+  {
+    "input": "NM_020975.6(RET):c.231C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RET",
+    "clinvar_id": "706783"
+  },
+  {
+    "input": "NM_024570.4(RNASEH2B):c.203A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RNASEH2B",
+    "clinvar_id": "706377"
+  },
+  {
+    "input": "NM_004082.4(DCTN1):c.3212-10G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DCTN1",
+    "clinvar_id": "705947"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.18694-12dup",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "704338"
+  },
+  {
+    "input": "NM_000335.5(SCN5A):c.5847C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SCN5A",
+    "clinvar_id": "704320"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.13327C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "703962"
+  },
+  {
+    "input": "NM_000454.5(SOD1):c.195T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SOD1",
+    "clinvar_id": "703873"
+  },
+  {
+    "input": "NM_000264.5(PTCH1):c.3379C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PTCH1",
+    "clinvar_id": "703716"
+  },
+  {
+    "input": "NM_001035.3(RYR2):c.3243C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR2",
+    "clinvar_id": "703408"
+  },
+  {
+    "input": "NM_015627.3(LDLRAP1):c.780G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LDLRAP1",
+    "clinvar_id": "701037"
+  },
+  {
+    "input": "NM_177438.2(DICER1):c.4206+8_4206+9insTTTT",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DICER1",
+    "clinvar_id": "701032"
+  },
+  {
+    "input": "NM_172201.1(KCNE2):c.348G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KCNE2",
+    "clinvar_id": "700968"
+  },
+  {
+    "input": "NM_012431.3(SEMA3E):c.1435C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SEMA3E",
+    "clinvar_id": "700561"
+  },
+  {
+    "input": "NM_145046.5(CALR3):c.780G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CALR3",
+    "clinvar_id": "699281"
+  },
+  {
+    "input": "NM_006218.4(PIK3CA):c.1809C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIK3CA",
+    "clinvar_id": "699107"
+  },
+  {
+    "input": "NM_015627.3(LDLRAP1):c.748-4C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LDLRAP1",
+    "clinvar_id": "698758"
+  },
+  {
+    "input": "NM_181882.3(PRX):c.1491C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRX",
+    "clinvar_id": "697308"
+  },
+  {
+    "input": "NM_005373.3(MPL):c.963G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MPL",
+    "clinvar_id": "696853"
+  },
+  {
+    "input": "NM_000093.5(COL5A1):c.57G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL5A1",
+    "clinvar_id": "696848"
+  },
+  {
+    "input": "NM_000540.3(RYR1):c.5487C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR1",
+    "clinvar_id": "696732"
+  },
+  {
+    "input": "NM_001005340.2(GPNMB):c.53C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GPNMB",
+    "clinvar_id": "715719"
+  },
+  {
+    "input": "NM_207437.3(DNAH10):c.3556G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DNAH10",
+    "clinvar_id": "715658"
+  },
+  {
+    "input": "NM_019023.4(PRMT7):c.1945G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRMT7",
+    "clinvar_id": "715535"
+  },
+  {
+    "input": "NM_024312.5(GNPTAB):c.3268C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GNPTAB",
+    "clinvar_id": "715282"
+  },
+  {
+    "input": "NM_005876.5(SPEG):c.8508G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SPEG",
+    "clinvar_id": "715221"
+  },
+  {
+    "input": "NM_004260.4(RECQL4):c.714G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RECQL4",
+    "clinvar_id": "715133"
+  },
+  {
+    "input": "NM_021942.6(TRAPPC11):c.1305T>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TRAPPC11",
+    "clinvar_id": "715108"
+  },
+  {
+    "input": "NM_001142864.4(PIEZO1):c.7353C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIEZO1",
+    "clinvar_id": "739465"
+  },
+  {
+    "input": "NM_001625.4(AK2):c.25G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AK2",
+    "clinvar_id": "737934"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.20346T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "737909"
+  },
+  {
+    "input": "NM_003839.4(TNFRSF11A):c.525T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TNFRSF11A",
+    "clinvar_id": "724616"
+  },
+  {
+    "input": "NM_003998.4(NFKB1):c.1700C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NFKB1",
+    "clinvar_id": "722155"
+  },
+  {
+    "input": "NM_021926.4(ALX4):c.1182G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ALX4",
+    "clinvar_id": "721962"
+  },
+  {
+    "input": "NM_003200.5(TCF3):c.1731A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TCF3",
+    "clinvar_id": "719994"
+  },
+  {
+    "input": "NM_000259.3(MYO5A):c.5520C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MYO5A",
+    "clinvar_id": "717952"
+  },
+  {
+    "input": "NM_014339.7(IL17RA):c.327C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IL17RA",
+    "clinvar_id": "714604"
+  },
+  {
+    "input": "NM_018344.6(SLC29A3):c.301-6T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SLC29A3",
+    "clinvar_id": "713949"
+  },
+  {
+    "input": "NM_003839.4(TNFRSF11A):c.1279G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TNFRSF11A",
+    "clinvar_id": "713429"
+  },
+  {
+    "input": "NM_017890.4(VPS13B):c.11133C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VPS13B",
+    "clinvar_id": "710565"
+  },
+  {
+    "input": "NM_004656.4(BAP1):c.141C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BAP1",
+    "clinvar_id": "707787"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.25473G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "706828"
+  },
+  {
+    "input": "NM_001130823.3(DNMT1):c.3960C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DNMT1",
+    "clinvar_id": "706182"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.60C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "704541"
+  },
+  {
+    "input": "NM_000719.7(CACNA1C):c.2103+8C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CACNA1C",
+    "clinvar_id": "700476"
+  },
+  {
+    "input": "NM_001035.3(RYR2):c.4707A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR2",
+    "clinvar_id": "699651"
+  },
+  {
+    "input": "NM_000090.4(COL3A1):c.1816-4T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL3A1",
+    "clinvar_id": "699016"
+  },
+  {
+    "input": "NM_000426.3(LAMA2):c.1506C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LAMA2",
+    "clinvar_id": "698119"
+  },
+  {
+    "input": "NM_004456.5(EZH2):c.1905T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EZH2",
+    "clinvar_id": "697798"
+  },
+  {
+    "input": "NM_000088.4(COL1A1):c.2166C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL1A1",
+    "clinvar_id": "697683"
+  },
+  {
+    "input": "NM_023110.3(FGFR1):c.2361G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FGFR1",
+    "clinvar_id": "697534"
+  },
+  {
+    "input": "NM_152296.5(ATP1A3):c.1080G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ATP1A3",
+    "clinvar_id": "697133"
+  },
+  {
+    "input": "NM_003640.5(ELP1):c.3360T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ELP1",
+    "clinvar_id": "697066"
+  },
+  {
+    "input": "NM_005957.5(MTHFR):c.1555C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MTHFR",
+    "clinvar_id": "697065"
+  },
+  {
+    "input": "NM_002114.4(HIVEP1):c.5586G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "HIVEP1",
+    "clinvar_id": "715501"
+  },
+  {
+    "input": "NM_001271223.2(OBSCN):c.21214C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "OBSCN",
+    "clinvar_id": "715471"
+  },
+  {
+    "input": "NM_030957.4(ADAMTS10):c.2016C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ADAMTS10",
+    "clinvar_id": "715179"
+  },
+  {
+    "input": "NM_016532.4(INPP5K):c.51C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "INPP5K",
+    "clinvar_id": "714853"
+  },
+  {
+    "input": "NM_001067.4(TOP2A):c.729A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TOP2A",
+    "clinvar_id": "714733"
+  },
+  {
+    "input": "NM_198576.4(AGRN):c.3060C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AGRN",
+    "clinvar_id": "742382"
+  },
+  {
+    "input": "NM_001127221.1(CACNA1A):c.687C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CACNA1A",
+    "clinvar_id": "742373"
+  },
+  {
+    "input": "NM_000170.3(GLDC):c.1262-4G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GLDC",
+    "clinvar_id": "742349"
+  },
+  {
+    "input": "NM_001875.5(CPS1):c.2392-9G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CPS1",
+    "clinvar_id": "742171"
+  },
+  {
+    "input": "NM_001039933.3(CD79B):c.434-4G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CD79B",
+    "clinvar_id": "742165"
+  },
+  {
+    "input": "NM_005060.4(RORC):c.1067-4C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RORC",
+    "clinvar_id": "741955"
+  },
+  {
+    "input": "NM_000274.4(OAT):c.521-6T>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "OAT",
+    "clinvar_id": "741125"
+  },
+  {
+    "input": "NM_004006.2(DMD):c.4014G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DMD",
+    "clinvar_id": "746915"
+  },
+  {
+    "input": "NM_000540.3(RYR1):c.7098C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR1",
+    "clinvar_id": "746892"
+  },
+  {
+    "input": "NM_001033855.3(DCLRE1C):c.330C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DCLRE1C",
+    "clinvar_id": "746860"
+  },
+  {
+    "input": "NM_032790.3(ORAI1):c.124G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ORAI1",
+    "clinvar_id": "746754"
+  },
+  {
+    "input": "NM_000074.3(CD40LG):c.32G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CD40LG",
+    "clinvar_id": "746752"
+  },
+  {
+    "input": "NM_000130.5(F5):c.5001G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "F5",
+    "clinvar_id": "746736"
+  },
+  {
+    "input": "NM_181882.3(PRX):c.3531A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PRX",
+    "clinvar_id": "746686"
+  },
+  {
+    "input": "NM_003664.5(AP3B1):c.2172G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AP3B1",
+    "clinvar_id": "746641"
+  },
+  {
+    "input": "NM_015247.2(CYLD):c.1071C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CYLD",
+    "clinvar_id": "746617"
+  },
+  {
+    "input": "NM_001556.3(IKBKB):c.2263G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IKBKB",
+    "clinvar_id": "746609"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.9768C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "746593"
+  },
+  {
+    "input": "NM_000490.5(AVP):c.245C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AVP",
+    "clinvar_id": "746584"
+  },
+  {
+    "input": "NM_004415.4(DSP):c.726+7G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DSP",
+    "clinvar_id": "746519"
+  },
+  {
+    "input": "NM_000368.5(TSC1):c.3135T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TSC1",
+    "clinvar_id": "746491"
+  },
+  {
+    "input": "NM_000092.5(COL4A4):c.929G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL4A4",
+    "clinvar_id": "746479"
+  },
+  {
+    "input": "NM_000097.7(CPOX):c.716G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CPOX",
+    "clinvar_id": "746450"
+  },
+  {
+    "input": "NM_000490.5(AVP):c.363C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AVP",
+    "clinvar_id": "746393"
+  },
+  {
+    "input": "NM_030984.5(TBXAS1):c.1254C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TBXAS1",
+    "clinvar_id": "746349"
+  },
+  {
+    "input": "NM_000190.4(HMBS):c.534C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "HMBS",
+    "clinvar_id": "746326"
+  },
+  {
+    "input": "NM_000043.6(FAS):c.948G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FAS",
+    "clinvar_id": "746285"
+  },
+  {
+    "input": "NM_000548.5(TSC2):c.4560G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TSC2",
+    "clinvar_id": "746261"
+  },
+  {
+    "input": "NM_032043.3(BRIP1):c.2576-4T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BRIP1",
+    "clinvar_id": "746260"
+  },
+  {
+    "input": "NM_002878.3(RAD51D):c.330T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RAD51D",
+    "clinvar_id": "746245"
+  },
+  {
+    "input": "NM_004364.4(CEBPA):c.939G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CEBPA",
+    "clinvar_id": "746241"
+  },
+  {
+    "input": "NM_006206.6(PDGFRA):c.576C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PDGFRA",
+    "clinvar_id": "746196"
+  },
+  {
+    "input": "NM_006231.4(POLE):c.4666C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "POLE",
+    "clinvar_id": "746176"
+  },
+  {
+    "input": "NM_203447.3(DOCK8):c.1779T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DOCK8",
+    "clinvar_id": "746168"
+  },
+  {
+    "input": "NM_153460.4(IL17RC):c.846C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "IL17RC",
+    "clinvar_id": "746160"
+  },
+  {
+    "input": "NM_001145536.2(C17orf107):c.*1419C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CHRNE",
+    "clinvar_id": "746130"
+  },
+  {
+    "input": "NM_000109.4(DMD):c.1969-5CA[4]",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DMD",
+    "clinvar_id": "746126"
+  },
+  {
+    "input": "NM_002529.3(NTRK1):c.1650C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NTRK1",
+    "clinvar_id": "745255"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.82857C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "743741"
+  },
+  {
+    "input": "NM_000246.3(CIITA):c.141C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CIITA",
+    "clinvar_id": "743724"
+  },
+  {
+    "input": "NM_001848.3(COL6A1):c.1977C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL6A1",
+    "clinvar_id": "743066"
+  },
+  {
+    "input": "NM_000091.5(COL4A3):c.1863A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL4A3",
+    "clinvar_id": "742400"
+  },
+  {
+    "input": "NM_014208.3(DSPP):c.144A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DSPP",
+    "clinvar_id": "741906"
+  },
+  {
+    "input": "NM_018400.3(SCN3B):c.445+8T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SCN3B",
+    "clinvar_id": "741757"
+  },
+  {
+    "input": "NM_006231.4(POLE):c.720+9G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "POLE",
+    "clinvar_id": "741710"
+  },
+  {
+    "input": "NM_177438.2(DICER1):c.2490G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DICER1",
+    "clinvar_id": "739997"
+  },
+  {
+    "input": "NM_020529.3(NFKBIA):c.140A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NFKBIA",
+    "clinvar_id": "739286"
+  },
+  {
+    "input": "NM_000548.5(TSC2):c.4224C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TSC2",
+    "clinvar_id": "738624"
+  },
+  {
+    "input": "NM_000179.3(MSH6):c.900G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MSH6",
+    "clinvar_id": "737905"
+  },
+  {
+    "input": "NM_000330.4(RS1):c.548C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RS1",
+    "clinvar_id": "736967"
+  },
+  {
+    "input": "NM_006019.4(TCIRG1):c.1305+7G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TCIRG1",
+    "clinvar_id": "736786"
+  },
+  {
+    "input": "NM_194456.1(KRIT1):c.1914A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KRIT1",
+    "clinvar_id": "735765"
+  },
+  {
+    "input": "NM_000259.3(MYO5A):c.1200C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MYO5A",
+    "clinvar_id": "735737"
+  },
+  {
+    "input": "NM_133459.4(CCBE1):c.843A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CCBE1",
+    "clinvar_id": "735571"
+  },
+  {
+    "input": "NM_004655.4(AXIN2):c.456C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "AXIN2",
+    "clinvar_id": "734883"
+  },
+  {
+    "input": "NM_002661.5(PLCG2):c.1092C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PLCG2",
+    "clinvar_id": "734066"
+  },
+  {
+    "input": "NM_000211.5(ITGB2):c.714C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ITGB2",
+    "clinvar_id": "733072"
+  },
+  {
+    "input": "NM_004304.5(ALK):c.361C>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ALK",
+    "clinvar_id": "730558"
+  },
+  {
+    "input": "NM_145725.3(TRAF3):c.1092G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TRAF3",
+    "clinvar_id": "728424"
+  },
+  {
+    "input": "NM_015125.4(CIC):c.2781C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CIC",
+    "clinvar_id": "727696"
+  },
+  {
+    "input": "NM_015243.2(VPS13B):c.510C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VPS13B",
+    "clinvar_id": "724979"
+  },
+  {
+    "input": "NM_152468.5(TMC8):c.917_918delinsTT",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TMC8",
+    "clinvar_id": "724852"
+  },
+  {
+    "input": "NM_004304.5(ALK):c.588G>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ALK",
+    "clinvar_id": "724813"
+  },
+  {
+    "input": "NM_004972.4(JAK2):c.731A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "JAK2",
+    "clinvar_id": "724741"
+  },
+  {
+    "input": "NM_003331.5(TYK2):c.3123C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TYK2",
+    "clinvar_id": "724651"
+  },
+  {
+    "input": "NM_000138.5(FBN1):c.6110A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FBN1",
+    "clinvar_id": "724608"
+  },
+  {
+    "input": "NM_004329.3(BMPR1A):c.1543T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BMPR1A",
+    "clinvar_id": "724589"
+  },
+  {
+    "input": "NM_012448.4(STAT5B):c.1971C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "STAT5B",
+    "clinvar_id": "724405"
+  },
+  {
+    "input": "NM_000527.5(LDLR):c.1863A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LDLR",
+    "clinvar_id": "745313"
+  },
+  {
+    "input": "NM_001145536.2(C17orf107):c.*1494G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CHRNE",
+    "clinvar_id": "735312"
+  },
+  {
+    "input": "NM_030773.4(TUBB1):c.1045G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TUBB1",
+    "clinvar_id": "724372"
+  },
+  {
+    "input": "NM_001458.4(FLNC):c.699+9G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FLNC",
+    "clinvar_id": "723638"
+  },
+  {
+    "input": "NM_001366385.1(CARD14):c.2139C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SGSH",
+    "clinvar_id": "722970"
+  },
+  {
+    "input": "NM_000092.5(COL4A4):c.1665G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "COL4A4",
+    "clinvar_id": "722931"
+  },
+  {
+    "input": "NM_006947.4(SRP72):c.1678+9_1678+12dup",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SRP72",
+    "clinvar_id": "722904"
+  },
+  {
+    "input": "NM_001366385.1(CARD14):c.27C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CARD14",
+    "clinvar_id": "722898"
+  },
+  {
+    "input": "NM_001734.5(C1S):c.1066+10T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "C1S",
+    "clinvar_id": "722140"
+  },
+  {
+    "input": "NM_001077269.1(WIPF1):c.212G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "WIPF1",
+    "clinvar_id": "721527"
+  },
+  {
+    "input": "NM_000086.2(CLN3):c.693C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CLN3",
+    "clinvar_id": "721317"
+  },
+  {
+    "input": "NM_003190.5(TAPBP):c.175G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TAPBP",
+    "clinvar_id": "715762"
+  },
+  {
+    "input": "NM_001458.4(FLNC):c.5922G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FLNC",
+    "clinvar_id": "708223"
+  },
+  {
+    "input": "NM_001130823.3(DNMT1):c.3669C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DNMT1",
+    "clinvar_id": "707638"
+  },
+  {
+    "input": "NM_015046.7(SETX):c.6276T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SETX",
+    "clinvar_id": "706296"
+  },
+  {
+    "input": "NM_001130823.3(DNMT1):c.1647C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DNMT1",
+    "clinvar_id": "705119"
+  },
+  {
+    "input": "NM_030962.3(SBF2):c.5493T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SBF2",
+    "clinvar_id": "705112"
+  },
+  {
+    "input": "NM_020975.6(RET):c.3123G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RET",
+    "clinvar_id": "705106"
+  },
+  {
+    "input": "NM_000252.3(MTM1):c.1793A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MTM1",
+    "clinvar_id": "705101"
+  },
+  {
+    "input": "NM_004738.5(VAPB):c.528G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VAPB",
+    "clinvar_id": "705096"
+  },
+  {
+    "input": "NM_024685.4(BBS10):c.1975A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "BBS10",
+    "clinvar_id": "704965"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.49476T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "704298"
+  },
+  {
+    "input": "NM_004629.2(FANCG):c.1002A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCG",
+    "clinvar_id": "703628"
+  },
+  {
+    "input": "NM_024529.5(CDC73):c.822A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CDC73",
+    "clinvar_id": "703410"
+  },
+  {
+    "input": "NM_004360.5(CDH1):c.1797T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CDH1",
+    "clinvar_id": "699641"
+  },
+  {
+    "input": "NM_012431.3(SEMA3E):c.1348G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SEMA3E",
+    "clinvar_id": "698832"
+  },
+  {
+    "input": "NM_003640.5(ELP1):c.1644-13dup",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ELP1",
+    "clinvar_id": "697137"
+  },
+  {
+    "input": "NM_198253.3(TERT):c.603G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TERT",
+    "clinvar_id": "696911"
+  },
+  {
+    "input": "NM_000268.4(NF2):c.492C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NF2",
+    "clinvar_id": "739244"
+  },
+  {
+    "input": "NM_000081.4(LYST):c.2363+7A>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "LYST",
+    "clinvar_id": "738462"
+  },
+  {
+    "input": "NM_004321.7(KIF1A):c.1503G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KIF1A",
+    "clinvar_id": "733791"
+  },
+  {
+    "input": "NM_006892.4(DNMT3B):c.408C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "DNMT3B",
+    "clinvar_id": "732894"
+  },
+  {
+    "input": "NM_005027.4(PIK3R2):c.816-8C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIK3R2",
+    "clinvar_id": "732893"
+  },
+  {
+    "input": "NM_014619.5(GRIK4):c.15G>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GRIK4",
+    "clinvar_id": "732535"
+  },
+  {
+    "input": "NM_001366385.1(CARD14):c.2807+10C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SGSH",
+    "clinvar_id": "732436"
+  },
+  {
+    "input": "NM_005666.4(CFHR2):c.334_337del",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CFHR2",
+    "clinvar_id": "732212"
+  },
+  {
+    "input": "NM_000174.4(GP9):c.445T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GP9",
+    "clinvar_id": "721252"
+  },
+  {
+    "input": "NM_001142864.4(PIEZO1):c.1647G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIEZO1",
+    "clinvar_id": "719933"
+  },
+  {
+    "input": "NM_003327.4(TNFRSF4):c.75C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TNFRSF4",
+    "clinvar_id": "718794"
+  },
+  {
+    "input": "NM_020458.4(TTC7A):c.2017+8C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTC7A",
+    "clinvar_id": "718394"
+  },
+  {
+    "input": "NM_032130.3(FAM186B):c.2210C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FAM186B",
+    "clinvar_id": "713126"
+  },
+  {
+    "input": "NM_138477.4(CDAN1):c.2263-5G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CDAN1",
+    "clinvar_id": "709476"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.13428T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "707416"
+  },
+  {
+    "input": "NM_004304.5(ALK):c.1803C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ALK",
+    "clinvar_id": "706226"
+  },
+  {
+    "input": "NM_000891.3(KCNJ2):c.207C>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "KCNJ2",
+    "clinvar_id": "704379"
+  },
+  {
+    "input": "NM_017890.4(VPS13B):c.8523T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "VPS13B",
+    "clinvar_id": "703757"
+  },
+  {
+    "input": "NM_025099.6(CTC1):c.1946-6C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CTC1",
+    "clinvar_id": "700777"
+  },
+  {
+    "input": "NM_017841.4(SDHAF2):c.387A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SDHAF2",
+    "clinvar_id": "700766"
+  },
+  {
+    "input": "NM_006920.6(SCN1A):c.3969+8A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SCN1A",
+    "clinvar_id": "700317"
+  },
+  {
+    "input": "NM_032444.4(SLX4):c.4830C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SLX4",
+    "clinvar_id": "699428"
+  },
+  {
+    "input": "NM_020937.4(FANCM):c.1200A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCM",
+    "clinvar_id": "699358"
+  },
+  {
+    "input": "NM_003000.3(SDHB):c.738C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SDHB",
+    "clinvar_id": "699234"
+  },
+  {
+    "input": "NM_002049.4(GATA1):c.798G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "GATA1",
+    "clinvar_id": "699197"
+  },
+  {
+    "input": "NM_033084.6(FANCD2):c.1698C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCD2",
+    "clinvar_id": "699115"
+  },
+  {
+    "input": "NM_000719.7(CACNA1C):c.798C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CACNA1C",
+    "clinvar_id": "698729"
+  },
+  {
+    "input": "NM_004958.4(MTOR):c.5133C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MTOR",
+    "clinvar_id": "698720"
+  },
+  {
+    "input": "NM_000540.3(RYR1):c.7362C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RYR1",
+    "clinvar_id": "698212"
+  },
+  {
+    "input": "NM_001267550.2(TTN):c.13281C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TTN",
+    "clinvar_id": "697912"
+  },
+  {
+    "input": "NM_002838.5(PTPRC):c.879G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PTPRC",
+    "clinvar_id": "794657"
+  },
+  {
+    "input": "NM_001323289.2(CDKL5):c.2217A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CDKL5",
+    "clinvar_id": "794336"
+  },
+  {
+    "input": "NM_001040142.2(SCN2A):c.2920-7G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "SCN2A",
+    "clinvar_id": "794328"
+  },
+  {
+    "input": "NM_001673.5(ASNS):c.1101A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "ASNS",
+    "clinvar_id": "794259"
+  },
+  {
+    "input": "NM_002474.3(MYH11):c.1719T>C",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "MYH11",
+    "clinvar_id": "794227"
+  },
+  {
+    "input": "NM_001142800.2(EYS):c.5376A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "EYS",
+    "clinvar_id": "794203"
+  },
+  {
+    "input": "NM_181471.3(RFC2):c.619G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RFC2",
+    "clinvar_id": "794141"
+  },
+  {
+    "input": "NM_001271208.2(NEB):c.21630C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NEB",
+    "clinvar_id": "745280"
+  },
+  {
+    "input": "NM_001322934.2(NFKB2):c.579C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NFKB2",
+    "clinvar_id": "738712"
+  },
+  {
+    "input": "NM_001007553.3(CSDE1):c.1965A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CSDE1",
+    "clinvar_id": "715551"
+  },
+  {
+    "input": "NM_001142864.4(PIEZO1):c.997C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "PIEZO1",
+    "clinvar_id": "708553"
+  },
+  {
+    "input": "NM_004364.4(CEBPA):c.468G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CEBPA",
+    "clinvar_id": "698261"
+  },
+  {
+    "input": "NM_000135.4(FANCA):c.303A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCA",
+    "clinvar_id": "696372"
+  },
+  {
+    "input": "NM_004629.2(FANCG):c.1521G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FANCG",
+    "clinvar_id": "696188"
+  },
+  {
+    "input": "NM_198253.3(TERT):c.2688C>T",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "TERT",
+    "clinvar_id": "696098"
+  },
+  {
+    "input": "NM_000719.7(CACNA1C):c.2853+440G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "CACNA1C",
+    "clinvar_id": "695431"
+  },
+  {
+    "input": "NM_014053.4(FLVCR1):c.1092+5G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "FLVCR1",
+    "clinvar_id": "374768"
+  },
+  {
+    "input": "NM_000271.5(NPC1):c.57+4A>G",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "NPC1",
+    "clinvar_id": "374748"
+  },
+  {
+    "input": "NM_018993.3(RIN2):c.1642G>A",
+    "valid": true,
+    "source": "ferro_clinvar_bulk",
+    "gene": "RIN2",
+    "clinvar_id": "374444"
+  }
+]
