@@ -57,6 +57,20 @@ pub enum MultiChromOverlapperError {
 /// `MultiChromOverlapper` maintains a separate overlap data structure (either [`AIList`] or [`Bits`])
 /// for each chromosome, enabling efficient queries across the entire genome.
 ///
+/// ## Indexed variant (`MultiChromOverlapper<u32, usize>`)
+///
+/// When built with [`from_region_set`](MultiChromOverlapper::from_region_set), the MCO **owns**
+/// its source [`RegionSet`] and stores indices back into it. This enables:
+///
+/// - **[`IntervalSetOps`](gtars_core::models::IntervalSetOps) trait**: set algebra operations
+///   that delegate to the owned source RegionSet.
+/// - **MCO-only query methods**: [`subset_by`](MultiChromOverlapper::subset_by),
+///   [`count_overlaps`](MultiChromOverlapper::count_overlaps),
+///   [`any_overlaps`](MultiChromOverlapper::any_overlaps),
+///   [`find_overlaps_indexed`](MultiChromOverlapper::find_overlaps_indexed),
+///   [`intersect_all`](MultiChromOverlapper::intersect_all).
+/// - **Build-once-query-many**: build the index once, then call any combination
+///   of the above methods without rebuilding.
 ///
 /// # Examples
 ///
@@ -65,6 +79,9 @@ pub struct MultiChromOverlapper<I, T> {
     index_maps: HashMap<String, Box<dyn Overlapper<I, T>>>,
     #[allow(dead_code)]
     overlapper_type: OverlapperType,
+    /// The source RegionSet that was indexed. Present when `T = usize`
+    /// (indexed variant built via `from_region_set`).
+    source: Option<RegionSet>,
 }
 
 /// An iterator over intervals that overlap with query regions across multiple chromosomes.
@@ -388,6 +405,7 @@ impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
         MultiChromOverlapper {
             index_maps: core,
             overlapper_type,
+            source: None,
         }
     }
 }
@@ -425,6 +443,234 @@ pub fn build_indexed_overlapper(
     MultiChromOverlapper {
         index_maps: core,
         overlapper_type,
+        source: None,
+    }
+}
+
+impl MultiChromOverlapper<u32, usize> {
+    /// Build a new MCO that owns its source RegionSet.
+    ///
+    /// This enables the build-once-query-many pattern: build the index once,
+    /// then call any of the query methods or IntervalSetOps methods repeatedly
+    /// without needing to pass the source RegionSet as a parameter.
+    pub fn from_region_set(rs: RegionSet, overlapper_type: OverlapperType) -> Self {
+        let mut core: HashMap<String, Box<dyn Overlapper<u32, usize>>> = HashMap::default();
+        let mut intervals: HashMap<String, Vec<Interval<u32, usize>>> = HashMap::default();
+
+        for (idx, region) in rs.regions.iter().enumerate() {
+            let interval = Interval {
+                start: region.start,
+                end: region.end,
+                val: idx,
+            };
+            let chr_intervals = intervals.entry(region.chr.clone()).or_default();
+            chr_intervals.push(interval);
+        }
+
+        for (chr, chr_intervals) in intervals.into_iter() {
+            let lapper: Box<dyn Overlapper<u32, usize>> = match overlapper_type {
+                OverlapperType::Bits => Box::new(Bits::build(chr_intervals)),
+                OverlapperType::AIList => Box::new(AIList::build(chr_intervals)),
+            };
+            core.insert(chr, lapper);
+        }
+
+        MultiChromOverlapper {
+            index_maps: core,
+            overlapper_type,
+            source: Some(rs),
+        }
+    }
+
+    /// Get a reference to the source RegionSet, if this MCO owns one.
+    pub fn source(&self) -> Option<&RegionSet> {
+        self.source.as_ref()
+    }
+
+    /// Subset the source RegionSet to only regions that overlap at least one region in query.
+    ///
+    /// Returns a new RegionSet containing only the regions from source that have
+    /// any overlap with query regions. Requires that this MCO was built with `from_region_set`.
+    ///
+    /// # Panics
+    /// Panics if this MCO does not own a source RegionSet.
+    pub fn subset_by(&self, query: &RegionSet) -> RegionSet {
+        let source = self.source.as_ref().expect("MCO does not own a source RegionSet");
+        let mut hit_indices = std::collections::BTreeSet::new();
+        for region in &query.regions {
+            if let Some(lapper) = self.index_maps.get(&region.chr) {
+                for iv in lapper.find_iter(region.start, region.end) {
+                    hit_indices.insert(iv.val);
+                }
+            }
+        }
+        let kept: Vec<Region> = hit_indices
+            .into_iter()
+            .map(|idx| source.regions[idx].clone())
+            .collect();
+        RegionSet::from(kept)
+    }
+
+    /// For each region in `query`, count how many indexed regions overlap it.
+    ///
+    /// Optionally filter by minimum overlap in base pairs.
+    pub fn count_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> Vec<usize> {
+        let min_bp = min_overlap.unwrap_or(0);
+        if min_bp <= 1 {
+            return self.count_query_overlaps(query);
+        }
+        let source = self.source.as_ref();
+        query
+            .regions
+            .iter()
+            .map(|region| match self.index_maps.get(&region.chr) {
+                Some(lapper) => lapper
+                    .find_iter(region.start, region.end)
+                    .filter(|iv| {
+                        if let Some(src) = source {
+                            let b = &src.regions[iv.val];
+                            overlap_bp(region.start, region.end, b.start, b.end) >= min_bp as i64
+                        } else {
+                            true
+                        }
+                    })
+                    .count(),
+                None => 0,
+            })
+            .collect()
+    }
+
+    /// For each region in `query`, whether any indexed region overlaps it.
+    ///
+    /// Optionally filter by minimum overlap in base pairs.
+    pub fn any_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> Vec<bool> {
+        let min_bp = min_overlap.unwrap_or(0);
+        if min_bp <= 1 {
+            return self.any_query_overlaps(query);
+        }
+        let source = self.source.as_ref();
+        query
+            .regions
+            .iter()
+            .map(|region| match self.index_maps.get(&region.chr) {
+                Some(lapper) => lapper
+                    .find_iter(region.start, region.end)
+                    .any(|iv| {
+                        if let Some(src) = source {
+                            let b = &src.regions[iv.val];
+                            overlap_bp(region.start, region.end, b.start, b.end) >= min_bp as i64
+                        } else {
+                            true
+                        }
+                    }),
+                None => false,
+            })
+            .collect()
+    }
+
+    /// For each region in `query`, return the indices of overlapping regions.
+    ///
+    /// Optionally filter by minimum overlap in base pairs.
+    pub fn find_overlaps_indexed(&self, query: &RegionSet, min_overlap: Option<i32>) -> Vec<Vec<usize>> {
+        let min_bp = min_overlap.unwrap_or(0);
+        if min_bp <= 1 {
+            return self.find_query_overlaps(query);
+        }
+        let source = self.source.as_ref();
+        query
+            .regions
+            .iter()
+            .map(|region| match self.index_maps.get(&region.chr) {
+                Some(lapper) => lapper
+                    .find_iter(region.start, region.end)
+                    .filter(|iv| {
+                        if let Some(src) = source {
+                            let b = &src.regions[iv.val];
+                            overlap_bp(region.start, region.end, b.start, b.end) >= min_bp as i64
+                        } else {
+                            true
+                        }
+                    })
+                    .map(|iv| iv.val)
+                    .collect(),
+                None => Vec::new(),
+            })
+            .collect()
+    }
+
+    /// Subset by overlap with optional minimum overlap filter.
+    pub fn subset_by_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> RegionSet {
+        let source = self.source.as_ref().expect("MCO does not own a source RegionSet");
+        let min_bp = min_overlap.unwrap_or(0);
+        if min_bp <= 1 {
+            return self.subset_by(query);
+        }
+        let all_hits = self.find_query_overlaps(query);
+        let flags: Vec<bool> = query
+            .regions
+            .iter()
+            .zip(all_hits.iter())
+            .map(|(r, hits)| {
+                hits.iter().any(|&idx| {
+                    let b = &source.regions[idx];
+                    overlap_bp(r.start, r.end, b.start, b.end) >= min_bp as i64
+                })
+            })
+            .collect();
+        let kept: Vec<Region> = query
+            .regions
+            .iter()
+            .zip(flags)
+            .filter_map(|(r, hit)| if hit { Some(r.clone()) } else { None })
+            .collect();
+        RegionSet::from(kept)
+    }
+}
+
+/// Compute actual overlap in base pairs between two regions.
+#[inline]
+fn overlap_bp(a_start: u32, a_end: u32, b_start: u32, b_end: u32) -> i64 {
+    a_end.min(b_end) as i64 - a_start.max(b_start) as i64
+}
+
+// ── IntervalSetOps implementation for MCO ───────────────────────────────
+
+use gtars_core::models::IntervalSetOps;
+
+impl IntervalSetOps for MultiChromOverlapper<u32, usize> {
+    fn setdiff(&self, other: &RegionSet) -> RegionSet {
+        self.source
+            .as_ref()
+            .expect("MCO does not own a source RegionSet")
+            .setdiff(other)
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        self.source
+            .as_ref()
+            .expect("MCO does not own a source RegionSet")
+            .intersect(other)
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        self.source
+            .as_ref()
+            .expect("MCO does not own a source RegionSet")
+            .jaccard(other)
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        self.source
+            .as_ref()
+            .expect("MCO does not own a source RegionSet")
+            .coverage(other)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        self.source
+            .as_ref()
+            .expect("MCO does not own a source RegionSet")
+            .overlap_coefficient(other)
     }
 }
 
