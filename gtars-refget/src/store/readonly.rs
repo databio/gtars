@@ -68,9 +68,6 @@ pub struct ReadonlyRefgetStore {
     pub(crate) available_sequence_alias_namespaces: Vec<String>,
     /// Available collection alias namespaces (from manifest, for remote discovery).
     pub(crate) available_collection_alias_namespaces: Vec<String>,
-    /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
-    /// Populated by ensure_decoded(), read by sequence_bytes().
-    pub(crate) decoded_cache: HashMap<DigestKey, Vec<u8>>,
 }
 
 impl ReadonlyRefgetStore {
@@ -92,7 +89,6 @@ impl ReadonlyRefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
-            decoded_cache: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
         }
@@ -136,6 +132,12 @@ impl ReadonlyRefgetStore {
                     }
                 }
                 SequenceRecord::Stub(_) => {}
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { .. } => {
+                    // Mmap records always hold decoded raw bytes. We don't mutate
+                    // the on-disk decoded file here; storage mode controls the
+                    // encoded `.seq` form, not the mmapped decoded cache.
+                }
             }
         }
 
@@ -292,6 +294,11 @@ impl ReadonlyRefgetStore {
                     return Ok(());
                 }
                 SequenceRecord::Stub(_) => {}
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { .. } => {
+                    // Caller handed us an already-mmapped record; the on-disk
+                    // decoded file already exists. Store as-is.
+                }
             }
         }
 
@@ -506,7 +513,6 @@ impl ReadonlyRefgetStore {
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);
                 self.md5_lookup.retain(|_, v| v != orphan_key);
-                self.decoded_cache.remove(orphan_key);
             }
 
             if self.persist_to_disk {
@@ -748,7 +754,152 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Ensure a sequence is loaded and decoded into the decoded cache.
+    /// Resolve the filesystem path of the decoded-bytes file for a sequence.
+    ///
+    /// Returns `{local_path}/decoded/{prefix2}/{digest}.bin`. Requires the
+    /// store to have a `local_path` set; in-memory stores cannot mmap-decode.
+    #[cfg(feature = "filesystem")]
+    fn decoded_file_path(&self, digest_key: &DigestKey) -> Result<PathBuf> {
+        let root = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("store has no local_path; mmap-backed decoding requires a local path"))?;
+        let digest_str = key_to_digest_string(digest_key);
+        if digest_str.len() < 2 {
+            return Err(anyhow!("digest string too short for sharded path"));
+        }
+        let dir = root.join("decoded").join(&digest_str[..2]);
+        Ok(dir.join(format!("{}.bin", digest_str)))
+    }
+
+    /// Ensure a sequence is decoded and available via a file-backed mmap.
+    ///
+    /// On first call: decodes the bytes from the `Full`-variant in-memory
+    /// record, writes them to `{store}/decoded/{prefix}/{digest}.bin` via
+    /// atomic-rename + advisory lock, then mmaps the file and installs a
+    /// `SequenceRecord::Mmap` variant. Subsequent calls (in this process or
+    /// any cooperating process sharing the same store directory) skip the
+    /// decode and just mmap the pre-existing file.
+    ///
+    /// The mmap region is shared across processes via the kernel file
+    /// cache: a fleet of N subprocesses holding the same store pay the
+    /// decoded-bytes cost exactly once in physical memory.
+    #[cfg(feature = "filesystem")]
+    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
+        use memmap2::Mmap;
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::sync::Arc;
+
+        fn lock_exclusive(file: &std::fs::File) -> Result<()> {
+            fs2::FileExt::lock_exclusive(file).context("failed to acquire exclusive file lock")
+        }
+
+        fn unlock(file: &std::fs::File) -> Result<()> {
+            fs2::FileExt::unlock(file).context("failed to release file lock")
+        }
+
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        // Fast path: already mmapped.
+        if matches!(
+            self.sequence_store.get(&actual_key),
+            Some(SequenceRecord::Mmap { .. })
+        ) {
+            return Ok(());
+        }
+
+        let path = self.decoded_file_path(&actual_key)?;
+
+        // File already exists (another process may have written it).
+        // Just mmap and swap.
+        if path.exists() {
+            let file = OpenOptions::new()
+                .read(true)
+                .open(&path)
+                .with_context(|| format!("Failed to open decoded file: {}", path.display()))?;
+            let mmap = unsafe { Mmap::map(&file) }
+                .with_context(|| format!("Failed to mmap decoded file: {}", path.display()))?;
+            let record = self
+                .sequence_store
+                .get_mut(&actual_key)
+                .ok_or_else(|| anyhow!("Sequence not found"))?;
+            record.load_mmap(Arc::new(mmap), path);
+            return Ok(());
+        }
+
+        // Need to decode + write. Decode first (requires Full).
+        let record = self
+            .sequence_store
+            .get_mut(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        let decoded = record
+            .decode()
+            .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
+        let decoded_bytes = decoded.into_bytes();
+
+        // Ensure directory exists.
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).with_context(|| {
+                format!("Failed to create decoded directory: {}", parent.display())
+            })?;
+        }
+
+        // Cooperative locking: prevent two processes from both writing the file.
+        let lock_path = path.with_extension("lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .open(&lock_path)
+            .with_context(|| format!("Failed to open lock file: {}", lock_path.display()))?;
+        lock_exclusive(&lock_file)?;
+
+        // After acquiring the lock: recheck — a sibling may have finished.
+        if !path.exists() {
+            let tmp_path = path.with_extension(format!("tmp.{}", std::process::id()));
+            {
+                let mut tmp_file = OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&tmp_path)
+                    .with_context(|| format!("Failed to open temp file: {}", tmp_path.display()))?;
+                tmp_file.write_all(&decoded_bytes)?;
+                tmp_file.sync_all()?;
+            }
+            fs::rename(&tmp_path, &path).with_context(|| {
+                format!(
+                    "Failed to rename {} -> {}",
+                    tmp_path.display(),
+                    path.display()
+                )
+            })?;
+        }
+        unlock(&lock_file)?;
+        drop(lock_file);
+
+        let file = OpenOptions::new()
+            .read(true)
+            .open(&path)
+            .with_context(|| format!("Failed to reopen decoded file: {}", path.display()))?;
+        let mmap = unsafe { Mmap::map(&file) }
+            .with_context(|| format!("Failed to mmap decoded file: {}", path.display()))?;
+        let record = self
+            .sequence_store
+            .get_mut(&actual_key)
+            .ok_or_else(|| anyhow!("Sequence not found"))?;
+        record.load_mmap(Arc::new(mmap), path);
+        Ok(())
+    }
+
+    /// Non-filesystem fallback: in-memory decode via load_data.
+    #[cfg(not(feature = "filesystem"))]
     pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -756,35 +907,66 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-
-        if self.decoded_cache.contains_key(&actual_key) {
-            return Ok(());
-        }
-
         let record = self
             .sequence_store
-            .get(&actual_key)
+            .get_mut(&actual_key)
             .ok_or_else(|| anyhow!("Sequence not found"))?;
         let decoded = record
             .decode()
             .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
-
-        self.decoded_cache.insert(actual_key, decoded.into_bytes());
+        record.load_data(decoded.into_bytes());
         Ok(())
     }
 
-    /// Clear the decoded sequence cache to reclaim memory.
+    /// Drop mmap handles for decoded sequences, downgrading records to `Stub`.
+    ///
+    /// The on-disk `decoded/*.bin` files are **preserved** — the next
+    /// `ensure_decoded` call will just re-mmap them, skipping the decode
+    /// work. Use `purge_decoded_files` to delete the files themselves.
     pub fn clear_decoded_cache(&mut self) {
-        self.decoded_cache.clear();
+        for record in self.sequence_store.values_mut() {
+            #[cfg(feature = "filesystem")]
+            if matches!(record, SequenceRecord::Mmap { .. }) {
+                let meta = record.metadata().clone();
+                *record = SequenceRecord::Stub(meta);
+            }
+        }
+    }
+
+    /// Permanently delete the on-disk `decoded/` tree.
+    #[cfg(feature = "filesystem")]
+    pub fn purge_decoded_files(&mut self) -> Result<()> {
+        self.clear_decoded_cache();
+        if let Some(root) = &self.local_path {
+            let decoded_dir = root.join("decoded");
+            if decoded_dir.exists() {
+                fs::remove_dir_all(&decoded_dir).with_context(|| {
+                    format!("Failed to remove decoded dir: {}", decoded_dir.display())
+                })?;
+            }
+        }
+        Ok(())
     }
 
     /// Clear sequence data from the store to free memory.
+    ///
+    /// Removes all sequence records. Metadata is preserved:
+    /// collections, name lookups, MD5 lookups, aliases, and FHR
+    /// metadata remain intact.
+    ///
+    /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
         self.sequence_store.clear();
-        self.decoded_cache.clear();
     }
 
-    /// Get decoded sequence bytes from the cache.
+    /// Get decoded sequence bytes in place.
+    ///
+    /// Returns `Some(&[u8])` only for `Mmap` records (decoded bytes
+    /// available via the file-backed cache). Returns `None` for `Stub`
+    /// records *and* for `Full` records whose bytes haven't been
+    /// materialized through `ensure_decoded` yet. Callers that want
+    /// the raw (possibly encoded) bytes should go through the
+    /// `SequenceRecord::sequence()` accessor directly.
     pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
         let digest_key = seq_digest.to_key();
         let actual_key = self
@@ -792,7 +974,54 @@ impl ReadonlyRefgetStore {
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        self.decoded_cache.get(&actual_key).map(|v| v.as_slice())
+        match self.sequence_store.get(&actual_key)? {
+            SequenceRecord::Stub(_) => None,
+            SequenceRecord::Full { .. } => None,
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { mmap, .. } => Some(&mmap[..]),
+        }
+    }
+
+    /// Check whether a sequence's bytes are already decoded (i.e. the
+    /// record is in `Mmap` state).
+    pub fn is_sequence_decoded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        #[cfg(feature = "filesystem")]
+        {
+            matches!(
+                self.sequence_store.get(&actual_key),
+                Some(SequenceRecord::Mmap { .. })
+            )
+        }
+        #[cfg(not(feature = "filesystem"))]
+        {
+            matches!(
+                self.sequence_store.get(&actual_key),
+                Some(SequenceRecord::Full { .. })
+            )
+        }
+    }
+
+    /// Check whether a sequence's record is loaded (Full or Mmap) rather
+    /// than a metadata-only Stub.
+    pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        let digest_key = seq_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+        match self.sequence_store.get(&actual_key) {
+            Some(SequenceRecord::Stub(_)) | None => false,
+            Some(SequenceRecord::Full { .. }) => true,
+            #[cfg(feature = "filesystem")]
+            Some(SequenceRecord::Mmap { .. }) => true,
+        }
     }
 
     /// Get a sequence by collection digest and name.
@@ -917,9 +1146,11 @@ impl ReadonlyRefgetStore {
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
-        let (metadata, sequence) = match record {
+        let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
             SequenceRecord::Stub(_) => return Err(anyhow!("Sequence data not loaded (stub only)")),
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
         };
 
         if start >= metadata.length || end > metadata.length || start >= end {
@@ -931,7 +1162,17 @@ impl ReadonlyRefgetStore {
             ));
         }
 
-        match self.mode {
+        // For mmap records, data is already decoded raw bytes.
+        #[cfg(feature = "filesystem")]
+        let effective_mode = if matches!(record, SequenceRecord::Mmap { .. }) {
+            StorageMode::Raw
+        } else {
+            self.mode
+        };
+        #[cfg(not(feature = "filesystem"))]
+        let effective_mode = self.mode;
+
+        match effective_mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
                 let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
@@ -1169,7 +1410,8 @@ impl ReadonlyRefgetStore {
             .get(digest)
             .ok_or_else(|| anyhow!("Sequence not found in store"))?;
 
-        if matches!(record, SequenceRecord::Full { .. }) {
+        // Already loaded (Full or Mmap)
+        if record.is_loaded() {
             return Ok(());
         }
 
@@ -1257,6 +1499,16 @@ impl ReadonlyRefgetStore {
                     record.to_file(full_path)?;
                 }
                 SequenceRecord::Stub(_) => {
+                    continue;
+                }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, .. } => {
+                    // Mmap-backed records already have their decoded bytes in
+                    // {store_dir}/decoded/; the encoded .seq file (if any) is
+                    // in the original store and is unchanged by decoding.
+                    // We skip writing to the new target because mmap records
+                    // aren't part of the encoded on-disk representation.
+                    let _ = metadata;
                     continue;
                 }
             }
@@ -1351,6 +1603,11 @@ impl Display for ReadonlyRefgetStore {
                         StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
                             .unwrap_or_else(|_| "???".to_string()),
                     }
+                }
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { mmap, .. } => {
+                    let n = 8.min(mmap.len());
+                    String::from_utf8(mmap[0..n].to_vec()).unwrap_or_else(|_| "???".to_string())
                 }
             };
 

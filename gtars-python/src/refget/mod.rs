@@ -758,6 +758,12 @@ impl From<SequenceRecord> for PySequenceRecord {
                 metadata: PySequenceMetadata::from(metadata),
                 sequence: Some(sequence),
             },
+            #[cfg(feature = "filesystem")]
+            SequenceRecord::Mmap { metadata, mmap, .. } => PySequenceRecord {
+                metadata: PySequenceMetadata::from(metadata),
+                // Python side gets an owned copy of the decoded bytes.
+                sequence: Some(mmap[..].to_vec()),
+            },
         }
     }
 }

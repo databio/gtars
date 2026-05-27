@@ -282,14 +282,26 @@ impl ReadonlyRefgetStore {
                 .get(seq_digest)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {:?}", seq_digest))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
             };
 
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            // For mmap records, data is already decoded raw bytes -- pass as Raw regardless of store mode.
+            #[cfg(feature = "filesystem")]
+            let effective_mode = if matches!(record, SequenceRecord::Mmap { .. }) {
+                StorageMode::Raw
+            } else {
+                self.mode
+            };
+            #[cfg(not(feature = "filesystem"))]
+            let effective_mode = self.mode;
+
+            write_fasta_record(&mut *writer, metadata, sequence_data, effective_mode, line_width)?;
         }
 
         writer.flush()?;
@@ -326,17 +338,28 @@ impl ReadonlyRefgetStore {
                 .get(&digest_key)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!(
                         "Sequence data not loaded for digest: {}",
                         digest_str
                     ));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+                #[cfg(feature = "filesystem")]
+                SequenceRecord::Mmap { metadata, mmap, .. } => (metadata, &mmap[..]),
             };
 
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            #[cfg(feature = "filesystem")]
+            let effective_mode = if matches!(record, SequenceRecord::Mmap { .. }) {
+                StorageMode::Raw
+            } else {
+                self.mode
+            };
+            #[cfg(not(feature = "filesystem"))]
+            let effective_mode = self.mode;
+
+            write_fasta_record(&mut *writer, metadata, sequence_data, effective_mode, line_width)?;
         }
 
         writer.flush()?;

@@ -264,9 +264,30 @@ impl RefgetStore {
         self.inner.clear_decoded_cache();
     }
 
-    /// Clear in-memory sequence data and decoded cache, preserving metadata.
+    /// Permanently delete the on-disk `decoded/` tree.
+    #[cfg(feature = "filesystem")]
+    pub fn purge_decoded_files(&mut self) -> Result<()> {
+        self.inner.purge_decoded_files()
+    }
+
+    /// Clear in-memory sequence data, preserving metadata.
     pub fn clear(&mut self) {
         self.inner.clear();
+    }
+
+    /// Get decoded sequence bytes.
+    pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
+        self.inner.sequence_bytes(seq_digest)
+    }
+
+    /// Check whether a sequence is decoded (Mmap state).
+    pub fn is_sequence_decoded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        self.inner.is_sequence_decoded(seq_digest)
+    }
+
+    /// Check whether a sequence is loaded (Full or Mmap).
+    pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        self.inner.is_sequence_loaded(seq_digest)
     }
 
     // --- Seqcol config methods ---
