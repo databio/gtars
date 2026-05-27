@@ -911,6 +911,7 @@ mod tests {
 
     // ── spatial-arrangement feature tests ───────────────────────────────
 
+    #[allow(dead_code)]
     fn make_rs(regions: &[(&str, u32, u32)]) -> RegionSet {
         let regs: Vec<Region> = regions
             .iter()
