@@ -222,6 +222,16 @@ impl EditPy {
                 reference: None,
                 alt: None,
             },
+            EditOwned::Copy { count } => Self {
+                kind: "copy".to_string(),
+                reference: None,
+                alt: Some(format!("[{}]", count)),
+            },
+            EditOwned::Repeat { sequence, count } => Self {
+                kind: "repeat".to_string(),
+                reference: None,
+                alt: Some(format!("{}[{}]", sequence, count)),
+            },
         }
     }
 }
@@ -270,6 +280,28 @@ impl PosEditPy {
                 PositionPy::from_rs(start),
                 Some(PositionPy::from_rs(end)),
             ),
+            LocationRange::WholeSequence => {
+                // Whole sequence - use placeholder positions
+                (PositionPy { base: 1, offset: 0, datum: DatumPy::SeqStart }, None)
+            },
+            LocationRange::UncertainStart { start_high, end, .. } => {
+                // Use the high estimate of the start if available, otherwise the end
+                let start_pos = start_high.map(PositionPy::from_rs)
+                    .unwrap_or_else(|| PositionPy::from_rs(end));
+                (start_pos, Some(PositionPy::from_rs(end)))
+            },
+            LocationRange::UncertainEnd { start, end_low, .. } => {
+                // Use the low estimate of the end if available
+                let end_pos = end_low.map(PositionPy::from_rs);
+                (PositionPy::from_rs(start), end_pos)
+            },
+            LocationRange::UncertainBoth { start_high, end_low, .. } => {
+                // Use high estimate of start and low estimate of end if available
+                let start_pos = start_high.map(PositionPy::from_rs)
+                    .unwrap_or_else(|| PositionPy { base: 1, offset: 0, datum: DatumPy::SeqStart });
+                let end_pos = end_low.map(PositionPy::from_rs);
+                (start_pos, end_pos)
+            },
         };
         Self {
             start,
