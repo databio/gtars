@@ -23,12 +23,13 @@ use gtars_vrs::models::{Allele, AlleleState, SequenceLocation, SequenceReference
 use serde_json::Value;
 
 /// Find the validation directory relative to the workspace root.
-fn validation_dir() -> PathBuf {
+/// Returns None if the vrs-spec repo is not available.
+fn validation_dir() -> Option<PathBuf> {
     // Check VRS_SPEC_DIR env var first, then fall back to sibling repo convention
     if let Ok(dir) = std::env::var("VRS_SPEC_DIR") {
         let p = PathBuf::from(dir).join("validation");
         if p.exists() {
-            return p;
+            return Some(p);
         }
     }
 
@@ -40,22 +41,29 @@ fn validation_dir() -> PathBuf {
     let inside = repo_root.join("vrs-spec/validation");
 
     if sibling.exists() {
-        sibling
+        Some(sibling)
     } else if inside.exists() {
-        inside
+        Some(inside)
     } else {
-        panic!(
-            "VRS validation directory not found. Either:\n  \
-             1. Set VRS_SPEC_DIR env var to the vrs-spec repo root, or\n  \
-             2. Clone as a sibling: cd {:?} && git clone --branch \
-             '2.1.0-connect_2026_#10' --depth 1 https://github.com/ga4gh/vrs.git vrs-spec",
-            repo_root.parent().unwrap()
-        );
+        None
     }
 }
 
-fn load_yaml(filename: &str) -> Value {
-    let path = validation_dir().join(filename);
+/// Skip test if validation data is unavailable.
+macro_rules! require_validation_dir {
+    () => {
+        match validation_dir() {
+            Some(dir) => dir,
+            None => {
+                eprintln!("SKIP: vrs-spec validation data not available");
+                return;
+            }
+        }
+    };
+}
+
+fn load_yaml(dir: &PathBuf, filename: &str) -> Value {
+    let path = dir.join(filename);
     let content =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read {path:?}: {e}"));
     serde_yaml::from_str(&content).unwrap_or_else(|e| panic!("Failed to parse {path:?}: {e}"))
@@ -146,7 +154,8 @@ impl TestResult {
 
 #[test]
 fn test_sha512t24u_from_validation() {
-    let data = load_yaml("functions.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "functions.yaml");
     let cases = data["sha512t24u"]
         .as_array()
         .expect("sha512t24u should be an array");
@@ -170,7 +179,8 @@ fn test_sha512t24u_from_validation() {
 
 #[test]
 fn test_sequence_location_from_validation() {
-    let data = load_yaml("models.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "models.yaml");
     let cases = data["SequenceLocation"]
         .as_array()
         .expect("SequenceLocation should be an array");
@@ -235,7 +245,8 @@ fn test_sequence_location_from_validation() {
 
 #[test]
 fn test_alleles_from_models_yaml() {
-    let data = load_yaml("models.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "models.yaml");
     let cases = data["Allele"]
         .as_array()
         .expect("Allele should be an array in models.yaml");
@@ -255,7 +266,8 @@ fn test_alleles_from_models_yaml() {
 
 #[test]
 fn test_alleles_from_alleles_yaml() {
-    let data = load_yaml("alleles.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "alleles.yaml");
     let cases = data["Allele"]
         .as_array()
         .expect("Allele should be an array in alleles.yaml");
@@ -343,7 +355,8 @@ fn run_allele_cases(cases: &[Value], source: &str) -> TestResult {
 
 #[test]
 fn test_serialization_from_models_yaml() {
-    let data = load_yaml("models.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "models.yaml");
     let mut r = TestResult::new();
 
     // Test SequenceLocation serialization
@@ -405,7 +418,8 @@ fn test_serialization_from_models_yaml() {
 
 #[test]
 fn report_coverage() {
-    let data = load_yaml("models.yaml");
+    let dir = require_validation_dir!();
+    let data = load_yaml(&dir, "models.yaml");
     let not_implemented = [
         "Adjacency",
         "CisPhasedBlock",

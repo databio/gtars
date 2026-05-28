@@ -141,7 +141,7 @@ impl TranscriptProvider for MockProvider {
 
 // ── Helpers ─────────────────────────────────────────────────────────────
 
-fn build_store_and_provider() -> (RefgetStore, MockProvider, String) {
+fn build_store_and_provider() -> (RefgetStore, MockProvider, String, tempfile::TempDir) {
     let temp = tempfile::tempdir().unwrap();
     let fasta_path = temp.path().join("fix.fa");
     let fasta_content = format!(
@@ -153,11 +153,13 @@ fn build_store_and_provider() -> (RefgetStore, MockProvider, String) {
     );
     std::fs::write(&fasta_path, fasta_content).unwrap();
 
-    let mut store = RefgetStore::in_memory();
+    let store_path = temp.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
     store.disable_encoding();
     store
         .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
         .unwrap();
+    store.load_all_sequences().unwrap();
 
     let collection_digest = store
         .iter_collections()
@@ -173,7 +175,7 @@ fn build_store_and_provider() -> (RefgetStore, MockProvider, String) {
     }
 
     let provider = MockProvider::new(name_to_digest);
-    (store, provider, collection_digest)
+    (store, provider, collection_digest, temp)
 }
 
 /// Compute the equivalent VCF-derived VRS ID for comparison.
@@ -205,7 +207,7 @@ fn raw_digest(store: &mut RefgetStore, name: &str, collection_digest: &str) -> S
 fn case_g_baseline_sub() {
     // Case 1: g. SNV on chrF at position 6 (1-based) → ib 5.
     // chrF[5] = 'C'. Sub C>T.
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6C>T"),
         &provider,
@@ -222,7 +224,7 @@ fn case_g_baseline_sub() {
 #[test]
 fn case_c_forward_sub() {
     // c.2C>T on TX_FWD → genomic ib 5 (chrF[5]='C') → C>T
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{TX_FWD}:c.2C>T"),
         &provider,
@@ -243,7 +245,7 @@ fn case_c_reverse_sub() {
     //         0         1         2         3
     //         0123456789012345678901234567890123456789
     // chrR[29] = 'C'. Reverse-strand: HGVS G → genomic C (revcomp). HGVS A (alt) → genomic T.
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{TX_REV}:c.1G>A"),
         &provider,
@@ -260,7 +262,7 @@ fn case_c_reverse_sub() {
 #[test]
 fn case_gene_symbol_to_mane() {
     // GENE_REV → TX_REV → same as case_c_reverse_sub.
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id("GENE_REV:c.1G>A", &provider, &mut store, &coll).unwrap();
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
@@ -273,7 +275,7 @@ fn case_g_deletion_left_trim() {
     // chrF: ACGT ACGT ACGT...
     // delete 1 bp at g.6 (chrF[5]='C') → VCF equivalent: pos 5(0b)=4 (1b 5), ref="AC", alt="A".
     // Use HGVS del: NC...:g.6del
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6del"),
         &provider,
@@ -292,7 +294,7 @@ fn case_g_deletion_left_trim() {
 fn case_g_insertion() {
     // Insert "TT" between chrF positions 6 and 7 (1-based).
     // → ib 6 (interbase): start=end=6, alt="TT"
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6_7insTT"),
         &provider,
@@ -309,7 +311,7 @@ fn case_g_insertion() {
 #[test]
 fn case_g_dup() {
     // dup at g.6 (chrF[5]='C') → ref="C", alt="CC".
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6dup"),
         &provider,
@@ -328,7 +330,7 @@ fn case_c_reverse_delins() {
     // c.1_2delinsAT on TX_REV.
     // c.1 → ib 29, c.2 → ib 28. Range → [28, 30) genomic. chrR[28..30] = "AC".
     // HGVS alt "AT" on -strand → genomic revcomp = "AT".
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{TX_REV}:c.1_2delinsAT"),
         &provider,
@@ -347,7 +349,7 @@ fn case_c_reverse_ins() {
     // c.1_2insGCG on TX_REV.
     // c.1 → ib 29, c.2 → ib 28. Range adjacent → insertion site at hi=29.
     // -strand: HGVS alt "GCG" → genomic revcomp = "CGC".
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id = hgvs_str_to_vrs_id(
         &format!("{TX_REV}:c.1_2insGCG"),
         &provider,
@@ -364,7 +366,7 @@ fn case_c_reverse_ins() {
 #[test]
 fn case_identity_noop() {
     // c.1= identity edge case. chrR[29]='C'. Identity → ref==alt.
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id =
         hgvs_str_to_vrs_id(&format!("{TX_REV}:c.1="), &provider, &mut store, &coll).unwrap();
     // identity collapses on normalize to start==end, alt empty.
@@ -379,7 +381,7 @@ fn case_identity_noop() {
 #[test]
 fn err_ref_mismatch() {
     // chrF[5]='C', not 'A'. Asking for g.6A>T must err RefMismatch.
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let err = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6A>T"),
         &provider,
@@ -392,7 +394,7 @@ fn err_ref_mismatch() {
 
 #[test]
 fn err_unsupported_protein() {
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     // p. always fails via UnsupportedReferenceType — but our parser may
     // not even support p. yet; use a bridge-level test against the AST.
     let result = hgvs_str_to_vrs_id(
@@ -413,7 +415,7 @@ fn err_unsupported_protein() {
 
 #[test]
 fn err_unsupported_inv() {
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let err = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.6inv"),
         &provider,
@@ -429,7 +431,7 @@ fn err_unsupported_inv() {
 
 #[test]
 fn err_out_of_bounds() {
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let err = hgvs_str_to_vrs_id(
         &format!("{CHR_F_NAME}:g.999A>T"),
         &provider,
@@ -442,7 +444,7 @@ fn err_out_of_bounds() {
 
 #[test]
 fn err_unknown_gene() {
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let err = hgvs_str_to_vrs_id("BOGUSGENE:c.1A>T", &provider, &mut store, &coll).unwrap_err();
     assert!(
         matches!(
@@ -458,7 +460,7 @@ fn err_unknown_gene() {
 
 #[test]
 fn allele_construction_only() {
-    let (mut store, provider, coll) = build_store_and_provider();
+    let (mut store, provider, coll, _temp) = build_store_and_provider();
     let s = format!("{CHR_F_NAME}:g.6C>T");
     let v = gtars_vrs::hgvs::parse(&s).unwrap();
     let allele = hgvs_to_allele(&v, &provider, &mut store, &coll).unwrap();
