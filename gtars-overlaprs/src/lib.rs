@@ -45,6 +45,30 @@
 //! strategy to handle intervals efficiently, particularly when dealing with high-coverage regions
 //! common in genomic data.
 //!
+//! ## IndexedRegionSet
+//!
+//! For repeated queries against the same reference, use [`IndexedRegionSet`]:
+//!
+//! ```rust
+//! use gtars_overlaprs::IndexedRegionSet;
+//! use gtars_core::models::{Region, RegionSet};
+//!
+//! let reference = RegionSet::from(vec![
+//!     Region { chr: "chr1".to_string(), start: 100, end: 200, rest: None },
+//!     Region { chr: "chr1".to_string(), start: 300, end: 400, rest: None },
+//! ]);
+//!
+//! let indexed = IndexedRegionSet::new(reference);
+//!
+//! let query = RegionSet::from(vec![
+//!     Region { chr: "chr1".to_string(), start: 150, end: 350, rest: None },
+//! ]);
+//!
+//! // Build once, query many times
+//! let counts = indexed.count_overlaps(&query);  // Uses pre-built index
+//! let any = indexed.any_overlaps(&query);       // Reuses same index
+//! ```
+//!
 //! ## Examples
 //!
 //! ### Finding all genes that overlap a query region
@@ -83,6 +107,12 @@ pub mod bits;
 ///
 /// See the [`genome_index`] module for details.
 pub mod multi_chrom_overlapper;
+
+/// Indexed region set for efficient repeated queries.
+///
+/// See [`IndexedRegionSet`] for details.
+mod indexed_region_set;
+pub use indexed_region_set::IndexedRegionSet;
 
 /// Core traits for overlap operations.
 ///
