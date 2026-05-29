@@ -399,8 +399,7 @@ pub fn parse_hgvs(py: Python<'_>, s: &str) -> PyResult<HgvsVariantPy> {
 /// Args:
 ///     hgvs_str (str): HGVS expression (e.g. `"NM_004333.6:c.1799T>A"`).
 ///     provider (gtars.reftx.ReftxProvider): Transcript provider.
-///     refget (gtars.refget.RefgetStore): Mutable RefgetStore (writable so the
-///         bridge can call `ensure_decoded`).
+///     refget (gtars.refget.RefgetStore): Mutable RefgetStore.
 ///     collection_digest (str): Sequence collection digest (level-0).
 ///
 /// Returns:

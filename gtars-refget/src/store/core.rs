@@ -254,38 +254,12 @@ impl RefgetStore {
         self.inner.import_collection(&source.inner, digest)
     }
 
-    /// Ensure a sequence is decoded into the decoded cache.
-    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
-        self.inner.ensure_decoded(seq_digest)
-    }
-
-    /// Clear the decoded sequence cache.
-    pub fn clear_decoded_cache(&mut self) {
-        self.inner.clear_decoded_cache();
-    }
-
-    /// Permanently delete the on-disk `decoded/` tree.
-    #[cfg(feature = "filesystem")]
-    pub fn purge_decoded_files(&mut self) -> Result<()> {
-        self.inner.purge_decoded_files()
-    }
-
     /// Clear in-memory sequence data, preserving metadata.
     pub fn clear(&mut self) {
         self.inner.clear();
     }
 
-    /// Get decoded sequence bytes.
-    pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
-        self.inner.sequence_bytes(seq_digest)
-    }
-
-    /// Check whether a sequence is decoded (Mmap state).
-    pub fn is_sequence_decoded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
-        self.inner.is_sequence_decoded(seq_digest)
-    }
-
-    /// Check whether a sequence is loaded (Full or Mmap).
+    /// Check whether a sequence is loaded (Full).
     pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         self.inner.is_sequence_loaded(seq_digest)
     }

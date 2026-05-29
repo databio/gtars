@@ -109,8 +109,6 @@ impl SequenceRecordExt for SequenceRecord {
                 ));
             }
             SequenceRecord::Full { sequence, .. } => sequence,
-            #[cfg(feature = "filesystem")]
-            SequenceRecord::Mmap { mmap, .. } => &mmap[..],
         };
 
         // Create parent directories if they don't exist

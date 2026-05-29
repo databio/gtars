@@ -758,10 +758,6 @@ impl From<SequenceRecord> for PySequenceRecord {
                 metadata: PySequenceMetadata::from(metadata),
                 sequence: Some(sequence),
             },
-            SequenceRecord::Mmap { metadata, mmap, .. } => PySequenceRecord {
-                metadata: PySequenceMetadata::from(metadata),
-                sequence: Some(mmap[..].to_vec()),
-            },
         }
     }
 }
@@ -1554,7 +1550,7 @@ impl PyRefgetStore {
 
     /// Eagerly load all Stub sequences to Full (fetches actual byte data).
     ///
-    /// After this call, get_substring(), export_fasta(), and sequence_bytes()
+    /// After this call, get_substring() and export_fasta()
     /// work without requiring mutable access. For large stores with many
     /// sequences, prefer load_sequence() for specific sequences.
     ///

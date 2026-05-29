@@ -8,11 +8,9 @@
 //! symbolic allele, then compares serial vs parallel output at several thread
 //! counts.
 //!
-//! The serial reference path reads decoded bytes (it requires `ensure_decoded`,
-//! which yields mmap-backed decoded records), while the parallel path reads the
-//! immutable 2-bit-encoded bytes and decodes on the fly. Both views come from
-//! the same on-disk store, so identical output proves the encoded path is
-//! byte-faithful to the decoded ground truth.
+//! Both paths read from the same on-disk store using the encoded 2-bit store;
+//! decoding happens on the fly in both cases. Identical output proves the paths
+//! are byte-faithful to each other.
 
 use std::collections::HashMap;
 use std::io::Write;
@@ -30,13 +28,12 @@ struct Fixture {
     vcf: String,
 }
 
-/// A serial (decoded, mmap-backed) readonly view of the fixture store.
+/// A serial (encoded, decode-on-the-fly) readonly view of the fixture store.
 fn open_serial(fx: &Fixture) -> ReadonlyRefgetStore {
     let mut store = RefgetStore::open_local(&fx.store_dir).unwrap();
     store.load_all_collections().unwrap();
     for d in fx.name_to_digest.values() {
         store.load_sequence(d.as_str()).unwrap();
-        store.ensure_decoded(d.as_str()).unwrap();
     }
     store.into_readonly()
 }
