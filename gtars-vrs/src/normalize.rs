@@ -1,7 +1,92 @@
 //! VRS allele normalization.
 //!
 //! Port of bioutils `normalize()` for fully-justified (EXPAND mode) normalization.
-//! Operates on `&[u8]` byte slices for zero-allocation sequence access.
+//!
+//! The reference sequence is accessed through the [`RefSeq`] trait, which exposes
+//! only single-base reads (`base_at`) plus a range copy (`extend_range`). This lets
+//! normalization run either over a decoded `&[u8]` (zero-cost) or directly over a
+//! 2-bit-encoded buffer that decodes bases on the fly ([`EncodedSeq`]), without the
+//! algorithm knowing the difference.
+
+/// Random-access, single-base view over a reference sequence.
+///
+/// Implemented for decoded byte slices (`[u8]`) and for the bit-packed
+/// [`EncodedSeq`]. Normalization only ever reads individual bases (during rolling)
+/// and copies the small rolled-context ranges, so this minimal surface is enough.
+pub trait RefSeq {
+    /// Number of bases in the sequence.
+    fn len(&self) -> usize;
+    /// True if the sequence is empty.
+    fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    /// Decoded base at position `i` (0-based). Caller guarantees `i < len()`.
+    fn base_at(&self, i: usize) -> u8;
+    /// Append decoded bases for `start..end` onto `out`.
+    fn extend_range(&self, start: usize, end: usize, out: &mut Vec<u8>);
+}
+
+impl RefSeq for [u8] {
+    #[inline]
+    fn len(&self) -> usize {
+        <[u8]>::len(self)
+    }
+    #[inline]
+    fn base_at(&self, i: usize) -> u8 {
+        self[i]
+    }
+    #[inline]
+    fn extend_range(&self, start: usize, end: usize, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self[start..end]);
+    }
+}
+
+/// A bit-packed (e.g. 2-bit DNA) reference view that decodes single bases on the fly.
+///
+/// Holds a borrowed slice of the encoded bytes plus just enough of the alphabet
+/// (`bits_per_symbol` + `decoding_array`) to decode any base by position. Decoding
+/// mirrors `gtars_refget`'s `decode_substring_from_bytes` (MSB-first within each byte).
+pub struct EncodedSeq<'a> {
+    /// The bit-packed encoded bytes.
+    pub bytes: &'a [u8],
+    /// Number of symbols (bases) represented.
+    pub length: usize,
+    /// Bits used per symbol (2 for DNA_2BIT).
+    pub bits_per_symbol: usize,
+    /// Maps an encoded code back to its original symbol byte.
+    pub decoding_array: &'a [u8; 256],
+}
+
+impl RefSeq for EncodedSeq<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        self.length
+    }
+    #[inline]
+    fn base_at(&self, i: usize) -> u8 {
+        let bit_offset = i * self.bits_per_symbol;
+        let mut code = 0u8;
+        for j in 0..self.bits_per_symbol {
+            let bit_pos = bit_offset + j;
+            let byte_index = bit_pos / 8;
+            let bit_in_byte = 7 - (bit_pos % 8); // MSB0, matches encoder
+            let bit = if byte_index < self.bytes.len() {
+                (self.bytes[byte_index] >> bit_in_byte) & 1
+            } else {
+                0
+            };
+            code = (code << 1) | bit;
+        }
+        self.decoding_array[code as usize]
+    }
+    #[inline]
+    fn extend_range(&self, start: usize, end: usize, out: &mut Vec<u8>) {
+        out.reserve(end - start);
+        for i in start..end {
+            out.push(self.base_at(i));
+        }
+    }
+}
 
 /// Result of normalizing an allele against a reference sequence.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,7 +145,7 @@ fn trim_right(alleles: &[&[u8]]) -> (usize, Vec<Vec<u8>>) {
 ///
 /// `sequence` is the full reference, `ref_pos` is the current left boundary (0-based),
 /// `bound` is the leftmost allowed position.
-fn roll_left(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) -> usize {
+fn roll_left<R: RefSeq + ?Sized>(sequence: &R, alleles: &[&[u8]], ref_pos: usize, bound: usize) -> usize {
     // Collect non-empty alleles with their index and length
     let mut non_empty: Vec<(usize, usize)> = Vec::new();
     for (i, a) in alleles.iter().enumerate() {
@@ -77,6 +162,7 @@ fn roll_left(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) -
     let mut d = 0;
     while d < max_d {
         let seq_pos = ref_pos - 1 - d;
+        let base = sequence.base_at(seq_pos);
         let mismatched = non_empty.iter().any(|&(i, len)| {
             let allele = alleles[i];
             // Circular index from the end of the allele
@@ -85,7 +171,7 @@ fn roll_left(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) -
             } else {
                 len - ((d + 1) % len)
             };
-            allele[idx] != sequence[seq_pos]
+            allele[idx] != base
         });
         if mismatched {
             break;
@@ -99,7 +185,7 @@ fn roll_left(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) -
 ///
 /// `sequence` is the full reference, `ref_pos` is the current right boundary (0-based),
 /// `bound` is the rightmost allowed position.
-fn roll_right(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) -> usize {
+fn roll_right<R: RefSeq + ?Sized>(sequence: &R, alleles: &[&[u8]], ref_pos: usize, bound: usize) -> usize {
     let mut non_empty: Vec<(usize, usize)> = Vec::new();
     for (i, a) in alleles.iter().enumerate() {
         if !a.is_empty() {
@@ -115,9 +201,10 @@ fn roll_right(sequence: &[u8], alleles: &[&[u8]], ref_pos: usize, bound: usize) 
     let mut d = 0;
     while d < max_d {
         let seq_pos = ref_pos + d;
+        let base = sequence.base_at(seq_pos);
         let mismatched = non_empty.iter().any(|&(i, len)| {
             let allele = alleles[i];
-            allele[d % len] != sequence[seq_pos]
+            allele[d % len] != base
         });
         if mismatched {
             break;
@@ -175,20 +262,35 @@ pub fn normalize(
     ref_allele: &[u8],
     alt_allele: &[u8],
 ) -> Result<NormalizedAllele, NormalizeError> {
+    normalize_ref(sequence, start, ref_allele, alt_allele)
+}
+
+/// Generic over any [`RefSeq`] reference view (decoded `&[u8]` or [`EncodedSeq`]).
+///
+/// This is the real implementation; [`normalize`] is a `&[u8]` convenience wrapper.
+/// Producing byte-identical results for the decoded and encoded views is what lets
+/// us keep the reference 2-bit-encoded in memory without changing any VRS digest.
+pub fn normalize_ref<R: RefSeq + ?Sized>(
+    sequence: &R,
+    start: u64,
+    ref_allele: &[u8],
+    alt_allele: &[u8],
+) -> Result<NormalizedAllele, NormalizeError> {
+    let seq_len = sequence.len();
     let s_usize = usize::try_from(start).map_err(|_| NormalizeError::StartOutOfBounds {
         start,
-        seq_len: sequence.len(),
+        seq_len,
     })?;
     let mut s = s_usize;
     let mut e = s.checked_add(ref_allele.len()).ok_or(NormalizeError::StartOutOfBounds {
         start,
-        seq_len: sequence.len(),
+        seq_len,
     })?;
-    if e > sequence.len() {
+    if e > seq_len {
         return Err(NormalizeError::RefAllelePastEnd {
             start: s,
             ref_len: ref_allele.len(),
-            seq_len: sequence.len(),
+            seq_len,
         });
     }
 
@@ -208,7 +310,7 @@ pub fn normalize(
     // Step 3: Expand (fully-justified normalization)
     // Roll left from start, roll right from end
     let bound_left = 0;
-    let bound_right = sequence.len();
+    let bound_right = seq_len;
 
     let alleles_for_roll: Vec<&[u8]> = vec![ref_trimmed.as_slice(), alt_trimmed.as_slice()];
     let left_roll = roll_left(sequence, &alleles_for_roll, s, bound_left);
@@ -220,9 +322,9 @@ pub fn normalize(
     // Rebuild the alt allele with the expanded context
     // Left context: sequence[new_start..s], then alt_trimmed, then right context: sequence[e..new_end]
     let mut new_alt = Vec::with_capacity((s - new_start) + alt_trimmed.len() + (new_end - e));
-    new_alt.extend_from_slice(&sequence[new_start..s]);
+    sequence.extend_range(new_start, s, &mut new_alt);
     new_alt.extend_from_slice(alt_trimmed);
-    new_alt.extend_from_slice(&sequence[e..new_end]);
+    sequence.extend_range(e, new_end, &mut new_alt);
 
     Ok(NormalizedAllele {
         start: new_start as u64,
