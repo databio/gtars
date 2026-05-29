@@ -36,7 +36,7 @@
 use std::collections::HashMap;
 
 use gtars_refget::digest::alphabet::lookup_alphabet;
-use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore, StorageMode};
+use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 use thiserror::Error;
 
 use crate::digest::DigestWriter;
@@ -101,17 +101,19 @@ fn ref_view_for<'a>(
     let bytes = rec
         .sequence()
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.to_string()))?;
-    match store.storage_mode() {
-        StorageMode::Raw => Ok(RefView::Decoded(bytes)),
-        StorageMode::Encoded => {
-            let alphabet = lookup_alphabet(&meta.alphabet);
-            Ok(RefView::Encoded(EncodedSeq {
-                bytes,
-                length: meta.length,
-                bits_per_symbol: alphabet.bits_per_symbol,
-                decoding_array: alphabet.decoding_array,
-            }))
-        }
+    // Decoded bytes are one per base (len == length); 2-bit-packed bytes are
+    // shorter. Length-based detection is robust to storage mode and the (legacy)
+    // mmap'd decoded-cache variant.
+    if bytes.len() == meta.length {
+        Ok(RefView::Decoded(bytes))
+    } else {
+        let alphabet = lookup_alphabet(&meta.alphabet);
+        Ok(RefView::Encoded(EncodedSeq {
+            bytes,
+            length: meta.length,
+            bits_per_symbol: alphabet.bits_per_symbol,
+            decoding_array: alphabet.decoding_array,
+        }))
     }
 }
 

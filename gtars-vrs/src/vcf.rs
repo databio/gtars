@@ -12,31 +12,32 @@ use std::sync::mpsc;
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
 use gtars_refget::digest::alphabet::lookup_alphabet;
-use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore, StorageMode};
+use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 
 use crate::digest::DigestWriter;
 use crate::normalize::{EncodedSeq, RefView, normalize_ref};
 
-/// Build a mode-aware [`RefView`] over a resident sequence's bytes: decoded bytes
-/// for a Raw store, or an on-the-fly [`EncodedSeq`] for an Encoded store. No
-/// decoded cache / mmap required — the reference is read through the base accessor.
+/// Build a [`RefView`] over a resident sequence's bytes, reading bases through the
+/// base accessor. Whether the bytes are already-decoded (Raw `Full`, or an mmap'd
+/// decoded record) or 2-bit-packed (Encoded `Full`) is decided by length: decoded
+/// bytes are one per base (`len == length`); packed bytes are shorter. This is
+/// robust to the storage mode and the (legacy) decoded-cache variant alike.
 fn ref_view_for<'a>(store: &'a ReadonlyRefgetStore, raw_digest: &str) -> Result<RefView<'a>> {
     let rec = store
         .get_sequence(raw_digest)
         .context("sequence not found in store")?;
     let meta = rec.metadata();
     let bytes = rec.sequence().context("sequence not resident in store")?;
-    Ok(match store.storage_mode() {
-        StorageMode::Raw => RefView::Decoded(bytes),
-        StorageMode::Encoded => {
-            let alphabet = lookup_alphabet(&meta.alphabet);
-            RefView::Encoded(EncodedSeq {
-                bytes,
-                length: meta.length,
-                bits_per_symbol: alphabet.bits_per_symbol,
-                decoding_array: alphabet.decoding_array,
-            })
-        }
+    Ok(if bytes.len() == meta.length {
+        RefView::Decoded(bytes)
+    } else {
+        let alphabet = lookup_alphabet(&meta.alphabet);
+        RefView::Encoded(EncodedSeq {
+            bytes,
+            length: meta.length,
+            bits_per_symbol: alphabet.bits_per_symbol,
+            decoding_array: alphabet.decoding_array,
+        })
     })
 }
 
