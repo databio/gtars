@@ -1912,3 +1912,299 @@ fn test_import_collection_mode_mismatch_error() {
         err_msg,
     );
 }
+
+// =========================================================================
+// Parallel encode parity / determinism tests
+// =========================================================================
+
+/// Recursively collect every `*.seq` file under `dir`, keyed by path relative
+/// to `dir`, with its bytes. Used to compare two on-disk stores.
+fn collect_seq_files(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        base: &std::path::Path,
+        cur: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(cur).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("seq") {
+                let rel = path.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                out.insert(rel, std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    let seqdir = dir.join("sequences");
+    if seqdir.exists() {
+        walk(dir, &seqdir, &mut out);
+    }
+    out
+}
+
+/// Multi-record FASTA with names deliberately NOT in sorted order so that a
+/// digest-sorted index would differ from FASTA (name_lookup) order, exercising
+/// the order-preservation logic.
+const PARITY_FASTA: &str =
+    ">chrX\nTTGGGGAACCCCTTTT\n>chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n\
+     >chrM\nGGGGCCCCAAAATTTT\n>chr10\nTACGTACGTACGTACG\n";
+
+fn build_on_disk_store(dir: &std::path::Path, fasta: &std::path::Path, threads: usize) -> String {
+    let mut store = RefgetStore::on_disk(dir).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(fasta, FastaImportOptions::new().threads(threads))
+        .unwrap();
+    meta.digest
+}
+
+#[test]
+fn test_parallel_equals_serial_on_disk() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digest_serial = build_on_disk_store(dir_serial.path(), &fasta, 1);
+    let digest_parallel = build_on_disk_store(dir_parallel.path(), &fasta, 8);
+
+    // Collection digest identical.
+    assert_eq!(digest_serial, digest_parallel, "collection digest must match");
+
+    // sequences.rgsi byte-identical (digest-sorted, so order-independent).
+    let rgsi_serial = fs::read(dir_serial.path().join("sequences.rgsi")).unwrap();
+    let rgsi_parallel = fs::read(dir_parallel.path().join("sequences.rgsi")).unwrap();
+    assert_eq!(rgsi_serial, rgsi_parallel, "sequences.rgsi must be byte-identical");
+
+    // collections.rgci byte-identical.
+    let rgci_serial = fs::read(dir_serial.path().join("collections.rgci")).unwrap();
+    let rgci_parallel = fs::read(dir_parallel.path().join("collections.rgci")).unwrap();
+    assert_eq!(rgci_serial, rgci_parallel, "collections.rgci must be byte-identical");
+
+    // Every .seq file present with identical bytes (both directions).
+    let seqs_serial = collect_seq_files(dir_serial.path());
+    let seqs_parallel = collect_seq_files(dir_parallel.path());
+    assert_eq!(
+        seqs_serial, seqs_parallel,
+        ".seq files must match between serial and parallel builds"
+    );
+    assert!(!seqs_serial.is_empty(), "expected some .seq files");
+}
+
+#[test]
+fn test_parallel_name_lookup_matches_fasta_order() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    // Raw FASTA header order.
+    let fasta_order = vec!["chrX", "chr1", "chr2", "chrM", "chr10"];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+    let digest = build_on_disk_store(dir_serial.path(), &fasta, 1);
+    let _ = build_on_disk_store(dir_parallel.path(), &fasta, 8);
+
+    let mut serial = RefgetStore::open_local(dir_serial.path()).unwrap();
+    let mut parallel = RefgetStore::open_local(dir_parallel.path()).unwrap();
+    serial.load_all_collections().unwrap();
+    parallel.load_all_collections().unwrap();
+
+    let key = digest.to_key();
+    let serial_names: Vec<String> = serial
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    let parallel_names: Vec<String> = parallel
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+
+    assert_eq!(serial_names, fasta_order, "serial name_lookup must follow FASTA order");
+    assert_eq!(
+        parallel_names, fasta_order,
+        "parallel name_lookup must follow FASTA order"
+    );
+}
+
+#[test]
+fn test_parallel_equals_serial_in_memory() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let mut serial = RefgetStore::in_memory();
+    serial.set_quiet(true);
+    let (meta_s, _) = serial
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(1))
+        .unwrap();
+
+    let mut parallel = RefgetStore::in_memory();
+    parallel.set_quiet(true);
+    let (meta_p, _) = parallel
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(8))
+        .unwrap();
+
+    assert_eq!(meta_s.digest, meta_p.digest);
+
+    let key = meta_s.digest.to_key();
+
+    // Identical name_lookup order and contents.
+    let names_s: Vec<(String, DigestKey)> = serial
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .iter()
+        .map(|(n, d)| (n.clone(), *d))
+        .collect();
+    let names_p: Vec<(String, DigestKey)> = parallel
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .iter()
+        .map(|(n, d)| (n.clone(), *d))
+        .collect();
+    assert_eq!(names_s, names_p, "name_lookup order+contents must match");
+
+    // Identical set of digests.
+    let digs_s: std::collections::BTreeSet<DigestKey> = serial.sequence_digests().collect();
+    let digs_p: std::collections::BTreeSet<DigestKey> = parallel.sequence_digests().collect();
+    assert_eq!(digs_s, digs_p, "digest sets must match");
+
+    // Per-digest metadata + decoded bytes parity.
+    for name in ["chrX", "chr1", "chr2", "chrM", "chr10"] {
+        let rec_s = serial.get_sequence_by_name(&meta_s.digest, name).unwrap();
+        let rec_p = parallel.get_sequence_by_name(&meta_p.digest, name).unwrap();
+        let m_s = rec_s.metadata();
+        let m_p = rec_p.metadata();
+        assert_eq!(m_s.sha512t24u, m_p.sha512t24u);
+        assert_eq!(m_s.md5, m_p.md5);
+        assert_eq!(m_s.alphabet, m_p.alphabet);
+        assert_eq!(m_s.length, m_p.length);
+
+        let sub_s = serial.get_substring(&m_s.sha512t24u, 0, m_s.length).unwrap();
+        let sub_p = parallel.get_substring(&m_p.sha512t24u, 0, m_p.length).unwrap();
+        assert_eq!(sub_s, sub_p, "decoded bytes must match for {}", name);
+    }
+}
+
+#[test]
+fn test_parallel_cached_metadata_parity() {
+    // First import (no cache) writes the .rgsi cache; second import hits the
+    // cached-metadata fast path. Build serial+parallel on-disk stores via the
+    // cached path and assert full equality.
+
+    // Build the rgsi cache by importing once into a throwaway store. The cache
+    // is written next to the FASTA, so use a per-arm FASTA copy.
+    let build_cached = |threads: usize| -> (tempfile::TempDir, String) {
+        let src_dir = tempdir().unwrap();
+        let fasta = src_dir.path().join("cached.fa");
+        fs::write(&fasta, PARITY_FASTA).unwrap();
+
+        // Prime the cache (writes cached.rgsi next to the FASTA).
+        let prime_dir = tempdir().unwrap();
+        let mut prime = RefgetStore::on_disk(prime_dir.path()).unwrap();
+        prime.set_quiet(true);
+        prime
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(1))
+            .unwrap();
+        assert!(
+            src_dir.path().join("cached.rgsi").exists(),
+            "rgsi cache should have been written"
+        );
+
+        // Now build a fresh store via the cached fast path.
+        let dir = tempdir().unwrap();
+        let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+        store.set_quiet(true);
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(threads))
+            .unwrap();
+        (dir, meta.digest)
+    };
+
+    let (dir_serial, digest_serial) = build_cached(1);
+    let (dir_parallel, digest_parallel) = build_cached(8);
+
+    assert_eq!(digest_serial, digest_parallel);
+
+    let rgsi_s = fs::read(dir_serial.path().join("sequences.rgsi")).unwrap();
+    let rgsi_p = fs::read(dir_parallel.path().join("sequences.rgsi")).unwrap();
+    assert_eq!(rgsi_s, rgsi_p, "cached-path sequences.rgsi must match");
+
+    let seqs_s = collect_seq_files(dir_serial.path());
+    let seqs_p = collect_seq_files(dir_parallel.path());
+    assert_eq!(seqs_s, seqs_p, "cached-path .seq files must match");
+
+    // name_lookup order should follow FASTA order in both.
+    let mut serial = RefgetStore::open_local(dir_serial.path()).unwrap();
+    let mut parallel = RefgetStore::open_local(dir_parallel.path()).unwrap();
+    serial.load_all_collections().unwrap();
+    parallel.load_all_collections().unwrap();
+    let key = digest_serial.to_key();
+    let names_s: Vec<String> = serial.name_lookup.get(&key).unwrap().keys().cloned().collect();
+    let names_p: Vec<String> = parallel.name_lookup.get(&key).unwrap().keys().cloned().collect();
+    assert_eq!(names_s, vec!["chrX", "chr1", "chr2", "chrM", "chr10"]);
+    assert_eq!(names_s, names_p);
+}
+
+#[test]
+fn test_parallel_duplicate_contig_dedup() {
+    // Two records with identical sequence but different names. Must dedup to a
+    // single .seq file / single sequence_store entry; name_lookup keeps both
+    // names in FASTA order mapping to the same digest.
+    let fasta_content = ">dupA\nACGTACGTACGT\n>uniq\nGGGGCCCCAAAA\n>dupB\nACGTACGTACGT\n";
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("dup.fa");
+    fs::write(&fasta, fasta_content).unwrap();
+
+    let dir = tempdir().unwrap();
+    let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(8))
+        .unwrap();
+
+    // Two distinct digests (the duplicate collapses).
+    let digs: std::collections::BTreeSet<DigestKey> = store.sequence_digests().collect();
+    assert_eq!(digs.len(), 2, "duplicate sequence must dedup to 2 entries");
+
+    let seqs = collect_seq_files(dir.path());
+    assert_eq!(seqs.len(), 2, "duplicate sequence must dedup to 2 .seq files");
+
+    let key = meta.digest.to_key();
+    let nl = store.name_lookup.get(&key).unwrap();
+    let names: Vec<String> = nl.keys().cloned().collect();
+    assert_eq!(names, vec!["dupA", "uniq", "dupB"], "name_lookup keeps FASTA order");
+    // dupA and dupB map to same digest.
+    assert_eq!(nl.get("dupA"), nl.get("dupB"));
+    assert_ne!(nl.get("dupA"), nl.get("uniq"));
+}
+
+#[test]
+fn test_parallel_determinism_across_runs() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let mut prev: Option<Vec<u8>> = None;
+    for _ in 0..3 {
+        let dir = tempdir().unwrap();
+        build_on_disk_store(dir.path(), &fasta, 8);
+        let rgsi = fs::read(dir.path().join("sequences.rgsi")).unwrap();
+        if let Some(p) = &prev {
+            assert_eq!(p, &rgsi, "sequences.rgsi must be identical across parallel runs");
+        }
+        prev = Some(rgsi);
+    }
+}

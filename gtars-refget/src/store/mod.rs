@@ -81,6 +81,9 @@ pub struct RetrievedSequence {
 pub struct FastaImportOptions<'a> {
     pub(crate) force: bool,
     pub(crate) namespaces: &'a [&'a str],
+    /// Number of worker threads for the CPU-bound digest+encode stage.
+    /// `0` means "auto" (resolved to `std::thread::available_parallelism`).
+    pub(crate) threads: usize,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -88,6 +91,7 @@ impl<'a> Default for FastaImportOptions<'a> {
         Self {
             force: false,
             namespaces: &[],
+            threads: 0,
         }
     }
 }
@@ -107,6 +111,14 @@ impl<'a> FastaImportOptions<'a> {
     #[must_use]
     pub fn namespaces(mut self, ns: &'a [&'a str]) -> Self {
         self.namespaces = ns;
+        self
+    }
+
+    /// Set the number of worker threads for the digest+encode stage.
+    /// `0` (the default) means auto-detect via `std::thread::available_parallelism`.
+    #[must_use]
+    pub fn threads(mut self, n: usize) -> Self {
+        self.threads = n;
         self
     }
 }
