@@ -88,6 +88,40 @@ impl RefSeq for EncodedSeq<'_> {
     }
 }
 
+/// A reference view that is either already-decoded bytes (Raw-mode store) or a
+/// bit-packed [`EncodedSeq`] (Encoded-mode store). Lets a caller hand `normalize`
+/// a `RefSeq` without knowing the store's storage mode.
+pub enum RefView<'a> {
+    /// Already-decoded raw bytes (e.g. a Raw-mode store, or an mmap'd decoded file).
+    Decoded(&'a [u8]),
+    /// Bit-packed bytes, decoded per base on the fly.
+    Encoded(EncodedSeq<'a>),
+}
+
+impl RefSeq for RefView<'_> {
+    #[inline]
+    fn len(&self) -> usize {
+        match self {
+            RefView::Decoded(s) => s.len(),
+            RefView::Encoded(e) => e.len(),
+        }
+    }
+    #[inline]
+    fn base_at(&self, i: usize) -> u8 {
+        match self {
+            RefView::Decoded(s) => s[i],
+            RefView::Encoded(e) => e.base_at(i),
+        }
+    }
+    #[inline]
+    fn extend_range(&self, start: usize, end: usize, out: &mut Vec<u8>) {
+        match self {
+            RefView::Decoded(s) => out.extend_from_slice(&s[start..end]),
+            RefView::Encoded(e) => e.extend_range(start, end, out),
+        }
+    }
+}
+
 /// Result of normalizing an allele against a reference sequence.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NormalizedAllele {

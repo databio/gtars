@@ -260,8 +260,10 @@ fn resolve_seq_bytes(store: &mut RefgetStore, coll: &str, name: &str) -> Option<
         .iter()
         .find(|r| r.metadata().name == name)
         .map(|r| r.metadata().sha512t24u.clone())?;
-    store.ensure_decoded(&sha).ok()?;
-    store.sequence_bytes(&sha).map(|b| b.to_vec())
+    // Mode-agnostic decode straight from the resident record (works for Raw and
+    // Encoded stores alike; no decoded cache / mmap required).
+    store.load_sequence(&sha).ok()?;
+    store.get_sequence(&sha).ok()?.decode().map(|s| s.into_bytes())
 }
 
 fn resolve_raw_digest(store: &mut RefgetStore, coll: &str, name: &str) -> Option<String> {

@@ -10,10 +10,34 @@ use std::io::{BufRead, BufReader};
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
-use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
+use gtars_refget::digest::alphabet::lookup_alphabet;
+use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore, StorageMode};
 
 use crate::digest::DigestWriter;
-use crate::normalize::normalize;
+use crate::normalize::{EncodedSeq, RefView, normalize_ref};
+
+/// Build a mode-aware [`RefView`] over a resident sequence's bytes: decoded bytes
+/// for a Raw store, or an on-the-fly [`EncodedSeq`] for an Encoded store. No
+/// decoded cache / mmap required — the reference is read through the base accessor.
+fn ref_view_for<'a>(store: &'a ReadonlyRefgetStore, raw_digest: &str) -> Result<RefView<'a>> {
+    let rec = store
+        .get_sequence(raw_digest)
+        .context("sequence not found in store")?;
+    let meta = rec.metadata();
+    let bytes = rec.sequence().context("sequence not resident in store")?;
+    Ok(match store.storage_mode() {
+        StorageMode::Raw => RefView::Decoded(bytes),
+        StorageMode::Encoded => {
+            let alphabet = lookup_alphabet(&meta.alphabet);
+            RefView::Encoded(EncodedSeq {
+                bytes,
+                length: meta.length,
+                bits_per_symbol: alphabet.bits_per_symbol,
+                decoding_array: alphabet.decoding_array,
+            })
+        }
+    })
+}
 
 /// Result of computing a VRS identifier for a single VCF variant.
 #[derive(Debug, Clone)]
@@ -113,33 +137,43 @@ pub fn compute_vrs_ids_streaming(
 
         if !chrom_accessions.contains_key(chrom) {
             if let Some(digest) = name_to_digest.get(chrom) {
-                store.ensure_decoded(digest.as_str())?;
+                // Ensure the encoded bytes are resident (no decode); in-memory is a no-op.
+                let resident = store
+                    .get_sequence(digest.as_str())
+                    .map(|r| r.sequence().is_some())
+                    .unwrap_or(false);
+                if !resident {
+                    store.load_sequence(digest.as_str())?;
+                }
                 chrom_accessions.insert(chrom.to_string(), format!("SQ.{}", digest));
             }
         }
 
         let seq_accession = match chrom_accessions.get(chrom) {
-            Some(acc) => acc,
+            Some(acc) => acc.clone(),
             None => continue,
         };
 
         let raw_digest = &name_to_digest[chrom];
-        let sequence = store
-            .sequence_bytes(raw_digest.as_str())
-            .context(format!("Chromosome {} not decoded in store", chrom))?;
+        let view = ref_view_for(store, raw_digest.as_str())
+            .context(format!("Chromosome {} not available in store", chrom))?;
 
         for alt in alt_field.split(',') {
             if alt.starts_with('<') || alt == "*" || alt == "." {
                 continue;
             }
 
-            let norm = normalize(sequence, pos, ref_allele.as_bytes(), alt.as_bytes())
+            let norm = normalize_ref(&view, pos, ref_allele.as_bytes(), alt.as_bytes())
                 .context(format!("Failed to normalize variant at {}:{}", chrom, pos + 1))?;
             let norm_seq = std::str::from_utf8(&norm.allele)
                 .context(format!("Normalized allele is not valid UTF-8 at {}:{}", chrom, pos + 1))?;
 
-            let vrs_id =
-                digest_writer.allele_identifier_literal(seq_accession, norm.start, norm.end, norm_seq);
+            let vrs_id = digest_writer.allele_identifier_literal(
+                &seq_accession,
+                norm.start,
+                norm.end,
+                norm_seq,
+            );
 
             on_result(VrsResult {
                 chrom: chrom.to_string(),
@@ -152,7 +186,6 @@ pub fn compute_vrs_ids_streaming(
         }
     }
 
-    store.clear_decoded_cache();
     Ok(count)
 }
 
@@ -204,16 +237,15 @@ pub fn compute_vrs_ids_streaming_readonly(
             Some(d) => d,
             None => continue,
         };
-        let sequence = store
-            .sequence_bytes(raw_digest.as_str())
-            .context(format!("Chromosome {} not decoded in store", chrom))?;
+        let view = ref_view_for(store, raw_digest.as_str())
+            .context(format!("Chromosome {} not available in store", chrom))?;
 
         for alt in alt_field.split(',') {
             if alt.starts_with('<') || alt == "*" || alt == "." {
                 continue;
             }
 
-            let norm = normalize(sequence, pos, ref_allele.as_bytes(), alt.as_bytes())
+            let norm = normalize_ref(&view, pos, ref_allele.as_bytes(), alt.as_bytes())
                 .context(format!("Failed to normalize variant at {}:{}", chrom, pos + 1))?;
             let norm_seq = std::str::from_utf8(&norm.allele)
                 .context(format!("Normalized allele is not valid UTF-8 at {}:{}", chrom, pos + 1))?;

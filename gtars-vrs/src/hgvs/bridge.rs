@@ -35,14 +35,15 @@
 
 use std::collections::HashMap;
 
-use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
+use gtars_refget::digest::alphabet::lookup_alphabet;
+use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore, StorageMode};
 use thiserror::Error;
 
 use crate::digest::DigestWriter;
 use crate::hgvs::ast::{Datum, Edit, HgvsVariant, LocationRange, Position, ReferenceType};
 use crate::hgvs::parser::parse;
 use crate::models::{Allele, AlleleState, SequenceLocation, SequenceReference};
-use crate::normalize::{NormalizeError, normalize};
+use crate::normalize::{EncodedSeq, NormalizeError, RefSeq, RefView, normalize_ref};
 use crate::provider::{ProviderError, TranscriptProvider};
 
 /// Errors raised by the HGVS-to-VRS bridge.
@@ -81,10 +82,56 @@ pub enum BridgeError {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
+/// Build a [`RefView`] over a sequence's resident bytes, decoding on the fly.
+///
+/// No decoded cache, no mmap — the reference is read through the [`RefSeq`] base
+/// accessor. For an Encoded-mode store the bytes are 2-bit and decoded per base;
+/// for a Raw-mode store they are already decoded and used directly. The record
+/// must be resident (Full); callers with a `&mut RefgetStore` load it first via
+/// [`ensure_resident`].
+fn ref_view_for<'a>(
+    store: &'a ReadonlyRefgetStore,
+    raw_digest: &str,
+    chrom_name: &str,
+) -> Result<RefView<'a>, BridgeError> {
+    let rec = store
+        .get_sequence(raw_digest)
+        .map_err(|_| BridgeError::UnknownChrom(chrom_name.to_string()))?;
+    let meta = rec.metadata();
+    let bytes = rec
+        .sequence()
+        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.to_string()))?;
+    match store.storage_mode() {
+        StorageMode::Raw => Ok(RefView::Decoded(bytes)),
+        StorageMode::Encoded => {
+            let alphabet = lookup_alphabet(&meta.alphabet);
+            Ok(RefView::Encoded(EncodedSeq {
+                bytes,
+                length: meta.length,
+                bits_per_symbol: alphabet.bits_per_symbol,
+                decoding_array: alphabet.decoding_array,
+            }))
+        }
+    }
+}
+
+/// Ensure a sequence's bytes are resident (Full) without decoding. For on-disk
+/// stores this loads the encoded `.seq`; for in-memory stores it is a no-op.
+fn ensure_resident(refget: &mut RefgetStore, raw_digest: &str) -> Result<(), BridgeError> {
+    let resident = refget
+        .get_sequence(raw_digest)
+        .map(|r| r.sequence().is_some())
+        .unwrap_or(false);
+    if !resident {
+        refget.load_sequence(raw_digest).map_err(BridgeError::Refget)?;
+    }
+    Ok(())
+}
+
 /// Convert a parsed HGVS variant into a (non-normalized) VRS [`Allele`].
 ///
-/// Resolves transcript coordinates via `provider` and fetches reference
-/// bytes via `refget` (lazy-decoding as needed). The returned Allele is
+/// Resolves transcript coordinates via `provider` and reads reference bases
+/// directly from the encoded store (decoding on the fly). The returned Allele is
 /// in genomic orientation, suitable for normalization and digesting.
 pub fn hgvs_to_allele(
     variant: &HgvsVariant<'_>,
@@ -98,13 +145,9 @@ pub fn hgvs_to_allele(
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?
         .clone();
-    refget
-        .ensure_decoded(raw_digest.as_str())
-        .map_err(BridgeError::Refget)?;
-    let seq = refget
-        .sequence_bytes(raw_digest.as_str())
-        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let parts = build_allele_parts(variant, provider, &chrom_name, &raw_digest, seq)?;
+    ensure_resident(refget, &raw_digest)?;
+    let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
+    let parts = build_allele_parts(variant, provider, &chrom_name, &raw_digest, &seq)?;
     Ok(parts.allele)
 }
 
@@ -125,19 +168,14 @@ pub fn hgvs_str_to_vrs_id(
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?
         .clone();
-    refget
-        .ensure_decoded(raw_digest.as_str())
-        .map_err(BridgeError::Refget)?;
-    let seq = refget
-        .sequence_bytes(raw_digest.as_str())
-        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let parts = build_allele_parts(&variant, provider, &chrom_name, &raw_digest, seq)?;
-    finalize_vrs_id(&parts, seq)
+    ensure_resident(refget, &raw_digest)?;
+    let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
+    let parts = build_allele_parts(&variant, provider, &chrom_name, &raw_digest, &seq)?;
+    finalize_vrs_id(&parts, &seq)
 }
 
-/// Read-only store variant of [`hgvs_to_allele`]. All referenced
-/// sequences must already be decoded (call `ensure_decoded` first on
-/// the mutable store, then `into_readonly()` if needed).
+/// Read-only store variant of [`hgvs_to_allele`]. Referenced sequences must be
+/// resident (Full/encoded) in the store; reference bases are decoded on the fly.
 pub fn hgvs_to_allele_readonly(
     variant: &HgvsVariant<'_>,
     provider: &dyn TranscriptProvider,
@@ -148,10 +186,8 @@ pub fn hgvs_to_allele_readonly(
     let raw_digest = name_to_digest
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let seq = refget
-        .sequence_bytes(raw_digest.as_str())
-        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let parts = build_allele_parts(variant, provider, &chrom_name, raw_digest, seq)?;
+    let seq = ref_view_for(refget, raw_digest, &chrom_name)?;
+    let parts = build_allele_parts(variant, provider, &chrom_name, raw_digest, &seq)?;
     Ok(parts.allele)
 }
 
@@ -167,11 +203,9 @@ pub fn hgvs_str_to_vrs_id_readonly(
     let raw_digest = name_to_digest
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let seq = refget
-        .sequence_bytes(raw_digest.as_str())
-        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
-    let parts = build_allele_parts(&variant, provider, &chrom_name, raw_digest, seq)?;
-    finalize_vrs_id(&parts, seq)
+    let seq = ref_view_for(refget, raw_digest, &chrom_name)?;
+    let parts = build_allele_parts(&variant, provider, &chrom_name, raw_digest, &seq)?;
+    finalize_vrs_id(&parts, &seq)
 }
 
 // ── Internals ───────────────────────────────────────────────────────────
@@ -332,12 +366,12 @@ fn position_to_genomic_interbase(
 /// Build the (Allele, normalize-input) parts for an HGVS variant. The
 /// returned `start_ib`, `ref_bytes`, and `alt_bytes` are all in genomic
 /// orientation and ready to feed `normalize()`.
-fn build_allele_parts(
+fn build_allele_parts<R: RefSeq + ?Sized>(
     variant: &HgvsVariant<'_>,
     provider: &dyn TranscriptProvider,
     chrom_name: &str,
     raw_digest: &str,
-    seq: &[u8],
+    seq: &R,
 ) -> Result<AlleleParts, BridgeError> {
     if variant.posedit.uncertain {
         // tracing crate isn't a workspace dep; eprintln keeps us
@@ -377,7 +411,8 @@ fn build_allele_parts(
         )));
     }
 
-    let actual_ref = seq[start_ib as usize..end_ib as usize].to_vec();
+    let mut actual_ref = Vec::with_capacity((end_ib - start_ib) as usize);
+    seq.extend_range(start_ib as usize, end_ib as usize, &mut actual_ref);
 
     let alt_bytes = compute_alt(&variant.posedit.edit, &actual_ref, strand)?;
 
@@ -544,8 +579,8 @@ fn edit_reference<'a>(edit: &'a Edit<'_>) -> Option<&'a str> {
 
 /// Normalize the parts and digest into the final `ga4gh:VA.<digest>` ID,
 /// reusing the already-fetched chromosome `seq` slice.
-fn finalize_vrs_id(parts: &AlleleParts, seq: &[u8]) -> Result<String, BridgeError> {
-    let norm = normalize(seq, parts.start_ib, &parts.ref_bytes, &parts.alt_bytes)?;
+fn finalize_vrs_id<R: RefSeq + ?Sized>(parts: &AlleleParts, seq: &R) -> Result<String, BridgeError> {
+    let norm = normalize_ref(seq, parts.start_ib, &parts.ref_bytes, &parts.alt_bytes)?;
     let norm_seq = std::str::from_utf8(&norm.allele).map_err(|_| {
         BridgeError::InconsistentEdit("normalized allele is not valid UTF-8".to_string())
     })?;
