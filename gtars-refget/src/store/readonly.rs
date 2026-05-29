@@ -295,6 +295,58 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
+    /// Inserter-side half of [`add_sequence_record`](Self::add_sequence_record)
+    /// for the parallel streaming import: do the FAST in-memory dedup decision
+    /// and map/`md5_lookup` insert here (single inserter, so no race on the
+    /// dedup truth), but DO NOT write the `.seq` to disk. Instead return the
+    /// expanded full path + bytes so the caller can dispatch the (independent,
+    /// per-digest) disk write to a bounded writer pool.
+    ///
+    /// Returns `Some((full_path, bytes))` when a `.seq` write must be performed
+    /// (disk-backed store, `Full` record, and either a first occurrence or a
+    /// forced overwrite), or `None` when nothing needs to be written to disk
+    /// (in-memory mode, a `Stub`, or a dedup hit). The in-memory state is fully
+    /// updated before returning, so dedup stays the single source of truth on
+    /// the inserter thread.
+    pub(crate) fn add_sequence_record_deferred_write(
+        &mut self,
+        sr: SequenceRecord,
+        force: bool,
+    ) -> Result<Option<(PathBuf, Vec<u8>)>> {
+        let metadata = sr.metadata();
+        let key = metadata.sha512t24u.to_key();
+
+        if !force && self.sequence_store.contains_key(&key) {
+            return Ok(None);
+        }
+
+        self.md5_lookup
+            .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+
+        if self.persist_to_disk && self.local_path.is_some() {
+            match sr {
+                SequenceRecord::Full { metadata, sequence } => {
+                    // Insert the stub into the map NOW (reserve), so the dedup
+                    // decision is committed on the inserter thread. The actual
+                    // byte write is dispatched to the writer pool by the caller.
+                    let full_path = self
+                        .sequence_file_path(&metadata.sha512t24u)
+                        .context("seqdata_path_template/local_path not set")?;
+                    let stub = SequenceRecord::Stub(metadata);
+                    self.sequence_store.insert(key, stub);
+                    return Ok(Some((full_path, sequence)));
+                }
+                SequenceRecord::Stub(s) => {
+                    self.sequence_store.insert(key, SequenceRecord::Stub(s));
+                    return Ok(None);
+                }
+            }
+        }
+
+        self.sequence_store.insert(key, sr);
+        Ok(None)
+    }
+
     // =========================================================================
     // Sequence query methods
     // =========================================================================

@@ -5,7 +5,7 @@ use super::*;
 use super::readonly::ReadonlyRefgetStore;
 use super::fhr_metadata;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 
 use indexmap::IndexMap;
@@ -55,6 +55,37 @@ impl ReadonlyRefgetStore {
         let mut file = File::create(&full_path)?;
         file.write_all(sequence)?;
 
+        Ok(())
+    }
+
+    /// Write a `.seq` file for a single sequence, given an already-expanded full
+    /// path, skipping `create_dir_all` when the shard directory is known to exist.
+    ///
+    /// Per-digest `.seq` files are independent, so this is safe to call
+    /// concurrently from a writer pool (see [`import`](super::import)). The
+    /// `created_shards` cache holds shard dirs already created in this run so the
+    /// common case avoids a `create_dir_all` syscall per (tiny) sequence -- the
+    /// throughput bottleneck for transcriptomes with hundreds of thousands of
+    /// records.
+    pub(crate) fn write_seq_bytes_to_full_path(
+        full_path: &Path,
+        sequence: &[u8],
+        created_shards: &std::sync::Mutex<HashSet<std::path::PathBuf>>,
+    ) -> Result<()> {
+        if let Some(parent) = full_path.parent() {
+            // Fast path: shard dir already created this run -> skip the syscall.
+            let known = {
+                let guard = created_shards.lock().unwrap();
+                guard.contains(parent)
+            };
+            if !known {
+                create_dir_all(parent)?;
+                created_shards.lock().unwrap().insert(parent.to_path_buf());
+            }
+        }
+
+        let mut file = File::create(full_path)?;
+        file.write_all(sequence)?;
         Ok(())
     }
 

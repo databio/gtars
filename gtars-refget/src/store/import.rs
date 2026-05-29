@@ -43,11 +43,12 @@ use super::readonly::ReadonlyRefgetStore;
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::thread::available_parallelism;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
-use crossbeam_channel::{bounded, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use indexmap::IndexMap;
 
 use crate::collection::SequenceCollectionExt;
@@ -66,6 +67,21 @@ const LARGE_SEQ_THRESHOLD: usize = 500 * 1024 * 1024; // 500 MB
 /// cross-file channel). Small constant: a couple sequences in flight per builder
 /// is enough to keep builders and the inserter busy without unbounded buffering.
 const CHANNEL_DEPTH: usize = 4;
+
+/// Bounded depth of the inserter -> writer-pool channel, per writer thread. The
+/// channel capacity is `K * WRITER_CHANNEL_DEPTH` so a few `.seq` writes can be
+/// queued ahead of the writers without unbounded buffering. Keeping this a small
+/// constant preserves the bounded-memory property (peak RAM stays O(K x channel
+/// depth x avg encoded seq size), independent of collection size).
+const WRITER_CHANNEL_DEPTH: usize = 8;
+
+/// A unit of work for the writer pool: write `bytes` to `full_path` (a `.seq`
+/// file). The inserter has already committed the dedup decision + in-memory
+/// metadata; only the (race-free, per-digest) byte write is offloaded here.
+struct WriteJob {
+    full_path: PathBuf,
+    bytes: Vec<u8>,
+}
 
 /// A fully-built sequence ready for the single inserter, in FASTA order.
 ///
@@ -681,7 +697,51 @@ impl ReadonlyRefgetStore {
         let build_err: std::sync::Mutex<Option<anyhow::Error>> = std::sync::Mutex::new(None);
         let build_err_ref = &build_err;
 
+        // --- Writer pool (disk-backed stores only) ---------------------------
+        // The single inserter does the FAST in-memory work (dedup decision,
+        // name_lookup/alias buffering, collection finalization) and DISPATCHES
+        // the actual `.seq` byte write for each NEW sequence to a bounded pool
+        // of `jobs` writer threads. Per-digest `.seq` files are independent, so
+        // these writes are race-free. A BOUNDED channel provides back-pressure
+        // so memory stays O(jobs x channel depth x avg seq size). In-memory mode
+        // never dispatches (the writer pool is effectively unused). The shard-dir
+        // cache lets writers skip a `create_dir_all` syscall per (tiny) sequence.
+        let writer_disk_backed = self.persist_to_disk && self.local_path.is_some();
+        let (write_tx, write_rx) = bounded::<WriteJob>(jobs * WRITER_CHANNEL_DEPTH);
+        let created_shards: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
+        let created_shards_ref = &created_shards;
+        let write_err: Mutex<Option<anyhow::Error>> = Mutex::new(None);
+        let write_err_ref = &write_err;
+
         std::thread::scope(|scope| -> Result<()> {
+            // Spawn the writer pool. Each writer drains `WriteJob`s and writes
+            // the `.seq` bytes; the first error is stashed and stops the writer.
+            let mut writer_handles = Vec::with_capacity(jobs);
+            if writer_disk_backed {
+                for _ in 0..jobs {
+                    let write_rx: Receiver<WriteJob> = write_rx.clone();
+                    let handle = scope.spawn(move || {
+                        for job in write_rx.iter() {
+                            if let Err(e) = ReadonlyRefgetStore::write_seq_bytes_to_full_path(
+                                &job.full_path,
+                                &job.bytes,
+                                created_shards_ref,
+                            ) {
+                                let mut slot = write_err_ref.lock().unwrap();
+                                if slot.is_none() {
+                                    *slot = Some(e);
+                                }
+                                break;
+                            }
+                        }
+                    });
+                    writer_handles.push(handle);
+                }
+            }
+            // The inserter keeps its own clone of `write_tx`; drop this extra one
+            // so the writers' channel closes once the inserter drops its clone.
+            drop(write_rx);
+
             // Spawn the builder pool.
             for _ in 0..jobs {
                 let job_rx = job_rx.clone();
@@ -770,20 +830,21 @@ impl ReadonlyRefgetStore {
                             ));
                         }
 
-                        // Persist the bytes immediately (write-through + dedup),
-                        // then drop them. Dedup is keyed on the content digest.
-                        // The first occurrence of a digest always writes the
-                        // `.seq` and its metadata. For a sequence shared across
-                        // collections we write again ONLY when this file's index
-                        // is higher than the current name owner, so the
-                        // highest-file-index name wins deterministically
+                        // Commit the dedup decision + in-memory metadata on this
+                        // (single) inserter thread, then DISPATCH the `.seq` byte
+                        // write to the bounded writer pool. Dedup is keyed on the
+                        // content digest. The first occurrence of a digest always
+                        // dispatches a write. For a sequence shared across
+                        // collections we re-do the in-memory metadata ONLY when
+                        // this file's index is higher than the current name owner,
+                        // so the highest-file-index name wins deterministically
                         // (matching the serial fixed-file-order build). The bytes
-                        // are identical (same digest), so the re-write is a no-op
-                        // for `.seq`; only the stored name metadata changes. For
-                        // disk-backed stores the record is downgraded to a Stub
-                        // (no bytes retained); for in-memory stores the Full
-                        // record is retained (memory is inherently O(total bytes)
-                        // there).
+                        // are identical (same digest) on such an overwrite, so we
+                        // do NOT re-dispatch the disk write -- the on-disk `.seq`
+                        // is already correct (byte-identical). For disk-backed
+                        // stores the in-memory record is a Stub (no bytes
+                        // retained); for in-memory stores the Full record is
+                        // retained and no write is dispatched.
                         let force = match seq_name_owner.get(&seq_key) {
                             None => {
                                 seq_name_owner.insert(seq_key, file_idx);
@@ -799,13 +860,31 @@ impl ReadonlyRefgetStore {
                                 continue;
                             }
                         };
-                        self.add_sequence_record(
-                            SequenceRecord::Full {
-                                metadata,
-                                sequence: sequence_data,
-                            },
-                            force,
-                        )?;
+                        // A forced overwrite only changes in-memory name metadata
+                        // (identical bytes); skip dispatching a redundant write.
+                        let already_written = force;
+                        if let Some((full_path, bytes)) = self
+                            .add_sequence_record_deferred_write(
+                                SequenceRecord::Full {
+                                    metadata,
+                                    sequence: sequence_data,
+                                },
+                                force,
+                            )?
+                        {
+                            if !already_written {
+                                // BOUNDED send: blocks (back-pressure) when the
+                                // writer pool is saturated, capping in-flight RAM.
+                                if write_tx
+                                    .send(WriteJob { full_path, bytes })
+                                    .is_err()
+                                {
+                                    // Writers all hung up (an earlier write error);
+                                    // stop feeding and let the error propagate.
+                                    break;
+                                }
+                            }
+                        }
                     }
                     InsertMsg::End {
                         file_idx,
@@ -833,11 +912,30 @@ impl ReadonlyRefgetStore {
             }
 
             feeder.join().map_err(|e| anyhow!("Feeder thread panicked: {:?}", e))?;
+
+            // END-OF-RUN BARRIER: close the writer channel and JOIN every writer
+            // so all dispatched `.seq` files are on disk BEFORE the global index
+            // files are written. Writer-completion order does not affect any
+            // persisted bytes (per-digest files are independent) nor index
+            // ordering (indexes are sorted and written after this barrier), so
+            // determinism is preserved.
+            drop(write_tx);
+            for handle in writer_handles {
+                handle
+                    .join()
+                    .map_err(|e| anyhow!("Writer thread panicked: {:?}", e))?;
+            }
             Ok(())
         })?;
 
         // Propagate the first builder error, if any.
         if let Some(e) = build_err.into_inner().unwrap() {
+            return Err(e);
+        }
+
+        // Propagate the first writer error, if any (every `.seq` must be on disk
+        // before the index files reference it).
+        if let Some(e) = write_err.into_inner().unwrap() {
             return Err(e);
         }
 

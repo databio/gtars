@@ -2461,3 +2461,95 @@ fn test_resume_skips_present_collection_before_decoding_fasta() {
         "resume must not change the set of sequences"
     );
 }
+
+// =========================================================================
+// Many-tiny-sequence throughput (writer-pool) tests
+// =========================================================================
+
+/// Generate a FASTA with `n` short, DISTINCT sequences. Each record encodes its
+/// index in base-4 as DNA so every sequence has a unique content digest (no
+/// dedup), mimicking a transcriptome with hundreds of thousands of tiny records
+/// -- the workload the writer pool is meant to accelerate (the old single
+/// inserter did a File::create + create_dir_all per record).
+fn write_many_tiny_fasta(path: &std::path::Path, n: usize) {
+    use std::io::Write;
+    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+    let f = fs::File::create(path).unwrap();
+    let mut w = std::io::BufWriter::new(f);
+    for i in 0..n {
+        // 16-base sequence uniquely encoding `i` (4^16 ≈ 4.3e9 >> n), padded so
+        // every record is distinct and a constant small size.
+        let mut seq = [b'A'; 16];
+        let mut v = i;
+        let mut p = 15usize;
+        while v > 0 {
+            seq[p] = BASES[v & 0b11];
+            v >>= 2;
+            p = p.wrapping_sub(1);
+        }
+        writeln!(w, ">seq{}", i).unwrap();
+        w.write_all(&seq).unwrap();
+        w.write_all(b"\n").unwrap();
+    }
+    w.flush().unwrap();
+}
+
+/// Throughput regression test for the parallel `.seq` writer pool.
+///
+/// Builds an on-disk store from a synthetic FASTA with MANY tiny sequences. The
+/// pre-writer-pool code funneled every per-sequence `File::create` +
+/// `create_dir_all` through the single inserter thread; this test asserts the
+/// build finishes well under a generous bound (so a regression that re-serializes
+/// the writes -- or reintroduces a per-sequence `create_dir_all` -- shows up),
+/// while staying fast and bounded (no benchmark loop, no giant dataset).
+#[test]
+fn test_many_tiny_sequences_throughput() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("tiny.fa");
+    // ~100k distinct tiny records: enough to expose a single-thread file-create
+    // bottleneck, small enough to build in a few seconds.
+    let n = 100_000usize;
+    write_many_tiny_fasta(&fasta, n);
+
+    let dir = tempdir().unwrap();
+    let start = std::time::Instant::now();
+    let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, was_new) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    assert!(was_new, "collection must be new");
+    assert_eq!(
+        meta.n_sequences, n,
+        "all {} distinct sequences must be registered",
+        n
+    );
+
+    // Every distinct sequence must have produced a .seq file on disk (the writer
+    // pool drained at the end-of-run barrier before indexes were written).
+    let seqs = collect_seq_files(dir.path());
+    assert_eq!(
+        seqs.len(),
+        n,
+        "every distinct tiny sequence must have a .seq file on disk after the barrier"
+    );
+
+    // Generous wall-clock bound: this is NOT a benchmark, just a guard against a
+    // re-serialized (single-thread file-create) regression. With the writer pool
+    // this completes in a couple seconds on CI; 60s leaves ample slack.
+    assert!(
+        elapsed.as_secs() < 60,
+        "building {} tiny sequences took {:?}; expected well under the single-inserter bound",
+        n,
+        elapsed
+    );
+
+    eprintln!(
+        "throughput: built {} tiny seqs in {:?} ({:.0} seqs/sec)",
+        n,
+        elapsed,
+        n as f64 / elapsed.as_secs_f64()
+    );
+}
