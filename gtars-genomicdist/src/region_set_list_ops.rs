@@ -7,62 +7,18 @@
 use gtars_core::models::IntervalSetOps;
 use gtars_core::models::RegionSet;
 
-/// Compute intersection bp between two *already-reduced, sorted* RegionSets
-/// using a linear merge-walk. O(n+m) with no allocations.
-fn merge_intersection_bp(a: &RegionSet, b: &RegionSet) -> u64 {
-    let a_regions = &a.regions;
-    let b_regions = &b.regions;
-    let mut ai = 0usize;
-    let mut bi = 0usize;
-    let mut intersection: u64 = 0;
-
-    while ai < a_regions.len() && bi < b_regions.len() {
-        let ra = &a_regions[ai];
-        let rb = &b_regions[bi];
-
-        // Skip ahead if on different chromosomes
-        match ra.chr.cmp(&rb.chr) {
-            std::cmp::Ordering::Less => {
-                ai += 1;
-                continue;
-            }
-            std::cmp::Ordering::Greater => {
-                bi += 1;
-                continue;
-            }
-            std::cmp::Ordering::Equal => {}
-        }
-
-        // Same chromosome — check overlap
-        if ra.start < rb.end && rb.start < ra.end {
-            let ovl_start = ra.start.max(rb.start);
-            let ovl_end = ra.end.min(rb.end);
-            intersection += (ovl_end - ovl_start) as u64;
-        }
-
-        // Advance whichever interval ends first
-        if ra.end <= rb.end {
-            ai += 1;
-        } else {
-            bi += 1;
-        }
-    }
-
-    intersection
-}
-
-/// Pairwise Jaccard similarity using merge-walk intersection (Algo B).
+/// Pairwise Jaccard similarity.
 ///
-/// Pre-reduces each set once, then computes all N*(N-1)/2 pairs using a linear
-/// merge-walk. Returns a flat Vec<f64> of length N*N in row-major order
-/// (symmetric matrix with 1.0 on the diagonal).
+/// Pre-reduces each set once (so each pairwise `jaccard` call operates on
+/// already-reduced inputs), then delegates each pair to
+/// [`IntervalSetOps::jaccard`]. Returns a flat Vec<f64> of length N*N in
+/// row-major order (symmetric matrix with 1.0 on the diagonal).
 pub fn pairwise_jaccard(sets: &[RegionSet]) -> Vec<f64> {
     let n = sets.len();
     let mut matrix = vec![0.0f64; n * n];
 
-    // Pre-reduce all sets and cache their bp counts
+    // Pre-reduce all sets once so each pairwise jaccard avoids re-reducing.
     let reduced: Vec<RegionSet> = sets.iter().map(|s| s.reduce()).collect();
-    let bp: Vec<u64> = reduced.iter().map(|s| s.nucleotides_length() as u64).collect();
 
     // Diagonal
     for i in 0..n {
@@ -72,9 +28,7 @@ pub fn pairwise_jaccard(sets: &[RegionSet]) -> Vec<f64> {
     // Upper triangle
     for i in 0..n {
         for j in (i + 1)..n {
-            let intersection = merge_intersection_bp(&reduced[i], &reduced[j]);
-            let union = bp[i] + bp[j] - intersection;
-            let jac = if union == 0 { 0.0 } else { intersection as f64 / union as f64 };
+            let jac = reduced[i].jaccard(&reduced[j]);
             matrix[i * n + j] = jac;
             matrix[j * n + i] = jac;
         }
@@ -331,54 +285,6 @@ mod tests {
         let matrix = super::pairwise_jaccard(&[a.clone(), b.clone()]);
         let expected = a.jaccard(&b);
         assert!((matrix[1] - expected).abs() < 1e-10);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_basic() {
-        // Already-reduced sets: a=[0,10) b=[5,15) -> intersection=[5,10)=5bp
-        let a = make_regionset(vec![("chr1", 0, 10)]).reduce();
-        let b = make_regionset(vec![("chr1", 5, 15)]).reduce();
-        assert_eq!(super::merge_intersection_bp(&a, &b), 5);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_multi_chrom() {
-        let a = make_regionset(vec![("chr1", 0, 20), ("chr2", 0, 10)]).reduce();
-        let b = make_regionset(vec![("chr1", 10, 30), ("chr2", 5, 15)]).reduce();
-        // chr1: [10,20) = 10bp, chr2: [5,10) = 5bp -> total 15bp
-        assert_eq!(super::merge_intersection_bp(&a, &b), 15);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_no_overlap() {
-        let a = make_regionset(vec![("chr1", 0, 10)]).reduce();
-        let b = make_regionset(vec![("chr1", 20, 30)]).reduce();
-        assert_eq!(super::merge_intersection_bp(&a, &b), 0);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_adjacent() {
-        // Half-open [0,10) and [10,20) do NOT overlap
-        let a = make_regionset(vec![("chr1", 0, 10)]).reduce();
-        let b = make_regionset(vec![("chr1", 10, 20)]).reduce();
-        assert_eq!(super::merge_intersection_bp(&a, &b), 0);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_contained() {
-        // b is fully inside a
-        let a = make_regionset(vec![("chr1", 0, 100)]).reduce();
-        let b = make_regionset(vec![("chr1", 20, 50)]).reduce();
-        assert_eq!(super::merge_intersection_bp(&a, &b), 30);
-    }
-
-    #[rstest]
-    fn test_merge_intersection_bp_multiple_overlaps() {
-        // a has two intervals, b overlaps both
-        let a = make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]).reduce();
-        let b = make_regionset(vec![("chr1", 5, 25)]).reduce();
-        // overlap with [0,10): [5,10)=5bp, overlap with [20,30): [20,25)=5bp
-        assert_eq!(super::merge_intersection_bp(&a, &b), 10);
     }
 
     // ── RegionSetListOps tests ─────────────────────────────────────────

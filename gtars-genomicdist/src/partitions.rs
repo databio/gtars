@@ -11,7 +11,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader};
 use flate2::read::MultiGzDecoder;
 use gtars_core::models::{Region, RegionSet};
-use gtars_overlaprs::{multi_chrom_overlapper::IntoMultiChromOverlapper, OverlapperType};
+use gtars_overlaprs::{multi_chrom_overlapper::MultiChromOverlapper, OverlapperType};
 
 use serde::{Deserialize, Serialize};
 
@@ -454,23 +454,13 @@ fn calc_partitions_priority(query: &RegionSet, partitions: &PartitionList) -> Pa
             continue;
         }
         let overlapper =
-            partition_rs
-                .clone()
-                .into_multi_chrom_overlapper(OverlapperType::AIList);
+            MultiChromOverlapper::from_region_set(partition_rs.clone(), OverlapperType::AIList);
 
-        for (ri, region) in query.regions.iter().enumerate() {
-            if assignments[ri].is_some() {
-                continue; // already assigned
-            }
-            // Check if this query region overlaps any interval in this partition
-            let single = RegionSet::from(vec![Region {
-                chr: region.chr.clone(),
-                start: region.start,
-                end: region.end,
-                rest: None,
-            }]);
-            let hits = overlapper.find_overlaps(&single);
-            if !hits.is_empty() {
+        // One batched any_overlaps over the whole query (build-once, query-many).
+        // Returns a Vec<bool> of length query.regions.len() in query order.
+        let hits = overlapper.any_overlaps(query, None);
+        for (ri, &hit) in hits.iter().enumerate() {
+            if assignments[ri].is_none() && hit {
                 assignments[ri] = Some(pi);
             }
         }
@@ -515,19 +505,11 @@ fn calc_partitions_bp(query: &RegionSet, partitions: &PartitionList) -> Partitio
         }
 
         let overlapper =
-            partition_rs
-                .clone()
-                .into_multi_chrom_overlapper(OverlapperType::AIList);
+            MultiChromOverlapper::from_region_set(partition_rs.clone(), OverlapperType::AIList);
 
         let mut partition_bp: u32 = 0;
         for region in &query.regions {
-            let single = RegionSet::from(vec![Region {
-                chr: region.chr.clone(),
-                start: region.start,
-                end: region.end,
-                rest: None,
-            }]);
-            for (_chr, iv) in overlapper.find_overlaps_iter(&single) {
+            for iv in overlapper.find_overlaps_for_region(&region.chr, region.start, region.end) {
                 // Compute actual overlap width
                 let ol_start = region.start.max(iv.start);
                 let ol_end = region.end.min(iv.end);
@@ -875,8 +857,7 @@ mod tests {
                 }
 
                 let overlapper =
-                    rs_i.clone()
-                        .into_multi_chrom_overlapper(OverlapperType::AIList);
+                    MultiChromOverlapper::from_region_set(rs_i.clone(), OverlapperType::AIList);
                 let hits = overlapper.find_overlaps(rs_j);
 
                 // No bp should belong to two partitions
