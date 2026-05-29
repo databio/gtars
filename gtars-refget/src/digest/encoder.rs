@@ -116,6 +116,19 @@ pub fn encode_sequence<T: AsRef<[u8]>>(sequence: T, alphabet: &Alphabet) -> Vec<
     bytes
 }
 
+/// Returns the `[byte_start, byte_end)` range in the encoded file that contains
+/// all bits for bases `[start, end)`.
+///
+/// `byte_start` is floor-aligned; `byte_end` is ceiling-aligned (exclusive).
+/// Use this to compute an HTTP `Range` header (or a partial read) before fetching
+/// only the bytes that cover a query window, then pass `byte_start` as the
+/// `byte_offset` to [`decode_substring_from_bytes_at_offset`].
+pub fn byte_range_for_bases(start: usize, end: usize, bits_per_symbol: usize) -> (usize, usize) {
+    let byte_start = (start * bits_per_symbol) / 8;
+    let byte_end = (end * bits_per_symbol + 7) / 8;
+    (byte_start, byte_end)
+}
+
 /// Decodes a substring from a bit-packed encoded sequence.
 ///
 /// Decodes a substring from a bit-packed sequence of bytes.
@@ -151,6 +164,45 @@ pub fn decode_substring_from_bytes(
 
             let bit = if byte_index < encoded_bytes.len() {
                 (encoded_bytes[byte_index] >> bit_in_byte) & 1
+            } else {
+                0
+            };
+
+            code = (code << 1) | bit;
+        }
+        decoded.push(alphabet.decoding_array[code as usize]);
+    }
+    decoded
+}
+
+/// Decodes bases `[start, end)` from a partial encoded buffer.
+///
+/// `bytes` contains encoded data starting at `byte_offset` in the full encoded
+/// file (i.e. `bytes[0]` corresponds to byte `byte_offset` of the complete
+/// encoding). The function subtracts `byte_offset` from every computed byte
+/// index so the bit arithmetic stays correct against the partial slice.
+///
+/// Use [`byte_range_for_bases`] with `alphabet.bits_per_symbol` to compute the
+/// `(byte_offset, _)` range before fetching the partial buffer.
+pub fn decode_substring_from_bytes_at_offset(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    alphabet: &Alphabet,
+) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(end - start);
+    for i in start..end {
+        let bit_offset = i * alphabet.bits_per_symbol;
+        let mut code = 0u8;
+
+        for j in 0..alphabet.bits_per_symbol {
+            let bit_pos = bit_offset + j;
+            let byte_index = bit_pos / 8;
+            let bit_in_byte = 7 - (bit_pos % 8); // MSB0
+
+            let bit = if byte_index >= byte_offset && byte_index - byte_offset < bytes.len() {
+                (bytes[byte_index - byte_offset] >> bit_in_byte) & 1
             } else {
                 0
             };
@@ -268,5 +320,50 @@ mod tests {
         assert_eq!(encoded, packed);
         let decoded: Vec<u8> = decode_substring_from_bytes(&encoded, 0, sequence.len(), alphabet);
         assert_eq!(decoded, sequence);
+    }
+
+    #[test]
+    fn test_byte_range_for_bases() {
+        // Dna2bit: 2 bits/base, 4 bases/byte
+        assert_eq!(byte_range_for_bases(0, 4, 2), (0, 1));
+        assert_eq!(byte_range_for_bases(1, 5, 2), (0, 2)); // start=1 is at bit 2, still byte 0
+        assert_eq!(byte_range_for_bases(4, 8, 2), (1, 2));
+        // Dna3bit: 3 bits/base
+        assert_eq!(byte_range_for_bases(0, 8, 3), (0, 3));
+        assert_eq!(byte_range_for_bases(3, 6, 3), (1, 3)); // bit 9 to bit 18; bytes 1..3
+    }
+
+    fn check_offset_roundtrip(sequence: &[u8], alphabet: &Alphabet, start: usize, end: usize) {
+        let encoded = encode_sequence(sequence, alphabet);
+        let (byte_start, byte_end) = byte_range_for_bases(start, end, alphabet.bits_per_symbol);
+        let partial = &encoded[byte_start..byte_end];
+
+        let from_partial =
+            decode_substring_from_bytes_at_offset(partial, byte_start, start, end, alphabet);
+        let from_full = decode_substring_from_bytes(&encoded, start, end, alphabet);
+
+        assert_eq!(from_partial, from_full, "partial decode must match full decode");
+        assert_eq!(from_partial, &sequence[start..end], "decode must match source");
+    }
+
+    #[test]
+    fn test_decode_at_offset_dna_2bit() {
+        let sequence = b"ACGTACGTACGTACGT";
+        let alphabet = &alphabet::DNA_2BIT_ALPHABET;
+        check_offset_roundtrip(sequence, alphabet, 0, 4);
+        check_offset_roundtrip(sequence, alphabet, 1, 5);
+        check_offset_roundtrip(sequence, alphabet, 4, 8);
+        check_offset_roundtrip(sequence, alphabet, 5, 13);
+        check_offset_roundtrip(sequence, alphabet, 3, 16);
+    }
+
+    #[test]
+    fn test_decode_at_offset_dna_3bit() {
+        let sequence = b"ACGTNRYXACGTNRYX";
+        let alphabet = &alphabet::DNA_3BIT_ALPHABET;
+        check_offset_roundtrip(sequence, alphabet, 0, 8);
+        check_offset_roundtrip(sequence, alphabet, 3, 6);
+        check_offset_roundtrip(sequence, alphabet, 5, 11);
+        check_offset_roundtrip(sequence, alphabet, 2, 16);
     }
 }
