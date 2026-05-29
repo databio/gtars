@@ -1951,11 +1951,11 @@ const PARITY_FASTA: &str =
     ">chrX\nTTGGGGAACCCCTTTT\n>chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n\
      >chrM\nGGGGCCCCAAAATTTT\n>chr10\nTACGTACGTACGTACG\n";
 
-fn build_on_disk_store(dir: &std::path::Path, fasta: &std::path::Path, threads: usize) -> String {
+fn build_on_disk_store(dir: &std::path::Path, fasta: &std::path::Path, jobs: usize) -> String {
     let mut store = RefgetStore::on_disk(dir).unwrap();
     store.set_quiet(true);
     let (meta, _) = store
-        .add_sequence_collection_from_fasta(fasta, FastaImportOptions::new().threads(threads))
+        .add_sequence_collection_from_fasta(fasta, FastaImportOptions::new().jobs(jobs))
         .unwrap();
     meta.digest
 }
@@ -2046,13 +2046,13 @@ fn test_parallel_equals_serial_in_memory() {
     let mut serial = RefgetStore::in_memory();
     serial.set_quiet(true);
     let (meta_s, _) = serial
-        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(1))
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
         .unwrap();
 
     let mut parallel = RefgetStore::in_memory();
     parallel.set_quiet(true);
     let (meta_p, _) = parallel
-        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(8))
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(8))
         .unwrap();
 
     assert_eq!(meta_s.digest, meta_p.digest);
@@ -2106,7 +2106,7 @@ fn test_parallel_cached_metadata_parity() {
 
     // Build the rgsi cache by importing once into a throwaway store. The cache
     // is written next to the FASTA, so use a per-arm FASTA copy.
-    let build_cached = |threads: usize| -> (tempfile::TempDir, String) {
+    let build_cached = |jobs: usize| -> (tempfile::TempDir, String) {
         let src_dir = tempdir().unwrap();
         let fasta = src_dir.path().join("cached.fa");
         fs::write(&fasta, PARITY_FASTA).unwrap();
@@ -2116,7 +2116,7 @@ fn test_parallel_cached_metadata_parity() {
         let mut prime = RefgetStore::on_disk(prime_dir.path()).unwrap();
         prime.set_quiet(true);
         prime
-            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(1))
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
             .unwrap();
         assert!(
             src_dir.path().join("cached.rgsi").exists(),
@@ -2128,7 +2128,7 @@ fn test_parallel_cached_metadata_parity() {
         let mut store = RefgetStore::on_disk(dir.path()).unwrap();
         store.set_quiet(true);
         let (meta, _) = store
-            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(threads))
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(jobs))
             .unwrap();
         (dir, meta.digest)
     };
@@ -2172,7 +2172,7 @@ fn test_parallel_duplicate_contig_dedup() {
     let mut store = RefgetStore::on_disk(dir.path()).unwrap();
     store.set_quiet(true);
     let (meta, _) = store
-        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().threads(8))
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(8))
         .unwrap();
 
     // Two distinct digests (the duplicate collapses).
@@ -2256,17 +2256,17 @@ fn write_gzipped(path: &std::path::Path, content: &str) {
     enc.finish().unwrap();
 }
 
-/// Build an on-disk store from multiple FASTA files with the given thread /
-/// file-jobs settings. Returns the per-file collection digests in input order.
+/// Build an on-disk store from multiple FASTA files with the given `jobs`
+/// (files-in-flight) setting. Returns the per-file collection digests in input
+/// order.
 fn build_multi(
     dir: &std::path::Path,
     files: &[std::path::PathBuf],
-    threads: usize,
-    file_jobs: usize,
+    jobs: usize,
 ) -> Vec<String> {
     let mut store = RefgetStore::on_disk(dir).unwrap();
     store.set_quiet(true);
-    let opts = FastaImportOptions::new().threads(threads).file_jobs(file_jobs);
+    let opts = FastaImportOptions::new().jobs(jobs);
     store
         .add_sequence_collections_from_fastas(files, opts)
         .unwrap()
@@ -2293,8 +2293,8 @@ fn test_multifile_parallel_equals_serial() {
     let dir_serial = tempdir().unwrap();
     let dir_parallel = tempdir().unwrap();
 
-    let digests_serial = build_multi(dir_serial.path(), &files, 1, 1);
-    let digests_parallel = build_multi(dir_parallel.path(), &files, 8, 4);
+    let digests_serial = build_multi(dir_serial.path(), &files, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8);
 
     // Per-file collection digests identical and in the same (input) order.
     assert_eq!(
@@ -2334,8 +2334,8 @@ fn test_multifile_parallel_gzipped() {
     let dir_serial = tempdir().unwrap();
     let dir_parallel = tempdir().unwrap();
 
-    let digests_serial = build_multi(dir_serial.path(), &files, 1, 1);
-    let digests_parallel = build_multi(dir_parallel.path(), &files, 8, 3);
+    let digests_serial = build_multi(dir_serial.path(), &files, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8);
 
     assert_eq!(digests_serial, digests_parallel, "gzipped digests must match");
 

@@ -21,8 +21,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let output = matches
         .get_one::<String>("output")
         .expect("output is required");
-    let threads = *matches.get_one::<usize>("threads").unwrap_or(&0);
-    let file_jobs = *matches.get_one::<usize>("file-jobs").unwrap_or(&0);
+    let jobs = *matches.get_one::<usize>("jobs").unwrap_or(&0);
     let raw = matches.get_flag("raw");
     let force = matches.get_flag("force");
 
@@ -37,11 +36,10 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mode = if raw { "Raw" } else { "Encoded" };
     let fmt_auto = |n: usize| if n == 0 { "auto".to_string() } else { n.to_string() };
     eprintln!(
-        "Building RefgetStore at {} (mode={}, threads={}, file-jobs={})",
+        "Building RefgetStore at {} (mode={}, jobs={})",
         output,
         mode,
-        fmt_auto(threads),
-        fmt_auto(file_jobs),
+        fmt_auto(jobs),
     );
 
     let mut total_bases: u64 = 0;
@@ -50,8 +48,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
 
     let opts = FastaImportOptions::new()
         .force(force)
-        .threads(threads)
-        .file_jobs(file_jobs);
+        .jobs(jobs);
     let results = store
         .add_sequence_collections_from_fastas(&fastas, opts)
         .map_err(|e| anyhow::anyhow!("Failed to import FASTA files: {}", e))?;
@@ -84,13 +81,12 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         0.0
     };
     eprintln!(
-        "Done: {} sequences, {} bases in {:.3}s ({:.1} Mbase/s, threads={}, file-jobs={})",
+        "Done: {} sequences, {} bases in {:.3}s ({:.1} Mbase/s, jobs={})",
         total_seqs,
         total_bases,
         elapsed,
         mbps,
-        fmt_auto(threads),
-        fmt_auto(file_jobs),
+        fmt_auto(jobs),
     );
 
     Ok(())

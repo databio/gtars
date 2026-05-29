@@ -24,20 +24,12 @@ pub fn create_refget_cli() -> Command {
                         .help("Output directory for the RefgetStore"),
                 )
                 .arg(
-                    Arg::new("threads")
-                        .long("threads")
-                        .short('t')
-                        .value_parser(clap::value_parser!(usize))
-                        .default_value("0")
-                        .help("Total worker threads for the digest+encode stage (0 = auto, 1 = serial)"),
-                )
-                .arg(
-                    Arg::new("file-jobs")
-                        .long("file-jobs")
+                    Arg::new("jobs")
+                        .long("jobs")
                         .short('j')
                         .value_parser(clap::value_parser!(usize))
                         .default_value("0")
-                        .help("Input FASTA files decoded concurrently, parallelizing gzip decode across files (0 = auto)"),
+                        .help("Number of FASTA files imported concurrently (0 = auto, 1 = serial)"),
                 )
                 .arg(
                     Arg::new("raw")

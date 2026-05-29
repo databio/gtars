@@ -1,42 +1,39 @@
 //! FASTA import pipeline for RefgetStore.
 //!
-//! Contains the multithreaded FASTA import pipeline and cached metadata fast path.
+//! Contains the FASTA import pipeline and cached metadata fast path.
 //!
-//! ## Two-axis parallelism model
+//! ## Single-knob parallelism model
 //!
-//! ### Per-sequence parallelism (within one file)
+//! There is ONE concurrency knob: `jobs` = the number of input FASTA files
+//! imported concurrently. With multiple files, up to `jobs` files are
+//! decoded/built concurrently, each with its OWN decoder (so K gzip streams
+//! decompress in parallel). With a single file `jobs` has no effect.
 //!
-//! The CPU-bound per-sequence work (SHA-512 + MD5 + alphabet guess + 2-bit
-//! encode) is embarrassingly parallel across sequences and touches no shared
-//! state. We fan that work out to N scoped worker threads. A reader thread
-//! streams FASTA records and dispatches them round-robin to per-worker channels,
-//! tagging each item with a monotonic `input_index`. The collector reorders
-//! worker output by `input_index` so records are observed in exact FASTA order;
-//! this is what makes `name_lookup` (and therefore the collection digest)
-//! deterministic and identical to a single-threaded build. The pattern mirrors
-//! `gtars-vrs/src/vcf.rs::compute_vrs_ids_parallel_encoded`.
+//! ### Per-file pipeline (basic chain)
+//!
+//! Each file is processed by a simple linear pipeline of ~3 threads with
+//! `bounded(1)` channels providing back-pressure (a couple of contigs in flight):
+//! a decompress/read thread, a digest thread, and an encode step on the build
+//! thread. Records flow through the chain in FASTA order, so output is naturally
+//! in FASTA order without any reordering machinery. This makes `name_lookup`
+//! (and therefore the collection digest) deterministic and identical to a
+//! single-threaded build.
 //!
 //! ### File-level parallelism (across files)
 //!
-//! A single reader thread doing gzip DECOMPRESSION is the bottleneck on
-//! compressed input (the per-sequence workers starve). To parallelize
-//! decompression we run K file pipelines concurrently, each with its OWN
-//! decoder (so K gzip streams decompress in parallel). The build half (decode +
-//! parse + digest + encode -> in-memory `BuiltCollection`) touches NO shared
-//! store state and runs concurrently across files; the insert half (`&mut self`
-//! registration of collections/sequences/aliases/name_lookup) runs on a single
-//! owner in FIXED input-file order, so the resulting store is byte-identical to
-//! a serial build regardless of which builder finishes first.
-//!
-//! `threads` is the TOTAL encode-worker budget; `file_jobs` is the number of
-//! files in flight. They are reconciled by `resolve_threads` /
-//! `resolve_file_jobs` so `file_jobs * per_file_workers <= threads`.
+//! The build half (decode + parse + digest + encode -> in-memory
+//! `BuiltCollection`) touches NO shared store state and runs concurrently across
+//! files; the insert half (`&mut self` registration of
+//! collections/sequences/aliases/name_lookup) runs on a single owner in FIXED
+//! input-file order, so the resulting store is byte-identical to a serial build
+//! regardless of which builder finishes first.
 
 use super::*;
 use super::readonly::ReadonlyRefgetStore;
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::thread::available_parallelism;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
@@ -50,52 +47,8 @@ use crate::hashkeyable::HashKeyable;
 
 /// Threshold above which the reader processes sequences inline (to bound peak
 /// memory: the few huge contigs are hashed+encoded on the reader instead of
-/// fanning N copies into the worker pool).
+/// being passed down the pipeline holding extra copies in flight).
 const LARGE_SEQ_THRESHOLD: usize = 500 * 1024 * 1024; // 500 MB
-
-/// Resolve a requested thread count, mapping `0` to the machine parallelism.
-fn resolve_threads(requested: usize) -> usize {
-    if requested == 0 {
-        std::thread::available_parallelism()
-            .map(|n| n.get())
-            .unwrap_or(1)
-    } else {
-        requested
-    }
-    .max(1)
-}
-
-/// Resolve how many files to decode/build concurrently (`file_jobs`).
-///
-/// `requested == 0` means auto. The auto heuristic biases toward more files in
-/// flight (more concurrent gzip decoders, since decode is the bottleneck on
-/// compressed input) while giving each file at least `PER_FILE_MIN_WORKERS`
-/// encode workers, and never exceeding the number of input files or the total
-/// thread budget. With a single file we always return 1 (all workers go to that
-/// file, preserving the prior single-file behavior).
-fn resolve_file_jobs(requested: usize, num_files: usize, n_workers: usize) -> usize {
-    /// Each file gets at least this many encode workers under the auto heuristic.
-    const PER_FILE_MIN_WORKERS: usize = 2;
-
-    let num_files = num_files.max(1);
-    if num_files == 1 {
-        return 1;
-    }
-    let resolved = if requested == 0 {
-        // ceil(n_workers / PER_FILE_MIN_WORKERS), capped to num_files.
-        let by_budget = n_workers.div_ceil(PER_FILE_MIN_WORKERS);
-        by_budget.clamp(1, num_files)
-    } else {
-        requested.min(num_files)
-    };
-    resolved.max(1)
-}
-
-/// Derive per-file encode workers from the total budget and files-in-flight,
-/// so `file_jobs * per_file <= n_workers` (each file gets at least 1).
-fn per_file_workers(n_workers: usize, file_jobs: usize) -> usize {
-    (n_workers / file_jobs.max(1)).max(1)
-}
 
 /// A fully-built sequence collection produced by the build half (no `&mut self`).
 ///
@@ -109,7 +62,7 @@ struct BuiltCollection {
     /// Sequence stub records in FASTA order (used to register the collection).
     stub_records: Vec<SequenceRecord>,
     /// Fully-encoded sequences in FASTA order, ready to write.
-    sequences: Vec<ReadyOrdered>,
+    sequences: Vec<ReadySequence>,
     /// (namespace, alias_value, sha512t24u) alias triples in FASTA order.
     aliases: Vec<(String, String, String)>,
     /// Source FASTA path (for metadata / RGSI cache).
@@ -121,136 +74,11 @@ struct BuiltCollection {
     seq_count: usize,
 }
 
-/// A fully-built sequence ready for the single inserter, tagged with its input
-/// (FASTA) index so the collector can restore order.
-struct ReadyOrdered {
-    input_index: u64,
+/// A fully-built sequence ready for the single inserter, in FASTA order.
+struct ReadySequence {
     metadata: SequenceMetadata,
     sequence_data: Vec<u8>,
     aliases: Vec<(String, String)>,
-}
-
-/// Run the reader -> N workers -> in-order collector pipeline.
-///
-/// - `reader` runs on its own scoped thread. It is handed N round-robin work
-///   senders (one per worker) and must tag each emitted item with a monotonic
-///   `input_index` starting at 0 with no gaps. It returns the number of items
-///   dispatched (unused by callers but useful for assertions).
-/// - `work_fn` is the per-item CPU work, run on N scoped worker threads. It maps
-///   one input item `T` (already carrying its `input_index`) to a `ReadyOrdered`.
-/// - `on_ready` runs on the **main** thread, receiving `ReadyOrdered` items in
-///   exact `input_index` order. This is where `&mut self` insertion happens.
-///
-/// `T` must be `Send` and carry its own `input_index` (the reader assigns it).
-fn run_encode_pipeline<T, R, W, C>(
-    n_workers: usize,
-    reader: R,
-    work_fn: W,
-    mut on_ready: C,
-) -> Result<()>
-where
-    T: Send,
-    R: FnOnce(&[crossbeam_channel::Sender<T>]) -> Result<u64> + Send,
-    W: Fn(T) -> Result<ReadyOrdered> + Send + Sync,
-    C: FnMut(ReadyOrdered) -> Result<()>,
-{
-    use crossbeam_channel::{bounded, unbounded};
-
-    let n_workers = n_workers.max(1);
-    let work_fn = &work_fn;
-
-    // Output channel: workers push ReadyOrdered, the collector (main thread)
-    // drains it. Unbounded so workers never block on the collector; in-flight
-    // raw bytes are bounded by the small per-worker input channels instead.
-    let (out_tx, out_rx) = unbounded::<Result<ReadyOrdered>>();
-
-    std::thread::scope(|scope| -> Result<()> {
-        // One bounded work channel per worker. bounded(2) keeps the reader from
-        // pulling the whole FASTA into RAM (a few contigs in flight per worker).
-        let mut work_txs: Vec<crossbeam_channel::Sender<T>> = Vec::with_capacity(n_workers);
-        let mut worker_handles = Vec::with_capacity(n_workers);
-
-        for _ in 0..n_workers {
-            let (work_tx, work_rx) = bounded::<T>(2);
-            work_txs.push(work_tx);
-            let out_tx = out_tx.clone();
-            let handle = scope.spawn(move || {
-                for item in work_rx.iter() {
-                    let result = work_fn(item);
-                    let is_err = result.is_err();
-                    if out_tx.send(result).is_err() {
-                        break;
-                    }
-                    if is_err {
-                        break;
-                    }
-                }
-            });
-            worker_handles.push(handle);
-        }
-        drop(out_tx); // workers hold the only remaining output senders
-
-        // Reader thread: dispatches work round-robin and assigns input indices.
-        let reader_handle = scope.spawn(move || -> Result<u64> {
-            let n = reader(&work_txs)?;
-            // Dropping all work senders signals workers to finish.
-            drop(work_txs);
-            Ok(n)
-        });
-
-        // Collector (main thread): reorder by input_index and emit in order.
-        let mut pending: HashMap<u64, ReadyOrdered> = HashMap::new();
-        let mut next_emit: u64 = 0;
-        let mut first_err: Option<anyhow::Error> = None;
-
-        for msg in out_rx.iter() {
-            match msg {
-                Ok(ready) => {
-                    pending.insert(ready.input_index, ready);
-                    while let Some(item) = pending.remove(&next_emit) {
-                        if let Err(e) = on_ready(item) {
-                            first_err = Some(e);
-                            break;
-                        }
-                        next_emit += 1;
-                    }
-                    if first_err.is_some() {
-                        break;
-                    }
-                }
-                Err(e) => {
-                    first_err = Some(e);
-                    break;
-                }
-            }
-        }
-
-        // Drain any remaining in-order items (none if a worker errored).
-        if first_err.is_none() {
-            while let Some(item) = pending.remove(&next_emit) {
-                if let Err(e) = on_ready(item) {
-                    first_err = Some(e);
-                    break;
-                }
-                next_emit += 1;
-            }
-        }
-
-        // Join reader and workers, surfacing panics and the reader error.
-        let reader_result = reader_handle
-            .join()
-            .map_err(|_| anyhow!("FASTA reader thread panicked"))?;
-        for h in worker_handles {
-            h.join()
-                .map_err(|_| anyhow!("FASTA worker thread panicked"))?;
-        }
-
-        if let Some(e) = first_err {
-            return Err(e);
-        }
-        reader_result?;
-        Ok(())
-    })
 }
 
 // ============================================================================
@@ -271,7 +99,6 @@ struct BuildConfig<'a> {
     /// Whether the store is disk-backed (controls RGSI cache read/write).
     use_cache: bool,
     namespaces: &'a [&'a str],
-    n_workers: usize,
 }
 
 /// Build a `BuiltCollection` from a FASTA file (raw path: digest + encode).
@@ -300,189 +127,211 @@ fn build_collection_from_fasta(
 
 /// Full build half: digest + encode every sequence and compute collection
 /// metadata. Returns a `BuiltCollection` ready for the insert half.
+///
+/// Uses the basic 3-thread chain: a reader/decompress thread, a digest thread,
+/// and the encode step on this (build) thread. `bounded(1)` channels keep at
+/// most a couple of contigs in flight, capping RAM. Records flow in FASTA order.
 fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<BuiltCollection> {
     use crate::utils::PathExtension;
+    use crossbeam_channel::bounded;
+    use md5::Md5;
+    use sha2::{Digest, Sha512};
 
-    // Reader item type: a raw record needing work, or a large record already
-    // processed inline by the reader. Both carry their input_index.
-    struct RawItem {
-        input_index: u64,
+    // --- Channel message types ---
+    struct DecompressedSequence {
         name: String,
         description: Option<String>,
         raw_header: String,
         raw_bytes: Vec<u8>,
     }
-    enum WorkUnit {
-        NeedsWork(RawItem),
-        AlreadyDone(ReadyOrdered),
+    struct DigestedSequence {
+        metadata: SequenceMetadata,
+        raw_bytes: Vec<u8>,
+        aliases: Vec<(String, String)>,
     }
+    enum ToDigest {
+        NeedsWork(DecompressedSequence),
+        AlreadyDone(ReadySequence),
+    }
+    enum ToEncode {
+        NeedsWork(DigestedSequence),
+        AlreadyDone(ReadySequence),
+    }
+
+    let (decompress_tx, decompress_rx) = bounded::<ToDigest>(1);
+    let (digest_tx, digest_rx) = bounded::<ToEncode>(1);
 
     let file_path_buf = file_path.to_path_buf();
     let namespaces: Vec<String> = cfg.namespaces.iter().map(|s| s.to_string()).collect();
-    let mode = cfg.mode;
+    let ns_for_digest = namespaces.clone();
+
     let quiet = cfg.quiet;
+    let mode = cfg.mode;
 
-    let mut sequences: Vec<ReadyOrdered> = Vec::new();
+    // --- Thread 1: read FASTA (decompress) ---
+    let decompress_handle = std::thread::spawn(move || -> Result<()> {
+        let mut fasta_reader = crate::fasta::FastaReader::from_path(&file_path_buf)?;
 
-    // --- Reader closure (runs on a scoped thread) ---
-    let reader = {
-        let namespaces = &namespaces;
-        move |work_txs: &[crossbeam_channel::Sender<WorkUnit>]| -> Result<u64> {
-            use md5::Md5;
-            use sha2::{Digest, Sha512};
+        while let Some(record) = fasta_reader.next_record()? {
+            if record.raw_bytes.len() > LARGE_SEQ_THRESHOLD {
+                if !quiet {
+                    println!(
+                        "  Large sequence '{}' ({} MB) -- processing inline to reduce memory",
+                        record.name,
+                        record.raw_bytes.len() / (1024 * 1024),
+                    );
+                }
+                let crate::fasta::FastaRecord { name, description, raw_header, raw_bytes } = record;
 
-            let mut fasta_reader = crate::fasta::FastaReader::from_path(&file_path_buf)?;
-            let n = work_txs.len();
-            let mut input_index: u64 = 0;
-            let mut next_worker = 0usize;
+                let mut sha512_hasher = Sha512::new();
+                sha512_hasher.update(&raw_bytes);
+                let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
 
-            while let Some(record) = fasta_reader.next_record()? {
-                let unit = if record.raw_bytes.len() > LARGE_SEQ_THRESHOLD {
-                    if !quiet {
-                        println!(
-                            "  Large sequence '{}' ({} MB) -- processing inline to reduce memory",
-                            record.name,
-                            record.raw_bytes.len() / (1024 * 1024),
-                        );
+                let mut md5_hasher = Md5::new();
+                md5_hasher.update(&raw_bytes);
+                let md5 = format!("{:x}", md5_hasher.finalize());
+
+                let mut guesser = crate::digest::AlphabetGuesser::new();
+                guesser.update(&raw_bytes);
+                let alphabet = guesser.guess();
+
+                let length = raw_bytes.len();
+                let aliases = if !namespaces.is_empty() {
+                    let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
+                    crate::digest::fasta::extract_aliases_from_header(&raw_header, &ns_refs)
+                } else {
+                    vec![]
+                };
+                let sequence_data = match mode {
+                    StorageMode::Encoded => {
+                        let mut encoder = SequenceEncoder::new(alphabet, length);
+                        encoder.update(&raw_bytes);
+                        drop(raw_bytes);
+                        encoder.finalize()
                     }
-                    let crate::fasta::FastaRecord { name, description, raw_header, raw_bytes } = record;
+                    StorageMode::Raw => raw_bytes,
+                };
 
-                    let mut sha512_hasher = Sha512::new();
-                    sha512_hasher.update(&raw_bytes);
-                    let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
+                let metadata = SequenceMetadata {
+                    name,
+                    description,
+                    length,
+                    sha512t24u: sha512,
+                    md5,
+                    alphabet,
+                    fai: None,
+                };
 
-                    let mut md5_hasher = Md5::new();
-                    md5_hasher.update(&raw_bytes);
-                    let md5 = format!("{:x}", md5_hasher.finalize());
-
-                    let mut guesser = crate::digest::AlphabetGuesser::new();
-                    guesser.update(&raw_bytes);
-                    let alphabet = guesser.guess();
-
-                    let length = raw_bytes.len();
-                    let aliases = if !namespaces.is_empty() {
-                        let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
-                        crate::digest::fasta::extract_aliases_from_header(&raw_header, &ns_refs)
-                    } else {
-                        vec![]
-                    };
-                    let sequence_data = match mode {
-                        StorageMode::Encoded => {
-                            let mut encoder = SequenceEncoder::new(alphabet, length);
-                            encoder.update(&raw_bytes);
-                            drop(raw_bytes);
-                            encoder.finalize()
-                        }
-                        StorageMode::Raw => raw_bytes,
-                    };
-
-                    let metadata = SequenceMetadata {
-                        name,
-                        description,
-                        length,
-                        sha512t24u: sha512,
-                        md5,
-                        alphabet,
-                        fai: None,
-                    };
-
-                    WorkUnit::AlreadyDone(ReadyOrdered {
-                        input_index,
+                decompress_tx
+                    .send(ToDigest::AlreadyDone(ReadySequence {
                         metadata,
                         sequence_data,
                         aliases,
-                    })
-                } else {
-                    WorkUnit::NeedsWork(RawItem {
-                        input_index,
+                    }))
+                    .map_err(|_| anyhow!("Digest thread stopped receiving"))?;
+            } else {
+                decompress_tx
+                    .send(ToDigest::NeedsWork(DecompressedSequence {
                         name: record.name,
                         description: record.description,
                         raw_header: record.raw_header,
                         raw_bytes: record.raw_bytes,
-                    })
-                };
-
-                if work_txs[next_worker].send(unit).is_err() {
-                    break; // worker hung up
-                }
-                input_index += 1;
-                next_worker = (next_worker + 1) % n;
+                    }))
+                    .map_err(|_| anyhow!("Digest thread stopped receiving"))?;
             }
-            Ok(input_index)
         }
-    };
+        Ok(())
+    });
 
-    // --- Worker closure (runs on N scoped threads) ---
-    let work_fn = {
-        let namespaces = &namespaces;
-        move |unit: WorkUnit| -> Result<ReadyOrdered> {
-            use md5::Md5;
-            use sha2::{Digest, Sha512};
+    // --- Thread 2: digest ---
+    let digest_handle = std::thread::spawn(move || -> Result<()> {
+        let ns_refs: Vec<&str> = ns_for_digest.iter().map(|s| s.as_str()).collect();
 
-            match unit {
-                WorkUnit::AlreadyDone(ready) => Ok(ready),
-                WorkUnit::NeedsWork(item) => {
+        for msg in decompress_rx {
+            match msg {
+                ToDigest::NeedsWork(seq) => {
                     let mut sha512_hasher = Sha512::new();
-                    sha512_hasher.update(&item.raw_bytes);
+                    sha512_hasher.update(&seq.raw_bytes);
                     let sha512 = base64_url::encode(&sha512_hasher.finalize()[0..24]);
 
                     let mut md5_hasher = Md5::new();
-                    md5_hasher.update(&item.raw_bytes);
+                    md5_hasher.update(&seq.raw_bytes);
                     let md5 = format!("{:x}", md5_hasher.finalize());
 
                     let mut guesser = crate::digest::AlphabetGuesser::new();
-                    guesser.update(&item.raw_bytes);
+                    guesser.update(&seq.raw_bytes);
                     let alphabet = guesser.guess();
 
-                    let length = item.raw_bytes.len();
-                    let aliases = if !namespaces.is_empty() {
-                        let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
-                        crate::digest::fasta::extract_aliases_from_header(&item.raw_header, &ns_refs)
-                    } else {
-                        vec![]
-                    };
-
-                    let sequence_data = match mode {
-                        StorageMode::Encoded => {
-                            let mut encoder = SequenceEncoder::new(alphabet, length);
-                            encoder.update(&item.raw_bytes);
-                            drop(item.raw_bytes);
-                            encoder.finalize()
-                        }
-                        StorageMode::Raw => item.raw_bytes,
-                    };
-
                     let metadata = SequenceMetadata {
-                        name: item.name,
-                        description: item.description,
-                        length,
+                        name: seq.name,
+                        description: seq.description,
+                        length: seq.raw_bytes.len(),
                         sha512t24u: sha512,
                         md5,
                         alphabet,
                         fai: None,
                     };
 
-                    Ok(ReadyOrdered {
-                        input_index: item.input_index,
-                        metadata,
-                        sequence_data,
-                        aliases,
-                    })
+                    let aliases = if !ns_refs.is_empty() {
+                        crate::digest::fasta::extract_aliases_from_header(&seq.raw_header, &ns_refs)
+                    } else {
+                        vec![]
+                    };
+
+                    digest_tx
+                        .send(ToEncode::NeedsWork(DigestedSequence {
+                            metadata,
+                            raw_bytes: seq.raw_bytes,
+                            aliases,
+                        }))
+                        .map_err(|_| anyhow!("Encode thread stopped receiving"))?;
+                }
+                ToDigest::AlreadyDone(ready) => {
+                    digest_tx
+                        .send(ToEncode::AlreadyDone(ready))
+                        .map_err(|_| anyhow!("Encode thread stopped receiving"))?;
                 }
             }
         }
-    };
+        drop(digest_tx);
+        Ok(())
+    });
 
-    // Collector: gather encoded sequences in FASTA order (no &mut self).
-    run_encode_pipeline(
-        cfg.n_workers,
-        reader,
-        work_fn,
-        |ready: ReadyOrdered| -> Result<()> {
-            sequences.push(ready);
-            Ok(())
-        },
-    )?;
+    // --- Thread 3 (this thread): encode + collect in FASTA order ---
+    let mut sequences: Vec<ReadySequence> = Vec::new();
+
+    for msg in digest_rx {
+        match msg {
+            ToEncode::NeedsWork(digested) => {
+                let sequence_data = match mode {
+                    StorageMode::Encoded => {
+                        let mut encoder =
+                            SequenceEncoder::new(digested.metadata.alphabet, digested.metadata.length);
+                        encoder.update(&digested.raw_bytes);
+                        drop(digested.raw_bytes);
+                        encoder.finalize()
+                    }
+                    StorageMode::Raw => digested.raw_bytes,
+                };
+                sequences.push(ReadySequence {
+                    metadata: digested.metadata,
+                    sequence_data,
+                    aliases: digested.aliases,
+                });
+            }
+            ToEncode::AlreadyDone(ready) => {
+                sequences.push(ready);
+            }
+        }
+    }
+
+    // Join threads and propagate errors.
+    decompress_handle
+        .join()
+        .map_err(|e| anyhow!("Decompress thread panicked: {:?}", e))??;
+    digest_handle
+        .join()
+        .map_err(|e| anyhow!("Digest thread panicked: {:?}", e))??;
 
     // Compute collection metadata from the sequence stubs in FASTA order.
     let stub_records: Vec<SequenceRecord> = sequences
@@ -526,11 +375,17 @@ fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<Built
 
 /// Build half for the RGSI cached-metadata fast path: skip digesting, only
 /// decompress + encode. Does NOT touch `&mut self`.
+///
+/// Uses a basic 2-thread split: a reader/decompress thread feeds raw records
+/// (with their already-known cached metadata) to this thread, which encodes them
+/// in FASTA order.
 fn build_collection_from_cached_metadata(
     file_path: &Path,
     rgsi_path: &Path,
     cfg: BuildConfig<'_>,
 ) -> Result<BuiltCollection> {
+    use crossbeam_channel::bounded;
+
     let mut seqcol = crate::collection::read_rgsi_file(rgsi_path)?;
 
     if seqcol.sequences.is_empty() {
@@ -557,55 +412,46 @@ fn build_collection_from_cached_metadata(
 
     // Reader item: a raw record plus its already-known cached metadata.
     struct CachedRaw {
-        input_index: u64,
         metadata: SequenceMetadata,
         raw_bytes: Vec<u8>,
         aliases: Vec<(String, String)>,
     }
 
-    let mut sequences: Vec<ReadyOrdered> = Vec::new();
+    let (read_tx, read_rx) = bounded::<CachedRaw>(1);
 
-    let reader = {
-        let namespaces = &namespaces;
-        let seqmeta_hashmap = &seqmeta_hashmap;
-        move |work_txs: &[crossbeam_channel::Sender<CachedRaw>]| -> Result<u64> {
-            let mut fasta_reader = crate::fasta::FastaReader::from_path(&file_path_buf)?;
-            let n = work_txs.len();
-            let mut input_index: u64 = 0;
-            let mut next_worker = 0usize;
+    // --- Thread 1: read FASTA + look up cached metadata ---
+    let read_handle = std::thread::spawn(move || -> Result<()> {
+        let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
+        let mut fasta_reader = crate::fasta::FastaReader::from_path(&file_path_buf)?;
 
-            while let Some(record) = fasta_reader.next_record()? {
-                let (name, _) = crate::fasta::parse_fasta_header(&record.raw_header);
+        while let Some(record) = fasta_reader.next_record()? {
+            let (name, _) = crate::fasta::parse_fasta_header(&record.raw_header);
 
-                let aliases = if !namespaces.is_empty() {
-                    let ns_refs: Vec<&str> = namespaces.iter().map(|s| s.as_str()).collect();
-                    crate::digest::fasta::extract_aliases_from_header(&record.raw_header, &ns_refs)
-                } else {
-                    vec![]
-                };
+            let aliases = if !ns_refs.is_empty() {
+                crate::digest::fasta::extract_aliases_from_header(&record.raw_header, &ns_refs)
+            } else {
+                vec![]
+            };
 
-                let dr = seqmeta_hashmap
-                    .get(&name)
-                    .ok_or_else(|| anyhow!("Sequence '{}' not found in cached metadata", name))?
-                    .clone();
+            let dr = seqmeta_hashmap
+                .get(&name)
+                .ok_or_else(|| anyhow!("Sequence '{}' not found in cached metadata", name))?
+                .clone();
 
-                let unit = CachedRaw {
-                    input_index,
+            read_tx
+                .send(CachedRaw {
                     metadata: dr,
                     raw_bytes: record.raw_bytes,
                     aliases,
-                };
-                if work_txs[next_worker].send(unit).is_err() {
-                    break;
-                }
-                input_index += 1;
-                next_worker = (next_worker + 1) % n;
-            }
-            Ok(input_index)
+                })
+                .map_err(|_| anyhow!("Encode thread stopped receiving"))?;
         }
-    };
+        Ok(())
+    });
 
-    let work_fn = move |unit: CachedRaw| -> Result<ReadyOrdered> {
+    // --- Thread 2 (this thread): encode + collect in FASTA order ---
+    let mut sequences: Vec<ReadySequence> = Vec::new();
+    for unit in read_rx {
         let sequence_data = match mode {
             StorageMode::Encoded => {
                 let mut encoder =
@@ -616,23 +462,16 @@ fn build_collection_from_cached_metadata(
             }
             StorageMode::Raw => unit.raw_bytes,
         };
-        Ok(ReadyOrdered {
-            input_index: unit.input_index,
+        sequences.push(ReadySequence {
             metadata: unit.metadata,
             sequence_data,
             aliases: unit.aliases,
-        })
-    };
+        });
+    }
 
-    run_encode_pipeline(
-        cfg.n_workers,
-        reader,
-        work_fn,
-        |ready: ReadyOrdered| -> Result<()> {
-            sequences.push(ready);
-            Ok(())
-        },
-    )?;
+    read_handle
+        .join()
+        .map_err(|e| anyhow!("Decompress thread panicked: {:?}", e))??;
 
     let stub_records = seqcol.sequences.clone();
     let metadata = seqcol.metadata.clone();
@@ -665,7 +504,7 @@ fn build_collection_from_cached_metadata(
 impl ReadonlyRefgetStore {
     /// Import multiple FASTA files into the store with file-level parallelism.
     ///
-    /// Up to `file_jobs` files are decoded/built concurrently (each with its own
+    /// Up to `jobs` files are decoded/built concurrently (each with its own
     /// decoder, so gzip decompression is parallelized across files). The insert
     /// half (`&mut self`) is applied on this single owner thread in FIXED input
     /// file order, guaranteeing a byte-identical store to a serial build.
@@ -680,9 +519,13 @@ impl ReadonlyRefgetStore {
             return Ok(Vec::new());
         }
 
-        let n_workers = resolve_threads(opts.threads);
-        let file_jobs = resolve_file_jobs(opts.file_jobs, files.len(), n_workers);
-        let workers_per_file = per_file_workers(n_workers, file_jobs);
+        // Resolve concurrency: 0 = auto (available_parallelism). Has no effect
+        // with a single file (clamped to 1).
+        let jobs = match opts.jobs {
+            0 => available_parallelism().map(|n| n.get()).unwrap_or(1),
+            n => n,
+        };
+        let jobs = jobs.min(files.len()).max(1);
 
         let cfg = BuildConfig {
             mode: self.mode,
@@ -690,20 +533,18 @@ impl ReadonlyRefgetStore {
             ancillary_digests: self.ancillary_digests,
             use_cache: self.local_path.is_some(),
             namespaces: opts.namespaces,
-            n_workers: workers_per_file,
         };
 
         let overall_start = Instant::now();
 
-        // --- Build half: run up to `file_jobs` builders concurrently. ---
+        // --- Build half: run up to `jobs` builders concurrently. ---
         // Results are streamed back tagged with the file index; the owner
         // collects them and inserts in fixed file index order.
         let mut built: Vec<Option<Result<BuiltCollection>>> =
             (0..files.len()).map(|_| None).collect();
 
-        if file_jobs <= 1 {
-            // Serial build (preserves single-file behavior; also used when the
-            // budget only allows one file at a time).
+        if jobs <= 1 {
+            // Serial build (one file at a time, basic pipeline per file).
             for (idx, file) in files.iter().enumerate() {
                 if !self.quiet {
                     println!("Processing {}...", file.display());
@@ -712,14 +553,14 @@ impl ReadonlyRefgetStore {
             }
         } else {
             use crossbeam_channel::{bounded, unbounded};
-            // Bounded job queue feeds a fixed pool of `file_jobs` builder
-            // threads; results stream back unbounded (each result is one
-            // BuiltCollection, bounded in count by the number of files).
-            let (job_tx, job_rx) = bounded::<(usize, PathBuf)>(file_jobs);
+            // Bounded job queue feeds a fixed pool of `jobs` builder threads;
+            // results stream back unbounded (each result is one BuiltCollection,
+            // bounded in count by the number of files).
+            let (job_tx, job_rx) = bounded::<(usize, PathBuf)>(jobs);
             let (res_tx, res_rx) = unbounded::<(usize, Result<BuiltCollection>)>();
 
             std::thread::scope(|scope| {
-                for _ in 0..file_jobs {
+                for _ in 0..jobs {
                     let job_rx = job_rx.clone();
                     let res_tx = res_tx.clone();
                     scope.spawn(move || {
@@ -759,12 +600,10 @@ impl ReadonlyRefgetStore {
 
         if !self.quiet {
             println!(
-                "Imported {} file(s) in {:.1}s (threads={}, file_jobs={}, workers/file={})",
+                "Imported {} file(s) in {:.1}s (jobs={})",
                 files.len(),
                 overall_start.elapsed().as_secs_f64(),
-                n_workers,
-                file_jobs,
-                workers_per_file,
+                jobs,
             );
         }
 
@@ -837,7 +676,7 @@ impl ReadonlyRefgetStore {
         // on its content digest, so a later collection writes byte-identical
         // bytes to the same path.
         for ready in sequences {
-            let ReadyOrdered { metadata: seq_meta, sequence_data, .. } = ready;
+            let ReadySequence { metadata: seq_meta, sequence_data, .. } = ready;
             self.add_sequence(
                 SequenceRecord::Full {
                     metadata: seq_meta,
