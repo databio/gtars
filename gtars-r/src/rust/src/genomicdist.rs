@@ -2,14 +2,15 @@ use std::collections::HashMap;
 
 use extendr_api::prelude::*;
 
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::models::{BinaryGenomeAssembly, GenomeAssembly, TssIndex};
-use gtars_overlaprs::RegionSetOverlaps;
+use gtars_overlaprs::IndexedRegionSet;
 use gtars_genomicdist::{
     calc_dinucl_freq, calc_gc_content, calc_summary_signal,
     chrom_karyotype_key, consensus, genome_partition_list, calc_expected_partitions,
     calc_partitions, pairwise_jaccard,
-    CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel, IntervalRanges,
+    CoordinateMode, GenomicDistAnnotation, GenomicIntervalSetStatistics, GeneModel,
     PartitionList, SignalMatrix, Strand, StrandedRegionSet, DINUCL_ORDER,
 };
 
@@ -725,7 +726,8 @@ pub fn r_find_overlaps(
         .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
     let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
         .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
-    let indices = RegionSetOverlaps::find_overlaps(&*ext_q, &*ext_s, Some(minoverlap));
+    let index = IndexedRegionSet::new((*ext_s).clone());
+    let indices = index.find_overlaps(&*ext_q, Some(minoverlap));
     // Flatten Vec<Vec<usize>> to (queryHits, subjectHits) pair vecs, 1-based for R
     let mut query_hits: Vec<i32> = Vec::new();
     let mut subject_hits: Vec<i32> = Vec::new();
@@ -753,7 +755,8 @@ pub fn r_count_overlaps(
         .map_err(|_| extendr_api::Error::Other("Invalid query RegionSet pointer".into()))?;
     let ext_s = <ExternalPtr<RegionSet>>::try_from(subject_ptr)
         .map_err(|_| extendr_api::Error::Other("Invalid subject RegionSet pointer".into()))?;
-    let counts = RegionSetOverlaps::count_overlaps(&*ext_q, &*ext_s, Some(minoverlap));
+    let index = IndexedRegionSet::new((*ext_s).clone());
+    let counts = index.count_overlaps(&*ext_q, Some(minoverlap));
     Ok(counts.into_iter().map(|c| c as i32).collect())
 }
 

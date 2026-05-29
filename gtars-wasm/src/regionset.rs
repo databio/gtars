@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use crate::models::BedEntries;
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::{Region, RegionSet, RegionSetList};
 use gtars_genomicdist::bed_classifier::classify_bed;
 use gtars_genomicdist::consensus;
-use gtars_genomicdist::interval_ranges::{IntervalRanges, RegionSetListOps};
+use gtars_genomicdist::region_set_list_ops::RegionSetListOps;
 use gtars_genomicdist::models::RegionBin;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
 use wasm_bindgen::prelude::*;
