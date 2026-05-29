@@ -95,19 +95,6 @@ fn ref_view_for<'a>(
         .map_err(|_| BridgeError::UnknownChrom(chrom_name.to_string()))
 }
 
-/// Ensure a sequence's bytes are resident (Full) without decoding. For on-disk
-/// stores this loads the encoded `.seq`; for in-memory stores it is a no-op.
-fn ensure_resident(refget: &mut RefgetStore, raw_digest: &str) -> Result<(), BridgeError> {
-    let resident = refget
-        .get_sequence(raw_digest)
-        .map(|r| r.sequence().is_some())
-        .unwrap_or(false);
-    if !resident {
-        refget.load_sequence(raw_digest).map_err(BridgeError::Refget)?;
-    }
-    Ok(())
-}
-
 /// Convert a parsed HGVS variant into a (non-normalized) VRS [`Allele`].
 ///
 /// Resolves transcript coordinates via `provider` and reads reference bases
@@ -119,13 +106,14 @@ pub fn hgvs_to_allele(
     refget: &mut RefgetStore,
     collection_digest: &str,
 ) -> Result<Allele, BridgeError> {
-    let name_to_digest = build_name_to_digest(refget, collection_digest)?;
+    let name_to_digest =
+        crate::vcf::build_name_to_digest(refget, collection_digest).map_err(BridgeError::Refget)?;
     let chrom_name = resolve_chrom_for_variant(variant, provider, &name_to_digest)?;
     let raw_digest = name_to_digest
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?
         .clone();
-    ensure_resident(refget, &raw_digest)?;
+    crate::vcf::ensure_resident(refget, &raw_digest).map_err(BridgeError::Refget)?;
     let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
     let parts = build_allele_parts(variant, provider, &chrom_name, &raw_digest, &seq)?;
     Ok(parts.allele)
@@ -142,13 +130,14 @@ pub fn hgvs_str_to_vrs_id(
     collection_digest: &str,
 ) -> Result<String, BridgeError> {
     let variant = parse(s)?;
-    let name_to_digest = build_name_to_digest(refget, collection_digest)?;
+    let name_to_digest =
+        crate::vcf::build_name_to_digest(refget, collection_digest).map_err(BridgeError::Refget)?;
     let chrom_name = resolve_chrom_for_variant(&variant, provider, &name_to_digest)?;
     let raw_digest = name_to_digest
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?
         .clone();
-    ensure_resident(refget, &raw_digest)?;
+    crate::vcf::ensure_resident(refget, &raw_digest).map_err(BridgeError::Refget)?;
     let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
     let parts = build_allele_parts(&variant, provider, &chrom_name, &raw_digest, &seq)?;
     finalize_vrs_id(&parts, &seq)
@@ -291,22 +280,6 @@ fn resolve_chrom_for_variant(
         }
         rt => Err(BridgeError::UnsupportedReferenceType(rt)),
     }
-}
-
-/// Build name→digest map for a collection (mirror of `vcf.rs`).
-fn build_name_to_digest(
-    store: &mut RefgetStore,
-    collection_digest: &str,
-) -> Result<HashMap<String, String>, BridgeError> {
-    let collection = store
-        .get_collection(collection_digest)
-        .map_err(BridgeError::Refget)?;
-    let mut out = HashMap::new();
-    for seq_record in &collection.sequences {
-        let meta = seq_record.metadata();
-        out.insert(meta.name.clone(), meta.sha512t24u.clone());
-    }
-    Ok(out)
 }
 
 /// Map a single transcript-relative or genomic [`Position`] to a 0-based

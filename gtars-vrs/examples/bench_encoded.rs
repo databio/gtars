@@ -31,6 +31,7 @@ use gtars_refget::digest::decode_substring_from_bytes;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 use gtars_vrs::digest::DigestWriter;
 use gtars_vrs::normalize::{normalize_ref, EncodedSeq};
+use gtars_vrs::vcf::parse_vcf_record;
 
 /// One reference sequence used by the VCF, with everything needed for both arms.
 struct SeqEntry<'a> {
@@ -212,41 +213,28 @@ fn main() {
     let mut reader = open_vcf(vcf_path);
     let mut skipped_unknown_chrom = 0u64;
     while read_line(&mut *reader, &mut line) {
-        let l = line.trim_end_matches(['\n', '\r']);
-        if l.is_empty() || l.starts_with('#') {
+        let Some(rec) = parse_vcf_record(&line) else {
+            continue;
+        };
+        if rec.ref_allele.is_empty() || rec.alts.is_empty() {
             continue;
         }
-        let mut it = l.splitn(6, '\t');
-        let chrom = it.next().unwrap_or("");
-        let pos_s = it.next().unwrap_or("");
-        let _id = it.next();
-        let ref_s = it.next().unwrap_or("");
-        let alt_field = it.next().unwrap_or("");
-        if ref_s.is_empty() || alt_field.is_empty() {
-            continue;
-        }
-        let raw_digest = match name_to_digest.get(chrom) {
+        let raw_digest = match name_to_digest.get(rec.chrom) {
             Some(d) => d,
             None => {
                 skipped_unknown_chrom += 1;
                 continue;
             }
         };
-        let pos: u64 = match pos_s.parse::<u64>() {
-            Ok(p) => p.saturating_sub(1),
-            Err(_) => continue,
-        };
+        let pos = rec.pos;
         let entry = *digest_index.entry(raw_digest.clone()).or_insert_with(|| {
             digests.push(raw_digest.clone());
             (digests.len() - 1) as u32
         });
         let ref_off = arena.len() as u32;
-        arena.extend_from_slice(ref_s.as_bytes());
-        let ref_len = ref_s.len() as u32;
-        for alt in alt_field.split(',') {
-            if alt.is_empty() || alt.starts_with('<') || alt == "*" || alt == "." {
-                continue;
-            }
+        arena.extend_from_slice(rec.ref_allele.as_bytes());
+        let ref_len = rec.ref_allele.len() as u32;
+        for alt in rec.real_alts() {
             let alt_off = arena.len() as u32;
             arena.extend_from_slice(alt.as_bytes());
             variants.push(Variant {

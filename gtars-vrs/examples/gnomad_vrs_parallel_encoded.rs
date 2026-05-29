@@ -15,7 +15,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
-use gtars_vrs::vcf::compute_vrs_ids_parallel_encoded;
+use gtars_vrs::vcf::{compute_vrs_ids_parallel_encoded, parse_vcf_record};
 
 fn open_vcf_reader(path: &str) -> Box<dyn std::io::BufRead> {
     use flate2::read::MultiGzDecoder;
@@ -88,13 +88,13 @@ fn main() {
                 Err(e) if e.kind() == std::io::ErrorKind::InvalidInput => break,
                 Err(e) => panic!("read vcf line: {e}"),
             }
-            let l = line.trim_end_matches(['\n', '\r']);
-            if l.is_empty() || l.starts_with('#') {
+            let Some(rec) = parse_vcf_record(&line) else {
                 continue;
-            }
-            let chrom = l.split('\t').next().unwrap_or("");
-            if let Some(d) = name_to_digest.get(chrom) {
-                needed.entry(chrom.to_string()).or_insert_with(|| d.clone());
+            };
+            if let Some(d) = name_to_digest.get(rec.chrom) {
+                needed
+                    .entry(rec.chrom.to_string())
+                    .or_insert_with(|| d.clone());
             }
         }
     }

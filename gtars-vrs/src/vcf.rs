@@ -23,6 +23,54 @@ fn ref_view_for<'a>(store: &'a ReadonlyRefgetStore, raw_digest: &str) -> Result<
     ref_view_for_inner(store, raw_digest).map_err(|e| anyhow::anyhow!(e))
 }
 
+/// True for an ALT allele we actually process: not symbolic (`<DEL>` etc.),
+/// not the `*` overlapping-deletion marker, not the `.` missing marker, and
+/// not empty.
+pub fn is_real_alt(alt: &str) -> bool {
+    !(alt.is_empty() || alt.starts_with('<') || alt == "*" || alt == ".")
+}
+
+/// One parsed VCF data record. Borrows slices out of the caller's line buffer.
+/// `pos` is already 0-based interbase (1-based POS minus one, saturating).
+/// `alts` is the raw ALT field; callers split it on `,` and filter with
+/// [`is_real_alt`] (or use [`ParsedRecord::real_alts`]).
+pub struct ParsedRecord<'a> {
+    pub chrom: &'a str,
+    pub pos: u64,
+    pub ref_allele: &'a str,
+    pub alts: &'a str,
+}
+
+impl<'a> ParsedRecord<'a> {
+    /// Iterator over the real (non-symbolic, non-missing) ALT alleles.
+    pub fn real_alts(&self) -> impl Iterator<Item = &'a str> {
+        self.alts.split(',').filter(|a| is_real_alt(a))
+    }
+}
+
+/// Parse one VCF line into CHROM/POS/REF/ALT, returning `None` for header/blank
+/// lines, lines with fewer than 5 fields, or an unparseable POS. POS is converted
+/// to 0-based interbase. Borrows from `line`.
+pub fn parse_vcf_record(line: &str) -> Option<ParsedRecord<'_>> {
+    let line = line.trim_end_matches(['\n', '\r']);
+    if line.is_empty() || line.starts_with('#') {
+        return None;
+    }
+    let mut it = line.splitn(6, '\t');
+    let chrom = it.next()?;
+    let pos_s = it.next()?;
+    let _id = it.next()?;
+    let ref_allele = it.next()?;
+    let alts = it.next()?;
+    let pos = pos_s.parse::<u64>().ok()?.saturating_sub(1);
+    Some(ParsedRecord {
+        chrom,
+        pos,
+        ref_allele,
+        alts,
+    })
+}
+
 /// Result of computing a VRS identifier for a single VCF variant.
 #[derive(Debug, Clone)]
 pub struct VrsResult {
@@ -48,7 +96,7 @@ fn open_vcf(path: &str) -> Result<Box<dyn BufRead>> {
 }
 
 /// Build the name→digest mapping for a collection.
-fn build_name_to_digest(
+pub(crate) fn build_name_to_digest(
     store: &mut RefgetStore,
     collection_digest: &str,
 ) -> Result<HashMap<String, String>> {
@@ -62,6 +110,19 @@ fn build_name_to_digest(
         name_to_digest.insert(meta.name.clone(), meta.sha512t24u.clone());
     }
     Ok(name_to_digest)
+}
+
+/// Ensure a sequence's bytes are resident (Full) without decoding. For on-disk
+/// stores this loads the encoded `.seq`; for in-memory stores it is a no-op.
+pub(crate) fn ensure_resident(store: &mut RefgetStore, raw_digest: &str) -> Result<()> {
+    let resident = store
+        .get_sequence(raw_digest)
+        .map(|r| r.sequence().is_some())
+        .unwrap_or(false);
+    if !resident {
+        store.load_sequence(raw_digest)?;
+    }
+    Ok(())
 }
 
 /// Read the next non-empty line from a VCF reader. Returns false at EOF.
@@ -101,34 +162,17 @@ pub fn compute_vrs_ids_streaming(
     let mut reader = open_vcf(vcf_path)?;
 
     while read_vcf_line(&mut *reader, &mut line_buf)? {
-        let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
-        if line.starts_with('#') || line.is_empty() {
+        let Some(rec) = parse_vcf_record(&line_buf) else {
             continue;
-        }
-
-        let fields: Vec<&str> = line.splitn(10, '\t').collect();
-        if fields.len() < 5 {
-            continue;
-        }
-
-        let chrom = fields[0];
-        let pos: u64 = fields[1]
-            .parse::<u64>()
-            .context("Invalid POS field")?
-            .saturating_sub(1);
-        let ref_allele = fields[3];
-        let alt_field = fields[4];
+        };
+        let chrom = rec.chrom;
+        let pos = rec.pos;
+        let ref_allele = rec.ref_allele;
 
         if !chrom_accessions.contains_key(chrom) {
             if let Some(digest) = name_to_digest.get(chrom) {
                 // Ensure the encoded bytes are resident (no decode); in-memory is a no-op.
-                let resident = store
-                    .get_sequence(digest.as_str())
-                    .map(|r| r.sequence().is_some())
-                    .unwrap_or(false);
-                if !resident {
-                    store.load_sequence(digest.as_str())?;
-                }
+                ensure_resident(store, digest.as_str())?;
                 chrom_accessions.insert(chrom.to_string(), format!("SQ.{}", digest));
             }
         }
@@ -142,11 +186,7 @@ pub fn compute_vrs_ids_streaming(
         let view = ref_view_for(store, raw_digest.as_str())
             .context(format!("Chromosome {} not available in store", chrom))?;
 
-        for alt in alt_field.split(',') {
-            if alt.starts_with('<') || alt == "*" || alt == "." {
-                continue;
-            }
-
+        for alt in rec.real_alts() {
             let norm = normalize_ref(&view, pos, ref_allele.as_bytes(), alt.as_bytes())
                 .context(format!("Failed to normalize variant at {}:{}", chrom, pos + 1))?;
             let norm_seq = std::str::from_utf8(&norm.allele)
@@ -194,23 +234,12 @@ pub fn compute_vrs_ids_streaming_readonly(
     let mut reader = open_vcf(vcf_path)?;
 
     while read_vcf_line(&mut *reader, &mut line_buf)? {
-        let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
-        if line.starts_with('#') || line.is_empty() {
+        let Some(rec) = parse_vcf_record(&line_buf) else {
             continue;
-        }
-
-        let fields: Vec<&str> = line.splitn(10, '\t').collect();
-        if fields.len() < 5 {
-            continue;
-        }
-
-        let chrom = fields[0];
-        let pos: u64 = fields[1]
-            .parse::<u64>()
-            .context("Invalid POS field")?
-            .saturating_sub(1);
-        let ref_allele = fields[3];
-        let alt_field = fields[4];
+        };
+        let chrom = rec.chrom;
+        let pos = rec.pos;
+        let ref_allele = rec.ref_allele;
 
         let seq_accession = match chrom_accessions.get(chrom) {
             Some(acc) => acc,
@@ -224,11 +253,7 @@ pub fn compute_vrs_ids_streaming_readonly(
         let view = ref_view_for(store, raw_digest.as_str())
             .context(format!("Chromosome {} not available in store", chrom))?;
 
-        for alt in alt_field.split(',') {
-            if alt.starts_with('<') || alt == "*" || alt == "." {
-                continue;
-            }
-
+        for alt in rec.real_alts() {
             let norm = normalize_ref(&view, pos, ref_allele.as_bytes(), alt.as_bytes())
                 .context(format!("Failed to normalize variant at {}:{}", chrom, pos + 1))?;
             let norm_seq = std::str::from_utf8(&norm.allele)
@@ -435,31 +460,14 @@ pub fn compute_vrs_ids_parallel_encoded(
             let mut next_worker = 0usize;
 
             while read_vcf_line(&mut *reader, &mut line_buf)? {
-                let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
-                if line.starts_with('#') || line.is_empty() {
+                let Some(rec) = parse_vcf_record(&line_buf) else {
                     continue;
-                }
-                let fields: Vec<&str> = line.splitn(10, '\t').collect();
-                if fields.len() < 5 {
-                    continue;
-                }
-                let chrom = fields[0];
-                let seq_index = match chrom_to_seq_index.get(chrom) {
+                };
+                let seq_index = match chrom_to_seq_index.get(rec.chrom) {
                     Some(&i) => i,
                     None => continue, // unknown chrom: skip (matches serial)
                 };
-                let pos: u64 = fields[1]
-                    .parse::<u64>()
-                    .context("Invalid POS field")?
-                    .saturating_sub(1);
-                let ref_allele = fields[3];
-                let alt_field = fields[4];
-
-                let alts: Vec<String> = alt_field
-                    .split(',')
-                    .filter(|alt| !(alt.starts_with('<') || *alt == "*" || *alt == "."))
-                    .map(|s| s.to_string())
-                    .collect();
+                let alts: Vec<String> = rec.real_alts().map(|s| s.to_string()).collect();
                 if alts.is_empty() {
                     continue;
                 }
@@ -467,9 +475,9 @@ pub fn compute_vrs_ids_parallel_encoded(
                 let item = WorkItem {
                     record_index,
                     seq_index,
-                    pos,
-                    chrom: chrom.to_string(),
-                    ref_allele: ref_allele.to_string(),
+                    pos: rec.pos,
+                    chrom: rec.chrom.to_string(),
+                    ref_allele: rec.ref_allele.to_string(),
                     alts,
                 };
                 record_index += 1;
@@ -543,4 +551,65 @@ pub fn compute_vrs_ids_from_vcf_readonly(
     let mut results = Vec::new();
     compute_vrs_ids_streaming_readonly(store, name_to_digest, vcf_path, |r| results.push(r))?;
     Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn header_line_is_none() {
+        assert!(parse_vcf_record("##fileformat=VCFv4.2").is_none());
+        assert!(parse_vcf_record("#CHROM\tPOS\tID\tREF\tALT").is_none());
+    }
+
+    #[test]
+    fn blank_line_is_none() {
+        assert!(parse_vcf_record("").is_none());
+        assert!(parse_vcf_record("\n").is_none());
+        assert!(parse_vcf_record("\r\n").is_none());
+    }
+
+    #[test]
+    fn too_few_fields_is_none() {
+        assert!(parse_vcf_record("chr1\t100\t.\tA").is_none());
+        assert!(parse_vcf_record("chr1\t100").is_none());
+    }
+
+    #[test]
+    fn non_numeric_pos_is_none() {
+        assert!(parse_vcf_record("chr1\tNOPE\t.\tA\tG").is_none());
+    }
+
+    #[test]
+    fn normal_line_parses() {
+        let rec = parse_vcf_record("chr1\t100\trs1\tA\tG\t.\tPASS\tINFO").unwrap();
+        assert_eq!(rec.chrom, "chr1");
+        assert_eq!(rec.pos, 99); // 1-based 100 -> 0-based interbase 99
+        assert_eq!(rec.ref_allele, "A");
+        let alts: Vec<&str> = rec.real_alts().collect();
+        assert_eq!(alts, vec!["G"]);
+    }
+
+    #[test]
+    fn pos_one_saturates() {
+        let rec = parse_vcf_record("chr1\t1\t.\tA\tG").unwrap();
+        assert_eq!(rec.pos, 0);
+    }
+
+    #[test]
+    fn multi_alt_filters_symbolic_and_missing() {
+        let rec = parse_vcf_record("chr1\t100\t.\tA\tG,<DEL>,*,.,,T").unwrap();
+        let alts: Vec<&str> = rec.real_alts().collect();
+        assert_eq!(alts, vec!["G", "T"]);
+    }
+
+    #[test]
+    fn is_real_alt_truth_table() {
+        assert!(is_real_alt("A"));
+        assert!(!is_real_alt("<DEL>"));
+        assert!(!is_real_alt("*"));
+        assert!(!is_real_alt("."));
+        assert!(!is_real_alt(""));
+    }
 }
