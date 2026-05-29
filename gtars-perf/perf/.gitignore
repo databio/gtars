@@ -1,4 +1,0 @@
-# Downloaded / large datasets — never committed.
-cache/
-# Run artifacts — local; commit only the seeded targets.json.
-runs/

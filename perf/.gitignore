@@ -1,0 +1,7 @@
+# Run records and any scratch/cache — regenerated on demand.
+runs/
+*.cache
+__pycache__/
+
+# targets.json IS committed (the regression baseline); do not ignore it.
+!targets.json

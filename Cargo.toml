@@ -19,7 +19,6 @@ members = [
     "gtars-scoring",
     "gtars-vrs",
     "gtars-reftx",
-    "gtars-perf",
     "gtars",
 ]
 
