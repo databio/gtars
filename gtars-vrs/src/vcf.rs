@@ -11,11 +11,10 @@ use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
-use gtars_refget::digest::alphabet::lookup_alphabet;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 
 use crate::digest::DigestWriter;
-use crate::normalize::{EncodedSeq, RefView, normalize_ref, ref_view_for as ref_view_for_inner};
+use crate::normalize::{RefView, normalize_ref, ref_view_for as ref_view_for_inner};
 
 /// Build a [`RefView`] over a resident sequence's bytes (thin `anyhow` wrapper
 /// around [`crate::normalize::ref_view_for`]).
@@ -303,20 +302,17 @@ struct OrderedOutput {
     results: Vec<VrsResult>,
 }
 
-/// Immutable per-sequence view shared (by `&`) with every worker. Holds the
-/// borrowed encoded bytes plus the alphabet bits needed to decode bases on the
-/// fly via [`EncodedSeq`]; nothing is decoded up front.
-struct SeqView<'a> {
+/// Immutable per-sequence entry shared (by `&`) with every worker. Pairs the
+/// `SQ.<digest>` accession with the canonical [`RefView`] built once up front via
+/// [`crate::normalize::ref_view_for`]. The `RefView` borrows the readonly store's
+/// bytes and decodes on the fly when the store is encoded; nothing is decoded up
+/// front. `RefView<'a>: Sync`, so `&[SeqEntry]` is freely shareable across the
+/// scoped worker threads.
+struct SeqEntry<'a> {
     /// `SQ.<digest>` accession used in the VRS identifier.
     accession: String,
-    /// Bit-packed encoded bytes, borrowed from the readonly store.
-    encoded: &'a [u8],
-    /// Number of bases.
-    length: usize,
-    /// Bits per symbol (e.g. 2 for DNA_2BIT).
-    bits_per_symbol: usize,
-    /// Decoding table (encoded code -> symbol byte); `'static` from the alphabet.
-    decoding_array: &'static [u8; 256],
+    /// Canonical reference view (decoded or encoded), built once via the shared builder.
+    view: RefView<'a>,
 }
 
 /// Compute VRS Allele identifiers for every variant in a VCF using an in-process
@@ -325,15 +321,18 @@ struct SeqView<'a> {
 ///
 /// One reader thread parses the VCF (plain or gzip/bgzf via [`open_vcf`]) and
 /// dispatches per-record [`WorkItem`]s round-robin to the workers. Each worker
-/// owns its own [`DigestWriter`] (which is not `Sync`) and builds an
-/// [`EncodedSeq`] per variant from the shared `&ReadonlyRefgetStore`. Results are
-/// tagged with the record's input index and reordered by a collector so the
+/// owns its own [`DigestWriter`] (which is not `Sync`) and borrows the shared
+/// [`RefView`] for its record's sequence (built once up front). Mode-awareness
+/// (decoded vs 2-bit-encoded) derives from the shared length-based builder
+/// [`crate::normalize::ref_view_for`], so a Raw-mode store works here too (the
+/// dedicated equivalence test is owned by a separate test-driven plan). Results
+/// are tagged with the record's input index and reordered by a collector so the
 /// callback observes records in exact input order. Within a record, alts are
 /// emitted in VCF order.
 ///
 /// The caller must make all referenced sequences resident first (e.g. via
 /// `RefgetStore::load_sequence` for each needed digest, then `into_readonly`).
-/// Workers only read; the `EncodedSeq` borrows are kept valid by scoped threads.
+/// Workers only read; the `RefView` borrows are kept valid by scoped threads.
 ///
 /// Output is identical (same VRS ids, same order) to
 /// [`compute_vrs_ids_streaming_readonly`]. Returns the number of results emitted.
@@ -346,33 +345,28 @@ pub fn compute_vrs_ids_parallel_encoded(
 ) -> Result<usize> {
     let n_workers = threads.max(1);
 
-    // Build the shared per-sequence views once, borrowing encoded bytes from the
-    // store. We index records by sequence position to avoid per-record hashing in
-    // the workers and to give each SeqView a stable index.
+    // Build the shared per-sequence entries once via the canonical builder,
+    // borrowing the store's bytes. The builder picks decoded vs 2-bit-encoded by
+    // length, so the view is mode-correct without the worker knowing the storage
+    // mode. We index records by sequence position to avoid per-record hashing in
+    // the workers and to give each entry a stable index.
     let mut seq_index_of_digest: HashMap<String, usize> = HashMap::new();
-    let mut seqs: Vec<SeqView> = Vec::new();
+    let mut seqs: Vec<SeqEntry> = Vec::new();
     // Map chrom name -> seq_index, lazily filled as the reader sees new chroms.
     let mut chrom_to_seq_index: HashMap<String, usize> = HashMap::new();
     for (name, digest) in name_to_digest.iter() {
         let idx = if let Some(&i) = seq_index_of_digest.get(digest) {
             i
         } else {
+            let view = ref_view_for(store, digest.as_str()).with_context(|| {
+                format!("sequence {digest} not resident/encoded in readonly store")
+            })?;
             let rec = store
                 .get_sequence(digest.as_str())
                 .with_context(|| format!("get_sequence {digest}"))?;
-            let meta = rec.metadata();
-            let alphabet = lookup_alphabet(&meta.alphabet);
-            let encoded = rec.sequence().with_context(|| {
-                format!("sequence {digest} not resident/encoded in readonly store")
-            })?;
+            let accession = format!("SQ.{}", rec.metadata().sha512t24u);
             let i = seqs.len();
-            seqs.push(SeqView {
-                accession: format!("SQ.{}", meta.sha512t24u),
-                encoded,
-                length: meta.length,
-                bits_per_symbol: alphabet.bits_per_symbol,
-                decoding_array: alphabet.decoding_array,
-            });
+            seqs.push(SeqEntry { accession, view });
             seq_index_of_digest.insert(digest.clone(), i);
             i
         };
@@ -397,13 +391,7 @@ pub fn compute_vrs_ids_parallel_encoded(
             let handle = scope.spawn(move || {
                 let mut writer = DigestWriter::new();
                 for item in work_rx.iter() {
-                    let view = &seqs[item.seq_index];
-                    let es = EncodedSeq {
-                        bytes: view.encoded,
-                        length: view.length,
-                        bits_per_symbol: view.bits_per_symbol,
-                        decoding_array: view.decoding_array,
-                    };
+                    let entry = &seqs[item.seq_index];
                     let mut results = Vec::with_capacity(item.alts.len());
                     for alt in &item.alts {
                         // A variant that fails to normalize (e.g. ref allele past
@@ -411,7 +399,7 @@ pub fn compute_vrs_ids_parallel_encoded(
                         // skipped. On well-formed input every variant normalizes,
                         // so output matches the serial path exactly.
                         let norm = match normalize_ref(
-                            &es,
+                            &entry.view,
                             item.pos,
                             item.ref_allele.as_bytes(),
                             alt.as_bytes(),
@@ -424,7 +412,7 @@ pub fn compute_vrs_ids_parallel_encoded(
                             Err(_) => continue,
                         };
                         let vrs_id = writer.allele_identifier_literal(
-                            &view.accession,
+                            &entry.accession,
                             norm.start,
                             norm.end,
                             norm_seq,

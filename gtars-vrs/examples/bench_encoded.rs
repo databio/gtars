@@ -8,7 +8,7 @@
 //!
 //! Both arms use identical `std::thread::scope` threading and per-thread
 //! `DigestWriter`. The ONLY difference is the reference access path:
-//!   - `encoded`: `EncodedSeq` decodes each base on demand from the 2-bit buffer.
+//!   - `encoded`: a `RefView` decodes each base on demand from the 2-bit buffer.
 //!   - `decoded`: a `Vec<u8>` decoded once up front, indexed directly.
 //!
 //! This is an in-process comparison (arm 1 vs arm 2). The multi-process mmap arm
@@ -30,21 +30,15 @@ use gtars_refget::digest::alphabet::lookup_alphabet;
 use gtars_refget::digest::decode_substring_from_bytes;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 use gtars_vrs::digest::DigestWriter;
-use gtars_vrs::normalize::{normalize_ref, EncodedSeq};
+use gtars_vrs::normalize::{normalize_ref, ref_view_for, RefView};
 use gtars_vrs::vcf::parse_vcf_record;
 
 /// One reference sequence used by the VCF, with everything needed for both arms.
 struct SeqEntry<'a> {
     /// `SQ.<digest>` refget accession (used in the VRS digest).
     accession: String,
-    /// Encoded (bit-packed) bytes, borrowed from the store.
-    encoded: &'a [u8],
-    /// Number of bases.
-    length: usize,
-    /// Bits per symbol (e.g. 2 for DNA_2BIT).
-    bits_per_symbol: usize,
-    /// Decoding table (encoded code -> symbol byte).
-    decoding_array: &'static [u8; 256],
+    /// Canonical encoded-on-the-fly reference view (built via the shared builder).
+    encoded_view: RefView<'a>,
 }
 
 /// A single VCF variant, with ref/alt bytes stored in a shared arena.
@@ -121,13 +115,7 @@ fn run_pass(
                     let alt_allele = &arena[v.alt_off as usize..(v.alt_off + v.alt_len) as usize];
 
                     let norm = if encoded_mode {
-                        let es = EncodedSeq {
-                            bytes: e.encoded,
-                            length: e.length,
-                            bits_per_symbol: e.bits_per_symbol,
-                            decoding_array: e.decoding_array,
-                        };
-                        normalize_ref(&es, v.pos, ref_allele, alt_allele)
+                        normalize_ref(&e.encoded_view, v.pos, ref_allele, alt_allele)
                     } else {
                         let dec = decoded[v.entry as usize].as_slice();
                         normalize_ref(dec, v.pos, ref_allele, alt_allele)
@@ -273,15 +261,16 @@ fn main() {
         let enc = rec.sequence().unwrap_or_else(|| panic!("sequence {d} not resident/encoded"));
         encoded_resident += enc.len() as u64;
         decoded_resident += meta.length as u64;
-        // Decode once for the decoded arm (and for verify).
+        // Decode once for the decoded arm (and for verify) — benchmark-specific and
+        // intentionally NOT routed through the shared builder.
         let dec = decode_substring_from_bytes(enc, 0, meta.length, alphabet);
         decoded.push(dec);
+        // Encoded arm uses the canonical RefView, built once via the shared builder.
+        let encoded_view = ref_view_for(&store, d.as_str())
+            .unwrap_or_else(|e| panic!("ref_view_for {d}: {e}"));
         entries.push(SeqEntry {
             accession: format!("SQ.{}", meta.sha512t24u),
-            encoded: enc,
-            length: meta.length,
-            bits_per_symbol: alphabet.bits_per_symbol,
-            decoding_array: alphabet.decoding_array,
+            encoded_view,
         });
     }
     eprintln!(
