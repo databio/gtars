@@ -1,6 +1,6 @@
 //! FASTA import pipeline for RefgetStore.
 //!
-//! Contains the FASTA import pipeline and cached metadata fast path.
+//! Contains the streaming FASTA import pipeline and cached metadata fast path.
 //!
 //! ## Single-knob parallelism model
 //!
@@ -9,24 +9,34 @@
 //! decoded/built concurrently, each with its OWN decoder (so K gzip streams
 //! decompress in parallel). With a single file `jobs` has no effect.
 //!
+//! ## Streaming, bounded-memory design
+//!
+//! Each builder emits sequences ONE AT A TIME over a bounded cross-file channel
+//! rather than accumulating a whole collection in RAM. The single inserter
+//! (owner, `&mut self`) writes each `.seq` to disk immediately as it arrives and
+//! retains only lightweight per-sequence METADATA (name + digest), so peak
+//! memory is bounded by `jobs x channel_depth x avg_encoded_seq_size` plus the
+//! on-disk index metadata, INDEPENDENT of how many sequences a collection holds.
+//!
 //! ### Per-file pipeline (basic chain)
 //!
 //! Each file is processed by a simple linear pipeline of ~3 threads with
 //! `bounded(1)` channels providing back-pressure (a couple of contigs in flight):
 //! a decompress/read thread, a digest thread, and an encode step on the build
-//! thread. Records flow through the chain in FASTA order, so output is naturally
-//! in FASTA order without any reordering machinery. This makes `name_lookup`
-//! (and therefore the collection digest) deterministic and identical to a
-//! single-threaded build.
+//! thread. Records flow through the chain in FASTA order; the build thread
+//! forwards each finished sequence onto the cross-file output channel instead of
+//! pushing into a `Vec`. This keeps `name_lookup` (and therefore the collection
+//! digest) deterministic and identical to a single-threaded build.
 //!
 //! ### File-level parallelism (across files)
 //!
-//! The build half (decode + parse + digest + encode -> in-memory
-//! `BuiltCollection`) touches NO shared store state and runs concurrently across
-//! files; the insert half (`&mut self` registration of
-//! collections/sequences/aliases/name_lookup) runs on a single owner in FIXED
-//! input-file order, so the resulting store is byte-identical to a serial build
-//! regardless of which builder finishes first.
+//! The build half (decode + parse + digest + encode) touches NO shared store
+//! state and runs concurrently across files; the insert half (`&mut self`
+//! registration of sequences/collections/aliases/name_lookup) runs on a single
+//! owner. Because the on-disk indexes are written once at the end, sorted by
+//! content/collection digest, the resulting store is byte-identical to a serial
+//! build regardless of which builder finishes first or how `Seq`/`End` messages
+//! from different files interleave.
 
 use super::*;
 use super::readonly::ReadonlyRefgetStore;
@@ -37,56 +47,67 @@ use std::thread::available_parallelism;
 use std::time::Instant;
 
 use anyhow::{anyhow, Result};
+use crossbeam_channel::{bounded, Sender};
+use indexmap::IndexMap;
 
 use crate::collection::SequenceCollectionExt;
 use crate::digest::{
     SequenceCollection, SequenceCollectionMetadata,
-    SequenceEncoder, SequenceMetadata, SequenceRecord,
+    SequenceCollectionRecord, SequenceEncoder, SequenceMetadata, SequenceRecord,
 };
-use crate::hashkeyable::HashKeyable;
+use crate::hashkeyable::{DigestKey, HashKeyable};
 
 /// Threshold above which the reader processes sequences inline (to bound peak
 /// memory: the few huge contigs are hashed+encoded on the reader instead of
 /// being passed down the pipeline holding extra copies in flight).
 const LARGE_SEQ_THRESHOLD: usize = 500 * 1024 * 1024; // 500 MB
 
-/// A fully-built sequence collection produced by the build half (no `&mut self`).
-///
-/// Holds everything needed to insert the collection into the store: the encoded
-/// sequences in FASTA order, the (namespace, alias, sha512) triples, and the
-/// computed collection metadata. The insert half consumes this on a single
-/// owner thread in fixed file order.
-struct BuiltCollection {
-    /// Collection metadata (digest + ancillary digests already computed).
-    metadata: SequenceCollectionMetadata,
-    /// Sequence stub records in FASTA order (used to register the collection).
-    stub_records: Vec<SequenceRecord>,
-    /// Fully-encoded sequences in FASTA order, ready to write.
-    sequences: Vec<ReadySequence>,
-    /// (namespace, alias_value, sha512t24u) alias triples in FASTA order.
-    aliases: Vec<(String, String, String)>,
-    /// Source FASTA path (for metadata / RGSI cache).
-    source_path: PathBuf,
-    /// RGSI cache path to (re)write, if caching is enabled and this was built
-    /// from raw FASTA (not from an existing cache).
-    rgsi_cache_path: Option<PathBuf>,
-    /// Number of sequences (for reporting).
-    seq_count: usize,
-}
+/// Per-builder output channel depth (multiplied by `jobs` for the shared
+/// cross-file channel). Small constant: a couple sequences in flight per builder
+/// is enough to keep builders and the inserter busy without unbounded buffering.
+const CHANNEL_DEPTH: usize = 4;
 
 /// A fully-built sequence ready for the single inserter, in FASTA order.
+///
+/// Carries the encoded bytes ONLY from emission until the inserter writes them
+/// to disk; the inserter then drops the bytes and keeps only metadata.
 struct ReadySequence {
     metadata: SequenceMetadata,
     sequence_data: Vec<u8>,
     aliases: Vec<(String, String)>,
 }
 
+/// One message in the streaming import protocol, consumed by the single inserter.
+///
+/// A builder emits `Begin`, then one `Seq` per record in FASTA order, then `End`.
+/// Messages from different files may interleave on the shared channel; the
+/// `file_idx` tag disambiguates which in-flight collection each `Seq` belongs to.
+enum InsertMsg {
+    /// A builder started processing this file.
+    Begin { file_idx: usize },
+    /// One fully digested+encoded sequence, in FASTA order within its file.
+    Seq {
+        file_idx: usize,
+        ready: ReadySequence,
+    },
+    /// The collection finished: metadata computed from the retained per-sequence
+    /// stubs (NOT from bytes), plus the RGSI cache path (raw builds only).
+    End {
+        file_idx: usize,
+        metadata: SequenceCollectionMetadata,
+        stub_records: Vec<SequenceRecord>,
+        rgsi_cache_path: Option<PathBuf>,
+        source_path: PathBuf,
+        seq_count: usize,
+    },
+}
+
 // ============================================================================
-// Build half (no &mut self): decode + parse + digest + encode -> BuiltCollection
+// Build half (no &mut self): decode + parse + digest + encode -> stream of msgs
 //
 // These free functions run concurrently across files. They touch NO shared
-// store state. The returned `BuiltCollection` is consumed by the insert half
-// on a single owner thread in fixed file order.
+// store state; they emit `InsertMsg`s onto a bounded channel. The inserter on a
+// single owner thread persists them.
 // ============================================================================
 
 /// Configuration needed by the build half, extracted from the store so the
@@ -101,39 +122,70 @@ struct BuildConfig<'a> {
     namespaces: &'a [&'a str],
 }
 
-/// Build a `BuiltCollection` from a FASTA file (raw path: digest + encode).
+/// Build half for a single FASTA file: digest + encode, streaming each sequence
+/// onto `out` as `InsertMsg::Seq`, framed by `Begin`/`End`.
 ///
 /// Checks for an RGSI metadata cache first and dispatches to the cached fast
 /// path if present and valid; otherwise runs the full digest+encode pipeline.
 /// Does NOT touch `&mut self`.
 fn build_collection_from_fasta(
+    file_idx: usize,
     file_path: &Path,
     cfg: BuildConfig<'_>,
-) -> Result<BuiltCollection> {
+    out: &Sender<InsertMsg>,
+) -> Result<()> {
     use crate::utils::PathExtension;
 
     let rgsi_path = file_path.replace_exts_with("rgsi");
     let have_rgsi = cfg.use_cache && rgsi_path.exists();
 
     if have_rgsi {
-        if let Ok(built) = build_collection_from_cached_metadata(file_path, &rgsi_path, cfg) {
-            return Ok(built);
+        match build_collection_from_cached_metadata(file_idx, file_path, &rgsi_path, cfg, out) {
+            Ok(()) => return Ok(()),
+            Err(BuildError::Channel(e)) => return Err(BuildError::Channel(e).into()),
+            // Cache was stale/empty; fall through to the full pipeline. Note: a
+            // partial cached run cannot have emitted `Seq`s (the cache validity
+            // is checked before any `Begin`/`Seq` is sent), so re-running the
+            // full pipeline is safe.
+            Err(BuildError::Other(_)) => {}
         }
-        // Cache was stale/empty; fall through to the full pipeline.
     }
 
-    build_collection_full(file_path, cfg)
+    build_collection_full(file_idx, file_path, cfg, out)
 }
 
-/// Full build half: digest + encode every sequence and compute collection
-/// metadata. Returns a `BuiltCollection` ready for the insert half.
+/// Errors from the build half. `Channel` means the inserter hung up (fatal);
+/// `Other` means a recoverable build error (e.g. stale cache) the caller may
+/// choose to handle by falling through to another path.
+enum BuildError {
+    Channel(anyhow::Error),
+    Other(anyhow::Error),
+}
+
+impl From<BuildError> for anyhow::Error {
+    fn from(e: BuildError) -> Self {
+        match e {
+            BuildError::Channel(e) | BuildError::Other(e) => e,
+        }
+    }
+}
+
+/// Full build half: digest + encode every sequence and stream it to the inserter.
 ///
 /// Uses the basic 3-thread chain: a reader/decompress thread, a digest thread,
 /// and the encode step on this (build) thread. `bounded(1)` channels keep at
-/// most a couple of contigs in flight, capping RAM. Records flow in FASTA order.
-fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<BuiltCollection> {
+/// most a couple of contigs in flight, capping per-builder RAM. Records flow in
+/// FASTA order, and each finished sequence is forwarded onto `out` (the shared
+/// cross-file channel) instead of being collected into a Vec. The builder
+/// retains ONLY the lightweight stub metadata to compute the collection digest
+/// at `End` -- never the encoded bytes.
+fn build_collection_full(
+    file_idx: usize,
+    file_path: &Path,
+    cfg: BuildConfig<'_>,
+    out: &Sender<InsertMsg>,
+) -> Result<()> {
     use crate::utils::PathExtension;
-    use crossbeam_channel::bounded;
     use md5::Md5;
     use sha2::{Digest, Sha512};
 
@@ -297,11 +349,16 @@ fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<Built
         Ok(())
     });
 
-    // --- Thread 3 (this thread): encode + collect in FASTA order ---
-    let mut sequences: Vec<ReadySequence> = Vec::new();
+    // --- Thread 3 (this thread): encode + stream in FASTA order ---
+    // Emit Begin, then a Seq per record. Retain ONLY stub metadata + alias
+    // triples (no bytes) to compute the collection digest at End.
+    out.send(InsertMsg::Begin { file_idx })
+        .map_err(|_| anyhow!("Inserter stopped receiving"))?;
+
+    let mut stub_records: Vec<SequenceRecord> = Vec::new();
 
     for msg in digest_rx {
-        match msg {
+        let ready = match msg {
             ToEncode::NeedsWork(digested) => {
                 let sequence_data = match mode {
                     StorageMode::Encoded => {
@@ -313,16 +370,18 @@ fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<Built
                     }
                     StorageMode::Raw => digested.raw_bytes,
                 };
-                sequences.push(ReadySequence {
+                ReadySequence {
                     metadata: digested.metadata,
                     sequence_data,
                     aliases: digested.aliases,
-                });
+                }
             }
-            ToEncode::AlreadyDone(ready) => {
-                sequences.push(ready);
-            }
-        }
+            ToEncode::AlreadyDone(ready) => ready,
+        };
+
+        stub_records.push(SequenceRecord::Stub(ready.metadata.clone()));
+        out.send(InsertMsg::Seq { file_idx, ready })
+            .map_err(|_| anyhow!("Inserter stopped receiving"))?;
     }
 
     // Join threads and propagate errors.
@@ -333,12 +392,7 @@ fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<Built
         .join()
         .map_err(|e| anyhow!("Digest thread panicked: {:?}", e))??;
 
-    // Compute collection metadata from the sequence stubs in FASTA order.
-    let stub_records: Vec<SequenceRecord> = sequences
-        .iter()
-        .map(|s| SequenceRecord::Stub(s.metadata.clone()))
-        .collect();
-
+    // Compute collection metadata from the retained sequence stubs (FASTA order).
     let mut seqcol_metadata = SequenceCollectionMetadata::from_sequences(
         &stub_records,
         Some(file_path.to_path_buf()),
@@ -347,50 +401,47 @@ fn build_collection_full(file_path: &Path, cfg: BuildConfig<'_>) -> Result<Built
         seqcol_metadata.compute_ancillary_digests(&stub_records);
     }
 
-    // Flatten alias triples in FASTA order.
-    let mut aliases: Vec<(String, String, String)> = Vec::new();
-    for ready in &sequences {
-        for (ns, alias_value) in &ready.aliases {
-            aliases.push((ns.clone(), alias_value.clone(), ready.metadata.sha512t24u.clone()));
-        }
-    }
-
-    let seq_count = sequences.len();
+    let seq_count = stub_records.len();
     let rgsi_cache_path = if cfg.use_cache {
         Some(file_path.replace_exts_with("rgsi"))
     } else {
         None
     };
 
-    Ok(BuiltCollection {
+    out.send(InsertMsg::End {
+        file_idx,
         metadata: seqcol_metadata,
         stub_records,
-        sequences,
-        aliases,
-        source_path: file_path.to_path_buf(),
         rgsi_cache_path,
+        source_path: file_path.to_path_buf(),
         seq_count,
     })
+    .map_err(|_| anyhow!("Inserter stopped receiving"))?;
+
+    Ok(())
 }
 
 /// Build half for the RGSI cached-metadata fast path: skip digesting, only
-/// decompress + encode. Does NOT touch `&mut self`.
+/// decompress + encode, streaming each sequence to the inserter.
 ///
 /// Uses a basic 2-thread split: a reader/decompress thread feeds raw records
 /// (with their already-known cached metadata) to this thread, which encodes them
-/// in FASTA order.
+/// in FASTA order and forwards them. Returns `BuildError::Other` if the cache is
+/// invalid (caller falls through to the full pipeline) -- this is checked BEFORE
+/// any `Begin`/`Seq` is emitted.
 fn build_collection_from_cached_metadata(
+    file_idx: usize,
     file_path: &Path,
     rgsi_path: &Path,
     cfg: BuildConfig<'_>,
-) -> Result<BuiltCollection> {
-    use crossbeam_channel::bounded;
-
-    let mut seqcol = crate::collection::read_rgsi_file(rgsi_path)?;
+    out: &Sender<InsertMsg>,
+) -> Result<(), BuildError> {
+    let mut seqcol = crate::collection::read_rgsi_file(rgsi_path)
+        .map_err(BuildError::Other)?;
 
     if seqcol.sequences.is_empty() {
         let _ = std::fs::remove_file(rgsi_path);
-        return Err(anyhow!("Empty RGSI cache"));
+        return Err(BuildError::Other(anyhow!("Empty RGSI cache")));
     }
 
     if cfg.ancillary_digests {
@@ -449,8 +500,12 @@ fn build_collection_from_cached_metadata(
         Ok(())
     });
 
-    // --- Thread 2 (this thread): encode + collect in FASTA order ---
-    let mut sequences: Vec<ReadySequence> = Vec::new();
+    // The cache is valid; from here on we emit Begin/Seq/End. A channel error is
+    // fatal (inserter hung up), not a recoverable cache miss.
+    out.send(InsertMsg::Begin { file_idx })
+        .map_err(|_| BuildError::Channel(anyhow!("Inserter stopped receiving")))?;
+
+    // --- Thread 2 (this thread): encode + stream in FASTA order ---
     for unit in read_rx {
         let sequence_data = match mode {
             StorageMode::Encoded => {
@@ -462,39 +517,60 @@ fn build_collection_from_cached_metadata(
             }
             StorageMode::Raw => unit.raw_bytes,
         };
-        sequences.push(ReadySequence {
+        let ready = ReadySequence {
             metadata: unit.metadata,
             sequence_data,
             aliases: unit.aliases,
-        });
+        };
+        out.send(InsertMsg::Seq { file_idx, ready })
+            .map_err(|_| BuildError::Channel(anyhow!("Inserter stopped receiving")))?;
     }
 
     read_handle
         .join()
-        .map_err(|e| anyhow!("Decompress thread panicked: {:?}", e))??;
+        .map_err(|e| BuildError::Other(anyhow!("Decompress thread panicked: {:?}", e)))?
+        .map_err(BuildError::Other)?;
 
     let stub_records = seqcol.sequences.clone();
     let metadata = seqcol.metadata.clone();
+    let seq_count = stub_records.len();
 
-    let mut aliases: Vec<(String, String, String)> = Vec::new();
-    for ready in &sequences {
-        for (ns, alias_value) in &ready.aliases {
-            aliases.push((ns.clone(), alias_value.clone(), ready.metadata.sha512t24u.clone()));
-        }
-    }
-
-    let seq_count = sequences.len();
-
-    Ok(BuiltCollection {
+    out.send(InsertMsg::End {
+        file_idx,
         metadata,
         stub_records,
-        sequences,
-        aliases,
-        source_path: file_path.to_path_buf(),
         // Cache already exists and is valid; no need to rewrite it.
         rgsi_cache_path: None,
+        source_path: file_path.to_path_buf(),
         seq_count,
     })
+    .map_err(|_| BuildError::Channel(anyhow!("Inserter stopped receiving")))?;
+
+    Ok(())
+}
+
+// ============================================================================
+// Per-in-flight collection scratch held by the inserter
+// ============================================================================
+
+/// Lightweight per-in-flight-collection state held by the single inserter
+/// between `Begin` and `End`. Metadata-sized only -- never holds encoded bytes
+/// (those are written to disk as each `Seq` arrives, then dropped). At most
+/// `jobs` of these are live at once.
+struct InFlight {
+    /// Ordered (name -> sha512 digest key) in FASTA order; becomes name_lookup.
+    name_to_digest: IndexMap<String, DigestKey>,
+    /// (namespace, alias_value, sha512t24u) alias triples in FASTA order.
+    aliases: Vec<(String, String, String)>,
+}
+
+impl InFlight {
+    fn new() -> Self {
+        InFlight {
+            name_to_digest: IndexMap::new(),
+            aliases: Vec::new(),
+        }
+    }
 }
 
 // ============================================================================
@@ -505,9 +581,14 @@ impl ReadonlyRefgetStore {
     /// Import multiple FASTA files into the store with file-level parallelism.
     ///
     /// Up to `jobs` files are decoded/built concurrently (each with its own
-    /// decoder, so gzip decompression is parallelized across files). The insert
-    /// half (`&mut self`) is applied on this single owner thread in FIXED input
-    /// file order, guaranteeing a byte-identical store to a serial build.
+    /// decoder, so gzip decompression is parallelized across files). Each builder
+    /// STREAMS its sequences one at a time over a bounded cross-file channel; the
+    /// single inserter (`&mut self`) on this owner thread persists each `.seq`
+    /// immediately and retains only metadata, so peak memory is bounded by
+    /// `jobs x channel_depth x avg_encoded_seq_size`, independent of collection
+    /// size. The on-disk indexes are written once at the very end (sorted by
+    /// content/collection digest), guaranteeing a byte-identical store to a serial
+    /// build regardless of build/arrival order.
     ///
     /// Returns per-file `(collection_metadata, was_new)` results in input order.
     pub fn add_sequence_collections_from_fastas(
@@ -537,65 +618,184 @@ impl ReadonlyRefgetStore {
 
         let overall_start = Instant::now();
 
-        // --- Build half: run up to `jobs` builders concurrently. ---
-        // Results are streamed back tagged with the file index; the owner
-        // collects them and inserts in fixed file index order.
-        let mut built: Vec<Option<Result<BuiltCollection>>> =
+        // Per-file results, filled in by the inserter as each `End` arrives, then
+        // returned in input order.
+        let mut results: Vec<Option<(SequenceCollectionMetadata, bool)>> =
             (0..files.len()).map(|_| None).collect();
 
-        if jobs <= 1 {
-            // Serial build (one file at a time, basic pipeline per file).
-            for (idx, file) in files.iter().enumerate() {
-                if !self.quiet {
-                    println!("Processing {}...", file.display());
-                }
-                built[idx] = Some(build_collection_from_fasta(file, cfg));
-            }
-        } else {
-            use crossbeam_channel::{bounded, unbounded};
-            // Bounded job queue feeds a fixed pool of `jobs` builder threads;
-            // results stream back unbounded (each result is one BuiltCollection,
-            // bounded in count by the number of files).
-            let (job_tx, job_rx) = bounded::<(usize, PathBuf)>(jobs);
-            let (res_tx, res_rx) = unbounded::<(usize, Result<BuiltCollection>)>();
+        // Bounded cross-file output channel: builders block on `send` when it is
+        // full, throttling fast builders to the inserter's pace (back-pressure)
+        // and capping in-flight encoded bytes.
+        let (out_tx, out_rx) = bounded::<InsertMsg>(jobs * CHANNEL_DEPTH);
 
-            std::thread::scope(|scope| {
-                for _ in 0..jobs {
-                    let job_rx = job_rx.clone();
-                    let res_tx = res_tx.clone();
-                    scope.spawn(move || {
-                        for (idx, path) in job_rx.iter() {
-                            let result = build_collection_from_fasta(&path, cfg);
-                            if res_tx.send((idx, result)).is_err() {
-                                break;
+        // Bounded job queue feeds a fixed pool of `jobs` builder threads.
+        let (job_tx, job_rx) = bounded::<(usize, PathBuf)>(jobs);
+
+        // The first builder error encountered (build threads stash it here).
+        let build_err: std::sync::Mutex<Option<anyhow::Error>> = std::sync::Mutex::new(None);
+        let build_err_ref = &build_err;
+
+        std::thread::scope(|scope| -> Result<()> {
+            // Spawn the builder pool.
+            for _ in 0..jobs {
+                let job_rx = job_rx.clone();
+                let out_tx = out_tx.clone();
+                scope.spawn(move || {
+                    for (idx, path) in job_rx.iter() {
+                        if let Err(e) = build_collection_from_fasta(idx, &path, cfg, &out_tx) {
+                            let mut slot = build_err_ref.lock().unwrap();
+                            if slot.is_none() {
+                                *slot = Some(e);
                             }
+                            // Stop pulling more jobs; let the inserter drain and
+                            // the scope tear down.
+                            break;
                         }
-                    });
-                }
-                drop(res_tx);
-
-                // Feed jobs from this thread, draining results as we go so the
-                // result channel never grows beyond the in-flight builders.
-                for (idx, file) in files.iter().enumerate() {
-                    if !self.quiet {
-                        println!("Processing {}...", file.display());
                     }
-                    job_tx.send((idx, file.clone())).expect("builder pool dropped");
-                }
-                drop(job_tx);
+                });
+            }
+            // Drop our extra senders so the inserter's loop terminates once all
+            // builders finish.
+            drop(out_tx);
+            drop(job_rx);
 
-                for (idx, result) in res_rx.iter() {
-                    built[idx] = Some(result);
+            // Feeder thread: push all jobs, then drop the sender. Runs in the
+            // scope so it can proceed while the inserter (this thread) drains the
+            // output channel -- otherwise a bounded job queue + bounded output
+            // channel could deadlock.
+            let feeder = {
+                let job_tx = job_tx.clone();
+                let files = files.to_vec();
+                let quiet = self.quiet;
+                scope.spawn(move || {
+                    for (idx, file) in files.into_iter().enumerate() {
+                        if !quiet {
+                            println!("Processing {}...", file.display());
+                        }
+                        if job_tx.send((idx, file)).is_err() {
+                            break;
+                        }
+                    }
+                })
+            };
+            drop(job_tx);
+
+            // --- Single inserter: drain the streaming channel. ---
+            // Per-in-flight-collection scratch keyed by file_idx (metadata-sized,
+            // at most `jobs` live).
+            let mut in_flight: HashMap<usize, InFlight> = HashMap::new();
+
+            // For each unique sequence digest, the input file_idx whose name
+            // currently "owns" the global `sequence_store` metadata entry. The
+            // global RGSI row for a shared digest carries one (arbitrary but
+            // DETERMINISTIC) name; we make the highest-file-index name win,
+            // matching the serial build's fixed-file-order, last-writer-wins
+            // behavior so parallel == serial byte-identical. (Per-collection
+            // names are always correct via the per-collection name_lookup.)
+            let mut seq_name_owner: HashMap<DigestKey, usize> = HashMap::new();
+
+            for msg in out_rx.iter() {
+                match msg {
+                    InsertMsg::Begin { file_idx } => {
+                        in_flight.insert(file_idx, InFlight::new());
+                    }
+                    InsertMsg::Seq { file_idx, ready } => {
+                        let ReadySequence { metadata, sequence_data, aliases } = ready;
+                        let seq_key = metadata.sha512t24u.to_key();
+
+                        // Record name -> digest in FASTA order for this file's
+                        // name_lookup, and stash alias triples.
+                        let scratch = in_flight
+                            .get_mut(&file_idx)
+                            .expect("Seq before Begin");
+                        scratch
+                            .name_to_digest
+                            .insert(metadata.name.clone(), seq_key);
+                        for (ns, alias_value) in &aliases {
+                            scratch.aliases.push((
+                                ns.clone(),
+                                alias_value.clone(),
+                                metadata.sha512t24u.clone(),
+                            ));
+                        }
+
+                        // Persist the bytes immediately (write-through + dedup),
+                        // then drop them. Dedup is keyed on the content digest.
+                        // The first occurrence of a digest always writes the
+                        // `.seq` and its metadata. For a sequence shared across
+                        // collections we write again ONLY when this file's index
+                        // is higher than the current name owner, so the
+                        // highest-file-index name wins deterministically
+                        // (matching the serial fixed-file-order build). The bytes
+                        // are identical (same digest), so the re-write is a no-op
+                        // for `.seq`; only the stored name metadata changes. For
+                        // disk-backed stores the record is downgraded to a Stub
+                        // (no bytes retained); for in-memory stores the Full
+                        // record is retained (memory is inherently O(total bytes)
+                        // there).
+                        let force = match seq_name_owner.get(&seq_key) {
+                            None => {
+                                seq_name_owner.insert(seq_key, file_idx);
+                                false // first occurrence: insert unconditionally
+                            }
+                            Some(&owner) if file_idx > owner => {
+                                seq_name_owner.insert(seq_key, file_idx);
+                                true // higher file index: overwrite stored name
+                            }
+                            Some(_) => {
+                                // Lower-or-equal file index already owns the name;
+                                // skip (still deduped, no re-write).
+                                continue;
+                            }
+                        };
+                        self.add_sequence_record(
+                            SequenceRecord::Full {
+                                metadata,
+                                sequence: sequence_data,
+                            },
+                            force,
+                        )?;
+                    }
+                    InsertMsg::End {
+                        file_idx,
+                        metadata,
+                        stub_records,
+                        rgsi_cache_path,
+                        source_path,
+                        seq_count,
+                    } => {
+                        let scratch = in_flight
+                            .remove(&file_idx)
+                            .expect("End before Begin");
+                        let (meta, was_new) = self.finalize_collection(
+                            metadata,
+                            stub_records,
+                            scratch,
+                            rgsi_cache_path,
+                            &source_path,
+                            seq_count,
+                            opts.force,
+                        )?;
+                        results[file_idx] = Some((meta, was_new));
+                    }
                 }
-            });
+            }
+
+            feeder.join().map_err(|e| anyhow!("Feeder thread panicked: {:?}", e))?;
+            Ok(())
+        })?;
+
+        // Propagate the first builder error, if any.
+        if let Some(e) = build_err.into_inner().unwrap() {
+            return Err(e);
         }
 
-        // --- Insert half: single owner, FIXED file order. ---
-        let mut results: Vec<(SequenceCollectionMetadata, bool)> = Vec::with_capacity(files.len());
-        for slot in built.into_iter() {
-            let built = slot.expect("every file index must be built")?;
-            let (metadata, was_new) = self.insert_built_collection(built, opts.force)?;
-            results.push((metadata, was_new));
+        // Finalize ALL indexes ONCE, after every collection is persisted. This
+        // is what makes parallel == serial byte-identical: sequences.rgsi sorts
+        // by sha512t24u and collections.rgci sorts by collection digest, so the
+        // arrival/build order is irrelevant.
+        if self.persist_to_disk && self.local_path.is_some() {
+            self.write_index_files()?;
         }
 
         if !self.quiet {
@@ -606,6 +806,11 @@ impl ReadonlyRefgetStore {
                 jobs,
             );
         }
+
+        let results: Vec<(SequenceCollectionMetadata, bool)> = results
+            .into_iter()
+            .map(|slot| slot.expect("every file index must be finalized"))
+            .collect();
 
         Ok(results)
     }
@@ -621,24 +826,21 @@ impl ReadonlyRefgetStore {
         Ok(results.pop().expect("one file yields one result"))
     }
 
-    /// Insert half: register a fully-built collection on `&mut self` in fixed
-    /// order. Honors `force` and the already-exists skip. Dedup-by-digest is
-    /// handled by `add_sequence_record` (keyed on content digest).
-    fn insert_built_collection(
+    /// Finalize one collection at `End`: register the collection record, install
+    /// the buffered name_lookup (FASTA order) and aliases. Sequence bytes were
+    /// already written to disk as each `Seq` arrived. Does NOT write the global
+    /// index files (the import owner does that ONCE at the end).
+    #[allow(clippy::too_many_arguments)]
+    fn finalize_collection(
         &mut self,
-        built: BuiltCollection,
+        metadata: SequenceCollectionMetadata,
+        stub_records: Vec<SequenceRecord>,
+        scratch: InFlight,
+        rgsi_cache_path: Option<PathBuf>,
+        source_path: &Path,
+        seq_count: usize,
         force: bool,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
-        let BuiltCollection {
-            metadata,
-            stub_records,
-            sequences,
-            aliases,
-            source_path,
-            rgsi_cache_path,
-            seq_count,
-        } = built;
-
         let coll_key = metadata.digest.to_key();
         let coll_digest_display = metadata.digest.clone();
 
@@ -660,35 +862,21 @@ impl ReadonlyRefgetStore {
             let _ = seqcol_for_cache.write_collection_rgsi(rgsi_path);
         }
 
-        // Register the collection.
-        let seqcol = SequenceCollection {
+        // Register the collection record (stub sequences only).
+        let record = SequenceCollectionRecord::Full {
             metadata: metadata.clone(),
             sequences: stub_records,
         };
-        self.add_sequence_collection_internal(seqcol, force)?;
-
-        // Insert encoded sequences in FASTA order and populate name_lookup.
-        // `add_sequence_collection_internal` above already inserted stub records
-        // (no sequence data) for these digests, so we MUST force here to write
-        // the actual sequence bytes through to disk. This matches the prior
-        // behavior (both the old raw and cached paths wrote sequences with
-        // force=true). Dedup-by-digest is preserved: a shared sequence is keyed
-        // on its content digest, so a later collection writes byte-identical
-        // bytes to the same path.
-        for ready in sequences {
-            let ReadySequence { metadata: seq_meta, sequence_data, .. } = ready;
-            self.add_sequence(
-                SequenceRecord::Full {
-                    metadata: seq_meta,
-                    sequence: sequence_data,
-                },
-                coll_key,
-                true,
-            )?;
+        if self.persist_to_disk && self.local_path.is_some() {
+            self.write_collection_to_disk_single(&record)?;
         }
+        self.collections.insert(coll_key, record);
+
+        // Install the buffered name_lookup in FASTA order.
+        self.name_lookup.insert(coll_key, scratch.name_to_digest);
 
         // Register aliases in FASTA order.
-        for (ns, alias_value, sha512t24u) in &aliases {
+        for (ns, alias_value, sha512t24u) in &scratch.aliases {
             self.add_sequence_alias(ns, alias_value, sha512t24u)?;
         }
 
