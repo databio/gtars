@@ -99,6 +99,10 @@ pub mod store;
 #[cfg(feature = "filesystem")]
 pub mod seqcol;
 
+/// Expansion of multi-FASTA input specifications (paths, globs, dirs, fofn).
+#[cfg(feature = "filesystem")]
+pub mod inputs;
+
 // Internal modules for filesystem operations
 #[cfg(feature = "filesystem")]
 mod hashkeyable;
@@ -117,6 +121,8 @@ pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 pub use store::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
 #[cfg(feature = "filesystem")]
 pub use seqcol::SeqColService;
+#[cfg(feature = "filesystem")]
+pub use inputs::{expand_fasta_inputs, FastaInputs, FASTA_EXTENSIONS};
 #[cfg(feature = "filesystem")]
 pub use store::{AvailableAliases, PagedResult, Pagination, PullResult, SyncStrategy};
 

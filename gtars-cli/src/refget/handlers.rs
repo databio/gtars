@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::ArgMatches;
 
 use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
+use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
@@ -13,11 +14,18 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
 }
 
 fn run_build(matches: &ArgMatches) -> Result<()> {
-    let fastas: Vec<std::path::PathBuf> = matches
+    let paths: Vec<std::path::PathBuf> = matches
         .get_many::<String>("fasta")
-        .expect("fasta is required")
+        .into_iter()
+        .flatten()
         .map(std::path::PathBuf::from)
         .collect();
+    let file_list = matches
+        .get_one::<String>("file_list")
+        .map(std::path::PathBuf::from);
+    let inputs = FastaInputs { paths, file_list };
+    let fastas = expand_fasta_inputs(&inputs)
+        .map_err(|e| anyhow::anyhow!("Failed to expand FASTA inputs: {}", e))?;
     let output = matches
         .get_one::<String>("output")
         .expect("output is required");

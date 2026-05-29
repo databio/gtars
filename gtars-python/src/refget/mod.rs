@@ -15,6 +15,7 @@ use gtars_refget::collection::{
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
+use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -1351,6 +1352,101 @@ impl PyRefgetStore {
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error importing FASTA: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Import multiple FASTA files into the store.
+    ///
+    /// `fastas` accepts a single path, a glob pattern (e.g. "fasta/*.fa.gz"),
+    /// a directory of FASTAs, or a list mixing any of these. `file_list` points
+    /// at a file-of-filenames (one path per line; blank lines and #-comments
+    /// ignored; may itself contain globs/directories). Inputs are expanded by
+    /// gtars into a de-duplicated, deterministic order (explicit paths first,
+    /// then file_list lines; directory/glob matches sorted lexicographically).
+    /// `jobs` is the number of files imported concurrently (0 = auto, 1 =
+    /// serial); it does not affect ordering or the resulting store.
+    ///
+    /// Args:
+    ///     fastas: A path, glob, directory, or list of any of these.
+    ///     file_list (str or Path, optional): Path to a file-of-filenames.
+    ///     jobs (int, optional): Files imported concurrently (0 = auto, 1 = serial).
+    ///     force (bool, optional): If True, overwrite existing collections/sequences.
+    ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
+    ///
+    /// Returns:
+    ///     list[tuple[SequenceCollectionMetadata, bool]]: per-file results in
+    ///         expanded-input order.
+    ///
+    /// Raises:
+    ///     ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
+    ///     IOError: If a file cannot be read or processed.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None))]
+    fn add_sequence_collections_from_fastas(
+        &mut self,
+        fastas: &Bound<'_, PyAny>,
+        file_list: Option<String>,
+        jobs: usize,
+        force: bool,
+        namespaces: Option<Vec<String>>,
+    ) -> PyResult<Vec<(PySequenceCollectionMetadata, bool)>> {
+        // Normalize `fastas` into a Vec<PathBuf>. Accept a single str/PathLike
+        // or a list/tuple of them. `expand_fasta_inputs` handles glob/dir/file
+        // classification, so we just stringify each entry here.
+        let paths: Vec<std::path::PathBuf> = if let Ok(seq) = fastas.try_iter() {
+            // Strings are iterable (over chars); guard against that by checking
+            // for a str first.
+            if fastas.is_instance_of::<pyo3::types::PyString>() {
+                vec![std::path::PathBuf::from(fastas.to_string())]
+            } else {
+                let mut out = Vec::new();
+                for item in seq {
+                    out.push(std::path::PathBuf::from(item?.to_string()));
+                }
+                out
+            }
+        } else {
+            vec![std::path::PathBuf::from(fastas.to_string())]
+        };
+
+        let inputs = FastaInputs {
+            paths,
+            file_list: file_list.map(std::path::PathBuf::from),
+        };
+        let expanded = expand_fasta_inputs(&inputs).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to expand FASTA inputs: {}",
+                e
+            ))
+        })?;
+
+        let ns_refs: Vec<&str> = namespaces
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        let opts = FastaImportOptions::new()
+            .force(force)
+            .namespaces(&ns_refs)
+            .jobs(jobs);
+
+        self.inner
+            .add_sequence_collections_from_fastas(&expanded, opts)
+            .map(|results| {
+                results
+                    .into_iter()
+                    .map(|(metadata, was_new)| {
+                        (PySequenceCollectionMetadata::from(metadata), was_new)
+                    })
+                    .collect()
+            })
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error importing FASTA files: {}",
                     e
                 ))
             })

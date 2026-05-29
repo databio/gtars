@@ -105,6 +105,48 @@ class TestRefget:
         assert seq is not None
         assert seq.metadata.length == 8
 
+    def test_store_import_multiple_fastas_list(self):
+        """Import several FASTAs at once via an explicit list."""
+        store = RefgetStore.in_memory()
+        results = store.add_sequence_collections_from_fastas(
+            ["../tests/data/fasta/base.fa", "../tests/data/fasta/different_order.fa"],
+            jobs=1,
+        )
+        assert len(results) == 2
+        for meta, was_new in results:
+            assert hasattr(meta, "digest")
+            assert isinstance(was_new, bool)
+
+    def test_store_import_multiple_fastas_glob(self):
+        """Glob form expands to lexicographically sorted, deterministic order."""
+        store = RefgetStore.in_memory()
+        results = store.add_sequence_collections_from_fastas(
+            "../tests/data/fasta/*.fa.gz"
+        )
+        assert len(results) >= 1
+
+    def test_store_import_multiple_fastas_file_list(self):
+        """file_list (fofn) form, with blank lines and comments ignored."""
+        store = RefgetStore.in_memory()
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# a comment\n\n")
+            f.write("../tests/data/fasta/base.fa\n")
+            f.write("  ../tests/data/fasta/different_order.fa  \n")
+            fofn = f.name
+        try:
+            results = store.add_sequence_collections_from_fastas([], file_list=fofn)
+            assert len(results) == 2
+        finally:
+            os.unlink(fofn)
+
+    def test_store_import_multiple_fastas_bad_glob(self):
+        """A glob matching nothing raises ValueError."""
+        store = RefgetStore.in_memory()
+        with pytest.raises(ValueError):
+            store.add_sequence_collections_from_fastas(
+                "../tests/data/fasta/does_not_exist_*.fa"
+            )
+
     def test_store_substring(self):
         """Test substring retrieval"""
         store = RefgetStore.in_memory()

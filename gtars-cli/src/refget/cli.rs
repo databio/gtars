@@ -12,9 +12,15 @@ pub fn create_refget_cli() -> Command {
                 .about("Build a RefgetStore on disk from one or more FASTA files.")
                 .arg(
                     Arg::new("fasta")
-                        .required(true)
+                        .required(false)
                         .num_args(1..)
-                        .help("Path(s) to FASTA file(s) (.fa or .fa.gz) to import"),
+                        .help("Path(s), glob pattern(s) (e.g. 'fasta/*.fa.gz'), or directory of FASTA files to import"),
+                )
+                .arg(
+                    Arg::new("file_list")
+                        .long("file-list")
+                        .short('f')
+                        .help("Path to a file listing FASTA paths, one per line (blank lines and #-comments ignored). May contain globs/directories."),
                 )
                 .arg(
                     Arg::new("output")
@@ -29,7 +35,7 @@ pub fn create_refget_cli() -> Command {
                         .short('j')
                         .value_parser(clap::value_parser!(usize))
                         .default_value("0")
-                        .help("Number of FASTA files imported concurrently (0 = auto, 1 = serial)"),
+                        .help("Number of FASTA files imported concurrently (0 = auto, 1 = serial). Does not affect input ordering or store output."),
                 )
                 .arg(
                     Arg::new("raw")
