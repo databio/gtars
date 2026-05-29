@@ -756,20 +756,17 @@ impl ReadonlyRefgetStore {
 
     /// Resolve the filesystem path of the decoded-bytes file for a sequence.
     ///
-    /// Returns `{local_path}/decoded/{prefix2}/{digest}.bin`. Requires the
-    /// store to have a `local_path` set; in-memory stores cannot mmap-decode.
+    /// Returns `Some({local_path}/decoded/{prefix2}/{digest}.bin)` if the store
+    /// has a local_path, or `None` for in-memory stores.
     #[cfg(feature = "filesystem")]
-    fn decoded_file_path(&self, digest_key: &DigestKey) -> Result<PathBuf> {
-        let root = self
-            .local_path
-            .as_ref()
-            .ok_or_else(|| anyhow!("store has no local_path; mmap-backed decoding requires a local path"))?;
+    fn decoded_file_path_opt(&self, digest_key: &DigestKey) -> Option<PathBuf> {
+        let root = self.local_path.as_ref()?;
         let digest_str = key_to_digest_string(digest_key);
         if digest_str.len() < 2 {
-            return Err(anyhow!("digest string too short for sharded path"));
+            return None;
         }
         let dir = root.join("decoded").join(&digest_str[..2]);
-        Ok(dir.join(format!("{}.bin", digest_str)))
+        Some(dir.join(format!("{}.bin", digest_str)))
     }
 
     /// Ensure a sequence is decoded and available via a file-backed mmap.
@@ -806,7 +803,7 @@ impl ReadonlyRefgetStore {
             .copied()
             .unwrap_or(digest_key);
 
-        // Fast path: already mmapped.
+        // Fast path: already mmap-backed.
         if matches!(
             self.sequence_store.get(&actual_key),
             Some(SequenceRecord::Mmap { .. })
@@ -814,7 +811,26 @@ impl ReadonlyRefgetStore {
             return Ok(());
         }
 
-        let path = self.decoded_file_path(&actual_key)?;
+        // If no local_path, fall back to in-memory decode (no mmap benefit).
+        let Some(path) = self.decoded_file_path_opt(&actual_key) else {
+            // In-memory store: check if already decoded, otherwise decode now.
+            let record = self
+                .sequence_store
+                .get(&actual_key)
+                .ok_or_else(|| anyhow!("Sequence not found"))?;
+            if record.is_loaded() && record.sequence().is_some() {
+                return Ok(());
+            }
+            let record = self
+                .sequence_store
+                .get_mut(&actual_key)
+                .ok_or_else(|| anyhow!("Sequence not found"))?;
+            let decoded = record
+                .decode()
+                .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
+            record.load_data(decoded.into_bytes());
+            return Ok(());
+        };
 
         // File already exists (another process may have written it).
         // Just mmap and swap.

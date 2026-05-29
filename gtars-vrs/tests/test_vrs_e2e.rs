@@ -43,8 +43,7 @@ fn test_vcf_to_vrs_ids_end_to_end() {
     }
 
     // Load FASTA into RefgetStore
-    let store_path = dir.path().join("store");
-    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let mut store = RefgetStore::in_memory();
     store.disable_encoding(); // Use raw mode for simplicity
     store
         .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())

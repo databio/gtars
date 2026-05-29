@@ -153,8 +153,7 @@ fn build_store_and_provider() -> (RefgetStore, MockProvider, String, tempfile::T
     );
     std::fs::write(&fasta_path, fasta_content).unwrap();
 
-    let store_path = temp.path().join("store");
-    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let mut store = RefgetStore::in_memory();
     store.disable_encoding();
     store
         .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())

@@ -87,16 +87,13 @@ fn build_fixture() -> (RefgetStore, Arc<gtars_reftx::ReadonlyTxStore>, ReftxProv
     let dir = synthetic_dir();
     let fasta = dir.join("synthetic.fa");
 
-    let store_tmpdir = tempfile::tempdir().unwrap();
-    let store_path = store_tmpdir.path().join("store");
-    let mut store = RefgetStore::on_disk(&store_path).expect("create store");
+    let mut store = RefgetStore::in_memory();
     store.disable_encoding();
     store.set_quiet(true);
     store
         .add_sequence_collection_from_fasta(&fasta, gtars_refget::store::FastaImportOptions::new())
         .expect("import synthetic.fa");
-    store.load_all_sequences().expect("load sequences");
-    std::mem::forget(store_tmpdir); // Keep store directory alive
+    store.load_all_sequences().expect("load sequences"); // Keep store directory alive
 
     let collection_digest = store
         .iter_collections()
