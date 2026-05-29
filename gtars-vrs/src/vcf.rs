@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
+use std::sync::mpsc;
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
@@ -263,6 +264,276 @@ pub fn compute_vrs_ids_streaming_readonly(
             count += 1;
         }
     }
+
+    Ok(count)
+}
+
+// ── Parallel, encoded-on-the-fly API ────────────────────────────────────
+
+/// A unit of work handed to a worker: one VCF record's parsed fields plus the
+/// index of the sequence (digest) it maps to. `alts` is split out by the reader
+/// so workers do no string scanning beyond UTF-8 of the normalized allele.
+struct WorkItem {
+    /// Monotonic index of this record among accepted records (for reordering).
+    record_index: u64,
+    /// Index into the shared `seqs` table identifying the reference sequence.
+    seq_index: usize,
+    /// 0-based interbase start.
+    pos: u64,
+    /// Original chromosome name (carried through to the result).
+    chrom: String,
+    /// Reference allele bytes.
+    ref_allele: String,
+    /// One or more alternate alleles already filtered of symbolic/`*`/`.` entries.
+    alts: Vec<String>,
+}
+
+/// Per-record output: the results for one VCF record, tagged with its index so
+/// the collector can emit records in input order regardless of worker timing.
+struct OrderedOutput {
+    record_index: u64,
+    results: Vec<VrsResult>,
+}
+
+/// Immutable per-sequence view shared (by `&`) with every worker. Holds the
+/// borrowed encoded bytes plus the alphabet bits needed to decode bases on the
+/// fly via [`EncodedSeq`]; nothing is decoded up front.
+struct SeqView<'a> {
+    /// `SQ.<digest>` accession used in the VRS identifier.
+    accession: String,
+    /// Bit-packed encoded bytes, borrowed from the readonly store.
+    encoded: &'a [u8],
+    /// Number of bases.
+    length: usize,
+    /// Bits per symbol (e.g. 2 for DNA_2BIT).
+    bits_per_symbol: usize,
+    /// Decoding table (encoded code -> symbol byte); `'static` from the alphabet.
+    decoding_array: &'static [u8; 256],
+}
+
+/// Compute VRS Allele identifiers for every variant in a VCF using an in-process
+/// pool of `threads` workers, reading the reference directly from the immutable
+/// 2-bit-encoded readonly store (decode-on-the-fly, no decoded cache, no mmap).
+///
+/// One reader thread parses the VCF (plain or gzip/bgzf via [`open_vcf`]) and
+/// dispatches per-record [`WorkItem`]s round-robin to the workers. Each worker
+/// owns its own [`DigestWriter`] (which is not `Sync`) and builds an
+/// [`EncodedSeq`] per variant from the shared `&ReadonlyRefgetStore`. Results are
+/// tagged with the record's input index and reordered by a collector so the
+/// callback observes records in exact input order. Within a record, alts are
+/// emitted in VCF order.
+///
+/// The caller must make all referenced sequences resident first (e.g. via
+/// `RefgetStore::load_sequence` for each needed digest, then `into_readonly`).
+/// Workers only read; the `EncodedSeq` borrows are kept valid by scoped threads.
+///
+/// Output is identical (same VRS ids, same order) to
+/// [`compute_vrs_ids_streaming_readonly`]. Returns the number of results emitted.
+pub fn compute_vrs_ids_parallel_encoded(
+    store: &ReadonlyRefgetStore,
+    name_to_digest: &HashMap<String, String>,
+    vcf_path: &str,
+    threads: usize,
+    mut on_result_ordered: impl FnMut(VrsResult),
+) -> Result<usize> {
+    let n_workers = threads.max(1);
+
+    // Build the shared per-sequence views once, borrowing encoded bytes from the
+    // store. We index records by sequence position to avoid per-record hashing in
+    // the workers and to give each SeqView a stable index.
+    let mut seq_index_of_digest: HashMap<String, usize> = HashMap::new();
+    let mut seqs: Vec<SeqView> = Vec::new();
+    // Map chrom name -> seq_index, lazily filled as the reader sees new chroms.
+    let mut chrom_to_seq_index: HashMap<String, usize> = HashMap::new();
+    for (name, digest) in name_to_digest.iter() {
+        let idx = if let Some(&i) = seq_index_of_digest.get(digest) {
+            i
+        } else {
+            let rec = store
+                .get_sequence(digest.as_str())
+                .with_context(|| format!("get_sequence {digest}"))?;
+            let meta = rec.metadata();
+            let alphabet = lookup_alphabet(&meta.alphabet);
+            let encoded = rec.sequence().with_context(|| {
+                format!("sequence {digest} not resident/encoded in readonly store")
+            })?;
+            let i = seqs.len();
+            seqs.push(SeqView {
+                accession: format!("SQ.{}", meta.sha512t24u),
+                encoded,
+                length: meta.length,
+                bits_per_symbol: alphabet.bits_per_symbol,
+                decoding_array: alphabet.decoding_array,
+            });
+            seq_index_of_digest.insert(digest.clone(), i);
+            i
+        };
+        chrom_to_seq_index.insert(name.clone(), idx);
+    }
+
+    let seqs = &seqs; // share by reference with the scoped workers
+
+    let mut count = 0usize;
+
+    std::thread::scope(|scope| -> Result<()> {
+        // Work channels: one per worker (round-robin keeps per-worker order, and
+        // the collector restores global order via record_index).
+        let mut work_txs: Vec<mpsc::Sender<WorkItem>> = Vec::with_capacity(n_workers);
+        let (out_tx, out_rx) = mpsc::channel::<OrderedOutput>();
+
+        let mut worker_handles = Vec::with_capacity(n_workers);
+        for _ in 0..n_workers {
+            let (work_tx, work_rx) = mpsc::channel::<WorkItem>();
+            work_txs.push(work_tx);
+            let out_tx = out_tx.clone();
+            let handle = scope.spawn(move || {
+                let mut writer = DigestWriter::new();
+                for item in work_rx.iter() {
+                    let view = &seqs[item.seq_index];
+                    let es = EncodedSeq {
+                        bytes: view.encoded,
+                        length: view.length,
+                        bits_per_symbol: view.bits_per_symbol,
+                        decoding_array: view.decoding_array,
+                    };
+                    let mut results = Vec::with_capacity(item.alts.len());
+                    for alt in &item.alts {
+                        // A variant that fails to normalize (e.g. ref allele past
+                        // sequence end) or whose normalized allele is not UTF-8 is
+                        // skipped. On well-formed input every variant normalizes,
+                        // so output matches the serial path exactly.
+                        let norm = match normalize_ref(
+                            &es,
+                            item.pos,
+                            item.ref_allele.as_bytes(),
+                            alt.as_bytes(),
+                        ) {
+                            Ok(n) => n,
+                            Err(_) => continue,
+                        };
+                        let norm_seq = match std::str::from_utf8(&norm.allele) {
+                            Ok(s) => s,
+                            Err(_) => continue,
+                        };
+                        let vrs_id = writer.allele_identifier_literal(
+                            &view.accession,
+                            norm.start,
+                            norm.end,
+                            norm_seq,
+                        );
+                        results.push(VrsResult {
+                            chrom: item.chrom.clone(),
+                            pos: item.pos,
+                            ref_allele: item.ref_allele.clone(),
+                            alt_allele: alt.clone(),
+                            vrs_id,
+                        });
+                    }
+                    // Send even empty result sets so the collector can advance the
+                    // expected index without stalling.
+                    if out_tx.send(OrderedOutput {
+                        record_index: item.record_index,
+                        results,
+                    }).is_err()
+                    {
+                        break;
+                    }
+                }
+            });
+            worker_handles.push(handle);
+        }
+        drop(out_tx); // workers hold the only remaining senders
+
+        // Reader thread: parse the VCF and dispatch work round-robin.
+        let reader_handle = scope.spawn(move || -> Result<u64> {
+            let mut reader = open_vcf(vcf_path)?;
+            let mut line_buf = String::new();
+            let mut record_index: u64 = 0;
+            let mut next_worker = 0usize;
+
+            while read_vcf_line(&mut *reader, &mut line_buf)? {
+                let line = line_buf.trim_end_matches('\n').trim_end_matches('\r');
+                if line.starts_with('#') || line.is_empty() {
+                    continue;
+                }
+                let fields: Vec<&str> = line.splitn(10, '\t').collect();
+                if fields.len() < 5 {
+                    continue;
+                }
+                let chrom = fields[0];
+                let seq_index = match chrom_to_seq_index.get(chrom) {
+                    Some(&i) => i,
+                    None => continue, // unknown chrom: skip (matches serial)
+                };
+                let pos: u64 = fields[1]
+                    .parse::<u64>()
+                    .context("Invalid POS field")?
+                    .saturating_sub(1);
+                let ref_allele = fields[3];
+                let alt_field = fields[4];
+
+                let alts: Vec<String> = alt_field
+                    .split(',')
+                    .filter(|alt| !(alt.starts_with('<') || *alt == "*" || *alt == "."))
+                    .map(|s| s.to_string())
+                    .collect();
+                if alts.is_empty() {
+                    continue;
+                }
+
+                let item = WorkItem {
+                    record_index,
+                    seq_index,
+                    pos,
+                    chrom: chrom.to_string(),
+                    ref_allele: ref_allele.to_string(),
+                    alts,
+                };
+                record_index += 1;
+                // If a worker has hung up, stop early.
+                if work_txs[next_worker].send(item).is_err() {
+                    break;
+                }
+                next_worker = (next_worker + 1) % n_workers;
+            }
+            // Dropping all work senders signals workers to finish.
+            drop(work_txs);
+            Ok(record_index)
+        });
+
+        // Collector: reorder OrderedOutput by record_index and emit in order.
+        // Buffer out-of-order records in a HashMap keyed by index.
+        let mut pending: HashMap<u64, Vec<VrsResult>> = HashMap::new();
+        let mut next_emit: u64 = 0;
+        for out in out_rx.iter() {
+            pending.insert(out.record_index, out.results);
+            while let Some(results) = pending.remove(&next_emit) {
+                for r in results {
+                    on_result_ordered(r);
+                    count += 1;
+                }
+                next_emit += 1;
+            }
+        }
+        // Drain any stragglers (should be none if all workers completed).
+        while let Some(results) = pending.remove(&next_emit) {
+            for r in results {
+                on_result_ordered(r);
+                count += 1;
+            }
+            next_emit += 1;
+        }
+
+        // Surface reader errors (e.g. bad POS) and worker panics.
+        reader_handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("VCF reader thread panicked"))??;
+        for h in worker_handles {
+            h.join()
+                .map_err(|_| anyhow::anyhow!("VRS worker thread panicked"))?;
+        }
+        Ok(())
+    })?;
 
     Ok(count)
 }

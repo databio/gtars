@@ -25,5 +25,6 @@ pub use hgvs::bridge::{
 pub use provider::{NoTranscriptProvider, ProviderError, TranscriptProvider};
 pub use vcf::{
     VrsResult, compute_vrs_ids_from_vcf, compute_vrs_ids_from_vcf_readonly,
-    compute_vrs_ids_streaming, compute_vrs_ids_streaming_readonly,
+    compute_vrs_ids_parallel_encoded, compute_vrs_ids_streaming,
+    compute_vrs_ids_streaming_readonly,
 };
