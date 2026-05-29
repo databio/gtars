@@ -2346,3 +2346,118 @@ fn test_multifile_parallel_gzipped() {
         "gzipped multi-file parallel store must be byte-identical to serial"
     );
 }
+
+/// Regression test for the parallel-import "resume re-decode" bug.
+///
+/// On RESUME (re-importing a FASTA whose collection is already in the store and
+/// whose sibling `.rgsi` cache exists), the import MUST short-circuit BEFORE
+/// opening/decoding the FASTA. The old serial path did this; a refactor moved
+/// the "already exists" check to `End`, AFTER the whole file had been
+/// re-decoded + re-encoded -- wasting enormous CPU on resume.
+///
+/// This test makes the regression deterministic WITHOUT any production hooks:
+/// after the first import we CORRUPT the FASTA bytes while keeping the `.rgsi`
+/// sidecar intact. A correct (short-circuiting) implementation never opens the
+/// corrupt FASTA, so the resume succeeds, reports `was_new = false`, and leaves
+/// the store unchanged. A regressed implementation would try to decode the
+/// garbage FASTA and either error or mis-build -- failing the test.
+#[test]
+fn test_resume_skips_present_collection_before_decoding_fasta() {
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+
+    // FASTA whose collection we will import, then "resume".
+    let fasta_path = temp_path.join("genome.fa");
+    fs::write(
+        &fasta_path,
+        ">chr1\nACGTACGTACGTACGT\n>chr2\nTTTTGGGGCCCCAAAA\n",
+    )
+    .unwrap();
+
+    // Disk-backed store so RGSI caching is enabled (use_cache = local_path set).
+    let cache_path = temp_path.join("store");
+    let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+
+    // First import: builds the collection and writes the sibling genome.rgsi.
+    let (meta_first, was_new_first) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert!(was_new_first, "first import must add a new collection");
+
+    let rgsi_sidecar = temp_path.join("genome.rgsi");
+    assert!(
+        rgsi_sidecar.exists(),
+        "first import must write the sibling .rgsi cache"
+    );
+
+    // --force must NOT skip: with the FASTA still intact and the collection
+    // already present, forcing must RE-PROCESS it (was_new = true), proving the
+    // short-circuit respects --force. (Done before corrupting so the forced
+    // decode has a valid FASTA to read.)
+    let (_meta_forced, was_new_forced) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_path,
+            FastaImportOptions::new().jobs(4).force(true),
+        )
+        .expect("forced re-import of an intact FASTA must succeed");
+    assert!(
+        was_new_forced,
+        "--force must bypass the skip and re-process the present collection (was_new = true)"
+    );
+
+    // Snapshot store contents to prove the resume changes nothing.
+    let collections_before: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    let sequences_before: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        v.sort();
+        v
+    };
+
+    // CORRUPT the FASTA: replace it with a record whose sequence NAME is absent
+    // from the cached metadata. Any code path that actually opens + decodes this
+    // FASTA fails ("Sequence '...' not found in cached metadata"). The .rgsi
+    // sidecar stays intact, so the collection digest is still discoverable for
+    // free -- a correct short-circuit never reaches the decode.
+    fs::write(&fasta_path, b">totally_bogus_name_not_in_cache\nNNNNNNNN\n").unwrap();
+
+    // Resume: re-import the SAME (now-corrupt) FASTA in parallel (jobs > 1).
+    let (meta_resume, was_new_resume) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new().jobs(4))
+        .expect(
+            "resume must succeed: a present collection with an intact .rgsi must be skipped \
+             BEFORE the (now-corrupt) FASTA is opened/decoded",
+        );
+
+    assert!(
+        !was_new_resume,
+        "resume of an already-present collection must report was_new = false"
+    );
+    assert_eq!(
+        meta_resume.digest, meta_first.digest,
+        "resume must report the same collection digest from the cached .rgsi"
+    );
+
+    // Store must be byte-for-byte unchanged by the resume.
+    let collections_after: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    let sequences_after: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    assert_eq!(
+        collections_before, collections_after,
+        "resume must not change the set of collections"
+    );
+    assert_eq!(
+        sequences_before, sequences_after,
+        "resume must not change the set of sequences"
+    );
+}

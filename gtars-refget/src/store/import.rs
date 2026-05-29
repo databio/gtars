@@ -41,7 +41,7 @@
 use super::*;
 use super::readonly::ReadonlyRefgetStore;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::thread::available_parallelism;
 use std::time::Instant;
@@ -85,6 +85,13 @@ struct ReadySequence {
 enum InsertMsg {
     /// A builder started processing this file.
     Begin { file_idx: usize },
+    /// The collection was found already present in the store (cached `.rgsi`
+    /// short-circuit). No `Begin`/`Seq`/`End` is emitted for this file: the FASTA
+    /// is never opened or decoded. The inserter records `was_new = false`.
+    Skip {
+        file_idx: usize,
+        metadata: SequenceCollectionMetadata,
+    },
     /// One fully digested+encoded sequence, in FASTA order within its file.
     Seq {
         file_idx: usize,
@@ -120,6 +127,14 @@ struct BuildConfig<'a> {
     /// Whether the store is disk-backed (controls RGSI cache read/write).
     use_cache: bool,
     namespaces: &'a [&'a str],
+    /// Re-process collections even if already present (disables the cached
+    /// `.rgsi` pre-decode short-circuit).
+    force: bool,
+    /// Read-only snapshot of collection digest keys already present in the store,
+    /// taken once before builders spawn. Lets the build half (which has no
+    /// `&self`) short-circuit an already-present collection BEFORE opening the
+    /// FASTA, avoiding a wasteful decode+encode on resume.
+    present_collections: &'a HashSet<DigestKey>,
 }
 
 /// Build half for a single FASTA file: digest + encode, streaming each sequence
@@ -444,6 +459,27 @@ fn build_collection_from_cached_metadata(
         return Err(BuildError::Other(anyhow!("Empty RGSI cache")));
     }
 
+    // Pre-decode short-circuit: if this collection is already present in the
+    // store (and we're not forcing), skip it WITHOUT opening/decoding the FASTA.
+    // The `.rgsi` sidecar gave us the collection digest for free; re-decoding +
+    // re-encoding every record only to discover the duplicate at `End` wastes
+    // enormous CPU on resume. Emit a `Skip` so the inserter records
+    // `was_new = false`, then return before spawning the reader thread.
+    if !cfg.force && cfg.present_collections.contains(&seqcol.metadata.digest.to_key()) {
+        if !cfg.quiet {
+            println!(
+                "Skipped {} (already exists) [cached metadata]",
+                seqcol.metadata.digest
+            );
+        }
+        out.send(InsertMsg::Skip {
+            file_idx,
+            metadata: seqcol.metadata.clone(),
+        })
+        .map_err(|_| BuildError::Channel(anyhow!("Inserter stopped receiving")))?;
+        return Ok(());
+    }
+
     if cfg.ancillary_digests {
         seqcol.metadata.compute_ancillary_digests(&seqcol.sequences);
     }
@@ -608,12 +644,22 @@ impl ReadonlyRefgetStore {
         };
         let jobs = jobs.min(files.len()).max(1);
 
+        // Snapshot the digest keys of collections already present in the store,
+        // taken ONCE here (before any builder spawns). The build half has no
+        // `&self`, so this read-only set is how it learns which collections can
+        // be skipped before opening their FASTAs. New collections added during
+        // this run are NOT in the snapshot, so they are never wrongly skipped;
+        // duplicates within the same batch are still deduped by the inserter.
+        let present_collections: HashSet<DigestKey> = self.collections.keys().copied().collect();
+
         let cfg = BuildConfig {
             mode: self.mode,
             quiet: self.quiet,
             ancillary_digests: self.ancillary_digests,
             use_cache: self.local_path.is_some(),
             namespaces: opts.namespaces,
+            force: opts.force,
+            present_collections: &present_collections,
         };
 
         let overall_start = Instant::now();
@@ -698,6 +744,11 @@ impl ReadonlyRefgetStore {
                 match msg {
                     InsertMsg::Begin { file_idx } => {
                         in_flight.insert(file_idx, InFlight::new());
+                    }
+                    InsertMsg::Skip { file_idx, metadata } => {
+                        // Already-present collection skipped before any decode.
+                        // No scratch was created (no Begin), nothing to persist.
+                        results[file_idx] = Some((metadata, false));
                     }
                     InsertMsg::Seq { file_idx, ready } => {
                         let ReadySequence { metadata, sequence_data, aliases } = ready;
