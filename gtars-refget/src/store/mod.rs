@@ -77,13 +77,27 @@ pub struct RetrievedSequence {
 }
 
 /// Options for importing a FASTA file into a RefgetStore.
+///
+/// ## Two-knob parallelism model
+///
+/// - `threads` is the TOTAL CPU budget for the digest+encode stage. When a
+///   single file is imported, all of these workers serve that file.
+/// - `file_jobs` is the number of input FASTA files decoded concurrently
+///   (each with its own gzip decoder), so decompression parallelizes across
+///   files. `0` means "auto": derived so `file_jobs * per_file_workers <=
+///   threads`. The two knobs are reconciled in
+///   `import::resolve_file_jobs` / `import::resolve_threads`.
 #[derive(Clone, Copy)]
 pub struct FastaImportOptions<'a> {
     pub(crate) force: bool,
     pub(crate) namespaces: &'a [&'a str],
-    /// Number of worker threads for the CPU-bound digest+encode stage.
+    /// Total number of worker threads for the CPU-bound digest+encode stage.
     /// `0` means "auto" (resolved to `std::thread::available_parallelism`).
     pub(crate) threads: usize,
+    /// Number of input FASTA files to decode/build concurrently (files in
+    /// flight). Each file gets its own decoder so gzip decompression is
+    /// parallelized across files. `0` means "auto".
+    pub(crate) file_jobs: usize,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -92,6 +106,7 @@ impl<'a> Default for FastaImportOptions<'a> {
             force: false,
             namespaces: &[],
             threads: 0,
+            file_jobs: 0,
         }
     }
 }
@@ -114,11 +129,20 @@ impl<'a> FastaImportOptions<'a> {
         self
     }
 
-    /// Set the number of worker threads for the digest+encode stage.
+    /// Set the total number of worker threads for the digest+encode stage.
     /// `0` (the default) means auto-detect via `std::thread::available_parallelism`.
     #[must_use]
     pub fn threads(mut self, n: usize) -> Self {
         self.threads = n;
+        self
+    }
+
+    /// Set the number of input FASTA files decoded/built concurrently.
+    /// `0` (the default) means auto: derived from `threads` and the number of
+    /// input files so `file_jobs * per_file_workers <= threads`.
+    #[must_use]
+    pub fn file_jobs(mut self, n: usize) -> Self {
+        self.file_jobs = n;
         self
     }
 }

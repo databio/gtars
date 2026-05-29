@@ -160,7 +160,14 @@ impl ReadonlyRefgetStore {
             "#digest\tn_sequences\tnames_digest\tsequences_digest\tlengths_digest\tname_length_pairs_digest\tsorted_name_length_pairs_digest\tsorted_sequences_digest"
         )?;
 
-        for record in self.collections.values() {
+        // Sort by collection digest for deterministic output (collections is a
+        // HashMap, so its iteration order is otherwise non-deterministic across
+        // builds; this is required for multi-collection stores to be
+        // byte-identical regardless of insertion/build order).
+        let mut records: Vec<&SequenceCollectionRecord> = self.collections.values().collect();
+        records.sort_by(|a, b| a.metadata().digest.cmp(&b.metadata().digest));
+
+        for record in records {
             let meta = record.metadata();
             writeln!(
                 file,

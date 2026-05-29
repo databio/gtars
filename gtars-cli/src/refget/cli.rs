@@ -29,7 +29,15 @@ pub fn create_refget_cli() -> Command {
                         .short('t')
                         .value_parser(clap::value_parser!(usize))
                         .default_value("0")
-                        .help("Worker threads for the digest+encode stage (0 = auto, 1 = serial)"),
+                        .help("Total worker threads for the digest+encode stage (0 = auto, 1 = serial)"),
+                )
+                .arg(
+                    Arg::new("file-jobs")
+                        .long("file-jobs")
+                        .short('j')
+                        .value_parser(clap::value_parser!(usize))
+                        .default_value("0")
+                        .help("Input FASTA files decoded concurrently, parallelizing gzip decode across files (0 = auto)"),
                 )
                 .arg(
                     Arg::new("raw")

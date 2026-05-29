@@ -2208,3 +2208,141 @@ fn test_parallel_determinism_across_runs() {
         prev = Some(rgsi);
     }
 }
+
+// =========================================================================
+// Multi-file (file-level) parallelism determinism tests
+// =========================================================================
+
+/// Collect every data/index file under a store dir EXCEPT the `rgstore.json`
+/// manifest (which embeds wall-clock timestamps). Keyed by path relative to
+/// `dir`, with bytes. Used to assert byte-identical stores.
+fn collect_store_data_files(
+    dir: &std::path::Path,
+) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        base: &std::path::Path,
+        cur: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(cur).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, out);
+            } else {
+                let rel = path.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                // rgstore.json embeds created_at/modified timestamps and the
+                // hashes of those files; skip it for byte-identity comparison.
+                if rel == "rgstore.json" {
+                    continue;
+                }
+                out.insert(rel, std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
+/// Write `content` gzip-compressed to `path`.
+fn write_gzipped(path: &std::path::Path, content: &str) {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let f = fs::File::create(path).unwrap();
+    let mut enc = GzEncoder::new(f, Compression::default());
+    enc.write_all(content.as_bytes()).unwrap();
+    enc.finish().unwrap();
+}
+
+/// Build an on-disk store from multiple FASTA files with the given thread /
+/// file-jobs settings. Returns the per-file collection digests in input order.
+fn build_multi(
+    dir: &std::path::Path,
+    files: &[std::path::PathBuf],
+    threads: usize,
+    file_jobs: usize,
+) -> Vec<String> {
+    let mut store = RefgetStore::on_disk(dir).unwrap();
+    store.set_quiet(true);
+    let opts = FastaImportOptions::new().threads(threads).file_jobs(file_jobs);
+    store
+        .add_sequence_collections_from_fastas(files, opts)
+        .unwrap()
+        .into_iter()
+        .map(|(m, _)| m.digest)
+        .collect()
+}
+
+#[test]
+fn test_multifile_parallel_equals_serial() {
+    let work = tempdir().unwrap();
+
+    // Three distinct collections. File "c" deliberately SHARES a sequence
+    // (the chr1 record) with file "a" to exercise cross-collection dedup.
+    let fa_a = work.path().join("a.fa");
+    let fa_b = work.path().join("b.fa");
+    let fa_c = work.path().join("c.fa");
+    fs::write(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n").unwrap();
+    fs::write(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n").unwrap();
+    // Shares the chr1 sequence content with file a (different collection).
+    fs::write(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n").unwrap();
+    let files = vec![fa_a.clone(), fa_b.clone(), fa_c.clone()];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digests_serial = build_multi(dir_serial.path(), &files, 1, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8, 4);
+
+    // Per-file collection digests identical and in the same (input) order.
+    assert_eq!(
+        digests_serial, digests_parallel,
+        "per-file collection digests must match in input order"
+    );
+
+    // The whole store (sans rgstore.json timestamp manifest) is byte-identical.
+    let serial = collect_store_data_files(dir_serial.path());
+    let parallel = collect_store_data_files(dir_parallel.path());
+    assert_eq!(
+        serial, parallel,
+        "multi-file parallel store must be byte-identical to serial store"
+    );
+
+    // Cross-collection dedup: the chr1 sequence is shared by file a and file c,
+    // so the total number of distinct .seq files must be 5 (chr1, chr2, chrX,
+    // chrM, chr9) -- NOT 6.
+    let seqs = collect_seq_files(dir_serial.path());
+    assert_eq!(seqs.len(), 5, "shared chr1 sequence must be stored once");
+}
+
+#[test]
+fn test_multifile_parallel_gzipped() {
+    let work = tempdir().unwrap();
+
+    // Same content as the plain-text case, but gzipped to exercise K concurrent
+    // MultiGzDecoders.
+    let fa_a = work.path().join("a.fa.gz");
+    let fa_b = work.path().join("b.fa.gz");
+    let fa_c = work.path().join("c.fa.gz");
+    write_gzipped(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n");
+    write_gzipped(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n");
+    write_gzipped(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n");
+    let files = vec![fa_a, fa_b, fa_c];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digests_serial = build_multi(dir_serial.path(), &files, 1, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8, 3);
+
+    assert_eq!(digests_serial, digests_parallel, "gzipped digests must match");
+
+    let serial = collect_store_data_files(dir_serial.path());
+    let parallel = collect_store_data_files(dir_parallel.path());
+    assert_eq!(
+        serial, parallel,
+        "gzipped multi-file parallel store must be byte-identical to serial"
+    );
+}

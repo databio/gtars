@@ -230,6 +230,17 @@ impl RefgetStore {
         self.inner.add_sequence_collection_from_fasta(file_path, opts)
     }
 
+    /// Add sequence collections from multiple FASTA files, decoding up to
+    /// `opts.file_jobs` files concurrently. Inserts in fixed input order so the
+    /// resulting store is byte-identical to a serial build.
+    pub fn add_sequence_collections_from_fastas(
+        &mut self,
+        files: &[std::path::PathBuf],
+        opts: FastaImportOptions<'_>,
+    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+        self.inner.add_sequence_collections_from_fastas(files, opts)
+    }
+
     /// Add a SequenceRecord directly to the store.
     pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
         self.inner.add_sequence_record(sr, force)

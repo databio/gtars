@@ -13,14 +13,16 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
 }
 
 fn run_build(matches: &ArgMatches) -> Result<()> {
-    let fastas: Vec<&String> = matches
+    let fastas: Vec<std::path::PathBuf> = matches
         .get_many::<String>("fasta")
         .expect("fasta is required")
+        .map(std::path::PathBuf::from)
         .collect();
     let output = matches
         .get_one::<String>("output")
         .expect("output is required");
     let threads = *matches.get_one::<usize>("threads").unwrap_or(&0);
+    let file_jobs = *matches.get_one::<usize>("file-jobs").unwrap_or(&0);
     let raw = matches.get_flag("raw");
     let force = matches.get_flag("force");
 
@@ -33,31 +35,33 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     }
 
     let mode = if raw { "Raw" } else { "Encoded" };
+    let fmt_auto = |n: usize| if n == 0 { "auto".to_string() } else { n.to_string() };
     eprintln!(
-        "Building RefgetStore at {} (mode={}, threads={})",
+        "Building RefgetStore at {} (mode={}, threads={}, file-jobs={})",
         output,
         mode,
-        if threads == 0 {
-            "auto".to_string()
-        } else {
-            threads.to_string()
-        }
+        fmt_auto(threads),
+        fmt_auto(file_jobs),
     );
 
     let mut total_bases: u64 = 0;
     let mut total_seqs: usize = 0;
     let start = Instant::now();
 
-    for fa in &fastas {
-        let opts = FastaImportOptions::new().force(force).threads(threads);
-        let (metadata, was_new) = store
-            .add_sequence_collection_from_fasta(fa.as_str(), opts)
-            .map_err(|e| anyhow::anyhow!("Failed to import {}: {}", fa, e))?;
+    let opts = FastaImportOptions::new()
+        .force(force)
+        .threads(threads)
+        .file_jobs(file_jobs);
+    let results = store
+        .add_sequence_collections_from_fastas(&fastas, opts)
+        .map_err(|e| anyhow::anyhow!("Failed to import FASTA files: {}", e))?;
+
+    for (fa, (metadata, was_new)) in fastas.iter().zip(results.iter()) {
         total_seqs += metadata.n_sequences;
         eprintln!(
             "  {} {}: {} ({} sequences)",
-            if was_new { "added" } else { "skipped" },
-            fa,
+            if *was_new { "added" } else { "skipped" },
+            fa.display(),
             metadata.digest,
             metadata.n_sequences
         );
@@ -80,16 +84,13 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         0.0
     };
     eprintln!(
-        "Done: {} sequences, {} bases in {:.3}s ({:.1} Mbase/s, threads={})",
+        "Done: {} sequences, {} bases in {:.3}s ({:.1} Mbase/s, threads={}, file-jobs={})",
         total_seqs,
         total_bases,
         elapsed,
         mbps,
-        if threads == 0 {
-            "auto".to_string()
-        } else {
-            threads.to_string()
-        }
+        fmt_auto(threads),
+        fmt_auto(file_jobs),
     );
 
     Ok(())
