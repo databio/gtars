@@ -35,7 +35,6 @@
 
 use std::collections::HashMap;
 
-use gtars_refget::digest::alphabet::lookup_alphabet;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 use thiserror::Error;
 
@@ -43,7 +42,9 @@ use crate::digest::DigestWriter;
 use crate::hgvs::ast::{Datum, Edit, HgvsVariant, LocationRange, Position, ReferenceType};
 use crate::hgvs::parser::parse;
 use crate::models::{Allele, AlleleState, SequenceLocation, SequenceReference};
-use crate::normalize::{EncodedSeq, NormalizeError, RefSeq, RefView, normalize_ref};
+use crate::normalize::{
+    NormalizeError, RefSeq, RefView, normalize_ref, ref_view_for as ref_view_for_inner,
+};
 use crate::provider::{ProviderError, TranscriptProvider};
 
 /// Errors raised by the HGVS-to-VRS bridge.
@@ -82,39 +83,16 @@ pub enum BridgeError {
 
 // ── Public API ──────────────────────────────────────────────────────────
 
-/// Build a [`RefView`] over a sequence's resident bytes, decoding on the fly.
-///
-/// No decoded cache, no mmap — the reference is read through the [`RefSeq`] base
-/// accessor. For an Encoded-mode store the bytes are 2-bit and decoded per base;
-/// for a Raw-mode store they are already decoded and used directly. The record
-/// must be resident (Full); callers with a `&mut RefgetStore` load it first via
-/// [`ensure_resident`].
+/// Build a [`RefView`] over a sequence's resident bytes, decoding on the fly
+/// (thin wrapper around [`crate::normalize::ref_view_for`] that maps any failure
+/// to [`BridgeError::UnknownChrom`] with the chromosome name for context).
 fn ref_view_for<'a>(
     store: &'a ReadonlyRefgetStore,
     raw_digest: &str,
     chrom_name: &str,
 ) -> Result<RefView<'a>, BridgeError> {
-    let rec = store
-        .get_sequence(raw_digest)
-        .map_err(|_| BridgeError::UnknownChrom(chrom_name.to_string()))?;
-    let meta = rec.metadata();
-    let bytes = rec
-        .sequence()
-        .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.to_string()))?;
-    // Decoded bytes are one per base (len == length); 2-bit-packed bytes are
-    // shorter. Length-based detection is robust to storage mode and the (legacy)
-    // mmap'd decoded-cache variant.
-    if bytes.len() == meta.length {
-        Ok(RefView::Decoded(bytes))
-    } else {
-        let alphabet = lookup_alphabet(&meta.alphabet);
-        Ok(RefView::Encoded(EncodedSeq {
-            bytes,
-            length: meta.length,
-            bits_per_symbol: alphabet.bits_per_symbol,
-            decoding_array: alphabet.decoding_array,
-        }))
-    }
+    ref_view_for_inner(store, raw_digest)
+        .map_err(|_| BridgeError::UnknownChrom(chrom_name.to_string()))
 }
 
 /// Ensure a sequence's bytes are resident (Full) without decoding. For on-disk

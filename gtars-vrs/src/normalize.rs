@@ -8,6 +8,9 @@
 //! 2-bit-encoded buffer that decodes bases on the fly ([`EncodedSeq`]), without the
 //! algorithm knowing the difference.
 
+use gtars_refget::digest::alphabet::lookup_alphabet;
+use gtars_refget::store::ReadonlyRefgetStore;
+
 /// Random-access, single-base view over a reference sequence.
 ///
 /// Implemented for decoded byte slices (`[u8]`) and for the bit-packed
@@ -120,6 +123,45 @@ impl RefSeq for RefView<'_> {
             RefView::Encoded(e) => e.extend_range(start, end, out),
         }
     }
+}
+
+/// Errors building a [`RefView`] from a refget store.
+#[derive(Debug, thiserror::Error)]
+pub enum RefViewError {
+    /// `get_sequence` failed for the digest (not in the store / lookup error).
+    #[error("sequence not found in store")]
+    NotFound,
+    /// The record exists but its bytes are not resident (not loaded).
+    #[error("sequence not resident in store")]
+    NotResident,
+}
+
+/// Build a [`RefView`] over a resident sequence's bytes.
+///
+/// Whether the bytes are already-decoded (`len == length`) or 2-bit-packed
+/// (shorter) is decided by length — robust to storage mode and to the legacy
+/// mmap'd decoded-cache variant. The record must be resident (Full); load it
+/// first for on-disk stores.
+pub fn ref_view_for<'a>(
+    store: &'a ReadonlyRefgetStore,
+    raw_digest: &str,
+) -> Result<RefView<'a>, RefViewError> {
+    let rec = store
+        .get_sequence(raw_digest)
+        .map_err(|_| RefViewError::NotFound)?;
+    let meta = rec.metadata();
+    let bytes = rec.sequence().ok_or(RefViewError::NotResident)?;
+    Ok(if bytes.len() == meta.length {
+        RefView::Decoded(bytes)
+    } else {
+        let alphabet = lookup_alphabet(&meta.alphabet);
+        RefView::Encoded(EncodedSeq {
+            bytes,
+            length: meta.length,
+            bits_per_symbol: alphabet.bits_per_symbol,
+            decoding_array: alphabet.decoding_array,
+        })
+    })
 }
 
 /// Result of normalizing an allele against a reference sequence.

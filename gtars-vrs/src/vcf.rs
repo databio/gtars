@@ -15,30 +15,12 @@ use gtars_refget::digest::alphabet::lookup_alphabet;
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
 
 use crate::digest::DigestWriter;
-use crate::normalize::{EncodedSeq, RefView, normalize_ref};
+use crate::normalize::{EncodedSeq, RefView, normalize_ref, ref_view_for as ref_view_for_inner};
 
-/// Build a [`RefView`] over a resident sequence's bytes, reading bases through the
-/// base accessor. Whether the bytes are already-decoded (Raw `Full`, or an mmap'd
-/// decoded record) or 2-bit-packed (Encoded `Full`) is decided by length: decoded
-/// bytes are one per base (`len == length`); packed bytes are shorter. This is
-/// robust to the storage mode and the (legacy) decoded-cache variant alike.
+/// Build a [`RefView`] over a resident sequence's bytes (thin `anyhow` wrapper
+/// around [`crate::normalize::ref_view_for`]).
 fn ref_view_for<'a>(store: &'a ReadonlyRefgetStore, raw_digest: &str) -> Result<RefView<'a>> {
-    let rec = store
-        .get_sequence(raw_digest)
-        .context("sequence not found in store")?;
-    let meta = rec.metadata();
-    let bytes = rec.sequence().context("sequence not resident in store")?;
-    Ok(if bytes.len() == meta.length {
-        RefView::Decoded(bytes)
-    } else {
-        let alphabet = lookup_alphabet(&meta.alphabet);
-        RefView::Encoded(EncodedSeq {
-            bytes,
-            length: meta.length,
-            bits_per_symbol: alphabet.bits_per_symbol,
-            decoding_array: alphabet.decoding_array,
-        })
-    })
+    ref_view_for_inner(store, raw_digest).map_err(|e| anyhow::anyhow!(e))
 }
 
 /// Result of computing a VRS identifier for a single VCF variant.
