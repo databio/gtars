@@ -48,6 +48,21 @@ fn open_encoded(fx: &Fixture) -> ReadonlyRefgetStore {
     store.into_readonly()
 }
 
+/// A Raw-mode (decoded, 1 byte/base) readonly view of the fixture store.
+///
+/// `set_encoding_mode` only re-encodes/decodes sequences that are already
+/// resident, so we load every needed sequence first and then `disable_encoding`
+/// to convert the in-memory bytes to Raw (1 byte/base, `bytes.len() == length`).
+fn open_raw(fx: &Fixture) -> ReadonlyRefgetStore {
+    let mut store = RefgetStore::open_local(&fx.store_dir).unwrap();
+    store.load_all_collections().unwrap();
+    for d in fx.name_to_digest.values() {
+        store.load_sequence(d.as_str()).unwrap();
+    }
+    store.disable_encoding(); // StorageMode::Raw: 1 byte/base, len == length
+    store.into_readonly()
+}
+
 /// Build a small disk-backed encoded store plus the name->digest map and VCF.
 fn build_fixture() -> Fixture {
     let dir = tempdir().unwrap();
@@ -164,6 +179,36 @@ fn parallel_encoded_matches_serial() {
             assert_eq!(s.pos, p.pos, "pos order mismatch at {i} ({threads} threads)");
             assert_eq!(s.ref_allele, p.ref_allele, "ref mismatch at {i} ({threads} threads)");
             assert_eq!(s.alt_allele, p.alt_allele, "alt mismatch at {i} ({threads} threads)");
+        }
+    }
+}
+
+#[test]
+fn vrs_ids_from_raw_mode_store_match_serial() {
+    // A store opened with encoding disabled (Raw, 1 byte/base) must yield the
+    // same VRS ids from the parallel path as from the serial reference path.
+    // This locks in the mode-aware reference-view selection in the parallel path:
+    // before the fix, the worker always built a 2-bit `EncodedSeq` regardless of
+    // store mode, so it would 2-bit-decode the already-decoded ASCII bytes of a
+    // Raw store and emit garbage bases / wrong VRS ids, diverging from serial.
+    let fx = build_fixture();
+    let n2d = &fx.name_to_digest;
+    let vcf = fx.vcf.as_str();
+
+    let serial_store = open_raw(&fx);
+    let serial = serial_results(&serial_store, n2d, vcf);
+    assert!(!serial.is_empty(), "fixture produced no results");
+
+    let raw_store = open_raw(&fx);
+    for &threads in &[1usize, 2, 4, 8] {
+        let par = parallel_results(&raw_store, n2d, vcf, threads);
+        assert_eq!(par.len(), serial.len(), "count mismatch at {threads} thread(s)");
+        for (i, (s, p)) in serial.iter().zip(par.iter()).enumerate() {
+            assert_eq!(
+                s.vrs_id, p.vrs_id,
+                "VRS id mismatch at record {i} with {threads} thread(s): serial={} parallel={}",
+                s.vrs_id, p.vrs_id
+            );
         }
     }
 }
