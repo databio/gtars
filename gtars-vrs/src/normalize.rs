@@ -151,16 +151,17 @@ pub fn ref_view_for<'a>(
         .map_err(|_| RefViewError::NotFound)?;
     let meta = rec.metadata();
     let bytes = rec.sequence().ok_or(RefViewError::NotResident)?;
-    Ok(if bytes.len() == meta.length {
+    let alphabet = lookup_alphabet(&meta.alphabet);
+    let bps = alphabet.bits_per_symbol;
+    let expected_encoded = meta.length.saturating_mul(bps).div_ceil(8);
+    // ASCII (8 bps) is always raw. Otherwise the packed size is authoritative:
+    // a buffer matching expected_encoded is bit-packed even when that equals
+    // `length` for very short non-2-bit sequences (old `len==length` misread those).
+    let is_raw = bps == 8 || (bytes.len() == meta.length && bytes.len() != expected_encoded);
+    Ok(if is_raw {
         RefView::Decoded(bytes)
     } else {
-        let alphabet = lookup_alphabet(&meta.alphabet);
-        RefView::Encoded(EncodedSeq {
-            bytes,
-            length: meta.length,
-            bits_per_symbol: alphabet.bits_per_symbol,
-            decoding_array: alphabet.decoding_array,
-        })
+        RefView::Encoded(EncodedSeq { bytes, length: meta.length, bits_per_symbol: bps, decoding_array: alphabet.decoding_array })
     })
 }
 

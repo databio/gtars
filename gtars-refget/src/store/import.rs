@@ -500,14 +500,16 @@ fn build_collection_from_cached_metadata(
         seqcol.metadata.compute_ancillary_digests(&seqcol.sequences);
     }
 
-    let seqmeta_hashmap: HashMap<String, SequenceMetadata> = seqcol
-        .sequences
-        .iter()
-        .map(|r| {
-            let meta = r.metadata().clone();
-            (meta.name.clone(), meta)
-        })
-        .collect();
+    let mut seqmeta_hashmap: HashMap<String, SequenceMetadata> =
+        HashMap::with_capacity(seqcol.sequences.len());
+    for r in &seqcol.sequences {
+        let meta = r.metadata().clone();
+        if seqmeta_hashmap.insert(meta.name.clone(), meta).is_some() {
+            return Err(BuildError::Other(anyhow!(
+                "RGSI cache has duplicate sequence names; rebuilding from FASTA"
+            )));
+        }
+    }
 
     let mode = cfg.mode;
     let namespaces: Vec<String> = cfg.namespaces.iter().map(|s| s.to_string()).collect();
@@ -643,6 +645,21 @@ impl ReadonlyRefgetStore {
     /// build regardless of build/arrival order.
     ///
     /// Returns per-file `(collection_metadata, was_new)` results in input order.
+    ///
+    /// ## Error handling / non-transactional semantics
+    ///
+    /// This function is NOT fully transactional. On a build or writer error, any
+    /// sequences already emitted (as `InsertMsg::Seq`) before the failure may have
+    /// been written to disk (as `.seq` files) and inserted into the in-memory
+    /// `sequence_store`, but the corresponding collection will NOT be in
+    /// `self.collections` (it never received an `End`). These are orphan sequences:
+    /// referenced by no surviving collection.
+    ///
+    /// On error this function calls [`Self::remove_orphan_seq_files`] which
+    /// performs a best-effort cleanup: it removes any sequence from `sequence_store`
+    /// (and its `.seq` file) that is not referenced by any surviving collection.
+    /// The in-memory store is left consistent (no dangling references), but if
+    /// you require a fully clean store on error, discard the store and rebuild.
     pub fn add_sequence_collections_from_fastas(
         &mut self,
         files: &[PathBuf],
@@ -713,7 +730,7 @@ impl ReadonlyRefgetStore {
         let write_err: Mutex<Option<anyhow::Error>> = Mutex::new(None);
         let write_err_ref = &write_err;
 
-        std::thread::scope(|scope| -> Result<()> {
+        let scope_result = std::thread::scope(|scope| -> Result<()> {
             // Spawn the writer pool. Each writer drains `WriteJob`s and writes
             // the `.seq` bytes; the first error is stashed and stops the writer.
             let mut writer_handles = Vec::with_capacity(jobs);
@@ -800,6 +817,9 @@ impl ReadonlyRefgetStore {
             // names are always correct via the per-collection name_lookup.)
             let mut seq_name_owner: HashMap<DigestKey, usize> = HashMap::new();
 
+            // Move ownership of out_rx into the inserter block so we can
+            // explicitly drop it after the loop (before joining the feeder).
+            let out_rx = out_rx;
             for msg in out_rx.iter() {
                 match msg {
                     InsertMsg::Begin { file_idx } => {
@@ -897,7 +917,7 @@ impl ReadonlyRefgetStore {
                         let scratch = in_flight
                             .remove(&file_idx)
                             .expect("End before Begin");
-                        let (meta, was_new) = self.finalize_collection(
+                        match self.finalize_collection(
                             metadata,
                             stub_records,
                             scratch,
@@ -905,11 +925,22 @@ impl ReadonlyRefgetStore {
                             &source_path,
                             seq_count,
                             opts.force,
-                        )?;
-                        results[file_idx] = Some((meta, was_new));
+                        ) {
+                            Ok((meta, was_new)) => results[file_idx] = Some((meta, was_new)),
+                            Err(e) => {
+                                let mut slot = build_err_ref.lock().unwrap();
+                                if slot.is_none() { *slot = Some(e); }
+                                break;
+                            }
+                        }
                     }
                 }
             }
+            // Disconnect the cross-file channel BEFORE joining: if we exited the
+            // loop early (writer hang-up `break`, or finalize error `break`),
+            // builders may be blocked in `out_tx.send()`. Dropping the receiver
+            // makes those sends return Err so builders break and the scope can join.
+            drop(out_rx);
 
             feeder.join().map_err(|e| anyhow!("Feeder thread panicked: {:?}", e))?;
 
@@ -926,16 +957,29 @@ impl ReadonlyRefgetStore {
                     .map_err(|e| anyhow!("Writer thread panicked: {:?}", e))?;
             }
             Ok(())
-        })?;
+        });
+
+        // Helper: clean up orphan sequences on any failure path below.
+        let cleanup_on_err = |store: &mut ReadonlyRefgetStore| {
+            store.remove_orphan_seq_files();
+        };
+
+        // Surface scope errors (e.g. feeder/writer panics), then builder/writer errors.
+        if let Err(e) = scope_result {
+            cleanup_on_err(self);
+            return Err(e);
+        }
 
         // Propagate the first builder error, if any.
         if let Some(e) = build_err.into_inner().unwrap() {
+            cleanup_on_err(self);
             return Err(e);
         }
 
         // Propagate the first writer error, if any (every `.seq` must be on disk
         // before the index files reference it).
         if let Some(e) = write_err.into_inner().unwrap() {
+            cleanup_on_err(self);
             return Err(e);
         }
 
@@ -1003,12 +1047,16 @@ impl ReadonlyRefgetStore {
         let insert_start = Instant::now();
 
         // Write the RGSI cache for next time (only for raw-FASTA builds).
+        // Empty collections are never cached (a delete at the read site is
+        // defensive only — empty caches are never written here).
         if let Some(rgsi_path) = &rgsi_cache_path {
-            let seqcol_for_cache = SequenceCollection {
-                metadata: metadata.clone(),
-                sequences: stub_records.clone(),
-            };
-            let _ = seqcol_for_cache.write_collection_rgsi(rgsi_path);
+            if !stub_records.is_empty() {
+                let seqcol_for_cache = SequenceCollection {
+                    metadata: metadata.clone(),
+                    sequences: stub_records.clone(),
+                };
+                let _ = seqcol_for_cache.write_collection_rgsi(rgsi_path);
+            }
         }
 
         // Register the collection record (stub sequences only).

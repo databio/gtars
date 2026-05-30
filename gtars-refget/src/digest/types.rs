@@ -167,24 +167,13 @@ impl SequenceRecord {
             return String::from_utf8(data.to_vec()).ok();
         }
 
-        // Try to detect if data is raw or encoded
-        // Heuristic: for encoded data, the size should be approximately length * bits_per_symbol / 8
-        // For raw data, the size should be approximately equal to length
         let alphabet = lookup_alphabet(&metadata.alphabet);
-
-        // If data size matches the expected length (not the encoded size), it's probably raw
-        if data.len() == metadata.length {
-            // Try to decode as UTF-8
-            if let Ok(raw_string) = String::from_utf8(data.to_vec()) {
-                // Data appears to be raw UTF-8
-                return Some(raw_string);
-            }
+        let bps = alphabet.bits_per_symbol;
+        let expected_encoded = metadata.length.saturating_mul(bps).div_ceil(8);
+        if data.len() == metadata.length && data.len() != expected_encoded {
+            if let Ok(raw_string) = String::from_utf8(data.to_vec()) { return Some(raw_string); }
         }
-
-        // Data is probably encoded (size matches expected encoded size), try to decode it
         let decoded_bytes = decode_substring_from_bytes(&data[..], 0, metadata.length, alphabet);
-
-        // Convert to string
         String::from_utf8(decoded_bytes).ok()
     }
 }

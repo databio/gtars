@@ -443,10 +443,16 @@ impl ReadonlyRefgetStore {
                         .context("seqdata_path_template/local_path not set")?;
                     let stub = SequenceRecord::Stub(metadata);
                     self.sequence_store.insert(key, stub);
-                    // `sequence` is `Arc<Vec<u8>>` (shared-ownership model from dev).
-                    // This record was just constructed with a single owner, so
-                    // try_unwrap reclaims the buffer with no copy; the clone
-                    // fallback only triggers in the (here impossible) shared case.
+                    // INVARIANT: strong_count == 1 here — the Arc was just
+                    // constructed in the import pipeline (Arc::new in import.rs)
+                    // and no other owner exists at the point of this call, so
+                    // try_unwrap always succeeds and reclaims the buffer with zero
+                    // copy. The clone fallback is dead code / future-proofing only.
+                    debug_assert_eq!(
+                        std::sync::Arc::strong_count(&sequence),
+                        1,
+                        "sequence Arc must be uniquely owned for zero-copy reclaim"
+                    );
                     let bytes = std::sync::Arc::try_unwrap(sequence)
                         .unwrap_or_else(|arc| (*arc).clone());
                     return Ok(Some((full_path, bytes)));
@@ -699,6 +705,65 @@ impl ReadonlyRefgetStore {
         }
 
         Ok(true)
+    }
+
+    /// Remove any sequence from `sequence_store` (and its `.seq` file on disk)
+    /// that is not referenced by any entry in `self.collections`.
+    ///
+    /// Used as a best-effort cleanup after a failed import:
+    /// [`add_sequence_collections_from_fastas`](Self::add_sequence_collections_from_fastas)
+    /// may have inserted sequences for a partially-built collection that never
+    /// received an `End` message (and was therefore never added to
+    /// `self.collections`).  Those sequences are orphans — they have no
+    /// owning collection — and this method removes them so the store stays
+    /// internally consistent. The operation is O(sequences + collections).
+    ///
+    /// Sequences shared with a successfully-finalized collection are preserved.
+    pub(crate) fn remove_orphan_seq_files(&mut self) {
+        // Build the set of all sequence digest keys that are referenced by at
+        // least one surviving (finalized) collection.
+        let mut referenced: std::collections::HashSet<DigestKey> =
+            std::collections::HashSet::new();
+        for name_map in self.name_lookup.values() {
+            for &seq_key in name_map.values() {
+                referenced.insert(seq_key);
+            }
+        }
+
+        // Collect the orphan keys (present in sequence_store but not referenced).
+        let orphans: Vec<DigestKey> = self
+            .sequence_store
+            .keys()
+            .filter(|k| !referenced.contains(*k))
+            .copied()
+            .collect();
+
+        if orphans.is_empty() {
+            return;
+        }
+
+        // Remove from in-memory structures.
+        for key in &orphans {
+            self.sequence_store.remove(key);
+            self.md5_lookup.retain(|_, v| v != key);
+        }
+
+        // Best-effort remove on-disk `.seq` files.
+        if self.persist_to_disk {
+            if let (Some(local_path), Some(template)) =
+                (&self.local_path, &self.seqdata_path_template)
+            {
+                for key in &orphans {
+                    let digest_str = key_to_digest_string(key);
+                    let rel = Self::expand_template(&digest_str, template);
+                    let full = local_path.join(&rel);
+                    let _ = fs::remove_file(&full);
+                    if let Some(parent) = full.parent() {
+                        let _ = fs::remove_dir(parent); // ignore if non-empty
+                    }
+                }
+            }
+        }
     }
 
     // =========================================================================
