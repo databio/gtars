@@ -152,39 +152,27 @@ pub fn decode_substring_from_bytes(
     end: usize,
     alphabet: &Alphabet,
 ) -> Vec<u8> {
-    let mut decoded = Vec::with_capacity(end - start);
-    for i in start..end {
-        let bit_offset = i * alphabet.bits_per_symbol;
-        let mut code = 0u8;
-
-        for j in 0..alphabet.bits_per_symbol {
-            let bit_pos = bit_offset + j;
-            let byte_index = bit_pos / 8;
-            let bit_in_byte = 7 - (bit_pos % 8); // MSB0
-
-            let bit = if byte_index < encoded_bytes.len() {
-                (encoded_bytes[byte_index] >> bit_in_byte) & 1
-            } else {
-                0
-            };
-
-            code = (code << 1) | bit;
-        }
-        decoded.push(alphabet.decoding_array[code as usize]);
-    }
-    decoded
+    decode_substring_from_bytes_at_offset(encoded_bytes, 0, start, end, alphabet)
 }
 
-/// Decodes bases `[start, end)` from a partial encoded buffer.
+/// Naive, bit-by-bit reference decoder. Kept private for differential testing.
 ///
-/// `bytes` contains encoded data starting at `byte_offset` in the full encoded
-/// file (i.e. `bytes[0]` corresponds to byte `byte_offset` of the complete
-/// encoding). The function subtracts `byte_offset` from every computed byte
-/// index so the bit arithmetic stays correct against the partial slice.
-///
-/// Use [`byte_range_for_bases`] with `alphabet.bits_per_symbol` to compute the
-/// `(byte_offset, _)` range before fetching the partial buffer.
-pub fn decode_substring_from_bytes_at_offset(
+/// This is the original implementation; the fast paths above must produce
+/// byte-identical output to this function for all inputs.
+#[cfg_attr(not(test), allow(dead_code))]
+fn decode_substring_naive(
+    encoded_bytes: &[u8],
+    start: usize,
+    end: usize,
+    alphabet: &Alphabet,
+) -> Vec<u8> {
+    decode_substring_naive_at_offset(encoded_bytes, 0, start, end, alphabet)
+}
+
+/// Naive, bit-by-bit reference decoder honoring a `byte_offset`. Kept private
+/// for differential testing against the fast accumulator path.
+#[cfg_attr(not(test), allow(dead_code))]
+fn decode_substring_naive_at_offset(
     bytes: &[u8],
     byte_offset: usize,
     start: usize,
@@ -214,32 +202,284 @@ pub fn decode_substring_from_bytes_at_offset(
     decoded
 }
 
+/// Decodes bases `[start, end)` from a partial encoded buffer.
+///
+/// `bytes` contains encoded data starting at `byte_offset` in the full encoded
+/// file (i.e. `bytes[0]` corresponds to byte `byte_offset` of the complete
+/// encoding). The function subtracts `byte_offset` from every computed byte
+/// index so the bit arithmetic stays correct against the partial slice.
+///
+/// Use [`byte_range_for_bases`] with `alphabet.bits_per_symbol` to compute the
+/// `(byte_offset, _)` range before fetching the partial buffer.
+pub fn decode_substring_from_bytes_at_offset(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    alphabet: &Alphabet,
+) -> Vec<u8> {
+    if end <= start {
+        return Vec::new();
+    }
+    let bits = alphabet.bits_per_symbol;
+    let decoding_array = alphabet.decoding_array;
+
+    // Specialized, byte-aligned 2-bit fast path: exactly 4 bases per byte.
+    if bits == 2 {
+        return decode_2bit(bytes, byte_offset, start, end, decoding_array);
+    }
+    if bits == 3 {
+        return decode_3bit(bytes, byte_offset, start, end, decoding_array);
+    }
+
+    // General rolling-accumulator path for any bit width (covers anything else).
+    // Produces byte-identical output to the naive decoder, including zero-fill
+    // semantics past the end / before byte_offset.
+    decode_rolling(bytes, byte_offset, start, end, bits, decoding_array)
+}
+
+/// Fetch the encoded byte for absolute byte index `abs_idx`, honoring the
+/// `byte_offset` window and zero-filling anything outside `[byte_offset, byte_offset+len)`.
+#[inline(always)]
+fn fetch_byte(bytes: &[u8], byte_offset: usize, abs_idx: usize) -> u8 {
+    if abs_idx >= byte_offset {
+        let rel = abs_idx - byte_offset;
+        if rel < bytes.len() {
+            return bytes[rel];
+        }
+    }
+    0
+}
+
+/// Specialized 2-bit decoder. 2 bits per symbol is byte-aligned (4 bases/byte),
+/// so the aligned middle is a straight table lookup; partial head/tail bases are
+/// handled with the rolling accumulator.
+fn decode_2bit(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    decoding_array: &[u8; 256],
+) -> Vec<u8> {
+    // Precompute byte -> 4 decoded symbols (MSB0: base 0 is bits 7-6, etc).
+    let mut table = [[0u8; 4]; 256];
+    for (b, row) in table.iter_mut().enumerate() {
+        for (k, slot) in row.iter_mut().enumerate() {
+            let code = (b >> (6 - 2 * k)) & 0b11;
+            *slot = decoding_array[code];
+        }
+    }
+
+    let mut decoded = Vec::with_capacity(end - start);
+
+    let mut i = start;
+    // Head: align `i` up to a multiple of 4 (the next byte boundary).
+    let aligned_start = i.div_ceil(4) * 4;
+    let head_end = aligned_start.min(end);
+    while i < head_end {
+        let code = read_code(bytes, byte_offset, i * 2, 2);
+        decoded.push(decoding_array[code as usize]);
+        i += 1;
+    }
+
+    // Middle: whole bytes, 4 bases each, via the table.
+    let aligned_end = end - (end % 4);
+    while i < aligned_end {
+        let abs_byte = (i * 2) / 8; // == i/4
+        let byte = fetch_byte(bytes, byte_offset, abs_byte);
+        decoded.extend_from_slice(&table[byte as usize]);
+        i += 4;
+    }
+
+    // Tail: leftover bases.
+    while i < end {
+        let code = read_code(bytes, byte_offset, i * 2, 2);
+        decoded.push(decoding_array[code as usize]);
+        i += 1;
+    }
+
+    decoded
+}
+
+/// Specialized 3-bit decoder. 3 bits/symbol is unaligned, but lcm(3, 8) = 24
+/// bits = 3 bytes = exactly 8 symbols, so the aligned middle (base indices that
+/// are multiples of 8) decodes 8 symbols per 3 bytes with no inner refill loop.
+/// Head/tail bases and any byte not fully in-bounds fall back to the scalar path.
+fn decode_3bit(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    decoding_array: &[u8; 256],
+) -> Vec<u8> {
+    let mut decoded = Vec::with_capacity(end - start);
+
+    let mut i = start;
+
+    // Head: advance to the next base index that is a multiple of 8 (aligned to a
+    // 3-byte boundary), using the scalar reader.
+    let aligned_start = i.div_ceil(8) * 8;
+    let head_end = aligned_start.min(end);
+    while i < head_end {
+        let code = read_code(bytes, byte_offset, i * 3, 3);
+        decoded.push(decoding_array[code as usize]);
+        i += 1;
+    }
+
+    // Middle: blocks of 8 symbols from 3 bytes. Only run while all 3 bytes are
+    // fully in-bounds (abs byte index in [byte_offset, byte_offset+len)).
+    let aligned_end = end - (end % 8);
+    while i < aligned_end {
+        let abs_byte = (i * 3) / 8; // == i/8*3
+        // Need abs_byte, abs_byte+1, abs_byte+2 all in window.
+        if abs_byte < byte_offset || abs_byte + 3 > byte_offset + bytes.len() {
+            break;
+        }
+        let rel = abs_byte - byte_offset;
+        let w = ((bytes[rel] as u32) << 16)
+            | ((bytes[rel + 1] as u32) << 8)
+            | (bytes[rel + 2] as u32);
+        // Extract 8 codes of 3 bits, MSB first (bits 23..21, 20..18, ...).
+        decoded.push(decoding_array[((w >> 21) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 18) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 15) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 12) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 9) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 6) & 0b111) as usize]);
+        decoded.push(decoding_array[((w >> 3) & 0b111) as usize]);
+        decoded.push(decoding_array[(w & 0b111) as usize]);
+        i += 8;
+    }
+
+    // Tail (and any aligned blocks skipped because they touched the buffer edge):
+    // scalar reader with zero-fill.
+    while i < end {
+        let code = read_code(bytes, byte_offset, i * 3, 3);
+        decoded.push(decoding_array[code as usize]);
+        i += 1;
+    }
+
+    decoded
+}
+
+/// Read a single `bits`-wide code starting at absolute bit position `bit_offset`
+/// (MSB0), zero-filling bits outside the buffer window.
+#[inline(always)]
+fn read_code(bytes: &[u8], byte_offset: usize, bit_offset: usize, bits: usize) -> u8 {
+    let mut code = 0u8;
+    for j in 0..bits {
+        let bit_pos = bit_offset + j;
+        let abs_byte = bit_pos / 8;
+        let bit_in_byte = 7 - (bit_pos % 8);
+        let byte = fetch_byte(bytes, byte_offset, abs_byte);
+        let bit = (byte >> bit_in_byte) & 1;
+        code = (code << 1) | bit;
+    }
+    code
+}
+
+/// General rolling bit-accumulator decoder for arbitrary bit widths.
+///
+/// Maintains a `u64` window fed one byte at a time (MSB-first). Symbols are
+/// extracted from the top of the window with shifts/masks, avoiding the
+/// per-bit `/8` and `%8` of the naive path. Bits past the buffer window are
+/// zero (we feed 0 bytes), matching the naive zero-fill semantics exactly.
+fn decode_rolling(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    bits: usize,
+    decoding_array: &[u8; 256],
+) -> Vec<u8> {
+    let n = end - start;
+    let mut decoded = Vec::with_capacity(n);
+
+    let first_bit = start * bits;
+    // Absolute byte index we will load next into the accumulator.
+    let mut next_byte = first_bit / 8;
+    // How many bits at the front of that first byte we must discard.
+    let skip_bits = first_bit % 8;
+
+    let mut acc: u64 = 0;
+    let mut acc_bits: usize = 0;
+
+    // Prime the accumulator and drop the leading skip bits.
+    while acc_bits < skip_bits {
+        acc = (acc << 8) | fetch_byte(bytes, byte_offset, next_byte) as u64;
+        next_byte += 1;
+        acc_bits += 8;
+    }
+    acc_bits -= skip_bits;
+    // Mask off the discarded high bits so only `acc_bits` low bits are valid.
+    acc &= (1u64 << acc_bits) - 1;
+
+    let mask = (1u64 << bits) - 1;
+
+    // The bytes available directly from the slice are at absolute indices
+    // `[byte_offset, byte_offset + bytes.len())`. While `next_byte` is in that
+    // window we can index the slice directly (no zero-fill branch). We need at
+    // least one full byte of headroom before refilling, so guard accordingly.
+    //
+    // Process the bulk where every refill byte is guaranteed in-bounds, then
+    // fall back to the branchy path for the tail that touches the zero-fill
+    // region (or the very edges).
+    let slice_end_abs = byte_offset + bytes.len(); // exclusive, absolute
+
+    // How many output symbols can be produced while only consuming bytes that
+    // are strictly in-bounds? Each symbol needs `bits` bits; we may refill up to
+    // (bits) extra bits worth (<= 1 byte) per symbol. Stay conservative: stop the
+    // fast loop a few symbols before the slice runs out so the slow path handles
+    // the boundary precisely.
+    let mut produced = 0usize;
+    if next_byte >= byte_offset && next_byte < slice_end_abs {
+        // Largest number of symbols we can emit while next_byte stays < slice_end_abs.
+        // After emitting k symbols we've consumed at most ceil((skip_bits=0 here is
+        // already handled)+k*bits)/8 bytes beyond the primed state. Compute the bit
+        // budget available from in-bounds bytes and derive a safe symbol count.
+        let inbounds_bits = (slice_end_abs - next_byte) * 8 + acc_bits;
+        // Reserve nothing extra: a symbol is safe iff after consuming it we never
+        // had to refill from out-of-bounds. We can emit floor(inbounds_bits / bits)
+        // symbols safely.
+        let fast_syms = (inbounds_bits / bits).min(n);
+
+        while produced < fast_syms {
+            while acc_bits < bits {
+                // SAFETY/CORRECTNESS: next_byte < slice_end_abs here because the
+                // fast_syms budget guarantees enough in-bounds bits remain.
+                let rel = next_byte - byte_offset;
+                acc = (acc << 8) | bytes[rel] as u64;
+                next_byte += 1;
+                acc_bits += 8;
+            }
+            acc_bits -= bits;
+            let code = ((acc >> acc_bits) & mask) as usize;
+            decoded.push(decoding_array[code]);
+            produced += 1;
+        }
+    }
+
+    // Slow tail: edges and the zero-fill region beyond the buffer.
+    for _ in produced..n {
+        while acc_bits < bits {
+            acc = (acc << 8) | fetch_byte(bytes, byte_offset, next_byte) as u64;
+            next_byte += 1;
+            acc_bits += 8;
+        }
+        acc_bits -= bits;
+        let code = ((acc >> acc_bits) & mask) as usize;
+        decoded.push(decoding_array[code]);
+    }
+
+    decoded
+}
+
 pub fn decode_string_from_bytes(
     encoded_bytes: &[u8],
     seq_len: usize,
     alphabet: &Alphabet,
 ) -> Vec<u8> {
-    let mut decoded = Vec::with_capacity(seq_len);
-    for i in 0..seq_len {
-        let bit_offset = i * alphabet.bits_per_symbol;
-        let mut code = 0u8;
-
-        for j in 0..alphabet.bits_per_symbol {
-            let bit_pos = bit_offset + j;
-            let byte_index = bit_pos / 8;
-            let bit_in_byte = 7 - (bit_pos % 8); // MSB0
-
-            let bit = if byte_index < encoded_bytes.len() {
-                (encoded_bytes[byte_index] >> bit_in_byte) & 1
-            } else {
-                0
-            };
-
-            code = (code << 1) | bit;
-        }
-        decoded.push(alphabet.decoding_array[code as usize]);
-    }
-    decoded
+    decode_substring_from_bytes(encoded_bytes, 0, seq_len, alphabet)
 }
 
 #[cfg(test)]
@@ -365,5 +605,112 @@ mod tests {
         check_offset_roundtrip(sequence, alphabet, 3, 6);
         check_offset_roundtrip(sequence, alphabet, 5, 11);
         check_offset_roundtrip(sequence, alphabet, 2, 16);
+    }
+
+    /// Tiny deterministic xorshift64 RNG so the differential test is reproducible
+    /// without pulling in an external rng crate.
+    struct Rng(u64);
+    impl Rng {
+        fn new(seed: u64) -> Self {
+            Rng(seed | 1)
+        }
+        fn next_u64(&mut self) -> u64 {
+            let mut x = self.0;
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            self.0 = x;
+            x
+        }
+        fn below(&mut self, bound: usize) -> usize {
+            (self.next_u64() % bound as u64) as usize
+        }
+    }
+
+    /// Differential test: the fast decoders must be byte-identical to the naive
+    /// reference for both 2-bit (byte-aligned) and 3-bit (unaligned) alphabets,
+    /// across many random (start, end) and byte_offset combinations, INCLUDING
+    /// ranges that run at and beyond the buffer's base count (zero-fill region).
+    #[test]
+    fn test_fast_decoder_matches_naive_differential() {
+        let mut rng = Rng::new(0xDEADBEEF_CAFEF00D);
+
+        for &alphabet in &[
+            &alphabet::DNA_2BIT_ALPHABET,
+            &alphabet::DNA_3BIT_ALPHABET,
+            &alphabet::DNA_IUPAC_ALPHABET, // 4-bit, also unaligned in spots
+            &alphabet::PROTEIN_ALPHABET,   // 5-bit
+        ] {
+            let bits = alphabet.bits_per_symbol;
+
+            // Try several buffer sizes, including tiny and empty-ish ones.
+            for &n_bases in &[0usize, 1, 3, 4, 5, 7, 8, 17, 64, 257, 1000] {
+                // Build a random encoded buffer of n_bases symbols by emitting
+                // random raw bytes and encoding them. We need the raw bytes to be
+                // valid symbols for the alphabet so encode/decode is meaningful,
+                // but for the differential test we only compare fast vs naive, so
+                // we can also just fabricate random encoded bytes directly.
+                let n_bytes = (n_bases * bits).div_ceil(8);
+                let mut encoded = vec![0u8; n_bytes];
+                for b in encoded.iter_mut() {
+                    *b = rng.next_u64() as u8;
+                }
+
+                // Max base count representable; allow start/end to exceed it to
+                // exercise zero-fill.
+                let max_base = n_bases + 16;
+
+                for _ in 0..200 {
+                    let a = rng.below(max_base + 1);
+                    let b = rng.below(max_base + 1);
+                    let (start, end) = if a <= b { (a, b) } else { (b, a) };
+
+                    // Full-buffer variant.
+                    let fast = decode_substring_from_bytes(&encoded, start, end, alphabet);
+                    let naive = decode_substring_naive(&encoded, start, end, alphabet);
+                    assert_eq!(
+                        fast, naive,
+                        "full decode mismatch: bits={bits} n_bases={n_bases} start={start} end={end}"
+                    );
+
+                    // _at_offset variant: choose a byte_offset and pass the
+                    // corresponding partial slice. byte_offset can be anywhere
+                    // in [0, n_bytes]; the slice is the remaining bytes.
+                    let byte_offset = if n_bytes == 0 {
+                        0
+                    } else {
+                        rng.below(n_bytes + 1)
+                    };
+                    // Also test partial slices that don't reach the end.
+                    let slice_end = if byte_offset >= n_bytes {
+                        byte_offset
+                    } else {
+                        byte_offset + rng.below(n_bytes - byte_offset + 1)
+                    };
+                    let partial = &encoded[byte_offset.min(n_bytes)..slice_end.min(n_bytes)];
+
+                    let fast_off = decode_substring_from_bytes_at_offset(
+                        partial, byte_offset, start, end, alphabet,
+                    );
+                    let naive_off = decode_substring_naive_at_offset(
+                        partial, byte_offset, start, end, alphabet,
+                    );
+                    assert_eq!(
+                        fast_off, naive_off,
+                        "at_offset decode mismatch: bits={bits} n_bases={n_bases} \
+                         byte_offset={byte_offset} slice_len={} start={start} end={end}",
+                        partial.len()
+                    );
+                }
+
+                // decode_string_from_bytes must also match the naive whole-seq decode.
+                let fast_full = decode_string_from_bytes(&encoded, n_bases, alphabet);
+                let naive_full = decode_substring_naive(&encoded, 0, n_bases, alphabet);
+                assert_eq!(
+                    fast_full, naive_full,
+                    "decode_string mismatch: bits={bits} n_bases={n_bases}"
+                );
+            }
+        }
     }
 }
