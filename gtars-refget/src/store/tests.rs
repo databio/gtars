@@ -2634,6 +2634,113 @@ fn test_stream_sequence_local_substring() {
     }
 }
 
+// =========================================================================
+// Partial-read fd-cache eviction test
+// =========================================================================
+
+/// Tiny deterministic xorshift RNG so the test is reproducible without adding
+/// a `rand` dependency.
+struct XorShift(u64);
+impl XorShift {
+    fn new(seed: u64) -> Self {
+        XorShift(seed | 1)
+    }
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn range(&mut self, n: usize) -> usize {
+        (self.next_u64() % n as u64) as usize
+    }
+}
+
+/// Build a FASTA with several distinct, multi-base sequences so byte windows
+/// are non-trivial and span multiple packed bytes in Encoded mode.
+fn multi_seq_fasta() -> String {
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut out = String::new();
+    for (i, len) in [400usize, 333, 512, 271, 600].iter().enumerate() {
+        out.push_str(&format!(">seq{}\n", i));
+        let mut s = String::with_capacity(*len);
+        // deterministic but distinct per-sequence content
+        for j in 0..*len {
+            s.push(bases[(i * 7 + j * 3 + (j / 5)) % 4] as char);
+        }
+        out.push_str(&s);
+        out.push('\n');
+    }
+    out
+}
+
+/// With a TINY fd-cache cap (2) and reads interleaved across >2 sequences,
+/// every partial-read result must be byte-identical to the resident decode
+/// path. Interleaving across 5 sequences with cap 2 forces constant
+/// eviction+reopen, exercising the LRU close/reopen logic. Run for both
+/// Encoded and Raw storage modes.
+fn run_fd_cache_eviction_for_mode(raw: bool) {
+    let temp_dir = tempdir().unwrap();
+    let fasta_content = multi_seq_fasta();
+    let fasta = temp_dir.path().join("multi.fa");
+    fs::write(&fasta, &fasta_content).unwrap();
+    let store_path = temp_dir.path().join("store");
+
+    // Build the store on disk.
+    let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+    if raw {
+        builder.disable_encoding();
+    }
+    let (coll_meta, _) = builder
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let coll_digest = coll_meta.digest.clone();
+    drop(builder);
+
+    // Reference: a resident store with everything loaded (whole-sequence decode).
+    let mut resident = RefgetStore::open_local(&store_path).unwrap();
+    resident.set_quiet(true);
+    resident.load_all_collections().unwrap();
+    resident.load_all_sequences().unwrap();
+
+    // Subject: a stub-only store driving the partial-read path with cap=2.
+    let mut partial = RefgetStore::open_local(&store_path).unwrap();
+    partial.set_quiet(true);
+    partial.load_all_collections().unwrap();
+    partial.set_seq_fd_cache_cap_for_test(2);
+
+    // Collect (digest, length) for each of the >2 sequences in the collection.
+    let names: Vec<String> = (0..5).map(|i| format!("seq{}", i)).collect();
+    let mut seqs: Vec<(String, usize)> = Vec::new();
+    for name in &names {
+        let rec = resident.get_sequence_by_name(&coll_digest, name).unwrap();
+        seqs.push((rec.metadata().sha512t24u.clone(), rec.metadata().length));
+    }
+    assert!(seqs.len() > 2, "need >2 sequences to force eviction with cap 2");
+
+    let mut rng = XorShift::new(0xC0FFEE_u64 ^ (raw as u64));
+    for _ in 0..2000 {
+        let (digest, len) = &seqs[rng.range(seqs.len())];
+        let len = *len;
+        let a = rng.range(len);
+        let b = rng.range(len);
+        let (start, end) = if a == b {
+            (a.min(len - 1), a.min(len - 1) + 1)
+        } else {
+            (a.min(b), a.max(b))
+        };
+        let expected = resident.get_substring(digest, start, end).unwrap();
+        let got = partial.get_substring(digest, start, end).unwrap();
+        assert_eq!(
+            got, expected,
+            "partial-read mismatch (raw={}) digest={} [{}, {})",
+            raw, digest, start, end
+        );
+    }
+}
+
 #[test]
 fn test_stream_sequence_raw_mode() {
     use std::io::Read;
@@ -3029,4 +3136,14 @@ fn test_load_all_sequences_triggers_index_load() {
     store.load_all_sequences().unwrap();
     assert!(store.inner.sequence_index_loaded, "Sequence index should be loaded after load_all_sequences");
     assert!(!store.inner.sequence_store.is_empty(), "Sequences should be populated");
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_encoded() {
+    run_fd_cache_eviction_for_mode(false);
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_raw() {
+    run_fd_cache_eviction_for_mode(true);
 }

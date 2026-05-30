@@ -18,12 +18,106 @@ use crate::digest::{
     SequenceRecord,
 };
 use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, StreamingDecoder};
+use crate::digest::{byte_range_for_bases, decode_substring_from_bytes_at_offset};
 use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// Default capacity of the per-store open-file-descriptor cache used by the
+/// partial-read path. MUST stay well under typical OS fd limits (often 1024):
+/// stores can have huge sequence counts (e.g. ~122k for a transcriptome), so an
+/// unbounded cache would exhaust file descriptors. Mirrors seqrepo's
+/// `fd_cache_size`.
+const SEQ_FD_CACHE_CAP: usize = 256;
+
+/// A tiny bounded LRU cache mapping a sequence digest to an open, shared
+/// `.seq` file handle. `.seq` content for a digest is immutable, so a cached
+/// handle never goes stale and needs no invalidation. When the cache is full,
+/// inserting a new handle evicts (closes) the least-recently-used one.
+///
+/// Recency is tracked with a monotonically increasing counter stamped on each
+/// access; eviction scans for the minimum stamp. With a small cap (default 256)
+/// this O(n) eviction is negligible compared to the avoided `open`/`seek`
+/// syscalls on the hot path.
+#[derive(Debug)]
+struct FdCache {
+    cap: usize,
+    tick: u64,
+    /// digest key -> (shared file handle, last-use stamp)
+    entries: HashMap<DigestKey, (Arc<File>, u64)>,
+}
+
+impl FdCache {
+    fn new(cap: usize) -> Self {
+        FdCache {
+            cap: cap.max(1),
+            tick: 0,
+            entries: HashMap::with_capacity(cap.max(1)),
+        }
+    }
+
+    /// Return a cloned handle on hit, bumping recency. `None` on miss.
+    fn get(&mut self, key: &DigestKey) -> Option<Arc<File>> {
+        self.tick += 1;
+        let tick = self.tick;
+        if let Some(slot) = self.entries.get_mut(key) {
+            slot.1 = tick;
+            Some(Arc::clone(&slot.0))
+        } else {
+            None
+        }
+    }
+
+    /// Insert a freshly opened handle, evicting (closing) the LRU entry if full.
+    fn insert(&mut self, key: DigestKey, file: Arc<File>) {
+        self.tick += 1;
+        let tick = self.tick;
+        if !self.entries.contains_key(&key) && self.entries.len() >= self.cap {
+            // Evict the least-recently-used entry. Dropping the Arc closes the
+            // fd once no in-flight read still holds a clone.
+            if let Some(lru_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, stamp))| *stamp)
+                .map(|(k, _)| *k)
+            {
+                self.entries.remove(&lru_key);
+            }
+        }
+        self.entries.insert(key, (file, tick));
+    }
+}
+
+/// Read exactly `len` bytes starting at byte offset `byte_start` from `file`.
+///
+/// On unix this uses a POSITIONED read (`pread` via
+/// `FileExt::read_exact_at`), which takes no file cursor and is therefore safe
+/// to call concurrently on a shared `&File` (the basis for the cached
+/// `Arc<File>`). On non-unix platforms we fall back to a brief seek+read on a
+/// freshly opened handle... but here the cached handle has a cursor, so to stay
+/// correct under sharing we clone the handle's underlying file via
+/// `try_clone()` (independent cursor) before seeking.
+fn read_exact_window(file: &File, byte_start: usize, len: usize) -> Result<Vec<u8>> {
+    let mut buf = vec![0u8; len];
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::FileExt;
+        file.read_exact_at(&mut buf, byte_start as u64)?;
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::{Read, Seek, SeekFrom};
+        // try_clone gives an independent cursor so concurrent reads on the
+        // shared handle do not race on a single seek position.
+        let mut handle = file.try_clone()?;
+        handle.seek(SeekFrom::Start(byte_start as u64))?;
+        handle.read_exact(&mut buf)?;
+    }
+    Ok(buf)
+}
 
 /// A `Read` adapter that yields a byte range from a shared `Arc<Vec<u8>>`
 /// buffer without cloning the backing data.
@@ -172,6 +266,10 @@ pub struct ReadonlyRefgetStore {
     /// The relative path to the sequence index file (from rgstore.json),
     /// stored for deferred loading in remote stores.
     pub(crate) sequence_index_path: Option<String>,
+    /// Bounded LRU cache of open `.seq` file handles for the partial-read path,
+    /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
+    /// the same chromosome file on every per-region `get_substring` call.
+    seq_fd_cache: Mutex<FdCache>,
 }
 
 impl ReadonlyRefgetStore {
@@ -197,7 +295,16 @@ impl ReadonlyRefgetStore {
             available_collection_alias_namespaces: Vec::new(),
             sequence_index_loaded: true,
             sequence_index_path: None,
+            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
         }
+    }
+
+    /// Test-only: shrink the partial-read fd-cache to a tiny capacity so the
+    /// eviction/reopen path is exercised deterministically.
+    #[cfg(test)]
+    pub(crate) fn set_seq_fd_cache_cap_for_test(&self, cap: usize) {
+        let mut cache = self.seq_fd_cache.lock().unwrap();
+        *cache = FdCache::new(cap);
     }
 
     /// Set whether to suppress progress output.
@@ -984,6 +1091,9 @@ impl ReadonlyRefgetStore {
     /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
         self.sequence_store.clear();
+        if let Ok(mut cache) = self.seq_fd_cache.lock() {
+            cache.entries.clear();
+        }
     }
 
     /// Check whether a sequence's record is loaded (Full) rather
@@ -1160,7 +1270,18 @@ impl ReadonlyRefgetStore {
             )
         })?;
         let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
-            SequenceRecord::Stub(_) => return Err(anyhow!("Sequence data not loaded (stub only)")),
+            // Not resident: for a disk-backed store, read only the bytes covering
+            // [start, end) directly from the `.seq` file instead of loading the
+            // whole sequence into RAM. This is the random-access extract path:
+            // sparse region extraction touches a tiny fraction of each sequence,
+            // so a per-query partial read avoids the cost of `load_sequence`
+            // pulling entire chromosomes into memory.
+            SequenceRecord::Stub(meta) => {
+                if self.local_path.is_some() && self.seqdata_path_template.is_some() {
+                    return self.get_substring_from_disk(meta, start, end);
+                }
+                return Err(anyhow!("Sequence data not loaded (stub only)"));
+            }
             SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
         };
 
@@ -1186,6 +1307,105 @@ impl ReadonlyRefgetStore {
                     .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
             }
         }
+    }
+
+    /// Read a substring directly from the on-disk `.seq` file, fetching only the
+    /// bytes that cover `[start, end)`.
+    ///
+    /// `.seq` files are headerless raw byte arrays (bit-packed in Encoded mode,
+    /// one ASCII byte per base in Raw mode), so byte offsets map directly to base
+    /// positions. We compute the covering byte range with [`byte_range_for_bases`],
+    /// read just that window with a positioned read, and decode it with
+    /// [`decode_substring_from_bytes_at_offset`]. This is the partial-read path
+    /// that makes random-access extraction cheap: it never materializes the whole
+    /// sequence in memory.
+    fn get_substring_from_disk(
+        &self,
+        metadata: &SequenceMetadata,
+        start: usize,
+        end: usize,
+    ) -> Result<String> {
+        if start >= metadata.length || end > metadata.length || start >= end {
+            return Err(anyhow!(
+                "Invalid substring range: start={}, end={}, sequence length={}",
+                start,
+                end,
+                metadata.length
+            ));
+        }
+
+        // Fetch (or open + cache) the shared `.seq` file handle. The critical
+        // section is kept tiny: lock -> get-or-open -> clone Arc -> unlock. The
+        // actual positioned read happens OUTSIDE the lock, so concurrent reads
+        // are never serialized by the cache.
+        let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+
+        // Compute the covering byte window, then read it with a positioned read.
+        let (byte_start, byte_end) = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                byte_range_for_bases(start, end, alphabet.bits_per_symbol)
+            }
+            StorageMode::Raw => (start, end),
+        };
+        let buf = read_exact_window(&file, byte_start, byte_end - byte_start)?;
+
+        let decoded: Vec<u8> = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                decode_substring_from_bytes_at_offset(&buf, byte_start, start, end, alphabet)
+            }
+            StorageMode::Raw => buf,
+        };
+
+        String::from_utf8(decoded).map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+    }
+
+    /// Return a shared handle to the `.seq` file for `digest`, opening and
+    /// caching it on a miss. Bounded LRU; the LRU handle is evicted (closed)
+    /// when the cache is full.
+    fn get_cached_seq_file(&self, digest: &str) -> Result<Arc<File>> {
+        let key = digest.to_key();
+
+        // Fast path: hit. Hold the lock only for the tiny map op.
+        {
+            let mut cache = self
+                .seq_fd_cache
+                .lock()
+                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+            if let Some(f) = cache.get(&key) {
+                return Ok(f);
+            }
+        }
+
+        // Miss: build the path and open OUTSIDE the lock (the open syscall must
+        // not serialize other readers).
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("Partial read requires a local disk-backed store"))?;
+        let template = self
+            .seqdata_path_template
+            .as_ref()
+            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+        let full_path = local_path.join(Self::expand_template(digest, template));
+        let file = Arc::new(
+            File::open(&full_path)
+                .with_context(|| format!("Failed to open seq file {}", full_path.display()))?,
+        );
+
+        // Insert under the lock. A concurrent miss may have inserted the same
+        // digest meanwhile; that is harmless (both handles read the same
+        // immutable file) -- prefer the already-cached one to avoid duplicating.
+        let mut cache = self
+            .seq_fd_cache
+            .lock()
+            .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+        if let Some(existing) = cache.get(&key) {
+            return Ok(existing);
+        }
+        cache.insert(key, Arc::clone(&file));
+        Ok(file)
     }
 
     // =========================================================================
