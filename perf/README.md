@@ -1,158 +1,264 @@
 # gtars-perf
 
-An occasionally-run performance regression harness for `gtars`, implemented as
-a single readable Python script (`perf.py`, stdlib only). It replaces the old
-`gtars-perf/` Rust crate while keeping the **same run-record JSON schema
-(`schema_version: 1`)** and the **same compare/seed gate design**.
+A fast, **refgetstore-only** performance-regression suite for `gtars`,
+implemented as a single readable Python script (`perf.py`, stdlib only) plus a
+focused Rust example binary (`gtars-refget/examples/perf_task.rs`).
 
-The script drives the real `gtars` CLI as a subprocess under `/usr/bin/time -v`,
-so it captures the child's **true peak RSS** for every task it measures. (The
-old crate ran extract/VRS in-process and therefore reported `null` RSS for them.)
+The whole suite runs **end-to-end in well under 30 seconds** and measures
+**only refgetstore** (no competitor tools) across the three real tasks of the
+refget benchmark: **encode**, **extract**, and **vrs**. It captures true wall
+time and **peak RSS** for every cell (via `/usr/bin/time -v`), and on `compare`
+it **highlights regressions in plain language**, e.g.
+
+```
+REGRESSION: extract/large_width (partial): 22% SLOWER (1.08s -> 1.32s)
+```
 
 ## Requirements
 
 - Python 3 (stdlib only — no pip installs).
 - `/usr/bin/time` (GNU time, for `-v` peak RSS). If absent, runs still work but
   `peak_rss_mb` is `null`.
-- A built `gtars` CLI:
+- Built binaries (release):
   ```
-  cargo build --release -p gtars-cli --all-features
-  # binary: target/release/gtars
+  cargo build --release -p gtars-cli --all-features          # target/release/gtars
+  cargo build --release --example perf_task -p gtars-refget  # target/release/examples/perf_task
   ```
+- The bundled fixture dataset (see [Dataset](#dataset-self-contained) below). On
+  a fresh checkout this is resolved automatically from a local tarball or a
+  configured download URL.
 
 ## Usage
 
-Run from the repo root.
+Run from the repo root. The suite is **self-contained** — it ships its own small
+real dataset — so `run` is a one-liner:
 
 ```bash
-# Run the encode jobs-sweep over a multi-file FASTA set:
-python3 perf/perf.py run \
-    --fasta tests/data/fasta/a.fa --fasta tests/data/fasta/b.fa \
-    --concurrency 1,4,8 \
-    --gtars-bin target/release/gtars \
-    --dataset-id mydataset \
-    --out perf/runs
-# (--fasta is repeatable and/or comma-separated.) Prints the run JSON path on stdout.
+# Run the whole suite (encode + extract + vrs); prints the run JSON path:
+python3 perf/perf.py run --out perf/runs
 
 # Seed a targets file from a known-good baseline run:
 python3 perf/perf.py seed-targets perf/runs/<commit>-<ts>.json \
     --out perf/targets.json --margin 0.15
 
-# Gate a new run against targets (exit 0 pass / 1 regression / 2 bad input):
+# Gate a new run vs targets AND highlight regressions
+# (exit 0 pass / 1 regression / 2 bad input):
 python3 perf/perf.py compare perf/runs/<commit>-<ts>.json --targets perf/targets.json
 echo "exit: $?"
 ```
 
-## Tasks
+## Dataset (self-contained)
 
-| task    | how measured | concurrency knob | real peak RSS? |
-|---------|--------------|------------------|----------------|
-| encode  | `gtars refget build <fastas> -o DIR -j N` | `-j` (FASTA files in parallel) | yes |
-| extract | *not measurable* | — | n/a (skipped) |
-| vrs     | *not measurable* | — | n/a (skipped) |
+The suite no longer depends on a prebuilt multi-GB store or machine-specific
+files. Instead it ships a **small, real subset of GRCh38** (~15 Mbp; a ~5 MB
+gzipped tarball, `perf/perfdata-v1.tar.gz`) and resolves it at runtime.
 
-The `-j` knob parallelizes across **files**, so use **>=2 FASTA files** for the
-encode sweep to mean anything (a single file gives a flat sweep; the harness
-warns).
+**Tarball contents** (source data only — the store is built+cached at runtime,
+not shipped):
 
-### CLI gap: extract and vrs
+| path                    | what                                                        |
+|-------------------------|-------------------------------------------------------------|
+| `fasta/part1.fa.gz`     | chr20 slice (first 5 Mbp; has N runs → `dna3bit`)           |
+| `fasta/part2.fa.gz`     | chr21 slice (5 Mbp; has N runs → `dna3bit`)                 |
+| `fasta/part3.fa.gz`     | chr22 slice (5 Mbp) + `GL000226.1` (pure ACGT → `dna2bit`)  |
+| `bed/small.bed`         | ~10k narrow regions                                         |
+| `bed/large_count.bed`   | ~100k narrow regions                                        |
+| `bed/large_width.bed`   | ~2k regions 100kb–1Mb (sized to fit the small genome)       |
+| `variants/points.tsv`   | ~200k `chrom<TAB>pos` (clinvar chr20/21/22 + synthetic fill)|
+| `VERSION`               | fixture version marker (`version=perfdata-v1`)              |
 
-As of this writing the `gtars` CLI exposes **only** `refget build`. There is no
-subcommand for region/substring **extract** from a refget store, nor for
-**VCF -> VRS** id computation. The old crate measured those by calling the
-library functions in-process (`SubstringsFromRegions`,
-`compute_vrs_ids_parallel_encoded`), which is exactly why it could not report
-per-task peak RSS for them.
+Three separate FASTA files keep the encode `-j` single-vs-multi-core comparison
+meaningful (`-j` parallelizes across **files**). Both store alphabets
+(`dna2bit`, `dna3bit`) are present so encode/extract exercise both decoders.
 
-To keep this harness honest it does **not** fake those measurements. If you pass
-`--bed`/`--vcf`, the run records an explicit skipped row
-(`extra.skipped == true`, with a `reason`) instead of a fabricated number.
-`seed-targets` ignores skipped rows, and `compare` treats them as informational
-unless a target exists for them.
+### Resolution order
 
-To measure extract/VRS with real peak RSS, add CLI subcommands that wrap the
-existing library calls, e.g.:
+`run` calls `ensure_perf_data()`, which resolves the fixture in this order:
 
-- `gtars refget extract --store DIR --bed FILE` (substrings from regions)
-- `gtars vrs --store DIR --vcf FILE --threads N` (VRS allele ids; the thread
-  knob is what lets us do a 1/4/8 concurrency sweep)
+1. **Extracted dir** — `perf/data/` already present with a matching `VERSION`
+   marker → use it.
+2. **Local tarball** — `perf/perfdata-v1.tar.gz` present → extract into
+   `perf/data/` → use it.
+3. **Download** — `PERF_DATA_URL` set (read from `perf/.env`, else the process
+   environment) → download (stdlib `urllib`) to `perf/perfdata-v1.tar.gz` →
+   extract → use it.
+4. Otherwise: a clear error explaining how to obtain the data.
 
-Then add a task function in `perf.py` (see "Adding a task") that shells out to it
-under `run_timed(...)`.
+After resolution, an **Encoded** store is built once from the bundled FASTAs and
+cached under `perf/data/_store/` (rebuilt only if missing/stale) for the
+extract/vrs tasks.
 
-## Run-record schema (`schema_version: 1`)
+`perf/data/`, `perf/*.tar.gz`, and `perf/.env` are all gitignored.
+
+### Configuring the download URL
+
+The tarball is too large to commit, so upload it to cloud storage and point the
+suite at it:
+
+```bash
+cp perf/.env.example perf/.env
+# edit perf/.env and set PERF_DATA_URL=https://<bucket>/perfdata-v1.tar.gz
+```
+
+On a machine that already has the tarball or an extracted `perf/data/`, no URL
+is needed.
+
+### Overrides (deep runs against the big real store)
+
+The bundled fixture is the default, but you can point any task at full-size real
+data via env vars (or the matching `run` flags):
+
+| env var         | overrides                                              |
+|-----------------|--------------------------------------------------------|
+| `PERF_STORE`    | the Encoded store dir for extract/vrs (`--enc`)        |
+| `PERF_RAW`      | the Raw store dir (warmed; reserved) (`--raw`)         |
+| `PERF_BED_DIR`  | a dir holding `small.bed` / `large_count.bed` / `large_width.bed` |
+| `PERF_POINTS`   | a `chrom<TAB>pos` variant file (`--points-src`)        |
+| `PERF_DATA_URL` | where to download the fixture tarball                  |
+
+The bounded points subset is cached under `--work` (`/tmp/gtars-perf-work` by
+default; cache key includes the source path so switching sources never reuses a
+stale subset).
+
+## Tasks, scenarios, and paths
+
+Each measured **cell** is keyed by `task / scenario / path / concurrency`.
+
+| task    | scenario(s)                          | path(s)              | knob | what's measured            |
+|---------|--------------------------------------|----------------------|------|----------------------------|
+| encode  | `multifile`                          | `-`                  | `-j` | wall, peak RSS, bases/s    |
+| extract | `small`, `large_count`, `large_width`| `resident`, `partial`, `batch`| —    | wall, peak RSS, bases/s    |
+| vrs     | `points`                             | `resident`           | —    | wall, lookups/s            |
+
+> **Caveats on the `batch` path and fixture size.** `batch` (`get_substrings`,
+> one call per sequence) exists mainly to amortize **FFI** overhead for callers
+> like the Python binding on high-region-count workloads; in pure-Rust it is at
+> best a wash and can be *slower* on `large_width` because it materializes a
+> whole sequence's output at once. The benchmark **contestant uses the per-region
+> partial path**, not `batch`. Also note the bundled fixture's sequences are only
+> ~5 Mbp, so `large_width` here understates real chromosome-scale costs — for
+> decode/whole-vs-partial decisions, spot-check against a full-size store (set
+> `PERF_STORE`) rather than trusting the fixture alone.
+
+### encode
+
+`gtars refget build <fasta>... -o DIR -j N`. The `-j` knob parallelizes across
+**FILES**, so the suite builds the three bundled FASTA files (`fasta/part*.fa.gz`
+— real chr20/chr21/chr22 slices plus a pure-ACGT contig) and runs the build at
+**jobs=1 (single core)** and **jobs=N (multi core, `min(cpu_count, 8)`)**. The
+multi-file fixture keeps the 1-core-vs-N-core comparison meaningful while staying
+fast. Correctness is the store's `collections_digest` plus the parsed
+`n_bases`/`n_sequences`.
+
+### extract
+
+Region/substring extraction over the **cached Encoded fixture store**
+(`perf/data/_store/`, built once from the bundled FASTAs). Three scenarios mirror
+the real benchmark, all against the small fixture genome:
+
+- **small**       — ~10k narrow regions
+- **large_count** — ~100k narrow regions
+- **large_width** — ~2k regions of 100kb–1Mb (full-width slices sized to fit the
+  ~5 Mbp fixture chromosomes)
+
+Each scenario is measured on **both read paths**, because they have different
+perf profiles and a regression in either must be caught:
+
+- **resident** — `load_sequence` the whole touched sequences, then
+  `get_substring()` slices/decodes each span.
+- **partial**  — never `load_sequence`; `get_substring()` on a stub reads only
+  the bytes covering each queried region straight from the `.seq` file.
+
+### vrs
+
+The VRS/HGVS point-lookup pattern: many **1bp lookups** on the resident path,
+over a **bounded** variant subset (~200k of the bundled
+`variants/points.tsv`, `chrom<TAB>pos` — real clinvar positions on chr20/21/22
+plus synthetic fill to reach the count). Records lookups/s.
+
+## Measurement entrypoint
+
+- **encode** is driven by the real `gtars` CLI (`refget build`) and parsed from
+  its `Done:` summary line.
+- **extract** and **vrs** are driven by `examples/perf_task`, which runs exactly
+  **one** task+scenario+path and prints a single machine-readable line:
+
+  ```
+  RESULT task=extract scenario=large_width path=partial seconds=1.316 \
+         items=2000 bases=1112931389 throughput=845400000.0 unit=bases_per_sec
+  ```
+
+  `perf.py` invokes it under `/usr/bin/time -v` (so peak RSS is captured too)
+  and parses the `RESULT` line. The gated `seconds` is the in-process sweep
+  time (excludes process startup and, for resident, the one-time
+  `load_sequence`); the full wall clock is kept in `extra.wall_seconds`.
+
+Before measuring, the suite **warms the page cache** once (reads the encoded and
+raw store sequence files to `/dev/null`) so numbers are stable.
+
+## Run-record schema (`schema_version: 2`)
 
 ```jsonc
 {
-  "schema_version": 1,
-  "run": {
-    "timestamp_utc":   "2026-05-29T18:58:01Z",
-    "gtars_commit":    "1a1a694",
-    "gtars_commit_date": "2026-05-29T...",
-    "gtars_dirty":     false,
-    "host":            "machine",
-    "cpu_model":       "...",
-    "logical_cpus":    16,
-    "total_ram_mb":    64000,
-    "rustc_version":   "rustc 1.x.y ...",
-    "profile":         "release"
-  },
+  "schema_version": 2,
+  "run": { "timestamp_utc": "...", "gtars_commit": "...", "host": "...",
+           "cpu_model": "...", "logical_cpus": 16, "rustc_version": "...",
+           "profile": "release", ... },
+  "suite_seconds": 6.56,            // total wall time of the whole suite
   "results": [
     {
-      "task":            "encode",
-      "concurrency":     4,          // -j for encode; threads for vrs; 1 for extract
-      "seconds":         1.234,      // wall clock measured around the child
-      "peak_rss_mb":     321.0,      // from /usr/bin/time -v; null if unmeasured
-      "throughput":      1234567.0,
+      "task": "extract", "scenario": "large_width", "path": "partial",
+      "concurrency": 1,
+      "seconds": 1.316,             // gated number (in-process sweep)
+      "peak_rss_mb": 5.0,           // from /usr/bin/time -v; null if unmeasured
+      "throughput": 845400000.0,
       "throughput_unit": "bases_per_sec",
-      "extra": {                     // task-specific; includes correctness checks
-        "dataset_id": "mydataset",
-        "n_bases": 16, "n_sequences": 3, "n_files": 2,
-        "collection_digest": "3e0213b5..."   // store collections_digest (regression-visible)
-      }
+      "extra": { "items": 2000, "bases": 1112931389, "wall_seconds": 1.33, ... }
     }
+    // encode rows additionally carry n_bases/n_sequences/collection_digest
   ]
 }
 ```
 
-Correctness signals live in `extra`: encode records the store
-`collection_digest` plus `n_bases`/`n_sequences`, so a change in *output*
-(not just speed) is visible across runs.
+## Gate / targets.json (`schema_version: 2`)
 
-## Gate / targets.json
+`seed-targets` writes one entry per cell keyed by `task/scenario/path/conc`:
 
 ```jsonc
 {
+  "schema_version": 2,
   "margin": 0.15,                    // tolerance applied to every constraint
   "seeded_on_host": "machine",       // compare warns if run host differs
-  "tasks": {
-    "encode": {
-      "1": { "min_throughput": 1.0e6, "max_seconds": 2.0, "max_peak_rss_mb": 400.0 },
-      "4": { "min_throughput": 3.0e6, "max_seconds": 1.0, "max_peak_rss_mb": 450.0 }
+  "cells": {
+    "extract/large_width/partial/1": {
+      "label": "extract/large_width (partial)",
+      "min_throughput": 845400000.0, "max_seconds": 1.316, "max_peak_rss_mb": 5.0
     }
+    // ...one per measured cell
   }
 }
 ```
 
-`compare` applies `margin` symmetrically:
-- fails if `throughput < min_throughput * (1 - margin)`
-- fails if `seconds     > max_seconds     * (1 + margin)`
-- fails if `peak_rss_mb > max_peak_rss_mb * (1 + margin)` (only when both present)
+`compare` applies `margin` symmetrically (fails if `seconds > max_seconds*(1+m)`,
+`throughput < min_throughput*(1-m)`, or `peak_rss_mb > max_peak_rss_mb*(1+m)`),
+prints a per-cell table with the per-cell **Δ%** vs baseline, and then prints a
+plain-language summary:
 
-Cells with no matching target are informational (`WARN`, not a failure). Exit
-codes: **0** pass, **1** regression, **2** bad input (unreadable/unparseable
-JSON, schema mismatch, malformed targets).
+- **REGRESSIONS** — e.g. `REGRESSION: extract/large_width (partial): 22% SLOWER
+  (1.08s -> 1.32s)`, with the specific violated constraints listed. ANSI red on
+  a tty (use `--no-color` to disable).
+- **IMPROVEMENTS** — e.g. `FASTER: extract/large_width (resident): 3.2x FASTER`.
 
-Targets are machine-specific — commit `targets.json`, but re-seed it on the
-machine you gate on.
+Cells with no matching target are informational (`WARN`). Exit codes: **0**
+pass, **1** regression, **2** bad input. Targets are machine-specific — commit
+`targets.json`, but re-seed it on the machine you gate on.
 
-## Adding a task
+## Adding a task/scenario/path
 
-1. Write a `task_<name>(...)` function that builds an `argv` for the `gtars`
-   CLI and calls `run_timed(argv)` -> `(seconds, peak_rss_mb, stdout)`.
-2. Parse correctness/size signals from `stdout` (or a store manifest) into
-   `extra`, compute `throughput`, and return a result dict with the standard
-   keys (`task, concurrency, seconds, peak_rss_mb, throughput, throughput_unit,
-   extra`).
-3. Call it from `cmd_run` (sweep over `a.concurrency` if it has a thread knob).
-4. Re-seed `targets.json` so the new cells get a floor/ceiling.
+1. For a CLI-measurable task, add a `task_*` that builds an `argv` and calls
+   `run_timed(...)`. For an in-process refgetstore path, add a branch to
+   `examples/perf_task.rs` that emits a `RESULT` line and call it via
+   `task_perf(...)`.
+2. Wire it into `cmd_run` (mind the < 30s budget — shrink region/lookup counts
+   if needed; draw inputs from the bundled fixture under `perf/data/`).
+3. Re-seed `targets.json` so the new cell gets a floor/ceiling.

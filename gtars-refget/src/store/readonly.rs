@@ -1298,13 +1298,112 @@ impl ReadonlyRefgetStore {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
                 let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
-                String::from_utf8(decoded_sequence)
-                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+                // SAFETY: the Encoded decoder emits only bytes drawn from
+                // `alphabet.decoding_array`, which are ASCII sequence symbols
+                // (A/C/G/T/N/IUPAC/protein/ASCII), hence valid UTF-8. Skipping
+                // the O(n) `from_utf8` validation matters on multi-GB extracts.
+                Ok(unsafe { String::from_utf8_unchecked(decoded_sequence) })
             }
             StorageMode::Raw => {
                 let raw_slice: &[u8] = &sequence[start..end];
-                String::from_utf8(raw_slice.to_vec())
-                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+                // SAFETY: Raw mode stores one ASCII sequence byte per base per the
+                // refget data model, so the slice is valid UTF-8.
+                Ok(unsafe { String::from_utf8_unchecked(raw_slice.to_vec()) })
+            }
+        }
+    }
+
+    /// Batch substring retrieval for many ranges of ONE sequence.
+    ///
+    /// Resolves the record once and validates all ranges up front, then:
+    /// - **Resident `Full`**: decode/slice each range from the resident bytes.
+    /// - **Disk-backed `Stub`**: partial-read each range independently via the
+    ///   fd-cached [`get_substring_from_disk`](Self::get_substring_from_disk)
+    ///   path (reads only the bytes covering each range; reuses the open `.seq`
+    ///   handle across ranges).
+    ///
+    /// The main benefit over a loop of [`get_substring`](Self::get_substring) is
+    /// for FFI callers (e.g. the Python binding): resolving the record once and
+    /// crossing the boundary once per sequence instead of once per range.
+    ///
+    /// A whole-sequence "decode once, slice all" strategy was tried for
+    /// wide/overlapping range sets but measured *slower* on real chromosome-scale
+    /// sequences (decoding a 250 Mbp chromosome into one buffer, plus the large
+    /// allocation, outweighs the avoided re-decode of scattered spans), so the
+    /// partial path is used uniformly. Callers wanting resident behavior should
+    /// load the sequence (`load_sequence`) first; the `Full` arm then serves it.
+    ///
+    /// Output strings are byte-identical to a loop of
+    /// [`get_substring`](Self::get_substring).
+    pub fn get_substrings<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        ranges: &[(usize, usize)],
+    ) -> Result<Vec<String>> {
+        let digest_key = sha512_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+            anyhow!(
+                "Sequence not found: {}",
+                String::from_utf8_lossy(sha512_digest.as_ref())
+            )
+        })?;
+
+        let metadata = record.metadata();
+        let seq_length = metadata.length;
+
+        // Validate every range up front (same rule as get_substring).
+        for &(start, end) in ranges {
+            if start >= seq_length || end > seq_length || start >= end {
+                return Err(anyhow!(
+                    "Invalid substring range: start={}, end={}, sequence length={}",
+                    start,
+                    end,
+                    seq_length
+                ));
+            }
+        }
+
+        match record {
+            SequenceRecord::Full { metadata, sequence } => {
+                let seq: &[u8] = sequence.as_slice();
+                let mut out = Vec::with_capacity(ranges.len());
+                match self.mode {
+                    StorageMode::Encoded => {
+                        let alphabet = lookup_alphabet(&metadata.alphabet);
+                        for &(start, end) in ranges {
+                            let decoded =
+                                decode_substring_from_bytes(seq, start, end, alphabet);
+                            // SAFETY: see get_substring (ASCII alphabet bytes).
+                            out.push(unsafe { String::from_utf8_unchecked(decoded) });
+                        }
+                    }
+                    StorageMode::Raw => {
+                        for &(start, end) in ranges {
+                            // SAFETY: see get_substring (Raw stores ASCII bases).
+                            out.push(unsafe {
+                                String::from_utf8_unchecked(seq[start..end].to_vec())
+                            });
+                        }
+                    }
+                }
+                Ok(out)
+            }
+            SequenceRecord::Stub(meta) => {
+                if self.local_path.is_none() || self.seqdata_path_template.is_none() {
+                    return Err(anyhow!("Sequence data not loaded (stub only)"));
+                }
+
+                let mut out = Vec::with_capacity(ranges.len());
+                for &(start, end) in ranges {
+                    out.push(self.get_substring_from_disk(meta, start, end)?);
+                }
+                Ok(out)
             }
         }
     }
@@ -1358,7 +1457,10 @@ impl ReadonlyRefgetStore {
             StorageMode::Raw => buf,
         };
 
-        String::from_utf8(decoded).map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+        // SAFETY: Encoded decode emits only ASCII alphabet bytes; Raw stores
+        // ASCII sequence bytes. Either way `decoded` is valid UTF-8, so we skip
+        // the O(n) validation. See `get_substring` for the full justification.
+        Ok(unsafe { String::from_utf8_unchecked(decoded) })
     }
 
     /// Return a shared handle to the `.seq` file for `digest`, opening and
