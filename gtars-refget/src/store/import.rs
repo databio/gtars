@@ -867,7 +867,7 @@ impl ReadonlyRefgetStore {
                             .add_sequence_record_deferred_write(
                                 SequenceRecord::Full {
                                     metadata,
-                                    sequence: sequence_data,
+                                    sequence: std::sync::Arc::new(sequence_data),
                                 },
                                 force,
                             )?

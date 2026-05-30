@@ -98,6 +98,12 @@ impl RefgetStore {
     // Preload methods (delegate to inner)
     // =====================================================================
 
+    /// Load the sequence index if not already loaded.
+    /// Servers should call this during startup to preload the index.
+    pub fn load_sequence_index(&mut self) -> Result<()> {
+        self.inner.load_sequence_index()
+    }
+
     /// Preload all collections (delegates to inner).
     pub fn load_all_collections(&mut self) -> Result<()> {
         self.inner.load_all_collections()
@@ -105,6 +111,7 @@ impl RefgetStore {
 
     /// Preload all sequences (delegates to inner).
     pub fn load_all_sequences(&mut self) -> Result<()> {
+        self.inner.ensure_sequence_index_loaded()?;
         self.inner.load_all_sequences()
     }
 
@@ -115,6 +122,7 @@ impl RefgetStore {
 
     /// Load a single sequence by digest.
     pub fn load_sequence(&mut self, digest: &str) -> Result<()> {
+        self.inner.ensure_sequence_index_loaded()?;
         self.inner.load_sequence(digest)
     }
 

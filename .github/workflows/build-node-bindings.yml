@@ -1,0 +1,41 @@
+name: Build Node native bindings
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'gtars-node/**'
+      - 'gtars-refget/**'
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+          - os: macos-latest
+            target: aarch64-apple-darwin
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Build
+        working-directory: gtars-node
+        run: |
+          npm install
+          npx napi build --platform --release --target ${{ matrix.target }}
+      - name: Test
+        working-directory: gtars-node
+        run: npm test
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: bindings-${{ matrix.target }}
+          path: gtars-node/*.node
