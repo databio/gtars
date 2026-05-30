@@ -1607,6 +1607,30 @@ impl PyRefgetStore {
             })
     }
 
+    /// Extract many substrings from ONE sequence in a single call.
+    ///
+    /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
+    /// substrings in the same order. The store adaptively reads the whole
+    /// sequence once when the ranges cover a large fraction (heavy overlap),
+    /// otherwise partial-reads each range. Output is identical to calling
+    /// `get_substring` per range, but amortizes record lookup, whole-sequence
+    /// decode, and FFI overhead.
+    fn get_substrings(
+        &self,
+        seq_digest: &str,
+        ranges: Vec<(usize, usize)>,
+    ) -> PyResult<Vec<String>> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.inner
+            .get_substrings(seq_digest, &ranges)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    seq_digest, e
+                ))
+            })
+    }
+
     #[getter]
     fn cache_path(&self) -> Option<String> {
         self.inner.local_path().map(|p| p.display().to_string())
@@ -3110,6 +3134,25 @@ impl PyReadonlyRefgetStore {
         let seq_digest = strip_sq_prefix(seq_digest);
         self.store
             .get_substring(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
+            })
+    }
+
+    /// Extract many substrings from ONE sequence in a single call.
+    ///
+    /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
+    /// substrings in the same order. Adaptively reads the whole sequence once
+    /// when the ranges cover a large fraction; otherwise partial-reads each
+    /// range. Identical output to per-range `get_substring`.
+    fn get_substrings(
+        &self,
+        seq_digest: &str,
+        ranges: Vec<(usize, usize)>,
+    ) -> PyResult<Vec<String>> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.store
+            .get_substrings(seq_digest, &ranges)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
             })
