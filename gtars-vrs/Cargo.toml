@@ -18,6 +18,9 @@ sha2 = "0.10.7"
 base64-url = "2.0.0"
 itoa = "1.0"
 
+# Bounded channels for the BGZF-block-parallel reader/worker/collector pipeline.
+crossbeam-channel = "0.5"
+
 # Internal dependency
 gtars-refget = { path = "../gtars-refget", version = "0.8.0" }
 

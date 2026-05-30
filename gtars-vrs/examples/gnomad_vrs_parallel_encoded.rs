@@ -7,15 +7,36 @@
 //! encoded path. Prints throughput (variants/sec) and the thread count.
 //!
 //! Usage:
-//!   cargo run --release --example gnomad_vrs_parallel_encoded -- <store_path> <vcf_path> [threads] [--print]
+//!   cargo run --release --example gnomad_vrs_parallel_encoded -- <store_path> <vcf_path> [threads] [--print] [--bgzf]
 //!     threads: worker count (default: available_parallelism)
 //!     --print: also print each result row (chrom pos ref alt vrs_id) to stdout
+//!     --bgzf:  use the BGZF-block-parallel path (raw-block reader + workers own
+//!              decompression). Requires BGZF (`.bgz`) input. Scales past the
+//!              single-reader default path. Without it, the single-reader
+//!              `compute_vrs_ids_parallel_encoded` path is used.
 
 use std::collections::HashMap;
 use std::time::Instant;
 
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
-use gtars_vrs::vcf::{compute_vrs_ids_parallel_encoded, parse_vcf_record};
+use gtars_vrs::vcf::{
+    compute_vrs_ids_parallel_bgzf_encoded_with_sink, compute_vrs_ids_parallel_encoded,
+    parse_vcf_record,
+};
+
+/// Peak resident set size (RSS) in kilobytes, read from /proc/self/status
+/// (VmHWM = "high water mark"). Returns 0 if unavailable.
+fn peak_rss_kb() -> u64 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|s| {
+            s.lines()
+                .find(|l| l.starts_with("VmHWM:"))
+                .and_then(|l| l.split_whitespace().nth(1))
+                .and_then(|v| v.parse().ok())
+        })
+        .unwrap_or(0)
+}
 
 fn open_vcf_reader(path: &str) -> Box<dyn std::io::BufRead> {
     use flate2::read::MultiGzDecoder;
@@ -49,6 +70,7 @@ fn main() {
         .and_then(|s| if s.starts_with("--") { None } else { s.parse().ok() })
         .unwrap_or(default_threads);
     let do_print = args.iter().any(|a| a == "--print");
+    let use_bgzf = args.iter().any(|a| a == "--bgzf");
 
     // ── Setup (untimed) ───────────────────────────────────────────────────
     eprintln!("Opening store: {store_path}");
@@ -108,31 +130,41 @@ fn main() {
     let store: ReadonlyRefgetStore = store.into_readonly();
 
     // ── Timed parallel pass ───────────────────────────────────────────────
-    eprintln!("\nComputing VRS IDs with {threads} thread(s)...");
+    let path_name = if use_bgzf {
+        "BGZF-block-parallel (workers own decompression)"
+    } else {
+        "single-reader parallel"
+    };
+    eprintln!("\nComputing VRS IDs with {threads} thread(s) via {path_name}...");
     if do_print {
         println!("chrom\tpos\tref\talt\tvrs_id");
     }
+    let on_result = |r: gtars_vrs::vcf::VrsResult| {
+        if do_print {
+            println!(
+                "{}\t{}\t{}\t{}\t{}",
+                r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
+            );
+        }
+    };
     let t1 = Instant::now();
-    let count = compute_vrs_ids_parallel_encoded(
-        &store,
-        &needed,
-        vcf_path,
-        threads,
-        |r| {
-            if do_print {
-                println!(
-                    "{}\t{}\t{}\t{}\t{}",
-                    r.chrom, r.pos, r.ref_allele, r.alt_allele, r.vrs_id
-                );
-            }
-        },
-    )
-    .expect("compute_vrs_ids_parallel_encoded");
+    let count = if use_bgzf {
+        compute_vrs_ids_parallel_bgzf_encoded_with_sink(&store, &needed, vcf_path, threads, on_result)
+            .expect("compute_vrs_ids_parallel_bgzf_encoded_with_sink")
+    } else {
+        compute_vrs_ids_parallel_encoded(&store, &needed, vcf_path, threads, on_result)
+            .expect("compute_vrs_ids_parallel_encoded")
+    };
     let secs = t1.elapsed().as_secs_f64();
 
     eprintln!(
-        "threads={threads}\tn_variants={count}\tcompute_s={secs:.3}\tvariants_per_sec={:.0}",
+        "path={}\tthreads={threads}\tn_variants={count}\tcompute_s={secs:.3}\tvariants_per_sec={:.0}",
+        if use_bgzf { "bgzf-block" } else { "single-reader" },
         count as f64 / secs
     );
-    eprintln!("Total time: {:.1}s", t0.elapsed().as_secs_f64());
+    eprintln!(
+        "peak_rss={:.1} MB\tTotal time: {:.1}s",
+        peak_rss_kb() as f64 / 1024.0,
+        t0.elapsed().as_secs_f64()
+    );
 }
