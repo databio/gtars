@@ -1,0 +1,61 @@
+{
+  "schema_version": 2,
+  "margin": 0.15,
+  "seeded_on_host": "zither",
+  "cells": {
+    "encode/multifile/-/1": {
+      "label": "encode/j1",
+      "min_throughput": 183638805.08159316,
+      "max_seconds": 0.08176380799977778,
+      "max_peak_rss_mb": 13.7109375
+    },
+    "encode/multifile/-/8": {
+      "label": "encode/j8",
+      "min_throughput": 409252609.18412346,
+      "max_seconds": 0.03668885100069019,
+      "max_peak_rss_mb": 23.921875
+    },
+    "extract/small/resident/1": {
+      "label": "extract/small (resident)",
+      "min_throughput": 574802291.0,
+      "max_seconds": 0.001596,
+      "max_peak_rss_mb": 5.93359375
+    },
+    "extract/small/partial/1": {
+      "label": "extract/small (partial)",
+      "min_throughput": 50987174.8,
+      "max_seconds": 0.01799,
+      "max_peak_rss_mb": 4.05859375
+    },
+    "extract/large_count/resident/1": {
+      "label": "extract/large_count (resident)",
+      "min_throughput": 534806172.4,
+      "max_seconds": 0.017157,
+      "max_peak_rss_mb": 17.54296875
+    },
+    "extract/large_count/partial/1": {
+      "label": "extract/large_count (partial)",
+      "min_throughput": 46094707.6,
+      "max_seconds": 0.199063,
+      "max_peak_rss_mb": 16.953125
+    },
+    "extract/large_width/resident/1": {
+      "label": "extract/large_width (resident)",
+      "min_throughput": 821613431.5,
+      "max_seconds": 0.427987,
+      "max_peak_rss_mb": 6.6484375
+    },
+    "extract/large_width/partial/1": {
+      "label": "extract/large_width (partial)",
+      "min_throughput": 821871199.9,
+      "max_seconds": 0.427852,
+      "max_peak_rss_mb": 5.12890625
+    },
+    "vrs/points/resident/1": {
+      "label": "vrs/points (resident)",
+      "min_throughput": 9209511.5,
+      "max_seconds": 0.008004,
+      "max_peak_rss_mb": 30.26171875
+    }
+  }
+}

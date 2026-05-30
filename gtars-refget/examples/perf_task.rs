@@ -14,9 +14,6 @@
 //!   extract, path=resident : load_sequence whole touched seqs, get_substring()
 //!   extract, path=partial  : never load_sequence; get_substring() reads only
 //!                            the covering bytes from disk per region
-//!   extract, path=batch    : never load_sequence; group ranges by sequence and
-//!                            call get_substrings() once per sequence (adaptive
-//!                            whole-decode + unchecked UTF-8)
 //!   vrs,     path=resident : many 1bp point lookups over resident sequences
 //!   vrs,     path=partial  : many 1bp point lookups, partial-read path
 //!
@@ -130,42 +127,6 @@ fn sweep(
     (secs, bases)
 }
 
-/// Batch sweep: group regions by sequence and call `get_substrings` once per
-/// sequence (the lever-2/lever-3 path). Returns (secs, total_bases). The sink
-/// matches `sweep` so the optimizer can't elide work.
-fn sweep_batch(
-    store: &RefgetStore,
-    regions: &[(String, usize, usize)],
-    cd: &HashMap<String, String>,
-) -> (f64, u64) {
-    // Group ranges by sequence digest, preserving per-chrom order. Track the
-    // original region indices so output stays comparable if needed.
-    let t = Instant::now();
-    let mut by_digest: HashMap<&str, Vec<(usize, usize)>> = HashMap::new();
-    for (chrom, s, e) in regions {
-        if let Some(d) = cd.get(chrom) {
-            by_digest.entry(d.as_str()).or_default().push((*s, *e));
-        }
-    }
-
-    let mut sink = 0u64;
-    let mut bases = 0u64;
-    for (digest, ranges) in &by_digest {
-        let subs = store.get_substrings(digest, ranges).unwrap();
-        for sub in &subs {
-            bases += sub.len() as u64;
-            sink = sink
-                .wrapping_add(sub.len() as u64)
-                .wrapping_add(sub.as_bytes()[0] as u64);
-        }
-    }
-    let secs = t.elapsed().as_secs_f64();
-    if secs < 0.0 {
-        eprintln!("{}", sink);
-    }
-    (secs, bases)
-}
-
 struct Args {
     task: String,
     path: String,
@@ -210,7 +171,7 @@ fn parse_args() -> Args {
         i += 1;
     }
     if a.task.is_empty() || a.store.is_empty() {
-        eprintln!("usage: perf_task --task extract|vrs --path resident|partial|batch --store ENC [--raw RAW] [--bed F | --points F] [--scenario NAME]");
+        eprintln!("usage: perf_task --task extract|vrs --path resident|partial --store ENC [--raw RAW] [--bed F | --points F] [--scenario NAME]");
         std::process::exit(2);
     }
     a
@@ -242,8 +203,6 @@ fn main() -> anyhow::Result<()> {
                 &a.store
             };
             let (mut store, coll) = open_with_collection(store_path)?;
-            // resident + raw load whole sequences; partial + batch stay stub-only
-            // so the disk-backed read path (and the batch heuristic) engages.
             let do_load = resident || a.path == "raw";
             let cd = resolve(&mut store, &coll, &unique, do_load)?;
             let regions: Vec<_> = regions
@@ -251,11 +210,7 @@ fn main() -> anyhow::Result<()> {
                 .filter(|(c, _, _)| cd.contains_key(c))
                 .cloned()
                 .collect();
-            let (secs, bases) = if a.path == "batch" {
-                sweep_batch(&store, &regions, &cd)
-            } else {
-                sweep(&store, &regions, &cd)
-            };
+            let (secs, bases) = sweep(&store, &regions, &cd);
             (regions.len() as u64, bases, secs, "bases_per_sec")
         }
         "vrs" => {

@@ -26,9 +26,6 @@ Tasks / scenarios / paths
               resident : load_sequence whole touched seqs, then get_substring()
               partial  : never load_sequence; get_substring() on a stub reads
                          only the covering bytes from disk per region
-              batch    : stub-only; group ranges by sequence and call
-                         get_substrings() once per sequence (adaptive
-                         whole-decode + unchecked-UTF-8)
             Records wall + peak RSS + bases/s.
 
   vrs     : the VRS/HGVS point-lookup pattern (1bp lookups), resident path, over
@@ -548,11 +545,9 @@ def cmd_run(a):
         sys.stderr.write(f"[encode] jobs={j}\n")
         results.append(task_encode(gtars_bin, fastas, j, a.dataset_id))
 
-    # 2) extract: 3 scenarios x 3 paths.
-    #    batch: stub-only, group ranges by sequence, call get_substrings() once
-    #    per sequence (adaptive whole-decode + unchecked-UTF-8 levers).
+    # 2) extract: 3 scenarios x 2 paths.
     for scenario in ("small", "large_count", "large_width"):
-        for path in ("resident", "partial", "batch"):
+        for path in ("resident", "partial"):
             sys.stderr.write(f"[extract] {scenario} ({path})\n")
             results.append(task_perf(
                 perf_bin, "extract", scenario, path, enc, raw,

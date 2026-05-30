@@ -3,5 +3,14 @@ runs/
 *.cache
 __pycache__/
 
+# Bundled fixture: extracted data dir, cached tarball, and local env config.
+# The fixture is resolved at runtime (dir -> tarball -> PERF_DATA_URL); none of
+# it is committed.
+data/
+*.tar.gz
+.env
+
 # targets.json IS committed (the regression baseline); do not ignore it.
 !targets.json
+# .env.example IS committed (the template); do not ignore it.
+!.env.example
