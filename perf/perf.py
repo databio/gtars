@@ -84,7 +84,10 @@ FIXTURE_VERSION = "perfdata-v1"
 TARBALL_NAME = f"{FIXTURE_VERSION}.tar.gz"
 DEF_DATA_DIR = HERE / "data"                     # extracted fixture lives here
 DEF_TARBALL = HERE / TARBALL_NAME                # local cached tarball
-DEF_ENV_FILE = HERE / ".env"                     # optional PERF_DATA_URL source
+DEF_ENV_FILE = HERE / ".env"                     # optional PERF_DATA_URL override
+# Public default location of the fixture tarball, so a fresh checkout
+# auto-downloads with no config. Override via PERF_DATA_URL (env or .env).
+DEFAULT_PERF_DATA_URL = f"https://cloud.databio.org/gtars/{TARBALL_NAME}"
 DEF_STORE_DIR = DEF_DATA_DIR / "_store"          # built+cached Encoded store
 
 DEF_WORK = "/tmp/gtars-perf-work"        # cached derived BEDs/points subsets
@@ -157,8 +160,10 @@ def ensure_perf_data(data_dir=DEF_DATA_DIR, tarball=DEF_TARBALL,
         sys.exit(f"ERROR: extracted tarball {tarball} but VERSION marker did not "
                  f"match {FIXTURE_VERSION}.")
 
-    # 3) download from PERF_DATA_URL
-    url = os.environ.get("PERF_DATA_URL") or _read_env_file(env_file).get("PERF_DATA_URL")
+    # 3) download from PERF_DATA_URL (env / .env override, else the public default)
+    url = (os.environ.get("PERF_DATA_URL")
+           or _read_env_file(env_file).get("PERF_DATA_URL")
+           or DEFAULT_PERF_DATA_URL)
     if url:
         sys.stderr.write(f"[data] downloading fixture from {url}\n")
         tmp = tarball.with_suffix(tarball.suffix + ".part")
