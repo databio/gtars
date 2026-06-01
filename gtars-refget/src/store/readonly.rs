@@ -524,6 +524,7 @@ impl ReadonlyRefgetStore {
     /// (in-memory mode, a `Stub`, or a dedup hit). The in-memory state is fully
     /// updated before returning, so dedup stays the single source of truth on
     /// the inserter thread.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
     pub(crate) fn add_sequence_record_deferred_write(
         &mut self,
         sr: SequenceRecord,
@@ -826,6 +827,7 @@ impl ReadonlyRefgetStore {
     /// internally consistent. The operation is O(sequences + collections).
     ///
     /// Sequences shared with a successfully-finalized collection are preserved.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
     pub(crate) fn remove_orphan_seq_files(&mut self) {
         // Build the set of all sequence digest keys that are referenced by at
         // least one surviving (finalized) collection.
@@ -1734,6 +1736,7 @@ impl ReadonlyRefgetStore {
             }
         }
 
+        #[cfg(feature = "http")]
         if let Some(remote_url) = remote_source {
             let full_remote_url = if remote_url.ends_with('/') {
                 format!("{}{}", remote_url, relative_path)
@@ -1766,13 +1769,14 @@ impl ReadonlyRefgetStore {
                 }
             }
 
-            Ok(data)
-        } else {
-            Err(anyhow!(
-                "File not found locally and no remote source configured: {}",
-                relative_path
-            ))
+            return Ok(data);
         }
+
+        let _ = remote_source;
+        Err(anyhow!(
+            "File not found locally and no remote source configured: {}",
+            relative_path
+        ))
     }
 
     /// Ensure a collection is loaded into the store

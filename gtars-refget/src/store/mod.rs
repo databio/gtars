@@ -14,8 +14,11 @@ mod readonly;
 mod core;
 mod alias;
 mod fhr_metadata;
+// FASTA import (crossbeam-channel) and export (gtars-core) are filesystem-only.
+#[cfg(feature = "filesystem")]
 mod import;
 mod persistence;
+#[cfg(feature = "filesystem")]
 mod export;
 
 #[cfg(test)]
@@ -32,7 +35,11 @@ pub use self::fhr_metadata::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
+// `BufRead` is only used by the filesystem-only FASTA import path (via `super::*`).
+#[cfg(feature = "filesystem")]
+#[allow(unused_imports)]
+use std::io::BufRead;
 
 pub(crate) use crate::hashkeyable::DigestKey;
 
@@ -254,6 +261,9 @@ pub struct AvailableAliases<'a> {
 }
 
 /// Iterator over BED file regions yielding substrings from a store.
+// Constructed only by the filesystem BED-streaming path; fields go unread on
+// the WASM (no-filesystem) build.
+#[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
 pub struct SubstringsFromRegions<'a, K>
 where
     K: AsRef<[u8]>,

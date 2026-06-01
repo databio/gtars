@@ -35,7 +35,10 @@
 
 use std::collections::HashMap;
 
-use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore};
+use gtars_refget::store::ReadonlyRefgetStore;
+// The mutable store is used only by the filesystem-backed bridge entries.
+#[cfg(feature = "filesystem")]
+use gtars_refget::store::RefgetStore;
 use thiserror::Error;
 
 use crate::digest::DigestWriter;
@@ -100,6 +103,7 @@ fn ref_view_for<'a>(
 /// Resolves transcript coordinates via `provider` and reads reference bases
 /// directly from the encoded store (decoding on the fly). The returned Allele is
 /// in genomic orientation, suitable for normalization and digesting.
+#[cfg(feature = "filesystem")]
 pub fn hgvs_to_allele(
     variant: &HgvsVariant<'_>,
     provider: &dyn TranscriptProvider,
@@ -123,6 +127,7 @@ pub fn hgvs_to_allele(
 ///
 /// Returns the canonical `ga4gh:VA.<digest>` identifier matching what the
 /// equivalent VCF row would produce through `vcf.rs`.
+#[cfg(feature = "filesystem")]
 pub fn hgvs_str_to_vrs_id(
     s: &str,
     provider: &dyn TranscriptProvider,
@@ -554,6 +559,39 @@ mod tests {
         assert!(!looks_like_gene_symbol("chr7"));
         assert!(!looks_like_gene_symbol("MT"));
         assert!(!looks_like_gene_symbol("ENST00000288602"));
+    }
+
+    /// Golden VRS id for `chrF:g.6C>T` over the synthetic `chrF` contig. This is
+    /// the cross-surface parity anchor: the wasm `hgvs_to_vrs_id` binding
+    /// (`gtars-wasm/src/hgvs.rs`) pins the SAME constant, so a divergence between
+    /// the native and wasm code paths fails one side or the other.
+    pub(crate) const GOLDEN_CHRF_G6CT_VRS_ID: &str = "ga4gh:VA._q-idtHGQxQ4XiEPJ1ExYl_htUeNEkir";
+
+    #[test]
+    fn readonly_bridge_matches_golden_vrs_id() {
+        use crate::provider::NoTranscriptProvider;
+        use gtars_refget::digest::digest_sequence;
+        use gtars_refget::store::RefgetStore;
+        use std::collections::HashMap;
+
+        // Replicate exactly what the wasm `hgvs_to_vrs_id` wrapper does, so this
+        // native result is the reference the wasm binding is asserted against.
+        let name = "chrF";
+        let bases = "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
+        let record = digest_sequence(name, bases.as_bytes());
+        let raw_digest = record.metadata().sha512t24u.clone();
+        let mut store = RefgetStore::in_memory();
+        store.add_sequence_record(record, true).unwrap();
+        let mut name_to_digest = HashMap::new();
+        name_to_digest.insert(name.to_string(), raw_digest);
+        let id = hgvs_str_to_vrs_id_readonly(
+            "chrF:g.6C>T",
+            &NoTranscriptProvider,
+            &store,
+            &name_to_digest,
+        )
+        .unwrap();
+        assert_eq!(id, GOLDEN_CHRF_G6CT_VRS_ID);
     }
 
     #[test]

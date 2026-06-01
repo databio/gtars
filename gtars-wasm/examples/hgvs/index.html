@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>HGVS → VRS (gtars-wasm)</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.4rem; }
+      label { display: block; margin: 0.8rem 0 0.2rem; font-weight: 600; }
+      input, textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.95rem; padding: 0.4rem; }
+      textarea { height: 5rem; }
+      button { margin-top: 1rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+      .result { margin-top: 1.2rem; padding: 0.8rem; border-radius: 6px; background: #f4f4f5; font-family: ui-monospace, monospace; word-break: break-all; }
+      .error { background: #fde8e8; color: #9b1c1c; }
+      .hint { color: #666; font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <h1>HGVS → VRS allele identifier</h1>
+    <p class="hint">
+      Genomic (<code>g.</code>) variants only. Reference bases are supplied from
+      JavaScript — there is no filesystem in the browser. Either paste the full
+      bases of the referenced sequence below, or give a URL to fetch them from.
+    </p>
+
+    <label for="hgvs">HGVS expression</label>
+    <input id="hgvs" value="chrF:g.6C>T" />
+
+    <label for="seqname">Sequence name / accession (must match the HGVS reference)</label>
+    <input id="seqname" value="chrF" />
+
+    <label for="bases">Reference bases (full sequence)</label>
+    <textarea id="bases">ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT</textarea>
+
+    <label for="basesurl">…or fetch bases from URL (plain text; overrides the box above when set)</label>
+    <input id="basesurl" placeholder="https://…/chrF.txt" />
+
+    <button id="go">Compute VRS id</button>
+
+    <div id="out" class="result" hidden></div>
+
+    <script type="module">
+      // Built with: wasm-pack build --target web (output in ../../pkg)
+      import init, { hgvs_to_vrs_id, parse_hgvs } from "../../pkg/gtars_js.js";
+
+      const out = document.getElementById("out");
+      const show = (text, isError) => {
+        out.hidden = false;
+        out.textContent = text;
+        out.classList.toggle("error", !!isError);
+      };
+
+      await init();
+
+      document.getElementById("go").addEventListener("click", async () => {
+        const hgvs = document.getElementById("hgvs").value.trim();
+        const seqName = document.getElementById("seqname").value.trim();
+        const url = document.getElementById("basesurl").value.trim();
+        try {
+          // Parse-only summary first (pure; no bases needed).
+          const parsed = parse_hgvs(hgvs);
+          if (parsed.reference_type !== "g") {
+            throw new Error(
+              `Only genomic (g.) variants are supported in v1; got "${parsed.reference_type}."`
+            );
+          }
+
+          let bases = document.getElementById("bases").value.trim();
+          if (url) {
+            // JS owns the async fetch; the Rust entry is synchronous over bytes.
+            const resp = await fetch(url);
+            if (!resp.ok) throw new Error(`fetch ${url} → HTTP ${resp.status}`);
+            bases = (await resp.text()).replace(/\s+/g, "");
+          }
+
+          const id = hgvs_to_vrs_id(hgvs, seqName, bases);
+          show(id, false);
+        } catch (err) {
+          show(String(err), true);
+        }
+      });
+    </script>
+  </body>
+</html>
