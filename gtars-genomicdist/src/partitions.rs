@@ -152,6 +152,9 @@ impl GeneModel {
         let mut pending_utrs: Vec<PendingUtr> = Vec::new();
         // transcript_id -> (min_cds_start, max_cds_end)
         let mut cds_bounds: HashMap<String, (u32, u32)> = HashMap::new();
+        // transcript_id -> exon intervals (chr, start, end, strand char). Used to
+        // derive UTRs from exon-minus-CDS when the GTF has no explicit UTR rows.
+        let mut tx_exons: HashMap<String, Vec<(String, u32, u32, char)>> = HashMap::new();
 
         for line in reader.lines() {
             let line = line?;
@@ -207,6 +210,13 @@ impl GeneModel {
                     gene_strands.push(strand);
                 }
                 "exon" => {
+                    if let Some(tid) = extract_gtf_transcript_id(fields[8]) {
+                        let strand_char = fields[6].chars().next().unwrap_or('+');
+                        tx_exons
+                            .entry(tid)
+                            .or_default()
+                            .push((chr.clone(), start, end, strand_char));
+                    }
                     exons.push(Region { chr, start, end, rest: None });
                     exon_strands.push(strand);
                 }
@@ -266,6 +276,55 @@ impl GeneModel {
                 }
             }
             // UTRs without matching CDS (non-coding transcripts) are skipped
+        }
+
+        // If the GTF supplied no explicit UTR features (neither typed
+        // five/three_prime_utr rows nor undifferentiated UTR rows), derive
+        // UTRs from exon-minus-CDS per transcript. This mirrors R
+        // GenomicFeatures' fiveUTRsByTranscript()/threeUTRsByTranscript(),
+        // which compute UTRs from the transcript model rather than reading
+        // them from the GTF.
+        if five_utr.is_empty() && three_utr.is_empty() {
+            for (tid, exon_list) in &tx_exons {
+                let Some(&(cds_start, cds_end)) = cds_bounds.get(tid) else {
+                    continue; // non-coding transcript: no UTRs
+                };
+                for &(ref chr, e_start, e_end, strand_char) in exon_list {
+                    let utr_strand = Strand::from_char(strand_char);
+                    // Exon portion before the CDS: 5'UTR on +, 3'UTR on -.
+                    if e_start < cds_start {
+                        let region = Region {
+                            chr: chr.clone(),
+                            start: e_start,
+                            end: e_end.min(cds_start),
+                            rest: None,
+                        };
+                        if strand_char == '-' {
+                            three_utr.push(region);
+                            three_utr_strands.push(utr_strand);
+                        } else {
+                            five_utr.push(region);
+                            five_utr_strands.push(utr_strand);
+                        }
+                    }
+                    // Exon portion after the CDS: 3'UTR on +, 5'UTR on -.
+                    if e_end > cds_end {
+                        let region = Region {
+                            chr: chr.clone(),
+                            start: e_start.max(cds_end),
+                            end: e_end,
+                            rest: None,
+                        };
+                        if strand_char == '-' {
+                            five_utr.push(region);
+                            five_utr_strands.push(utr_strand);
+                        } else {
+                            three_utr.push(region);
+                            three_utr_strands.push(utr_strand);
+                        }
+                    }
+                }
+            }
         }
 
         let genes_srs = StrandedRegionSet::new(RegionSet::from(genes), gene_strands).reduce();
