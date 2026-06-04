@@ -1,12 +1,56 @@
 use clap::ArgMatches;
 
+use gtars_uniwig::bamqc::{run_bam_qc, run_bam_qc_parallel};
 use gtars_uniwig::stream::{CountType, OutputFormat, read_chrom_sizes, uniwig_streaming};
 use gtars_uniwig::uniwig_main;
 use std::fs::File;
 use std::io::{self, BufReader, Cursor, Read, Write};
+use std::path::Path;
+
+use super::cli::BAMQC_SUBCMD;
+
+/// Handles bamqc subcommand
+fn handle_bamqc(matches: &ArgMatches) {
+    let input = matches
+        .get_one::<String>("input")
+        .expect("--input is required");
+    let output = matches
+        .get_one::<String>("output")
+        .expect("--output is required");
+    let threads = *matches
+        .get_one::<usize>("threads")
+        .unwrap_or(&1);
+
+    let result = if threads > 1 {
+        run_bam_qc_parallel(Path::new(input), Path::new(output), threads)
+    } else {
+        run_bam_qc(Path::new(input), Path::new(output))
+    };
+
+    match result {
+        Ok(result) => {
+            println!("BAM QC completed successfully.");
+            println!("  Total read pairs: {}", result.total_reads);
+            println!("  Distinct read pairs: {}", result.distinct);
+            println!("  NRF: {:.6}", result.nrf);
+            println!("  PBC1: {:.6}", result.pbc1);
+            println!("  PBC2: {:.6}", result.pbc2);
+            println!("Output written to: {}", output);
+        }
+        Err(e) => {
+            eprintln!("Error computing BAM QC: {}", e);
+            std::process::exit(1);
+        }
+    }
+}
 
 /// Matches items from CLAP args before running uniwig_main
 pub fn run_uniwig(matches: &ArgMatches) {
+    if let Some((BAMQC_SUBCMD, sub_matches)) = matches.subcommand() {
+        handle_bamqc(sub_matches);
+        return;
+    }
+
     let streaming = matches.get_one::<bool>("streaming").unwrap_or(&false);
 
     if *streaming {
@@ -34,7 +78,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
     let smoothsize = matches
         .get_one::<i32>("smoothsize")
-        .expect("smoothsize required");
+        .expect("--smoothsize is required for uniwig (not needed for subcommands like bamqc)");
 
     let output_type = matches
         .get_one::<String>("outputtype")
@@ -85,7 +129,7 @@ pub fn run_uniwig(matches: &ArgMatches) {
 
     let stepsize = matches
         .get_one::<i32>("stepsize")
-        .expect("requires integer value");
+        .expect("--stepsize is required for uniwig (not needed for subcommands like bamqc)");
 
     let zoom = matches
         .get_one::<i32>("zoom")
