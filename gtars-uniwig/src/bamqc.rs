@@ -40,8 +40,9 @@ impl BamQcResult {
 #[derive(Debug, Clone, Default)]
 struct ChromResult {
     chrom: String,
-    position_counts: HashMap<(i64, i64), u64>,
+    position_counts: HashMap<(i64, i64, i64, i64), u64>,
     total_reads: u64,
+    num_pairs: u64,
     dup_count: u64,
     mito_reads: u64,
     is_paired: bool,
@@ -77,6 +78,10 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
         return Ok(result);
     }
 
+    let mut read1_data: HashMap<Vec<u8>, (i64, i64)> = HashMap::new();
+    let mut read2_data: HashMap<Vec<u8>, (i64, i64)> = HashMap::new();
+    let mut paired_read_count: u64 = 0;
+
     for record_result in records {
         let record = record_result?;
 
@@ -98,20 +103,34 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
             None => continue,
         };
 
-        let key = if record.flags().is_segmented() {
+        if record.flags().is_segmented() {
             result.is_paired = true;
+            paired_read_count += 1;
+
+            let qname = match record.name() {
+                Some(name) => name.to_vec(),
+                None => continue,
+            };
+            let tlen = record.template_length() as i64;
+
             if record.flags().is_first_segment() {
-                let tlen = record.template_length() as i64;
-                (pos, tlen)
-            } else {
-                continue;
+                read1_data.insert(qname, (pos, tlen));
+            } else if record.flags().is_last_segment() {
+                read2_data.insert(qname, (pos, tlen));
             }
         } else {
             let qlen = record.sequence().len() as i64;
-            (pos, qlen)
-        };
+            *result.position_counts.entry((pos, qlen, 0, 0)).or_insert(0) += 1;
+        }
+    }
 
-        *result.position_counts.entry(key).or_insert(0) += 1;
+    if result.is_paired {
+        result.num_pairs = paired_read_count / 2;
+        for (qname, (pos1, tlen1)) in &read1_data {
+            if let Some(&(pos2, tlen2)) = read2_data.get(qname) {
+                *result.position_counts.entry((*pos1, *tlen1, pos2, tlen2)).or_insert(0) += 1;
+            }
+        }
     }
 
     Ok(result)
@@ -145,40 +164,37 @@ pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<Ba
     });
 
     let mut total_reads: u64 = 0;
+    let mut total_pairs: u64 = 0;
     let mut dup_count: u64 = 0;
     let mut mito_count: u64 = 0;
     let mut is_paired_data = false;
-    let mut global_counts: HashMap<(String, i64, i64), u64> = HashMap::new();
+    let mut m_distinct: u64 = 0;
+    let mut m1: u64 = 0;
+    let mut m2: u64 = 0;
 
     for chrom_result in results {
         total_reads += chrom_result.total_reads;
+        total_pairs += chrom_result.num_pairs;
         dup_count += chrom_result.dup_count;
         mito_count += chrom_result.mito_reads;
         if chrom_result.is_paired {
             is_paired_data = true;
         }
-        for ((pos, tlen), count) in chrom_result.position_counts {
-            let key = (chrom_result.chrom.clone(), pos, tlen);
-            *global_counts.entry(key).or_insert(0) += count;
-        }
-    }
-
-    let m_distinct = global_counts.len() as u64;
-    let mut m1: u64 = 0;
-    let mut m2: u64 = 0;
-
-    for &count in global_counts.values() {
-        if count == 1 {
-            m1 += 1;
-        } else if count == 2 {
-            m2 += 1;
+        // Count M1/M2/M_DISTINCT per chromosome - no need to store globally
+        m_distinct += chrom_result.position_counts.len() as u64;
+        for &count in chrom_result.position_counts.values() {
+            if count == 1 {
+                m1 += 1;
+            } else if count == 2 {
+                m2 += 1;
+            }
         }
     }
 
     let effective_total = if is_paired_data {
-        total_reads / 2
+        total_pairs
     } else {
-        total_reads
+        total_reads - mito_count
     };
 
     let total_f = effective_total.max(1) as f64;
@@ -203,89 +219,56 @@ pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<Ba
 }
 
 pub fn compute_bam_qc(bam_path: &Path) -> Result<BamQcResult, Box<dyn Error>> {
-    let mut reader = bam::io::reader::Builder.build_from_path(bam_path)?;
+    // Process chromosome-by-chromosome to reduce memory usage.
+    // Compute M1/M2/M_DISTINCT per chromosome and sum them.
+    // Position keys don't span chromosomes, so this is correct.
+    let mut reader = bam::io::indexed_reader::Builder::default()
+        .build_from_path(bam_path)?;
     let header = reader.read_header()?;
 
-    let mut position_counts: HashMap<(String, i64, i64), u64> = HashMap::new();
+    let chromosomes: Vec<String> = header
+        .reference_sequences()
+        .iter()
+        .map(|(name, _)| String::from_utf8_lossy(name.as_ref()).to_string())
+        .collect();
+
     let mut total_reads: u64 = 0;
+    let mut total_pairs: u64 = 0;
     let mut dup_count: u64 = 0;
     let mut mito_count: u64 = 0;
     let mut is_paired_data = false;
-
-    let reference_sequences = header.reference_sequences();
-
-    for result in reader.records() {
-        let record = result?;
-
-        if record.flags().is_unmapped() {
-            continue;
-        }
-
-        total_reads += 1;
-
-        if record.flags().is_duplicate() {
-            dup_count += 1;
-        }
-
-        let chrom_idx = match record.reference_sequence_id() {
-            Some(id) => match id {
-                Ok(idx) => idx,
-                Err(_) => continue,
-            },
-            None => continue,
-        };
-
-        let chrom_name = reference_sequences
-            .get_index(chrom_idx)
-            .map(|(name, _)| String::from_utf8_lossy(name.as_ref()).to_string())
-            .unwrap_or_default();
-
-        if is_mitochondrial(&chrom_name) {
-            mito_count += 1;
-            continue;
-        }
-
-        let pos = match record.alignment_start() {
-            Some(p) => match p {
-                Ok(position) => position.get() as i64,
-                Err(_) => continue,
-            },
-            None => continue,
-        };
-
-        let key = if record.flags().is_segmented() {
-            is_paired_data = true;
-            if record.flags().is_first_segment() {
-                let tlen = record.template_length() as i64;
-                (chrom_name, pos, tlen)
-            } else {
-                continue;
-            }
-        } else {
-            let qlen = record.sequence().len() as i64;
-            (chrom_name, pos, qlen)
-        };
-
-        *position_counts.entry(key).or_insert(0) += 1;
-    }
-
-    let m_distinct = position_counts.len() as u64;
-
+    let mut m_distinct: u64 = 0;
     let mut m1: u64 = 0;
     let mut m2: u64 = 0;
 
-    for &count in position_counts.values() {
-        if count == 1 {
-            m1 += 1;
-        } else if count == 2 {
-            m2 += 1;
+    for chrom in &chromosomes {
+        match process_chromosome(bam_path, chrom) {
+            Ok(chrom_result) => {
+                total_reads += chrom_result.total_reads;
+                total_pairs += chrom_result.num_pairs;
+                dup_count += chrom_result.dup_count;
+                mito_count += chrom_result.mito_reads;
+                if chrom_result.is_paired {
+                    is_paired_data = true;
+                }
+                // Count M1/M2/M_DISTINCT for this chromosome and discard position_counts
+                m_distinct += chrom_result.position_counts.len() as u64;
+                for &count in chrom_result.position_counts.values() {
+                    if count == 1 {
+                        m1 += 1;
+                    } else if count == 2 {
+                        m2 += 1;
+                    }
+                }
+            }
+            Err(_) => continue,
         }
     }
 
     let effective_total = if is_paired_data {
-        total_reads / 2
+        total_pairs
     } else {
-        total_reads
+        total_reads - mito_count
     };
 
     let total_f = effective_total.max(1) as f64;
