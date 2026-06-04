@@ -9,8 +9,6 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
-#[cfg(feature = "http")]
-use flate2::read::GzDecoder;
 use flate2::read::MultiGzDecoder;
 #[cfg(feature = "http")]
 use std::error::Error;
@@ -171,7 +169,7 @@ pub fn get_dynamic_reader_from_url(
     let is_gzipped = url_str.ends_with(".gz");
 
     let reader: Box<dyn std::io::Read> = match is_gzipped {
-        true => Box::new(GzDecoder::new(cursor)),
+        true => Box::new(MultiGzDecoder::new(cursor)),
         false => Box::new(cursor),
     };
 
