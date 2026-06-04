@@ -1453,6 +1453,7 @@ mod tests {
     }
 
     #[rstest]
+    #[ignore = "Hits encodeproject.org; the CDN blocks cloud/CI IPs. See test_open_from_url_matches_local for a self-contained version."]
     fn test_open_from_url() {
         let file_path = String::from(
             "https://www.encodeproject.org/files/ENCFF321QPN/@@download/ENCFF321QPN.bed.gz",
@@ -1460,37 +1461,72 @@ mod tests {
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
-    /// ENCODE `.bed.gz` files are multi-member (bgzip) gzip streams. This checks
-    /// that the URL and local-file readers both decode every member and produce the
-    /// same, full region count (regression test for truncation at the first member).
+    /// Build a multi-member (concatenated) gzip stream from BED lines, splitting them
+    /// across two gzip members — exactly the bgzip-style layout used by ENCODE files.
+    /// A single-member `GzDecoder` would stop after the first member; `MultiGzDecoder`
+    /// reads them all.
+    #[cfg(feature = "http")]
+    fn make_multimember_bed_gz(num_regions: usize) -> Vec<u8> {
+        use flate2::write::GzEncoder;
+        use flate2::Compression;
+        use std::io::Write;
+
+        let lines: Vec<String> = (0..num_regions)
+            .map(|i| format!("chr1\t{}\t{}\n", i * 100, i * 100 + 50))
+            .collect();
+
+        let mid = lines.len() / 2;
+        let mut out = Vec::new();
+        for chunk in [&lines[..mid], &lines[mid..]] {
+            let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+            for line in chunk {
+                enc.write_all(line.as_bytes()).unwrap();
+            }
+            out.extend(enc.finish().unwrap());
+        }
+        out
+    }
+
+    /// `.bed.gz` files (e.g. from ENCODE) are multi-member gzip streams. This verifies
+    /// that the URL reader and the local-file reader both decode every member and
+    /// produce the same, full region count — a regression test for truncation at the
+    /// first gzip member. Served over localhost so it has no external dependency.
     #[cfg(feature = "http")]
     #[rstest]
     fn test_open_from_url_matches_local() {
         use std::io::{Read, Write};
+        use std::net::TcpListener;
 
-        let url = "https://www.encodeproject.org/files/ENCFF003NPD/@@download/ENCFF003NPD.bed.gz";
+        const NUM_REGIONS: usize = 5000;
+        let gz_bytes = make_multimember_bed_gz(NUM_REGIONS);
 
-        // Read directly from the URL.
-        let from_url = RegionSet::try_from(url).unwrap();
-        assert_eq!(from_url.len(), 70445);
-
-        // Download the raw gzip bytes, write them to a temp file, and read locally.
-        let mut bytes = Vec::new();
-        ureq::get(url)
-            .call()
-            .unwrap()
-            .into_body()
-            .into_reader()
-            .read_to_end(&mut bytes)
-            .unwrap();
-
+        // Read from a local file.
         let tmp = tempfile::Builder::new().suffix(".bed.gz").tempfile().unwrap();
-        tmp.as_file().write_all(&bytes).unwrap();
-
+        tmp.as_file().write_all(&gz_bytes).unwrap();
         let from_file = RegionSet::try_from(tmp.path()).unwrap();
-        assert_eq!(from_file.len(), 70445);
+        assert_eq!(from_file.len(), NUM_REGIONS);
 
-        // Both readers must agree.
+        // Serve the same bytes over localhost and read from the URL.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let body = gz_bytes.clone();
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 1024];
+            let _ = stream.read(&mut buf); // consume the request line/headers
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(header.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+        });
+
+        let url = format!("http://127.0.0.1:{}/data.bed.gz", port);
+        let from_url = RegionSet::try_from(url).unwrap();
+        server.join().unwrap();
+
+        assert_eq!(from_url.len(), NUM_REGIONS);
         assert_eq!(from_url.len(), from_file.len());
     }
 
