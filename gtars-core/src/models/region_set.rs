@@ -689,6 +689,40 @@ mod tests {
         assert!(RegionSet::try_from(file_path).is_ok());
     }
 
+    /// ENCODE `.bed.gz` files are multi-member (bgzip) gzip streams. This checks
+    /// that the URL and local-file readers both decode every member and produce the
+    /// same, full region count (regression test for truncation at the first member).
+    #[cfg(feature = "http")]
+    #[rstest]
+    fn test_open_from_url_matches_local() {
+        use std::io::{Read, Write};
+
+        let url = "https://www.encodeproject.org/files/ENCFF003NPD/@@download/ENCFF003NPD.bed.gz";
+
+        // Read directly from the URL.
+        let from_url = RegionSet::try_from(url).unwrap();
+        assert_eq!(from_url.len(), 70445);
+
+        // Download the raw gzip bytes, write them to a temp file, and read locally.
+        let mut bytes = Vec::new();
+        ureq::get(url)
+            .call()
+            .unwrap()
+            .into_body()
+            .into_reader()
+            .read_to_end(&mut bytes)
+            .unwrap();
+
+        let tmp = tempfile::Builder::new().suffix(".bed.gz").tempfile().unwrap();
+        tmp.as_file().write_all(&bytes).unwrap();
+
+        let from_file = RegionSet::try_from(tmp.path()).unwrap();
+        assert_eq!(from_file.len(), 70445);
+
+        // Both readers must agree.
+        assert_eq!(from_url.len(), from_file.len());
+    }
+
     #[rstest]
     #[ignore = "Avoid BEDbase dependency in CI"]
     fn test_open_from_bedbase() {
