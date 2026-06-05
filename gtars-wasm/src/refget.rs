@@ -583,15 +583,11 @@ impl RefgetStore {
     }
 
     /// The underlying read-only store, for the VCF→VRS streaming core.
-    // Consumed by `vcf_to_vrs_ids` (Step 3) and the tests below.
-    #[allow(dead_code)]
     pub(crate) fn inner_readonly(&self) -> &ReadonlyRefgetStore {
         &self.inner
     }
 
     /// The name→digest map built from ingested sequences and aliases.
-    // Consumed by `vcf_to_vrs_ids` (Step 3) and the tests below.
-    #[allow(dead_code)]
     pub(crate) fn name_to_digest(&self) -> &HashMap<String, String> {
         &self.name_to_digest
     }

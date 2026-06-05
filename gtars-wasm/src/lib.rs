@@ -11,8 +11,10 @@ mod signal;
 mod tokenizers;
 mod tss;
 mod utils;
+mod vcf;
 
 // Re-export functions at the top level
 pub use bed_stream::*;
 pub use hgvs::*;
 pub use refget::*;
+pub use vcf::*;
