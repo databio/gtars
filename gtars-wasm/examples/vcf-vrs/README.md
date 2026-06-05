@@ -1,10 +1,11 @@
-# VCF → VRS in the browser (OPFS + Web Worker)
+# HGVS / VCF → VRS in the browser
 
-An in-browser tool that converts every variant in a VCF into a GA4GH VRS allele
-identifier (`ga4gh:VA.<digest>`), **entirely client-side** with zero server
-compute, using the WASM build of `gtars` (`gtars-js`). All parsing,
-normalization, and digesting happen in WASM; the only network traffic is a
-one-time fetch of the reference genome, which is then cached locally in OPFS.
+An in-browser tool that converts variants — a whole **VCF** file or a list of
+**HGVS** expressions — into GA4GH VRS allele identifiers (`ga4gh:VA.<digest>`),
+**entirely client-side** with zero server compute, using the WASM build of
+`gtars` (`gtars-js`). All parsing, normalization, and digesting happen in WASM;
+the only network traffic is a one-time fetch of the reference genome, cached
+locally in the browser (OPFS).
 
 ## The core idea
 
@@ -61,28 +62,29 @@ python3 -m http.server 8080
 
 ### Steps in the UI
 
-1. **Download / verify genome** — paste the refgetstore base URL. The Worker reads
+1. **Download / verify genome** — paste the genome store base URL. The Worker reads
    only the small `rgstore.json` + `sequences.rgsi` (no sequence bytes yet).
-   Chromosomes are fetched **lazily**: when you drop a VCF, only the chromosomes it
-   references are downloaded (and cached in OPFS for reuse). A whole-genome store has
-   hundreds of contigs; a VCF touches a few, so this avoids downloading the rest.
-2. **Drop a VCF** (`.vcf` or `.vcf.gz`) onto the drop zone.
-3. **Compute** runs `vcf_to_vrs_ids` in the Worker; watch the progress, then
-   **Download TSV** (`chrom  pos  ref  alt  vrs_id`).
+   Chromosomes are fetched **lazily**: only the ones an input actually references
+   are downloaded (and cached locally for reuse). A whole-genome store has hundreds
+   of contigs; an input touches a few, so this avoids downloading the rest.
+2. **Pick an input type** — **VCF file** (drag-drop `.vcf`/`.vcf.gz`) or **HGVS**
+   (paste genomic `g.` expressions, one per line).
+3. **Compute** runs in the Worker; watch the progress, then **Download TSV**
+   (`chrom pos ref alt vrs_id` for VCF, `hgvs vrs_id` for HGVS).
 
 ## How it fits together
 
 | File         | Thread | Role |
 |--------------|--------|------|
-| `index.html` | main   | Drop zone, refgetstore-URL input, progress bars, results table, TSV button. |
-| `main.js`    | main   | Drag-drop, Worker orchestration, progress UI, batched-results rendering, TSV download. |
-| `worker.js`  | worker | Genome provisioning (manifest/index → OPFS-cached `.seq` → resident `RefgetStore`), then `vcf_to_vrs_ids` over the dropped VCF, streaming results/progress back. |
+| `index.html` | main   | Input-type toggle (VCF drop zone / HGVS textarea), genome-URL input, progress bars, results table, TSV button. |
+| `main.js`    | main   | Input handling, Worker orchestration, progress UI, batched-results rendering, TSV download. |
+| `worker.js`  | worker | Genome provisioning (manifest/index → locally-cached `.seq` → resident `RefgetStore`), then `vcf_to_vrs_ids` / per-line `RefgetStore.hgvs_to_vrs_id`, streaming results/progress back. |
 
 The WASM surface used here (all real): the `RefgetStore` class
-(`add_sequence` / `add_encoded_sequence` / `add_alias`) and the batch entry
-`vcf_to_vrs_ids(store, vcfText, (chrom, pos, ref, alt, vrsId) => …)`. The
-single-variant `hgvs_to_vrs_id` / `parse_hgvs` entries also exist (see `../hgvs/`);
-`parse_hgvs` is loaded on the main thread here as a smoke test.
+(`add_sequence` / `add_encoded_sequence` / `add_alias` / `hgvs_to_vrs_id`), the batch
+entry `vcf_to_vrs_ids(store, vcfText, (chrom, pos, ref, alt, vrsId) => …)`, and the
+parse helper `parse_hgvs`. Both input types convert against the **same resident
+genome** — HGVS reuses the loaded chromosomes rather than rebuilding a store per call.
 
 ## Notes & current limits
 

@@ -33,6 +33,25 @@ const cacheRefreshBtn = $("cacheRefreshBtn");
 const cachePurgeBtn = $("cachePurgeBtn");
 const cacheInfo = $("cacheInfo");
 const cacheBody = $("cacheTable").querySelector("tbody");
+const vcfFileInput = $("vcfFileInput");
+const vcfPasteInput = $("vcfPasteInput");
+const vcfText = $("vcfText");
+const vcfRunBtn = $("vcfRunBtn");
+const vcfExampleBtn = $("vcfExampleBtn");
+const hgvsInput = $("hgvsInput");
+const hgvsText = $("hgvsText");
+const hgvsRunBtn = $("hgvsRunBtn");
+const hgvsExampleBtn = $("hgvsExampleBtn");
+const genomeExampleBtn = $("genomeExampleBtn");
+const resultsHeadRow = $("resultsHeadRow");
+
+// Self-consistent example set (works against the bundled teststore: chrF).
+const GENOME_EXAMPLE = new URL("./teststore", location.href).href;
+const HGVS_EXAMPLE = "chrF:g.6C>T";
+const VCF_EXAMPLE =
+  "##fileformat=VCFv4.2\n" +
+  "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n" +
+  "chrF\t6\t.\tC\tT\t.\t.\t.\n";
 
 const MAX_PREVIEW_ROWS = 50;
 
@@ -55,9 +74,32 @@ function setBar(bar, fraction, done = false) {
 // Rows are kept as compact arrays [chrom, pos, ref, alt, vrs_id]. For a 1M
 // variant file this is the only thing the main thread holds (the Worker streams
 // results in batches), so we keep it lean and only render a small preview.
-const TSV_HEADER = ["chrom", "pos", "ref", "alt", "vrs_id"];
+const VCF_HEADER = ["chrom", "pos", "ref", "alt", "vrs_id"];
+const HGVS_HEADER = ["hgvs", "vrs_id"];
+let currentHeader = VCF_HEADER;
 let resultRows = [];
 let previewCount = 0;
+
+function renderResultsHeader(header) {
+  resultsHeadRow.innerHTML = "";
+  for (const h of header) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    resultsHeadRow.appendChild(th);
+  }
+}
+
+// Reset the results UI for a new run with the given column header.
+function startRun(header) {
+  currentHeader = header;
+  resultRows = [];
+  previewCount = 0;
+  resultsBody.innerHTML = "";
+  renderResultsHeader(header);
+  downloadBtn.disabled = true;
+  setBar(computeBar, 0);
+  computeInfo.textContent = "";
+}
 
 function addResults(rows) {
   for (const r of rows) {
@@ -78,7 +120,7 @@ function addResults(rows) {
 function buildTsv() {
   // Build the TSV lazily at download time. Joining ~1M short rows is fine in
   // one pass; if it ever isn't, switch to a streamed Blob via a generator.
-  const lines = [TSV_HEADER.join("\t")];
+  const lines = [currentHeader.join("\t")];
   for (const r of resultRows) lines.push(r.join("\t"));
   return lines.join("\n") + "\n";
 }
@@ -229,13 +271,20 @@ function renderCache(msg) {
   }
 
   if (msg.other.count > 0) {
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      if (confirm(`Delete ${msg.other.count} unattributed file(s) (${fmtBytes(msg.other.bytes)})?`)) {
+        worker.postMessage({ type: "delete-unattributed" });
+      }
+    });
     addCacheRow(
       [
-        "(unattributed — verify its genome to group these)",
+        "(unattributed — from an earlier download; verify its genome to name them)",
         `${msg.other.count} files`,
         fmtBytes(msg.other.bytes),
       ],
-      null
+      del
     );
     cacheBody.lastChild.firstChild.className = "hint";
   }
@@ -267,6 +316,59 @@ prepBtn.addEventListener("click", () => {
 // ---------------------------------------------------------------------------
 // Drag-drop / file-picker VCF on the MAIN thread
 // ---------------------------------------------------------------------------
+// Input-type toggle: VCF file (drop) / VCF paste / HGVS.
+function setInputMode(mode) {
+  vcfFileInput.hidden = mode !== "vcf-file";
+  vcfPasteInput.hidden = mode !== "vcf-paste";
+  hgvsInput.hidden = mode !== "hgvs";
+}
+for (const r of document.querySelectorAll('input[name="inputType"]')) {
+  r.addEventListener("change", (e) => {
+    if (e.target.checked) setInputMode(e.target.value);
+  });
+}
+
+// "Load example" / "Use example" buttons fill the boxes with the bundled chrF demo.
+genomeExampleBtn.addEventListener("click", () => {
+  genomeUrlInput.value = GENOME_EXAMPLE;
+});
+hgvsExampleBtn.addEventListener("click", () => {
+  hgvsText.value = HGVS_EXAMPLE;
+});
+vcfExampleBtn.addEventListener("click", () => {
+  vcfText.value = VCF_EXAMPLE;
+});
+
+// Run pasted VCF text: encode to bytes and reuse the same VCF compute path.
+vcfRunBtn.addEventListener("click", () => {
+  const text = vcfText.value;
+  if (!text.trim()) {
+    log("Paste some VCF text first.", true);
+    return;
+  }
+  startRun(VCF_HEADER);
+  computeStartTs = performance.now();
+  const buf = new TextEncoder().encode(text).buffer;
+  worker.postMessage({ type: "process-vcf", buffer: buf, isGz: false, name: "pasted.vcf" }, [buf]);
+});
+
+// HGVS run: one expression per line, converted against the resident genome
+// (the Worker lazily loads referenced chromosomes).
+hgvsRunBtn.addEventListener("click", () => {
+  const lines = hgvsText.value
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (lines.length === 0) {
+    log("Enter at least one HGVS expression.", true);
+    return;
+  }
+  startRun(HGVS_HEADER);
+  log(`Converting ${lines.length} HGVS expression(s)…`);
+  computeStartTs = performance.now();
+  worker.postMessage({ type: "process-hgvs", lines });
+});
+
 dropZone.addEventListener("click", () => filePicker.click());
 filePicker.addEventListener("change", () => {
   if (filePicker.files.length) handleFile(filePicker.files[0]);
@@ -290,13 +392,7 @@ dropZone.addEventListener("drop", (e) => {
 });
 
 async function handleFile(file) {
-  // Reset result state for a fresh run.
-  resultRows = [];
-  previewCount = 0;
-  resultsBody.innerHTML = "";
-  downloadBtn.disabled = true;
-  setBar(computeBar, 0);
-  computeInfo.textContent = "";
+  startRun(VCF_HEADER); // reset results with the VCF columns
 
   const isGz = /\.gz$/i.test(file.name);
   log(`Loaded "${file.name}" (${fmtBytes(file.size)})${isGz ? " — gzip" : ""}.`);

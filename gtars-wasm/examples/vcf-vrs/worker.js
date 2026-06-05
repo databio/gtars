@@ -26,7 +26,7 @@
 //
 // Build: wasm-pack build --target web   (emits ../../pkg/gtars_js.js)
 
-import init, { RefgetStore, vcf_to_vrs_ids } from "../../pkg/gtars_js.js";
+import init, { RefgetStore, vcf_to_vrs_ids, parse_hgvs } from "../../pkg/gtars_js.js";
 
 const OPFS_DIR = "refget"; // OPFS subdir holding cached .seq files
 const PROGRESS_EVERY = 5000; // emit compute progress every N results
@@ -57,10 +57,14 @@ self.addEventListener("message", async (ev) => {
       await prepareGenome(msg.url);
     } else if (msg.type === "process-vcf") {
       await processVcf(msg.buffer, msg.isGz, msg.name);
+    } else if (msg.type === "process-hgvs") {
+      await processHgvs(msg.lines);
     } else if (msg.type === "list-cache") {
       await listCache();
     } else if (msg.type === "delete-genome") {
       await deleteGenome(msg.base);
+    } else if (msg.type === "delete-unattributed") {
+      await deleteUnattributed();
     } else if (msg.type === "purge-cache") {
       await purgeCache();
     }
@@ -218,6 +222,69 @@ async function processVcf(buffer, isGz, name) {
   post({ type: "compute-progress", processed: count, total: count });
   post({ type: "compute-done" });
   workerLog(`Computed ${count} VRS ids for ${name}.`);
+}
+
+// Convert a batch of HGVS expressions (one per line) against the resident
+// genome, lazily loading whichever chromosomes they reference. Emits results as
+// [hgvs, vrs_id] rows (bad/unconvertible lines get an "ERROR: …" id).
+async function processHgvs(lines) {
+  if (!genome) {
+    throw new Error('Genome not prepared. Click "Download / verify genome" first.');
+  }
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(OPFS_DIR, { create: true });
+
+  // Resolve + load referenced sequences once (the accession in each HGVS).
+  const accessions = new Set();
+  for (const line of lines) {
+    try {
+      const p = parse_hgvs(line);
+      if (p && p.accession) accessions.add(p.accession);
+    } catch {
+      /* unparseable; the per-line conversion below reports it */
+    }
+  }
+  let downloaded = 0;
+  const missing = [];
+  for (const acc of accessions) {
+    const meta = resolveChrom(acc);
+    if (!meta) {
+      missing.push(acc);
+      continue;
+    }
+    downloaded += await ensureChromLoaded(dir, meta, acc);
+    post({ type: "download-progress", received: downloaded, total: null });
+  }
+  if (missing.length) {
+    workerLog(
+      `Skipping HGVS referencing sequences not in the store: ${missing.slice(0, 10).join(", ")}`,
+      true
+    );
+  }
+
+  let batch = [];
+  let processed = 0;
+  for (const line of lines) {
+    let row;
+    try {
+      row = [line, residentStore.hgvs_to_vrs_id(line)];
+    } catch (e) {
+      row = [line, `ERROR: ${String(e && e.message ? e.message : e)}`];
+    }
+    batch.push(row);
+    processed++;
+    if (batch.length >= RESULT_BATCH) {
+      post({ type: "results", rows: batch });
+      batch = [];
+    }
+    if (processed % PROGRESS_EVERY === 0) {
+      post({ type: "compute-progress", processed, total: lines.length });
+    }
+  }
+  if (batch.length) post({ type: "results", rows: batch });
+  post({ type: "compute-progress", processed: lines.length, total: lines.length });
+  post({ type: "compute-done" });
+  workerLog(`Converted ${lines.length} HGVS expression(s).`);
 }
 
 // Distinct CHROM values (column 0) across all non-header VCF rows.
@@ -384,6 +451,34 @@ async function deleteGenome(base) {
   delete reg[base];
   await writeRegistry(dir, reg);
   workerLog(`Deleted genome "${info.label || base}" (${removed} chromosome file(s)) from local storage.`);
+  await listCache();
+}
+
+// Delete every cached .seq not claimed by a registered genome (e.g. files left
+// by an earlier download before the genome was registered). Verifying that
+// genome instead would attribute them; this just frees the disk.
+async function deleteUnattributed() {
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(OPFS_DIR, { create: false });
+  const reg = await readRegistry(dir);
+  const known = new Set();
+  for (const info of Object.values(reg)) for (const d of info.digests) known.add(`${d}.seq`);
+
+  const toDelete = [];
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind === "file" && name.endsWith(".seq") && !known.has(name)) toDelete.push(name);
+  }
+  let removed = 0;
+  for (const name of toDelete) {
+    try {
+      await dir.removeEntry(name);
+      removed++;
+      if (loaded) loaded.delete(name.replace(/\.seq$/, ""));
+    } catch {
+      /* ignore */
+    }
+  }
+  workerLog(`Deleted ${removed} unattributed chromosome file(s) from local storage.`);
   await listCache();
 }
 

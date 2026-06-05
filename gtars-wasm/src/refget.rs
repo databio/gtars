@@ -565,6 +565,22 @@ impl RefgetStore {
     pub fn name_count(&self) -> usize {
         self.name_to_digest.len()
     }
+
+    /// Convert a single genomic (`g.`) HGVS string into a GA4GH VRS allele id,
+    /// resolving the reference against THIS resident store (reusing the loaded
+    /// genome — unlike the standalone `hgvs_to_vrs_id`, which builds a one-off
+    /// store per call). The referenced sequence must already be ingested
+    /// (`add_sequence` / `add_encoded_sequence`). `c.`/`n.` are rejected (v1).
+    #[wasm_bindgen]
+    pub fn hgvs_to_vrs_id(&self, hgvs: &str) -> Result<String, JsValue> {
+        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id_readonly(
+            hgvs,
+            &gtars_vrs::provider::NoTranscriptProvider,
+            self.inner_readonly(),
+            self.name_to_digest(),
+        )
+        .map_err(|e| JsValue::from_str(&format!("{e}")))
+    }
 }
 
 impl RefgetStore {
@@ -672,6 +688,18 @@ mod tests {
             )
             .expect("add_encoded_sequence should succeed");
         assert_eq!(vrs_id_via_store(&store), GOLDEN_CHRF_G6CT_VRS_ID);
+    }
+
+    #[wasm_bindgen_test]
+    fn store_hgvs_to_vrs_id_uses_resident_genome() {
+        let mut store = RefgetStore::new();
+        store
+            .add_sequence(CHR_F_NAME, CHR_F_BASES.as_bytes())
+            .expect("add_sequence");
+        // The store method resolves against the resident genome (no per-call
+        // store rebuild) and must match the same golden id.
+        let id = store.hgvs_to_vrs_id("chrF:g.6C>T").expect("hgvs_to_vrs_id");
+        assert_eq!(id, GOLDEN_CHRF_G6CT_VRS_ID);
     }
 
     #[wasm_bindgen_test]
