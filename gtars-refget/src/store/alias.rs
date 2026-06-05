@@ -237,6 +237,36 @@ impl AliasManager {
         Ok(())
     }
 
+    /// Load only the alias namespaces explicitly listed (the manifest-driven
+    /// path). Unlike `load_from_dir`, which scans the directory for any `*.tsv`
+    /// present, this loads exactly `<aliases_dir>/{sequences,collections}/<ns>.tsv`
+    /// for each listed namespace. This makes `rgstore.json` the single source of
+    /// truth for what a store advertises: an alias file on disk that the manifest
+    /// does not list is simply not loaded, so a stale manifest fails identically
+    /// on a local filesystem and over HTTP (where directory listing is impossible).
+    pub fn load_namespaces_from_dir(
+        &mut self,
+        aliases_dir: &Path,
+        sequence_namespaces: &[String],
+        collection_namespaces: &[String],
+    ) -> Result<()> {
+        let seq_dir = aliases_dir.join("sequences");
+        for ns in sequence_namespaces {
+            let path = seq_dir.join(format!("{}.tsv", ns));
+            if path.exists() {
+                alias_load_tsv(&mut self.sequence_aliases, ns, &path)?;
+            }
+        }
+        let coll_dir = aliases_dir.join("collections");
+        for ns in collection_namespaces {
+            let path = coll_dir.join(format!("{}.tsv", ns));
+            if path.exists() {
+                alias_load_tsv(&mut self.collection_aliases, ns, &path)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn write_to_dir(&self, aliases_dir: &Path) -> Result<()> {
         write_all_aliases(&self.sequence_aliases, &aliases_dir.join("sequences"))?;
         write_all_aliases(&self.collection_aliases, &aliases_dir.join("collections"))?;
@@ -391,6 +421,12 @@ impl ReadonlyRefgetStore {
             if let Some(ref local_path) = self.local_path {
                 let aliases_dir = local_path.join("aliases");
                 self.aliases.write_namespace(&aliases_dir, kind, namespace)?;
+                // Keep rgstore.json in lock-step with the alias files on disk, so a
+                // served store always advertises its true alias namespaces. Without
+                // this, aliases added after the index was written (e.g. a post-build
+                // alias step) leave the manifest stale and remote/HTTP clients —
+                // which cannot list the aliases/ directory — never discover them.
+                self.refresh_manifest_alias_namespaces()?;
             }
         }
         Ok(())
@@ -1187,6 +1223,83 @@ mod tests {
         let available = store2.available_alias_namespaces();
         assert!(available.sequences.is_empty());
         assert!(available.collections.is_empty());
+    }
+
+    /// Fix #1: adding an alias to a disk-backed store re-writes rgstore.json so
+    /// the served manifest advertises the new namespace (no separate index write
+    /// required). Previously the alias TSV was persisted but the manifest was
+    /// left stale, so remote/HTTP clients could never discover the namespace.
+    #[test]
+    fn test_alias_add_refreshes_manifest() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        let mut store = RefgetStore::on_disk(&store_path).unwrap();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">chr1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(fasta_path.to_str().unwrap(), FastaImportOptions::new())
+            .unwrap();
+
+        let seq_digest = key_to_digest_string(&store.sequence_digests().next().unwrap());
+        // The manifest exists (written when the collection was added) but lists no
+        // sequence namespaces yet.
+        let before: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(store_path.join("rgstore.json")).unwrap()).unwrap();
+        assert!(before.get("sequence_alias_namespaces").is_none());
+
+        // Adding the alias must refresh the manifest in place.
+        store.add_sequence_alias("ucsc", "chr1", &seq_digest).unwrap();
+
+        let after: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(store_path.join("rgstore.json")).unwrap()).unwrap();
+        assert!(after["sequence_alias_namespaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|v| v.as_str() == Some("ucsc")));
+
+        // And a fresh manifest-driven open discovers and resolves it.
+        let store2 = RefgetStore::open_local(&store_path).unwrap();
+        assert!(store2.available_alias_namespaces().sequences.contains(&"ucsc".to_string()));
+        assert!(store2.get_sequence_metadata_by_alias("ucsc", "chr1").is_some());
+    }
+
+    /// Fix #2: with the manifest as the single source of truth, a stale manifest
+    /// (alias files present on disk but not advertised) yields the SAME result on
+    /// a local filesystem as over HTTP — the aliases are not discovered and do not
+    /// resolve. This is the failure that used to be silently masked by scanning
+    /// the aliases/ directory; making it visible locally is the point.
+    #[test]
+    fn test_stale_manifest_hides_aliases_locally() {
+        let dir = tempdir().unwrap();
+        let store_path = dir.path().join("store");
+
+        let mut store = RefgetStore::in_memory();
+        let fasta_path = dir.path().join("test.fa");
+        fs::write(&fasta_path, ">chr1\nACGT\n").unwrap();
+        store
+            .add_sequence_collection_from_fasta(fasta_path.to_str().unwrap(), FastaImportOptions::new())
+            .unwrap();
+        let seq_digest = key_to_digest_string(&store.sequence_digests().next().unwrap());
+        store.add_sequence_alias("ucsc", "chr1", &seq_digest).unwrap();
+        store.write_store_to_dir(&store_path, None).unwrap();
+
+        // The alias TSV is on disk and the manifest correctly lists it.
+        assert!(store_path.join("aliases/sequences/ucsc.tsv").exists());
+
+        // Simulate the stale-manifest bug: drop the advertised namespaces while
+        // leaving the alias files in place.
+        let mut metadata: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(store_path.join("rgstore.json")).unwrap()).unwrap();
+        metadata.as_object_mut().unwrap().remove("sequence_alias_namespaces");
+        fs::write(store_path.join("rgstore.json"), serde_json::to_string_pretty(&metadata).unwrap()).unwrap();
+
+        // Manifest-driven open: the un-advertised alias is invisible and unresolvable,
+        // exactly as it would be for a remote client that cannot list the directory.
+        let store2 = RefgetStore::open_local(&store_path).unwrap();
+        assert!(store2.available_alias_namespaces().sequences.is_empty());
+        assert!(store2.get_sequence_metadata_by_alias("ucsc", "chr1").is_none());
     }
 
     // -----------------------------------------------------------------------
