@@ -1,22 +1,37 @@
-# VCF → VRS browser harness (OPFS + Web Worker scaffold)
+# VCF → VRS in the browser (OPFS + Web Worker)
 
-A **starting-point scaffold** for an in-browser tool that converts every variant
-in a VCF into a GA4GH VRS allele identifier (`ga4gh:VA.<digest>`), entirely
-client-side, using the WASM build of `gtars` (`gtars-js`).
-
-This example is deliberately a **harness**: it implements the full, real
-JavaScript / Web Worker / OPFS plumbing — the hard, browser-specific part — with
-one clearly-marked seam where the not-yet-built WASM batch API will plug in. The
-plan for that WASM work is `gtars_browser_vcf_vrs_plan_v1.md`.
+An in-browser tool that converts every variant in a VCF into a GA4GH VRS allele
+identifier (`ga4gh:VA.<digest>`), **entirely client-side** with zero server
+compute, using the WASM build of `gtars` (`gtars-js`). All parsing,
+normalization, and digesting happen in WASM; the only network traffic is a
+one-time fetch of the reference genome, which is then cached locally in OPFS.
 
 ## The core idea
 
-> **WASM has no I/O.** JavaScript reads bytes from a browser store and copies
-> them into WASM linear memory.
+> **WASM has no I/O.** JavaScript fetches bytes (network or OPFS) and copies them
+> into WASM linear memory.
 
 `wasm32` has a hard **4 GB linear-memory ceiling**, and a decoded human genome is
-~3 GB. So the reference genome is held **ENCODED** (e.g. a ~750 MB `.2bit`) and
-decoded **on the fly** per variant — we never materialize the decoded genome.
+~3 GB. So the reference genome is held **ENCODED** (~750 MB, 2-bit packed) in a
+resident `RefgetStore` and decoded **on the fly** per variant — the decoded
+genome is never materialized.
+
+## Genome source: a served gtars refgetstore
+
+The genome comes from a directory that serves a **gtars refgetstore** (encoded
+mode) over HTTP:
+
+```
+{base}/rgstore.json                      manifest: path templates, index names, mode
+{base}/sequences.rgsi                    TSV index: name, length, alphabet, sha512t24u, md5
+{base}/sequences/<ab>/<digest>.seq       per-sequence ENCODED bytes (no header)
+```
+
+Build one from FASTA with `gtars refget build <fasta> -o <dir>` and serve `<dir>`.
+The `.seq` bytes are exactly the encoder output, so the Worker feeds them straight
+into the WASM store via `add_encoded_sequence` — no decode needed in JS, and the
+chromosome digests (the VRS sequence accessions) come from the index, not from
+re-hashing.
 
 ## Build the WASM bundle
 
@@ -30,10 +45,9 @@ wasm-pack build --target web
 This emits a `pkg/` directory (`gtars_js.js`, `gtars_js_bg.wasm`, …) next to
 `Cargo.toml`. Both `main.js` and `worker.js` import `../../pkg/gtars_js.js`.
 
-## Run the demo
+## Run
 
-ES modules + Workers must be served over HTTP (not `file://`). From
-`gtars-wasm/`:
+ES modules + Workers must be served over HTTP (not `file://`). From `gtars-wasm/`:
 
 ```bash
 python3 -m http.server 8080
@@ -41,88 +55,55 @@ python3 -m http.server 8080
 ```
 
 - No build step beyond `wasm-pack`, no `npm install`, no frameworks.
-- The Worker is loaded as `type: "module"` so it can `import` the wasm bundle —
-  this requires a reasonably modern browser (see caveats).
-- **Cross-origin isolation is NOT required.** This harness does not use
-  `SharedArrayBuffer` or wasm threads, so no `COOP`/`COEP` headers are needed.
-  (If a future version adds wasm threading you'd then need
-  `Cross-Origin-Opener-Policy: same-origin` +
-  `Cross-Origin-Embedder-Policy: require-corp`.)
+- The Worker is loaded as `type: "module"` so it can `import` the wasm bundle.
+- **Cross-origin isolation is NOT required** — no `SharedArrayBuffer`/wasm threads,
+  so no `COOP`/`COEP` headers needed.
 
 ### Steps in the UI
 
-1. **Download / verify genome** — streams the genome URL into OPFS once, then
-   reuses it. UCSC's `hg38.2bit` (~750 MB) is the default; any reachable
-   encoded genome URL works (CORS must allow the fetch).
+1. **Download / verify genome** — paste the refgetstore base URL. The Worker reads
+   `rgstore.json` + `sequences.rgsi`, fetches each `.seq` (caching it in OPFS so
+   the ~750 MB download happens once), and builds the resident store. Re-runs read
+   the cached `.seq` files from OPFS and skip the network.
 2. **Drop a VCF** (`.vcf` or `.vcf.gz`) onto the drop zone.
-3. **Compute** runs in the Worker; watch the progress bar, then **Download TSV**.
+3. **Compute** runs `vcf_to_vrs_ids` in the Worker; watch the progress, then
+   **Download TSV** (`chrom  pos  ref  alt  vrs_id`).
 
-## What genuinely works now vs. what is stubbed
-
-### ✅ Real and working (this is the value of the scaffold)
-
-- **OPFS download-once layer** (`worker.js → prepareGenome`):
-  `navigator.storage.persist()`, `estimate()` headroom check, and a streamed
-  `fetch` whose response body is written into an OPFS file **chunk-by-chunk**
-  via a sync access handle — peak JS memory stays at ~one network chunk, not
-  750 MB. Re-runs detect the cached file and skip the download.
-- **Web Worker** doing all OPFS + compute work, because OPFS *synchronous access
-  handles* (`createSyncAccessHandle()`) are Worker-only.
-- **Both genome feed modes**, as real `handle.read(buffer, { at })` call shapes:
-  - **Mode A — load-whole:** one `read(whole, { at: 0 })` of the entire encoded
-    genome to build a resident store once.
-  - **Mode B — byte-range:** per-variant positioned `read(slice, { at: byteStart })`,
-    the local analog of an HTTP Range request.
-- **Drag-drop / file-picker VCF** on the main thread, read to an `ArrayBuffer`,
-  with **gzip** handled by `DecompressionStream("gzip")`.
-- **Zero-copy handoff:** the VCF `ArrayBuffer` is **transferred** to the Worker.
-- **VCF parsing** (header skip, first 5 columns, multi-allelic ALT split).
-- **Progress + results streaming:** the Worker posts compute progress every N
-  variants and results in batches; the main thread renders progress bars, a
-  preview table, and assembles a downloadable **TSV**
-  (`chrom  pos  ref  alt  vrs_id`). The Worker yields to the event loop so a
-  **1M-variant** file does not freeze the UI.
-- **Quota / eviction messaging** via `persist()` + `estimate()`.
-
-### ⛔ Stubbed (pending `gtars_browser_vcf_vrs_plan_v1.md`)
-
-Every stub is marked with a `TODO:` pointing at the plan.
-
-- **`computeVrsIdsForVcf(...)` — the seam.** Currently returns a clearly-labeled
-  placeholder id (`STUB:VA.<fnv-hash>`) per variant. It will be replaced by the
-  WASM batch entry `vcf_to_vrs_ids(store, vcfText, onResult)`.
-- **Resident `RefgetStore`** built once from the encoded genome bytes
-  (`feedWholeGenome` returns the raw bytes today; the real path constructs a
-  WASM `RefgetStore` and reuses it across all variants).
-- **Byte-window math** (`byteRangeForBases`) — returns a placeholder window. The
-  real path uses the WASM-safe encoder helpers `byte_range_for_bases` /
-  `decode_substring_from_bytes_at_offset` (which may not be exported to JS yet).
-  The `handle.read({ at })` *call shape* around it is real.
-
-> The single-variant `hgvs_to_vrs_id` / `parse_hgvs` entries DO exist today (see
-> `../hgvs/`). `parse_hgvs` is loaded on the main thread here as a smoke test.
-
-## File map
+## How it fits together
 
 | File         | Thread | Role |
 |--------------|--------|------|
-| `index.html` | main   | Drop zone, genome-URL input, progress bars, results table, TSV button. Loads the wasm bundle (main thread) and spawns the Worker. |
-| `main.js`    | main   | Drag-drop, Worker orchestration, progress UI, TSV download. |
-| `worker.js`  | worker | OPFS download-once, sync access handle, both feed modes, the `computeVrsIdsForVcf` seam + stub, progress/result messaging. |
+| `index.html` | main   | Drop zone, refgetstore-URL input, progress bars, results table, TSV button. |
+| `main.js`    | main   | Drag-drop, Worker orchestration, progress UI, batched-results rendering, TSV download. |
+| `worker.js`  | worker | Genome provisioning (manifest/index → OPFS-cached `.seq` → resident `RefgetStore`), then `vcf_to_vrs_ids` over the dropped VCF, streaming results/progress back. |
+
+The WASM surface used here (all real): the `RefgetStore` class
+(`add_sequence` / `add_encoded_sequence` / `add_alias`) and the batch entry
+`vcf_to_vrs_ids(store, vcfText, (chrom, pos, ref, alt, vrsId) => …)`. The
+single-variant `hgvs_to_vrs_id` / `parse_hgvs` entries also exist (see `../hgvs/`);
+`parse_hgvs` is loaded on the main thread here as a smoke test.
+
+## Notes & current limits
+
+- **Genome held resident (load-whole).** The Worker reads every chromosome's
+  encoded bytes into the resident store (~750 MB for a human genome — fits under
+  the wasm32 ceiling). A memory-frugal **byte-range** mode (read only the window
+  each variant needs via `byte_range_for_bases` + a positioned OPFS `read`) is a
+  future optimization, not yet wired.
+- **Whole-file VCF in memory.** The dropped VCF is decoded to one string and run
+  in a single `vcf_to_vrs_ids` call; progress still streams out per result batch.
+  Streaming-parse of truly huge files is a future refinement.
+- **A normalization error aborts the run.** Per-row error collection (skip-and-
+  report) is noted in the plan but not yet implemented.
 
 ## Browser-support caveats
 
-- **OPFS** (`navigator.storage.getDirectory`) and **sync access handles** are
-  available in current Chromium and Safari; Firefox shipped OPFS sync access
-  handles relatively recently — use an up-to-date browser. `main.js` warns if
-  OPFS is missing.
-- **Module Workers** (`new Worker(url, { type: "module" })`) are required to
-  `import` the wasm bundle in the Worker; supported in current browsers.
-- **`DecompressionStream("gzip")`** is broadly available in current browsers but
-  not ancient ones; plain `.vcf` always works.
-- **Persistent storage** (`navigator.storage.persist()`) may be granted or
-  denied silently based on the browser's site-engagement heuristics; without it
-  the cached genome can be evicted under storage pressure (the UI says so).
-- **CORS:** the genome URL must permit a cross-origin `fetch` from your serving
-  origin. UCSC's `hgdownload.soe.ucsc.edu` generally does; mirror it yourself if
-  not.
+- **OPFS** (`navigator.storage.getDirectory`) and **sync access handles**
+  (`createSyncAccessHandle()`, Worker-only) require a current Chromium/Safari or a
+  recent Firefox. `main.js` warns if OPFS is missing.
+- **Module Workers** (`new Worker(url, { type: "module" })`) are required.
+- **`DecompressionStream("gzip")`** handles `.vcf.gz`; plain `.vcf` always works.
+- **Persistent storage** (`navigator.storage.persist()`) may be granted/denied
+  silently; without it the cached genome can be evicted under pressure.
+- **CORS:** the refgetstore origin must permit a cross-origin `fetch` from your
+  serving origin.

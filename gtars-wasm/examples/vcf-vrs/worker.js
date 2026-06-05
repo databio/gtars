@@ -3,30 +3,37 @@
 // Why a Worker at all:
 //   1. OPFS *synchronous access handles* (createSyncAccessHandle) are only
 //      available in Workers. They give us fast, seekable read()/write() over a
-//      file in the Origin-Private File System — the local analog of HTTP Range
-//      requests against a remote genome.
+//      file in the Origin-Private File System — the local cache for the genome.
 //   2. Processing a 1M-variant VCF must not block the main thread; doing it here
-//      keeps the UI responsive.
+//      keeps the UI responsive (progress still streams out via postMessage even
+//      while the wasm compute loop runs synchronously).
 //
-// The core mental model: WASM HAS NO I/O. This Worker reads bytes from OPFS and
-// copies the relevant window into WASM linear memory. wasm32 has a hard 4 GB
-// linear-memory ceiling, so the reference genome (e.g. ~750 MB 2bit-encoded)
-// must be held ENCODED and decoded on the fly — we never materialize the ~3 GB
-// decoded genome.
+// The core mental model: WASM HAS NO I/O. This Worker fetches bytes (network or
+// OPFS) and copies them into WASM linear memory. wasm32 has a hard 4 GB linear-
+// memory ceiling, so the reference genome (~750 MB 2bit-encoded for a human
+// genome) is held ENCODED and decoded on the fly per variant — we never
+// materialize the ~3 GB decoded genome.
+//
+// Genome source: a served **gtars refgetstore** directory, i.e. a base URL that
+// exposes:
+//   {base}/rgstore.json                     — manifest (templates, index names, mode)
+//   {base}/sequences.rgsi                    — TSV: name, length, alphabet, sha512t24u, md5
+//   {base}/sequences/<first2>/<digest>.seq   — per-sequence ENCODED bytes (no header)
+// The .seq bytes are exactly `encode_sequence` output, so they go straight into
+// the wasm store via `add_encoded_sequence`.
 //
 // Build: wasm-pack build --target web   (emits ../../pkg/gtars_js.js)
 
-// The Worker loads its OWN wasm instance (workers don't share the main thread's
-// linear memory). The resident RefgetStore / batch entry points do not exist
-// yet, so we only need the bundle's default init() here (see the STUB seam
-// below); once the batch API lands, import RefgetStore / vcf_to_vrs_ids too.
-import init from "../../pkg/gtars_js.js";
+import init, { RefgetStore, vcf_to_vrs_ids } from "../../pkg/gtars_js.js";
 
-const GENOME_FILENAME = "reference.2bit"; // name of the cached file in OPFS
-const PROGRESS_EVERY = 5000; // emit compute progress every N variants
-const RESULT_BATCH = 2000; // flush results to main thread every N rows
+const OPFS_DIR = "refget"; // OPFS subdir holding cached .seq files
+const PROGRESS_EVERY = 5000; // emit compute progress every N results
+const RESULT_BATCH = 2000; // flush results to the main thread every N rows
 
 let wasmReady = false;
+// The resident genome store, built once during prepare-genome and reused across
+// every process-vcf call.
+let residentStore = null;
 
 function post(msg, transfer) {
   self.postMessage(msg, transfer || []);
@@ -54,281 +61,213 @@ self.addEventListener("message", async (ev) => {
 });
 
 // ===========================================================================
-// (1) OPFS download-once layer
+// (1) Provision the genome: manifest → per-sequence encoded bytes → resident
+//     wasm store. .seq files are cached in OPFS so the big download happens once.
 // ===========================================================================
-// On first run: request persistence, check headroom, stream the genome into an
-// OPFS file chunk-by-chunk (never buffering 750 MB in JS memory). On later runs,
-// detect the existing file and skip the download.
-async function prepareGenome(url) {
-  // Ask the browser to make this origin's storage persistent so the cached
-  // genome is not silently evicted under storage pressure. This may prompt the
-  // user or be granted/denied silently depending on engagement heuristics.
+async function prepareGenome(baseUrl) {
+  const base = baseUrl.replace(/\/+$/, ""); // strip trailing slashes
+
+  // Ask for persistent storage so the cached genome is not evicted under
+  // pressure, and report headroom before a potentially large download.
   let persisted = false;
   if (navigator.storage && navigator.storage.persist) {
     persisted = await navigator.storage.persist();
   }
-
-  // Report headroom so the UI can warn before a 750 MB download.
   if (navigator.storage && navigator.storage.estimate) {
     const est = await navigator.storage.estimate();
-    post({
-      type: "storage-estimate",
-      usage: est.usage,
-      quota: est.quota,
-      persisted,
-    });
-    const headroom = (est.quota || 0) - (est.usage || 0);
-    if (headroom > 0 && headroom < 1.2 * 1024 * 1024 * 1024) {
-      workerLog(
-        `Only ${(headroom / 1e9).toFixed(2)} GB free — a full genome may not fit.`,
-        true
-      );
-    }
+    post({ type: "storage-estimate", usage: est.usage, quota: est.quota, persisted });
   }
 
+  // --- manifest ---
+  workerLog(`Fetching ${base}/rgstore.json …`);
+  const manifest = await fetchJson(`${base}/rgstore.json`);
+  const template = manifest.seqdata_path_template || "sequences/%s2/%s.seq";
+  const indexName = manifest.sequence_index || "sequences.rgsi";
+  workerLog(`Store mode=${manifest.mode}, index=${indexName}.`);
+
+  // --- sequence index ---
+  const rgsiText = await (await fetchOk(`${base}/${indexName}`)).text();
+  const seqs = parseRgsi(rgsiText);
+  if (seqs.length === 0) throw new Error("sequences.rgsi listed no sequences.");
+  workerLog(`Index lists ${seqs.length} sequences.`);
+
+  // --- download-once each .seq into OPFS, then build the resident store ---
   const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(OPFS_DIR, { create: true });
 
-  // Detect an already-cached genome and skip the download.
-  const existing = await tryGetFile(root, GENOME_FILENAME);
-  if (existing && existing.size > 0) {
-    post({ type: "genome-ready", cached: true, size: existing.size });
-    return;
-  }
+  const store = new RefgetStore();
+  let totalBytes = 0;
+  let cachedCount = 0;
 
-  // Stream the response body into OPFS chunk-by-chunk.
-  workerLog(`Fetching ${url} …`);
-  const resp = await fetch(url);
-  if (!resp.ok) throw new Error(`fetch ${url} → HTTP ${resp.status}`);
-  if (!resp.body) throw new Error("Response has no readable body to stream.");
+  for (let i = 0; i < seqs.length; i++) {
+    const s = seqs[i];
+    const seqUrl = `${base}/${expandTemplate(template, s.sha512t24u)}`;
+    const cacheName = `${s.sha512t24u}.seq`;
 
-  const total = Number(resp.headers.get("Content-Length")) || null;
+    const { bytes, cached } = await ensureCached(dir, cacheName, seqUrl);
+    if (cached) cachedCount++;
+    totalBytes += bytes.byteLength;
+    post({ type: "download-progress", received: totalBytes, total: null });
 
-  // Create the destination file handle. We write via a sync access handle so we
-  // can append at a running offset without holding the whole file in memory.
-  const fileHandle = await root.getFileHandle(GENOME_FILENAME, { create: true });
-  const access = await fileHandle.createSyncAccessHandle();
-  let offset = 0;
-  try {
-    access.truncate(0);
-    const reader = resp.body.getReader();
-    // Each `value` is a Uint8Array chunk straight off the network. We write it
-    // immediately and drop it — peak JS memory stays at ~one chunk, not 750 MB.
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      access.write(value, { at: offset });
-      offset += value.byteLength;
-      post({ type: "download-progress", received: offset, total });
+    // Encoded alphabets go in as packed bytes; a Raw/ASCII store would carry
+    // plain bases, which we ingest via the digesting path instead.
+    if (isEncodedAlphabet(s.alphabet)) {
+      store.add_encoded_sequence(s.name, s.sha512t24u, s.md5, s.length, bytes, s.alphabet);
+    } else {
+      store.add_sequence(s.name, bytes);
     }
-    access.flush();
-  } finally {
-    access.close();
+    workerLog(`Loaded ${s.name} (${s.length} bp, ${s.alphabet}).`);
   }
 
-  post({ type: "genome-ready", cached: false, size: offset });
-  workerLog(`Wrote ${offset} bytes to OPFS:/${GENOME_FILENAME}.`);
+  residentStore = store;
+  post({
+    type: "genome-ready",
+    cached: cachedCount === seqs.length,
+    size: totalBytes,
+  });
+  workerLog(
+    `Resident store built: ${seqs.length} sequences, ${totalBytes} encoded bytes ` +
+      `(${cachedCount} already cached in OPFS).`
+  );
 }
 
-async function tryGetFile(dir, name) {
+// Fetch a .seq from OPFS if present, else download it and write it to OPFS.
+// Returns { bytes: Uint8Array, cached: boolean }.
+async function ensureCached(dir, name, url) {
+  const existing = await tryReadOpfs(dir, name);
+  if (existing && existing.byteLength > 0) {
+    return { bytes: existing, cached: true };
+  }
+  const resp = await fetchOk(url);
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  await writeOpfs(dir, name, bytes);
+  return { bytes, cached: false };
+}
+
+async function tryReadOpfs(dir, name) {
   try {
     const fh = await dir.getFileHandle(name, { create: false });
-    return await fh.getFile();
+    const access = await fh.createSyncAccessHandle();
+    try {
+      const size = access.getSize();
+      const buf = new Uint8Array(size);
+      access.read(buf, { at: 0 });
+      return buf;
+    } finally {
+      access.close();
+    }
   } catch {
     return null; // NotFoundError → not cached yet
   }
 }
 
-// ===========================================================================
-// (2) Two genome feed modes (both shown as commented, correct API shapes)
-// ===========================================================================
-// We open the cached OPFS genome with a synchronous access handle (Worker-only).
-// From there, two strategies feed bytes into the resident wasm store.
-async function openGenomeAccessHandle() {
-  const root = await navigator.storage.getDirectory();
-  const fileHandle = await root.getFileHandle(GENOME_FILENAME, { create: false });
-  // Sync access handle: fast, seekable read(buffer, {at}) / write — only valid
-  // inside a Worker. One exclusive handle per file at a time.
-  return await fileHandle.createSyncAccessHandle();
-}
-
-// ----- Mode A: load-whole -------------------------------------------------
-// Read the ENTIRE encoded genome into one buffer and hand it to wasm to build a
-// resident store once. Fine for the ENCODED genome (~750 MB) — that fits under
-// the 4 GB wasm32 ceiling. NEVER decode the whole thing (the ~3 GB decoded form
-// would not be safe to hold).
-function feedWholeGenome(access) {
-  const size = access.getSize();
-  const whole = new Uint8Array(size);
-  // Single seekable read of the entire encoded file at offset 0.
-  access.read(whole, { at: 0 });
-
-  // TODO(gtars_browser_vcf_vrs_plan_v1.md): hand `whole` to the not-yet-built
-  // wasm `RefgetStore` constructor to build a resident, encoded genome store:
-  //
-  //   import { RefgetStore } from "../../pkg/gtars_js.js";
-  //   const store = RefgetStore.from_2bit_bytes(whole); // builds resident store
-  //   return store;
-  //
-  // For now we just return the raw bytes so the shape is exercised.
-  return whole;
-}
-
-// ----- Mode B: byte-range -------------------------------------------------
-// Per-variant, compute a byte window covering the needed bases and read ONLY
-// that slice — the local analog of an HTTP Range request. This avoids ever
-// holding the whole genome and is how you'd scale to many contigs.
-function readGenomeByteRange(access, byteStart, byteLen) {
-  const slice = new Uint8Array(byteLen);
-  // The real, load-bearing call shape: a seekable positioned read.
-  access.read(slice, { at: byteStart });
-  return slice;
-}
-
-// Window math for Mode B. The real implementation needs the wasm-safe encoder
-// helpers (byte_range_for_bases / decode_substring_from_bytes_at_offset) which
-// may not be wired for JS yet, so this is STUBBED.
-function byteRangeForBases(/* chrom, start, end, contigByteOffsets */) {
-  // TODO(gtars_browser_vcf_vrs_plan_v1.md): replace with the wasm export
-  //   byte_range_for_bases(contig, start, end) -> { byteStart, byteLen }
-  // which accounts for the 2bit header, per-contig offsets, and the 4-bases/byte
-  // packing. Returning a tiny placeholder window so the read() shape is real.
-  return { byteStart: 0, byteLen: 64 };
+async function writeOpfs(dir, name, bytes) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const access = await fh.createSyncAccessHandle();
+  try {
+    access.truncate(0);
+    access.write(bytes, { at: 0 });
+    access.flush();
+  } finally {
+    access.close();
+  }
 }
 
 // ===========================================================================
-// (3) VCF parsing + compute
+// (2) VCF → VRS compute, against the resident store.
 // ===========================================================================
 async function processVcf(buffer, isGz, name) {
+  if (!residentStore) {
+    throw new Error('Genome not loaded. Click "Download / verify genome" first.');
+  }
+
   let text;
   if (isGz) {
-    // DecompressionStream('gzip') is a fine, dependency-free gunzip in modern
-    // browsers. Wrapping the ArrayBuffer in a Response gives us .text() cheaply.
-    // (For a true 1M-line file you'd stream-decompress + stream-parse instead of
-    // decompressing to one big string; that optimization is noted, not done.)
+    // DecompressionStream('gzip') is a dependency-free gunzip in modern browsers.
     const ds = new DecompressionStream("gzip");
     const stream = new Blob([buffer]).stream().pipeThrough(ds);
     text = await new Response(stream).text();
   } else {
     text = new TextDecoder().decode(buffer);
   }
+  workerLog(`Decoded ${name} (${text.length} chars). Running VRS compute…`);
 
-  const variants = parseVcf(text);
-  workerLog(`Parsed ${variants.length} variants from ${name}.`);
-
-  // Open the genome handle so the two feed modes are genuinely exercised. If the
-  // genome isn't cached yet we proceed anyway (the compute is stubbed).
-  let access = null;
-  try {
-    access = await openGenomeAccessHandle();
-    // Mode A demo: build the resident store once (returns raw bytes for now).
-    const wholeOrStore = feedWholeGenome(access);
-    workerLog(
-      `Mode A: read whole encoded genome (${wholeOrStore.byteLength} bytes) for resident store.`
-    );
-  } catch (e) {
-    workerLog(
-      `Genome not available in OPFS (${e}); running compute stub without bytes. ` +
-        `Run "Download / verify genome" first for the real path.`,
-      true
-    );
-  }
-
-  try {
-    await computeVrsIdsForVcf(variants, access);
-  } finally {
-    if (access) access.close(); // release the exclusive sync handle
-  }
-}
-
-// Minimal VCF parser: skips headers (#), splits the first five columns. Handles
-// multi-allelic ALT by emitting one record per comma-separated allele.
-function parseVcf(text) {
-  const out = [];
-  let lineStart = 0;
-  const len = text.length;
-  // Manual line scan avoids building a giant array of all lines at once.
-  while (lineStart < len) {
-    let nl = text.indexOf("\n", lineStart);
-    if (nl === -1) nl = len;
-    const line = text.slice(lineStart, nl);
-    lineStart = nl + 1;
-    if (line.length === 0 || line.charCodeAt(0) === 35 /* '#' */) continue;
-    const cols = line.split("\t");
-    if (cols.length < 5) continue;
-    const [chrom, pos, , ref, altField] = cols;
-    for (const alt of altField.split(",")) {
-      out.push([chrom, pos, ref, alt]);
-    }
-  }
-  return out;
-}
-
-// ===========================================================================
-// (4) THE SEAM — where the real wasm batch API will plug in.
-// ===========================================================================
-// TODO(gtars_browser_vcf_vrs_plan_v1.md): replace the stub body below with the
-// not-yet-built wasm batch entry:
-//
-//   import { RefgetStore, vcf_to_vrs_ids } from "../../pkg/gtars_js.js";
-//   // store built once in Mode A (feedWholeGenome) and reused across variants:
-//   vcf_to_vrs_ids(store, vcfText, (chrom, pos, ref, alt, vrsId) => { ... });
-//
-// The Rust side builds a RESIDENT encoded genome once and decodes windows on the
-// fly per variant (Mode B byte ranges), staying under the 4 GB wasm32 ceiling.
-//
-// Until that exists, this STUB returns a clearly-derived placeholder id per
-// variant so the OPFS/Worker/progress/TSV wiring runs end-to-end.
-async function computeVrsIdsForVcf(variants, access) {
-  const total = variants.length;
+  // The wasm batch entry runs the whole file in one synchronous call; the
+  // callback fires once per result. We accumulate rows and post them in batches,
+  // and emit progress every PROGRESS_EVERY results. postMessage from inside the
+  // loop still reaches the main thread promptly, so the UI updates live even
+  // though this Worker thread is busy.
   let batch = [];
+  let processed = 0;
 
-  for (let i = 0; i < total; i++) {
-    const [chrom, pos, ref, alt] = variants[i];
-
-    // ---- STUB compute (NOT real VRS) -------------------------------------
-    // In the real path this is where we'd, per variant:
-    //   (Mode B) const win = byteRangeForBases(chrom, start, end, offsets);
-    //            const enc = readGenomeByteRange(access, win.byteStart, win.byteLen);
-    //   then call the wasm batch/single entry to get the canonical
-    //   ga4gh:VA.<digest>. We exercise the byte-range read shape on a few
-    //   variants so the OPFS read path is genuinely visited.
-    if (access && i < 3) {
-      const win = byteRangeForBases(chrom, pos, pos);
-      const enc = readGenomeByteRange(access, win.byteStart, win.byteLen);
-      void enc; // bytes are read but not yet decoded (stub)
-    }
-    const vrsId = stubVrsId(chrom, pos, ref, alt);
-    // ----------------------------------------------------------------------
-
+  const onResult = (chrom, pos, ref, alt, vrsId) => {
     batch.push([chrom, pos, ref, alt, vrsId]);
-
+    processed++;
     if (batch.length >= RESULT_BATCH) {
       post({ type: "results", rows: batch });
       batch = [];
     }
-    if ((i + 1) % PROGRESS_EVERY === 0) {
-      post({ type: "compute-progress", processed: i + 1, total });
-      // Yield to the event loop so the Worker can flush messages and stays
-      // responsive on huge inputs.
-      await Promise.resolve();
+    if (processed % PROGRESS_EVERY === 0) {
+      post({ type: "compute-progress", processed, total: null });
     }
-  }
+  };
+
+  const count = vcf_to_vrs_ids(residentStore, text, onResult);
 
   if (batch.length) post({ type: "results", rows: batch });
-  post({ type: "compute-progress", processed: total, total });
+  post({ type: "compute-progress", processed: count, total: count });
   post({ type: "compute-done" });
+  workerLog(`Computed ${count} VRS ids for ${name}.`);
 }
 
-// STUB id generator. Clearly NOT a real VRS digest — a deterministic placeholder
-// derived from the variant so the table/TSV are populated and reproducible.
-// TODO(gtars_browser_vcf_vrs_plan_v1.md): delete once the wasm batch entry lands.
-function stubVrsId(chrom, pos, ref, alt) {
-  const key = `${chrom}:${pos}:${ref}:${alt}`;
-  let h = 0x811c9dc5; // FNV-1a 32-bit
-  for (let i = 0; i < key.length; i++) {
-    h ^= key.charCodeAt(i);
-    h = Math.imul(h, 0x01000193);
+// ===========================================================================
+// (3) refgetstore format helpers
+// ===========================================================================
+
+// Expand a seqdata path template (e.g. "sequences/%s2/%s.seq") for a digest.
+// %s2 → first 2 chars, %s4 → first 4 chars, %s → full digest. Order matters:
+// replace the longer keys before the %s catch-all.
+function expandTemplate(template, digest) {
+  return template
+    .replaceAll("%s2", digest.slice(0, 2))
+    .replaceAll("%s4", digest.slice(0, 4))
+    .replaceAll("%s", digest);
+}
+
+// Parse sequences.rgsi: tab-separated, '#' header/comment lines skipped.
+// Columns: name, length, alphabet, sha512t24u, md5, [description].
+function parseRgsi(text) {
+  const out = [];
+  for (const line of text.split("\n")) {
+    if (line.length === 0 || line.charCodeAt(0) === 35 /* '#' */) continue;
+    const c = line.split("\t");
+    if (c.length < 5) continue;
+    out.push({
+      name: c[0],
+      length: parseInt(c[1], 10),
+      alphabet: c[2],
+      sha512t24u: c[3],
+      md5: c[4],
+    });
   }
-  const hex = (h >>> 0).toString(16).padStart(8, "0");
-  return `STUB:VA.${hex}`;
+  return out;
+}
+
+// The wasm add_encoded_sequence accepts the bit-packed alphabets; ASCII/raw and
+// anything else falls back to the digesting add_sequence path.
+function isEncodedAlphabet(alphabet) {
+  const a = alphabet.toLowerCase();
+  return a === "dna2bit" || a === "dna3bit" || a === "dnaio" || a === "dnaiupac";
+}
+
+// ===========================================================================
+// (4) fetch helpers
+// ===========================================================================
+async function fetchOk(url) {
+  const resp = await fetch(url);
+  if (!resp.ok) throw new Error(`fetch ${url} → HTTP ${resp.status}`);
+  return resp;
+}
+async function fetchJson(url) {
+  return (await fetchOk(url)).json();
 }

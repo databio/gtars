@@ -32,28 +32,25 @@
   <body>
     <h1>VCF → VRS allele identifiers (browser harness)</h1>
     <p class="hint">
-      Scaffold demonstrating the full <strong>OPFS + Web Worker</strong> plumbing for an
-      in-browser VCF→VRS tool. The reference genome is downloaded once into OPFS, a Worker
-      reads bytes from it via a synchronous access handle, and (eventually) hands them to
-      WASM to compute a <code>ga4gh:VA.&lt;digest&gt;</code> per variant.
+      In-browser VCF→VRS tool with <strong>zero server compute</strong>. The reference genome
+      is fetched once from a served <strong>gtars refgetstore</strong> and cached in OPFS; a
+      Web Worker holds it ENCODED in a resident <code>RefgetStore</code> and computes a
+      <code>ga4gh:VA.&lt;digest&gt;</code> for every variant via <code>vcf_to_vrs_ids</code>,
+      decoding reference bases on the fly.
     </p>
-    <div class="stub">
-      <strong>STUB NOTICE.</strong> The OPFS download-once layer, the Worker, drag-drop,
-      progress, and TSV export are <em>real and working</em>. The actual WASM batch
-      conversion (resident <code>RefgetStore</code> + <code>vcf_to_vrs_ids</code>) is
-      <em>not yet built</em> — see <code>gtars_browser_vcf_vrs_plan_v1.md</code>. Until then a
-      labeled stub returns a placeholder/derived id per variant so the wiring runs end-to-end.
-    </div>
 
     <h2>1. Reference genome</h2>
-    <label for="genomeUrl">Genome URL (2bit-encoded; held ENCODED in OPFS, decoded on the fly)</label>
+    <label for="genomeUrl">Refgetstore base URL (serves rgstore.json, sequences.rgsi, sequences/&lt;ab&gt;/&lt;digest&gt;.seq)</label>
     <input id="genomeUrl"
-      value="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit"
-      placeholder="https://…/hg38.2bit" />
+      value=""
+      placeholder="https://…/my_refgetstore/" />
     <p class="hint">
-      First run streams this into OPFS (no 750&nbsp;MB JS buffer). Later runs detect the
-      cached file and skip the download. <code>wasm32</code> has a hard 4&nbsp;GB linear-memory
-      ceiling, so we never materialize the ~3&nbsp;GB decoded genome.
+      Point at a directory that exposes a gtars refgetstore (encoded mode). The Worker reads
+      the manifest + index to learn each chromosome's digest/length/alphabet, fetches the
+      encoded <code>.seq</code> bytes (cached in OPFS so the ~750&nbsp;MB download happens
+      once), and builds the resident store. <code>wasm32</code> has a hard 4&nbsp;GB
+      linear-memory ceiling, so we hold the genome encoded and never materialize the ~3&nbsp;GB
+      decoded form.
     </p>
     <button id="prepBtn">Download / verify genome in OPFS</button>
     <div>Download / cache</div>
