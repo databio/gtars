@@ -21,9 +21,8 @@ pub mod parser;
 pub use ast::{
     Datum, Edit, HgvsVariant, HgvsVariantOwned, LocationRange, PosEdit, Position, ReferenceType,
 };
-pub use bridge::{
-    BridgeError, hgvs_str_to_vrs_id, hgvs_str_to_vrs_id_readonly, hgvs_to_allele,
-    hgvs_to_allele_readonly,
-};
+pub use bridge::{BridgeError, hgvs_str_to_vrs_id_readonly, hgvs_to_allele_readonly};
+#[cfg(feature = "filesystem")]
+pub use bridge::{hgvs_str_to_vrs_id, hgvs_to_allele};
 pub use error::HgvsError;
 pub use parser::parse;

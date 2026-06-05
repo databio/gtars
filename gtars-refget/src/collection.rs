@@ -7,7 +7,11 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
+// FASTA digesting + path helpers are filesystem-only; the rest of this module
+// (the `*Ext` traits, `read_rgsi_file`, RGSI writers) is WASM-safe.
+#[cfg(feature = "filesystem")]
 use crate::fasta::digest_fasta;
+#[cfg(feature = "filesystem")]
 use crate::utils::PathExtension;
 
 // Re-export core types from digest::types for backward compatibility
@@ -143,6 +147,7 @@ impl SequenceCollectionRecordExt for SequenceCollectionRecord {
 // ============================================================================
 
 /// Extension trait for SequenceCollection with filesystem-dependent methods.
+#[cfg(feature = "filesystem")]
 pub trait SequenceCollectionExt {
     fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
     fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
@@ -158,6 +163,7 @@ pub trait SequenceCollectionExt {
     fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()>;
 }
 
+#[cfg(feature = "filesystem")]
 impl SequenceCollectionExt for SequenceCollection {
     /// Default behavior: read and write cache
     fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {

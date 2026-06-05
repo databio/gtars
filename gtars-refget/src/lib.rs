@@ -87,44 +87,49 @@ pub use digest::{
 #[cfg(feature = "filesystem")]
 pub mod fasta;
 
-/// Extended SequenceCollection with filesystem operations.
-/// Adds methods for RGSI file I/O, caching, and file-based construction.
-#[cfg(feature = "filesystem")]
+/// Extended SequenceCollection with RGSI file I/O and the `*Ext` traits.
+/// WASM-safe except the `SequenceCollectionExt` (FASTA digesting) trait, which
+/// is gated behind `filesystem` inside the module.
 pub mod collection;
 
 /// Persistent sequence storage (RefgetStore).
-#[cfg(feature = "filesystem")]
+///
+/// The module is always compiled. The in-memory read path of
+/// `ReadonlyRefgetStore` is WASM-safe; filesystem/HTTP-backed pieces (the
+/// `RefgetStore` wrapper, FASTA import, persistence, export) are gated behind
+/// the `filesystem`/`http` features inside the module.
 pub mod store;
 
 /// Seqcol spec operations (comparison, level-based retrieval, attribute search).
-#[cfg(feature = "filesystem")]
+/// WASM-safe (operates on in-memory metadata).
 pub mod seqcol;
 
 /// Expansion of multi-FASTA input specifications (paths, globs, dirs, fofn).
 #[cfg(feature = "filesystem")]
 pub mod inputs;
 
-// Internal modules for filesystem operations
-#[cfg(feature = "filesystem")]
+// Internal modules.
+// `hashkeyable` provides `DigestKey`, the in-memory map key type, so it must be
+// WASM-safe and ungated. `utils` is filesystem-only.
 mod hashkeyable;
 #[cfg(feature = "filesystem")]
 mod utils;
 
-// Re-export filesystem functions at crate root for backward compatibility
-#[cfg(feature = "filesystem")]
+// Re-export collection helpers at crate root for backward compatibility.
+// The `*Ext` traits and `read_rgsi_file` are WASM-safe; `SequenceCollectionExt`
+// (FASTA digesting) is filesystem-only.
 pub use collection::{
-    SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt,
-    read_rgsi_file,
+    SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt, read_rgsi_file,
 };
+#[cfg(feature = "filesystem")]
+pub use collection::SequenceCollectionExt;
 #[cfg(feature = "filesystem")]
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 #[cfg(feature = "filesystem")]
 pub use store::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
-#[cfg(feature = "filesystem")]
 pub use seqcol::SeqColService;
 #[cfg(feature = "filesystem")]
 pub use inputs::{expand_fasta_inputs, FastaInputs, FASTA_EXTENSIONS};
-#[cfg(feature = "filesystem")]
 pub use store::{AvailableAliases, PagedResult, Pagination, PullResult, SyncStrategy};
 
 // ============================================================================

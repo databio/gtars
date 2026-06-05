@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>VCF → VRS (gtars-wasm) — OPFS + Worker harness</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; }
+      h1 { font-size: 1.4rem; }
+      h2 { font-size: 1.05rem; margin-top: 1.6rem; }
+      label { display: block; margin: 0.8rem 0 0.2rem; font-weight: 600; }
+      input { width: 100%; box-sizing: border-box; font-family: ui-monospace, monospace; font-size: 0.95rem; padding: 0.4rem; }
+      button { margin-top: 0.6rem; padding: 0.5rem 1rem; font-size: 1rem; cursor: pointer; }
+      button:disabled { opacity: 0.5; cursor: not-allowed; }
+      .hint { color: #666; font-size: 0.85rem; }
+      .stub { background: #fff7e6; border-left: 4px solid #f0a500; padding: 0.6rem 0.8rem; font-size: 0.85rem; border-radius: 4px; }
+      #drop {
+        margin-top: 1rem; padding: 2rem; border: 2px dashed #bbb; border-radius: 10px;
+        text-align: center; color: #777; transition: background 0.15s, border-color 0.15s;
+      }
+      #drop.drag { background: #eef6ff; border-color: #4a90d9; color: #205080; }
+      .barwrap { background: #eee; border-radius: 6px; overflow: hidden; height: 18px; margin-top: 0.3rem; }
+      .bar { height: 100%; width: 0%; background: #4a90d9; transition: width 0.1s linear; }
+      .bar.done { background: #3aaf5c; }
+      #log { font-family: ui-monospace, monospace; font-size: 0.8rem; white-space: pre-wrap; background: #f4f4f5; padding: 0.6rem; border-radius: 6px; margin-top: 0.6rem; max-height: 12rem; overflow: auto; }
+      table { border-collapse: collapse; width: 100%; margin-top: 0.6rem; font-family: ui-monospace, monospace; font-size: 0.82rem; }
+      th, td { border: 1px solid #ddd; padding: 0.25rem 0.5rem; text-align: left; }
+      th { background: #f4f4f5; }
+      .err { color: #9b1c1c; }
+    </style>
+  </head>
+  <body>
+    <h1>VCF → VRS allele identifiers (browser harness)</h1>
+    <p class="hint">
+      Scaffold demonstrating the full <strong>OPFS + Web Worker</strong> plumbing for an
+      in-browser VCF→VRS tool. The reference genome is downloaded once into OPFS, a Worker
+      reads bytes from it via a synchronous access handle, and (eventually) hands them to
+      WASM to compute a <code>ga4gh:VA.&lt;digest&gt;</code> per variant.
+    </p>
+    <div class="stub">
+      <strong>STUB NOTICE.</strong> The OPFS download-once layer, the Worker, drag-drop,
+      progress, and TSV export are <em>real and working</em>. The actual WASM batch
+      conversion (resident <code>RefgetStore</code> + <code>vcf_to_vrs_ids</code>) is
+      <em>not yet built</em> — see <code>gtars_browser_vcf_vrs_plan_v1.md</code>. Until then a
+      labeled stub returns a placeholder/derived id per variant so the wiring runs end-to-end.
+    </div>
+
+    <h2>1. Reference genome</h2>
+    <label for="genomeUrl">Genome URL (2bit-encoded; held ENCODED in OPFS, decoded on the fly)</label>
+    <input id="genomeUrl"
+      value="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/bigZips/hg38.2bit"
+      placeholder="https://…/hg38.2bit" />
+    <p class="hint">
+      First run streams this into OPFS (no 750&nbsp;MB JS buffer). Later runs detect the
+      cached file and skip the download. <code>wasm32</code> has a hard 4&nbsp;GB linear-memory
+      ceiling, so we never materialize the ~3&nbsp;GB decoded genome.
+    </p>
+    <button id="prepBtn">Download / verify genome in OPFS</button>
+    <div>Download / cache</div>
+    <div class="barwrap"><div id="dlBar" class="bar"></div></div>
+    <div id="storageInfo" class="hint"></div>
+
+    <h2>2. Drop a VCF</h2>
+    <div id="drop">Drag &amp; drop a <code>.vcf</code> or <code>.vcf.gz</code> file here (or click to pick)</div>
+    <input id="filePicker" type="file" accept=".vcf,.vcf.gz,.gz" hidden />
+
+    <h2>3. Compute</h2>
+    <div>Variants processed</div>
+    <div class="barwrap"><div id="computeBar" class="bar"></div></div>
+    <div id="computeInfo" class="hint"></div>
+    <button id="downloadBtn" disabled>Download TSV</button>
+
+    <h2>Results preview <span class="hint">(first rows)</span></h2>
+    <table id="results">
+      <thead><tr><th>chrom</th><th>pos</th><th>ref</th><th>alt</th><th>vrs_id</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Log</h2>
+    <div id="log"></div>
+
+    <!--
+      The wasm bundle is loaded on the MAIN thread here for pure helpers like
+      parse_hgvs (handy for quick inspection / validation in the UI). The heavy
+      OPFS + compute work runs in worker.js, which imports its own wasm instance
+      (OPFS sync access handles are Worker-only).
+      Built with: wasm-pack build --target web (output in ../../pkg)
+    -->
+    <script type="module" src="./main.js"></script>
+  </body>
+</html>

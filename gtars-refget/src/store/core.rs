@@ -9,7 +9,10 @@ use std::path::Path;
 use anyhow::Result;
 use std::fs::create_dir_all;
 
-use crate::digest::{SequenceCollection, SequenceCollectionMetadata, SequenceRecord};
+use crate::digest::{SequenceCollection, SequenceRecord};
+// Only the filesystem FASTA-import wrappers use this return type.
+#[cfg(feature = "filesystem")]
+use crate::digest::SequenceCollectionMetadata;
 
 /// User-facing store with lazy-loading read methods.
 ///
@@ -230,6 +233,7 @@ impl RefgetStore {
     }
 
     /// Add a sequence collection from a FASTA file.
+    #[cfg(feature = "filesystem")]
     pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(
         &mut self,
         file_path: P,
@@ -241,6 +245,7 @@ impl RefgetStore {
     /// Add sequence collections from multiple FASTA files, decoding up to
     /// `opts.file_jobs` files concurrently. Inserts in fixed input order so the
     /// resulting store is byte-identical to a serial build.
+    #[cfg(feature = "filesystem")]
     pub fn add_sequence_collections_from_fastas(
         &mut self,
         files: &[std::path::PathBuf],

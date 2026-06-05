@@ -2555,6 +2555,86 @@ fn test_many_tiny_sequences_throughput() {
 }
 
 // =========================================================================
+// stream_sequence tests
+// =========================================================================
+
+fn first_seq_digest(store: &RefgetStore) -> String {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone()
+}
+
+fn first_seq_length(store: &RefgetStore) -> usize {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .length
+}
+
+fn build_on_disk_store_streaming(mode: StorageMode) -> (tempfile::TempDir, RefgetStore, String, usize) {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+    let length = first_seq_length(&store);
+    (dir, store, digest, length)
+}
+
+#[test]
+fn test_stream_sequence_local_full() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+}
+
+#[test]
+fn test_stream_sequence_local_substring() {
+    use std::io::Read;
+    let (_dir, mut store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    store.load_sequence(&digest).unwrap();
+    let ranges: Vec<(u64, u64)> = vec![
+        (0, 4),
+        (1, 5),
+        (2, 10),
+        (5, 6),
+        (0, length as u64),
+        (length as u64 - 1, length as u64),
+    ];
+    for (s, e) in ranges {
+        let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+
+        let expected = store.get_substring(&digest, s as usize, e as usize).unwrap();
+        assert_eq!(
+            String::from_utf8(streamed).unwrap(),
+            expected,
+            "mismatch for range {}..{}",
+            s,
+            e
+        );
+    }
+}
+
+// =========================================================================
 // Partial-read fd-cache eviction test
 // =========================================================================
 
@@ -2657,208 +2737,6 @@ fn run_fd_cache_eviction_for_mode(raw: bool) {
             got, expected,
             "partial-read mismatch (raw={}) digest={} [{}, {})",
             raw, digest, start, end
-        );
-    }
-}
-
-#[test]
-fn test_fd_cache_eviction_matches_resident_encoded() {
-    run_fd_cache_eviction_for_mode(false);
-}
-
-#[test]
-fn test_fd_cache_eviction_matches_resident_raw() {
-    run_fd_cache_eviction_for_mode(true);
-}
-
-/// `get_substrings` must produce output byte-identical to (a) a loop of
-/// `get_substring` on the same disk-backed store and (b) the resident decode,
-/// for BOTH branches of the adaptive heuristic:
-///   - sparse small ranges (total coverage < WHOLE_DECODE_FRACTION) -> partial branch
-///   - wide/overlapping ranges (total coverage >= WHOLE_DECODE_FRACTION) -> whole-decode branch
-/// Run for both Encoded and Raw storage modes.
-fn run_get_substrings_matches_for_mode(raw: bool) {
-    let temp_dir = tempdir().unwrap();
-    let fasta_content = multi_seq_fasta();
-    let fasta = temp_dir.path().join("multi.fa");
-    fs::write(&fasta, &fasta_content).unwrap();
-    let store_path = temp_dir.path().join("store");
-
-    let mut builder = RefgetStore::on_disk(&store_path).unwrap();
-    if raw {
-        builder.disable_encoding();
-    }
-    let (coll_meta, _) = builder
-        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
-        .unwrap();
-    let coll_digest = coll_meta.digest.clone();
-    drop(builder);
-
-    // Reference: resident store (whole-sequence decode held in memory).
-    let mut resident = RefgetStore::open_local(&store_path).unwrap();
-    resident.set_quiet(true);
-    resident.load_all_collections().unwrap();
-    resident.load_all_sequences().unwrap();
-
-    // Subject: stub-only disk-backed store.
-    let mut disk = RefgetStore::open_local(&store_path).unwrap();
-    disk.set_quiet(true);
-    disk.load_all_collections().unwrap();
-
-    // Use seq0 (length 400) for the per-sequence range sets.
-    let rec = resident.get_sequence_by_name(&coll_digest, "seq0").unwrap();
-    let digest = rec.metadata().sha512t24u.clone();
-    let len = rec.metadata().length;
-    assert_eq!(len, 400);
-
-    // BRANCH A (partial): many sparse small ranges; total coverage tiny relative
-    // to len (well below the 0.125 threshold).
-    let sparse: Vec<(usize, usize)> = vec![
-        (0, 3),
-        (10, 14),
-        (50, 51),
-        (100, 105),
-        (200, 202),
-        (399, 400),
-    ];
-    let sparse_total: usize = sparse.iter().map(|&(s, e)| e - s).sum();
-    assert!((sparse_total as f64) < 0.125 * (len as f64), "branch A must be partial");
-
-    // BRANCH B (whole-decode): wide and overlapping ranges whose total coverage
-    // far exceeds the threshold.
-    let wide: Vec<(usize, usize)> = vec![
-        (0, 200),
-        (100, 350),
-        (50, 400),
-        (10, 390),
-    ];
-    let wide_total: usize = wide.iter().map(|&(s, e)| e - s).sum();
-    assert!((wide_total as f64) >= 0.125 * (len as f64), "branch B must be whole-decode");
-
-    for ranges in [&sparse, &wide] {
-        // Expected from resident decode.
-        let expected_resident: Vec<String> = ranges
-            .iter()
-            .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
-            .collect();
-        // Loop of disk get_substring.
-        let expected_disk_loop: Vec<String> = ranges
-            .iter()
-            .map(|&(s, e)| disk.get_substring(&digest, s, e).unwrap())
-            .collect();
-        // Batch.
-        let batch = disk.get_substrings(&digest, ranges).unwrap();
-
-        assert_eq!(
-            batch, expected_resident,
-            "batch != resident (raw={}) ranges={:?}",
-            raw, ranges
-        );
-        assert_eq!(
-            batch, expected_disk_loop,
-            "batch != disk loop (raw={}) ranges={:?}",
-            raw, ranges
-        );
-    }
-
-    // Resident store batch path (Full arm) must also match.
-    let batch_resident = resident.get_substrings(&digest, &wide).unwrap();
-    let expected: Vec<String> = wide
-        .iter()
-        .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
-        .collect();
-    assert_eq!(batch_resident, expected, "resident Full-arm batch mismatch (raw={})", raw);
-
-    // Invalid range must error.
-    assert!(disk.get_substrings(&digest, &[(0, len + 1)]).is_err());
-}
-
-#[test]
-fn test_get_substrings_matches_encoded() {
-    run_get_substrings_matches_for_mode(false);
-}
-
-#[test]
-fn test_get_substrings_matches_raw() {
-    run_get_substrings_matches_for_mode(true);
-}
-
-// =========================================================================
-// stream_sequence tests
-// =========================================================================
-
-fn first_seq_digest(store: &RefgetStore) -> String {
-    store
-        .sequence_store
-        .values()
-        .next()
-        .unwrap()
-        .metadata()
-        .sha512t24u
-        .clone()
-}
-
-fn first_seq_length(store: &RefgetStore) -> usize {
-    store
-        .sequence_store
-        .values()
-        .next()
-        .unwrap()
-        .metadata()
-        .length
-}
-
-fn build_on_disk_store_streaming(mode: StorageMode) -> (tempfile::TempDir, RefgetStore, String, usize) {
-    let dir = tempdir().unwrap();
-    let fasta = dir.path().join("test.fa");
-    fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
-    let store_path = dir.path().join("store");
-    let mut store = RefgetStore::on_disk(&store_path).unwrap();
-    store.set_encoding_mode(mode);
-    store
-        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
-        .unwrap();
-    let digest = first_seq_digest(&store);
-    let length = first_seq_length(&store);
-    (dir, store, digest, length)
-}
-
-#[test]
-fn test_stream_sequence_local_full() {
-    use std::io::Read;
-    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
-    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
-    let mut out = Vec::new();
-    reader.read_to_end(&mut out).unwrap();
-    assert_eq!(out.len(), length);
-    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
-}
-
-#[test]
-fn test_stream_sequence_local_substring() {
-    use std::io::Read;
-    let (_dir, mut store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
-    store.load_sequence(&digest).unwrap();
-    let ranges: Vec<(u64, u64)> = vec![
-        (0, 4),
-        (1, 5),
-        (2, 10),
-        (5, 6),
-        (0, length as u64),
-        (length as u64 - 1, length as u64),
-    ];
-    for (s, e) in ranges {
-        let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
-        let mut streamed = Vec::new();
-        reader.read_to_end(&mut streamed).unwrap();
-
-        let expected = store.get_substring(&digest, s as usize, e as usize).unwrap();
-        assert_eq!(
-            String::from_utf8(streamed).unwrap(),
-            expected,
-            "mismatch for range {}..{}",
-            s,
-            e
         );
     }
 }
@@ -3258,4 +3136,126 @@ fn test_load_all_sequences_triggers_index_load() {
     store.load_all_sequences().unwrap();
     assert!(store.inner.sequence_index_loaded, "Sequence index should be loaded after load_all_sequences");
     assert!(!store.inner.sequence_store.is_empty(), "Sequences should be populated");
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_encoded() {
+    run_fd_cache_eviction_for_mode(false);
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_raw() {
+    run_fd_cache_eviction_for_mode(true);
+}
+
+/// `get_substrings` must produce output byte-identical to (a) a loop of
+/// `get_substring` on the same disk-backed store and (b) the resident decode,
+/// for BOTH branches of the adaptive heuristic:
+///   - sparse small ranges (total coverage < WHOLE_DECODE_FRACTION) -> partial branch
+///   - wide/overlapping ranges (total coverage >= WHOLE_DECODE_FRACTION) -> whole-decode branch
+/// Run for both Encoded and Raw storage modes.
+fn run_get_substrings_matches_for_mode(raw: bool) {
+    let temp_dir = tempdir().unwrap();
+    let fasta_content = multi_seq_fasta();
+    let fasta = temp_dir.path().join("multi.fa");
+    fs::write(&fasta, &fasta_content).unwrap();
+    let store_path = temp_dir.path().join("store");
+
+    let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+    if raw {
+        builder.disable_encoding();
+    }
+    let (coll_meta, _) = builder
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let coll_digest = coll_meta.digest.clone();
+    drop(builder);
+
+    // Reference: resident store (whole-sequence decode held in memory).
+    let mut resident = RefgetStore::open_local(&store_path).unwrap();
+    resident.set_quiet(true);
+    resident.load_all_collections().unwrap();
+    resident.load_all_sequences().unwrap();
+
+    // Subject: stub-only disk-backed store.
+    let mut disk = RefgetStore::open_local(&store_path).unwrap();
+    disk.set_quiet(true);
+    disk.load_all_collections().unwrap();
+
+    // Use seq0 (length 400) for the per-sequence range sets.
+    let rec = resident.get_sequence_by_name(&coll_digest, "seq0").unwrap();
+    let digest = rec.metadata().sha512t24u.clone();
+    let len = rec.metadata().length;
+    assert_eq!(len, 400);
+
+    // BRANCH A (partial): many sparse small ranges; total coverage tiny relative
+    // to len (well below the 0.125 threshold).
+    let sparse: Vec<(usize, usize)> = vec![
+        (0, 3),
+        (10, 14),
+        (50, 51),
+        (100, 105),
+        (200, 202),
+        (399, 400),
+    ];
+    let sparse_total: usize = sparse.iter().map(|&(s, e)| e - s).sum();
+    assert!((sparse_total as f64) < 0.125 * (len as f64), "branch A must be partial");
+
+    // BRANCH B (whole-decode): wide and overlapping ranges whose total coverage
+    // far exceeds the threshold.
+    let wide: Vec<(usize, usize)> = vec![
+        (0, 200),
+        (100, 350),
+        (50, 400),
+        (10, 390),
+    ];
+    let wide_total: usize = wide.iter().map(|&(s, e)| e - s).sum();
+    assert!((wide_total as f64) >= 0.125 * (len as f64), "branch B must be whole-decode");
+
+    for ranges in [&sparse, &wide] {
+        // Expected from resident decode.
+        let expected_resident: Vec<String> = ranges
+            .iter()
+            .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
+            .collect();
+        // Loop of disk get_substring.
+        let expected_disk_loop: Vec<String> = ranges
+            .iter()
+            .map(|&(s, e)| disk.get_substring(&digest, s, e).unwrap())
+            .collect();
+        // Batch.
+        let batch = disk.get_substrings(&digest, ranges).unwrap();
+
+        assert_eq!(
+            batch, expected_resident,
+            "batch != resident (raw={}) ranges={:?}",
+            raw, ranges
+        );
+        assert_eq!(
+            batch, expected_disk_loop,
+            "batch != disk loop (raw={}) ranges={:?}",
+            raw, ranges
+        );
+    }
+
+    // Resident store batch path (Full arm) must also match.
+    let batch_resident = resident.get_substrings(&digest, &wide).unwrap();
+    let expected: Vec<String> = wide
+        .iter()
+        .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
+        .collect();
+    assert_eq!(batch_resident, expected, "resident Full-arm batch mismatch (raw={})", raw);
+
+    // Invalid range must error.
+    assert!(disk.get_substrings(&digest, &[(0, len + 1)]).is_err());
+}
+
+#[test]
+fn test_get_substrings_matches_encoded() {
+    run_get_substrings_matches_for_mode(false);
+}
+
+#[test]
+fn test_get_substrings_matches_raw() {
+    run_get_substrings_matches_for_mode(true);
 }

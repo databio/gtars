@@ -67,6 +67,7 @@ impl ReadonlyRefgetStore {
     /// common case avoids a `create_dir_all` syscall per (tiny) sequence -- the
     /// throughput bottleneck for transcriptomes with hundreds of thousands of
     /// records.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
     pub(crate) fn write_seq_bytes_to_full_path(
         full_path: &Path,
         sequence: &[u8],
