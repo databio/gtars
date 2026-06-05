@@ -62,9 +62,10 @@ python3 -m http.server 8080
 ### Steps in the UI
 
 1. **Download / verify genome** — paste the refgetstore base URL. The Worker reads
-   `rgstore.json` + `sequences.rgsi`, fetches each `.seq` (caching it in OPFS so
-   the ~750 MB download happens once), and builds the resident store. Re-runs read
-   the cached `.seq` files from OPFS and skip the network.
+   only the small `rgstore.json` + `sequences.rgsi` (no sequence bytes yet).
+   Chromosomes are fetched **lazily**: when you drop a VCF, only the chromosomes it
+   references are downloaded (and cached in OPFS for reuse). A whole-genome store has
+   hundreds of contigs; a VCF touches a few, so this avoids downloading the rest.
 2. **Drop a VCF** (`.vcf` or `.vcf.gz`) onto the drop zone.
 3. **Compute** runs `vcf_to_vrs_ids` in the Worker; watch the progress, then
    **Download TSV** (`chrom  pos  ref  alt  vrs_id`).
@@ -85,11 +86,16 @@ single-variant `hgvs_to_vrs_id` / `parse_hgvs` entries also exist (see `../hgvs/
 
 ## Notes & current limits
 
-- **Genome held resident (load-whole).** The Worker reads every chromosome's
-  encoded bytes into the resident store (~750 MB for a human genome — fits under
-  the wasm32 ceiling). A memory-frugal **byte-range** mode (read only the window
-  each variant needs via `byte_range_for_bases` + a positioned OPFS `read`) is a
-  future optimization, not yet wired.
+- **Lazy per-chromosome loading.** Only the chromosomes a VCF references are
+  downloaded and held resident (each is tens of MB encoded; cached in OPFS after the
+  first touch). A whole-genome VCF still pulls the full primary set; a memory-frugal
+  **byte-range** mode (read only the window each variant needs via
+  `byte_range_for_bases` + a positioned OPFS `read`) would shrink even that, and is a
+  future optimization.
+- **Chromosome-name matching.** A VCF `CHROM` resolves to a store sequence by exact
+  name or a `chr`/no-`chr` toggle. Names the store doesn't have are skipped and
+  logged. Cross-naming (e.g. `chr20` ↔ `NC_000020.11`) needs the store's alias
+  namespaces, not yet wired here.
 - **Whole-file VCF in memory.** The dropped VCF is decoded to one string and run
   in a single `vcf_to_vrs_ids` call; progress still streams out per result batch.
   Streaming-parse of truly huge files is a future refinement.

@@ -45,12 +45,11 @@
       value=""
       placeholder="https://…/my_refgetstore/" />
     <p class="hint">
-      Point at a directory that exposes a gtars refgetstore (encoded mode). The Worker reads
-      the manifest + index to learn each chromosome's digest/length/alphabet, fetches the
-      encoded <code>.seq</code> bytes (cached in OPFS so the ~750&nbsp;MB download happens
-      once), and builds the resident store. <code>wasm32</code> has a hard 4&nbsp;GB
-      linear-memory ceiling, so we hold the genome encoded and never materialize the ~3&nbsp;GB
-      decoded form.
+      Point at a directory that exposes a gtars refgetstore (encoded mode). Preparing only
+      fetches the small manifest + index; each chromosome's encoded <code>.seq</code> is
+      downloaded <strong>lazily</strong> when a dropped VCF references it, and cached in OPFS
+      so later runs reuse it. <code>wasm32</code> has a hard 4&nbsp;GB linear-memory ceiling,
+      so we hold sequences encoded and never materialize the decoded form.
     </p>
     <button id="prepBtn">Download / verify genome in OPFS</button>
     <div>Download / cache</div>
