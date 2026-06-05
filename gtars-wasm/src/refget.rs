@@ -25,11 +25,13 @@
 //! ```
 
 use gtars_refget::digest::{
-    canonicalize_json, digest_fasta_bytes, md5, sha512t24u, FastaStreamHasher, SequenceCollection,
+    canonicalize_json, digest_fasta_bytes, digest_sequence, lookup_alphabet, md5, sha512t24u,
+    AlphabetType, FastaStreamHasher, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
+use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore as CoreRefgetStore};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 
 // ============================================================================
@@ -422,12 +424,267 @@ impl SeqColResult {
     }
 }
 
+// ============================================================================
+// Persistent, reusable refget store (genome-scale, encoded)
+// ============================================================================
+
+/// A persistent, reusable refget store for the browser.
+///
+/// Unlike the one-shot `hgvs_to_vrs_id` (which rebuilds a fresh single-sequence
+/// store on every call), this holds the reference genome **once** so a whole VCF
+/// of variants can reuse it. The genome is held in an encoded in-memory store and
+/// decoded on the fly per variant via the VRS `RefView` path; the decoded genome
+/// (~3 GB for a human reference) is never materialized.
+///
+/// Two ingest paths:
+/// - [`add_sequence`](RefgetStore::add_sequence): hand in raw bases; the store
+///   digests them and stores them as a resident record (good for small contigs
+///   or tests).
+/// - [`add_encoded_sequence`](RefgetStore::add_encoded_sequence): hand in bytes
+///   that are **already** 2-/3-bit encoded (the genome blob downloaded once into
+///   OPFS), skipping re-encoding of the ~750 MB reference.
+///
+/// Chromosome-name aliasing: VCFs reference sequences as `chr1`, `1`, or an
+/// accession like `NC_000001.11`. Each ingest registers the given name plus its
+/// `chr`-prefix toggle against the same digest; use [`add_alias`](RefgetStore::add_alias)
+/// to map an accession (or any other name) the VCF might use to a known digest.
+///
+/// # Example (JavaScript)
+/// ```javascript
+/// import init, { RefgetStore } from "gtars-js";
+/// await init();
+/// const store = new RefgetStore();
+/// const digest = store.add_sequence("chr1", new TextEncoder().encode("ACGT..."));
+/// store.add_alias("NC_000001.11", digest);
+/// // ... hand `store` to vcf_to_vrs_ids(store, vcfText, onResult) (Step 3) ...
+/// ```
+#[wasm_bindgen]
+pub struct RefgetStore {
+    inner: CoreRefgetStore,
+    /// Maps every name a VCF might use (canonical, `chr`-toggled, explicit
+    /// aliases) to the raw sha512t24u digest of the underlying sequence.
+    name_to_digest: HashMap<String, String>,
+}
+
+#[wasm_bindgen]
+impl RefgetStore {
+    /// Create a new, empty encoded in-memory store.
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> RefgetStore {
+        RefgetStore {
+            inner: CoreRefgetStore::in_memory(),
+            name_to_digest: HashMap::new(),
+        }
+    }
+
+    /// Ingest a sequence from **raw bases**. Computes the GA4GH digests and
+    /// stores the record resident; the VRS path decodes on the fly. Returns the
+    /// raw sha512t24u digest, which is also the VRS sequence accession.
+    ///
+    /// # Arguments
+    /// * `name` - The sequence name (e.g. `"chr1"`).
+    /// * `bases` - The reference bases as a Uint8Array.
+    #[wasm_bindgen]
+    pub fn add_sequence(&mut self, name: &str, bases: &[u8]) -> Result<String, JsError> {
+        let record = digest_sequence(name, bases);
+        let digest = record.metadata().sha512t24u.clone();
+        self.inner
+            .add_sequence_record(record, true)
+            .map_err(|e| JsError::new(&format!("failed to add sequence '{name}': {e}")))?;
+        self.register_name(name, &digest);
+        Ok(digest)
+    }
+
+    /// Ingest a sequence whose bytes are **already encoded** (2-/3-bit packed),
+    /// as shipped in a prebuilt genome blob. Skips re-encoding the reference.
+    ///
+    /// The GA4GH digest is computed over the *raw* bases at genome-build time and
+    /// cannot be recovered from the packed bytes, so it (and the alphabet) must be
+    /// supplied from the blob's seqcol metadata.
+    ///
+    /// # Arguments
+    /// * `name` - The sequence name (e.g. `"chr1"`).
+    /// * `sha512t24u` - The raw-sequence GA4GH digest (the VRS accession).
+    /// * `md5` - The raw-sequence MD5 (may be empty; used only for md5 lookups).
+    /// * `length` - The sequence length in **bases** (not packed bytes).
+    /// * `encoded` - The packed bytes; must be exactly `ceil(length * bits/8)`.
+    /// * `alphabet` - One of `"dna2bit"`, `"dna3bit"`, `"dnaio"` (IUPAC).
+    #[wasm_bindgen]
+    pub fn add_encoded_sequence(
+        &mut self,
+        name: &str,
+        sha512t24u: &str,
+        md5: &str,
+        length: usize,
+        encoded: &[u8],
+        alphabet: &str,
+    ) -> Result<(), JsError> {
+        let alphabet_type = parse_alphabet(alphabet)
+            .ok_or_else(|| JsError::new(&format!("unsupported alphabet: {alphabet}")))?;
+        let bps = lookup_alphabet(&alphabet_type).bits_per_symbol;
+        let expected = length.saturating_mul(bps).div_ceil(8);
+        if encoded.len() != expected {
+            return Err(JsError::new(&format!(
+                "encoded length {} does not match expected {} for length={} alphabet={} ({} bits/symbol)",
+                encoded.len(),
+                expected,
+                length,
+                alphabet,
+                bps
+            )));
+        }
+        let metadata = SequenceMetadata {
+            name: name.to_string(),
+            description: None,
+            length,
+            sha512t24u: sha512t24u.to_string(),
+            md5: md5.to_string(),
+            alphabet: alphabet_type,
+            fai: None,
+        };
+        let record = SequenceRecord::Full {
+            metadata,
+            sequence: Arc::new(encoded.to_vec()),
+        };
+        self.inner
+            .add_sequence_record(record, true)
+            .map_err(|e| JsError::new(&format!("failed to add encoded sequence '{name}': {e}")))?;
+        self.register_name(name, sha512t24u);
+        Ok(())
+    }
+
+    /// Map an additional `name` (e.g. an accession like `"NC_000001.11"`) the VCF
+    /// might use to an already-ingested sequence's `digest`.
+    #[wasm_bindgen]
+    pub fn add_alias(&mut self, name: &str, digest: &str) {
+        self.name_to_digest.insert(name.to_string(), digest.to_string());
+    }
+
+    /// Number of distinct name→digest entries registered (including aliases).
+    #[wasm_bindgen(js_name = "nameCount")]
+    pub fn name_count(&self) -> usize {
+        self.name_to_digest.len()
+    }
+}
+
+impl RefgetStore {
+    /// Register a name plus its `chr`-prefix toggle against `digest`, so VCFs
+    /// that drop or add the `chr` prefix still resolve. Does not overwrite an
+    /// explicit alias already pointing elsewhere for the toggled form.
+    fn register_name(&mut self, name: &str, digest: &str) {
+        self.name_to_digest.insert(name.to_string(), digest.to_string());
+        let toggled = match name.strip_prefix("chr") {
+            Some(rest) => rest.to_string(),
+            None => format!("chr{name}"),
+        };
+        self.name_to_digest
+            .entry(toggled)
+            .or_insert_with(|| digest.to_string());
+    }
+
+    /// The underlying read-only store, for the VCF→VRS streaming core.
+    // Consumed by `vcf_to_vrs_ids` (Step 3) and the tests below.
+    #[allow(dead_code)]
+    pub(crate) fn inner_readonly(&self) -> &ReadonlyRefgetStore {
+        &self.inner
+    }
+
+    /// The name→digest map built from ingested sequences and aliases.
+    // Consumed by `vcf_to_vrs_ids` (Step 3) and the tests below.
+    #[allow(dead_code)]
+    pub(crate) fn name_to_digest(&self) -> &HashMap<String, String> {
+        &self.name_to_digest
+    }
+}
+
+impl Default for RefgetStore {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Parse a JS-supplied alphabet name into an [`AlphabetType`]. Accepts the
+/// `Display` spellings used elsewhere in gtars (`"dna2bit"`, `"dna3bit"`,
+/// `"dnaio"`), plus the friendlier `"dnaiupac"`.
+fn parse_alphabet(alphabet: &str) -> Option<AlphabetType> {
+    match alphabet.to_ascii_lowercase().as_str() {
+        "dna2bit" => Some(AlphabetType::Dna2bit),
+        "dna3bit" => Some(AlphabetType::Dna3bit),
+        "dnaio" | "dnaiupac" => Some(AlphabetType::DnaIupac),
+        _ => None,
+    }
+}
+
 // Tests use wasm-bindgen-test since JsError/JsValue require WASM runtime
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod tests {
     use super::*;
     use wasm_bindgen_test::*;
+
+    // Persistent-store tests share the hgvs.rs synthetic contig and golden id, so
+    // the store class is proven to drive the SAME readonly VRS path the one-shot
+    // `hgvs_to_vrs_id` does. If the store ingest ever corrupts bytes/metadata,
+    // these diverge from the golden id.
+    const CHR_F_NAME: &str = "chrF";
+    const CHR_F_BASES: &str = "ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
+    const GOLDEN_CHRF_G6CT_VRS_ID: &str = "ga4gh:VA._q-idtHGQxQ4XiEPJ1ExYl_htUeNEkir";
+
+    fn vrs_id_via_store(store: &RefgetStore) -> String {
+        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id_readonly(
+            "chrF:g.6C>T",
+            &gtars_vrs::provider::NoTranscriptProvider,
+            store.inner_readonly(),
+            store.name_to_digest(),
+        )
+        .expect("readonly bridge should succeed")
+    }
+
+    #[wasm_bindgen_test]
+    fn store_add_sequence_drives_readonly_vrs() {
+        let mut store = RefgetStore::new();
+        let digest = store
+            .add_sequence(CHR_F_NAME, CHR_F_BASES.as_bytes())
+            .expect("add_sequence should succeed");
+        // Raw-bases ingest resolves through the same path as the one-shot entry.
+        assert_eq!(vrs_id_via_store(&store), GOLDEN_CHRF_G6CT_VRS_ID);
+        // chr-toggle alias was registered ("chrF" -> also "F").
+        assert_eq!(store.name_to_digest().get("F"), Some(&digest));
+    }
+
+    #[wasm_bindgen_test]
+    fn store_add_encoded_sequence_drives_readonly_vrs() {
+        // Encode the contig exactly as the store would, then ingest the packed
+        // bytes via the encoded path; the on-the-fly decode must reproduce the id.
+        let meta = digest_sequence(CHR_F_NAME, CHR_F_BASES.as_bytes());
+        let digest = meta.metadata().sha512t24u.clone();
+        let md5 = meta.metadata().md5.clone();
+        let encoded = gtars_refget::digest::encode_sequence(
+            CHR_F_BASES.as_bytes(),
+            &gtars_refget::digest::DNA_2BIT_ALPHABET,
+        );
+
+        let mut store = RefgetStore::new();
+        store
+            .add_encoded_sequence(
+                CHR_F_NAME,
+                &digest,
+                &md5,
+                CHR_F_BASES.len(),
+                &encoded,
+                "dna2bit",
+            )
+            .expect("add_encoded_sequence should succeed");
+        assert_eq!(vrs_id_via_store(&store), GOLDEN_CHRF_G6CT_VRS_ID);
+    }
+
+    #[wasm_bindgen_test]
+    fn store_add_encoded_sequence_rejects_bad_length() {
+        let mut store = RefgetStore::new();
+        // 40 bases at 2 bits/symbol needs 10 packed bytes; give it 3.
+        let res = store.add_encoded_sequence("chrF", "deadbeef", "", 40, &[0u8; 3], "dna2bit");
+        assert!(res.is_err(), "mismatched encoded length should be rejected");
+    }
 
     #[wasm_bindgen_test]
     fn test_streaming_lifecycle() {
