@@ -17,12 +17,13 @@ use crate::digest::{
     SequenceCollectionMetadata, SequenceCollectionRecord, SequenceMetadata,
     SequenceRecord,
 };
-use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence};
+use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, StreamingDecoder};
 use crate::digest::{byte_range_for_bases, decode_substring_from_bytes_at_offset};
 use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all, File};
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
 /// Default capacity of the per-store open-file-descriptor cache used by the
@@ -118,6 +119,101 @@ fn read_exact_window(file: &File, byte_start: usize, len: usize) -> Result<Vec<u
     Ok(buf)
 }
 
+/// A `Read` adapter that yields a byte range from a shared `Arc<Vec<u8>>`
+/// buffer without cloning the backing data.
+///
+/// Used by `stream_sequence` when the target sequence is already resident
+/// in memory as `SequenceRecord::Full`. The alternative of slicing+cloning
+/// would allocate a second copy of the (possibly chromosome-sized) buffer
+/// and defeat the O(1) memory guarantee of streaming.
+pub(crate) struct ArcSliceReader {
+    buf: Arc<Vec<u8>>,
+    pos: usize,
+    end: usize,
+}
+
+impl ArcSliceReader {
+    pub(crate) fn new(buf: Arc<Vec<u8>>, start: usize, end: usize) -> Self {
+        debug_assert!(start <= end);
+        debug_assert!(end <= buf.len());
+        Self { buf, pos: start, end }
+    }
+}
+
+impl Read for ArcSliceReader {
+    fn read(&mut self, out: &mut [u8]) -> std::io::Result<usize> {
+        let remaining = self.end - self.pos;
+        if remaining == 0 {
+            return Ok(0);
+        }
+        let n = remaining.min(out.len());
+        out[..n].copy_from_slice(&self.buf[self.pos..self.pos + n]);
+        self.pos += n;
+        Ok(n)
+    }
+}
+
+/// Open a bounded HTTP byte range against a remote refget store and return
+/// a `Read` yielding exactly `byte_end - byte_start` bytes.
+#[cfg(feature = "http")]
+fn open_remote_range(
+    remote: &str,
+    relpath: &Path,
+    byte_start: u64,
+    byte_end: u64,
+) -> Result<Box<dyn Read + Send>> {
+    let relpath_str = relpath
+        .to_str()
+        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+    let url = if remote.ends_with('/') {
+        format!("{}{}", remote, relpath_str)
+    } else {
+        format!("{}/{}", remote, relpath_str)
+    };
+
+    let byte_len = byte_end - byte_start;
+    let last_byte = byte_end.saturating_sub(1);
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(std::time::Duration::from_secs(30))
+        .timeout_read(std::time::Duration::from_secs(60))
+        .build();
+    let response = agent
+        .get(&url)
+        .set("Range", &format!("bytes={}-{}", byte_start, last_byte))
+        .call()
+        .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
+
+    // Guard against servers that ignore the Range header and return the full
+    // body with HTTP 200 instead of a 206 Partial Content slice. Wrapping the
+    // full body here would silently produce wrong bases, so refuse outright.
+    let status = response.status();
+    if status != 206 {
+        return Err(anyhow!(
+            "Remote server did not honor Range header (got HTTP {}); \
+             refusing to stream to avoid silent data corruption. URL: {}",
+            status,
+            url
+        ));
+    }
+
+    Ok(Box::new(BufReader::with_capacity(
+        64 * 1024,
+        response.into_reader().take(byte_len),
+    )))
+}
+
+#[cfg(not(feature = "http"))]
+fn open_remote_range(
+    _remote: &str,
+    _relpath: &Path,
+    _byte_start: u64,
+    _byte_end: u64,
+) -> Result<Box<dyn Read + Send>> {
+    Err(anyhow!(
+        "Remote streaming requires the 'http' feature to be enabled"
+    ))
+}
+
 /// Core refget store with `&self` read methods, suitable for `Arc` sharing in servers.
 ///
 /// Mutating methods are used during the setup/loading phase; once wrapped in `Arc`,
@@ -167,6 +263,13 @@ pub struct ReadonlyRefgetStore {
     /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
     /// the same chromosome file on every per-region `get_substring` call.
     seq_fd_cache: Mutex<FdCache>,
+    /// Whether the sequence index (sequences.rgsi) has been loaded.
+    /// For remote stores, this starts as `false` and is lazily loaded on first
+    /// sequence access, avoiding the costly download when only browsing collections.
+    pub(crate) sequence_index_loaded: bool,
+    /// The relative path to the sequence index file (from rgstore.json),
+    /// stored for deferred loading in remote stores.
+    pub(crate) sequence_index_path: Option<String>,
 }
 
 impl ReadonlyRefgetStore {
@@ -191,6 +294,8 @@ impl ReadonlyRefgetStore {
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
             seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
+            sequence_index_loaded: true,
+            sequence_index_path: None,
         }
     }
 
@@ -229,12 +334,15 @@ impl ReadonlyRefgetStore {
                     match (self.mode, new_mode) {
                         (StorageMode::Raw, StorageMode::Encoded) => {
                             let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence = encode_sequence(&*sequence, alphabet);
+                            *sequence = std::sync::Arc::new(encode_sequence(&sequence[..], alphabet));
                         }
                         (StorageMode::Encoded, StorageMode::Raw) => {
                             let alphabet = lookup_alphabet(&metadata.alphabet);
-                            *sequence =
-                                decode_string_from_bytes(&*sequence, metadata.length, alphabet);
+                            *sequence = std::sync::Arc::new(decode_string_from_bytes(
+                                &sequence[..],
+                                metadata.length,
+                                alphabet,
+                            ));
                         }
                         _ => {}
                     }
@@ -442,7 +550,19 @@ impl ReadonlyRefgetStore {
                         .context("seqdata_path_template/local_path not set")?;
                     let stub = SequenceRecord::Stub(metadata);
                     self.sequence_store.insert(key, stub);
-                    return Ok(Some((full_path, sequence)));
+                    // INVARIANT: strong_count == 1 here — the Arc was just
+                    // constructed in the import pipeline (Arc::new in import.rs)
+                    // and no other owner exists at the point of this call, so
+                    // try_unwrap always succeeds and reclaims the buffer with zero
+                    // copy. The clone fallback is dead code / future-proofing only.
+                    debug_assert_eq!(
+                        std::sync::Arc::strong_count(&sequence),
+                        1,
+                        "sequence Arc must be uniquely owned for zero-copy reclaim"
+                    );
+                    let bytes = std::sync::Arc::try_unwrap(sequence)
+                        .unwrap_or_else(|arc| (*arc).clone());
+                    return Ok(Some((full_path, bytes)));
                 }
                 SequenceRecord::Stub(s) => {
                     self.sequence_store.insert(key, SequenceRecord::Stub(s));
@@ -592,10 +712,10 @@ impl ReadonlyRefgetStore {
                         })?;
                         let mut meta = record.metadata().clone();
                         meta.name = name.clone();
-                        Ok(match record.sequence() {
+                        Ok(match record.sequence_arc() {
                             Some(seq) => SequenceRecord::Full {
                                 metadata: meta,
-                                sequence: seq.to_vec(),
+                                sequence: seq,
                             },
                             None => SequenceRecord::Stub(meta),
                         })
@@ -692,6 +812,65 @@ impl ReadonlyRefgetStore {
         }
 
         Ok(true)
+    }
+
+    /// Remove any sequence from `sequence_store` (and its `.seq` file on disk)
+    /// that is not referenced by any entry in `self.collections`.
+    ///
+    /// Used as a best-effort cleanup after a failed import:
+    /// [`add_sequence_collections_from_fastas`](Self::add_sequence_collections_from_fastas)
+    /// may have inserted sequences for a partially-built collection that never
+    /// received an `End` message (and was therefore never added to
+    /// `self.collections`).  Those sequences are orphans — they have no
+    /// owning collection — and this method removes them so the store stays
+    /// internally consistent. The operation is O(sequences + collections).
+    ///
+    /// Sequences shared with a successfully-finalized collection are preserved.
+    pub(crate) fn remove_orphan_seq_files(&mut self) {
+        // Build the set of all sequence digest keys that are referenced by at
+        // least one surviving (finalized) collection.
+        let mut referenced: std::collections::HashSet<DigestKey> =
+            std::collections::HashSet::new();
+        for name_map in self.name_lookup.values() {
+            for &seq_key in name_map.values() {
+                referenced.insert(seq_key);
+            }
+        }
+
+        // Collect the orphan keys (present in sequence_store but not referenced).
+        let orphans: Vec<DigestKey> = self
+            .sequence_store
+            .keys()
+            .filter(|k| !referenced.contains(*k))
+            .copied()
+            .collect();
+
+        if orphans.is_empty() {
+            return;
+        }
+
+        // Remove from in-memory structures.
+        for key in &orphans {
+            self.sequence_store.remove(key);
+            self.md5_lookup.retain(|_, v| v != key);
+        }
+
+        // Best-effort remove on-disk `.seq` files.
+        if self.persist_to_disk {
+            if let (Some(local_path), Some(template)) =
+                (&self.local_path, &self.seqdata_path_template)
+            {
+                for key in &orphans {
+                    let digest_str = key_to_digest_string(key);
+                    let rel = Self::expand_template(&digest_str, template);
+                    let full = local_path.join(&rel);
+                    let _ = fs::remove_file(&full);
+                    if let Some(parent) = full.parent() {
+                        let _ = fs::remove_dir(parent); // ignore if non-empty
+                    }
+                }
+            }
+        }
     }
 
     // =========================================================================
@@ -960,6 +1139,42 @@ impl ReadonlyRefgetStore {
     // =========================================================================
     // Loading methods
     // =========================================================================
+
+    /// Ensure the sequence index (sequences.rgsi) is loaded.
+    /// For remote stores this is deferred until first sequence access.
+    /// Returns Ok(()) immediately if already loaded.
+    pub(crate) fn ensure_sequence_index_loaded(&mut self) -> Result<()> {
+        if self.sequence_index_loaded {
+            return Ok(());
+        }
+
+        let seq_index_path = self.sequence_index_path.clone()
+            .ok_or_else(|| anyhow!("No sequence_index_path set for deferred loading"))?;
+
+        if !self.quiet {
+            eprintln!("Downloading sequence index {}...", seq_index_path);
+        }
+
+        let data = Self::fetch_file(
+            &self.local_path,
+            &self.remote_source,
+            &seq_index_path,
+            true,
+            false,
+        )?;
+        let data_str = String::from_utf8(data)
+            .context("sequence index contains invalid UTF-8")?;
+
+        Self::load_sequences_from_reader(self, data_str.as_bytes())?;
+        self.sequence_index_loaded = true;
+        Ok(())
+    }
+
+    /// Explicitly load the sequence index. For servers that want to preload
+    /// all data during startup before converting to `ReadonlyRefgetStore`.
+    pub fn load_sequence_index(&mut self) -> Result<()> {
+        self.ensure_sequence_index_loaded()
+    }
 
     /// Eagerly load all Stub collections to Full.
     pub fn load_all_collections(&mut self) -> Result<()> {
@@ -1293,6 +1508,159 @@ impl ReadonlyRefgetStore {
         }
         cache.insert(key, Arc::clone(&file));
         Ok(file)
+    }
+
+    // =========================================================================
+    // Streaming retrieval
+    // =========================================================================
+
+    /// Resolve the relative on-disk/remote path for a sequence's encoded bytes.
+    fn resolve_seq_file_relpath(&self, digest: &str) -> Result<PathBuf> {
+        let template = self
+            .seqdata_path_template
+            .as_deref()
+            .unwrap_or(DEFAULT_SEQDATA_PATH_TEMPLATE);
+        let relpath = Self::expand_template(digest, template);
+        let relpath_str = relpath
+            .to_str()
+            .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+        Self::sanitize_relative_path(relpath_str)?;
+        Ok(relpath)
+    }
+
+    /// Stream a (sub)sequence as decoded ASCII bases without loading the full
+    /// sequence into memory.
+    ///
+    /// Opens a bounded byte window on the backing store (local file via
+    /// `seek`+`take`, or remote via HTTP `Range: bytes=`), and wraps it in a
+    /// [`StreamingDecoder`] when the store is in `Encoded` mode. In `Raw`
+    /// mode the bounded byte source is returned directly, since bytes and
+    /// bases are 1:1.
+    ///
+    /// Memory use is O(1) in the sequence length.
+    pub fn stream_sequence<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        start: Option<u64>,
+        end: Option<u64>,
+    ) -> Result<Box<dyn Read + Send>> {
+        // 1. Resolve digest (MD5 -> SHA512t24u fallback).
+        let digest_key = sha512_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        // 2. Fetch metadata only (do not load bytes).
+        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+            anyhow!(
+                "Sequence not found: {}",
+                String::from_utf8_lossy(sha512_digest.as_ref())
+            )
+        })?;
+        let metadata = record.metadata();
+
+        // 3. Resolve bounds.
+        let length = metadata.length as u64;
+        let start = start.unwrap_or(0);
+        let end = end.unwrap_or(length);
+        if start > end || end > length {
+            return Err(anyhow!(
+                "Invalid stream range: start={}, end={}, length={}",
+                start,
+                end,
+                length
+            ));
+        }
+
+        // 4. Look up alphabet and compute bits-per-base.
+        let alphabet = crate::digest::lookup_alphabet(&metadata.alphabet);
+        let bps = match self.mode {
+            StorageMode::Encoded => alphabet.bits_per_symbol as u64,
+            StorageMode::Raw => 8,
+        };
+
+        // 5. Compute byte range + leading-skip bits.
+        let start_bit = start * bps;
+        let end_bit = end * bps;
+        let byte_start = start_bit / 8;
+        let byte_end = end_bit.div_ceil(8);
+        let leading_skip_bits = (start_bit - byte_start * 8) as u8;
+        let bases_to_emit = end - start;
+        let byte_len = byte_end - byte_start;
+
+        // Fast path for empty range.
+        if bases_to_emit == 0 {
+            return Ok(Box::new(std::io::empty()));
+        }
+
+        let sha = metadata.sha512t24u.clone();
+
+        // 6. Build the source reader. In-memory Full records are streamed
+        // directly from their encoded byte buffer. Otherwise try the
+        // on-disk path (local_path / remote_source).
+        if let SequenceRecord::Full { sequence, .. } = record {
+            // Share ownership of the already-resident buffer instead of
+            // cloning the byte range. This keeps peak allocation O(1) in
+            // the sequence size.
+            let shared = Arc::clone(sequence);
+            let source: Box<dyn Read + Send> = Box::new(ArcSliceReader::new(
+                shared,
+                byte_start as usize,
+                byte_end as usize,
+            ));
+            return match self.mode {
+                StorageMode::Encoded => Ok(Box::new(StreamingDecoder::new(
+                    source,
+                    alphabet,
+                    leading_skip_bits,
+                    bases_to_emit,
+                ))),
+                StorageMode::Raw => {
+                    debug_assert_eq!(leading_skip_bits, 0);
+                    Ok(source)
+                }
+            };
+        }
+
+        let relpath = self.resolve_seq_file_relpath(&sha)?;
+
+        let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
+            let full = local.join(&relpath);
+            if full.exists() {
+                let mut file = File::open(&full)
+                    .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
+                file.seek(SeekFrom::Start(byte_start))
+                    .context("Failed to seek in local seq file")?;
+                Box::new(BufReader::new(file).take(byte_len))
+            } else if let Some(remote) = self.remote_source.as_ref() {
+                open_remote_range(remote, &relpath, byte_start, byte_end)?
+            } else {
+                return Err(anyhow!(
+                    "Sequence file missing locally and no remote source: {}",
+                    full.display()
+                ));
+            }
+        } else if let Some(remote) = self.remote_source.as_ref() {
+            open_remote_range(remote, &relpath, byte_start, byte_end)?
+        } else {
+            return Err(anyhow!("No backing source configured for sequence {}", sha));
+        };
+
+        // 7. Dispatch on mode.
+        match self.mode {
+            StorageMode::Encoded => Ok(Box::new(StreamingDecoder::new(
+                source,
+                alphabet,
+                leading_skip_bits,
+                bases_to_emit,
+            ))),
+            StorageMode::Raw => {
+                debug_assert_eq!(leading_skip_bits, 0);
+                Ok(source)
+            }
+        }
     }
 
     // =========================================================================
@@ -1740,3 +2108,98 @@ impl Display for ReadonlyRefgetStore {
 
 // Extension traits used by collection.rs
 use crate::collection::SequenceCollectionRecordExt;
+
+#[cfg(all(test, feature = "http"))]
+mod open_remote_range_tests {
+    use super::*;
+    use std::net::TcpListener;
+    use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+
+    /// Spin up an HTTP server that DELIBERATELY IGNORES the Range header,
+    /// responding 200 OK with the full body. Models a misbehaving CDN/origin.
+    /// Returns (base_url, shutdown_fn).
+    fn start_range_ignoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
+        use std::io::{Read as _, Write as _};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            listener.set_nonblocking(false).ok();
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let _ = stream.read(&mut buf).unwrap_or(0);
+                        // Respond 200 OK with the full body, ignoring the Range header.
+                        let header = format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                            body.len()
+                        );
+                        let _ = stream.write_all(header.as_bytes());
+                        let _ = stream.write_all(&body);
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
+
+    /// When a remote server ignores the Range header and returns 200 + full body,
+    /// `open_remote_range` MUST return an error rather than silently wrapping the
+    /// wrong bytes in a StreamingDecoder. Otherwise callers get silent corruption.
+    #[test]
+    fn test_open_remote_range_rejects_non_206_response() {
+        let full_body: Vec<u8> = (0u8..=255).collect();
+        let (base_url, shutdown) = start_range_ignoring_server(full_body.clone());
+
+        // Request only a middle slice: bytes 10..20.
+        let result = open_remote_range(
+            &base_url,
+            std::path::Path::new("seq.dat"),
+            10,
+            20,
+        );
+
+        shutdown();
+
+        match result {
+            Err(e) => {
+                let msg = format!("{}", e);
+                assert!(
+                    msg.contains("Range") || msg.contains("206") || msg.contains("status"),
+                    "expected a Range/206/status error, got: {}",
+                    msg
+                );
+            }
+            Ok(mut reader) => {
+                use std::io::Read as _;
+                let mut got = Vec::new();
+                reader.read_to_end(&mut got).unwrap();
+                // If we got here, the bug is live: the reader yielded bytes
+                // that are NOT the requested 10..20 slice. The `.take(byte_len)`
+                // in the buggy code returns the FIRST `byte_len` bytes of the
+                // full body, i.e. 0..10, instead of the requested 10..20.
+                assert_eq!(
+                    got,
+                    full_body[10..20],
+                    "BUG: open_remote_range silently returned wrong bytes \
+                     when server ignored the Range header. Got {:?}, expected {:?}. \
+                     The function should have returned an error instead.",
+                    got,
+                    &full_body[10..20]
+                );
+            }
+        }
+    }
+}

@@ -227,3 +227,91 @@ fn parallel_encoded_is_deterministic() {
         assert_eq!(x.alt_allele, y.alt_allele);
     }
 }
+
+// FIX 3: A VCF record whose REF allele extends past the sequence end must
+// cause BOTH serial and parallel paths to return Err (not silently skip).
+#[test]
+fn fix3_ref_past_end_returns_err_both_paths() {
+    use std::io::Write;
+    use tempfile::tempdir;
+    use gtars_refget::store::{FastaImportOptions, RefgetStore};
+
+    let dir = tempdir().unwrap();
+
+    // A single short sequence "chr1" of length 10.
+    let fasta_path = dir.path().join("short.fa");
+    {
+        let mut f = std::fs::File::create(&fasta_path).unwrap();
+        writeln!(f, ">chr1\nACGTACGTAC").unwrap(); // length 10
+    }
+
+    // A VCF record whose REF (ACGTACGTAC, len=10) starting at 1-based pos=5
+    // (0-based=4) would need bytes [4..14], extending past the end (len=10).
+    let vcf_path = dir.path().join("bad.vcf");
+    {
+        let mut f = std::fs::File::create(&vcf_path).unwrap();
+        writeln!(f, "##fileformat=VCFv4.2").unwrap();
+        writeln!(f, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO").unwrap();
+        // POS=5 (0-based=4), REF=ACGTACGTAC (len=10) → end=14 > seq_len=10 → error
+        writeln!(f, "chr1\t5\t.\tACGTACGTAC\tA\t.\tPASS\t.").unwrap();
+    }
+
+    let store_dir = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    store.load_all_sequences().unwrap();
+
+    let paged = store.list_collections(0, 10, &[]).unwrap();
+    let coll_digest = paged.results[0].digest.clone();
+    let collection = store.get_collection(&coll_digest).unwrap();
+    let mut name_to_digest: HashMap<String, String> = HashMap::new();
+    for rec in &collection.sequences {
+        let m = rec.metadata();
+        name_to_digest.insert(m.name.clone(), m.sha512t24u.clone());
+    }
+    let store_dir_str = store_dir.to_str().unwrap().to_string();
+    drop(store);
+
+    // Serial path must return Err.
+    let serial_store = {
+        let mut s = RefgetStore::open_local(&store_dir_str).unwrap();
+        s.load_all_collections().unwrap();
+        for d in name_to_digest.values() {
+            s.load_sequence(d.as_str()).unwrap();
+        }
+        s.into_readonly()
+    };
+    let serial_result = compute_vrs_ids_streaming_readonly(
+        &serial_store,
+        &name_to_digest,
+        vcf_path.to_str().unwrap(),
+        |_| {},
+    );
+    assert!(
+        serial_result.is_err(),
+        "serial path must return Err for ref-past-end variant"
+    );
+
+    // Parallel path must also return Err.
+    let parallel_store = {
+        let mut s = RefgetStore::open_local(&store_dir_str).unwrap();
+        s.load_all_collections().unwrap();
+        for d in name_to_digest.values() {
+            s.load_sequence(d.as_str()).unwrap();
+        }
+        s.into_readonly()
+    };
+    let parallel_result = compute_vrs_ids_parallel_encoded(
+        &parallel_store,
+        &name_to_digest,
+        vcf_path.to_str().unwrap(),
+        2,
+        |_| {},
+    );
+    assert!(
+        parallel_result.is_err(),
+        "parallel path must return Err for ref-past-end variant (Fix 3)"
+    );
+}

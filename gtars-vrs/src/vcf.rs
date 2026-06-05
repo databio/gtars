@@ -334,8 +334,10 @@ struct SeqEntry<'a> {
 /// `RefgetStore::load_sequence` for each needed digest, then `into_readonly`).
 /// Workers only read; the `RefView` borrows are kept valid by scoped threads.
 ///
-/// Output is identical (same VRS ids, same order) to
-/// [`compute_vrs_ids_streaming_readonly`]. Returns the number of results emitted.
+/// Output is identical to [`compute_vrs_ids_streaming_readonly`] on well-formed
+/// input; on malformed input both paths return Err and the set of results
+/// delivered to the callback before the Err is unspecified.
+/// Returns the number of results emitted.
 pub fn compute_vrs_ids_parallel_encoded(
     store: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
@@ -377,7 +379,13 @@ pub fn compute_vrs_ids_parallel_encoded(
 
     let mut count = 0usize;
 
+    // Shared first-error slot: must outlive the scope so its borrow is valid
+    // for the full lifetime of the scope (scoped threads borrow it).
+    let worker_err: std::sync::Mutex<Option<anyhow::Error>> = std::sync::Mutex::new(None);
+    let worker_err_ref = &worker_err;
+
     std::thread::scope(|scope| -> Result<()> {
+
         // Work channels: one per worker (round-robin keeps per-worker order, and
         // the collector restores global order via record_index).
         let mut work_txs: Vec<mpsc::Sender<WorkItem>> = Vec::with_capacity(n_workers);
@@ -394,10 +402,6 @@ pub fn compute_vrs_ids_parallel_encoded(
                     let entry = &seqs[item.seq_index];
                     let mut results = Vec::with_capacity(item.alts.len());
                     for alt in &item.alts {
-                        // A variant that fails to normalize (e.g. ref allele past
-                        // sequence end) or whose normalized allele is not UTF-8 is
-                        // skipped. On well-formed input every variant normalizes,
-                        // so output matches the serial path exactly.
                         let norm = match normalize_ref(
                             &entry.view,
                             item.pos,
@@ -405,11 +409,31 @@ pub fn compute_vrs_ids_parallel_encoded(
                             alt.as_bytes(),
                         ) {
                             Ok(n) => n,
-                            Err(_) => continue,
+                            Err(e) => {
+                                let mut s = worker_err_ref.lock().unwrap();
+                                if s.is_none() {
+                                    *s = Some(anyhow::anyhow!(
+                                        "Failed to normalize variant at {}:{}: {e}",
+                                        item.chrom,
+                                        item.pos + 1
+                                    ));
+                                }
+                                continue;
+                            }
                         };
                         let norm_seq = match std::str::from_utf8(&norm.allele) {
                             Ok(s) => s,
-                            Err(_) => continue,
+                            Err(e) => {
+                                let mut s = worker_err_ref.lock().unwrap();
+                                if s.is_none() {
+                                    *s = Some(anyhow::anyhow!(
+                                        "Normalized allele not valid UTF-8 at {}:{}: {e}",
+                                        item.chrom,
+                                        item.pos + 1
+                                    ));
+                                }
+                                continue;
+                            }
                         };
                         let vrs_id = writer.allele_identifier_literal(
                             &entry.accession,
@@ -510,6 +534,11 @@ pub fn compute_vrs_ids_parallel_encoded(
         for h in worker_handles {
             h.join()
                 .map_err(|_| anyhow::anyhow!("VRS worker thread panicked"))?;
+        }
+        // Surface the first worker error (if any), matching the serial path's
+        // error behaviour on malformed input.
+        if let Some(e) = worker_err_ref.lock().unwrap().take() {
+            return Err(e);
         }
         Ok(())
     })?;
