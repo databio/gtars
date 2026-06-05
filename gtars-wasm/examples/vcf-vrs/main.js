@@ -166,7 +166,7 @@ worker.addEventListener("message", (ev) => {
       requestCacheList(); // newly-downloaded chromosomes show up
       break;
 
-    case "cache-list":
+    case "genome-list":
       renderCache(msg);
       break;
 
@@ -187,46 +187,57 @@ function requestCacheList() {
   worker.postMessage({ type: "list-cache" });
 }
 
+function addCacheRow(cells, button) {
+  const tr = document.createElement("tr");
+  for (const c of cells) {
+    const td = document.createElement("td");
+    td.textContent = c;
+    tr.appendChild(td);
+  }
+  const tdBtn = document.createElement("td");
+  if (button) tdBtn.appendChild(button);
+  tr.appendChild(tdBtn);
+  cacheBody.appendChild(tr);
+}
+
 function renderCache(msg) {
   cacheBody.innerHTML = "";
   const used = msg.usage != null ? fmtBytes(msg.usage) : "?";
   const quota = msg.quota != null ? fmtBytes(msg.quota) : "?";
   cacheInfo.textContent =
-    `${msg.entries.length} chromosome(s) saved locally, ${fmtBytes(msg.totalBytes)}` +
+    `${msg.genomes.length} genome(s), ${fmtBytes(msg.totalBytes)} saved locally` +
     `  ·  browser storage used: ${used} / ${quota}`;
 
-  if (msg.entries.length === 0) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = 4;
-    td.className = "hint";
-    td.textContent = "No chromosomes downloaded yet.";
-    tr.appendChild(td);
-    cacheBody.appendChild(tr);
+  if (msg.genomes.length === 0 && msg.other.count === 0) {
+    addCacheRow(["No genomes downloaded yet.", "", ""], null);
+    cacheBody.lastChild.firstChild.colSpan = 4;
+    cacheBody.lastChild.firstChild.className = "hint";
     return;
   }
 
-  for (const e of msg.entries) {
-    const tr = document.createElement("tr");
-    const label = e.label || "(unknown — prepare a genome to map names)";
-    const shortFile = e.name.length > 20 ? e.name.slice(0, 12) + "…" + e.name.slice(-7) : e.name;
-    const cells = [label + (e.resident ? " · resident" : ""), shortFile, fmtBytes(e.size)];
-    for (const c of cells) {
-      const td = document.createElement("td");
-      td.textContent = c;
-      tr.appendChild(td);
-    }
-    const tdBtn = document.createElement("td");
+  for (const g of msg.genomes) {
+    const name = g.label + (g.active ? " · active" : "");
+    const counts = `${g.cachedCount} / ${g.totalCount} chromosomes`;
     const del = document.createElement("button");
     del.textContent = "Delete";
     del.addEventListener("click", () => {
-      if (confirm(`Delete cached ${label} (${fmtBytes(e.size)})?`)) {
-        worker.postMessage({ type: "delete-cache", name: e.name });
+      if (confirm(`Delete genome "${g.label}" (${fmtBytes(g.cachedBytes)}) from local storage?`)) {
+        worker.postMessage({ type: "delete-genome", base: g.base });
       }
     });
-    tdBtn.appendChild(del);
-    tr.appendChild(tdBtn);
-    cacheBody.appendChild(tr);
+    addCacheRow([name, counts, fmtBytes(g.cachedBytes)], g.cachedCount > 0 ? del : null);
+  }
+
+  if (msg.other.count > 0) {
+    addCacheRow(
+      [
+        "(unattributed — verify its genome to group these)",
+        `${msg.other.count} files`,
+        fmtBytes(msg.other.bytes),
+      ],
+      null
+    );
+    cacheBody.lastChild.firstChild.className = "hint";
   }
 }
 

@@ -59,8 +59,8 @@ self.addEventListener("message", async (ev) => {
       await processVcf(msg.buffer, msg.isGz, msg.name);
     } else if (msg.type === "list-cache") {
       await listCache();
-    } else if (msg.type === "delete-cache") {
-      await deleteCache(msg.name);
+    } else if (msg.type === "delete-genome") {
+      await deleteGenome(msg.base);
     } else if (msg.type === "purge-cache") {
       await purgeCache();
     }
@@ -98,6 +98,10 @@ async function prepareGenome(baseUrl) {
   genome = { base, template, byName };
   residentStore = new RefgetStore();
   loaded = new Set();
+
+  // Record this genome's identity + its full sequence-digest set, so the local
+  // store panel can group cached chromosomes by genome (one row per genome).
+  await registerGenome(base, byName);
 
   // size:null — nothing downloaded yet; sequences load on demand.
   post({ type: "genome-ready", cached: true, size: null, sequences: byName.size });
@@ -234,8 +238,16 @@ function scanVcfChroms(text) {
 }
 
 // ===========================================================================
-// (2b) OPFS cache inventory / management.
+// (2b) Local genome store: inventory grouped BY GENOME, not by file.
+//
+// The on-disk cache is just per-sequence `<digest>.seq` files. To present one
+// row per genome, we keep a tiny registry (`genomes.json`) mapping each genome's
+// base URL to its label and full set of sequence digests, written when a genome
+// is verified. The panel then reports, per genome, how many of its sequences are
+// cached and their total size.
 // ===========================================================================
+const REGISTRY_FILE = "genomes.json";
+
 async function storageEstimate() {
   if (navigator.storage && navigator.storage.estimate) {
     const e = await navigator.storage.estimate();
@@ -244,19 +256,47 @@ async function storageEstimate() {
   return { usage: null, quota: null };
 }
 
-// Reverse map a cache filename (`<digest>.seq`) to the chromosome name(s) that
-// share that digest, when the index is loaded. Multiple names can map to one
-// sequence (aliases), so values are comma-joined.
-function digestFileToNames() {
-  const m = new Map();
-  if (!genome) return m;
-  for (const meta of genome.byName.values()) {
-    const file = `${meta.sha512t24u}.seq`;
-    m.set(file, m.has(file) ? `${m.get(file)}, ${meta.name}` : meta.name);
-  }
-  return m;
+function deriveLabel(base) {
+  const parts = base.split("/").filter((p) => p && !p.endsWith(":"));
+  return parts[parts.length - 1] || base;
 }
 
+async function readRegistry(dir) {
+  try {
+    const fh = await dir.getFileHandle(REGISTRY_FILE, { create: false });
+    const f = await fh.getFile();
+    return JSON.parse(await f.text());
+  } catch {
+    return {};
+  }
+}
+
+async function writeRegistry(dir, reg) {
+  const fh = await dir.getFileHandle(REGISTRY_FILE, { create: true });
+  const access = await fh.createSyncAccessHandle();
+  try {
+    const bytes = new TextEncoder().encode(JSON.stringify(reg));
+    access.truncate(0);
+    access.write(bytes, { at: 0 });
+    access.flush();
+  } finally {
+    access.close();
+  }
+}
+
+async function registerGenome(base, byName) {
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(OPFS_DIR, { create: true });
+  const reg = await readRegistry(dir);
+  const digests = [...new Set([...byName.values()].map((m) => m.sha512t24u))];
+  reg[base] = { label: deriveLabel(base), digests };
+  await writeRegistry(dir, reg);
+}
+
+// List cached chromosomes grouped by genome. Emits one entry per registered
+// genome (cached/total counts + bytes on disk) plus an "other" bucket for any
+// cached files not attributed to a known genome (e.g. cached before the genome
+// was registered — verifying that genome will attribute them).
 async function listCache() {
   const est = await storageEstimate();
   const root = await navigator.storage.getDirectory();
@@ -264,35 +304,86 @@ async function listCache() {
   try {
     dir = await root.getDirectoryHandle(OPFS_DIR, { create: false });
   } catch {
-    post({ type: "cache-list", entries: [], totalBytes: 0, ...est });
+    post({ type: "genome-list", genomes: [], other: { count: 0, bytes: 0 }, totalBytes: 0, ...est });
     return;
   }
-  const names = digestFileToNames();
-  const entries = [];
-  let total = 0;
+
+  // Sizes of every cached .seq on disk.
+  const sizes = new Map();
+  let totalBytes = 0;
   for await (const [name, handle] of dir.entries()) {
-    if (handle.kind !== "file") continue;
-    const file = await handle.getFile();
-    total += file.size;
-    entries.push({
-      name,
-      size: file.size,
-      label: names.get(name) || null,
-      resident: loaded ? loaded.has(name.replace(/\.seq$/, "")) : false,
+    if (handle.kind !== "file" || !name.endsWith(".seq")) continue;
+    const f = await handle.getFile();
+    sizes.set(name, f.size);
+    totalBytes += f.size;
+  }
+
+  const reg = await readRegistry(dir);
+  const attributed = new Set();
+  const genomes = [];
+  for (const [base, info] of Object.entries(reg)) {
+    let cachedCount = 0;
+    let cachedBytes = 0;
+    for (const d of info.digests) {
+      const fn = `${d}.seq`;
+      if (sizes.has(fn)) {
+        cachedCount++;
+        cachedBytes += sizes.get(fn);
+        attributed.add(fn);
+      }
+    }
+    genomes.push({
+      base,
+      label: info.label || base,
+      cachedCount,
+      totalCount: info.digests.length,
+      cachedBytes,
+      active: genome && genome.base === base,
     });
   }
-  entries.sort((a, b) => b.size - a.size);
-  post({ type: "cache-list", entries, totalBytes: total, ...est });
+
+  let otherCount = 0;
+  let otherBytes = 0;
+  for (const [fn, sz] of sizes) {
+    if (!attributed.has(fn)) {
+      otherCount++;
+      otherBytes += sz;
+    }
+  }
+
+  genomes.sort((a, b) => b.cachedBytes - a.cachedBytes);
+  post({ type: "genome-list", genomes, other: { count: otherCount, bytes: otherBytes }, totalBytes, ...est });
 }
 
-async function deleteCache(name) {
+// Delete one genome's cached chromosomes. Sequences shared with another
+// registered genome are kept; the genome's registry entry is removed.
+async function deleteGenome(base) {
   const root = await navigator.storage.getDirectory();
   const dir = await root.getDirectoryHandle(OPFS_DIR, { create: false });
-  await dir.removeEntry(name);
-  // Let it re-download on next use. (The resident wasm store keeps its copy
-  // until the page reloads; this only frees disk.)
-  if (loaded) loaded.delete(name.replace(/\.seq$/, ""));
-  workerLog(`Deleted ${name} from the local genome store.`);
+  const reg = await readRegistry(dir);
+  const info = reg[base];
+  if (!info) {
+    await listCache();
+    return;
+  }
+  const keep = new Set();
+  for (const [b, i] of Object.entries(reg)) {
+    if (b !== base) for (const d of i.digests) keep.add(d);
+  }
+  let removed = 0;
+  for (const d of info.digests) {
+    if (keep.has(d)) continue;
+    try {
+      await dir.removeEntry(`${d}.seq`);
+      removed++;
+    } catch {
+      /* not cached */
+    }
+    if (loaded) loaded.delete(d);
+  }
+  delete reg[base];
+  await writeRegistry(dir, reg);
+  workerLog(`Deleted genome "${info.label || base}" (${removed} chromosome file(s)) from local storage.`);
   await listCache();
 }
 
@@ -304,7 +395,7 @@ async function purgeCache() {
     /* dir may not exist yet */
   }
   if (loaded) loaded.clear();
-  workerLog("Deleted all chromosomes from the local genome store.");
+  workerLog("Deleted all genomes from local storage.");
   await listCache();
 }
 
