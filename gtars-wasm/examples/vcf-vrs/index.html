@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>VCF → VRS (gtars-wasm) — OPFS + Worker harness</title>
+    <title>VCF → VRS (gtars-wasm)</title>
     <style>
       body { font-family: system-ui, sans-serif; max-width: 880px; margin: 2rem auto; padding: 0 1rem; }
       h1 { font-size: 1.4rem; }
@@ -33,26 +33,23 @@
     <h1>VCF → VRS allele identifiers (browser harness)</h1>
     <p class="hint">
       In-browser VCF→VRS tool with <strong>zero server compute</strong>. The reference genome
-      is fetched once from a served <strong>gtars refgetstore</strong> and cached in OPFS; a
-      Web Worker holds it ENCODED in a resident <code>RefgetStore</code> and computes a
-      <code>ga4gh:VA.&lt;digest&gt;</code> for every variant via <code>vcf_to_vrs_ids</code>,
-      decoding reference bases on the fly.
+      is downloaded once and cached in your browser; every variant is converted to a
+      <code>ga4gh:VA.&lt;digest&gt;</code> identifier entirely on your machine. Nothing is
+      sent to a server.
     </p>
 
     <h2>1. Reference genome</h2>
-    <label for="genomeUrl">Refgetstore base URL (serves rgstore.json, sequences.rgsi, sequences/&lt;ab&gt;/&lt;digest&gt;.seq)</label>
+    <label for="genomeUrl">Genome store URL</label>
     <input id="genomeUrl"
       value=""
-      placeholder="https://…/my_refgetstore/" />
+      placeholder="https://…/my_genome_store/" />
     <p class="hint">
-      Point at a directory that exposes a gtars refgetstore (encoded mode). Preparing only
-      fetches the small manifest + index; each chromosome's encoded <code>.seq</code> is
-      downloaded <strong>lazily</strong> when a dropped VCF references it, and cached in OPFS
-      so later runs reuse it. <code>wasm32</code> has a hard 4&nbsp;GB linear-memory ceiling,
-      so we hold sequences encoded and never materialize the decoded form.
+      The URL of a hosted reference genome store. Verifying only reads a small index;
+      each chromosome is downloaded the first time a dropped VCF needs it, then kept in
+      your browser's local storage so later runs are instant.
     </p>
-    <button id="prepBtn">Download / verify genome in OPFS</button>
-    <div>Download / cache</div>
+    <button id="prepBtn">Download / verify genome</button>
+    <div>Download</div>
     <div class="barwrap"><div id="dlBar" class="bar"></div></div>
     <div id="storageInfo" class="hint"></div>
 
@@ -69,6 +66,17 @@
     <h2>Results preview <span class="hint">(first rows)</span></h2>
     <table id="results">
       <thead><tr><th>chrom</th><th>pos</th><th>ref</th><th>alt</th><th>vrs_id</th></tr></thead>
+      <tbody></tbody>
+    </table>
+
+    <h2>Local genome store <span class="hint">(chromosomes saved in your browser)</span></h2>
+    <div>
+      <button id="cacheRefreshBtn">Refresh</button>
+      <button id="cachePurgeBtn">Delete all</button>
+    </div>
+    <div id="cacheInfo" class="hint"></div>
+    <table id="cacheTable">
+      <thead><tr><th>chromosome</th><th>file</th><th>size</th><th></th></tr></thead>
       <tbody></tbody>
     </table>
 

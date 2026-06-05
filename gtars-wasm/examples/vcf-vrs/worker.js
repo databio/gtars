@@ -57,6 +57,12 @@ self.addEventListener("message", async (ev) => {
       await prepareGenome(msg.url);
     } else if (msg.type === "process-vcf") {
       await processVcf(msg.buffer, msg.isGz, msg.name);
+    } else if (msg.type === "list-cache") {
+      await listCache();
+    } else if (msg.type === "delete-cache") {
+      await deleteCache(msg.name);
+    } else if (msg.type === "purge-cache") {
+      await purgeCache();
     }
   } catch (err) {
     post({ type: "error", text: String(err && err.stack ? err.stack : err) });
@@ -97,7 +103,7 @@ async function prepareGenome(baseUrl) {
   post({ type: "genome-ready", cached: true, size: null, sequences: byName.size });
   workerLog(
     `Index ready: ${byName.size} sequences available. Chromosomes download on ` +
-      `demand when a VCF references them (cached in OPFS for reuse).`
+      `demand when a VCF references them (saved locally for reuse).`
   );
 }
 
@@ -138,7 +144,7 @@ async function ensureChromLoaded(dir, seqMeta, vcfName) {
   loaded.add(seqMeta.sha512t24u);
   workerLog(
     `Loaded ${seqMeta.name} (${seqMeta.length} bp, ${seqMeta.alphabet})` +
-      `${cached ? " from OPFS cache" : " — downloaded"}.`
+      `${cached ? " from local storage" : " — downloaded"}.`
   );
   return cached ? 0 : bytes.byteLength;
 }
@@ -225,6 +231,81 @@ function scanVcfChroms(text) {
     lineStart = nl + 1;
   }
   return set;
+}
+
+// ===========================================================================
+// (2b) OPFS cache inventory / management.
+// ===========================================================================
+async function storageEstimate() {
+  if (navigator.storage && navigator.storage.estimate) {
+    const e = await navigator.storage.estimate();
+    return { usage: e.usage, quota: e.quota };
+  }
+  return { usage: null, quota: null };
+}
+
+// Reverse map a cache filename (`<digest>.seq`) to the chromosome name(s) that
+// share that digest, when the index is loaded. Multiple names can map to one
+// sequence (aliases), so values are comma-joined.
+function digestFileToNames() {
+  const m = new Map();
+  if (!genome) return m;
+  for (const meta of genome.byName.values()) {
+    const file = `${meta.sha512t24u}.seq`;
+    m.set(file, m.has(file) ? `${m.get(file)}, ${meta.name}` : meta.name);
+  }
+  return m;
+}
+
+async function listCache() {
+  const est = await storageEstimate();
+  const root = await navigator.storage.getDirectory();
+  let dir;
+  try {
+    dir = await root.getDirectoryHandle(OPFS_DIR, { create: false });
+  } catch {
+    post({ type: "cache-list", entries: [], totalBytes: 0, ...est });
+    return;
+  }
+  const names = digestFileToNames();
+  const entries = [];
+  let total = 0;
+  for await (const [name, handle] of dir.entries()) {
+    if (handle.kind !== "file") continue;
+    const file = await handle.getFile();
+    total += file.size;
+    entries.push({
+      name,
+      size: file.size,
+      label: names.get(name) || null,
+      resident: loaded ? loaded.has(name.replace(/\.seq$/, "")) : false,
+    });
+  }
+  entries.sort((a, b) => b.size - a.size);
+  post({ type: "cache-list", entries, totalBytes: total, ...est });
+}
+
+async function deleteCache(name) {
+  const root = await navigator.storage.getDirectory();
+  const dir = await root.getDirectoryHandle(OPFS_DIR, { create: false });
+  await dir.removeEntry(name);
+  // Let it re-download on next use. (The resident wasm store keeps its copy
+  // until the page reloads; this only frees disk.)
+  if (loaded) loaded.delete(name.replace(/\.seq$/, ""));
+  workerLog(`Deleted ${name} from the local genome store.`);
+  await listCache();
+}
+
+async function purgeCache() {
+  const root = await navigator.storage.getDirectory();
+  try {
+    await root.removeEntry(OPFS_DIR, { recursive: true });
+  } catch {
+    /* dir may not exist yet */
+  }
+  if (loaded) loaded.clear();
+  workerLog("Deleted all chromosomes from the local genome store.");
+  await listCache();
 }
 
 // ===========================================================================

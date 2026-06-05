@@ -29,6 +29,10 @@ const computeInfo = $("computeInfo");
 const downloadBtn = $("downloadBtn");
 const resultsBody = $("results").querySelector("tbody");
 const logEl = $("log");
+const cacheRefreshBtn = $("cacheRefreshBtn");
+const cachePurgeBtn = $("cachePurgeBtn");
+const cacheInfo = $("cacheInfo");
+const cacheBody = $("cacheTable").querySelector("tbody");
 
 const MAX_PREVIEW_ROWS = 50;
 
@@ -121,11 +125,12 @@ worker.addEventListener("message", (ev) => {
 
     case "genome-ready":
       setBar(dlBar, 1, true);
-      storageInfo.textContent = msg.cached
-        ? `Genome already in OPFS (${fmtBytes(msg.size)}). Skipped download.`
-        : `Genome cached in OPFS (${fmtBytes(msg.size)}).`;
+      storageInfo.textContent =
+        `Index ready: ${msg.sequences ?? "?"} sequences available. ` +
+        `Chromosomes download on demand when you drop a VCF.`;
       prepBtn.disabled = false;
-      log(`Genome ready: ${fmtBytes(msg.size)} (${msg.cached ? "cached" : "freshly downloaded"}).`);
+      log(`Genome index ready (${msg.sequences ?? "?"} sequences).`);
+      requestCacheList();
       break;
 
     case "storage-estimate":
@@ -158,6 +163,11 @@ worker.addEventListener("message", (ev) => {
         `Done: ${resultRows.length.toLocaleString()} variants in ` +
         `${((performance.now() - computeStartTs) / 1000).toFixed(1)}s.`;
       log(`Compute done: ${resultRows.length} results.`);
+      requestCacheList(); // newly-downloaded chromosomes show up
+      break;
+
+    case "cache-list":
+      renderCache(msg);
       break;
 
     case "error":
@@ -168,6 +178,63 @@ worker.addEventListener("message", (ev) => {
 
 worker.addEventListener("error", (ev) => {
   log(`Worker error: ${ev.message} (${ev.filename}:${ev.lineno})`, true);
+});
+
+// ---------------------------------------------------------------------------
+// OPFS cache panel: inventory cached chromosomes, delete one, or purge all.
+// ---------------------------------------------------------------------------
+function requestCacheList() {
+  worker.postMessage({ type: "list-cache" });
+}
+
+function renderCache(msg) {
+  cacheBody.innerHTML = "";
+  const used = msg.usage != null ? fmtBytes(msg.usage) : "?";
+  const quota = msg.quota != null ? fmtBytes(msg.quota) : "?";
+  cacheInfo.textContent =
+    `${msg.entries.length} chromosome(s) saved locally, ${fmtBytes(msg.totalBytes)}` +
+    `  ·  browser storage used: ${used} / ${quota}`;
+
+  if (msg.entries.length === 0) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4;
+    td.className = "hint";
+    td.textContent = "No chromosomes downloaded yet.";
+    tr.appendChild(td);
+    cacheBody.appendChild(tr);
+    return;
+  }
+
+  for (const e of msg.entries) {
+    const tr = document.createElement("tr");
+    const label = e.label || "(unknown — prepare a genome to map names)";
+    const shortFile = e.name.length > 20 ? e.name.slice(0, 12) + "…" + e.name.slice(-7) : e.name;
+    const cells = [label + (e.resident ? " · resident" : ""), shortFile, fmtBytes(e.size)];
+    for (const c of cells) {
+      const td = document.createElement("td");
+      td.textContent = c;
+      tr.appendChild(td);
+    }
+    const tdBtn = document.createElement("td");
+    const del = document.createElement("button");
+    del.textContent = "Delete";
+    del.addEventListener("click", () => {
+      if (confirm(`Delete cached ${label} (${fmtBytes(e.size)})?`)) {
+        worker.postMessage({ type: "delete-cache", name: e.name });
+      }
+    });
+    tdBtn.appendChild(del);
+    tr.appendChild(tdBtn);
+    cacheBody.appendChild(tr);
+  }
+}
+
+cacheRefreshBtn.addEventListener("click", requestCacheList);
+cachePurgeBtn.addEventListener("click", () => {
+  if (confirm("Delete ALL downloaded chromosomes from local storage? They will re-download on next use.")) {
+    worker.postMessage({ type: "purge-cache" });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -270,8 +337,12 @@ try {
 
 if (!("storage" in navigator) || !navigator.storage.getDirectory) {
   log(
-    "WARNING: This browser does not expose OPFS (navigator.storage.getDirectory). " +
-      "The genome cache + Worker compute will not function.",
+    "WARNING: This browser can't store genomes locally (no OPFS support). " +
+      "The local genome store and compute will not function.",
     true
   );
+} else {
+  // Show whatever is already cached from a previous session (names resolve once
+  // a genome index is prepared).
+  requestCacheList();
 }
