@@ -29,6 +29,9 @@
 import init, { RefgetStore, vcf_to_vrs_ids, parse_hgvs } from "../../pkg/gtars_js.js";
 
 const OPFS_DIR = "refget"; // OPFS subdir holding cached .seq files
+// Probed when the manifest doesn't list alias namespaces (it often doesn't).
+// Missing ones just 404/403 and are skipped.
+const DEFAULT_ALIAS_NAMESPACES = ["ucsc", "ensembl", "refseq", "gencode", "genbank"];
 const PROGRESS_EVERY = 5000; // emit compute progress every N results
 const RESULT_BATCH = 2000; // flush results to the main thread every N rows
 
@@ -96,10 +99,25 @@ async function prepareGenome(baseUrl) {
 
   const rgsiText = await (await fetchOk(`${base}/${indexName}`)).text();
   const byName = new Map();
-  for (const s of parseRgsi(rgsiText)) byName.set(s.name, s);
+  const byDigest = new Map();
+  for (const s of parseRgsi(rgsiText)) {
+    byName.set(s.name, s);
+    byDigest.set(s.sha512t24u, s);
+  }
   if (byName.size === 0) throw new Error("sequences.rgsi listed no sequences.");
 
-  genome = { base, template, byName };
+  // Load the store's own sequence aliases (e.g. a `ucsc` namespace mapping
+  // chr20 -> the digest stored under NC_000020.11), so a VCF/HGVS using a
+  // different naming scheme than the store resolves to the right sequence.
+  // The manifest may omit the namespace list (the native loader dir-scans);
+  // we can't list a remote dir, so fall back to probing common namespaces.
+  const namespaces =
+    manifest.sequence_alias_namespaces && manifest.sequence_alias_namespaces.length
+      ? manifest.sequence_alias_namespaces
+      : DEFAULT_ALIAS_NAMESPACES;
+  const aliasToDigest = await loadAliases(base, namespaces);
+
+  genome = { base, template, byName, byDigest, aliasToDigest };
   residentStore = new RefgetStore();
   loaded = new Set();
 
@@ -115,12 +133,46 @@ async function prepareGenome(baseUrl) {
   );
 }
 
-// Resolve a VCF chromosome name to a store sequence: exact match, else the
-// chr-prefix toggle (chr20 <-> 20). Returns the seqMeta or null.
+// Resolve a chromosome name (from a VCF CHROM or an HGVS accession) to a store
+// sequence: exact name, then the chr-prefix toggle (chr20 <-> 20), then the
+// store's alias namespaces (e.g. chr20 -> NC_000020.11's digest). Returns the
+// seqMeta or null.
 function resolveChrom(name) {
   if (genome.byName.has(name)) return genome.byName.get(name);
   const alt = name.startsWith("chr") ? name.slice(3) : `chr${name}`;
-  return genome.byName.get(alt) || null;
+  if (genome.byName.has(alt)) return genome.byName.get(alt);
+  const digest = genome.aliasToDigest.get(name) || genome.aliasToDigest.get(alt);
+  if (digest && genome.byDigest.has(digest)) return genome.byDigest.get(digest);
+  return null;
+}
+
+// Fetch the store's sequence-alias namespaces and build alias -> digest. Each
+// namespace is a TSV at {base}/aliases/sequences/<ns>.tsv with `alias\tdigest`
+// lines ('#' comments skipped). Missing namespace files are ignored.
+async function loadAliases(base, namespaces) {
+  const map = new Map();
+  let nsLoaded = 0;
+  for (const ns of namespaces) {
+    let txt;
+    try {
+      txt = await (await fetchOk(`${base}/aliases/sequences/${ns}.tsv`)).text();
+    } catch {
+      continue; // namespace file not served
+    }
+    for (const line of txt.split("\n")) {
+      if (!line || line.charCodeAt(0) === 35 /* '#' */) continue;
+      const tab = line.indexOf("\t");
+      if (tab < 0) continue;
+      const alias = line.slice(0, tab).trim();
+      const digest = line.slice(tab + 1).trim();
+      if (alias && digest && !map.has(alias)) map.set(alias, digest);
+    }
+    nsLoaded++;
+  }
+  if (map.size) {
+    workerLog(`Loaded ${map.size} sequence alias(es) from ${nsLoaded} namespace(s).`);
+  }
+  return map;
 }
 
 // Ensure the sequence for `seqMeta` is resident in the wasm store, downloading
