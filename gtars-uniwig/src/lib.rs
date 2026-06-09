@@ -1,3 +1,4 @@
+pub mod bamqc;
 pub mod counting;
 pub mod reading;
 pub mod utils;
