@@ -37,7 +37,8 @@ pub fn is_real_alt(alt: &str) -> bool {
 }
 
 /// One parsed VCF data record. Borrows slices out of the caller's line buffer.
-/// `pos` is already 0-based interbase (1-based POS minus one, saturating).
+/// `pos` is already 0-based interbase (1-based POS minus one; POS `0` is
+/// rejected at parse time, never saturated).
 /// `alts` is the raw ALT field; callers split it on `,` and filter with
 /// [`is_real_alt`] (or use [`ParsedRecord::real_alts`]).
 pub struct ParsedRecord<'a> {
