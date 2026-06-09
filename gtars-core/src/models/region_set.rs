@@ -1042,24 +1042,47 @@ impl RegionSet {
     }
 
     /// Break all regions into non-overlapping disjoint pieces.
+    ///
+    /// Internal boundaries (starts and ends of overlapping input regions) split
+    /// the covered intervals into non-overlapping pieces. Only pieces that are
+    /// covered by at least one input region are emitted; gaps between disjoint
+    /// regions are never filled. This matches the semantics of R's
+    /// GenomicRanges `disjoin`.
     pub fn disjoin(&self) -> RegionSet {
-        let mut by_chr: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut by_chr: HashMap<String, Vec<(u32, u32)>> = HashMap::new();
         for r in &self.regions {
-            by_chr.entry(r.chr.clone()).or_default().push(r.start);
-            by_chr.entry(r.chr.clone()).or_default().push(r.end);
+            by_chr.entry(r.chr.clone()).or_default().push((r.start, r.end));
         }
 
         let mut result: Vec<Region> = Vec::new();
-        for (chr, mut boundaries) in by_chr {
+        for (chr, mut intervals) in by_chr {
+            // Collect and sort/dedup all interval boundaries on this chromosome.
+            let mut boundaries: Vec<u32> = Vec::with_capacity(intervals.len() * 2);
+            for &(start, end) in &intervals {
+                boundaries.push(start);
+                boundaries.push(end);
+            }
             boundaries.sort();
             boundaries.dedup();
+
+            // Sort intervals by start so we can scan for coverage efficiently.
+            intervals.sort_by_key(|&(start, _)| start);
+
             for window in boundaries.windows(2) {
-                result.push(Region {
-                    chr: chr.clone(),
-                    start: window[0],
-                    end: window[1],
-                    rest: None,
-                });
+                let (seg_start, seg_end) = (window[0], window[1]);
+                // Keep this candidate piece only if it is covered by at least
+                // one input interval (i.e. some interval fully contains it).
+                let covered = intervals
+                    .iter()
+                    .any(|&(start, end)| start <= seg_start && seg_end <= end);
+                if covered {
+                    result.push(Region {
+                        chr: chr.clone(),
+                        start: seg_start,
+                        end: seg_end,
+                        rest: None,
+                    });
+                }
             }
         }
         result.sort_by(|a, b| (&a.chr, a.start).cmp(&(&b.chr, b.start)));
