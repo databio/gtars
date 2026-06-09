@@ -259,6 +259,10 @@ pub struct ReadonlyRefgetStore {
     pub(crate) available_sequence_alias_namespaces: Vec<String>,
     /// Available collection alias namespaces (from manifest, for remote discovery).
     pub(crate) available_collection_alias_namespaces: Vec<String>,
+    /// Bounded LRU cache of open `.seq` file handles for the partial-read path,
+    /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
+    /// the same chromosome file on every per-region `get_substring` call.
+    seq_fd_cache: Mutex<FdCache>,
     /// Whether the sequence index (sequences.rgsi) has been loaded.
     /// For remote stores, this starts as `false` and is lazily loaded on first
     /// sequence access, avoiding the costly download when only browsing collections.
@@ -266,10 +270,6 @@ pub struct ReadonlyRefgetStore {
     /// The relative path to the sequence index file (from rgstore.json),
     /// stored for deferred loading in remote stores.
     pub(crate) sequence_index_path: Option<String>,
-    /// Bounded LRU cache of open `.seq` file handles for the partial-read path,
-    /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
-    /// the same chromosome file on every per-region `get_substring` call.
-    seq_fd_cache: Mutex<FdCache>,
 }
 
 impl ReadonlyRefgetStore {
@@ -293,9 +293,9 @@ impl ReadonlyRefgetStore {
             fhr_metadata: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
+            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
             sequence_index_loaded: true,
             sequence_index_path: None,
-            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
         }
     }
 

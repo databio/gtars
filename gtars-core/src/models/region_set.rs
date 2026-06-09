@@ -648,6 +648,745 @@ impl RegionSet {
     }
 }
 
+// ── SortedRegionSet ─────────────────────────────────────────────────────
+//
+// A newtype wrapper that guarantees the inner RegionSet is sorted by (chr, start).
+
+/// A RegionSet whose regions are sorted by (chr, start).
+///
+/// Created via `SortedRegionSet::new(rs)`, which sorts in place.
+pub struct SortedRegionSet(pub RegionSet);
+
+impl SortedRegionSet {
+    /// Consume a RegionSet and sort it in place.
+    pub fn new(mut rs: RegionSet) -> Self {
+        rs.sort();
+        SortedRegionSet(rs)
+    }
+}
+
+// ── Structural interval operations (inherent methods) ───────────────────
+
+impl RegionSet {
+    /// Merge overlapping and adjacent intervals per chromosome.
+    ///
+    /// Sorts by (chr, start), then sweeps to merge intervals where
+    /// `next.start <= current.end`. Returns a minimal set of non-overlapping regions.
+    pub fn reduce(&self) -> RegionSet {
+        if self.regions.is_empty() {
+            return RegionSet::from(Vec::<Region>::new());
+        }
+
+        let sorted = SortedRegionSet::new(RegionSet::from(self.regions.clone()));
+        let regions = &sorted.0.regions;
+
+        let mut merged: Vec<Region> = Vec::new();
+        let mut current = regions[0].clone();
+
+        for r in &regions[1..] {
+            if r.chr == current.chr && r.start <= current.end {
+                current.end = current.end.max(r.end);
+            } else {
+                merged.push(Region {
+                    chr: current.chr.clone(),
+                    start: current.start,
+                    end: current.end,
+                    rest: None,
+                });
+                current = r.clone();
+            }
+        }
+        merged.push(Region {
+            chr: current.chr,
+            start: current.start,
+            end: current.end,
+            rest: None,
+        });
+
+        RegionSet::from(merged)
+    }
+
+    /// Combine two region sets without merging overlapping intervals.
+    pub fn concat(&self, other: &RegionSet) -> RegionSet {
+        let mut regions = self.regions.clone();
+        regions.extend(other.regions.iter().cloned());
+        RegionSet::from(regions)
+    }
+
+    /// Combine two region sets without merging overlapping intervals,
+    /// consuming both sets.
+    ///
+    /// Like [`RegionSet::concat`], but takes ownership of `self` and `other`
+    /// so the backing `Vec<Region>`s are moved instead of cloned. Prefer this
+    /// when neither input is needed afterward. As with `concat`, the resulting
+    /// set has no `header` or `path` (it is a pure-regions set).
+    pub fn concat_into(mut self, other: RegionSet) -> RegionSet {
+        self.regions.extend(other.regions);
+        RegionSet::from(self.regions)
+    }
+
+    /// Merge two region sets into a minimal non-overlapping set.
+    ///
+    /// Equivalent to `self.concat(other).reduce()`.
+    pub fn union(&self, other: &RegionSet) -> RegionSet {
+        self.concat(other).reduce()
+    }
+
+    /// Merge two region sets into a minimal non-overlapping set, consuming both.
+    ///
+    /// Equivalent to `self.concat_into(other).reduce()`. Saves the concat-stage
+    /// clones that [`RegionSet::union`] incurs; `reduce` still allocates internally.
+    pub fn union_into(self, other: RegionSet) -> RegionSet {
+        self.concat_into(other).reduce()
+    }
+
+    /// Clamp regions to chromosome boundaries.
+    pub fn trim(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .filter_map(|r| {
+                let chrom_size = chrom_sizes.get(&r.chr)?;
+                let start = r.start.min(*chrom_size);
+                let end = r.end.min(*chrom_size);
+                if start > end {
+                    None
+                } else {
+                    Some(Region {
+                        chr: r.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    })
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Return the gaps between regions per chromosome, bounded by chromosome sizes.
+    ///
+    /// Reduces the input first, then emits intervals that tile the peak-free
+    /// regions of each chromosome listed in `chrom_sizes`:
+    ///
+    /// - a **leading gap** from position 0 to the first region's start
+    ///   (omitted if the first region starts at 0),
+    /// - an **inter-region gap** between each consecutive pair of reduced
+    ///   regions,
+    /// - a **trailing gap** from the last region's end to the chromosome
+    ///   size (omitted if the last region already reaches the chromosome
+    ///   end, or extends past it due to assembly mismatch),
+    /// - a **full-chromosome gap** `0..chrom_size` for any chromosome in
+    ///   `chrom_sizes` that has no regions at all.
+    ///
+    /// Regions on chromosomes not present in `chrom_sizes` are skipped.
+    /// Regions that extend past the stated chromosome size are clipped to
+    /// `chrom_size` when computing the trailing gap, matching the
+    /// clipping behavior of `trim()`.
+    pub fn gaps(&self, chrom_sizes: &HashMap<String, u32>) -> RegionSet {
+        let reduced = self.reduce();
+
+        // Group reduced regions by chromosome so we can emit per-chrom gaps
+        // and also detect chromosomes with zero regions (full-chrom gaps).
+        let mut by_chr: HashMap<&str, Vec<&Region>> = HashMap::new();
+        for r in &reduced.regions {
+            // Skip chromosomes we don't have a size for — can't bound trailing gaps,
+            // and including leading gaps for unknown-size chromosomes is misleading.
+            if chrom_sizes.contains_key(&r.chr) {
+                by_chr.entry(r.chr.as_str()).or_default().push(r);
+            }
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        // Emit gaps for every chromosome named in chrom_sizes, not just those
+        // present in the input — this way a chromosome with zero regions
+        // contributes a full-chromosome gap, matching bedtools complement.
+        for (chr_name, &chrom_size) in chrom_sizes.iter() {
+            if chrom_size == 0 {
+                continue;
+            }
+
+            match by_chr.get(chr_name.as_str()) {
+                None => {
+                    // No regions on this chromosome — whole chromosome is a gap.
+                    result.push(Region {
+                        chr: chr_name.clone(),
+                        start: 0,
+                        end: chrom_size,
+                        rest: None,
+                    });
+                }
+                Some(regions) => {
+                    // Leading gap from 0 to the first region's start.
+                    if regions[0].start > 0 {
+                        // Leading gap is clipped to chrom_size as a safety net:
+                        // if the first region starts past chrom_size (assembly
+                        // mismatch) we still produce a valid [0, chrom_size) gap.
+                        let lead_end = regions[0].start.min(chrom_size);
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: 0,
+                            end: lead_end,
+                            rest: None,
+                        });
+                    }
+
+                    // Inter-region gaps.
+                    for pair in regions.windows(2) {
+                        let gap_start = pair[0].end;
+                        let gap_end = pair[1].start;
+                        if gap_start < gap_end {
+                            // Clip both bounds to chrom_size so the whole emitted
+                            // gap lies within the chromosome.
+                            let cs = chrom_size;
+                            let clipped_start = gap_start.min(cs);
+                            let clipped_end = gap_end.min(cs);
+                            if clipped_start < clipped_end {
+                                result.push(Region {
+                                    chr: chr_name.clone(),
+                                    start: clipped_start,
+                                    end: clipped_end,
+                                    rest: None,
+                                });
+                            }
+                        }
+                    }
+
+                    // Trailing gap from last region's end to chrom_size.
+                    let last_end = regions[regions.len() - 1].end;
+                    if last_end < chrom_size {
+                        result.push(Region {
+                            chr: chr_name.clone(),
+                            start: last_end,
+                            end: chrom_size,
+                            rest: None,
+                        });
+                    }
+                }
+            }
+        }
+
+        // Karyotypic chromosome ordering so output is stable across runs.
+        result.sort_by(|a, b| {
+            crate::utils::chrom_karyotype_key(&a.chr)
+                .cmp(&crate::utils::chrom_karyotype_key(&b.chr))
+                .then(a.start.cmp(&b.start))
+        });
+
+        RegionSet::from(result)
+    }
+
+    /// Shift all regions by a fixed offset.
+    pub fn shift(&self, offset: i64) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                let start = (r.start as i64 + offset).max(0) as u32;
+                let end = (r.end as i64 + offset).max(start as i64) as u32;
+                Region {
+                    chr: r.chr.clone(),
+                    start,
+                    end,
+                    rest: None,
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Generate flanking regions.
+    pub fn flank(&self, width: u32, use_start: bool, both: bool) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                if both {
+                    let anchor = if use_start { r.start } else { r.end };
+                    Region {
+                        chr: r.chr.clone(),
+                        start: anchor.saturating_sub(width),
+                        end: anchor.saturating_add(width),
+                        rest: None,
+                    }
+                } else if use_start {
+                    Region {
+                        chr: r.chr.clone(),
+                        start: r.start.saturating_sub(width),
+                        end: r.start,
+                        rest: None,
+                    }
+                } else {
+                    Region {
+                        chr: r.chr.clone(),
+                        start: r.end,
+                        end: r.end.saturating_add(width),
+                        rest: None,
+                    }
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Resize regions to a fixed width, anchored at start, end, or center.
+    pub fn resize(&self, width: u32, fix: &str) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| match fix {
+                "end" => Region {
+                    chr: r.chr.clone(),
+                    start: r.end.saturating_sub(width),
+                    end: r.end,
+                    rest: None,
+                },
+                "center" => {
+                    let mid = r.start + (r.end - r.start) / 2;
+                    let half = width / 2;
+                    Region {
+                        chr: r.chr.clone(),
+                        start: mid.saturating_sub(half),
+                        end: mid.saturating_sub(half).saturating_add(width),
+                        rest: None,
+                    }
+                }
+                _ => Region {
+                    chr: r.chr.clone(),
+                    start: r.start,
+                    end: r.start.saturating_add(width),
+                    rest: None,
+                },
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Narrow each region by specifying a relative sub-range within it.
+    pub fn narrow(&self, start: Option<u32>, end: Option<u32>, width: Option<u32>) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| {
+                let region_width = r.end - r.start;
+                let (rel_start, rel_end) = match (start, end, width) {
+                    (Some(s), Some(e), None) => (s.saturating_sub(1), e),
+                    (Some(s), None, Some(w)) => (s.saturating_sub(1), s.saturating_sub(1) + w),
+                    (None, Some(e), Some(w)) => (e.saturating_sub(w), e),
+                    _ => (0, region_width),
+                };
+                let new_start = r.start + rel_start.min(region_width);
+                let new_end = r.start + rel_end.min(region_width);
+                Region {
+                    chr: r.chr.clone(),
+                    start: new_start.min(new_end),
+                    end: new_end.max(new_start),
+                    rest: None,
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Generate promoter regions relative to each region's start position.
+    pub fn promoters(&self, upstream: u32, downstream: u32) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .map(|r| Region {
+                chr: r.chr.clone(),
+                start: r.start.saturating_sub(upstream),
+                end: r.start.saturating_add(downstream),
+                rest: None,
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Pairwise intersection of two region sets by index position.
+    pub fn pintersect(&self, other: &RegionSet) -> RegionSet {
+        let regions: Vec<Region> = self
+            .regions
+            .iter()
+            .zip(other.regions.iter())
+            .map(|(a, b)| {
+                if a.chr != b.chr {
+                    return Region {
+                        chr: a.chr.clone(),
+                        start: a.start,
+                        end: a.start,
+                        rest: None,
+                    };
+                }
+                let start = a.start.max(b.start);
+                let end = a.end.min(b.end);
+                if start >= end {
+                    Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end: start,
+                        rest: None,
+                    }
+                } else {
+                    Region {
+                        chr: a.chr.clone(),
+                        start,
+                        end,
+                        rest: None,
+                    }
+                }
+            })
+            .collect();
+        RegionSet::from(regions)
+    }
+
+    /// Break all regions into non-overlapping disjoint pieces.
+    pub fn disjoin(&self) -> RegionSet {
+        let mut by_chr: HashMap<String, Vec<u32>> = HashMap::new();
+        for r in &self.regions {
+            by_chr.entry(r.chr.clone()).or_default().push(r.start);
+            by_chr.entry(r.chr.clone()).or_default().push(r.end);
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+        for (chr, mut boundaries) in by_chr {
+            boundaries.sort();
+            boundaries.dedup();
+            for window in boundaries.windows(2) {
+                result.push(Region {
+                    chr: chr.clone(),
+                    start: window[0],
+                    end: window[1],
+                    rest: None,
+                });
+            }
+        }
+        result.sort_by(|a, b| (&a.chr, a.start).cmp(&(&b.chr, b.start)));
+        RegionSet::from(result)
+    }
+
+    /// Cluster nearby regions.
+    pub fn cluster(&self, max_gap: u32) -> Vec<u32> {
+        if self.regions.is_empty() {
+            return vec![];
+        }
+
+        let n = self.regions.len();
+        let mut result = vec![0u32; n];
+
+        // Create sorted indices to preserve original order mapping
+        let mut sorted_indices: Vec<usize> = (0..n).collect();
+        sorted_indices.sort_by(|&i, &j| {
+            self.regions[i]
+                .chr
+                .cmp(&self.regions[j].chr)
+                .then(self.regions[i].start.cmp(&self.regions[j].start))
+                .then(self.regions[i].end.cmp(&self.regions[j].end))
+        });
+
+        let mut cluster_id: u32 = 0;
+        let mut cluster_end = self.regions[sorted_indices[0]].end;
+        let mut current_chr = &self.regions[sorted_indices[0]].chr;
+        result[sorted_indices[0]] = cluster_id;
+
+        for &idx in &sorted_indices[1..] {
+            let r = &self.regions[idx];
+            if r.chr != *current_chr || r.start > cluster_end.saturating_add(max_gap) {
+                cluster_id += 1;
+                cluster_end = r.end;
+                current_chr = &r.chr;
+            } else {
+                cluster_end = cluster_end.max(r.end);
+            }
+            result[idx] = cluster_id;
+        }
+
+        result
+    }
+
+    /// Find the nearest region in `other` for each region in `self`.
+    pub fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+        if other.regions.is_empty() {
+            return Vec::new();
+        }
+
+        // Group other by chromosome, keeping original indices, sorted by start
+        let mut other_by_chr: HashMap<String, Vec<(usize, &Region)>> = HashMap::new();
+        for (idx, r) in other.regions.iter().enumerate() {
+            other_by_chr
+                .entry(r.chr.clone())
+                .or_default()
+                .push((idx, r));
+        }
+        for v in other_by_chr.values_mut() {
+            v.sort_by_key(|(_, r)| r.start);
+        }
+
+        // Precompute max region width per chromosome for left-side early termination
+        let mut max_width_by_chr: HashMap<String, u32> = HashMap::new();
+        for (chr, candidates) in &other_by_chr {
+            let max_w = candidates.iter().map(|(_, r)| r.end - r.start).max().unwrap_or(0);
+            max_width_by_chr.insert(chr.clone(), max_w);
+        }
+
+        let mut result: Vec<(usize, usize, i64)> = Vec::new();
+
+        for (self_idx, a) in self.regions.iter().enumerate() {
+            let Some(candidates) = other_by_chr.get(&a.chr) else {
+                continue; // skip regions on chromosomes absent in other
+            };
+
+            // Binary search for insertion point based on a.start
+            let ins = candidates
+                .binary_search_by_key(&a.start, |(_, r)| r.start)
+                .unwrap_or_else(|x| x);
+
+            let gap_dist = |a_reg: &Region, b_reg: &Region| -> i64 {
+                if a_reg.start < b_reg.end && b_reg.start < a_reg.end {
+                    0i64
+                } else if b_reg.end <= a_reg.start {
+                    (a_reg.start as i64) - (b_reg.end as i64)
+                } else {
+                    (b_reg.start as i64) - (a_reg.end as i64)
+                }
+            };
+
+            let max_width = *max_width_by_chr.get(&a.chr).unwrap_or(&0) as i64;
+
+            let mut best_other_idx = 0usize;
+            let mut best_dist = i64::MAX;
+
+            let mut left_done = ins == 0;
+            let mut right_done = ins >= candidates.len();
+            let mut li = if ins > 0 { ins - 1 } else { 0 };
+            let mut ri = ins;
+
+            while !left_done || !right_done {
+                if !right_done {
+                    let (other_idx, b) = candidates[ri];
+                    let dist = gap_dist(a, b);
+                    if dist.abs() < best_dist.abs() {
+                        best_dist = dist;
+                        best_other_idx = other_idx;
+                    }
+                    if best_dist == 0 { break; }
+                    ri += 1;
+                    if ri >= candidates.len() || (b.start as i64 - a.end as i64 > best_dist.abs()) {
+                        right_done = true;
+                    }
+                }
+
+                if !left_done {
+                    let (other_idx, b) = candidates[li];
+                    let dist = gap_dist(a, b);
+                    if dist.abs() < best_dist.abs() {
+                        best_dist = dist;
+                        best_other_idx = other_idx;
+                    }
+                    if best_dist == 0 { break; }
+                    if li == 0 || (a.start as i64 - b.start as i64 > best_dist.abs() + max_width) {
+                        left_done = true;
+                    } else {
+                        li -= 1;
+                    }
+                }
+            }
+
+            result.push((self_idx, best_other_idx, best_dist));
+        }
+
+        result
+    }
+}
+
+// ── Sweep-line helpers ──────────────────────────────────────────────────
+
+/// Per-chromosome set difference using a sweep-line algorithm.
+pub fn sweep_setdiff_chr(chr: &str, a: &[Region], b: &[Region]) -> Vec<Region> {
+    let mut result = Vec::new();
+    let mut b_idx = 0;
+
+    for a_region in a {
+        while b_idx < b.len() && b[b_idx].end <= a_region.start {
+            b_idx += 1;
+        }
+
+        let mut pos = a_region.start;
+        let mut j = b_idx;
+
+        while j < b.len() && b[j].start < a_region.end && pos < a_region.end {
+            if b[j].start > pos {
+                result.push(Region {
+                    chr: chr.to_string(),
+                    start: pos,
+                    end: b[j].start,
+                    rest: None,
+                });
+            }
+            pos = pos.max(b[j].end);
+            j += 1;
+        }
+
+        if pos < a_region.end {
+            result.push(Region {
+                chr: chr.to_string(),
+                start: pos,
+                end: a_region.end,
+                rest: None,
+            });
+        }
+    }
+
+    result
+}
+
+/// Per-chromosome intersection using a sweep-line algorithm.
+pub fn sweep_intersect_chr(chr: &str, a: &[Region], b: &[Region]) -> Vec<Region> {
+    let mut result = Vec::new();
+    let mut b_idx = 0;
+
+    for a_region in a {
+        while b_idx < b.len() && b[b_idx].end <= a_region.start {
+            b_idx += 1;
+        }
+        let mut j = b_idx;
+        while j < b.len() && b[j].start < a_region.end {
+            let start = a_region.start.max(b[j].start);
+            let end = a_region.end.min(b[j].end);
+            if start < end {
+                result.push(Region {
+                    chr: chr.to_string(),
+                    start,
+                    end,
+                    rest: None,
+                });
+            }
+            j += 1;
+        }
+    }
+
+    result
+}
+
+// ── IntervalSetOps trait ────────────────────────────────────────────────
+
+/// Two-set interval operations on genomic region sets.
+///
+/// Provides set algebra (setdiff, intersect) and similarity metrics
+/// (jaccard, coverage, overlap_coefficient). Implementations may use
+/// sweep-line or index-based algorithms.
+pub trait IntervalSetOps {
+    /// Set difference: remove portions of `self` that overlap with `other`.
+    fn setdiff(&self, other: &RegionSet) -> RegionSet;
+
+    /// Range-level intersection: positions covered by *both* sets.
+    fn intersect(&self, other: &RegionSet) -> RegionSet;
+
+    /// Nucleotide-level Jaccard similarity: `|intersection| / |union|`.
+    fn jaccard(&self, other: &RegionSet) -> f64;
+
+    /// Fraction of self's base pairs covered by other.
+    fn coverage(&self, other: &RegionSet) -> f64;
+
+    /// Overlap coefficient: `|intersection| / min(|self|, |other|)`.
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64;
+}
+
+impl IntervalSetOps for RegionSet {
+    fn setdiff(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r.clone());
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_chr_start = 0;
+        while a_chr_start < a.regions.len() {
+            let chr = &a.regions[a_chr_start].chr;
+            let mut a_chr_end = a_chr_start;
+            while a_chr_end < a.regions.len() && a.regions[a_chr_end].chr == *chr {
+                a_chr_end += 1;
+            }
+
+            let empty_vec = vec![];
+            let b_chr = b_by_chr.get(chr.as_str()).unwrap_or(&empty_vec);
+            result.extend(sweep_setdiff_chr(chr, &a.regions[a_chr_start..a_chr_end], b_chr));
+
+            a_chr_start = a_chr_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        let a = self.reduce();
+        let b = other.reduce();
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in &b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r.clone());
+        }
+
+        let mut result: Vec<Region> = Vec::new();
+
+        let mut a_i = 0;
+        while a_i < a.regions.len() {
+            let chr = &a.regions[a_i].chr;
+            let mut a_end = a_i;
+            while a_end < a.regions.len() && a.regions[a_end].chr == *chr {
+                a_end += 1;
+            }
+
+            if let Some(b_chr) = b_by_chr.get(chr.as_str()) {
+                result.extend(sweep_intersect_chr(chr, &a.regions[a_i..a_end], b_chr));
+            }
+
+            a_i = a_end;
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let union_bp = self.union(other).nucleotides_length();
+        if union_bp == 0 {
+            return 0.0;
+        }
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / union_bp as f64
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        let self_reduced = self.reduce();
+        let self_bp = self_reduced.nucleotides_length();
+        if self_bp == 0 {
+            return 0.0;
+        }
+        let diff = self_reduced.setdiff(other);
+        let diff_bp = diff.nucleotides_length();
+        1.0 - (diff_bp as f64 / self_bp as f64)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        let a_bp = self.reduce().nucleotides_length();
+        let b_bp = other.reduce().nucleotides_length();
+        let min_bp = a_bp.min(b_bp);
+        if min_bp == 0 {
+            return 0.0;
+        }
+        let union_bp = self.union(other).nucleotides_length();
+        let intersection_bp = a_bp + b_bp - union_bp;
+        intersection_bp as f64 / min_bp as f64
+    }
+}
+
 impl Display for RegionSet {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "RegionSet with {} regions.", self.len())
@@ -713,6 +1452,33 @@ mod tests {
         let region_set = RegionSet::try_from(file_path.to_str().unwrap()).unwrap();
 
         assert_eq!("f0b2cf73383b53bd97ff525a0380f200", region_set.identifier());
+    }
+
+    #[rstest]
+    fn test_closest_index_on_unsorted_other() {
+        // Regression: `other` is NOT start-sorted. The returned other_idx must
+        // index into the caller's `other`, not an internal sorted clone.
+        let mk = |chr: &str, start: u32, end: u32| Region {
+            chr: chr.to_owned(),
+            start,
+            end,
+            rest: None,
+        };
+
+        let query = RegionSet::from(vec![mk("chr1", 100, 110)]);
+        let other = RegionSet::from(vec![
+            mk("chr1", 500, 510),
+            mk("chr1", 120, 130),
+            mk("chr1", 900, 910),
+        ]);
+
+        let result = query.closest(&other);
+
+        assert_eq!(result, vec![(0, 1, 10)]);
+        let (_, other_idx, dist) = result[0];
+        assert_eq!(other_idx, 1);
+        assert_eq!(other.regions[other_idx], mk("chr1", 120, 130));
+        assert_eq!(dist, 10);
     }
 
     #[rstest]
@@ -859,5 +1625,270 @@ mod tests {
                 .unwrap(),
             6u32
         );
+    }
+
+    fn gaps_make_regionset(regions: Vec<(&str, u32, u32)>) -> RegionSet {
+        RegionSet::from(
+            regions
+                .into_iter()
+                .map(|(chr, start, end)| Region {
+                    chr: chr.to_string(),
+                    start,
+                    end,
+                    rest: None,
+                })
+                .collect::<Vec<Region>>(),
+        )
+    }
+
+    fn gaps_chrom_sizes(sizes: &[(&str, u32)]) -> HashMap<String, u32> {
+        sizes
+            .iter()
+            .map(|(chr, size)| (chr.to_string(), *size))
+            .collect()
+    }
+
+    #[rstest]
+    fn test_gaps_basic() {
+        // Three peaks on chr1 with gaps between them; leading + trailing
+        // gaps also present.
+        let rs = gaps_make_regionset(vec![("chr1", 10, 20), ("chr1", 30, 40), ("chr1", 50, 60)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(&str, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.as_str(), r.start, r.end))
+            .collect();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1", 0, 10),   // leading
+                ("chr1", 20, 30),  // between peak 1 and 2
+                ("chr1", 40, 50),  // between peak 2 and 3
+                ("chr1", 60, 100), // trailing
+            ]
+        );
+    }
+
+    #[rstest]
+    fn test_gaps_peak_at_origin_no_leading() {
+        // First peak starts at 0 — no leading gap.
+        let rs = gaps_make_regionset(vec![("chr1", 0, 10), ("chr1", 20, 30)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result.regions.iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(gaps, vec![(10, 20), (30, 100)]);
+    }
+
+    #[rstest]
+    fn test_gaps_peak_at_chrom_end_no_trailing() {
+        // Last peak ends at chrom_size — no trailing gap.
+        let rs = gaps_make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 100)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result.regions.iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[rstest]
+    fn test_gaps_peak_past_chrom_end_clipped() {
+        // Last peak extends past chrom_size — should be clipped, no trailing.
+        let rs = gaps_make_regionset(vec![("chr1", 10, 20), ("chr1", 80, 150)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result.regions.iter().map(|r| (r.start, r.end)).collect();
+        assert_eq!(gaps, vec![(0, 10), (20, 80)]);
+    }
+
+    #[rstest]
+    fn test_gaps_empty_regionset_populated_chrom_sizes() {
+        // No regions, but chrom_sizes has entries — emit whole-chrom gaps.
+        let rs = RegionSet::from(Vec::<Region>::new());
+        let cs = gaps_chrom_sizes(&[("chr1", 100), ("chr2", 50)]);
+        let result = rs.gaps(&cs);
+        let mut gaps: Vec<(String, u32, u32)> = result
+            .regions
+            .iter()
+            .map(|r| (r.chr.clone(), r.start, r.end))
+            .collect();
+        gaps.sort();
+        assert_eq!(
+            gaps,
+            vec![
+                ("chr1".to_string(), 0, 100),
+                ("chr2".to_string(), 0, 50),
+            ]
+        );
+    }
+
+    #[rstest]
+    fn test_gaps_chromosome_not_in_chrom_sizes_skipped() {
+        // Peak on chr2 with no chr2 entry in chrom_sizes — should be ignored.
+        let rs = gaps_make_regionset(vec![("chr1", 10, 20), ("chr2", 5, 15)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        // Only chr1 gaps emitted.
+        for r in &result.regions {
+            assert_eq!(r.chr, "chr1");
+        }
+    }
+
+    #[rstest]
+    fn test_gaps_full_chrom_gap_for_unrepresented_chrom() {
+        // chrom_sizes has chr2 but input has no chr2 peaks — emit whole chr2.
+        let rs = gaps_make_regionset(vec![("chr1", 10, 20)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100), ("chr2", 200)]);
+        let result = rs.gaps(&cs);
+        let chr2_gaps: Vec<(u32, u32)> = result
+            .regions
+            .iter()
+            .filter(|r| r.chr == "chr2")
+            .map(|r| (r.start, r.end))
+            .collect();
+        assert_eq!(chr2_gaps, vec![(0, 200)]);
+    }
+
+    #[rstest]
+    fn test_gaps_overlapping_peaks_reduced() {
+        // Overlapping peaks get merged by reduce() before gap computation.
+        let rs = gaps_make_regionset(vec![
+            ("chr1", 10, 30),
+            ("chr1", 25, 40), // overlaps with previous
+            ("chr1", 50, 60),
+        ]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        let gaps: Vec<(u32, u32)> = result.regions.iter().map(|r| (r.start, r.end)).collect();
+        // After reduce: [10,40], [50,60] → gaps: [0,10], [40,50], [60,100]
+        assert_eq!(gaps, vec![(0, 10), (40, 50), (60, 100)]);
+    }
+
+    #[rstest]
+    fn test_gaps_karyotypic_ordering() {
+        // Output should be karyotypically ordered regardless of chrom_sizes insertion order.
+        let rs = gaps_make_regionset(vec![
+            ("chr2", 10, 20),
+            ("chr1", 10, 20),
+            ("chr10", 10, 20),
+        ]);
+        let cs = gaps_chrom_sizes(&[("chr10", 100), ("chr1", 100), ("chr2", 100)]);
+        let result = rs.gaps(&cs);
+        // Collect chr names in order of first appearance.
+        let order: Vec<&str> = result
+            .regions
+            .iter()
+            .map(|r| r.chr.as_str())
+            .scan("", |prev, chr| {
+                if chr != *prev {
+                    *prev = chr;
+                    Some(chr)
+                } else {
+                    Some("") // repeat, skip
+                }
+            })
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(order, vec!["chr1", "chr2", "chr10"]);
+    }
+
+    #[rstest]
+    fn test_gaps_fully_covered_chrom_no_gaps() {
+        // A single region spanning the whole chromosome yields zero gaps.
+        let rs = gaps_make_regionset(vec![("chr1", 0, 100)]);
+        let cs = gaps_chrom_sizes(&[("chr1", 100)]);
+        let result = rs.gaps(&cs);
+        assert!(result.regions.is_empty());
+    }
+
+    fn concat_make_region(chr: &str, start: u32, end: u32) -> Region {
+        Region {
+            chr: chr.to_owned(),
+            start,
+            end,
+            rest: None,
+        }
+    }
+
+    #[rstest]
+    fn test_concat_into_matches_concat() {
+        // Borrowing `concat` and consuming `concat_into` must produce identical
+        // results, including order: self's regions first, then other's.
+        let a_regions = vec![
+            concat_make_region("chr1", 100, 200),
+            concat_make_region("chr2", 50, 60),
+        ];
+        let b_regions = vec![
+            concat_make_region("chr1", 150, 250),
+            concat_make_region("chr3", 10, 20),
+        ];
+
+        let a = RegionSet::from(a_regions.clone());
+        let b = RegionSet::from(b_regions.clone());
+        let borrowed = a.concat(&b);
+
+        let a2 = RegionSet::from(a_regions);
+        let b2 = RegionSet::from(b_regions);
+        let consumed = a2.concat_into(b2);
+
+        assert_eq!(borrowed.regions, consumed.regions);
+    }
+
+    #[rstest]
+    fn test_concat_into_consumes_inputs() {
+        // The inputs are moved; referencing them after the call would not
+        // compile. We only assert the combined length here.
+        let rs1 = RegionSet::from(vec![
+            concat_make_region("chr1", 100, 200),
+            concat_make_region("chr1", 300, 400),
+        ]);
+        let rs2 = RegionSet::from(vec![concat_make_region("chr2", 0, 10)]);
+
+        let combined = rs1.concat_into(rs2);
+        assert_eq!(combined.regions.len(), 3);
+    }
+
+    #[rstest]
+    fn test_concat_into_empty() {
+        let non_empty = vec![
+            concat_make_region("chr1", 100, 200),
+            concat_make_region("chr2", 5, 15),
+        ];
+
+        // empty + non-empty
+        let empty = RegionSet::from(Vec::<Region>::new());
+        let ne = RegionSet::from(non_empty.clone());
+        let result = empty.concat_into(ne);
+        assert_eq!(result.regions, non_empty);
+
+        // non-empty + empty
+        let ne2 = RegionSet::from(non_empty.clone());
+        let empty2 = RegionSet::from(Vec::<Region>::new());
+        let result2 = ne2.concat_into(empty2);
+        assert_eq!(result2.regions, non_empty);
+    }
+
+    #[rstest]
+    fn test_union_into_matches_union() {
+        // Use overlapping regions on the same chr to exercise the merge in
+        // `reduce`, plus a separate chr to exercise ordering.
+        let a_regions = vec![
+            concat_make_region("chr1", 100, 200),
+            concat_make_region("chr2", 0, 50),
+        ];
+        let b_regions = vec![
+            concat_make_region("chr1", 150, 250),
+            concat_make_region("chr3", 10, 20),
+        ];
+
+        let a = RegionSet::from(a_regions.clone());
+        let b = RegionSet::from(b_regions.clone());
+        let borrowed = a.union(&b);
+
+        let a2 = RegionSet::from(a_regions);
+        let b2 = RegionSet::from(b_regions);
+        let consumed = a2.union_into(b2);
+
+        assert_eq!(borrowed.regions, consumed.regions);
     }
 }

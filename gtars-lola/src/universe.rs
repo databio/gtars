@@ -1,7 +1,6 @@
 //! Universe validation, user set redefinition, and restricted universe construction.
 
 use gtars_core::models::{Region, RegionSet};
-use gtars_genomicdist::IntervalRanges;
 use gtars_igd::igd::Igd;
 
 /// Diagnostic report from universe appropriateness check.

@@ -745,7 +745,6 @@ fn ln_gamma(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interval_ranges::IntervalRanges;
     use pretty_assertions::assert_eq;
     use rstest::*;
     use std::path::PathBuf;
