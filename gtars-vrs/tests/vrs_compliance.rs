@@ -1,24 +1,207 @@
-//! VRS 2.1 validation tests against official GA4GH test vectors.
+//! VRS compliance tests — GA4GH VRS 2.0 hard-coded vectors + VRS 2.1 YAML.
 //!
-//! Loads YAML validation files from the cloned vrs-spec repo at
-//! `vrs-spec/validation/` and checks our implementation against them.
-//!
-//! Currently tests:
-//!   - sha512t24u hash function
-//!   - SequenceLocation digest/identify (exact coordinates only)
-//!   - Allele digest/identify (LiteralSequenceExpression + ReferenceLengthExpression)
-//!
-//! Types not yet implemented in gtars-vrs are reported as skipped.
-//!
-//! Run with:
-//!   cargo test -p gtars-vrs --test test_vrs_2_1_validation -- --nocapture
-
-use std::fs;
-use std::path::PathBuf;
+//! Merged from the former `test_vrs_compliance` (2.0 hand-coded vectors) and
+//! `test_vrs_2_1_validation` (YAML-driven against the vrs-spec repo) binaries.
+//! Test-fn names are disjoint across the two suites; no renames needed.
 
 use gtars_refget::sha512t24u;
 use gtars_vrs::digest::{allele_digest, allele_identifier, sequence_location_digest};
 use gtars_vrs::models::{Allele, AlleleState, SequenceLocation, SequenceReference};
+
+// ============================================================================
+// VRS 2.0 hard-coded vectors
+// ============================================================================
+//
+// Test vectors from the official GA4GH VRS specification:
+// - https://github.com/ga4gh/vrs/blob/2.0/validation/models.yaml
+// - https://github.com/ga4gh/vrs-python/blob/main/tests/test_vrs.py
+
+// ── sha512t24u primitive (also tested in gtars-refget; sanity check) ─────
+
+#[test]
+fn test_sha512t24u_empty_string() {
+    let digest = gtars_refget::sha512t24u("");
+    assert_eq!(digest, "z4PhNX7vuL3xVChQ1m2AB9Yg5AULVxXc");
+}
+
+#[test]
+fn test_sha512t24u_acgt() {
+    let digest = gtars_refget::sha512t24u("ACGT");
+    assert_eq!(digest, "aKF498dAxcJAqme6QYQ7EZ07-fiw8Kw2");
+}
+
+// ── VRS 2.0 SequenceLocation digests ─────────────────────────────────────
+
+#[test]
+fn test_sequence_location_digest_chr19_rs7412() {
+    // rs7412 on chr19 (NC_000019.10)
+    // From VRS 2.0 validation/models.yaml
+    let loc = SequenceLocation {
+        sequence_reference: SequenceReference {
+            refget_accession: "SQ.IIB53T8CNeJJdUqzn9V_JnRtQadwWCbl".to_string(),
+        },
+        start: 44908821,
+        end: 44908822,
+    };
+    let digest = sequence_location_digest(&loc);
+    assert_eq!(
+        digest, "wIlaGykfwHIpPY2Fcxtbx4TINbbODFVz",
+        "SequenceLocation digest for rs7412 does not match VRS 2.0 spec"
+    );
+}
+
+#[test]
+fn test_sequence_location_digest_chr7() {
+    // chr7 location (NC_000007.14)
+    let loc = SequenceLocation {
+        sequence_reference: SequenceReference {
+            refget_accession: "SQ.F-LrLMe1SRpfUZHkQmvkVKFEGaoDeHul".to_string(),
+        },
+        start: 44908821,
+        end: 44908822,
+    };
+    let digest = sequence_location_digest(&loc);
+    assert_eq!(
+        digest, "4t6JnYWqHwYw9WzBT_lmWBb3tLQNalkT",
+        "SequenceLocation digest for chr7 does not match VRS 2.0 spec"
+    );
+}
+
+#[test]
+fn test_sequence_location_digest_egfr() {
+    // EGFR region on chr7
+    // From vrs-python test_vrs.py
+    let loc = SequenceLocation {
+        sequence_reference: SequenceReference {
+            refget_accession: "SQ.F-LrLMe1SRpfUZHkQmvkVKFEGaoDeHul".to_string(),
+        },
+        start: 55181319,
+        end: 55181320,
+    };
+    let digest = sequence_location_digest(&loc);
+    assert_eq!(
+        digest, "_G2K0qSioM74l_u3OaKR0mgLYdeTL7Xd",
+        "SequenceLocation digest for EGFR region does not match VRS 2.0 spec"
+    );
+}
+
+// ── VRS 2.0 Allele identifiers ───────────────────────────────────────────
+
+#[test]
+fn test_allele_identifier_rs7412_snv() {
+    // rs7412 C>T on chr19 — THE canonical VRS test vector
+    // Expected: ga4gh:VA.0AePZIWZUNsUlQTamyLrjm2HWUw2opLt
+    let allele = Allele {
+        location: SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: "SQ.IIB53T8CNeJJdUqzn9V_JnRtQadwWCbl".to_string(),
+            },
+            start: 44908821,
+            end: 44908822,
+        },
+        state: AlleleState::LiteralSequenceExpression {
+            sequence: "T".to_string(),
+        },
+    };
+    let id = allele_identifier(&allele);
+    assert_eq!(
+        id, "ga4gh:VA.0AePZIWZUNsUlQTamyLrjm2HWUw2opLt",
+        "Allele identifier for rs7412 does not match VRS 2.0 spec"
+    );
+}
+
+#[test]
+fn test_allele_identifier_egfr() {
+    // EGFR SNV on chr7
+    // From vrs-python test_vrs.py
+    let allele = Allele {
+        location: SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: "SQ.F-LrLMe1SRpfUZHkQmvkVKFEGaoDeHul".to_string(),
+            },
+            start: 55181319,
+            end: 55181320,
+        },
+        state: AlleleState::LiteralSequenceExpression {
+            sequence: "T".to_string(),
+        },
+    };
+    let id = allele_identifier(&allele);
+    assert_eq!(
+        id, "ga4gh:VA.Hy2XU_-rp4IMh6I_1NXNecBo8Qx8n0oE",
+        "Allele identifier for EGFR variant does not match VRS 2.0 spec"
+    );
+}
+
+#[test]
+fn test_allele_identifier_clinvar_383650() {
+    // ClinVar 383650
+    // From vrs-python test_vrs.py
+    let allele = Allele {
+        location: SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: "SQ.KEO-4XBcm1cxeo_DIQ8_ofqGUkp4iZhI".to_string(),
+            },
+            start: 128325834,
+            end: 128325835,
+        },
+        state: AlleleState::LiteralSequenceExpression {
+            sequence: "T".to_string(),
+        },
+    };
+    let id = allele_identifier(&allele);
+    assert_eq!(
+        id, "ga4gh:VA.SZIS2ua7AL-0YgUTAqyBsFPYK3vE8h_d",
+        "Allele identifier for ClinVar 383650 does not match VRS 2.0 spec"
+    );
+}
+
+#[test]
+fn test_allele_identifier_reference_length_expression() {
+    // ReferenceLengthExpression allele on chr1
+    // From VRS 2.0 validation/models.yaml
+    let allele = Allele {
+        location: SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: "SQ.Ya6Rs7DHhDeg7YaOSg1EoNi3U_nQ9SvO".to_string(),
+            },
+            start: 40819438,
+            end: 40819446,
+        },
+        state: AlleleState::ReferenceLengthExpression {
+            length: 11,
+            repeat_subunit_length: 3,
+            sequence: None,
+        },
+    };
+    let id = allele_identifier(&allele);
+    assert_eq!(
+        id, "ga4gh:VA.Oop4kjdTtKcg1kiZjIJAAR3bp7qi4aNT",
+        "Allele identifier for RLE allele does not match VRS 2.0 spec"
+    );
+}
+
+// ============================================================================
+// VRS 2.1 YAML validation
+// ============================================================================
+//
+// Loads YAML validation files from the cloned vrs-spec repo at
+// `vrs-spec/validation/` and checks our implementation against them.
+//
+// Currently tests:
+//   - sha512t24u hash function
+//   - SequenceLocation digest/identify (exact coordinates only)
+//   - Allele digest/identify (LiteralSequenceExpression + ReferenceLengthExpression)
+//
+// Types not yet implemented in gtars-vrs are reported as skipped. The tests
+// degrade to a no-op `eprintln!("SKIP")` when the vrs-spec repo isn't present
+// (via `require_validation_dir!`).
+//
+// Run with:
+//   cargo test -p gtars-vrs --test vrs_compliance -- --nocapture
+
+use std::fs;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -62,7 +245,7 @@ macro_rules! require_validation_dir {
     };
 }
 
-fn load_yaml(dir: &PathBuf, filename: &str) -> Value {
+fn load_yaml(dir: &Path, filename: &str) -> Value {
     let path = dir.join(filename);
     let content =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("Failed to read {path:?}: {e}"));
@@ -148,9 +331,7 @@ impl TestResult {
     }
 }
 
-// ============================================================================
-// sha512t24u function tests (functions.yaml)
-// ============================================================================
+// ── sha512t24u function tests (functions.yaml) ───────────────────────────
 
 #[test]
 fn test_sha512t24u_from_validation() {
@@ -173,9 +354,7 @@ fn test_sha512t24u_from_validation() {
     eprintln!("sha512t24u: {}/{} passed", cases.len(), cases.len());
 }
 
-// ============================================================================
-// SequenceLocation tests (models.yaml)
-// ============================================================================
+// ── SequenceLocation tests (models.yaml) ─────────────────────────────────
 
 #[test]
 fn test_sequence_location_from_validation() {
@@ -239,9 +418,7 @@ fn test_sequence_location_from_validation() {
     assert_eq!(r.failed, 0, "{} SequenceLocation test(s) failed", r.failed);
 }
 
-// ============================================================================
-// Allele tests (models.yaml - canonical reference vectors)
-// ============================================================================
+// ── Allele tests (models.yaml - canonical reference vectors) ─────────────
 
 #[test]
 fn test_alleles_from_models_yaml() {
@@ -260,9 +437,7 @@ fn test_alleles_from_models_yaml() {
     );
 }
 
-// ============================================================================
-// Allele tests (alleles.yaml - extended test cases, some WIP)
-// ============================================================================
+// ── Allele tests (alleles.yaml - extended test cases, some WIP) ──────────
 
 // IGNORED: `alleles.yaml` is sourced from an in-progress VRS spec branch
 // (2.1.0-connect_2026_#10) whose expected digests are not yet finalized — some
@@ -310,7 +485,7 @@ fn run_allele_cases(cases: &[Value], source: &str) -> TestResult {
         let expected_identify = output.get("ga4gh_identify").and_then(|v| v.as_str());
 
         // Skip cases with "tbd" or missing expected values
-        if expected_digest.map_or(true, |d| d == "tbd" || d.is_empty()) {
+        if expected_digest.is_none_or(|d| d == "tbd" || d.is_empty()) {
             r.skipped += 1;
             eprintln!("  SKIP: {name} (expected value is tbd or missing)");
             continue;
@@ -357,9 +532,7 @@ fn run_allele_cases(cases: &[Value], source: &str) -> TestResult {
     r
 }
 
-// ============================================================================
-// Serialization tests (ga4gh_serialize from models.yaml)
-// ============================================================================
+// ── Serialization tests (ga4gh_serialize from models.yaml) ───────────────
 
 #[test]
 fn test_serialization_from_models_yaml() {
@@ -374,9 +547,7 @@ fn test_serialization_from_models_yaml() {
                 .get("name")
                 .and_then(|v| v.as_str())
                 .unwrap_or("unnamed");
-            let expected_serialize = case["out"]
-                .get("ga4gh_serialize")
-                .and_then(|v| v.as_str());
+            let expected_serialize = case["out"].get("ga4gh_serialize").and_then(|v| v.as_str());
             if expected_serialize.is_none() || expected_serialize == Some("") {
                 r.skipped += 1;
                 continue;
@@ -420,9 +591,7 @@ fn test_serialization_from_models_yaml() {
     assert_eq!(r.failed, 0, "{} serialization test(s) failed", r.failed);
 }
 
-// ============================================================================
-// Coverage report: types not yet implemented in gtars-vrs
-// ============================================================================
+// ── Coverage report: types not yet implemented in gtars-vrs ──────────────
 
 #[test]
 fn report_coverage() {

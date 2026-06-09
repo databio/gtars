@@ -1,4 +1,7 @@
 //! Full HGVS-to-VRS pipeline benchmark (parsing + normalization + digest)
+//!
+//! Usage:
+//!   cargo bench --bench hgvs_vrs_bench --features filesystem
 
 use std::io::Write;
 use std::time::Instant;

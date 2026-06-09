@@ -1,5 +1,10 @@
 //! Vendored-corpus regression tests for the HGVS coordinate mapper.
 //!
+//! NOTE: this binary is kept STANDALONE (not merged into `hgvs_parser` or
+//! `hgvs_synthetic`) because of its crate-level `#![cfg(feature = "filesystem")]`
+//! gate plus its `gtars_refget::{CoordinateMapper, ReadonlyTxStore, TxBackend}`
+//! imports. Merging would force that gate onto unrelated tests.
+//!
 //! RESTORED from the deleted `gtars-reftx/tests/test_hgvs_corpus_mapper.rs`
 //! (commit `ded971e6`), which was dropped when `gtars-reftx` was folded into
 //! `gtars_refget::transcripts`. The original `project_biocommons_gcp_full`
@@ -53,8 +58,7 @@ fn gcp_files() -> Vec<PathBuf> {
 /// Simple TSV parser that ignores blank lines and `#`-prefixed comments.
 /// Returns header + data rows verbatim (header detection is left to callers).
 fn read_tsv_rows(path: &Path) -> Vec<Vec<String>> {
-    let raw =
-        fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
+    let raw = fs::read_to_string(path).unwrap_or_else(|e| panic!("read {}: {}", path.display(), e));
     let mut rows = Vec::new();
     for line in raw.lines() {
         let t = line.trim();
@@ -212,8 +216,7 @@ fn project_biocommons_gcp_full() {
             continue;
         }
         let header = &rows[0];
-        let (Some(g_idx), Some(c_idx)) =
-            (col_index(header, "HGVSg"), col_index(header, "HGVSc"))
+        let (Some(g_idx), Some(c_idx)) = (col_index(header, "HGVSg"), col_index(header, "HGVSc"))
         else {
             continue;
         };
@@ -251,13 +254,11 @@ fn project_biocommons_gcp_full() {
                 };
 
             checked += 1;
-            if res.position != expected_g_ib {
-                if mismatches.len() < 20 {
-                    mismatches.push(format!(
-                        "{} ({}) -> g {} but corpus says g {}",
-                        c_cell, c_var.accession, res.position, expected_g_ib
-                    ));
-                }
+            if res.position != expected_g_ib && mismatches.len() < 20 {
+                mismatches.push(format!(
+                    "{} ({}) -> g {} but corpus says g {}",
+                    c_cell, c_var.accession, res.position, expected_g_ib
+                ));
             }
         }
     }

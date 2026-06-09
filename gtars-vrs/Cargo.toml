@@ -49,3 +49,28 @@ serde_yaml = "0.9"
 csv = { workspace = true }
 rstest = { workspace = true }
 base64-url = { workspace = true }
+
+[[bench]]
+name = "bench_store"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "bench_encoded"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "hgvs_bench"
+harness = false
+required-features = ["transcripts"]
+
+[[bench]]
+name = "hgvs_vrs_bench"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "gnomad_vrs_parallel_encoded"
+harness = false
+required-features = ["filesystem"]

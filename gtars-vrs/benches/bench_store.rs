@@ -2,7 +2,7 @@
 //! Reports throughput and peak RSS for mmap vs in-memory comparison.
 //!
 //! Usage:
-//!   cargo run --release --example bench_store -- <store_path> <vcf_path>
+//!   cargo bench --bench bench_store --features filesystem -- <store_path> <vcf_path>
 
 use std::time::Instant;
 

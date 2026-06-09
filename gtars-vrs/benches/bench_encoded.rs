@@ -15,7 +15,7 @@
 //! (arm 3) only differs cross-process and is measured separately (PSS).
 //!
 //! Usage:
-//!   cargo run --release --example bench_encoded -- <store_path> <vcf_path> [mode] [threads_csv]
+//!   cargo bench --bench bench_encoded --features filesystem -- <store_path> <vcf_path> [mode] [threads_csv]
 //!     mode:        encoded | decoded | both | verify   (default: both)
 //!     threads_csv: e.g. 1,2,4,8                          (default: 1,<num_cpus>)
 

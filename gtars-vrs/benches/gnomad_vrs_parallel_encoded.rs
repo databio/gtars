@@ -7,7 +7,7 @@
 //! encoded path. Prints throughput (variants/sec) and the thread count.
 //!
 //! Usage:
-//!   cargo run --release --example gnomad_vrs_parallel_encoded -- <store_path> <vcf_path> [threads] [--print] [--bgzf]
+//!   cargo bench --bench gnomad_vrs_parallel_encoded --features filesystem -- <store_path> <vcf_path> [threads] [--print] [--bgzf]
 //!     threads: worker count (default: available_parallelism)
 //!     --print: also print each result row (chrom pos ref alt vrs_id) to stdout
 //!     --bgzf:  use the BGZF-block-parallel path (raw-block reader + workers own

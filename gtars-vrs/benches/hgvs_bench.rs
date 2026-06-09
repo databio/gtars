@@ -1,4 +1,7 @@
 //! Quick HGVS parsing benchmark
+//!
+//! Usage (run from the gtars-vrs/ package directory):
+//!   cargo bench --bench hgvs_bench
 
 use std::fs;
 use std::time::Instant;

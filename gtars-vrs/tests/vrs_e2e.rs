@@ -64,12 +64,9 @@ fn test_vcf_to_vrs_ids_end_to_end() {
     };
 
     // Run VRS ID computation
-    let results = compute_vrs_ids_from_vcf(
-        &mut store,
-        &collection_digest,
-        vcf_path.to_str().unwrap(),
-    )
-    .unwrap();
+    let results =
+        compute_vrs_ids_from_vcf(&mut store, &collection_digest, vcf_path.to_str().unwrap())
+            .unwrap();
 
     // Print results for debugging
     eprintln!("\nVRS Results:");
@@ -82,7 +79,12 @@ fn test_vcf_to_vrs_ids_end_to_end() {
 
     // Should have 6 results: 2 SNVs + 1 insertion + 1 deletion + 2 from multi-allelic
     // (symbolic <DEL> should be skipped)
-    assert_eq!(results.len(), 6, "Expected 6 results, got {}", results.len());
+    assert_eq!(
+        results.len(),
+        6,
+        "Expected 6 results, got {}",
+        results.len()
+    );
 
     // All VRS IDs should have the right format
     for r in &results {
@@ -95,12 +97,9 @@ fn test_vcf_to_vrs_ids_end_to_end() {
     }
 
     // Same variant should always produce same ID (determinism)
-    let results2 = compute_vrs_ids_from_vcf(
-        &mut store,
-        &collection_digest,
-        vcf_path.to_str().unwrap(),
-    )
-    .unwrap();
+    let results2 =
+        compute_vrs_ids_from_vcf(&mut store, &collection_digest, vcf_path.to_str().unwrap())
+            .unwrap();
     for (a, b) in results.iter().zip(results2.iter()) {
         assert_eq!(a.vrs_id, b.vrs_id, "Non-deterministic VRS ID");
     }
