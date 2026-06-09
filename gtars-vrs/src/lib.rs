@@ -27,10 +27,14 @@ pub use normalize::normalize;
 // Readonly HGVS->VRS entries are WASM-safe; the mutable `&mut RefgetStore`
 // entries depend on the filesystem-backed VCF helpers.
 pub use hgvs::bridge::{
-    BridgeError, BridgeWarning, hgvs_str_to_vrs_id_readonly, hgvs_to_allele_readonly,
+    Bridged, BridgeError, BridgeWarning, hgvs_str_to_vrs_id_readonly, hgvs_to_allele_readonly,
 };
 #[cfg(feature = "filesystem")]
 pub use hgvs::bridge::{hgvs_str_to_vrs_id, hgvs_to_allele};
+#[cfg(feature = "transcripts")]
+pub use hgvs::bridge::{
+    hgvs_str_to_transcript_vrs_id_readonly, hgvs_to_transcript_allele_readonly,
+};
 pub use provider::{NoTranscriptProvider, ProviderError, TranscriptProvider};
 #[cfg(feature = "transcripts")]
 pub use provider::TxProvider;

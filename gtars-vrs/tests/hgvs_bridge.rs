@@ -212,9 +212,9 @@ fn case_g_baseline_sub() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_F_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_F_SEQ, &sq, 5, b"C", b"T");
@@ -230,9 +230,9 @@ fn case_c_forward_sub() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_F_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_F_SEQ, &sq, 5, b"C", b"T");
@@ -252,9 +252,9 @@ fn case_c_reverse_sub() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_R_SEQ, &sq, 29, b"C", b"T");
@@ -266,8 +266,9 @@ fn case_gene_symbol_to_mane() {
     // GENE_REV → TX_REV → same as case_c_reverse_sub.
     let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id =
-        hgvs_str_to_vrs_id("GENE_REV:c.1G>A", &provider, &mut store, &coll, &mut Vec::new())
-            .unwrap();
+        hgvs_str_to_vrs_id("GENE_REV:c.1G>A", &provider, &mut store, &coll)
+            .unwrap()
+            .value;
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_R_SEQ, &sq, 29, b"C", b"T");
@@ -285,9 +286,9 @@ fn case_g_deletion_left_trim() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_F_NAME, &coll);
     let sq = format!("SQ.{raw}");
     // Bridge produces start_ib=5, ref="C", alt="" — then normalize.
@@ -305,9 +306,9 @@ fn case_g_insertion() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_F_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_F_SEQ, &sq, 6, b"", b"TT");
@@ -323,9 +324,9 @@ fn case_g_dup() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_F_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_F_SEQ, &sq, 5, b"C", b"CC");
@@ -343,9 +344,9 @@ fn case_c_reverse_delins() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_R_SEQ, &sq, 28, b"AC", b"AT");
@@ -363,9 +364,9 @@ fn case_c_reverse_ins() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
     let expected = vcf_equiv_vrs_id(CHR_R_SEQ, &sq, 29, b"", b"CGC");
@@ -377,8 +378,9 @@ fn case_identity_noop() {
     // c.1= identity edge case. chrR[29]='C'. Identity → ref==alt.
     let (mut store, provider, coll, _temp) = build_store_and_provider();
     let id =
-        hgvs_str_to_vrs_id(&format!("{TX_REV}:c.1="), &provider, &mut store, &coll, &mut Vec::new())
-            .unwrap();
+        hgvs_str_to_vrs_id(&format!("{TX_REV}:c.1="), &provider, &mut store, &coll)
+            .unwrap()
+            .value;
     // identity collapses on normalize to start==end, alt empty.
     let raw = raw_digest(&mut store, CHR_R_NAME, &coll);
     let sq = format!("SQ.{raw}");
@@ -397,7 +399,6 @@ fn err_ref_mismatch() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
     .unwrap_err();
     assert!(matches!(err, BridgeError::RefMismatch { .. }), "got {:?}", err);
@@ -413,7 +414,6 @@ fn err_unsupported_protein() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     );
     assert!(result.is_err());
     // Expected: either Parse error (parser rejects p.) or UnsupportedReferenceType.
@@ -433,7 +433,6 @@ fn err_unsupported_inv() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     );
     // Either parser rejects inv at this grammar position, or bridge errors UnsupportedEdit.
     match err {
@@ -450,7 +449,6 @@ fn err_out_of_bounds() {
         &provider,
         &mut store,
         &coll,
-        &mut Vec::new(),
     )
     .unwrap_err();
     assert!(matches!(err, BridgeError::OutOfBounds { .. }), "got {:?}", err);
@@ -460,7 +458,7 @@ fn err_out_of_bounds() {
 fn err_unknown_gene() {
     let (mut store, provider, coll, _temp) = build_store_and_provider();
     let err =
-        hgvs_str_to_vrs_id("BOGUSGENE:c.1A>T", &provider, &mut store, &coll, &mut Vec::new())
+        hgvs_str_to_vrs_id("BOGUSGENE:c.1A>T", &provider, &mut store, &coll)
             .unwrap_err();
     assert!(
         matches!(
@@ -479,7 +477,7 @@ fn allele_construction_only() {
     let (mut store, provider, coll, _temp) = build_store_and_provider();
     let s = format!("{CHR_F_NAME}:g.6C>T");
     let v = gtars_vrs::hgvs::parse(&s).unwrap();
-    let allele = hgvs_to_allele(&v, &provider, &mut store, &coll, &mut Vec::new()).unwrap();
+    let allele = hgvs_to_allele(&v, &provider, &mut store, &coll).unwrap().value;
     assert_eq!(allele.location.start, 5);
     assert_eq!(allele.location.end, 6);
     match allele.state {

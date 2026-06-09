@@ -151,6 +151,30 @@ impl<'a> CoordinateMapper<'a> {
         n_to_g_inner(&tx, &offsets, n_pos, offset)
     }
 
+    /// Map a 0-based genomic position to a 0-based offset on the mature
+    /// (spliced) mRNA for `accession`. Returns `None` if the position is
+    /// intronic or otherwise outside every exon (i.e. has no coordinate on
+    /// the mature mRNA).
+    ///
+    /// This is the inverse of the forward c./n. -> genomic projection: it lets
+    /// a caller take a genomic interbase coordinate (e.g. produced by
+    /// [`Self::c_to_g_full`]) and re-anchor it onto the derived mature mRNA.
+    /// `Some(off)` is an exonic offset; `None` signals an intronic / out-of-
+    /// exon position which has no mature-mRNA coordinate.
+    pub fn g_to_transcript_offset(
+        &self,
+        accession: &str,
+        g_pos: u64,
+    ) -> Result<Option<u64>, MappingError> {
+        let tx = self
+            .store
+            .lookup(accession)
+            .ok_or_else(|| MappingError::TranscriptNotFound(accession.to_string()))?;
+        let mut offsets = Vec::with_capacity(tx.exons.len());
+        build_exon_offsets_into(&tx, &mut offsets);
+        Ok(genomic_to_transcript_fast(&tx, g_pos, &offsets))
+    }
+
     /// Map a c. coordinate by gene symbol via MANE Select.
     ///
     /// Returns `(accession_used, result)` so the caller can record which
@@ -498,4 +522,83 @@ fn genomic_to_transcript_fast(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::transcripts::models::{Exon, ManeStatus};
+    use crate::transcripts::store::{build_reftx_bytes_in_memory, ReadonlyTxStore};
+
+    fn make_tx(acc: &str, strand: Strand, exons: Vec<Exon>) -> Transcript {
+        Transcript {
+            accession: acc.to_string(),
+            gene: "G".to_string(),
+            chrom_digest: [0u8; 24],
+            strand,
+            cds_start: None,
+            cds_end: None,
+            exons,
+            mane: ManeStatus::default(),
+        }
+    }
+
+    fn store_for(tx: Transcript) -> ReadonlyTxStore {
+        let bytes = build_reftx_bytes_in_memory(&[tx]).unwrap();
+        ReadonlyTxStore::from_bytes(bytes).unwrap()
+    }
+
+    #[test]
+    fn g_to_transcript_offset_forward_exonic() {
+        // Two forward exons: [10,14) and [20,24). mRNA offsets:
+        //   genomic 10..14 -> tx 0..4
+        //   genomic 20..24 -> tx 4..8
+        let tx = make_tx(
+            "NM_F.1",
+            Strand::Forward,
+            vec![Exon { start: 10, end: 14 }, Exon { start: 20, end: 24 }],
+        );
+        let store = store_for(tx);
+        let mapper = CoordinateMapper::new(&store);
+
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 10).unwrap(), Some(0));
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 13).unwrap(), Some(3));
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 20).unwrap(), Some(4));
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 23).unwrap(), Some(7));
+        // Intronic (between the two exons) -> None.
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 16).unwrap(), None);
+        // Outside all exons -> None.
+        assert_eq!(mapper.g_to_transcript_offset("NM_F.1", 0).unwrap(), None);
+    }
+
+    #[test]
+    fn g_to_transcript_offset_reverse_exonic() {
+        // Two exons (genomic order) [10,14) and [20,24) on the reverse strand.
+        // Transcript runs 3'->5' in genomic terms, so the last genomic base of
+        // the last exon is tx offset 0:
+        //   genomic 23 -> tx 0, genomic 20 -> tx 3,
+        //   genomic 13 -> tx 4, genomic 10 -> tx 7.
+        let tx = make_tx(
+            "NM_R.1",
+            Strand::Reverse,
+            vec![Exon { start: 10, end: 14 }, Exon { start: 20, end: 24 }],
+        );
+        let store = store_for(tx);
+        let mapper = CoordinateMapper::new(&store);
+
+        assert_eq!(mapper.g_to_transcript_offset("NM_R.1", 23).unwrap(), Some(0));
+        assert_eq!(mapper.g_to_transcript_offset("NM_R.1", 20).unwrap(), Some(3));
+        assert_eq!(mapper.g_to_transcript_offset("NM_R.1", 13).unwrap(), Some(4));
+        assert_eq!(mapper.g_to_transcript_offset("NM_R.1", 10).unwrap(), Some(7));
+        // Intronic -> None.
+        assert_eq!(mapper.g_to_transcript_offset("NM_R.1", 16).unwrap(), None);
+    }
+
+    #[test]
+    fn g_to_transcript_offset_unknown_accession() {
+        let tx = make_tx("NM_F.1", Strand::Forward, vec![Exon { start: 0, end: 4 }]);
+        let store = store_for(tx);
+        let mapper = CoordinateMapper::new(&store);
+        assert!(mapper.g_to_transcript_offset("NM_MISSING.1", 0).is_err());
+    }
 }

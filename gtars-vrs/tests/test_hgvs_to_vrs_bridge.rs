@@ -136,9 +136,9 @@ fn bridge_matches_independently_computed_vrs_id() {
         &NoTranscriptProvider,
         &store,
         &name_to_digest,
-        &mut Vec::new(),
     )
-    .unwrap();
+    .unwrap()
+    .value;
 
     assert_eq!(
         id, expected,

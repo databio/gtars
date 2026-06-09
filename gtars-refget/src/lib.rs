@@ -117,6 +117,7 @@ pub mod transcripts;
 pub use transcripts::{
     build_reftx_bytes_in_memory, CoordinateMapper, CoordinateMapperWriter, Exon, ManeStatus,
     MappingError, MappingResult, ReadonlyTxStore, Strand, Transcript, TranscriptRef,
+    concat_regions, mature_mrna, mature_mrna_for_transcript,
 };
 // Native-only re-exports (mmap-backed store, file-backed backend selector, and
 // the atomic file-writing builder). `ReadonlyTxStore::open_mmap`/`open_pread`/
@@ -134,6 +135,10 @@ pub mod inputs;
 mod hashkeyable;
 #[cfg(feature = "filesystem")]
 mod utils;
+// Positioned-read helper shared by the store partial-read path and the
+// transcript pread backend. Ungated: the store caller compiles in all
+// configs (incl. --no-default-features), so this must too.
+mod posread;
 
 // Re-export collection helpers at crate root for backward compatibility.
 // The `*Ext` traits and `read_rgsi_file` are WASM-safe; `SequenceCollectionExt`

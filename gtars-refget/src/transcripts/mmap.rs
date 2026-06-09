@@ -12,9 +12,8 @@
 //!
 //! Both readonly backends reuse the WASM-safe lookup/parse logic in
 //! [`super::store`] over the [`TxBytes`] abstraction — only the byte source
-//! differs. The positioned read helper is COPIED/ADAPTED from
-//! `gtars-refget/src/store/readonly.rs` (`read_exact_window`); it deliberately
-//! does NOT call into the refget store.
+//! differs. The pread backend uses the shared [`crate::posread::read_exact_window`]
+//! helper (ungated, crate-internal) for positioned reads.
 
 use std::collections::HashMap;
 use std::fs::File;
@@ -63,33 +62,10 @@ impl PreadSource {
         if end > self.len {
             return None;
         }
-        read_exact_window(&self.file, offset, len).ok()
+        crate::posread::read_exact_window(&self.file, offset, len).ok()
     }
 }
 
-/// Read exactly `len` bytes starting at `byte_start` from `file`.
-///
-/// COPIED/ADAPTED from `gtars-refget/src/store/readonly.rs::read_exact_window`
-/// (do NOT call into that module). On unix this is a POSITIONED read (`pread`
-/// via `FileExt::read_exact_at`), cursorless and safe to call concurrently on a
-/// shared `&File`. On non-unix we `try_clone()` for an independent cursor, then
-/// seek+read.
-fn read_exact_window(file: &File, byte_start: usize, len: usize) -> Result<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::FileExt;
-        file.read_exact_at(&mut buf, byte_start as u64)?;
-    }
-    #[cfg(not(unix))]
-    {
-        use std::io::{Read, Seek, SeekFrom};
-        let mut handle = file.try_clone()?;
-        handle.seek(SeekFrom::Start(byte_start as u64))?;
-        handle.read_exact(&mut buf)?;
-    }
-    Ok(buf)
-}
 
 // ============================================================================
 // TxStore: Mutable store for setup/build phase (mmap-backed)

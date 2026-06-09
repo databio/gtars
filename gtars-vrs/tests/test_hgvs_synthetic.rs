@@ -150,10 +150,10 @@ enum CaseOutcome {
 fn run_case(case: &Case, store: &mut RefgetStore, provider: &TxProvider, coll: &str) -> CaseOutcome {
     // Negative cases: assert hgvs_str_to_vrs_id errors.
     if !case.expected_error.is_empty() {
-        match hgvs_str_to_vrs_id(&case.hgvs_string, provider, store, coll, &mut Vec::new()) {
-            Ok(id) => CaseOutcome::NegativeFail(format!(
+        match hgvs_str_to_vrs_id(&case.hgvs_string, provider, store, coll) {
+            Ok(b) => CaseOutcome::NegativeFail(format!(
                 "expected error {} but got Ok({})",
-                case.expected_error, id
+                case.expected_error, b.value
             )),
             Err(_) => CaseOutcome::Pass,
         }
@@ -195,8 +195,8 @@ fn run_case(case: &Case, store: &mut RefgetStore, provider: &TxProvider, coll: &
         }
 
         // Layer 1: bridge VRS ID == VCF-equivalent VRS ID.
-        let bridge_id = match hgvs_str_to_vrs_id(&case.hgvs_string, provider, store, coll, &mut Vec::new()) {
-            Ok(id) => id,
+        let bridge_id = match hgvs_str_to_vrs_id(&case.hgvs_string, provider, store, coll) {
+            Ok(b) => b.value,
             Err(e) => {
                 // Distinguish layer-2 failure (mapper) vs bridge error.
                 let s = format!("{:?}", e);

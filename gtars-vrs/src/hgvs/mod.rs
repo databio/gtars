@@ -21,8 +21,10 @@ pub mod parser;
 pub use ast::{
     Datum, Edit, HgvsVariant, HgvsVariantOwned, LocationRange, PosEdit, Position, ReferenceType,
 };
-pub use bridge::{BridgeError, hgvs_str_to_vrs_id_readonly, hgvs_to_allele_readonly};
+pub use bridge::{Bridged, BridgeError, hgvs_str_to_vrs_id_readonly, hgvs_to_allele_readonly};
 #[cfg(feature = "filesystem")]
 pub use bridge::{hgvs_str_to_vrs_id, hgvs_to_allele};
+#[cfg(feature = "transcripts")]
+pub use bridge::{hgvs_str_to_transcript_vrs_id_readonly, hgvs_to_transcript_allele_readonly};
 pub use error::HgvsError;
 pub use parser::parse;

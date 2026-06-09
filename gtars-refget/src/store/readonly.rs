@@ -91,33 +91,6 @@ impl FdCache {
     }
 }
 
-/// Read exactly `len` bytes starting at byte offset `byte_start` from `file`.
-///
-/// On unix this uses a POSITIONED read (`pread` via
-/// `FileExt::read_exact_at`), which takes no file cursor and is therefore safe
-/// to call concurrently on a shared `&File` (the basis for the cached
-/// `Arc<File>`). On non-unix platforms we fall back to a brief seek+read on a
-/// freshly opened handle... but here the cached handle has a cursor, so to stay
-/// correct under sharing we clone the handle's underlying file via
-/// `try_clone()` (independent cursor) before seeking.
-fn read_exact_window(file: &File, byte_start: usize, len: usize) -> Result<Vec<u8>> {
-    let mut buf = vec![0u8; len];
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::FileExt;
-        file.read_exact_at(&mut buf, byte_start as u64)?;
-    }
-    #[cfg(not(unix))]
-    {
-        use std::io::{Read, Seek, SeekFrom};
-        // try_clone gives an independent cursor so concurrent reads on the
-        // shared handle do not race on a single seek position.
-        let mut handle = file.try_clone()?;
-        handle.seek(SeekFrom::Start(byte_start as u64))?;
-        handle.read_exact(&mut buf)?;
-    }
-    Ok(buf)
-}
 
 /// A `Read` adapter that yields a byte range from a shared `Arc<Vec<u8>>`
 /// buffer without cloning the backing data.
@@ -1462,7 +1435,7 @@ impl ReadonlyRefgetStore {
             }
             StorageMode::Raw => (start, end),
         };
-        let buf = read_exact_window(&file, byte_start, byte_end - byte_start)?;
+        let buf = crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?;
 
         let decoded: Vec<u8> = match self.mode {
             StorageMode::Encoded => {

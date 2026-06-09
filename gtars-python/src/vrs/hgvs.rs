@@ -419,16 +419,17 @@ pub fn hgvs_to_vrs_id(
     let s = hgvs_str.to_string();
     let coll = collection_digest.to_string();
     let prov = provider.inner.clone();
+    // NOTE: warnings are currently dropped at the FFI boundary; surfacing them
+    // to Python is out of scope for this change.
     py.allow_threads(|| {
-        let mut warnings = Vec::new();
         gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(
             &s,
             &prov,
             &mut refget.inner,
             &coll,
-            &mut warnings,
         )
     })
+    .map(|b| b.value)
     .map_err(map_hgvs_err)
 }
 

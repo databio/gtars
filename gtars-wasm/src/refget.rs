@@ -586,8 +586,8 @@ impl RefgetStore {
             &gtars_vrs::provider::NoTranscriptProvider,
             self.inner_readonly(),
             self.name_to_digest(),
-            &mut Vec::new(),
         )
+        .map(|b| b.value)
         .map_err(|e| JsValue::from_str(&format!("{e}")))
     }
 
@@ -612,8 +612,8 @@ impl RefgetStore {
             transcripts.provider(),
             self.inner_readonly(),
             self.name_to_digest(),
-            &mut Vec::new(),
         )
+        .map(|b| b.value)
         .map_err(|e| JsValue::from_str(&format!("{e}")))
     }
 }
@@ -683,9 +683,9 @@ mod tests {
             &gtars_vrs::provider::NoTranscriptProvider,
             store.inner_readonly(),
             store.name_to_digest(),
-            &mut Vec::new(),
         )
         .expect("readonly bridge should succeed")
+        .value
     }
 
     #[wasm_bindgen_test]

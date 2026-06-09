@@ -110,8 +110,8 @@ pub fn hgvs_to_vrs_id(
         &NoTranscriptProvider,
         &store,
         &name_to_digest,
-        &mut Vec::new(),
     )
+    .map(|b| b.value)
     .map_err(|e| JsValue::from_str(&format!("{e}")))
 }
 
@@ -153,8 +153,8 @@ pub fn hgvs_to_vrs_id_with_transcripts(
         transcripts.provider(),
         &store,
         &name_to_digest,
-        &mut Vec::new(),
     )
+    .map(|b| b.value)
     .map_err(|e| JsValue::from_str(&format!("{e}")))
 }
 

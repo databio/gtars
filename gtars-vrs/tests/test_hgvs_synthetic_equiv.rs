@@ -226,7 +226,8 @@ fn compute_member_vrs_id(
 ) -> Result<String, String> {
     match member.member_kind.as_str() {
         "hgvs_g" | "hgvs_c" | "hgvs_n" => {
-            hgvs_str_to_vrs_id(&member.expression, provider, store, coll, &mut Vec::new())
+            hgvs_str_to_vrs_id(&member.expression, provider, store, coll)
+                .map(|b| b.value)
                 .map_err(|e| format!("{:?}", e))
         }
         "vcf" => {

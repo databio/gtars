@@ -43,7 +43,7 @@ fn main() {
 
     // Warmup
     for case in &test_cases {
-        let _ = hgvs_str_to_vrs_id(case, &provider, &mut store, &collection_digest, &mut Vec::new());
+        let _ = hgvs_str_to_vrs_id(case, &provider, &mut store, &collection_digest);
     }
 
     // Benchmark
@@ -53,7 +53,7 @@ fn main() {
     let start = Instant::now();
     for _ in 0..iterations {
         for case in &test_cases {
-            let _ = hgvs_str_to_vrs_id(case, &provider, &mut store, &collection_digest, &mut Vec::new());
+            let _ = hgvs_str_to_vrs_id(case, &provider, &mut store, &collection_digest);
         }
     }
     let elapsed = start.elapsed();

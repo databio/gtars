@@ -13,6 +13,7 @@
 
 pub mod mapper;
 pub mod models;
+pub mod sequence;
 pub mod store;
 
 #[cfg(feature = "filesystem")]
@@ -22,6 +23,7 @@ pub mod mmap;
 
 pub use mapper::{CoordinateMapper, CoordinateMapperWriter, MappingError, MappingResult};
 pub use models::{Exon, ManeStatus, Strand, Transcript};
+pub use sequence::{concat_regions, mature_mrna, mature_mrna_for_transcript};
 pub use store::{build_reftx_bytes_in_memory, ReadonlyTxStore, TranscriptRef};
 
 // Native-only: the mmap-backed mutable store, the file-backed backend selector,
