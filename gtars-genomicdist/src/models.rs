@@ -9,20 +9,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-/// A `RegionSet` that is guaranteed to be sorted by (chr, start).
-///
-/// Created by moving a `RegionSet` into `SortedRegionSet::new()`, which
-/// sorts in place (no clone). Functions that require sorted input can
-/// accept this type instead of re-sorting every time.
-pub struct SortedRegionSet(pub RegionSet);
-
-impl SortedRegionSet {
-    /// Sort a RegionSet in place and wrap it. This is a move, not a clone.
-    pub fn new(mut rs: RegionSet) -> Self {
-        rs.sort();
-        Self(rs)
-    }
-}
+// `SortedRegionSet` is defined in gtars-core; re-exported here so the
+// genomicdist public path (`gtars_genomicdist::SortedRegionSet`) is unchanged.
+pub use gtars_core::models::SortedRegionSet;
 
 /// Genomic strand orientation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

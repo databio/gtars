@@ -85,8 +85,6 @@ pub enum MultiChromOverlapperError {
 /// See the [module-level documentation](self) for usage examples.
 pub struct MultiChromOverlapper<I, T> {
     index_maps: HashMap<String, Box<dyn Overlapper<I, T>>>,
-    #[allow(dead_code)]
-    overlapper_type: OverlapperType,
 }
 
 /// An iterator over intervals that overlap with query regions across multiple chromosomes.
@@ -315,10 +313,7 @@ impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
             core.insert(chr.to_string(), lapper);
         }
 
-        MultiChromOverlapper {
-            index_maps: core,
-            overlapper_type,
-        }
+        MultiChromOverlapper { index_maps: core }
     }
 }
 
@@ -352,10 +347,7 @@ pub fn build_indexed_overlapper(
         core.insert(chr, lapper);
     }
 
-    MultiChromOverlapper {
-        index_maps: core,
-        overlapper_type,
-    }
+    MultiChromOverlapper { index_maps: core }
 }
 
 impl MultiChromOverlapper<u32, ()> {
