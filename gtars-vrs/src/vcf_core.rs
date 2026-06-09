@@ -55,8 +55,12 @@ impl<'a> ParsedRecord<'a> {
 }
 
 /// Parse one VCF line into CHROM/POS/REF/ALT, returning `None` for header/blank
-/// lines, lines with fewer than 5 fields, or an unparseable POS. POS is converted
-/// to 0-based interbase. Borrows from `line`.
+/// lines, lines with fewer than 5 fields, or an unparseable / out-of-spec POS.
+/// POS is converted to 0-based interbase. Borrows from `line`.
+///
+/// Per the VCF spec POS is 1-based and MUST be `>= 1`; a POS of `0` is rejected
+/// (returns `None`) rather than silently saturating to interbase `0`, which
+/// would corrupt the variant's coordinate.
 pub fn parse_vcf_record(line: &str) -> Option<ParsedRecord<'_>> {
     let line = line.trim_end_matches(['\n', '\r']);
     if line.is_empty() || line.starts_with('#') {
@@ -68,7 +72,11 @@ pub fn parse_vcf_record(line: &str) -> Option<ParsedRecord<'_>> {
     let _id = it.next()?;
     let ref_allele = it.next()?;
     let alts = it.next()?;
-    let pos = pos_s.parse::<u64>().ok()?.saturating_sub(1);
+    let pos_1based = pos_s.parse::<u64>().ok()?;
+    if pos_1based < 1 {
+        return None;
+    }
+    let pos = pos_1based - 1;
     Some(ParsedRecord {
         chrom,
         pos,

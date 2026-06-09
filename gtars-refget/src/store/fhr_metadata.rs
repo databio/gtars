@@ -757,6 +757,7 @@ mod tests {
     // =========================================================================
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fhr_metadata_empty_by_default() {
         let mut store = RefgetStore::in_memory();
 
@@ -769,6 +770,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fhr_metadata_set_get() {
         let mut store = RefgetStore::in_memory();
         let (meta, _) = store
@@ -795,6 +797,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fhr_metadata_remove() {
         let mut store = RefgetStore::in_memory();
         let (meta, _) = store
@@ -813,6 +816,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fhr_metadata_persistence() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -844,6 +848,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fhr_list() {
         let mut store = RefgetStore::in_memory();
         assert!(store.list_fhr_metadata().is_empty());
@@ -863,6 +868,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_remove_collection_cleans_up_fhr_metadata() {
         let dir = tempdir().unwrap();
         let fasta = dir.path().join("test.fa");
@@ -889,6 +895,7 @@ mod tests {
 
     /// Spin up a minimal HTTP server serving files from `serve_dir`.
     /// Returns `(base_url, shutdown_fn)`.
+    #[cfg(all(feature = "filesystem", feature = "http"))]
     fn start_file_server(serve_dir: std::path::PathBuf) -> (String, impl FnOnce()) {
         use std::io::{Read as _, Write as _};
         use std::net::TcpListener;
@@ -949,6 +956,7 @@ mod tests {
     /// Pull an FHR sidecar that does NOT exist locally yet.
     /// KeepOurs: first pull should count as `pulled`, second pull as `skipped`.
     #[test]
+    #[cfg(all(feature = "filesystem", feature = "http"))]
     fn test_keep_ours_fhr_first_pull_counts_as_pulled() {
         // "Remote" store: directory with a pre-built FHR JSON sidecar.
         let remote_dir = tempdir().unwrap();

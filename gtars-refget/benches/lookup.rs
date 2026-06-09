@@ -1,5 +1,11 @@
+//! Transcript store lookup benchmark.
+//!
+//! Native: builds and mmaps a `.reftx` store, so requires `transcripts` +
+//! `filesystem`. Run with `--features "transcripts filesystem"`.
+#![cfg(all(feature = "transcripts", feature = "filesystem"))]
+
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use gtars_reftx::{
+use gtars_refget::{
     CoordinateMapper, CoordinateMapperWriter, Exon, Strand, Transcript, TxStore, TxStoreBuilder,
 };
 use tempfile::tempdir;

@@ -34,7 +34,14 @@ fn readonly_route_a(hgvs: &str, name: &str, bases: &[u8]) -> String {
     let mut name_to_digest = HashMap::new();
     name_to_digest.insert(name.to_string(), raw_digest);
 
-    hgvs_str_to_vrs_id_readonly(hgvs, &NoTranscriptProvider, &store, &name_to_digest).unwrap()
+    hgvs_str_to_vrs_id_readonly(
+        hgvs,
+        &NoTranscriptProvider,
+        &store,
+        &name_to_digest,
+        &mut Vec::new(),
+    )
+    .unwrap()
 }
 
 /// Canonical VRS id via the normalize+digest path (VCF-equivalent), mirroring
@@ -93,6 +100,7 @@ fn readonly_rejects_transcript_variant() {
         &NoTranscriptProvider,
         &store,
         &name_to_digest,
+        &mut Vec::new(),
     );
     assert!(res.is_err(), "c. variant should be rejected in v1");
 }

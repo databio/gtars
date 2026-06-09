@@ -264,7 +264,15 @@ fn test_alleles_from_models_yaml() {
 // Allele tests (alleles.yaml - extended test cases, some WIP)
 // ============================================================================
 
+// IGNORED: `alleles.yaml` is sourced from an in-progress VRS spec branch
+// (2.1.0-connect_2026_#10) whose expected digests are not yet finalized — some
+// vectors have known issues (start > end, optional-field serialization
+// differences). It previously ran but only `eprintln!`'d failures and never
+// asserted, so a real regression would have passed silently. Until the WIP
+// spec stabilizes this test is `#[ignore]`d; when it does, drop the attribute
+// and have `run_allele_cases` failures hard-fail via `assert_eq!(r.failed, 0)`.
 #[test]
+#[ignore = "alleles.yaml expected digests are from an unfinalized WIP VRS spec branch"]
 fn test_alleles_from_alleles_yaml() {
     let dir = require_validation_dir!();
     let data = load_yaml(&dir, "alleles.yaml");
@@ -274,8 +282,8 @@ fn test_alleles_from_alleles_yaml() {
 
     let r = run_allele_cases(cases, "alleles.yaml");
 
-    // alleles.yaml is from a WIP branch - report results but don't hard-fail.
-    // Some test vectors may have issues (e.g., start > end, missing serialization).
+    // When run explicitly (`--ignored`), surface the WIP failure count but do
+    // not hard-fail: the expected vectors themselves are not yet final.
     if r.failed > 0 {
         eprintln!(
             "\n  NOTE: {} alleles.yaml case(s) produced different digests than expected.\n  \

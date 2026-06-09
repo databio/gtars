@@ -158,7 +158,7 @@ def test_transcript_to_dict(tmp_path):
 def test_exon_to_dict():
     e = Exon(start=10, end=20)
     d = e.to_dict()
-    assert d == {"start": 10, "end": 20, "cds_start": None, "cds_end": None}
+    assert d == {"start": 10, "end": 20}
 
 
 def test_mane_status_to_dict():

@@ -16,9 +16,14 @@ genomic_distributions = ["dep:gtars-genomicdist"]
 models = ["dep:gtars-core", "dep:gtars-genomicdist", "dep:gtars-overlaprs"]
 utils = ["dep:gtars-core", "dep:gtars-io"]
 lola = ["dep:gtars-lola", "dep:gtars-igd", "dep:gtars-core"]
-reftx = ["dep:gtars-reftx"]
-# vrs implies reftx because vrs.hgvs.bridge needs a ReftxProvider.
-vrs = ["dep:gtars-vrs", "dep:gtars-reftx", "gtars-reftx?/vrs"]
+# reftx is the `gtars.reftx` Python submodule: transcript store, builder, and
+# coordinate mapper. The builder and mmap-backed TxStore::open need refget's
+# native filesystem backend in addition to the transcript CORE.
+reftx = ["dep:gtars-refget", "gtars-refget?/transcripts", "gtars-refget?/filesystem"]
+# vrs implies reftx because vrs.hgvs.bridge needs the transcript provider
+# (gtars_vrs::provider::TxProvider, behind gtars-vrs's `transcripts` feature),
+# which now lives over the relocated gtars-refget transcript store.
+vrs = ["dep:gtars-vrs", "gtars-vrs?/transcripts", "reftx"]
 
 [dependencies]
 anyhow = { workspace = true }
@@ -36,8 +41,7 @@ gtars-igd = { path = "../gtars-igd", optional = true }
 gtars-lola = { path = "../gtars-lola", optional = true }
 gtars-overlaprs = { path = "../gtars-overlaprs", optional = true }
 gtars-vrs = { path = "../gtars-vrs", optional = true }
-gtars-reftx = { path = "../gtars-reftx", optional = true }
-base64-url = "3.0"
+base64-url = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tikv-jemallocator = { version = "0.6", features = ["disable_initial_exec_tls"] }

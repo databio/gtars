@@ -104,6 +104,26 @@ pub mod store;
 /// WASM-safe (operates on in-memory metadata).
 pub mod seqcol;
 
+/// Binary transcript store and HGVS coordinate mapper.
+///
+/// Mirrors this crate's core/filesystem split: the in-memory readonly store and
+/// the mapper are WASM-safe and compile whenever `transcripts` is on (including
+/// WASM, which uses `default-features = false`); the mmap backend and the
+/// file-writing builder are gated behind `filesystem` inside the module.
+#[cfg(feature = "transcripts")]
+pub mod transcripts;
+
+#[cfg(feature = "transcripts")]
+pub use transcripts::{
+    build_reftx_bytes_in_memory, CoordinateMapper, CoordinateMapperWriter, Exon, ManeStatus,
+    MappingError, MappingResult, ReadonlyTxStore, Strand, Transcript, TranscriptRef,
+};
+// Native-only re-exports (mmap-backed store, file-backed backend selector, and
+// the atomic file-writing builder). `ReadonlyTxStore::open_mmap`/`open_pread`/
+// `open_with_backend` are inherent methods reached through `ReadonlyTxStore`.
+#[cfg(all(feature = "transcripts", feature = "filesystem"))]
+pub use transcripts::{TxBackend, TxStore, TxStoreBuilder};
+
 /// Expansion of multi-FASTA input specifications (paths, globs, dirs, fofn).
 #[cfg(feature = "filesystem")]
 pub mod inputs;

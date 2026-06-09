@@ -47,10 +47,6 @@ impl<'a> Parser<'a> {
         self.input.as_bytes().get(self.pos).copied()
     }
 
-    fn peek_at(&self, off: usize) -> Option<u8> {
-        self.input.as_bytes().get(self.pos + off).copied()
-    }
-
     fn consume_byte(&mut self) -> Option<u8> {
         let b = self.peek()?;
         self.pos += 1;
@@ -570,12 +566,6 @@ impl<'a> Parser<'a> {
             Some(&self.input[s..self.pos])
         }
     }
-}
-
-// Compatibility helper: silence unused warning on peek_at.
-#[allow(dead_code)]
-fn _used_peek_at_marker() {
-    let _ = Parser::peek_at;
 }
 
 fn is_iupac(b: u8) -> bool {

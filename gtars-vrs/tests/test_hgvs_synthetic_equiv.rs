@@ -23,8 +23,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use gtars_refget::store::RefgetStore;
-use gtars_reftx::provider::ReftxProvider;
-use gtars_reftx::{TxStore, TxStoreBuilder};
+use gtars_refget::transcripts::{TxStore, TxStoreBuilder};
+use gtars_vrs::TxProvider;
 use gtars_vrs::digest::DigestWriter;
 use gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id;
 use gtars_vrs::normalize::normalize;
@@ -147,7 +147,7 @@ fn assert_cases_cross_link(groups: &[EquivGroup]) {
     );
 }
 
-fn build_fixture() -> (RefgetStore, Arc<gtars_reftx::ReadonlyTxStore>, ReftxProvider, String) {
+fn build_fixture() -> (RefgetStore, Arc<gtars_refget::ReadonlyTxStore>, TxProvider, String) {
     let dir = synthetic_dir();
     let fasta = dir.join("synthetic.fa");
 
@@ -190,7 +190,7 @@ fn build_fixture() -> (RefgetStore, Arc<gtars_reftx::ReadonlyTxStore>, ReftxProv
 
     let txstore = Arc::new(TxStore::open(&bin_path).unwrap().into_readonly());
     std::mem::forget(tmpdir);
-    let provider = ReftxProvider::new(Arc::clone(&txstore));
+    let provider = TxProvider::new(Arc::clone(&txstore));
     (store, txstore, provider, collection_digest)
 }
 
@@ -221,12 +221,12 @@ fn resolve_raw_digest(store: &mut RefgetStore, coll: &str, name: &str) -> Option
 fn compute_member_vrs_id(
     member: &EquivRow,
     store: &mut RefgetStore,
-    provider: &ReftxProvider,
+    provider: &TxProvider,
     coll: &str,
 ) -> Result<String, String> {
     match member.member_kind.as_str() {
         "hgvs_g" | "hgvs_c" | "hgvs_n" => {
-            hgvs_str_to_vrs_id(&member.expression, provider, store, coll)
+            hgvs_str_to_vrs_id(&member.expression, provider, store, coll, &mut Vec::new())
                 .map_err(|e| format!("{:?}", e))
         }
         "vcf" => {

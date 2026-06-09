@@ -420,7 +420,14 @@ pub fn hgvs_to_vrs_id(
     let coll = collection_digest.to_string();
     let prov = provider.inner.clone();
     py.allow_threads(|| {
-        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(&s, &prov, &mut refget.inner, &coll)
+        let mut warnings = Vec::new();
+        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(
+            &s,
+            &prov,
+            &mut refget.inner,
+            &coll,
+            &mut warnings,
+        )
     })
     .map_err(map_hgvs_err)
 }

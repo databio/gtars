@@ -1,12 +1,36 @@
-//! Transcript provider trait for HGVS coordinate resolution.
+//! Transcript provider trait and concrete implementations for HGVS coordinate resolution.
 //!
-//! This trait abstracts over different transcript annotation sources
-//! (e.g., `gtars-reftx`, UTA, etc.). HGVS parsers use it to resolve
-//! transcript-relative coordinates (c./n.) to genomic SequenceLocations.
+//! This module defines the `TranscriptProvider` trait, which abstracts over
+//! different transcript annotation sources. HGVS parsers use it to resolve
+//! transcript-relative coordinates (c./n.) to genomic `SequenceLocation`s.
+//!
+//! ## Concrete provider
+//!
+//! When the `transcripts` feature is enabled on `gtars-vrs`, this module also
+//! provides `TxProvider`, a concrete `Arc<ReadonlyTxStore>`-backed provider
+//! implemented over the `gtars-refget` transcript store. This impl is available
+//! on **both native and WASM targets** — it is gated on the transcripts CORE
+//! feature, NOT on `filesystem`, so `c.`/`n.` resolution is possible in the
+//! browser once a real provider is wired in.
+//!
+//! On native targets the same `TxProvider` wraps a mmap-backed store opened via
+//! `gtars_refget::transcripts::TxStore::open(...).into_readonly()` (the
+//! opener types are native-only, behind `gtars-refget`'s `filesystem` gate). On
+//! WASM, `TxProvider` wraps an in-memory store constructed via the WASM-safe
+//! in-memory constructor.
 
 use thiserror::Error;
 
 use crate::models::SequenceLocation;
+
+// Concrete provider impl — available on all targets (WASM-safe core).
+#[cfg(feature = "transcripts")]
+use std::sync::Arc;
+#[cfg(feature = "transcripts")]
+use gtars_refget::transcripts::{CoordinateMapper, ReadonlyTxStore, Strand};
+
+#[cfg(feature = "transcripts")]
+use crate::models::SequenceReference;
 
 /// Errors from transcript operations.
 #[derive(Debug, Error)]
@@ -29,8 +53,9 @@ pub enum ProviderError {
 
 /// Trait for looking up transcript annotations.
 ///
-/// Implemented by `gtars-reftx::ReadonlyTxStore` when the `vrs` feature is
-/// enabled on the `gtars-reftx` crate.
+/// Implemented in this crate (when the `transcripts` feature is enabled) by
+/// `ReadonlyTxStore` from `gtars-refget`. That impl is available on both native
+/// and WASM targets — see the module-level doc for details.
 pub trait TranscriptProvider {
     /// Map a coding coordinate (c.) to genomic SequenceLocation.
     ///
@@ -116,5 +141,197 @@ impl TranscriptProvider for NoTranscriptProvider {
 
     fn get_strand(&self, accession: &str) -> Result<i8, ProviderError> {
         Err(ProviderError::TranscriptNotFound(accession.to_string()))
+    }
+}
+
+// ============================================================================
+// Concrete provider over the gtars-refget transcript store.
+// Gated on the `transcripts` CORE feature — WASM-safe (no mmap, no std::fs).
+// ============================================================================
+
+/// `TranscriptProvider` impl for the readonly transcript store from
+/// `gtars-refget`. Delegates each method to a `CoordinateMapper` over the
+/// store.
+///
+/// This impl is available on ALL targets (native and WASM) when the
+/// `transcripts` feature is enabled. It contains no `memmap2`, no `std::fs`,
+/// and no file-open calls — those live behind the store's own `filesystem`
+/// gate.
+///
+/// On native, the store is typically opened via
+/// `gtars_refget::transcripts::TxStore::open(...).into_readonly()` (the
+/// opener types are native-only, behind `filesystem`). On WASM, the same
+/// `ReadonlyTxStore` is constructed from in-memory bytes.
+#[cfg(feature = "transcripts")]
+impl TranscriptProvider for ReadonlyTxStore {
+    fn c_to_genomic(&self, accession: &str, c_pos: i64) -> Result<SequenceLocation, ProviderError> {
+        let mapper = CoordinateMapper::new(self);
+        let result = mapper
+            .c_to_g(accession, c_pos)
+            .map_err(|e| ProviderError::MappingError(e.to_string()))?;
+
+        Ok(SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: format!("SQ.{}", base64_url::encode(&result.chrom_digest)),
+            },
+            start: result.position,
+            end: result.position + 1,
+        })
+    }
+
+    fn n_to_genomic(&self, accession: &str, n_pos: u64) -> Result<SequenceLocation, ProviderError> {
+        let mapper = CoordinateMapper::new(self);
+        let result = mapper
+            .n_to_g(accession, n_pos)
+            .map_err(|e| ProviderError::MappingError(e.to_string()))?;
+
+        Ok(SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: format!("SQ.{}", base64_url::encode(&result.chrom_digest)),
+            },
+            start: result.position,
+            end: result.position + 1,
+        })
+    }
+
+    fn get_chrom_accession(&self, accession: &str) -> Result<String, ProviderError> {
+        let tx = self
+            .lookup(accession)
+            .ok_or_else(|| ProviderError::TranscriptNotFound(accession.to_string()))?;
+        Ok(format!("SQ.{}", base64_url::encode(&tx.chrom_digest)))
+    }
+
+    fn get_strand(&self, accession: &str) -> Result<i8, ProviderError> {
+        let tx = self
+            .lookup(accession)
+            .ok_or_else(|| ProviderError::TranscriptNotFound(accession.to_string()))?;
+        Ok(match tx.strand {
+            Strand::Forward => 1,
+            Strand::Reverse => -1,
+        })
+    }
+
+    fn c_to_genomic_full(
+        &self,
+        accession: &str,
+        c_pos: i64,
+        offset: i64,
+        is_cds_end: bool,
+    ) -> Result<SequenceLocation, ProviderError> {
+        let mapper = CoordinateMapper::new(self);
+        let result = mapper
+            .c_to_g_full(accession, c_pos, offset, is_cds_end)
+            .map_err(|e| ProviderError::MappingError(e.to_string()))?;
+        Ok(SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: format!("SQ.{}", base64_url::encode(&result.chrom_digest)),
+            },
+            start: result.position,
+            end: result.position + 1,
+        })
+    }
+
+    fn n_to_genomic_full(
+        &self,
+        accession: &str,
+        n_pos: i64,
+        offset: i64,
+    ) -> Result<SequenceLocation, ProviderError> {
+        let mapper = CoordinateMapper::new(self);
+        let result = mapper
+            .n_to_g_full(accession, n_pos, offset)
+            .map_err(|e| ProviderError::MappingError(e.to_string()))?;
+        Ok(SequenceLocation {
+            sequence_reference: SequenceReference {
+                refget_accession: format!("SQ.{}", base64_url::encode(&result.chrom_digest)),
+            },
+            start: result.position,
+            end: result.position + 1,
+        })
+    }
+
+    fn gene_to_mane_accession(&self, gene: &str) -> Option<String> {
+        self.lookup_mane(gene).map(|tx| tx.accession)
+    }
+}
+
+/// Thread-safe transcript provider wrapping `Arc<ReadonlyTxStore>`.
+///
+/// For concurrent HGVS parsing, share a single provider across workers:
+///
+/// ```ignore
+/// // Native path (opener types are native-only, behind gtars-refget `filesystem` gate):
+/// use gtars_refget::transcripts::TxStore;
+/// use std::sync::Arc;
+/// use gtars_vrs::TxProvider;
+///
+/// let store = TxStore::open("transcripts.reftx")?.into_readonly();
+/// let provider = TxProvider::new(Arc::new(store));
+///
+/// // Clone is cheap (just bumps an Arc).
+/// for hgvs in variants {
+///     let loc = provider.c_to_genomic(&hgvs.accession, hgvs.c_pos)?;
+/// }
+///
+/// // WASM path: same TxProvider wraps an in-memory store built via the
+/// // WASM-safe in-memory constructor from gtars-refget.
+/// ```
+#[cfg(feature = "transcripts")]
+#[derive(Clone)]
+pub struct TxProvider {
+    store: Arc<ReadonlyTxStore>,
+}
+
+#[cfg(feature = "transcripts")]
+impl TxProvider {
+    pub fn new(store: Arc<ReadonlyTxStore>) -> Self {
+        Self { store }
+    }
+
+    /// Access the underlying store.
+    pub fn store(&self) -> &Arc<ReadonlyTxStore> {
+        &self.store
+    }
+}
+
+#[cfg(feature = "transcripts")]
+impl TranscriptProvider for TxProvider {
+    fn c_to_genomic(&self, accession: &str, c_pos: i64) -> Result<SequenceLocation, ProviderError> {
+        self.store.c_to_genomic(accession, c_pos)
+    }
+
+    fn n_to_genomic(&self, accession: &str, n_pos: u64) -> Result<SequenceLocation, ProviderError> {
+        self.store.n_to_genomic(accession, n_pos)
+    }
+
+    fn get_chrom_accession(&self, accession: &str) -> Result<String, ProviderError> {
+        self.store.get_chrom_accession(accession)
+    }
+
+    fn get_strand(&self, accession: &str) -> Result<i8, ProviderError> {
+        self.store.get_strand(accession)
+    }
+
+    fn c_to_genomic_full(
+        &self,
+        accession: &str,
+        c_pos: i64,
+        offset: i64,
+        is_cds_end: bool,
+    ) -> Result<SequenceLocation, ProviderError> {
+        self.store.c_to_genomic_full(accession, c_pos, offset, is_cds_end)
+    }
+
+    fn n_to_genomic_full(
+        &self,
+        accession: &str,
+        n_pos: i64,
+        offset: i64,
+    ) -> Result<SequenceLocation, ProviderError> {
+        self.store.n_to_genomic_full(accession, n_pos, offset)
+    }
+
+    fn gene_to_mane_accession(&self, gene: &str) -> Option<String> {
+        self.store.gene_to_mane_accession(gene)
     }
 }

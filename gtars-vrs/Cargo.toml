@@ -9,11 +9,18 @@ repository = "https://github.com/databio/gtars"
 [features]
 # Filesystem/VCF path (default): pulls refget's filesystem+http subset, the
 # BGZF-parallel VCF pipeline, and the mutable `&mut RefgetStore` HGVS entries.
+# Also enables `transcripts` (native HGVS/VCF path needs the full transcript store).
 default = ["filesystem"]
-filesystem = ["gtars-refget/filesystem", "gtars-refget/http", "dep:crossbeam-channel"]
-# WASM/browser path: in-memory refget only. Compiles the readonly HGVS->VRS
-# bridge, parser, normalize, models, and the g.-only NoTranscriptProvider.
-wasm = []
+filesystem = ["gtars-refget/filesystem", "gtars-refget/http", "transcripts", "dep:crossbeam-channel"]
+# WASM/browser path: in-memory refget only. Enables `transcripts` (the WASM-safe
+# transcript CORE) so TxProvider compiles on the WASM target without pulling
+# filesystem/mmap. The actual wiring of a real provider into the WASM binding
+# is a separate plan.
+wasm = ["transcripts"]
+# WASM-safe transcript store CORE + the TxProvider impl. No mmap, no std::fs.
+# Enabling `transcripts` alone (without `filesystem`) is the WASM config.
+# `filesystem` also enables `transcripts` for the native path.
+transcripts = ["gtars-refget/transcripts"]
 
 [dependencies]
 # Workspace dependencies
@@ -24,7 +31,7 @@ thiserror = { workspace = true }
 
 # Fast digest path (avoid serde per-variant in hot loop)
 sha2 = "0.10.7"
-base64-url = "2.0.0"
+base64-url = { workspace = true }
 itoa = "1.0"
 
 # Bounded channels for the BGZF-block-parallel reader/worker/collector pipeline.
@@ -41,8 +48,4 @@ serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 csv = { workspace = true }
 rstest = { workspace = true }
-base64-url = "2.0.0"
-# Dev-only: needed for synthetic HGVS test harness (test_hgvs_synthetic.rs).
-# This creates a dev-dep cycle (reftx with `vrs` feature path-depends on
-# gtars-vrs) but Cargo permits it for dev-dependencies.
-gtars-reftx = { path = "../gtars-reftx", features = ["vrs"] }
+base64-url = { workspace = true }

@@ -300,8 +300,9 @@ impl ReadonlyRefgetStore {
     }
 
     /// Test-only: shrink the partial-read fd-cache to a tiny capacity so the
-    /// eviction/reopen path is exercised deterministically.
-    #[cfg(test)]
+    /// eviction/reopen path is exercised deterministically. Only used by the
+    /// filesystem-gated partial-read tests.
+    #[cfg(all(test, feature = "filesystem"))]
     pub(crate) fn set_seq_fd_cache_cap_for_test(&self, cap: usize) {
         let mut cache = self.seq_fd_cache.lock().unwrap();
         *cache = FdCache::new(cap);
@@ -487,6 +488,18 @@ impl ReadonlyRefgetStore {
     pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
+
+        // CONTRACT: ingested sequence bytes are ASCII (the refget digest and the
+        // on-the-fly decode paths assume one byte == one residue). Enforced in
+        // debug builds only to keep the ingestion hot path allocation/branch
+        // free in release.
+        debug_assert!(
+            match &sr {
+                SequenceRecord::Full { sequence, .. } => sequence.is_ascii(),
+                SequenceRecord::Stub(_) => true,
+            },
+            "add_sequence_record: sequence bytes must be ASCII"
+        );
 
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(());

@@ -1,27 +1,91 @@
 //! Layer-2 only mapper-correctness test (no VRS dependency).
 //!
-//! Iterates `tests/data/hgvs/synthetic/cases.tsv` (symlink to the
-//! gtars-vrs fixture), filters to non-genomic, non-error c./n. cases,
-//! and asserts that `CoordinateMapper::{c_to_g_full, n_to_g_full}`
-//! produces the same genomic coordinate the generator recorded.
+//! Iterates `tests/data/hgvs/synthetic/cases.tsv` (symlink to the gtars-vrs
+//! fixture), filters to non-genomic, non-error c./n. cases, and asserts that
+//! `CoordinateMapper::{c_to_g_full, n_to_g_full}` produces the same genomic
+//! coordinate the generator recorded.
 //!
-//! This test exists so a reftx-only contributor can run mapper
-//! correctness tests without pulling in the gtars-vrs crate. It parses
-//! the HGVS string with a tiny regex-free splitter sufficient for the
-//! synthetic corpus's narrow shape (no whitespace, fixed punctuation).
+//! This test runs against the WASM-SAFE CORE only: it builds the `.reftx` byte
+//! image in memory (the small serializer below mirrors the native builder's
+//! record format) and constructs the store via `ReadonlyTxStore::from_bytes`.
+//! It therefore compiles and runs under `--features transcripts` WITHOUT
+//! `filesystem`, giving the core direct coverage. (Reading the fixture files
+//! from disk happens in the test harness via `std::fs`, which is always
+//! available to tests regardless of crate feature gating.)
+#![cfg(feature = "transcripts")]
 
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use gtars_reftx::mapper::CoordinateMapper;
-use gtars_reftx::{TxStore, TxStoreBuilder};
+use gtars_refget::{
+    build_reftx_bytes_in_memory, CoordinateMapper, Exon, ManeStatus, ReadonlyTxStore, Strand,
+    Transcript,
+};
 
 const CHROM_NAME: &str = "chr_synth";
-// Hard-coded chromosome digest: derived independently from the
-// synthetic genome (sha512t24u of the 30000-byte sequence). The test
-// regenerates it from the FASTA at runtime instead of hard-coding it,
-// to stay in sync with the generator's seed.
+
+// ----------------------------------------------------------------------------
+// cdot JSON ingest (test-only; parses the synthetic fixture into Transcripts).
+// ----------------------------------------------------------------------------
+
+fn ingest_cdot(path: &PathBuf, chrom_name: &str, chrom_digest: [u8; 24]) -> Vec<Transcript> {
+    let raw = fs::read_to_string(path).expect("read cdot json");
+    let json: serde_json::Value = serde_json::from_str(&raw).expect("parse cdot json");
+    let txs = json
+        .get("transcripts")
+        .and_then(|v| v.as_object())
+        .expect("transcripts object");
+
+    let mut out = Vec::new();
+    for (_, tx) in txs {
+        let contig = tx.get("contig").and_then(|v| v.as_str()).unwrap_or("");
+        if contig != chrom_name {
+            continue;
+        }
+        let strand = match tx.get("strand").and_then(|v| v.as_i64()).unwrap_or(0) {
+            1 => Strand::Forward,
+            -1 => Strand::Reverse,
+            _ => continue,
+        };
+        let exons: Vec<Exon> = tx
+            .get("exons")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| {
+                        let pair = e.as_array()?;
+                        let s = pair.first()?.as_u64()? as u32;
+                        let en = pair.get(1)?.as_u64()? as u32;
+                        Some(Exon { start: s, end: en })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if exons.is_empty() {
+            continue;
+        }
+        out.push(Transcript {
+            accession: tx.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            gene: tx
+                .get("gene_name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            chrom_digest,
+            strand,
+            cds_start: tx.get("cds_start").and_then(|v| v.as_u64()).map(|v| v as u32),
+            cds_end: tx.get("cds_end").and_then(|v| v.as_u64()).map(|v| v as u32),
+            exons,
+            mane: ManeStatus::default(),
+        });
+    }
+    out
+}
+
+// ----------------------------------------------------------------------------
+// Fixture helpers
+// ----------------------------------------------------------------------------
 
 #[derive(Debug, Clone)]
 struct Case {
@@ -63,7 +127,7 @@ fn parse_cases() -> Vec<Case> {
     rows
 }
 
-/// Compute SHA-512/24 base64-url digest of the FASTA's first sequence.
+/// Compute SHA-512/24 digest of the FASTA's first sequence.
 fn synthetic_chrom_digest() -> [u8; 24] {
     use std::io::Read;
     let mut buf = Vec::new();
@@ -85,25 +149,16 @@ fn synthetic_chrom_digest() -> [u8; 24] {
     out
 }
 
-fn build_txstore() -> Arc<gtars_reftx::ReadonlyTxStore> {
+fn build_txstore() -> Arc<ReadonlyTxStore> {
     let dir = synthetic_dir();
     let cdot_path = dir.join("synthetic_transcripts.json");
-    let tmp = tempfile::tempdir().unwrap();
-    let bin_path = tmp.path().join("synth.reftx");
-
-    let mut builder = TxStoreBuilder::new();
-    builder.add_chrom_mapping(CHROM_NAME, synthetic_chrom_digest());
-    let n = builder.ingest_cdot(&cdot_path).expect("ingest cdot");
-    assert!(n >= 5);
-    builder.build(&bin_path).unwrap();
-
-    let store = Arc::new(TxStore::open(&bin_path).unwrap().into_readonly());
-    std::mem::forget(tmp); // keep mmap alive
-    store
+    let transcripts = ingest_cdot(&cdot_path, CHROM_NAME, synthetic_chrom_digest());
+    assert!(transcripts.len() >= 5);
+    let bytes = build_reftx_bytes_in_memory(&transcripts).unwrap();
+    Arc::new(ReadonlyTxStore::from_bytes(bytes).unwrap())
 }
 
 /// Parse a synthetic HGVS string of the form `<acc>:<g|c|n>.<rest>`.
-/// Returns (accession, ref_type, c_pos_or_n_pos, intron_offset, is_cds_end).
 fn parse_synth_hgvs(s: &str) -> Option<(String, char, i64, i64, bool)> {
     let (acc, rest) = s.split_once(':')?;
     let bytes = rest.as_bytes();
@@ -117,17 +172,10 @@ fn parse_synth_hgvs(s: &str) -> Option<(String, char, i64, i64, bool)> {
     if bytes[1] != b'.' {
         return None;
     }
-    // Skip ranges (ins/del/dup spanning two positions). The position
-    // part appears before any edit suffix; if `_` appears anywhere in
-    // `rest` it is a range we don't handle in this layer-2 mapper test.
     if rest.contains('_') {
         return None;
     }
-    // After "X.", parse position. Stop at the first edit indicator
-    // (A>T, del, ins, dup, delins, =).
     let after = &rest[2..];
-    // Find where edit starts: scan for one of the markers.
-    // Acceptable position chars: digits, +, -, *, _ (range — synthetic uses only single positions for c./n.)
     let mut pos_end = 0;
     let mut iter = after.char_indices().peekable();
     while let Some((i, c)) = iter.peek().copied() {
@@ -140,7 +188,6 @@ fn parse_synth_hgvs(s: &str) -> Option<(String, char, i64, i64, bool)> {
     }
     let pos_str = &after[..pos_end];
 
-    // Check for `_` indicating range — we only handle single-positions in this test.
     if pos_str.is_empty() || pos_str.contains('_') {
         return None;
     }
@@ -151,9 +198,6 @@ fn parse_synth_hgvs(s: &str) -> Option<(String, char, i64, i64, bool)> {
         is_cds_end = true;
         s2 = rest;
     }
-    // Split into base and offset.
-    // Base may have a leading '-' for c.-N. Find the offset separator: first
-    // '+' or '-' that is NOT at index 0.
     let mut sep = None;
     for (i, c) in s2.char_indices() {
         if i == 0 {
@@ -194,7 +238,7 @@ fn synthetic_mapper_layer2() {
         }
         let parsed = match parse_synth_hgvs(&case.hgvs_string) {
             Some(p) => p,
-            None => continue, // skip ranges (del/ins/dup) for layer-2 test
+            None => continue,
         };
         let (acc, rt, base, off, is_end) = parsed;
         if acc != case.transcript {
@@ -231,7 +275,11 @@ fn synthetic_mapper_layer2() {
             eprintln!("{}", f);
         }
     }
-    eprintln!("layer-2 mapper test: {} cases checked, {} failures", checked, failures.len());
+    eprintln!(
+        "layer-2 mapper test: {} cases checked, {} failures",
+        checked,
+        failures.len()
+    );
     assert!(failures.is_empty(), "layer-2 mapper failures (see eprintln above)");
     assert!(checked >= 10, "expected to check at least 10 c./n. cases");
 }
@@ -245,13 +293,11 @@ fn synthetic_mapper_negative_cases() {
     let mut failures = vec![];
     let mut known_gaps = vec![];
     for case in &cases {
-        // Only mapper-level negative cases (skip ParseError, which the
-        // mapper never sees because the parser rejects upstream).
         if case.expected_error.is_empty() || case.expected_error == "ParseError" {
             continue;
         }
         if case.ref_type == "g" {
-            continue; // g. negative cases are out-of-bounds at refget level
+            continue;
         }
         let parsed = match parse_synth_hgvs(&case.hgvs_string) {
             Some(p) => p,
@@ -264,11 +310,6 @@ fn synthetic_mapper_negative_cases() {
             _ => continue,
         };
         if result.is_ok() {
-            // Known mapper gap: `apply_offset_to_tx_pos` does not validate
-            // that |intron_offset| <= intron_length; it blindly shifts the
-            // genomic anchor into (or beyond) the next exon. Plan 10 flags
-            // this as a real bug to fix; until then the synthetic corpus
-            // documents the expected behavior and this test soft-warns.
             if case.expected_error == "IntronOffsetTooLarge" {
                 known_gaps.push(format!(
                     "KNOWN MAPPER GAP: {} ({}) — mapper accepted intronic offset \

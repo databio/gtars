@@ -18,13 +18,13 @@ members = [
     "gtars-fragsplit",
     "gtars-scoring",
     "gtars-vrs",
-    "gtars-reftx",
     "gtars",
     "gtars-node",
 ]
 
 [workspace.dependencies]
 anyhow = "1.0.82"
+base64-url = "3.0"
 thiserror = "2.0.12"
 fxhash = "0.2.1"
 serde = { version = "1.0.203", features=["derive"] }

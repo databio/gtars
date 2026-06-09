@@ -22,6 +22,13 @@ use crate::normalize::{RefView, normalize_ref};
 pub use crate::vcf_core::{VrsResult, is_real_alt, parse_vcf_record};
 use crate::vcf_core::{compute_vrs_ids_streaming_readonly_from_reader, read_vcf_line, ref_view_for};
 
+/// Record the first error encountered, ignoring subsequent ones.
+fn record_first_err(slot: &mut Option<anyhow::Error>, e: anyhow::Error) {
+    if slot.is_none() {
+        *slot = Some(e);
+    }
+}
+
 /// Detect a BGZF stream by inspecting the first gzip member's header for the
 /// BGZF `BC` extra subfield. Reads 18 bytes and rewinds to the start. If the
 /// read is short or the bytes don't match, we assume plain gzip.
@@ -41,11 +48,21 @@ fn is_bgzf(file: &mut File) -> Result<bool> {
     Ok(fextra && buf[12] == b'B' && buf[13] == b'C')
 }
 
-/// Open a VCF file, auto-detecting gzip/bgzf compression.
+/// Open a VCF file, auto-detecting gzip/bgzf compression by byte-sniffing the
+/// gzip magic bytes (`0x1f 0x8b`) rather than the file extension. This matches
+/// the detection used elsewhere (see [`is_bgzf`]) and correctly handles
+/// gzip-compressed files that lack a `.gz`/`.bgz` extension (and plain files
+/// that carry one).
 fn open_vcf(path: &str) -> Result<Box<dyn BufRead>> {
-    let file = File::open(path).context(format!("Failed to open VCF: {}", path))?;
+    let mut file = File::open(path).context(format!("Failed to open VCF: {}", path))?;
     let capacity = 256 * 1024; // 256KB buffer for large VCF files
-    if path.ends_with(".gz") || path.ends_with(".bgz") {
+
+    let mut magic = [0u8; 2];
+    let n = file.read(&mut magic)?;
+    file.seek(SeekFrom::Start(0))?;
+    let is_gzip = n == 2 && magic[0] == 0x1f && magic[1] == 0x8b;
+
+    if is_gzip {
         Ok(Box::new(BufReader::with_capacity(
             capacity,
             MultiGzDecoder::new(file),
@@ -794,16 +811,11 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
         let reader_handle = s.spawn(move || -> Result<()> {
             let mut reader = BufReader::with_capacity(1 << 20, file);
             let mut batch_id: usize = 0;
-            loop {
-                match read_raw_bgzf_block(&mut reader)? {
-                    Some(block) => {
-                        if block_tx.send((batch_id, block)).is_err() {
-                            return Ok(());
-                        }
-                        batch_id += 1;
-                    }
-                    None => break,
+            while let Some(block) = read_raw_bgzf_block(&mut reader)? {
+                if block_tx.send((batch_id, block)).is_err() {
+                    return Ok(());
                 }
+                batch_id += 1;
             }
             Ok(())
         });
@@ -864,9 +876,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                 // line completes when a later block produces its first `\n`.
                 for r in block.results {
                     if let Err(e) = r {
-                        if first_err.is_none() {
-                            *first_err = Some(e);
-                        }
+                        record_first_err(first_err, e);
                     }
                 }
                 prev_tail.extend_from_slice(&block.tail_fragment);
@@ -895,9 +905,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                             *count += 1;
                         }
                         Err(e) => {
-                            if first_err.is_none() {
-                                *first_err = Some(e);
-                            }
+                            record_first_err(first_err, e);
                         }
                     }
                 }
@@ -909,9 +917,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                         *count += 1;
                     }
                     Err(e) => {
-                        if first_err.is_none() {
-                            *first_err = Some(e);
-                        }
+                        record_first_err(first_err, e);
                     }
                 }
             }
@@ -972,9 +978,7 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
                         count += 1;
                     }
                     Err(e) => {
-                        if first_err.is_none() {
-                            first_err = Some(e);
-                        }
+                        record_first_err(&mut first_err, e);
                     }
                 }
             }
@@ -984,14 +988,13 @@ pub fn compute_vrs_ids_parallel_bgzf_encoded_with_sink<F: FnMut(VrsResult)>(
         match reader_handle.join() {
             Ok(Ok(())) => {}
             Ok(Err(e)) => {
-                if first_err.is_none() {
-                    first_err = Some(e);
-                }
+                record_first_err(&mut first_err, e);
             }
             Err(_) => {
-                if first_err.is_none() {
-                    first_err = Some(anyhow::anyhow!("BGZF reader thread panicked"));
-                }
+                record_first_err(
+                    &mut first_err,
+                    anyhow::anyhow!("BGZF reader thread panicked"),
+                );
             }
         }
         for h in worker_handles {

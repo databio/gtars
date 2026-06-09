@@ -378,6 +378,64 @@ mod tests {
     use super::*;
     use crate::digest::encode_sequence;
     use crate::digest::{AlphabetType, lookup_alphabet};
+
+    #[test]
+    fn test_decode_handles_encoded_data() {
+        let sequence = b"ACGT";
+        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord::Full {
+            metadata: SequenceMetadata {
+                name: "test_seq".to_string(),
+                description: None,
+                length: 4,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+                fai: None,
+            },
+            sequence: std::sync::Arc::new(encoded_data),
+        };
+
+        let decoded = record.decode().expect("Should decode encoded data");
+        assert_eq!(decoded, "ACGT");
+    }
+
+    #[test]
+    fn test_digest_sequence_basic() {
+        let seq = digest_sequence("test_seq", b"ACGTACGT");
+        assert_eq!(seq.metadata().name, "test_seq");
+        assert_eq!(seq.metadata().length, 8);
+        assert!(!seq.metadata().sha512t24u.is_empty());
+        assert!(seq.is_loaded());
+        assert_eq!(seq.sequence().unwrap(), b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_sequence_metadata_disk_size() {
+        use crate::store::StorageMode;
+
+        let metadata = SequenceMetadata {
+            name: "test".to_string(),
+            description: None,
+            length: 1000,
+            sha512t24u: "test".to_string(),
+            md5: "test".to_string(),
+            alphabet: AlphabetType::Dna2bit,
+            fai: None,
+        };
+
+        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
+        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
+    }
+}
+
+// FASTA-based tests require the `filesystem` feature (digest_fasta/load_fasta,
+// SequenceCollectionExt::from_path_no_cache/write_fasta).
+#[cfg(all(test, feature = "filesystem"))]
+mod fasta_tests {
+    use super::*;
     use crate::fasta::{digest_fasta, load_fasta};
 
     #[test]
@@ -406,29 +464,6 @@ mod tests {
             let decoded = seq_record.decode().expect("decode() should return Some");
             assert_eq!(decoded, *expected_seq);
         }
-    }
-
-    #[test]
-    fn test_decode_handles_encoded_data() {
-        let sequence = b"ACGT";
-        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
-        let encoded_data = encode_sequence(sequence, alphabet);
-
-        let record = SequenceRecord::Full {
-            metadata: SequenceMetadata {
-                name: "test_seq".to_string(),
-                description: None,
-                length: 4,
-                sha512t24u: "test_digest".to_string(),
-                md5: "test_md5".to_string(),
-                alphabet: AlphabetType::Dna2bit,
-                fai: None,
-            },
-            sequence: std::sync::Arc::new(encoded_data),
-        };
-
-        let decoded = record.decode().expect("Should decode encoded data");
-        assert_eq!(decoded, "ACGT");
     }
 
     #[test]
@@ -481,16 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn test_digest_sequence_basic() {
-        let seq = digest_sequence("test_seq", b"ACGTACGT");
-        assert_eq!(seq.metadata().name, "test_seq");
-        assert_eq!(seq.metadata().length, 8);
-        assert!(!seq.metadata().sha512t24u.is_empty());
-        assert!(seq.is_loaded());
-        assert_eq!(seq.sequence().unwrap(), b"ACGTACGT");
-    }
-
-    #[test]
     fn test_digest_sequence_matches_fasta_digest() {
         let seqcol =
             load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
@@ -503,24 +528,6 @@ mod tests {
             fasta_seq.metadata().sha512t24u
         );
         assert_eq!(prog_seq.metadata().md5, fasta_seq.metadata().md5);
-    }
-
-    #[test]
-    fn test_sequence_metadata_disk_size() {
-        use crate::store::StorageMode;
-
-        let metadata = SequenceMetadata {
-            name: "test".to_string(),
-            description: None,
-            length: 1000,
-            sha512t24u: "test".to_string(),
-            md5: "test".to_string(),
-            alphabet: AlphabetType::Dna2bit,
-            fai: None,
-        };
-
-        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
-        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
     }
 
     #[test]

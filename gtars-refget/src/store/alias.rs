@@ -641,6 +641,7 @@ mod tests {
     ///
     /// Returns `(base_url, shutdown_fn)` where `shutdown_fn()` signals the
     /// server to stop.
+    #[cfg(all(feature = "filesystem", feature = "http"))]
     fn start_file_server(serve_dir: std::path::PathBuf) -> (String, impl FnOnce()) {
         use std::io::{Read as _, Write as _};
         use std::net::TcpListener;
@@ -847,6 +848,7 @@ mod tests {
 
     // --- Store-level alias integration tests ---
 
+    #[cfg(feature = "filesystem")]
     fn copy_test_fasta(temp_dir: &std::path::Path, name: &str) -> std::path::PathBuf {
         let src = format!("../tests/data/fasta/{}", name);
         let dst = temp_dir.join(name);
@@ -884,6 +886,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_store_collection_aliases() {
         let temp = tempdir().unwrap();
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
@@ -922,6 +925,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_store_alias_persistence() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1050,6 +1054,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_get_collection_metadata_by_alias() {
         let temp = tempdir().unwrap();
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
@@ -1064,6 +1069,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_get_collection_by_alias_loads() {
         let temp = tempdir().unwrap();
         let fasta_path = copy_test_fasta(temp.path(), "base.fa");
@@ -1091,6 +1097,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fasta_load_with_namespace_aliases() {
         let dir = tempdir().unwrap();
         let fasta = dir.path().join("test.fa");
@@ -1121,6 +1128,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_fasta_load_without_namespaces_no_aliases() {
         let dir = tempdir().unwrap();
         let fasta = dir.path().join("test.fa");
@@ -1136,6 +1144,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_remove_collection_cleans_up_aliases() {
         let dir = tempdir().unwrap();
         let fasta = dir.path().join("test.fa");
@@ -1155,6 +1164,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_manifest_namespace_roundtrip() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1188,6 +1198,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_manifest_empty_namespaces_not_serialized() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1206,6 +1217,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_old_rgstore_json_without_namespaces() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1230,6 +1242,7 @@ mod tests {
     /// required). Previously the alias TSV was persisted but the manifest was
     /// left stale, so remote/HTTP clients could never discover the namespace.
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_alias_add_refreshes_manifest() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1271,6 +1284,7 @@ mod tests {
     /// resolve. This is the failure that used to be silently masked by scanning
     /// the aliases/ directory; making it visible locally is the point.
     #[test]
+    #[cfg(feature = "filesystem")]
     fn test_stale_manifest_hides_aliases_locally() {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1309,6 +1323,7 @@ mod tests {
     /// Pull an alias file that does NOT exist locally yet.
     /// KeepOurs: first pull should count as `pulled`, second pull as `skipped`.
     #[test]
+    #[cfg(all(feature = "filesystem", feature = "http"))]
     fn test_keep_ours_alias_first_pull_counts_as_pulled() {
         // "Remote" store: a directory with pre-built alias TSV files.
         // pull_aliases(Some("ncbi"), ...) pulls BOTH sequences and collections

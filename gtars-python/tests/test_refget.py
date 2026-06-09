@@ -254,10 +254,11 @@ class TestRefget:
 
             collection_digest = result.digest
 
-            chr1_sha = sha512t24u_digest(b"ATGCATGCATGC")
-            chr1_md5 = md5_digest(b"ATGCATGCATGC")
-            chr2_sha = sha512t24u_digest(b"GGGGAAAA")
-            chr2_md5 = md5_digest(b"GGGGAAAA")
+            # Smoke-test the digest bindings (values not asserted here).
+            sha512t24u_digest(b"ATGCATGCATGC")
+            md5_digest(b"ATGCATGCATGC")
+            sha512t24u_digest(b"GGGGAAAA")
+            md5_digest(b"GGGGAAAA")
 
             # Use only valid entries - errors now propagate instead of being silently skipped
             bed_content = "chr1\t0\t5\nchr1\t8\t12\nchr2\t0\t4"
@@ -273,11 +274,11 @@ class TestRefget:
             with open(temp_output_fa_path, "r") as f:
                 output_fa_content = f.read()
 
-            expected_fa_content = f""">chr1 12 dna2bit {chr1_sha} {chr1_md5}
-ATGCAATGC
->chr2 8 dna2bit {chr2_sha} {chr2_md5}
-GGGG
-"""
+            # export_fasta_from_regions writes one record per BED region with a
+            # `>{chrom}:{start}-{end}` header (see gtars-refget export.rs, PR #259).
+            expected_fa_content = (
+                ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n"
+            )
 
             assert output_fa_content.strip() == expected_fa_content.strip(), (
                 "Output FASTA file content mismatch"

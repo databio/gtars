@@ -1,17 +1,18 @@
-//! Builder for creating transcript stores from cdot JSON.
+//! Builder for creating transcript stores from cdot JSON (native-only).
+//!
+//! Gated behind `filesystem`: writes a `.reftx` file via `std::fs`.
 
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::{BufRead, BufReader, BufWriter, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::fs::{File, OpenOptions};
+use std::io::{BufRead, BufReader, Write};
+use std::path::{Path, PathBuf};
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use serde::Deserialize;
 
-use crate::models::{Exon, ManeStatus, Strand, Transcript};
-use crate::store::{fnv1a_64, HEADER_SIZE, MAGIC, NONE_SENTINEL, VERSION};
+use crate::transcripts::models::{Exon, ManeStatus, Strand, Transcript};
+use crate::transcripts::store::build_reftx_bytes;
 
-const WRITE_BUFFER_SIZE: usize = 256 * 1024;
 const READ_BUFFER_SIZE: usize = 256 * 1024;
 
 /// cdot JSON transcript format (subset of fields we need).
@@ -39,7 +40,6 @@ pub struct TxStoreBuilder {
     chrom_to_digest: HashMap<String, [u8; 24]>,
     /// Map from transcript accession (versioned or base) to MANE flags byte.
     mane_flags: HashMap<String, u8>,
-    record_buf: Vec<u8>,
 }
 
 impl TxStoreBuilder {
@@ -49,7 +49,6 @@ impl TxStoreBuilder {
             transcripts: Vec::new(),
             chrom_to_digest: HashMap::new(),
             mane_flags: HashMap::new(),
-            record_buf: Vec::with_capacity(512),
         }
     }
 
@@ -64,12 +63,11 @@ impl TxStoreBuilder {
     /// Returns the number of accession→flags entries inserted.
     pub fn load_mane_summary<P: AsRef<Path>>(&mut self, path: P) -> Result<usize> {
         let file = File::open(path.as_ref())?;
-        let reader: Box<dyn BufRead> =
-            if path.as_ref().extension().map_or(false, |e| e == "gz") {
-                Box::new(BufReader::new(flate2::read::GzDecoder::new(file)))
-            } else {
-                Box::new(BufReader::new(file))
-            };
+        let reader: Box<dyn BufRead> = if path.as_ref().extension().is_some_and(|e| e == "gz") {
+            Box::new(BufReader::new(flate2::read::GzDecoder::new(file)))
+        } else {
+            Box::new(BufReader::new(file))
+        };
 
         let mut lines = reader.lines();
         let header = loop {
@@ -149,7 +147,7 @@ impl TxStoreBuilder {
         let file = File::open(path.as_ref())?;
 
         let reader: Box<dyn std::io::Read> =
-            if path.as_ref().extension().map_or(false, |e| e == "gz") {
+            if path.as_ref().extension().is_some_and(|e| e == "gz") {
                 Box::new(flate2::read::GzDecoder::new(BufReader::with_capacity(
                     READ_BUFFER_SIZE,
                     file,
@@ -219,110 +217,91 @@ impl TxStoreBuilder {
         self.transcripts.is_empty()
     }
 
-    /// Build and write the binary store to disk.
+    /// Build and write the binary `.reftx` store to disk atomically.
+    ///
+    /// Uses refget's write-once + atomic-publish discipline so any reader
+    /// (especially the mmap backend, whose `unsafe { Mmap::map }` requires the
+    /// file to be immutable) only ever observes a complete file:
+    ///
+    /// 1. Acquire an advisory build lock on a `<dest>.lock` sidecar (serializes
+    ///    BUILDERS only — readers never need it since they open only a fully
+    ///    published, immutable file).
+    /// 2. Build the full `.reftx` byte image in memory via the shared
+    ///    [`build_reftx_bytes`] encoder (the ONE encoder; header already
+    ///    populated, no write-then-seek-back patch needed) and write it to a
+    ///    temp file in the SAME directory as the destination (so the final
+    ///    rename is same-filesystem and atomic).
+    /// 3. `sync_all()` to force bytes+metadata to disk BEFORE publishing.
+    /// 4. `NamedTempFile::persist` to atomically `rename(2)` onto the
+    ///    destination: the dest either is unchanged or flips wholesale to the
+    ///    complete file — never a torn intermediate.
     pub fn build<P: AsRef<Path>>(&mut self, output: P) -> Result<()> {
         if self.transcripts.is_empty() {
             return Err(anyhow!("No transcripts to write"));
         }
 
-        self.transcripts
-            .sort_by_key(|t| fnv1a_64(t.accession.as_bytes()));
-
-        let file = File::create(output)?;
-        let mut writer = BufWriter::with_capacity(WRITE_BUFFER_SIZE, file);
-
-        let header_placeholder = [0u8; HEADER_SIZE];
-        writer.write_all(&header_placeholder)?;
-
-        let records_start = HEADER_SIZE as u64;
-        let mut index_entries: Vec<(u64, u64)> = Vec::with_capacity(self.transcripts.len());
-        let mut mane_entries: Vec<(u64, u64)> = Vec::new();
-        let mut current_offset = records_start;
-
-        // Take the record buffer out of self so we can simultaneously iterate
-        // self.transcripts immutably and mutate the buffer.
-        let mut record_buf = std::mem::take(&mut self.record_buf);
-        for tx in &self.transcripts {
-            let hash = fnv1a_64(tx.accession.as_bytes());
-            index_entries.push((hash, current_offset));
-
-            if tx.mane.mane_select {
-                let gene_hash = fnv1a_64(tx.gene.to_uppercase().as_bytes());
-                mane_entries.push((gene_hash, current_offset));
-            }
-
-            serialize_record_into(&mut record_buf, tx);
-            writer.write_all(&record_buf)?;
-            current_offset += record_buf.len() as u64;
-        }
-        self.record_buf = record_buf;
-
-        let index_offset = current_offset;
-        for (hash, offset) in &index_entries {
-            writer.write_all(&hash.to_le_bytes())?;
-            writer.write_all(&offset.to_le_bytes())?;
-            current_offset += 16;
-        }
-
-        // MANE gene index: 0 if empty (sentinel for "no MANE info").
-        let mane_index_offset = if mane_entries.is_empty() {
-            0u64
-        } else {
-            mane_entries.sort_by_key(|(h, _)| *h);
-            let off = current_offset;
-            writer.write_all(&(mane_entries.len() as u64).to_le_bytes())?;
-            for (hash, offset) in &mane_entries {
-                writer.write_all(&hash.to_le_bytes())?;
-                writer.write_all(&offset.to_le_bytes())?;
-            }
-            off
+        let dest = output.as_ref();
+        let dest_parent = dest.parent().filter(|p| !p.as_os_str().is_empty());
+        let dest_dir: PathBuf = match dest_parent {
+            Some(p) => p.to_path_buf(),
+            None => PathBuf::from("."),
         };
 
-        writer.flush()?;
+        // (1) Advisory build lock (serializes concurrent builders only).
+        let _lock = BuildLock::acquire(dest)?;
 
-        let mut file = writer.into_inner()?;
-        file.seek(SeekFrom::Start(0))?;
+        // (2) Assemble the complete byte image with the shared encoder (header
+        // already populated) and write it into a temp file in the dest dir.
+        let bytes = build_reftx_bytes(&self.transcripts)?;
+        let mut tmp = tempfile::NamedTempFile::new_in(&dest_dir)
+            .with_context(|| format!("creating temp file in {:?}", dest_dir))?;
+        {
+            let file = tmp.as_file_mut();
+            file.write_all(&bytes)?;
+            // (3) Durability: force bytes+metadata to disk BEFORE publishing.
+            file.sync_all()?;
+        }
 
-        let mut header = [0u8; HEADER_SIZE];
-        header[0..4].copy_from_slice(MAGIC);
-        header[4..8].copy_from_slice(&VERSION.to_le_bytes());
-        header[8..16].copy_from_slice(&(self.transcripts.len() as u64).to_le_bytes());
-        header[16..24].copy_from_slice(&index_offset.to_le_bytes());
-        header[24..32].copy_from_slice(&mane_index_offset.to_le_bytes());
-        // bytes [32..40] reserved (already zero)
-
-        file.write_all(&header)?;
+        // (4) Atomically publish via rename(2) onto the destination.
+        tmp.persist(dest)
+            .map_err(|e| anyhow!("failed to atomically publish {:?}: {}", dest, e.error))?;
 
         Ok(())
     }
-
 }
 
-/// Serialize a transcript record into a reusable buffer.
-fn serialize_record_into(buf: &mut Vec<u8>, tx: &Transcript) {
-    buf.clear();
+/// Advisory build lock backed by a create-exclusive `<dest>.lock` sidecar.
+///
+/// Portable across platforms (no `flock`/`fs2` dependency): the lock is held
+/// for the lifetime of the guard and the sidecar is removed on drop. Serializes
+/// only concurrent BUILDERS — readers never acquire it because they open only a
+/// fully-published, immutable file.
+struct BuildLock {
+    path: PathBuf,
+}
 
-    buf.push(tx.accession.len() as u8);
-    buf.extend_from_slice(tx.accession.as_bytes());
+impl BuildLock {
+    fn acquire(dest: &Path) -> Result<Self> {
+        let mut path = dest.as_os_str().to_os_string();
+        path.push(".lock");
+        let path = PathBuf::from(path);
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .with_context(|| {
+                format!(
+                    "acquiring build lock {:?} (another builder may be running)",
+                    path
+                )
+            })?;
+        Ok(Self { path })
+    }
+}
 
-    buf.push(tx.gene.len() as u8);
-    buf.extend_from_slice(tx.gene.as_bytes());
-
-    buf.extend_from_slice(&tx.chrom_digest);
-
-    buf.push(tx.strand.to_byte());
-
-    // MANE flags byte (v2 format).
-    buf.push(tx.mane.to_flags_byte());
-
-    buf.extend_from_slice(&tx.cds_start.unwrap_or(NONE_SENTINEL).to_le_bytes());
-    buf.extend_from_slice(&tx.cds_end.unwrap_or(NONE_SENTINEL).to_le_bytes());
-
-    buf.extend_from_slice(&(tx.exons.len() as u16).to_le_bytes());
-
-    for exon in &tx.exons {
-        buf.extend_from_slice(&exon.start.to_le_bytes());
-        buf.extend_from_slice(&exon.end.to_le_bytes());
+impl Drop for BuildLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
     }
 }
 

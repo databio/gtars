@@ -1002,8 +1002,10 @@ impl ReadonlyRefgetStore {
 
         let results: Vec<(SequenceCollectionMetadata, bool)> = results
             .into_iter()
-            .map(|slot| slot.expect("every file index must be finalized"))
-            .collect();
+            .map(|slot| {
+                slot.ok_or_else(|| anyhow!("internal error: a file index was not finalized"))
+            })
+            .collect::<Result<_>>()?;
 
         Ok(results)
     }
@@ -1016,7 +1018,9 @@ impl ReadonlyRefgetStore {
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         let files = [file_path.as_ref().to_path_buf()];
         let mut results = self.add_sequence_collections_from_fastas(&files, opts)?;
-        Ok(results.pop().expect("one file yields one result"))
+        results
+            .pop()
+            .ok_or_else(|| anyhow!("internal error: importing one file yielded no result"))
     }
 
     /// Finalize one collection at `End`: register the collection record, install

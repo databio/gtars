@@ -26,15 +26,11 @@ class ManeStatus:
 class Exon:
     start: int
     end: int
-    cds_start: Optional[int]
-    cds_end: Optional[int]
 
     def __init__(
         self,
         start: int,
         end: int,
-        cds_start: Optional[int] = None,
-        cds_end: Optional[int] = None,
     ) -> None: ...
     def to_dict(self) -> Dict[str, Any]: ...
 

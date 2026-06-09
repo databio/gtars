@@ -1,37 +1,43 @@
-//! High-performance binary transcript store for HGVS coordinate mapping.
+//! Binary transcript store and HGVS coordinate mapper.
 //!
-//! # Overview
-//!
-//! `gtars-reftx` provides a memory-mapped binary transcript store optimized for
-//! HGVS coordinate mapping. Key features:
-//!
-//! - **mmap-friendly**: OS pages in only accessed data
-//! - **O(log n) lookup**: Binary search on sorted hash index
-//! - **~500ns lookup**: After ~1ms cold start
-//! - **Zero-allocation paths**: For batch processing
-//! - **Arc-based concurrency**: Safe multi-threaded access
+//! Mirrors gtars-refget's own core/filesystem split:
+//! - CORE (this `transcripts` feature, all targets, no mmap/fs): `models`,
+//!   `mapper`, the `store` lookup logic, and an in-memory byte-backed transcript
+//!   store built from owned `.reftx` bytes (`ReadonlyTxStore::from_bytes`).
+//! - NATIVE-ONLY (`filesystem`): the file-backed byte backends in `mmap`
+//!   (`TxBytes::Mmap` / `TxBytes::Pread`, opened via `open_mmap` / `open_pread`
+//!   / `open_with_backend`, plus the mmap-backed mutable `TxStore`) and the
+//!   atomic file-writing `builder`. The byte source (`store::TxBytes`) is the
+//!   single place the three backends differ; all lookup logic is
+//!   backend-agnostic and compiles on wasm with only `TxBytes::InMemory`.
 
-pub mod builder;
 pub mod mapper;
 pub mod models;
 pub mod store;
 
-#[cfg(feature = "vrs")]
-pub mod provider;
+#[cfg(feature = "filesystem")]
+pub mod builder;
+#[cfg(feature = "filesystem")]
+pub mod mmap;
 
-#[cfg(feature = "vrs")]
-pub use provider::ReftxProvider;
-
-// Re-exports
-pub use builder::TxStoreBuilder;
 pub use mapper::{CoordinateMapper, CoordinateMapperWriter, MappingError, MappingResult};
 pub use models::{Exon, ManeStatus, Strand, Transcript};
-pub use store::{ReadonlyTxStore, TranscriptRef, TxStore};
+pub use store::{build_reftx_bytes_in_memory, ReadonlyTxStore, TranscriptRef};
 
-#[cfg(test)]
+// Native-only: the mmap-backed mutable store, the file-backed backend selector,
+// and the atomic file-writing builder.
+#[cfg(feature = "filesystem")]
+pub use builder::TxStoreBuilder;
+#[cfg(feature = "filesystem")]
+pub use mmap::{TxBackend, TxStore};
+
+// ============================================================================
+// Native integration-style unit tests (build a file, mmap it).
+// ============================================================================
+
+#[cfg(all(test, feature = "filesystem"))]
 mod tests {
     use super::*;
-    use crate::store::fnv1a_64;
     use tempfile::tempdir;
 
     fn sample_transcript() -> Transcript {
@@ -47,7 +53,7 @@ mod tests {
                 Exon { start: 140726493, end: 140726516 },
                 Exon { start: 140753274, end: 140753393 },
             ],
-            mane: crate::models::ManeStatus { mane_select: true, mane_clinical: false },
+            mane: ManeStatus { mane_select: true, mane_clinical: false },
         }
     }
 
@@ -71,16 +77,6 @@ mod tests {
 
         tx.cds_start = None;
         assert!(!tx.is_coding());
-    }
-
-    #[test]
-    fn test_fnv1a_64_deterministic() {
-        let hash1 = fnv1a_64(b"NM_004333.6");
-        let hash2 = fnv1a_64(b"NM_004333.6");
-        assert_eq!(hash1, hash2);
-
-        let hash3 = fnv1a_64(b"NM_000546.6");
-        assert_ne!(hash1, hash3);
     }
 
     #[test]
@@ -170,13 +166,12 @@ mod tests {
             cds_start: Some(100),
             cds_end: Some(400),
             exons: vec![Exon { start: 50, end: 500 }],
-            mane: crate::models::ManeStatus { mane_select: true, mane_clinical: false },
+            mane: ManeStatus { mane_select: true, mane_clinical: false },
         }
     }
 
     #[test]
     fn test_mane_status_byte_roundtrip() {
-        use crate::models::ManeStatus;
         for byte in 0u8..4 {
             let m = ManeStatus::from_flags_byte(byte);
             assert_eq!(m.to_flags_byte(), byte & 0x03);
@@ -268,10 +263,6 @@ mod tests {
     #[test]
     fn test_c_to_g_full_intronic_forward() {
         // Two exons [50, 100) and [150, 250). CDS = [60, 220).
-        // Last base of exon 1 in tx coords is position 49 (length 50, idx 49).
-        // Forward strand: c.41 (genomic 100? no -- CDS starts at tx pos 10,
-        // so c.41 is tx pos 50, which is first base of exon 2 (genomic 150).
-        // c.40 is tx pos 49, last base of exon 1 (genomic 99).
         let tx = Transcript {
             accession: "NM_T2.1".to_string(),
             gene: "T2".to_string(),

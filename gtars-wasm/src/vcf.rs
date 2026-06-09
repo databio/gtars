@@ -87,6 +87,39 @@ pub fn vcf_to_vrs_ids(
     Ok(count)
 }
 
+// ── VCF + transcript seam (design) ───────────────────────────────────────────
+//
+// Standard VCF rows are GENOMIC (CHROM/POS), so the streaming core
+// (`compute_vrs_ids_streaming_readonly_from_reader`) needs no transcript
+// provider and `vcf_to_vrs_ids` above passes none. The transcript provider only
+// matters for transcript-coordinate inputs (a future VCF dialect or an HGVS
+// column carrying `c.`/`n.`).
+//
+// The seam is designed to mirror the HGVS path exactly: the SAME
+// `TranscriptStore` holder that serves `hgvs_to_vrs_id_with_transcripts` would
+// serve VCF too — one transcript store, one genome store, both reused across the
+// whole file (just as one `RefgetStore` backs the genomic VCF path today).
+//
+// FOLLOW-UP: a transcript-aware VCF batch entry
+//
+//     pub fn vcf_to_vrs_ids_with_transcripts(
+//         store: &RefgetStore,
+//         transcripts: &TranscriptStore,
+//         vcf_text: &str,
+//         on_result: &js_sys::Function,
+//     ) -> Result<usize, JsValue>
+//
+// would thread `transcripts.provider()` into the streaming core. That requires a
+// provider-accepting variant of
+// `compute_vrs_ids_streaming_readonly_from_reader` in gtars-vrs
+// (`gtars-vrs/src/vcf_core.rs`): add a `provider: &dyn TranscriptProvider`
+// parameter, used only where a row's reference type is `c.`/`n.`, and have the
+// existing genomic entry pass `&NoTranscriptProvider`. The streaming core does
+// not yet parse transcript-coordinate references, so that is a non-trivial core
+// change tracked here rather than landed in this gtars-wasm-scoped change; the
+// `TranscriptStore` holder and `provider()` accessor designed in
+// `transcripts.rs` are exactly what that follow-up plugs into.
+
 #[cfg(test)]
 #[cfg(target_arch = "wasm32")]
 mod tests {

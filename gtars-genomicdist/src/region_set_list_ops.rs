@@ -9,15 +9,20 @@ use gtars_core::models::RegionSet;
 
 /// Pairwise Jaccard similarity.
 ///
-/// Pre-reduces each set once (so each pairwise `jaccard` call operates on
-/// already-reduced inputs), then delegates each pair to
-/// [`IntervalSetOps::jaccard`]. Returns a flat Vec<f64> of length N*N in
+/// Pre-reduces each set once (N reduces total) and feeds the already-reduced
+/// sets to each pairwise [`IntervalSetOps::jaccard`] call. Note `jaccard`
+/// re-reduces its inputs internally, so this does NOT skip those reductions
+/// entirely; the win is that `reduce()` on an already-reduced set is cheap and
+/// the O(N^2) `union()` calls in the inner loop operate on reduced inputs.
+/// Without the pre-reduction each raw set would be re-reduced ~N times across
+/// the matrix instead of once. Returns a flat Vec<f64> of length N*N in
 /// row-major order (symmetric matrix with 1.0 on the diagonal).
 pub fn pairwise_jaccard(sets: &[RegionSet]) -> Vec<f64> {
     let n = sets.len();
     let mut matrix = vec![0.0f64; n * n];
 
-    // Pre-reduce all sets once so each pairwise jaccard avoids re-reducing.
+    // Pre-reduce all sets once (see fn-level note on why this still helps even
+    // though `jaccard` re-reduces internally).
     let reduced: Vec<RegionSet> = sets.iter().map(|s| s.reduce()).collect();
 
     // Diagonal
@@ -125,8 +130,13 @@ impl RegionSetListOps for RegionSetList {
         let mut suffix = vec![None; n];
         suffix[n - 1] = Some(self.get(n - 1)?.clone());
         for i in (0..n - 1).rev() {
+            // INVARIANT: the loop fills suffix from n-1 downward, so suffix[i+1]
+            // was set on the previous iteration (or as the seed at n-1); it is
+            // always Some here.
             suffix[i] = Some(self.get(i)?.union(suffix[i + 1].as_ref().unwrap()));
         }
+        // INVARIANT: every index 0..n was assigned Some above (seed at n-1, the
+        // loop covers 0..n-1), so each unwrap is sound.
         let suffix: Vec<RegionSet> = suffix.into_iter().map(|s| s.unwrap()).collect();
 
         let full_union = prefix[n - 1].clone();

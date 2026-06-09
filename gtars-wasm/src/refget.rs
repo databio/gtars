@@ -456,8 +456,14 @@ impl SeqColResult {
 /// const store = new RefgetStore();
 /// const digest = store.add_sequence("chr1", new TextEncoder().encode("ACGT..."));
 /// store.add_alias("NC_000001.11", digest);
-/// // ... hand `store` to vcf_to_vrs_ids(store, vcfText, onResult) (Step 3) ...
+/// // ... hand `store` to vcf_to_vrs_ids(store, vcfText, onResult) ...
 /// ```
+///
+/// The same resident store serves both `g.` (via
+/// [`hgvs_to_vrs_id`](RefgetStore::hgvs_to_vrs_id)) and `c.`/`n.` (via
+/// [`hgvs_to_vrs_id_with_transcripts`](RefgetStore::hgvs_to_vrs_id_with_transcripts),
+/// given a [`TranscriptStore`](crate::transcripts::TranscriptStore)) — exactly
+/// one genome holder backs every reference type.
 #[wasm_bindgen]
 pub struct RefgetStore {
     inner: CoreRefgetStore,
@@ -570,7 +576,9 @@ impl RefgetStore {
     /// resolving the reference against THIS resident store (reusing the loaded
     /// genome — unlike the standalone `hgvs_to_vrs_id`, which builds a one-off
     /// store per call). The referenced sequence must already be ingested
-    /// (`add_sequence` / `add_encoded_sequence`). `c.`/`n.` are rejected (v1).
+    /// (`add_sequence` / `add_encoded_sequence`). Uses a `NoTranscriptProvider`,
+    /// so only `g.` resolves; for `c.`/`n.` use
+    /// [`hgvs_to_vrs_id_with_transcripts`](RefgetStore::hgvs_to_vrs_id_with_transcripts).
     #[wasm_bindgen]
     pub fn hgvs_to_vrs_id(&self, hgvs: &str) -> Result<String, JsValue> {
         gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id_readonly(
@@ -578,6 +586,33 @@ impl RefgetStore {
             &gtars_vrs::provider::NoTranscriptProvider,
             self.inner_readonly(),
             self.name_to_digest(),
+            &mut Vec::new(),
+        )
+        .map_err(|e| JsValue::from_str(&format!("{e}")))
+    }
+
+    /// Convert an HGVS string into a GA4GH VRS allele id, resolving
+    /// transcript-relative (`c.`/`n.`) coordinates and gene-symbol → MANE
+    /// lookups against `transcripts`, while reading reference bases from THIS
+    /// resident genome.
+    ///
+    /// This is the genome-scale path: a caller holding a resident genome (every
+    /// contig ingested) AND a [`TranscriptStore`](crate::transcripts::TranscriptStore)
+    /// can resolve `c.`/`n.` without rebuilding either. The chromosome the
+    /// transcript maps onto must already be resident here (`add_sequence` /
+    /// `add_encoded_sequence`); otherwise the variant cannot resolve.
+    #[wasm_bindgen]
+    pub fn hgvs_to_vrs_id_with_transcripts(
+        &self,
+        hgvs: &str,
+        transcripts: &crate::transcripts::TranscriptStore,
+    ) -> Result<String, JsValue> {
+        gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id_readonly(
+            hgvs,
+            transcripts.provider(),
+            self.inner_readonly(),
+            self.name_to_digest(),
+            &mut Vec::new(),
         )
         .map_err(|e| JsValue::from_str(&format!("{e}")))
     }
@@ -648,6 +683,7 @@ mod tests {
             &gtars_vrs::provider::NoTranscriptProvider,
             store.inner_readonly(),
             store.name_to_digest(),
+            &mut Vec::new(),
         )
         .expect("readonly bridge should succeed")
     }

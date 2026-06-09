@@ -70,6 +70,15 @@ impl ManeStatus {
 }
 
 /// A single exon with genomic coordinates (0-based, half-open).
+///
+/// # Coordinate range limit
+///
+/// `start`/`end` are `u32`, so genomic coordinates are capped at
+/// `u32::MAX` (~4.29 Gb). This is safe for every supported assembly
+/// (the longest GRCh38 contig, chr1, is ~248.96 Mb) but would silently
+/// truncate on a hypothetical genome larger than ~4.3 Gb. Downstream
+/// mapping outputs widen to `u64` (see [`crate::transcripts::mapper`]),
+/// so the limit lives only on the stored exon-coordinate side.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Exon {
     /// Genomic start (0-based, inclusive).
@@ -96,7 +105,7 @@ impl Exon {
 ///
 /// Exons are stored in genomic order (5' to 3' on chromosome), regardless of strand.
 /// For reverse-strand transcripts, transcript coordinates run in reverse genomic order.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Transcript {
     /// Accession with version (e.g., "NM_004333.6").
     pub accession: String,

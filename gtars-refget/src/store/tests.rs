@@ -61,60 +61,13 @@ fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestK
 // =========================================================================
 // Template and path tests (merged parametric)
 // =========================================================================
-
-#[test]
-fn test_expand_template() {
-    let digest = "ABCDEFghijklmnop";
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCDEFghijklmnop.seq"));
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s4/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCD/ABCDEFghijklmnop.seq"));
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/ABCDEFghijklmnop.seq"));
-}
-
-#[test]
-fn test_sanitize_relative_path() {
-    // Rejects traversal
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("../etc/passwd").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../bar").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../../bar").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("..").is_err());
-
-    // Rejects absolute
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("/etc/passwd").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
-
-    // Accepts valid
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("rgstore.json").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
-}
+// `test_expand_template`, `test_sanitize_relative_path`, and `test_mode_basics`
+// are non-filesystem tests; they live in the always-compiled `nofs_tests`
+// module in `store/mod.rs` so they run under `--no-default-features`.
 
 // =========================================================================
 // Mode tests
 // =========================================================================
-
-#[test]
-fn test_mode_basics() {
-    let mut store = RefgetStore::in_memory();
-
-    assert_eq!(store.mode, StorageMode::Encoded);
-
-    store.disable_encoding();
-    assert_eq!(store.mode, StorageMode::Raw);
-    store.enable_encoding();
-    assert_eq!(store.mode, StorageMode::Encoded);
-
-    store.set_encoding_mode(StorageMode::Raw);
-    assert_eq!(store.mode, StorageMode::Raw);
-    store.set_encoding_mode(StorageMode::Encoded);
-    assert_eq!(store.mode, StorageMode::Encoded);
-}
 
 #[test]
 fn test_mode_switching() {

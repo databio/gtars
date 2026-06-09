@@ -84,6 +84,29 @@ pub enum BridgeError {
     InconsistentEdit(String),
 }
 
+/// Non-fatal warning surfaced by the bridge to the caller.
+///
+/// Library code never writes to stderr; instead it appends warnings to the
+/// caller-supplied sink so the caller decides how (or whether) to report them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BridgeWarning {
+    /// The HGVS expression was an uncertain/imprecise expression (e.g. an outer
+    /// `(...)` wrapper). The resulting VRS digest reflects the central
+    /// coordinate only.
+    UncertainExpression,
+}
+
+impl std::fmt::Display for BridgeWarning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BridgeWarning::UncertainExpression => write!(
+                f,
+                "bridging uncertain HGVS expression — VRS digest reflects central coordinate only"
+            ),
+        }
+    }
+}
+
 // ── Public API ──────────────────────────────────────────────────────────
 
 /// Build a [`RefView`] over a sequence's resident bytes, decoding on the fly
@@ -109,6 +132,7 @@ pub fn hgvs_to_allele(
     provider: &dyn TranscriptProvider,
     refget: &mut RefgetStore,
     collection_digest: &str,
+    warnings: &mut Vec<BridgeWarning>,
 ) -> Result<Allele, BridgeError> {
     let name_to_digest =
         crate::vcf::build_name_to_digest(refget, collection_digest).map_err(BridgeError::Refget)?;
@@ -119,7 +143,7 @@ pub fn hgvs_to_allele(
         .clone();
     crate::vcf::ensure_resident(refget, &raw_digest).map_err(BridgeError::Refget)?;
     let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
-    let parts = build_allele_parts(variant, provider, &chrom_name, &raw_digest, &seq)?;
+    let parts = build_allele_parts(variant, provider, &chrom_name, &raw_digest, &seq, warnings)?;
     Ok(parts.allele)
 }
 
@@ -133,6 +157,7 @@ pub fn hgvs_str_to_vrs_id(
     provider: &dyn TranscriptProvider,
     refget: &mut RefgetStore,
     collection_digest: &str,
+    warnings: &mut Vec<BridgeWarning>,
 ) -> Result<String, BridgeError> {
     let variant = parse(s)?;
     let name_to_digest =
@@ -144,7 +169,7 @@ pub fn hgvs_str_to_vrs_id(
         .clone();
     crate::vcf::ensure_resident(refget, &raw_digest).map_err(BridgeError::Refget)?;
     let seq = ref_view_for(refget, &raw_digest, &chrom_name)?;
-    let parts = build_allele_parts(&variant, provider, &chrom_name, &raw_digest, &seq)?;
+    let parts = build_allele_parts(&variant, provider, &chrom_name, &raw_digest, &seq, warnings)?;
     finalize_vrs_id(&parts, &seq)
 }
 
@@ -155,13 +180,14 @@ pub fn hgvs_to_allele_readonly(
     provider: &dyn TranscriptProvider,
     refget: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
+    warnings: &mut Vec<BridgeWarning>,
 ) -> Result<Allele, BridgeError> {
     let chrom_name = resolve_chrom_for_variant(variant, provider, name_to_digest)?;
     let raw_digest = name_to_digest
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
     let seq = ref_view_for(refget, raw_digest, &chrom_name)?;
-    let parts = build_allele_parts(variant, provider, &chrom_name, raw_digest, &seq)?;
+    let parts = build_allele_parts(variant, provider, &chrom_name, raw_digest, &seq, warnings)?;
     Ok(parts.allele)
 }
 
@@ -171,6 +197,7 @@ pub fn hgvs_str_to_vrs_id_readonly(
     provider: &dyn TranscriptProvider,
     refget: &ReadonlyRefgetStore,
     name_to_digest: &HashMap<String, String>,
+    warnings: &mut Vec<BridgeWarning>,
 ) -> Result<String, BridgeError> {
     let variant = parse(s)?;
     let chrom_name = resolve_chrom_for_variant(&variant, provider, name_to_digest)?;
@@ -178,7 +205,7 @@ pub fn hgvs_str_to_vrs_id_readonly(
         .get(&chrom_name)
         .ok_or_else(|| BridgeError::UnknownChrom(chrom_name.clone()))?;
     let seq = ref_view_for(refget, raw_digest, &chrom_name)?;
-    let parts = build_allele_parts(&variant, provider, &chrom_name, raw_digest, &seq)?;
+    let parts = build_allele_parts(&variant, provider, &chrom_name, raw_digest, &seq, warnings)?;
     finalize_vrs_id(&parts, &seq)
 }
 
@@ -330,13 +357,11 @@ fn build_allele_parts<R: RefSeq + ?Sized>(
     chrom_name: &str,
     raw_digest: &str,
     seq: &R,
+    warnings: &mut Vec<BridgeWarning>,
 ) -> Result<AlleleParts, BridgeError> {
     if variant.posedit.uncertain {
-        // tracing crate isn't a workspace dep; eprintln keeps us
-        // dependency-free without silently swallowing the warning.
-        eprintln!(
-            "warning: bridging uncertain HGVS expression — VRS digest reflects central coordinate only"
-        );
+        // Surface to the caller rather than writing to stderr from library code.
+        warnings.push(BridgeWarning::UncertainExpression);
     }
 
     let accession = if looks_like_gene_symbol(variant.accession) {
@@ -589,6 +614,7 @@ mod tests {
             &NoTranscriptProvider,
             &store,
             &name_to_digest,
+            &mut Vec::new(),
         )
         .unwrap();
         assert_eq!(id, GOLDEN_CHRF_G6CT_VRS_ID);

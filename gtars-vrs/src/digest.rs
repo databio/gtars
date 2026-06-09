@@ -21,6 +21,12 @@ pub struct DigestWriter {
     buf: Vec<u8>,
 }
 
+impl Default for DigestWriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DigestWriter {
     pub fn new() -> Self {
         Self {
@@ -54,11 +60,13 @@ impl DigestWriter {
         // Canonical JSON (keys sorted): {"end":N,"sequenceReference":{"refgetAccession":"...","type":"SequenceReference"},"start":N,"type":"SequenceLocation"}
         self.buf.clear();
         self.buf.extend_from_slice(b"{\"end\":");
-        itoa::Buffer::new().format(end).as_bytes().iter().for_each(|&b| self.buf.push(b));
+        self.buf
+            .extend_from_slice(itoa::Buffer::new().format(end).as_bytes());
         self.buf.extend_from_slice(b",\"sequenceReference\":{\"refgetAccession\":\"");
         self.buf.extend_from_slice(refget_accession.as_bytes());
         self.buf.extend_from_slice(b"\",\"type\":\"SequenceReference\"},\"start\":");
-        itoa::Buffer::new().format(start).as_bytes().iter().for_each(|&b| self.buf.push(b));
+        self.buf
+            .extend_from_slice(itoa::Buffer::new().format(start).as_bytes());
         self.buf.extend_from_slice(b",\"type\":\"SequenceLocation\"}");
 
         let sl_digest = sha512t24u_inline(&self.buf);

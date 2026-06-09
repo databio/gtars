@@ -2,8 +2,8 @@
 
 use thiserror::Error;
 
-use crate::models::{Strand, Transcript};
-use crate::store::ReadonlyTxStore;
+use crate::transcripts::models::{Strand, Transcript};
+use crate::transcripts::store::ReadonlyTxStore;
 
 /// Result of coordinate mapping.
 #[derive(Debug, Clone)]
@@ -55,6 +55,7 @@ pub struct CoordinateMapper<'a> {
 }
 
 impl<'a> CoordinateMapper<'a> {
+    /// Create a coordinate mapper backed by a read-only transcript store.
     pub fn new(store: &'a ReadonlyTxStore) -> Self {
         Self { store }
     }
@@ -95,6 +96,9 @@ impl<'a> CoordinateMapper<'a> {
 
     /// Map a non-coding coordinate (n.) to genomic coordinate.
     pub fn n_to_g(&self, accession: &str, n_pos: u64) -> Result<MappingResult, MappingError> {
+        if n_pos == 0 {
+            return Err(MappingError::OutsideTranscript(0));
+        }
         let tx = self
             .store
             .lookup(accession)
@@ -178,7 +182,9 @@ impl<'a> CoordinateMapper<'a> {
 pub struct CoordinateMapperWriter<'a> {
     store: &'a ReadonlyTxStore,
     exon_offsets: Vec<ExonOffset>,
-    itoa_buf: itoa::Buffer,
+    /// Reusable string buffer for formatting positions. Kept WASM-safe (no
+    /// `itoa`, which is a native-only builder dependency).
+    fmt_buf: String,
 }
 
 /// Pre-computed exon offset for coordinate mapping.
@@ -191,11 +197,12 @@ struct ExonOffset {
 }
 
 impl<'a> CoordinateMapperWriter<'a> {
+    /// Create a reusable coordinate mapper that keeps scratch buffers between calls.
     pub fn new(store: &'a ReadonlyTxStore) -> Self {
         Self {
             store,
             exon_offsets: Vec::with_capacity(64),
-            itoa_buf: itoa::Buffer::new(),
+            fmt_buf: String::with_capacity(24),
         }
     }
 
@@ -233,6 +240,9 @@ impl<'a> CoordinateMapperWriter<'a> {
     }
 
     pub fn n_to_g(&mut self, accession: &str, n_pos: u64) -> Result<MappingResult, MappingError> {
+        if n_pos == 0 {
+            return Err(MappingError::OutsideTranscript(0));
+        }
         let tx = self
             .store
             .lookup(accession)
@@ -251,7 +261,10 @@ impl<'a> CoordinateMapperWriter<'a> {
 
     #[inline]
     pub fn format_position(&mut self, pos: u64) -> &str {
-        self.itoa_buf.format(pos)
+        use std::fmt::Write;
+        self.fmt_buf.clear();
+        let _ = write!(self.fmt_buf, "{}", pos);
+        &self.fmt_buf
     }
 }
 

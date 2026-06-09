@@ -1,4 +1,5 @@
-//! Python bindings for `gtars-reftx`: transcript store, MANE index, and
+//! Python bindings for the `gtars-refget` transcript store
+//! (`gtars_refget::transcripts`): transcript store, MANE index, and
 //! coordinate mapping for HGVS-to-genomic projection.
 //!
 //! Exposed as the `gtars.reftx` submodule.
@@ -10,13 +11,18 @@ use pyo3::create_exception;
 use pyo3::prelude::*;
 use pyo3::types::{PyDict, PyType};
 
-use gtars_reftx::builder::TxStoreBuilder as RsTxStoreBuilder;
-use gtars_reftx::mapper::{CoordinateMapper as RsCoordinateMapper, MappingError as RsMappingError};
-use gtars_reftx::models::{Exon as RsExon, ManeStatus as RsManeStatus, Strand as RsStrand};
-use gtars_reftx::store::{ReadonlyTxStore as RsReadonlyTxStore, TranscriptRef, TxStore as RsTxStore};
+use gtars_refget::transcripts::builder::TxStoreBuilder as RsTxStoreBuilder;
+use gtars_refget::transcripts::mapper::{
+    CoordinateMapper as RsCoordinateMapper, MappingError as RsMappingError,
+};
+use gtars_refget::transcripts::mmap::TxStore as RsTxStore;
+use gtars_refget::transcripts::models::{
+    Exon as RsExon, ManeStatus as RsManeStatus, Strand as RsStrand,
+};
+use gtars_refget::transcripts::store::{ReadonlyTxStore as RsReadonlyTxStore, TranscriptRef};
 
 #[cfg(feature = "vrs")]
-use gtars_reftx::provider::ReftxProvider as RsReftxProvider;
+use gtars_vrs::provider::TxProvider as RsReftxProvider;
 
 // ---------------------------------------------------------------------------
 // Exception classes
@@ -144,39 +150,25 @@ pub struct ExonPy {
     pub start: u32,
     #[pyo3(get, set)]
     pub end: u32,
-    #[pyo3(get, set)]
-    pub cds_start: Option<u32>,
-    #[pyo3(get, set)]
-    pub cds_end: Option<u32>,
 }
 
 #[pymethods]
 impl ExonPy {
     #[new]
-    #[pyo3(signature = (start, end, cds_start=None, cds_end=None))]
-    fn new(start: u32, end: u32, cds_start: Option<u32>, cds_end: Option<u32>) -> Self {
-        Self {
-            start,
-            end,
-            cds_start,
-            cds_end,
-        }
+    #[pyo3(signature = (start, end))]
+    fn new(start: u32, end: u32) -> Self {
+        Self { start, end }
     }
 
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
         d.set_item("start", self.start)?;
         d.set_item("end", self.end)?;
-        d.set_item("cds_start", self.cds_start)?;
-        d.set_item("cds_end", self.cds_end)?;
         Ok(d)
     }
 
     fn __repr__(&self) -> String {
-        format!(
-            "Exon(start={}, end={}, cds_start={:?}, cds_end={:?})",
-            self.start, self.end, self.cds_start, self.cds_end
-        )
+        format!("Exon(start={}, end={})", self.start, self.end)
     }
 }
 
@@ -185,8 +177,6 @@ impl ExonPy {
         Self {
             start: e.start,
             end: e.end,
-            cds_start: None,
-            cds_end: None,
         }
     }
 }
@@ -259,7 +249,7 @@ impl TranscriptPy {
 }
 
 impl TranscriptPy {
-    fn from_rs(tx: gtars_reftx::models::Transcript) -> Self {
+    fn from_rs(tx: gtars_refget::transcripts::models::Transcript) -> Self {
         let chrom = format!("SQ.{}", base64_url::encode(&tx.chrom_digest));
         let mane = if tx.mane.mane_select || tx.mane.mane_clinical {
             Some(ManeStatusPy::from_rs(tx.mane))
@@ -360,7 +350,7 @@ impl TxStoreBuilderPy {
             },
             None => RsManeStatus::default(),
         };
-        self.inner.transcripts.push(gtars_reftx::models::Transcript {
+        self.inner.transcripts.push(gtars_refget::transcripts::models::Transcript {
             accession: tx.accession,
             gene: tx.gene.unwrap_or_default(),
             chrom_digest,
@@ -469,21 +459,9 @@ fn transcript_from_dict(d: &Bound<'_, PyDict>) -> PyResult<TranscriptPy> {
         } else if let Ok(d) = item.downcast::<PyDict>() {
             let start: u32 = get(d, "start")?;
             let end: u32 = get(d, "end")?;
-            let cds_start = get_opt(d, "cds_start")?;
-            let cds_end = get_opt(d, "cds_end")?;
-            ExonPy {
-                start,
-                end,
-                cds_start,
-                cds_end,
-            }
+            ExonPy { start, end }
         } else if let Ok((s, e)) = item.extract::<(u32, u32)>() {
-            ExonPy {
-                start: s,
-                end: e,
-                cds_start: None,
-                cds_end: None,
-            }
+            ExonPy { start: s, end: e }
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
                 "exons entries must be Exon, dict, or (start, end) tuple",
@@ -710,7 +688,7 @@ impl CoordinateMapperPy {
 
 fn build_full_dict<'py>(
     py: Python<'py>,
-    result: &gtars_reftx::mapper::MappingResult,
+    result: &gtars_refget::transcripts::mapper::MappingResult,
     strand: Option<Strand>,
 ) -> PyResult<Bound<'py, PyDict>> {
     let d = PyDict::new(py);
