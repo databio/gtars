@@ -419,23 +419,45 @@ fn transcript_interbase_span(
     mapper: &CoordinateMapper<'_>,
 ) -> Result<(u64, u64), BridgeError> {
     // Insertions are a 0-bp genomic span; the transcript insertion point is
-    // computed from the single anchor base so it stays strand-correct.
+    // computed from the anchor base(s) so it stays strand-correct.
     if let Edit::Ins { .. } = edit {
-        let anchor = match pos {
-            LocationRange::Single(p) => *p,
-            // For an `ins` range the two positions are adjacent; the anchor is
-            // the 5'-on-transcript base. Reuse the genome path to validate
-            // adjacency, then take the transcript-5' position (the `start`).
-            LocationRange::Range { start, .. } => *start,
+        match pos {
+            LocationRange::Single(p) => {
+                let (ib, _strand) =
+                    position_to_genomic_interbase(p, accession, reference_type, provider)?;
+                let anchor_off = map_g_to_tx(mapper, accession, ib)?;
+                // Insertion sits BETWEEN transcript bases `anchor_off` and
+                // `anchor_off + 1`, regardless of strand.
+                let q = anchor_off + 1;
+                return Ok((q, q));
+            }
+            LocationRange::Range { start, end } => {
+                // The two flanking positions MUST be adjacent on the mature
+                // mRNA. Validate in TRANSCRIPT space, not genomic: a valid
+                // insertion at an exon junction (e.g. c.40_41ins) has adjacent
+                // transcript offsets but far-apart genomic coordinates, so the
+                // genome path's genomic adjacency check would wrongly reject
+                // it. (The genome path never sees exon junctions.)
+                let (ib_start, _) =
+                    position_to_genomic_interbase(start, accession, reference_type, provider)?;
+                let (ib_end, _) =
+                    position_to_genomic_interbase(end, accession, reference_type, provider)?;
+                let off_start = map_g_to_tx(mapper, accession, ib_start)?;
+                let off_end = map_g_to_tx(mapper, accession, ib_end)?;
+                let lo = off_start.min(off_end);
+                let hi = off_start.max(off_end);
+                if hi - lo != 1 {
+                    return Err(BridgeError::InconsistentEdit(format!(
+                        "ins range positions are not adjacent on the transcript: \
+                         offsets {} and {}",
+                        off_start, off_end
+                    )));
+                }
+                // Insertion sits between transcript bases `lo` and `hi` (= lo+1).
+                return Ok((hi, hi));
+            }
             _ => return Err(BridgeError::UnsupportedEdit("ins position range")),
-        };
-        let (ib, _strand) =
-            position_to_genomic_interbase(&anchor, accession, reference_type, provider)?;
-        let anchor_off = map_g_to_tx(mapper, accession, ib)?;
-        // Insertion sits BETWEEN transcript bases `anchor_off` and
-        // `anchor_off + 1`, regardless of strand.
-        let p = anchor_off + 1;
-        return Ok((p, p));
+        }
     }
 
     let (start_ib_g, end_ib_g, _strand) =
@@ -1112,6 +1134,33 @@ mod transcript_tests {
                 .unwrap()
                 .value;
         assert!(ins_id.starts_with("ga4gh:VA."));
+    }
+
+    // 4b. Insertion-range adjacency is enforced on the transcript path.
+    #[test]
+    fn ins_range_adjacency_transcript() {
+        let (genome, tx_store, _) = forward_fixture(true);
+
+        // Malformed: c.1_5ins — flanks are 4 bases apart on the mRNA, not
+        // adjacent. The genome path rejects this; the transcript path must too.
+        let bad = parse("NM_FWD.1:c.1_5insAT").unwrap();
+        let err = hgvs_to_transcript_allele_readonly(&bad, &genome, &tx_store).unwrap_err();
+        assert!(
+            matches!(err, BridgeError::InconsistentEdit(_)),
+            "expected InconsistentEdit for non-adjacent ins range, got {err:?}"
+        );
+
+        // Valid exon-junction insertion: c.8 is the last base of exon 1
+        // (genomic 11), c.9 the first of exon 2 (genomic 20). They are adjacent
+        // on the mRNA (offsets 7 and 8) but 8 bp apart genomically, so a
+        // genomic adjacency check would WRONGLY reject this. The transcript
+        // path must accept it; insertion sits at interbase 8.
+        let junc = parse("NM_FWD.1:c.8_9insGG").unwrap();
+        let allele = hgvs_to_transcript_allele_readonly(&junc, &genome, &tx_store)
+            .unwrap()
+            .value;
+        assert_eq!(allele_span(&allele), (8, 8));
+        assert_eq!(allele_alt(&allele), "GG");
     }
 
     // 5. Intronic-position rejection.
