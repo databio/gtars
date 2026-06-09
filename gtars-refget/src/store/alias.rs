@@ -859,7 +859,7 @@ mod tests {
 
     #[test]
     fn test_store_sequence_aliases() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let mut store = RefgetStore::in_memory();
         let record = digest_sequence("chr1", b"ACGT");
@@ -908,7 +908,7 @@ mod tests {
 
     #[test]
     fn test_store_alias_remove() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let mut store = RefgetStore::in_memory();
         let record = digest_sequence("chr1", b"ACGT");
@@ -959,7 +959,7 @@ mod tests {
 
     #[test]
     fn test_store_alias_load_tsv() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let dir = tempdir().unwrap();
         let tsv_path = dir.path().join("ncbi.tsv");
@@ -978,7 +978,7 @@ mod tests {
 
     #[test]
     fn test_store_alias_reverse_multiple_sequences() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let mut store = RefgetStore::in_memory();
         let r1 = digest_sequence("chr1", b"ACGT");
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[test]
     fn test_store_alias_write_store_to_dir() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
@@ -1024,7 +1024,7 @@ mod tests {
 
     #[test]
     fn test_get_sequence_metadata_by_alias() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let mut store = RefgetStore::in_memory();
         let record = digest_sequence("chr1", b"ACGT");
@@ -1040,7 +1040,7 @@ mod tests {
 
     #[test]
     fn test_get_sequence_by_alias_loads_data() {
-        use crate::collection::digest_sequence;
+        use crate::digest::digest_sequence;
 
         let mut store = RefgetStore::in_memory();
         let record = digest_sequence("chr1", b"ACGT");

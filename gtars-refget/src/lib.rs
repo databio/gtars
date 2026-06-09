@@ -140,14 +140,6 @@ mod utils;
 // configs (incl. --no-default-features), so this must too.
 mod posread;
 
-// Re-export collection helpers at crate root for backward compatibility.
-// The `*Ext` traits and `read_rgsi_file` are WASM-safe; `SequenceCollectionExt`
-// (FASTA digesting) is filesystem-only.
-pub use collection::{
-    SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt, read_rgsi_file,
-};
-#[cfg(feature = "filesystem")]
-pub use collection::SequenceCollectionExt;
 #[cfg(feature = "filesystem")]
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 #[cfg(feature = "filesystem")]

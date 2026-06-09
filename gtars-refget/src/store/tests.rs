@@ -2,8 +2,9 @@
 
 use super::*;
 
-use crate::collection::{
-    SequenceCollection, SequenceCollectionExt, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+use crate::collection::SequenceCollectionExt;
+use crate::digest::types::{
+    SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
 };
 use crate::digest::{AlphabetType, md5, sha512t24u};
 use crate::hashkeyable::{DigestKey, HashKeyable};

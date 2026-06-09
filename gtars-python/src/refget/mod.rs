@@ -8,9 +8,10 @@ use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
 
-use gtars_refget::collection::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionExt,
-    SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+use gtars_refget::collection::SequenceCollectionExt;
+use gtars_refget::digest::{
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
+    SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
@@ -122,9 +123,9 @@ pub fn digest_sequence(data: &[u8], name: Option<&str>, description: Option<&str
     let name = name.unwrap_or("");
     let seq_record = match description {
         Some(desc) => {
-            gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data)
+            gtars_refget::digest::digest_sequence_with_description(name, Some(desc), data)
         }
-        None => gtars_refget::collection::digest_sequence(name, data),
+        None => gtars_refget::digest::digest_sequence(name, data),
     };
     PySequenceRecord::from(seq_record)
 }

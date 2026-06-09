@@ -1,5 +1,5 @@
 use extendr_api::prelude::*;
-use gtars_refget::collection::{
+use gtars_refget::digest::{
     SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceMetadata,
     SequenceRecord,
 };

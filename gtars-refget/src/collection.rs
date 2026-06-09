@@ -14,11 +14,9 @@ use crate::fasta::digest_fasta;
 #[cfg(feature = "filesystem")]
 use crate::utils::PathExtension;
 
-// Re-export core types from digest::types for backward compatibility
-pub use crate::digest::types::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
-    digest_sequence_with_description, parse_rgsi_line,
+use crate::digest::types::{
+    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord,
+    SequenceMetadata, SequenceRecord, parse_rgsi_line,
 };
 
 /// Shared implementation for writing RGSI (Refget Sequence Index) files.
@@ -376,6 +374,7 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::digest::digest_sequence;
     use crate::digest::encode_sequence;
     use crate::digest::{AlphabetType, lookup_alphabet};
 
@@ -436,6 +435,7 @@ mod tests {
 #[cfg(all(test, feature = "filesystem"))]
 mod fasta_tests {
     use super::*;
+    use crate::digest::digest_sequence;
     use crate::fasta::{digest_fasta, load_fasta};
 
     #[test]
