@@ -296,15 +296,6 @@ class RegionSet:
         """
         ...
 
-    def subtract(self, other: "RegionSet") -> "RegionSet":
-        """
-        Genomic subtraction (alias for setdiff).
-
-        Remove portions of self that overlap with other.
-        Both inputs are reduced before subtraction.
-        """
-        ...
-
     def closest(self, other: "RegionSet") -> List[tuple]:
         """
         Find nearest region in other for each region in self.

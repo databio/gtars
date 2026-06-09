@@ -180,6 +180,42 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
+    /// Refresh only the alias-namespace lists (and aliases_digest) in an existing
+    /// rgstore.json, preserving created_at and the index digests.
+    ///
+    /// This is the cheap manifest update used after an alias is added/removed: it
+    /// re-reads the current manifest and rewrites only the alias-derived fields,
+    /// so we do not rehash the (potentially 60+ MB) sequence/collection indexes
+    /// on every alias mutation. Keeps `sequence_alias_namespaces` /
+    /// `collection_alias_namespaces` in lock-step with what is actually on disk,
+    /// so served stores stay self-describing. No-op if the manifest does not yet
+    /// exist (the next full index write will include the namespaces).
+    pub(crate) fn refresh_manifest_alias_namespaces(&self) -> Result<()> {
+        let local_path = match self.local_path.as_ref() {
+            Some(p) => p,
+            None => return Ok(()),
+        };
+        let manifest_path = local_path.join("rgstore.json");
+        if !manifest_path.exists() {
+            return Ok(());
+        }
+
+        let json = fs::read_to_string(&manifest_path)
+            .context("Failed to read rgstore.json for alias refresh")?;
+        let mut metadata: StoreMetadata =
+            serde_json::from_str(&json).context("Failed to parse rgstore.json for alias refresh")?;
+
+        metadata.sequence_alias_namespaces = self.aliases.sequence_namespaces();
+        metadata.collection_alias_namespaces = self.aliases.collection_namespaces();
+        metadata.aliases_digest = self.compute_aliases_digest();
+        metadata.modified = Some(Utc::now().to_rfc3339());
+
+        let out = serde_json::to_string_pretty(&metadata)
+            .context("Failed to serialize rgstore.json for alias refresh")?;
+        fs::write(&manifest_path, out).context("Failed to write rgstore.json for alias refresh")?;
+        Ok(())
+    }
+
     /// Write collection metadata index (collections.rgci) to disk.
     ///
     /// Creates a master index of all collections with their metadata.
@@ -373,19 +409,20 @@ impl ReadonlyRefgetStore {
             Self::load_collections_from_directory(&mut store, &collections_dir)?;
         }
 
+        // Manifest is the single source of truth: load exactly the alias
+        // namespaces rgstore.json advertises, rather than scanning the aliases/
+        // directory. This unifies local and remote behavior — an alias file the
+        // manifest omits is not loaded, so a stale manifest fails the same way on
+        // disk as it does over HTTP (where directory listing is impossible),
+        // surfacing manifest-write bugs instead of silently masking them.
         let aliases_dir = root_path.join("aliases");
-        store.aliases.load_from_dir(&aliases_dir)?;
-
-        store.available_sequence_alias_namespaces = if metadata.sequence_alias_namespaces.is_empty() {
-            store.aliases.sequence_namespaces()
-        } else {
-            metadata.sequence_alias_namespaces
-        };
-        store.available_collection_alias_namespaces = if metadata.collection_alias_namespaces.is_empty() {
-            store.aliases.collection_namespaces()
-        } else {
-            metadata.collection_alias_namespaces
-        };
+        store.aliases.load_namespaces_from_dir(
+            &aliases_dir,
+            &metadata.sequence_alias_namespaces,
+            &metadata.collection_alias_namespaces,
+        )?;
+        store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
+        store.available_collection_alias_namespaces = metadata.collection_alias_namespaces;
 
         store.fhr_metadata =
             fhr_metadata::load_sidecars(&root_path.join("fhr"));

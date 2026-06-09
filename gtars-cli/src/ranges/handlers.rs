@@ -4,9 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::ArgMatches;
 
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::RegionSet;
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::IntervalRanges;
 
 pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {

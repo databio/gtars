@@ -127,8 +127,18 @@ Each measured **cell** is keyed by `task / scenario / path / concurrency`.
 | task    | scenario(s)                          | path(s)              | knob | what's measured            |
 |---------|--------------------------------------|----------------------|------|----------------------------|
 | encode  | `multifile`                          | `-`                  | `-j` | wall, peak RSS, bases/s    |
-| extract | `small`, `large_count`, `large_width`| `resident`, `partial`| —    | wall, peak RSS, bases/s    |
+| extract | `small`, `large_count`, `large_width`| `resident`, `partial`, `batch`| —    | wall, peak RSS, bases/s    |
 | vrs     | `points`                             | `resident`           | —    | wall, lookups/s            |
+
+> **Caveats on the `batch` path and fixture size.** `batch` (`get_substrings`,
+> one call per sequence) exists mainly to amortize **FFI** overhead for callers
+> like the Python binding on high-region-count workloads; in pure-Rust it is at
+> best a wash and can be *slower* on `large_width` because it materializes a
+> whole sequence's output at once. The benchmark **contestant uses the per-region
+> partial path**, not `batch`. Also note the bundled fixture's sequences are only
+> ~5 Mbp, so `large_width` here understates real chromosome-scale costs — for
+> decode/whole-vs-partial decisions, spot-check against a full-size store (set
+> `PERF_STORE`) rather than trusting the fixture alone.
 
 ### encode
 

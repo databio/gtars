@@ -6,9 +6,7 @@
 //! replicates").
 
 use gtars_core::models::{Region, RegionSet};
-use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::IntoMultiChromOverlapper};
-
-use crate::interval_ranges::IntervalRanges;
+use gtars_overlaprs::{OverlapperType, multi_chrom_overlapper::MultiChromOverlapper};
 
 /// A region annotated with the number of input sets overlapping it.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,27 +38,24 @@ pub fn consensus(sets: &[RegionSet]) -> Vec<ConsensusRegion> {
     }
     let union = RegionSet::from(all_regions).reduce();
 
-    // Build an AIList overlapper per input set
-    let overlappers: Vec<_> = sets
+    // Build an AIList overlapper per input set and run one batched
+    // any_overlaps over the whole union (build-once, query-many). Each call
+    // returns a Vec<bool> of length union.len() in union order.
+    let hit_cols: Vec<Vec<bool>> = sets
         .iter()
-        .map(|s| s.clone().into_multi_chrom_overlapper(OverlapperType::AIList))
+        .map(|s| {
+            let ov = MultiChromOverlapper::from_region_set(s.clone(), OverlapperType::AIList);
+            ov.any_overlaps(&union, None)
+        })
         .collect();
 
     // For each union region, count how many input sets overlap it
     union
         .regions
         .iter()
-        .map(|r| {
-            let query = RegionSet::from(vec![Region {
-                chr: r.chr.clone(),
-                start: r.start,
-                end: r.end,
-                rest: None,
-            }]);
-            let count = overlappers
-                .iter()
-                .filter(|ov| !ov.find_overlaps(&query).is_empty())
-                .count() as u32;
+        .enumerate()
+        .map(|(ui, r)| {
+            let count = hit_cols.iter().filter(|col| col[ui]).count() as u32;
             ConsensusRegion {
                 chr: r.chr.clone(),
                 start: r.start,
