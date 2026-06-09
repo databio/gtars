@@ -184,6 +184,10 @@ where
     ) -> Box<dyn Iterator<Item = &'a Interval<I, T>> + 'a> {
         Box::new(IterFind::new(self, start, stop))
     }
+
+    fn iter(&self) -> Box<dyn Iterator<Item = &Interval<I, T>> + '_> {
+        Box::new(self.stored_intervals.iter())
+    }
 }
 
 impl<I, T> AIList<I, T>

@@ -65,8 +65,8 @@
 //! ]);
 //!
 //! // Build once, query many times
-//! let counts = indexed.count_overlaps(&query);  // Uses pre-built index
-//! let any = indexed.any_overlaps(&query);       // Reuses same index
+//! let counts = indexed.count_overlaps(&query, None);  // Uses pre-built index
+//! let any = indexed.any_overlaps(&query, None);       // Reuses same index
 //! ```
 //!
 //! ## Examples
@@ -118,12 +118,6 @@ pub use indexed_region_set::IndexedRegionSet;
 ///
 /// See [`Overlapper`] for the main trait.
 pub mod traits;
-
-/// Overlap query operations on RegionSet.
-///
-/// See [`RegionSetOverlaps`] for the main trait.
-pub mod regionset_ops;
-pub use self::regionset_ops::RegionSetOverlaps;
 
 // re-exports
 pub use self::ailist::AIList;

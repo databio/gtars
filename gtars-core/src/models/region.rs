@@ -82,6 +82,20 @@ impl Region {
             }
         }
     }
+
+    /// Gap distance between two regions.
+    ///
+    /// Returns 0 if the regions overlap, otherwise returns the positive
+    /// gap (in bases) between the closer edges of the two regions.
+    pub fn distance_to(&self, other: &Region) -> i64 {
+        if self.start < other.end && other.start < self.end {
+            0i64
+        } else if other.end <= self.start {
+            (self.start as i64) - (other.end as i64)
+        } else {
+            (other.start as i64) - (self.end as i64)
+        }
+    }
 }
 
 impl Display for Region {

@@ -1291,6 +1291,11 @@ pub trait IntervalSetOps {
 
     /// Overlap coefficient: `|intersection| / min(|self|, |other|)`.
     fn overlap_coefficient(&self, other: &RegionSet) -> f64;
+
+    /// Find the nearest region in `other` for each region in `self`.
+    ///
+    /// Returns `(self_index, other_index, distance)` tuples.
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)>;
 }
 
 impl IntervalSetOps for RegionSet {
@@ -1384,6 +1389,10 @@ impl IntervalSetOps for RegionSet {
         let union_bp = self.union(other).nucleotides_length();
         let intersection_bp = a_bp + b_bp - union_bp;
         intersection_bp as f64 / min_bp as f64
+    }
+
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+        RegionSet::closest(self, other)
     }
 }
 

@@ -4,11 +4,11 @@ use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
-use gtars_genomicdist::IntervalRanges;
-use gtars_overlaprs::RegionSetOverlaps;
+use gtars_overlaprs::IndexedRegionSet;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -440,37 +440,46 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    /// Return a new RegionSet containing only regions that overlap at least
-    /// one region in other.
+    /// Return a new RegionSet containing only regions in self that overlap at
+    /// least one region in other.
     fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subset_by_overlaps(&other.regionset, None);
-        Ok(Self::from_regionset(rs))
+        // Index `other`, query `self`, keep self regions that hit.
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        let counts = index.count_overlaps(&self.regionset, None);
+        let kept: Vec<Region> = self
+            .regionset
+            .regions
+            .iter()
+            .zip(counts)
+            .filter_map(|(r, c)| if c > 0 { Some(r.clone()) } else { None })
+            .collect();
+        Ok(Self::from_regionset(RegionSet::from(kept)))
     }
 
-    /// Return a list of overlap counts, one per region in self.
+    /// Return a list of overlap counts, one per region in self, counting how
+    /// many regions of other overlap each region of self.
     fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
-        RegionSetOverlaps::count_overlaps(&self.regionset, &other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.count_overlaps(&self.regionset, None)
     }
 
-    /// Return a list of booleans indicating whether each region overlaps
-    /// any region in other.
+    /// Return a list of booleans indicating whether each region in self
+    /// overlaps any region in other.
     fn any_overlaps(&self, other: &PyRegionSet) -> Vec<bool> {
-        self.regionset.any_overlaps(&other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.any_overlaps(&self.regionset, None)
     }
 
-    /// Return a list of lists of indices into other that overlap each
-    /// region in self.
+    /// Return a list of lists of indices into other that overlap each region
+    /// in self.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        RegionSetOverlaps::find_overlaps(&self.regionset, &other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.find_overlaps(&self.regionset, None)
     }
 
+    /// Range-level intersection: the positions covered by both self and other.
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.intersect_all(&other.regionset);
-        Ok(Self::from_regionset(rs))
-    }
-
-    fn subtract(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subtract(&other.regionset);
+        let rs = self.regionset.intersect(&other.regionset);
         Ok(Self::from_regionset(rs))
     }
 
