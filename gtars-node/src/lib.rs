@@ -245,21 +245,6 @@ impl RefgetStore {
         })
     }
 
-    // -- Cache management --
-
-    #[napi]
-    pub fn ensure_decoded(&self, digest: String) -> Result<()> {
-        let mut store = self.inner.lock().map_err(lock_err)?;
-        store.ensure_decoded(&digest).map_err(to_napi_err)
-    }
-
-    #[napi]
-    pub fn clear_decoded_cache(&self) -> Result<()> {
-        let mut store = self.inner.lock().map_err(lock_err)?;
-        store.clear_decoded_cache();
-        Ok(())
-    }
-
     // -- Store building --
 
     #[napi]

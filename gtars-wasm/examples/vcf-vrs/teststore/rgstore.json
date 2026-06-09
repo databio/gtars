@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "seqdata_path_template": "sequences/%s2/%s.seq",
+  "collections_path_template": "collections/%s.rgsi",
+  "sequence_index": "sequences.rgsi",
+  "collection_index": "collections.rgci",
+  "mode": "Encoded",
+  "created_at": "2026-06-05T20:28:52.548266361+00:00",
+  "ancillary_digests": true,
+  "attribute_index": false,
+  "modified": "2026-06-05T20:28:52.548271781+00:00",
+  "collections_digest": "522ac26edb4dc7ebcd4bb962834e0f6bde815ee4f9af6301bf6dbf7b709bd29a",
+  "sequences_digest": "7f8c0189366bf64321b11ac0535d4930ee9cc33d7c323798fd1b588d77275a05"
+}

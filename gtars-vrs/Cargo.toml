@@ -1,0 +1,83 @@
+[package]
+name = "gtars-vrs"
+version = "0.7.0"
+edition = "2024"
+description = "GA4GH VRS (Variation Representation Specification) allele digest computation"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[features]
+# Filesystem/VCF path (default): pulls refget's filesystem+http subset, the
+# BGZF-parallel VCF pipeline, and the mutable `&mut RefgetStore` HGVS entries.
+# Also enables `transcripts` (native HGVS/VCF path needs the full transcript store).
+default = ["filesystem"]
+filesystem = ["gtars-refget/filesystem", "gtars-refget/http", "transcripts", "dep:crossbeam-channel"]
+# WASM/browser path: in-memory refget only. Enables `transcripts` (the WASM-safe
+# transcript CORE) so TxProvider compiles on the WASM target without pulling
+# filesystem/mmap. The actual wiring of a real provider into the WASM binding
+# is a separate plan.
+wasm = ["transcripts"]
+# WASM-safe transcript store CORE + the TxProvider impl. No mmap, no std::fs.
+# Enabling `transcripts` alone (without `filesystem`) is the WASM config.
+# `filesystem` also enables `transcripts` for the native path.
+transcripts = ["gtars-refget/transcripts"]
+
+[dependencies]
+# Workspace dependencies
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+flate2 = { workspace = true }
+thiserror = { workspace = true }
+
+# Fast digest path (avoid serde per-variant in hot loop)
+sha2 = "0.10.7"
+base64-url = { workspace = true }
+itoa = "1.0"
+
+# Bounded channels for the BGZF-block-parallel reader/worker/collector pipeline.
+# Filesystem-only (the VCF pipeline); not compiled for WASM.
+crossbeam-channel = { version = "0.5", optional = true }
+
+# Internal dependency. default-features = false keeps the WASM build free of
+# filesystem/http; the `filesystem` feature re-enables them.
+gtars-refget = { path = "../gtars-refget", version = "0.8.0", default-features = false }
+
+[dev-dependencies]
+tempfile = "3.8.1"
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9"
+csv = { workspace = true }
+rstest = { workspace = true }
+base64-url = { workspace = true }
+
+[[bench]]
+name = "bench_store"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "bench_encoded"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "hgvs_bench"
+harness = false
+required-features = ["transcripts"]
+
+[[bench]]
+name = "hgvs_vrs_bench"
+harness = false
+required-features = ["filesystem"]
+
+[[bench]]
+name = "gnomad_vrs_parallel_encoded"
+harness = false
+required-features = ["filesystem"]
+
+# Uses the mutable RefgetStore FASTA import path, which is filesystem-gated.
+# Declared so `cargo build --examples` under a feature set without `filesystem`
+# skips it instead of failing to compile.
+[[example]]
+name = "gnomad_vrs"
+required-features = ["filesystem"]

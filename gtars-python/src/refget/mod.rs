@@ -8,13 +8,15 @@ use pyo3::exceptions::{PyIndexError, PyTypeError};
 use pyo3::prelude::*;
 use pyo3::types::{IntoPyDict, PyBytes, PyString, PyType};
 
-use gtars_refget::collection::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionExt,
-    SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+use gtars_refget::collection::SequenceCollectionExt;
+use gtars_refget::digest::{
+    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
+    SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
 use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
+use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
 /// Compute the GA4GH SHA-512/24u digest for a sequence.
@@ -121,9 +123,9 @@ pub fn digest_sequence(data: &[u8], name: Option<&str>, description: Option<&str
     let name = name.unwrap_or("");
     let seq_record = match description {
         Some(desc) => {
-            gtars_refget::collection::digest_sequence_with_description(name, Some(desc), data)
+            gtars_refget::digest::digest_sequence_with_description(name, Some(desc), data)
         }
-        None => gtars_refget::collection::digest_sequence(name, data),
+        None => gtars_refget::digest::digest_sequence(name, data),
     };
     PySequenceRecord::from(seq_record)
 }
@@ -1071,7 +1073,7 @@ fn strip_sq_prefix(digest: &str) -> &str {
 ///         )
 #[pyclass(name = "RefgetStore", module = "gtars.refget")]
 pub struct PyRefgetStore {
-    inner: RefgetStore,
+    pub(crate) inner: RefgetStore,
 }
 
 #[pymethods]
@@ -1357,6 +1359,101 @@ impl PyRefgetStore {
             })
     }
 
+    /// Import multiple FASTA files into the store.
+    ///
+    /// `fastas` accepts a single path, a glob pattern (e.g. "fasta/*.fa.gz"),
+    /// a directory of FASTAs, or a list mixing any of these. `file_list` points
+    /// at a file-of-filenames (one path per line; blank lines and #-comments
+    /// ignored; may itself contain globs/directories). Inputs are expanded by
+    /// gtars into a de-duplicated, deterministic order (explicit paths first,
+    /// then file_list lines; directory/glob matches sorted lexicographically).
+    /// `jobs` is the number of files imported concurrently (0 = auto, 1 =
+    /// serial); it does not affect ordering or the resulting store.
+    ///
+    /// Args:
+    ///     fastas: A path, glob, directory, or list of any of these.
+    ///     file_list (str or Path, optional): Path to a file-of-filenames.
+    ///     jobs (int, optional): Files imported concurrently (0 = auto, 1 = serial).
+    ///     force (bool, optional): If True, overwrite existing collections/sequences.
+    ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
+    ///
+    /// Returns:
+    ///     list[tuple[SequenceCollectionMetadata, bool]]: per-file results in
+    ///         expanded-input order.
+    ///
+    /// Raises:
+    ///     ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
+    ///     IOError: If a file cannot be read or processed.
+    ///
+    /// Example:
+    ///     >>> store = RefgetStore.in_memory()
+    ///     >>> results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None))]
+    fn add_sequence_collections_from_fastas(
+        &mut self,
+        fastas: &Bound<'_, PyAny>,
+        file_list: Option<String>,
+        jobs: usize,
+        force: bool,
+        namespaces: Option<Vec<String>>,
+    ) -> PyResult<Vec<(PySequenceCollectionMetadata, bool)>> {
+        // Normalize `fastas` into a Vec<PathBuf>. Accept a single str/PathLike
+        // or a list/tuple of them. `expand_fasta_inputs` handles glob/dir/file
+        // classification, so we just stringify each entry here.
+        let paths: Vec<std::path::PathBuf> = if let Ok(seq) = fastas.try_iter() {
+            // Strings are iterable (over chars); guard against that by checking
+            // for a str first.
+            if fastas.is_instance_of::<pyo3::types::PyString>() {
+                vec![std::path::PathBuf::from(fastas.to_string())]
+            } else {
+                let mut out = Vec::new();
+                for item in seq {
+                    out.push(std::path::PathBuf::from(item?.to_string()));
+                }
+                out
+            }
+        } else {
+            vec![std::path::PathBuf::from(fastas.to_string())]
+        };
+
+        let inputs = FastaInputs {
+            paths,
+            file_list: file_list.map(std::path::PathBuf::from),
+        };
+        let expanded = expand_fasta_inputs(&inputs).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                "Failed to expand FASTA inputs: {}",
+                e
+            ))
+        })?;
+
+        let ns_refs: Vec<&str> = namespaces
+            .as_ref()
+            .map(|v| v.iter().map(|s| s.as_str()).collect())
+            .unwrap_or_default();
+        let opts = FastaImportOptions::new()
+            .force(force)
+            .namespaces(&ns_refs)
+            .jobs(jobs);
+
+        self.inner
+            .add_sequence_collections_from_fastas(&expanded, opts)
+            .map(|results| {
+                results
+                    .into_iter()
+                    .map(|(metadata, was_new)| {
+                        (PySequenceCollectionMetadata::from(metadata), was_new)
+                    })
+                    .collect()
+            })
+            .map_err(|e| {
+                PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                    "Error importing FASTA files: {}",
+                    e
+                ))
+            })
+    }
+
     /// Add a pre-built SequenceCollection to the store.
     ///
     /// Adds a SequenceCollection (created via `digest_fasta()` or programmatically)
@@ -1512,6 +1609,30 @@ impl PyRefgetStore {
             })
     }
 
+    /// Extract many substrings from ONE sequence in a single call.
+    ///
+    /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
+    /// substrings in the same order. The store adaptively reads the whole
+    /// sequence once when the ranges cover a large fraction (heavy overlap),
+    /// otherwise partial-reads each range. Output is identical to calling
+    /// `get_substring` per range, but amortizes record lookup, whole-sequence
+    /// decode, and FFI overhead.
+    fn get_substrings(
+        &self,
+        seq_digest: &str,
+        ranges: Vec<(usize, usize)>,
+    ) -> PyResult<Vec<String>> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.inner
+            .get_substrings(seq_digest, &ranges)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    seq_digest, e
+                ))
+            })
+    }
+
     #[getter]
     fn cache_path(&self) -> Option<String> {
         self.inner.local_path().map(|p| p.display().to_string())
@@ -1551,7 +1672,7 @@ impl PyRefgetStore {
 
     /// Eagerly load all Stub sequences to Full (fetches actual byte data).
     ///
-    /// After this call, get_substring(), export_fasta(), and sequence_bytes()
+    /// After this call, get_substring() and export_fasta()
     /// work without requiring mutable access. For large stores with many
     /// sequences, prefer load_sequence() for specific sequences.
     ///
@@ -2685,6 +2806,45 @@ impl PyRefgetStore {
             index: 0,
         })
     }
+
+    /// Compute GA4GH VRS Allele identifiers for variants in a VCF file.
+    ///
+    /// Reads the VCF, normalizes each variant against the reference sequence
+    /// (from this store), and computes VRS digests.
+    ///
+    /// Args:
+    ///     collection_digest (str): Digest of the sequence collection (genome assembly).
+    ///     vcf_path (str): Path to a plain-text VCF file.
+    ///
+    /// Returns:
+    ///     list[dict]: Each dict has keys: chrom, pos, ref, alt, vrs_id.
+    fn compute_vrs_ids<'py>(
+        &mut self,
+        py: Python<'py>,
+        collection_digest: &str,
+        vcf_path: &str,
+    ) -> PyResult<Vec<Bound<'py, pyo3::types::PyDict>>> {
+        let results = gtars_vrs::vcf::compute_vrs_ids_from_vcf(
+            &mut self.inner,
+            collection_digest,
+            vcf_path,
+        )
+        .map_err(|e| {
+            pyo3::exceptions::PyRuntimeError::new_err(format!("VRS computation failed: {}", e))
+        })?;
+
+        let mut py_results = Vec::with_capacity(results.len());
+        for r in &results {
+            let dict = pyo3::types::PyDict::new(py);
+            dict.set_item("chrom", &r.chrom)?;
+            dict.set_item("pos", r.pos)?;
+            dict.set_item("ref", &r.ref_allele)?;
+            dict.set_item("alt", &r.alt_allele)?;
+            dict.set_item("vrs_id", &r.vrs_id)?;
+            py_results.push(dict);
+        }
+        Ok(py_results)
+    }
 }
 
 /// Iterator for RefgetStore that yields SequenceMetadata.
@@ -2734,7 +2894,7 @@ impl PyRefgetStoreIterator {
 ///     >>> coll = readonly.get_collection("abc123")
 #[pyclass(name = "ReadonlyRefgetStore", module = "gtars.refget")]
 pub struct PyReadonlyRefgetStore {
-    store: ReadonlyRefgetStore,
+    pub(crate) store: ReadonlyRefgetStore,
 }
 
 #[pymethods]
@@ -2976,6 +3136,25 @@ impl PyReadonlyRefgetStore {
         let seq_digest = strip_sq_prefix(seq_digest);
         self.store
             .get_substring(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
+            })
+    }
+
+    /// Extract many substrings from ONE sequence in a single call.
+    ///
+    /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
+    /// substrings in the same order. Adaptively reads the whole sequence once
+    /// when the ranges cover a large fraction; otherwise partial-reads each
+    /// range. Identical output to per-range `get_substring`.
+    fn get_substrings(
+        &self,
+        seq_digest: &str,
+        ranges: Vec<(usize, usize)>,
+    ) -> PyResult<Vec<String>> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        self.store
+            .get_substrings(seq_digest, &ranges)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
             })

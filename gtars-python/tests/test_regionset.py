@@ -59,8 +59,8 @@ class TestOverlapOps:
         assert result[0].start == 150
         assert result[0].end == 200
 
-    def test_subtract(self):
-        result = self.a.subtract(self.b)
+    def test_setdiff(self):
+        result = self.a.setdiff(self.b)
         assert len(result) > 0
 
     def test_closest(self):

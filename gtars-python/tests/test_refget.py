@@ -105,6 +105,48 @@ class TestRefget:
         assert seq is not None
         assert seq.metadata.length == 8
 
+    def test_store_import_multiple_fastas_list(self):
+        """Import several FASTAs at once via an explicit list."""
+        store = RefgetStore.in_memory()
+        results = store.add_sequence_collections_from_fastas(
+            ["../tests/data/fasta/base.fa", "../tests/data/fasta/different_order.fa"],
+            jobs=1,
+        )
+        assert len(results) == 2
+        for meta, was_new in results:
+            assert hasattr(meta, "digest")
+            assert isinstance(was_new, bool)
+
+    def test_store_import_multiple_fastas_glob(self):
+        """Glob form expands to lexicographically sorted, deterministic order."""
+        store = RefgetStore.in_memory()
+        results = store.add_sequence_collections_from_fastas(
+            "../tests/data/fasta/*.fa.gz"
+        )
+        assert len(results) >= 1
+
+    def test_store_import_multiple_fastas_file_list(self):
+        """file_list (fofn) form, with blank lines and comments ignored."""
+        store = RefgetStore.in_memory()
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# a comment\n\n")
+            f.write("../tests/data/fasta/base.fa\n")
+            f.write("  ../tests/data/fasta/different_order.fa  \n")
+            fofn = f.name
+        try:
+            results = store.add_sequence_collections_from_fastas([], file_list=fofn)
+            assert len(results) == 2
+        finally:
+            os.unlink(fofn)
+
+    def test_store_import_multiple_fastas_bad_glob(self):
+        """A glob matching nothing raises ValueError."""
+        store = RefgetStore.in_memory()
+        with pytest.raises(ValueError):
+            store.add_sequence_collections_from_fastas(
+                "../tests/data/fasta/does_not_exist_*.fa"
+            )
+
     def test_store_substring(self):
         """Test substring retrieval"""
         store = RefgetStore.in_memory()
@@ -212,10 +254,11 @@ class TestRefget:
 
             collection_digest = result.digest
 
-            chr1_sha = sha512t24u_digest(b"ATGCATGCATGC")
-            chr1_md5 = md5_digest(b"ATGCATGCATGC")
-            chr2_sha = sha512t24u_digest(b"GGGGAAAA")
-            chr2_md5 = md5_digest(b"GGGGAAAA")
+            # Smoke-test the digest bindings (values not asserted here).
+            sha512t24u_digest(b"ATGCATGCATGC")
+            md5_digest(b"ATGCATGCATGC")
+            sha512t24u_digest(b"GGGGAAAA")
+            md5_digest(b"GGGGAAAA")
 
             # Use only valid entries - errors now propagate instead of being silently skipped
             bed_content = "chr1\t0\t5\nchr1\t8\t12\nchr2\t0\t4"
@@ -231,11 +274,11 @@ class TestRefget:
             with open(temp_output_fa_path, "r") as f:
                 output_fa_content = f.read()
 
-            expected_fa_content = f""">chr1 12 dna2bit {chr1_sha} {chr1_md5}
-ATGCAATGC
->chr2 8 dna2bit {chr2_sha} {chr2_md5}
-GGGG
-"""
+            # export_fasta_from_regions writes one record per BED region with a
+            # `>{chrom}:{start}-{end}` header (see gtars-refget export.rs, PR #259).
+            expected_fa_content = (
+                ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n"
+            )
 
             assert output_fa_content.strip() == expected_fa_content.strip(), (
                 "Output FASTA file content mismatch"

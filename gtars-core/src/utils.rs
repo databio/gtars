@@ -354,6 +354,21 @@ pub fn read_bedset_file<P: AsRef<Path>>(file_path: P) -> Result<Vec<String>> {
     Ok(bed_identifiers)
 }
 
+/// Returns a sort key that orders chromosome names karyotypically:
+/// numeric (1, 2, …, 22) → X → Y → M/MT → everything else alphabetically.
+pub fn chrom_karyotype_key(chr: &str) -> (u8, u32, String) {
+    let bare = chr.strip_prefix("chr").unwrap_or(chr);
+    match bare {
+        "X" => (1, 0, String::new()),
+        "Y" => (2, 0, String::new()),
+        "M" | "MT" => (3, 0, String::new()),
+        _ => match bare.parse::<u32>() {
+            Ok(n) => (0, n, String::new()),
+            Err(_) => (4, 0, bare.to_string()),
+        },
+    }
+}
+
 pub fn remove_all_extensions(path: &Path) -> String {
     let mut stem = path.file_stem().unwrap().to_string_lossy().to_string();
 
@@ -369,4 +384,27 @@ pub fn remove_all_extensions(path: &Path) -> String {
     }
 
     stem
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_chrom_karyotype_sort_order() {
+        let mut chroms = vec!["chrM", "chrX", "chr2", "chr10", "chr1", "chrY", "chrUn_gl"];
+        chroms.sort_by_key(|c| chrom_karyotype_key(c));
+        assert_eq!(
+            chroms,
+            vec!["chr1", "chr2", "chr10", "chrX", "chrY", "chrM", "chrUn_gl"]
+        );
+    }
+
+    #[test]
+    fn test_chrom_karyotype_without_prefix() {
+        // works without "chr" prefix
+        let mut chroms = vec!["MT", "X", "2", "1", "Y"];
+        chroms.sort_by_key(|c| chrom_karyotype_key(c));
+        assert_eq!(chroms, vec!["1", "2", "X", "Y", "MT"]);
+    }
 }

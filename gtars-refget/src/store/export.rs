@@ -282,11 +282,11 @@ impl ReadonlyRefgetStore {
                 .get(seq_digest)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {:?}", seq_digest))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
             };
 
             write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
@@ -326,14 +326,14 @@ impl ReadonlyRefgetStore {
                 .get(&digest_key)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!(
                         "Sequence data not loaded for digest: {}",
                         digest_str
                     ));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
             };
 
             write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;

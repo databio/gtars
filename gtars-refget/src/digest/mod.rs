@@ -30,7 +30,8 @@ pub use alphabet::{
 };
 pub use auto_decompress::AutoDecompressWriter;
 pub use encoder::{
-    SequenceEncoder, decode_string_from_bytes, decode_substring_from_bytes, encode_sequence,
+    SequenceEncoder, byte_range_for_bases, decode_string_from_bytes, decode_substring_from_bytes,
+    decode_substring_from_bytes_at_offset, encode_sequence,
 };
 pub use fasta::{ParseOptions, digest_fasta_bytes, load_fasta_bytes, parse_fasta_header};
 pub use stream::FastaStreamHasher;

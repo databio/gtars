@@ -626,6 +626,47 @@ class RefgetStore:
         """
         ...
 
+    def add_sequence_collections_from_fastas(
+        self,
+        fastas: Union[str, PathLike, List[Union[str, PathLike]]],
+        file_list: Optional[Union[str, PathLike]] = None,
+        jobs: int = 0,
+        force: bool = False,
+        namespaces: Optional[List[str]] = None,
+    ) -> List[tuple[SequenceCollectionMetadata, bool]]:
+        """Import multiple FASTA files into the store.
+
+        ``fastas`` accepts a single path, a glob pattern (e.g. "fasta/*.fa.gz"),
+        a directory of FASTAs, or a list mixing any of these. ``file_list`` points
+        at a file-of-filenames (one path per line; blank lines and #-comments
+        ignored; may itself contain globs/directories). Inputs are expanded by
+        gtars into a de-duplicated, deterministic order (explicit paths first,
+        then file_list lines; directory/glob matches sorted lexicographically).
+        ``jobs`` is the number of files imported concurrently (0 = auto, 1 =
+        serial); it does not affect ordering or the resulting store.
+
+        Args:
+            fastas: A path, glob, directory, or list of any of these.
+            file_list: Optional path to a file-of-filenames.
+            jobs: Number of files imported concurrently (0 = auto, 1 = serial).
+            force: If True, overwrite existing collections/sequences.
+            namespaces: Optional namespace prefixes to extract aliases from headers.
+
+        Returns:
+            A list of ``(SequenceCollectionMetadata, bool)`` tuples in
+            expanded-input order; the bool is True if newly added.
+
+        Raises:
+            ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
+            IOError: If a file cannot be read or processed.
+
+        Example::
+
+            store = RefgetStore.in_memory()
+            results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+        """
+        ...
+
     def add_sequence_collection(
         self, collection: SequenceCollection, force: bool = False
     ) -> None:

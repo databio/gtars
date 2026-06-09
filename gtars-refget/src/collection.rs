@@ -7,14 +7,16 @@ use anyhow::Result;
 use std::io::Write;
 use std::path::Path;
 
+// FASTA digesting + path helpers are filesystem-only; the rest of this module
+// (the `*Ext` traits, `read_rgsi_file`, RGSI writers) is WASM-safe.
+#[cfg(feature = "filesystem")]
 use crate::fasta::digest_fasta;
+#[cfg(feature = "filesystem")]
 use crate::utils::PathExtension;
 
-// Re-export core types from digest::types for backward compatibility
-pub use crate::digest::types::{
-    FaiMetadata, SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata,
-    SequenceCollectionRecord, SequenceMetadata, SequenceRecord, digest_sequence,
-    digest_sequence_with_description, parse_rgsi_line,
+use crate::digest::types::{
+    SeqColDigestLvl1, SequenceCollection, SequenceCollectionMetadata, SequenceCollectionRecord,
+    SequenceMetadata, SequenceRecord, parse_rgsi_line,
 };
 
 /// Shared implementation for writing RGSI (Refget Sequence Index) files.
@@ -102,7 +104,7 @@ impl SequenceRecordExt for SequenceRecord {
         use std::fs::{self, File};
         use std::io::Write;
 
-        let data = match self {
+        let data: &[u8] = match self {
             SequenceRecord::Stub(_) => {
                 return Err(anyhow::anyhow!(
                     "Cannot write file: sequence data not loaded"
@@ -143,6 +145,7 @@ impl SequenceCollectionRecordExt for SequenceCollectionRecord {
 // ============================================================================
 
 /// Extension trait for SequenceCollection with filesystem-dependent methods.
+#[cfg(feature = "filesystem")]
 pub trait SequenceCollectionExt {
     fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
     fn from_rgsi<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection>;
@@ -158,6 +161,7 @@ pub trait SequenceCollectionExt {
     fn write_fasta<P: AsRef<Path>>(&self, file_path: P, line_width: Option<usize>) -> Result<()>;
 }
 
+#[cfg(feature = "filesystem")]
 impl SequenceCollectionExt for SequenceCollection {
     /// Default behavior: read and write cache
     fn from_fasta<P: AsRef<Path>>(file_path: P) -> Result<SequenceCollection> {
@@ -370,8 +374,68 @@ pub fn read_rgsi_file<T: AsRef<Path>>(file_path: T) -> Result<SequenceCollection
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::digest::digest_sequence;
     use crate::digest::encode_sequence;
     use crate::digest::{AlphabetType, lookup_alphabet};
+
+    #[test]
+    fn test_decode_handles_encoded_data() {
+        let sequence = b"ACGT";
+        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
+        let encoded_data = encode_sequence(sequence, alphabet);
+
+        let record = SequenceRecord::Full {
+            metadata: SequenceMetadata {
+                name: "test_seq".to_string(),
+                description: None,
+                length: 4,
+                sha512t24u: "test_digest".to_string(),
+                md5: "test_md5".to_string(),
+                alphabet: AlphabetType::Dna2bit,
+                fai: None,
+            },
+            sequence: std::sync::Arc::new(encoded_data),
+        };
+
+        let decoded = record.decode().expect("Should decode encoded data");
+        assert_eq!(decoded, "ACGT");
+    }
+
+    #[test]
+    fn test_digest_sequence_basic() {
+        let seq = digest_sequence("test_seq", b"ACGTACGT");
+        assert_eq!(seq.metadata().name, "test_seq");
+        assert_eq!(seq.metadata().length, 8);
+        assert!(!seq.metadata().sha512t24u.is_empty());
+        assert!(seq.is_loaded());
+        assert_eq!(seq.sequence().unwrap(), b"ACGTACGT");
+    }
+
+    #[test]
+    fn test_sequence_metadata_disk_size() {
+        use crate::store::StorageMode;
+
+        let metadata = SequenceMetadata {
+            name: "test".to_string(),
+            description: None,
+            length: 1000,
+            sha512t24u: "test".to_string(),
+            md5: "test".to_string(),
+            alphabet: AlphabetType::Dna2bit,
+            fai: None,
+        };
+
+        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
+        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
+    }
+}
+
+// FASTA-based tests require the `filesystem` feature (digest_fasta/load_fasta,
+// SequenceCollectionExt::from_path_no_cache/write_fasta).
+#[cfg(all(test, feature = "filesystem"))]
+mod fasta_tests {
+    use super::*;
+    use crate::digest::digest_sequence;
     use crate::fasta::{digest_fasta, load_fasta};
 
     #[test]
@@ -400,29 +464,6 @@ mod tests {
             let decoded = seq_record.decode().expect("decode() should return Some");
             assert_eq!(decoded, *expected_seq);
         }
-    }
-
-    #[test]
-    fn test_decode_handles_encoded_data() {
-        let sequence = b"ACGT";
-        let alphabet = lookup_alphabet(&AlphabetType::Dna2bit);
-        let encoded_data = encode_sequence(sequence, alphabet);
-
-        let record = SequenceRecord::Full {
-            metadata: SequenceMetadata {
-                name: "test_seq".to_string(),
-                description: None,
-                length: 4,
-                sha512t24u: "test_digest".to_string(),
-                md5: "test_md5".to_string(),
-                alphabet: AlphabetType::Dna2bit,
-                fai: None,
-            },
-            sequence: std::sync::Arc::new(encoded_data),
-        };
-
-        let decoded = record.decode().expect("Should decode encoded data");
-        assert_eq!(decoded, "ACGT");
     }
 
     #[test]
@@ -475,16 +516,6 @@ mod tests {
     }
 
     #[test]
-    fn test_digest_sequence_basic() {
-        let seq = digest_sequence("test_seq", b"ACGTACGT");
-        assert_eq!(seq.metadata().name, "test_seq");
-        assert_eq!(seq.metadata().length, 8);
-        assert!(!seq.metadata().sha512t24u.is_empty());
-        assert!(seq.is_loaded());
-        assert_eq!(seq.sequence().unwrap(), b"ACGTACGT");
-    }
-
-    #[test]
     fn test_digest_sequence_matches_fasta_digest() {
         let seqcol =
             load_fasta("../tests/data/fasta/base.fa").expect("Failed to load test FASTA file");
@@ -497,24 +528,6 @@ mod tests {
             fasta_seq.metadata().sha512t24u
         );
         assert_eq!(prog_seq.metadata().md5, fasta_seq.metadata().md5);
-    }
-
-    #[test]
-    fn test_sequence_metadata_disk_size() {
-        use crate::store::StorageMode;
-
-        let metadata = SequenceMetadata {
-            name: "test".to_string(),
-            description: None,
-            length: 1000,
-            sha512t24u: "test".to_string(),
-            md5: "test".to_string(),
-            alphabet: AlphabetType::Dna2bit,
-            fai: None,
-        };
-
-        assert_eq!(metadata.disk_size(&StorageMode::Raw), 1000);
-        assert_eq!(metadata.disk_size(&StorageMode::Encoded), 250);
     }
 
     #[test]

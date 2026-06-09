@@ -103,10 +103,13 @@ impl SequenceRecord {
 
     /// Check if sequence data is loaded (Full) or just metadata (Stub).
     pub fn is_loaded(&self) -> bool {
-        matches!(self, SequenceRecord::Full { .. })
+        match self {
+            SequenceRecord::Stub(_) => false,
+            SequenceRecord::Full { .. } => true,
+        }
     }
 
-    /// Load data into a Stub record, or replace data in a Full record (takes ownership)
+    /// Load data into a Stub/Full record, converting to Full (takes ownership).
     pub fn with_data(self, sequence: Vec<u8>) -> Self {
         let metadata = match self {
             SequenceRecord::Stub(m) => m,
@@ -120,13 +123,9 @@ impl SequenceRecord {
 
     /// Load data into a Stub record in-place, converting it to Full.
     /// If already Full, replaces the existing sequence data.
-    ///
-    /// This is more efficient than `with_data()` when you have a mutable reference,
-    /// as it avoids cloning the metadata.
     pub fn load_data(&mut self, sequence: Vec<u8>) {
         match self {
             SequenceRecord::Stub(metadata) => {
-                // Take ownership of metadata without cloning
                 let metadata = std::mem::take(metadata);
                 *self = SequenceRecord::Full {
                     metadata,
@@ -158,34 +157,23 @@ impl SequenceRecord {
         use super::alphabet::lookup_alphabet;
         use super::encoder::decode_substring_from_bytes;
 
-        let (metadata, data) = match self {
+        let (metadata, data): (&SequenceMetadata, &[u8]) = match self {
             SequenceRecord::Stub(_) => return None,
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
         };
 
         // For ASCII alphabet (8 bits per symbol), the data is always stored raw
         if metadata.alphabet == AlphabetType::Ascii {
-            return String::from_utf8(data.as_ref().clone()).ok();
+            return String::from_utf8(data.to_vec()).ok();
         }
 
-        // Try to detect if data is raw or encoded
-        // Heuristic: for encoded data, the size should be approximately length * bits_per_symbol / 8
-        // For raw data, the size should be approximately equal to length
         let alphabet = lookup_alphabet(&metadata.alphabet);
-
-        // If data size matches the expected length (not the encoded size), it's probably raw
-        if data.len() == metadata.length {
-            // Try to decode as UTF-8
-            if let Ok(raw_string) = String::from_utf8(data.as_ref().clone()) {
-                // Data appears to be raw UTF-8
-                return Some(raw_string);
-            }
+        let bps = alphabet.bits_per_symbol;
+        let expected_encoded = metadata.length.saturating_mul(bps).div_ceil(8);
+        if data.len() == metadata.length && data.len() != expected_encoded {
+            if let Ok(raw_string) = String::from_utf8(data.to_vec()) { return Some(raw_string); }
         }
-
-        // Data is probably encoded (size matches expected encoded size), try to decode it
         let decoded_bytes = decode_substring_from_bytes(&data[..], 0, metadata.length, alphabet);
-
-        // Convert to string
         String::from_utf8(decoded_bytes).ok()
     }
 }

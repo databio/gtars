@@ -1,0 +1,482 @@
+[
+  {
+    "group_id": "eq_fwd_del_len1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2060del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.sMhqHWChcUpaiCuFyL3EAsfLhU0E-chn",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_fwd_del_len1_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.10del",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.sMhqHWChcUpaiCuFyL3EAsfLhU0E-chn",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_del_len1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2060:A:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.sMhqHWChcUpaiCuFyL3EAsfLhU0E-chn",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_del_len2_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2060_2061del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.FAr4ZgrfueE7gmmhtse2bcy6AXgEbom-",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_fwd_del_len2_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.10_11del",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.FAr4ZgrfueE7gmmhtse2bcy6AXgEbom-",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_del_len2_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2060:AC:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.FAr4ZgrfueE7gmmhtse2bcy6AXgEbom-",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_del_len3_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2060_2062del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.iqPUFWL3Hn198eR-GMgRaiDnQeCN80FX",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_fwd_del_len3_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.10_12del",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.iqPUFWL3Hn198eR-GMgRaiDnQeCN80FX",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_del_len3_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2060:ACC:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.iqPUFWL3Hn198eR-GMgRaiDnQeCN80FX",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_ins_len1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2070_2071insG",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.vu6i1qzK_PYyQbWZS3ML0xW6WAgUmgFc",
+    "notes": "genomic ins"
+  },
+  {
+    "group_id": "eq_fwd_ins_len1_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.20_21insG",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.vu6i1qzK_PYyQbWZS3ML0xW6WAgUmgFc",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_ins_len1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2071::G",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.vu6i1qzK_PYyQbWZS3ML0xW6WAgUmgFc",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_start_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2051C>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.GcSJupIPv1erWm3QFaI14CBntmEq0Rpp",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_start_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.1C>T",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.GcSJupIPv1erWm3QFaI14CBntmEq0Rpp",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_start_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2051:C:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.GcSJupIPv1erWm3QFaI14CBntmEq0Rpp",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_stop_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.3150A>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.hXfGLeNQrlL6yn80ANdslxco9mIsZJrk",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_stop_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.400A>T",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.hXfGLeNQrlL6yn80ANdslxco9mIsZJrk",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_sub_at_cds_stop_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:3150:A:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.hXfGLeNQrlL6yn80ANdslxco9mIsZJrk",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_fwd_sub_in_cds_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2100C>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.UCn50MimFLhhs-gkxt98WQdV1tE4AAnq",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_fwd_sub_in_cds_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_fwd:c.50C>T",
+    "transcript": "NM_synth_fwd",
+    "expected_vrs_id": "ga4gh:VA.UCn50MimFLhhs-gkxt98WQdV1tE4AAnq",
+    "notes": "strand=+"
+  },
+  {
+    "group_id": "eq_fwd_sub_in_cds_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2100:C:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.UCn50MimFLhhs-gkxt98WQdV1tE4AAnq",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_del_len1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.1610del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.Qp01eoV9BQ7xv09wXBNJnVKu5MzFJaZz",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_g_only_del_len1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:1610:T:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.Qp01eoV9BQ7xv09wXBNJnVKu5MzFJaZz",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_del_len2_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.1620_1621del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.w_tNRRQ_s0J5CAQBeSEMVF3o07CwGflo",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_g_only_del_len2_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:1620:AT:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.w_tNRRQ_s0J5CAQBeSEMVF3o07CwGflo",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_dup_len1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.1810dup",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.HHMN7TUoOvU874HKBK_Bh2lnbRZ8KHrS",
+    "notes": "genomic dup"
+  },
+  {
+    "group_id": "eq_g_only_dup_len1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:1810:A:AA",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.HHMN7TUoOvU874HKBK_Bh2lnbRZ8KHrS",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_dup_len3_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.1830_1832dup",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.fCaTAIfCPQsNTEF2K13ALO0UDCxcerdj",
+    "notes": "genomic dup"
+  },
+  {
+    "group_id": "eq_g_only_dup_len3_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:1830:CGT:CGTCGT",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.fCaTAIfCPQsNTEF2K13ALO0UDCxcerdj",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_identity_2500_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.2500=",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.zPutTnLzi1YtmVZTEIsFVLKZBbgDoZpz",
+    "notes": "genomic identity"
+  },
+  {
+    "group_id": "eq_g_only_identity_2500_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:2500:T:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.zPutTnLzi1YtmVZTEIsFVLKZBbgDoZpz",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_identity_4500_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.4500=",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.j7rYn6ydhGcuXGBRFNXeHD0O21D-X1_k",
+    "notes": "genomic identity"
+  },
+  {
+    "group_id": "eq_g_only_identity_4500_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:4500:G:G",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.j7rYn6ydhGcuXGBRFNXeHD0O21D-X1_k",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_sub_1500_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.1500G>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.7pDL-2ZhX7eMHf2puW1kHUm4dtL8pR2u",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_g_only_sub_1500_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:1500:G:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.7pDL-2ZhX7eMHf2puW1kHUm4dtL8pR2u",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_sub_4000_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.4000A>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.YTAdWWDWE68dg0-fHHbw6YRqgUebLRJa",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_g_only_sub_4000_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:4000:A:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.YTAdWWDWE68dg0-fHHbw6YRqgUebLRJa",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_g_only_sub_7000_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.7000T>A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.6Fql9VJNyEyltVvDa630Sj1lyPyi_WvQ",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_g_only_sub_7000_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:7000:T:A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.6Fql9VJNyEyltVvDa630Sj1lyPyi_WvQ",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_nc_sub_at_n1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.8001A>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.pSIomgTO-cCHFzxG7L909IEYIjW_JeFH",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n1_001",
+    "member_kind": "hgvs_n",
+    "expression": "NR_synth_nc:n.1A>T",
+    "transcript": "NR_synth_nc",
+    "expected_vrs_id": "ga4gh:VA.pSIomgTO-cCHFzxG7L909IEYIjW_JeFH",
+    "notes": "noncoding"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:8001:A:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.pSIomgTO-cCHFzxG7L909IEYIjW_JeFH",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_nc_sub_at_n200_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.8550T>A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.lLenWjQLoDQ7ok70z8yQs5KqHPYMRBCK",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n200_001",
+    "member_kind": "hgvs_n",
+    "expression": "NR_synth_nc:n.200T>A",
+    "transcript": "NR_synth_nc",
+    "expected_vrs_id": "ga4gh:VA.lLenWjQLoDQ7ok70z8yQs5KqHPYMRBCK",
+    "notes": "noncoding"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n200_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:8550:T:A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.lLenWjQLoDQ7ok70z8yQs5KqHPYMRBCK",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_nc_sub_at_n50_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.8050G>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.HF-s9ZHawhvEh9hx7OloYwICP_ef5lw_",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n50_001",
+    "member_kind": "hgvs_n",
+    "expression": "NR_synth_nc:n.50G>T",
+    "transcript": "NR_synth_nc",
+    "expected_vrs_id": "ga4gh:VA.HF-s9ZHawhvEh9hx7OloYwICP_ef5lw_",
+    "notes": "noncoding"
+  },
+  {
+    "group_id": "eq_nc_sub_at_n50_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:8050:G:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.HF-s9ZHawhvEh9hx7OloYwICP_ef5lw_",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_rev_del_len1_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.6141del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.qfNnSZZAg2rMjqwkyc4FjDrN_jK1ryoX",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_rev_del_len1_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_rev:c.10del",
+    "transcript": "NM_synth_rev",
+    "expected_vrs_id": "ga4gh:VA.qfNnSZZAg2rMjqwkyc4FjDrN_jK1ryoX",
+    "notes": "strand=-"
+  },
+  {
+    "group_id": "eq_rev_del_len1_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:6141:G:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.qfNnSZZAg2rMjqwkyc4FjDrN_jK1ryoX",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_rev_del_len3_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.6139_6141del",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.I1lTpoWZ1oLyuxwBilCHOOKVDPBXNqbX",
+    "notes": "genomic del"
+  },
+  {
+    "group_id": "eq_rev_del_len3_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_rev:c.10_12del",
+    "transcript": "NM_synth_rev",
+    "expected_vrs_id": "ga4gh:VA.I1lTpoWZ1oLyuxwBilCHOOKVDPBXNqbX",
+    "notes": "strand=-"
+  },
+  {
+    "group_id": "eq_rev_del_len3_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:6139:ACG:",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.I1lTpoWZ1oLyuxwBilCHOOKVDPBXNqbX",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_rev_sub_at_cds_start_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.6150T>A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.-UIEHl0gXyZ1Am8ErsK1Y5-R3rRly7nO",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_rev_sub_at_cds_start_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_rev:c.1A>T",
+    "transcript": "NM_synth_rev",
+    "expected_vrs_id": "ga4gh:VA.-UIEHl0gXyZ1Am8ErsK1Y5-R3rRly7nO",
+    "notes": "strand=-"
+  },
+  {
+    "group_id": "eq_rev_sub_at_cds_start_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:6150:T:A",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.-UIEHl0gXyZ1Am8ErsK1Y5-R3rRly7nO",
+    "notes": ""
+  },
+  {
+    "group_id": "eq_rev_sub_in_cds_001",
+    "member_kind": "hgvs_g",
+    "expression": "chr_synth:g.6101A>T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.jLGMDmmuPyCK9SlW22wFP52i8q8dfloL",
+    "notes": "genomic sub"
+  },
+  {
+    "group_id": "eq_rev_sub_in_cds_001",
+    "member_kind": "hgvs_c",
+    "expression": "NM_synth_rev:c.50T>A",
+    "transcript": "NM_synth_rev",
+    "expected_vrs_id": "ga4gh:VA.jLGMDmmuPyCK9SlW22wFP52i8q8dfloL",
+    "notes": "strand=-"
+  },
+  {
+    "group_id": "eq_rev_sub_in_cds_001",
+    "member_kind": "vcf",
+    "expression": "chr_synth:6101:A:T",
+    "transcript": "",
+    "expected_vrs_id": "ga4gh:VA.jLGMDmmuPyCK9SlW22wFP52i8q8dfloL",
+    "notes": ""
+  }
+]

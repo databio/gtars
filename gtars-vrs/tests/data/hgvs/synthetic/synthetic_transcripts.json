@@ -1,0 +1,114 @@
+{
+  "transcripts": {
+    "NM_synth_fwd": {
+      "cds_end": 3150,
+      "cds_start": 2050,
+      "contig": "chr_synth",
+      "exons": [
+        [
+          2000,
+          2100
+        ],
+        [
+          2300,
+          2450
+        ],
+        [
+          2700,
+          2850
+        ],
+        [
+          3100,
+          3200
+        ]
+      ],
+      "gene_name": "GENE_synth_fwd",
+      "id": "NM_synth_fwd",
+      "strand": 1
+    },
+    "NM_synth_rev": {
+      "cds_end": 6150,
+      "cds_start": 5050,
+      "contig": "chr_synth",
+      "exons": [
+        [
+          5000,
+          5100
+        ],
+        [
+          5300,
+          5450
+        ],
+        [
+          5700,
+          5850
+        ],
+        [
+          6100,
+          6200
+        ]
+      ],
+      "gene_name": "GENE_synth_rev",
+      "id": "NM_synth_rev",
+      "strand": -1
+    },
+    "NM_synth_simple": {
+      "cds_end": 1249,
+      "cds_start": 1050,
+      "contig": "chr_synth",
+      "exons": [
+        [
+          1000,
+          1300
+        ]
+      ],
+      "gene_name": "GENE_synth_simple",
+      "id": "NM_synth_simple",
+      "strand": 1
+    },
+    "NM_synth_tiny": {
+      "cds_end": 9042,
+      "cds_start": 9002,
+      "contig": "chr_synth",
+      "exons": [
+        [
+          9000,
+          9010
+        ],
+        [
+          9014,
+          9030
+        ],
+        [
+          9034,
+          9044
+        ]
+      ],
+      "gene_name": "GENE_synth_tiny",
+      "id": "NM_synth_tiny",
+      "strand": 1
+    },
+    "NR_synth_nc": {
+      "cds_end": null,
+      "cds_start": null,
+      "contig": "chr_synth",
+      "exons": [
+        [
+          8000,
+          8050
+        ],
+        [
+          8200,
+          8300
+        ],
+        [
+          8500,
+          8550
+        ]
+      ],
+      "gene_name": "GENE_synth_nc",
+      "id": "NR_synth_nc",
+      "strand": 1
+    }
+  }
+}

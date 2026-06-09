@@ -18,12 +18,79 @@ use crate::digest::{
     SequenceRecord,
 };
 use crate::digest::{decode_string_from_bytes, decode_substring_from_bytes, encode_sequence, StreamingDecoder};
+use crate::digest::{byte_range_for_bases, decode_substring_from_bytes_at_offset};
 use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+
+/// Default capacity of the per-store open-file-descriptor cache used by the
+/// partial-read path. MUST stay well under typical OS fd limits (often 1024):
+/// stores can have huge sequence counts (e.g. ~122k for a transcriptome), so an
+/// unbounded cache would exhaust file descriptors. Mirrors seqrepo's
+/// `fd_cache_size`.
+const SEQ_FD_CACHE_CAP: usize = 256;
+
+/// A tiny bounded LRU cache mapping a sequence digest to an open, shared
+/// `.seq` file handle. `.seq` content for a digest is immutable, so a cached
+/// handle never goes stale and needs no invalidation. When the cache is full,
+/// inserting a new handle evicts (closes) the least-recently-used one.
+///
+/// Recency is tracked with a monotonically increasing counter stamped on each
+/// access; eviction scans for the minimum stamp. With a small cap (default 256)
+/// this O(n) eviction is negligible compared to the avoided `open`/`seek`
+/// syscalls on the hot path.
+#[derive(Debug)]
+struct FdCache {
+    cap: usize,
+    tick: u64,
+    /// digest key -> (shared file handle, last-use stamp)
+    entries: HashMap<DigestKey, (Arc<File>, u64)>,
+}
+
+impl FdCache {
+    fn new(cap: usize) -> Self {
+        FdCache {
+            cap: cap.max(1),
+            tick: 0,
+            entries: HashMap::with_capacity(cap.max(1)),
+        }
+    }
+
+    /// Return a cloned handle on hit, bumping recency. `None` on miss.
+    fn get(&mut self, key: &DigestKey) -> Option<Arc<File>> {
+        self.tick += 1;
+        let tick = self.tick;
+        if let Some(slot) = self.entries.get_mut(key) {
+            slot.1 = tick;
+            Some(Arc::clone(&slot.0))
+        } else {
+            None
+        }
+    }
+
+    /// Insert a freshly opened handle, evicting (closing) the LRU entry if full.
+    fn insert(&mut self, key: DigestKey, file: Arc<File>) {
+        self.tick += 1;
+        let tick = self.tick;
+        if !self.entries.contains_key(&key) && self.entries.len() >= self.cap {
+            // Evict the least-recently-used entry. Dropping the Arc closes the
+            // fd once no in-flight read still holds a clone.
+            if let Some(lru_key) = self
+                .entries
+                .iter()
+                .min_by_key(|(_, (_, stamp))| *stamp)
+                .map(|(k, _)| *k)
+            {
+                self.entries.remove(&lru_key);
+            }
+        }
+        self.entries.insert(key, (file, tick));
+    }
+}
+
 
 /// A `Read` adapter that yields a byte range from a shared `Arc<Vec<u8>>`
 /// buffer without cloning the backing data.
@@ -79,13 +146,14 @@ fn open_remote_range(
 
     let byte_len = byte_end - byte_start;
     let last_byte = byte_end.saturating_sub(1);
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(30))
-        .timeout_read(std::time::Duration::from_secs(60))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(30)))
+        .timeout_recv_response(Some(std::time::Duration::from_secs(60)))
+        .build()
+        .into();
     let response = agent
         .get(&url)
-        .set("Range", &format!("bytes={}-{}", byte_start, last_byte))
+        .header("Range", &format!("bytes={}-{}", byte_start, last_byte))
         .call()
         .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
 
@@ -93,7 +161,7 @@ fn open_remote_range(
     // body with HTTP 200 instead of a 206 Partial Content slice. Wrapping the
     // full body here would silently produce wrong bases, so refuse outright.
     let status = response.status();
-    if status != 206 {
+    if status.as_u16() != 206 {
         return Err(anyhow!(
             "Remote server did not honor Range header (got HTTP {}); \
              refusing to stream to avoid silent data corruption. URL: {}",
@@ -104,7 +172,7 @@ fn open_remote_range(
 
     Ok(Box::new(BufReader::with_capacity(
         64 * 1024,
-        response.into_reader().take(byte_len),
+        response.into_body().into_reader().take(byte_len),
     )))
 }
 
@@ -165,9 +233,10 @@ pub struct ReadonlyRefgetStore {
     pub(crate) available_sequence_alias_namespaces: Vec<String>,
     /// Available collection alias namespaces (from manifest, for remote discovery).
     pub(crate) available_collection_alias_namespaces: Vec<String>,
-    /// Cache of decoded sequence bytes, keyed by SHA512t24u digest.
-    /// Populated by ensure_decoded(), read by sequence_bytes().
-    pub(crate) decoded_cache: HashMap<DigestKey, Vec<u8>>,
+    /// Bounded LRU cache of open `.seq` file handles for the partial-read path,
+    /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
+    /// the same chromosome file on every per-region `get_substring` call.
+    seq_fd_cache: Mutex<FdCache>,
     /// Whether the sequence index (sequences.rgsi) has been loaded.
     /// For remote stores, this starts as `false` and is lazily loaded on first
     /// sequence access, avoiding the costly download when only browsing collections.
@@ -196,12 +265,21 @@ impl ReadonlyRefgetStore {
             attribute_index: false,
             aliases: AliasManager::default(),
             fhr_metadata: HashMap::new(),
-            decoded_cache: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
+            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
             sequence_index_loaded: true,
             sequence_index_path: None,
         }
+    }
+
+    /// Test-only: shrink the partial-read fd-cache to a tiny capacity so the
+    /// eviction/reopen path is exercised deterministically. Only used by the
+    /// filesystem-gated partial-read tests.
+    #[cfg(all(test, feature = "filesystem"))]
+    pub(crate) fn set_seq_fd_cache_cap_for_test(&self, cap: usize) {
+        let mut cache = self.seq_fd_cache.lock().unwrap();
+        *cache = FdCache::new(cap);
     }
 
     /// Set whether to suppress progress output.
@@ -385,6 +463,18 @@ impl ReadonlyRefgetStore {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
+        // CONTRACT: ingested sequence bytes are ASCII (the refget digest and the
+        // on-the-fly decode paths assume one byte == one residue). Enforced in
+        // debug builds only to keep the ingestion hot path allocation/branch
+        // free in release.
+        debug_assert!(
+            match &sr {
+                SequenceRecord::Full { sequence, .. } => sequence.is_ascii(),
+                SequenceRecord::Stub(_) => true,
+            },
+            "add_sequence_record: sequence bytes must be ASCII"
+        );
+
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(());
         }
@@ -406,6 +496,71 @@ impl ReadonlyRefgetStore {
 
         self.sequence_store.insert(key, sr);
         Ok(())
+    }
+
+    /// Inserter-side half of [`add_sequence_record`](Self::add_sequence_record)
+    /// for the parallel streaming import: do the FAST in-memory dedup decision
+    /// and map/`md5_lookup` insert here (single inserter, so no race on the
+    /// dedup truth), but DO NOT write the `.seq` to disk. Instead return the
+    /// expanded full path + bytes so the caller can dispatch the (independent,
+    /// per-digest) disk write to a bounded writer pool.
+    ///
+    /// Returns `Some((full_path, bytes))` when a `.seq` write must be performed
+    /// (disk-backed store, `Full` record, and either a first occurrence or a
+    /// forced overwrite), or `None` when nothing needs to be written to disk
+    /// (in-memory mode, a `Stub`, or a dedup hit). The in-memory state is fully
+    /// updated before returning, so dedup stays the single source of truth on
+    /// the inserter thread.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+    pub(crate) fn add_sequence_record_deferred_write(
+        &mut self,
+        sr: SequenceRecord,
+        force: bool,
+    ) -> Result<Option<(PathBuf, Vec<u8>)>> {
+        let metadata = sr.metadata();
+        let key = metadata.sha512t24u.to_key();
+
+        if !force && self.sequence_store.contains_key(&key) {
+            return Ok(None);
+        }
+
+        self.md5_lookup
+            .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+
+        if self.persist_to_disk && self.local_path.is_some() {
+            match sr {
+                SequenceRecord::Full { metadata, sequence } => {
+                    // Insert the stub into the map NOW (reserve), so the dedup
+                    // decision is committed on the inserter thread. The actual
+                    // byte write is dispatched to the writer pool by the caller.
+                    let full_path = self
+                        .sequence_file_path(&metadata.sha512t24u)
+                        .context("seqdata_path_template/local_path not set")?;
+                    let stub = SequenceRecord::Stub(metadata);
+                    self.sequence_store.insert(key, stub);
+                    // INVARIANT: strong_count == 1 here — the Arc was just
+                    // constructed in the import pipeline (Arc::new in import.rs)
+                    // and no other owner exists at the point of this call, so
+                    // try_unwrap always succeeds and reclaims the buffer with zero
+                    // copy. The clone fallback is dead code / future-proofing only.
+                    debug_assert_eq!(
+                        std::sync::Arc::strong_count(&sequence),
+                        1,
+                        "sequence Arc must be uniquely owned for zero-copy reclaim"
+                    );
+                    let bytes = std::sync::Arc::try_unwrap(sequence)
+                        .unwrap_or_else(|arc| (*arc).clone());
+                    return Ok(Some((full_path, bytes)));
+                }
+                SequenceRecord::Stub(s) => {
+                    self.sequence_store.insert(key, SequenceRecord::Stub(s));
+                    return Ok(None);
+                }
+            }
+        }
+
+        self.sequence_store.insert(key, sr);
+        Ok(None)
     }
 
     // =========================================================================
@@ -615,7 +770,6 @@ impl ReadonlyRefgetStore {
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);
                 self.md5_lookup.retain(|_, v| v != orphan_key);
-                self.decoded_cache.remove(orphan_key);
             }
 
             if self.persist_to_disk {
@@ -646,6 +800,66 @@ impl ReadonlyRefgetStore {
         }
 
         Ok(true)
+    }
+
+    /// Remove any sequence from `sequence_store` (and its `.seq` file on disk)
+    /// that is not referenced by any entry in `self.collections`.
+    ///
+    /// Used as a best-effort cleanup after a failed import:
+    /// [`add_sequence_collections_from_fastas`](Self::add_sequence_collections_from_fastas)
+    /// may have inserted sequences for a partially-built collection that never
+    /// received an `End` message (and was therefore never added to
+    /// `self.collections`).  Those sequences are orphans — they have no
+    /// owning collection — and this method removes them so the store stays
+    /// internally consistent. The operation is O(sequences + collections).
+    ///
+    /// Sequences shared with a successfully-finalized collection are preserved.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+    pub(crate) fn remove_orphan_seq_files(&mut self) {
+        // Build the set of all sequence digest keys that are referenced by at
+        // least one surviving (finalized) collection.
+        let mut referenced: std::collections::HashSet<DigestKey> =
+            std::collections::HashSet::new();
+        for name_map in self.name_lookup.values() {
+            for &seq_key in name_map.values() {
+                referenced.insert(seq_key);
+            }
+        }
+
+        // Collect the orphan keys (present in sequence_store but not referenced).
+        let orphans: Vec<DigestKey> = self
+            .sequence_store
+            .keys()
+            .filter(|k| !referenced.contains(*k))
+            .copied()
+            .collect();
+
+        if orphans.is_empty() {
+            return;
+        }
+
+        // Remove from in-memory structures.
+        for key in &orphans {
+            self.sequence_store.remove(key);
+            self.md5_lookup.retain(|_, v| v != key);
+        }
+
+        // Best-effort remove on-disk `.seq` files.
+        if self.persist_to_disk {
+            if let (Some(local_path), Some(template)) =
+                (&self.local_path, &self.seqdata_path_template)
+            {
+                for key in &orphans {
+                    let digest_str = key_to_digest_string(key);
+                    let rel = Self::expand_template(&digest_str, template);
+                    let full = local_path.join(&rel);
+                    let _ = fs::remove_file(&full);
+                    if let Some(parent) = full.parent() {
+                        let _ = fs::remove_dir(parent); // ignore if non-empty
+                    }
+                }
+            }
+        }
     }
 
     // =========================================================================
@@ -857,51 +1071,33 @@ impl ReadonlyRefgetStore {
         })
     }
 
-    /// Ensure a sequence is loaded and decoded into the decoded cache.
-    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
-        let digest_key = seq_digest.to_key();
-        let actual_key = self
-            .md5_lookup
-            .get(&digest_key)
-            .copied()
-            .unwrap_or(digest_key);
-
-        if self.decoded_cache.contains_key(&actual_key) {
-            return Ok(());
-        }
-
-        let record = self
-            .sequence_store
-            .get(&actual_key)
-            .ok_or_else(|| anyhow!("Sequence not found"))?;
-        let decoded = record
-            .decode()
-            .ok_or_else(|| anyhow!("Sequence not loaded (stub). Call load_sequence() first."))?;
-
-        self.decoded_cache.insert(actual_key, decoded.into_bytes());
-        Ok(())
-    }
-
-    /// Clear the decoded sequence cache to reclaim memory.
-    pub fn clear_decoded_cache(&mut self) {
-        self.decoded_cache.clear();
-    }
-
     /// Clear sequence data from the store to free memory.
+    ///
+    /// Removes all sequence records. Metadata is preserved:
+    /// collections, name lookups, MD5 lookups, aliases, and FHR
+    /// metadata remain intact.
+    ///
+    /// For on-disk stores, data on disk is unaffected.
     pub fn clear(&mut self) {
         self.sequence_store.clear();
-        self.decoded_cache.clear();
+        if let Ok(mut cache) = self.seq_fd_cache.lock() {
+            cache.entries.clear();
+        }
     }
 
-    /// Get decoded sequence bytes from the cache.
-    pub fn sequence_bytes<K: AsRef<[u8]>>(&self, seq_digest: K) -> Option<&[u8]> {
+    /// Check whether a sequence's record is loaded (Full) rather
+    /// than a metadata-only Stub.
+    pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
         let digest_key = seq_digest.to_key();
         let actual_key = self
             .md5_lookup
             .get(&digest_key)
             .copied()
             .unwrap_or(digest_key);
-        self.decoded_cache.get(&actual_key).map(|v| v.as_slice())
+        match self.sequence_store.get(&actual_key) {
+            Some(SequenceRecord::Stub(_)) | None => false,
+            Some(SequenceRecord::Full { .. }) => true,
+        }
     }
 
     /// Get a sequence by collection digest and name.
@@ -1062,9 +1258,20 @@ impl ReadonlyRefgetStore {
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
-        let (metadata, sequence) = match record {
-            SequenceRecord::Stub(_) => return Err(anyhow!("Sequence data not loaded (stub only)")),
-            SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+        let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
+            // Not resident: for a disk-backed store, read only the bytes covering
+            // [start, end) directly from the `.seq` file instead of loading the
+            // whole sequence into RAM. This is the random-access extract path:
+            // sparse region extraction touches a tiny fraction of each sequence,
+            // so a per-query partial read avoids the cost of `load_sequence`
+            // pulling entire chromosomes into memory.
+            SequenceRecord::Stub(meta) => {
+                if self.local_path.is_some() && self.seqdata_path_template.is_some() {
+                    return self.get_substring_from_disk(meta, start, end);
+                }
+                return Err(anyhow!("Sequence data not loaded (stub only)"));
+            }
+            SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
         };
 
         if start >= metadata.length || end > metadata.length || start >= end {
@@ -1080,15 +1287,216 @@ impl ReadonlyRefgetStore {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
                 let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
-                String::from_utf8(decoded_sequence)
-                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+                // SAFETY: the Encoded decoder emits only bytes drawn from
+                // `alphabet.decoding_array`, which are ASCII sequence symbols
+                // (A/C/G/T/N/IUPAC/protein/ASCII), hence valid UTF-8. Skipping
+                // the O(n) `from_utf8` validation matters on multi-GB extracts.
+                Ok(unsafe { String::from_utf8_unchecked(decoded_sequence) })
             }
             StorageMode::Raw => {
                 let raw_slice: &[u8] = &sequence[start..end];
-                String::from_utf8(raw_slice.to_vec())
-                    .map_err(|e| anyhow!("Failed to decode UTF-8 sequence: {}", e))
+                // SAFETY: Raw mode stores one ASCII sequence byte per base per the
+                // refget data model, so the slice is valid UTF-8.
+                Ok(unsafe { String::from_utf8_unchecked(raw_slice.to_vec()) })
             }
         }
+    }
+
+    /// Batch substring retrieval for many ranges of ONE sequence.
+    ///
+    /// Resolves the record once and validates all ranges up front, then:
+    /// - **Resident `Full`**: decode/slice each range from the resident bytes.
+    /// - **Disk-backed `Stub`**: partial-read each range independently via the
+    ///   fd-cached [`get_substring_from_disk`](Self::get_substring_from_disk)
+    ///   path (reads only the bytes covering each range; reuses the open `.seq`
+    ///   handle across ranges).
+    ///
+    /// The main benefit over a loop of [`get_substring`](Self::get_substring) is
+    /// for FFI callers (e.g. the Python binding): resolving the record once and
+    /// crossing the boundary once per sequence instead of once per range.
+    ///
+    /// A whole-sequence "decode once, slice all" strategy was tried for
+    /// wide/overlapping range sets but measured *slower* on real chromosome-scale
+    /// sequences (decoding a 250 Mbp chromosome into one buffer, plus the large
+    /// allocation, outweighs the avoided re-decode of scattered spans), so the
+    /// partial path is used uniformly. Callers wanting resident behavior should
+    /// load the sequence (`load_sequence`) first; the `Full` arm then serves it.
+    ///
+    /// Output strings are byte-identical to a loop of
+    /// [`get_substring`](Self::get_substring).
+    pub fn get_substrings<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        ranges: &[(usize, usize)],
+    ) -> Result<Vec<String>> {
+        let digest_key = sha512_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
+
+        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
+            anyhow!(
+                "Sequence not found: {}",
+                String::from_utf8_lossy(sha512_digest.as_ref())
+            )
+        })?;
+
+        let metadata = record.metadata();
+        let seq_length = metadata.length;
+
+        // Validate every range up front (same rule as get_substring).
+        for &(start, end) in ranges {
+            if start >= seq_length || end > seq_length || start >= end {
+                return Err(anyhow!(
+                    "Invalid substring range: start={}, end={}, sequence length={}",
+                    start,
+                    end,
+                    seq_length
+                ));
+            }
+        }
+
+        match record {
+            SequenceRecord::Full { metadata, sequence } => {
+                let seq: &[u8] = sequence.as_slice();
+                let mut out = Vec::with_capacity(ranges.len());
+                match self.mode {
+                    StorageMode::Encoded => {
+                        let alphabet = lookup_alphabet(&metadata.alphabet);
+                        for &(start, end) in ranges {
+                            let decoded =
+                                decode_substring_from_bytes(seq, start, end, alphabet);
+                            // SAFETY: see get_substring (ASCII alphabet bytes).
+                            out.push(unsafe { String::from_utf8_unchecked(decoded) });
+                        }
+                    }
+                    StorageMode::Raw => {
+                        for &(start, end) in ranges {
+                            // SAFETY: see get_substring (Raw stores ASCII bases).
+                            out.push(unsafe {
+                                String::from_utf8_unchecked(seq[start..end].to_vec())
+                            });
+                        }
+                    }
+                }
+                Ok(out)
+            }
+            SequenceRecord::Stub(meta) => {
+                if self.local_path.is_none() || self.seqdata_path_template.is_none() {
+                    return Err(anyhow!("Sequence data not loaded (stub only)"));
+                }
+
+                let mut out = Vec::with_capacity(ranges.len());
+                for &(start, end) in ranges {
+                    out.push(self.get_substring_from_disk(meta, start, end)?);
+                }
+                Ok(out)
+            }
+        }
+    }
+
+    /// Read a substring directly from the on-disk `.seq` file, fetching only the
+    /// bytes that cover `[start, end)`.
+    ///
+    /// `.seq` files are headerless raw byte arrays (bit-packed in Encoded mode,
+    /// one ASCII byte per base in Raw mode), so byte offsets map directly to base
+    /// positions. We compute the covering byte range with [`byte_range_for_bases`],
+    /// read just that window with a positioned read, and decode it with
+    /// [`decode_substring_from_bytes_at_offset`]. This is the partial-read path
+    /// that makes random-access extraction cheap: it never materializes the whole
+    /// sequence in memory.
+    fn get_substring_from_disk(
+        &self,
+        metadata: &SequenceMetadata,
+        start: usize,
+        end: usize,
+    ) -> Result<String> {
+        if start >= metadata.length || end > metadata.length || start >= end {
+            return Err(anyhow!(
+                "Invalid substring range: start={}, end={}, sequence length={}",
+                start,
+                end,
+                metadata.length
+            ));
+        }
+
+        // Fetch (or open + cache) the shared `.seq` file handle. The critical
+        // section is kept tiny: lock -> get-or-open -> clone Arc -> unlock. The
+        // actual positioned read happens OUTSIDE the lock, so concurrent reads
+        // are never serialized by the cache.
+        let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+
+        // Compute the covering byte window, then read it with a positioned read.
+        let (byte_start, byte_end) = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                byte_range_for_bases(start, end, alphabet.bits_per_symbol)
+            }
+            StorageMode::Raw => (start, end),
+        };
+        let buf = crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?;
+
+        let decoded: Vec<u8> = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                decode_substring_from_bytes_at_offset(&buf, byte_start, start, end, alphabet)
+            }
+            StorageMode::Raw => buf,
+        };
+
+        // SAFETY: Encoded decode emits only ASCII alphabet bytes; Raw stores
+        // ASCII sequence bytes. Either way `decoded` is valid UTF-8, so we skip
+        // the O(n) validation. See `get_substring` for the full justification.
+        Ok(unsafe { String::from_utf8_unchecked(decoded) })
+    }
+
+    /// Return a shared handle to the `.seq` file for `digest`, opening and
+    /// caching it on a miss. Bounded LRU; the LRU handle is evicted (closed)
+    /// when the cache is full.
+    fn get_cached_seq_file(&self, digest: &str) -> Result<Arc<File>> {
+        let key = digest.to_key();
+
+        // Fast path: hit. Hold the lock only for the tiny map op.
+        {
+            let mut cache = self
+                .seq_fd_cache
+                .lock()
+                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+            if let Some(f) = cache.get(&key) {
+                return Ok(f);
+            }
+        }
+
+        // Miss: build the path and open OUTSIDE the lock (the open syscall must
+        // not serialize other readers).
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("Partial read requires a local disk-backed store"))?;
+        let template = self
+            .seqdata_path_template
+            .as_ref()
+            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+        let full_path = local_path.join(Self::expand_template(digest, template));
+        let file = Arc::new(
+            File::open(&full_path)
+                .with_context(|| format!("Failed to open seq file {}", full_path.display()))?,
+        );
+
+        // Insert under the lock. A concurrent miss may have inserted the same
+        // digest meanwhile; that is harmless (both handles read the same
+        // immutable file) -- prefer the already-cached one to avoid duplicating.
+        let mut cache = self
+            .seq_fd_cache
+            .lock()
+            .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+        if let Some(existing) = cache.get(&key) {
+            return Ok(existing);
+        }
+        cache.insert(key, Arc::clone(&file));
+        Ok(file)
     }
 
     // =========================================================================
@@ -1315,6 +1723,7 @@ impl ReadonlyRefgetStore {
             }
         }
 
+        #[cfg(feature = "http")]
         if let Some(remote_url) = remote_source {
             let full_remote_url = if remote_url.ends_with('/') {
                 format!("{}{}", remote_url, relative_path)
@@ -1328,6 +1737,7 @@ impl ReadonlyRefgetStore {
 
             let mut data = Vec::new();
             response
+                .into_body()
                 .into_reader()
                 .read_to_end(&mut data)
                 .context("Failed to read response body")?;
@@ -1347,13 +1757,14 @@ impl ReadonlyRefgetStore {
                 }
             }
 
-            Ok(data)
-        } else {
-            Err(anyhow!(
-                "File not found locally and no remote source configured: {}",
-                relative_path
-            ))
+            return Ok(data);
         }
+
+        let _ = remote_source;
+        Err(anyhow!(
+            "File not found locally and no remote source configured: {}",
+            relative_path
+        ))
     }
 
     /// Ensure a collection is loaded into the store
@@ -1467,7 +1878,8 @@ impl ReadonlyRefgetStore {
             .get(digest)
             .ok_or_else(|| anyhow!("Sequence not found in store"))?;
 
-        if matches!(record, SequenceRecord::Full { .. }) {
+        // Already loaded (Full or Mmap)
+        if record.is_loaded() {
             return Ok(());
         }
 

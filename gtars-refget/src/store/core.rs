@@ -9,7 +9,10 @@ use std::path::Path;
 use anyhow::Result;
 use std::fs::create_dir_all;
 
-use crate::digest::{SequenceCollection, SequenceCollectionMetadata, SequenceRecord};
+use crate::digest::{SequenceCollection, SequenceRecord};
+// Only the filesystem FASTA-import wrappers use this return type.
+#[cfg(feature = "filesystem")]
+use crate::digest::SequenceCollectionMetadata;
 
 /// User-facing store with lazy-loading read methods.
 ///
@@ -230,12 +233,25 @@ impl RefgetStore {
     }
 
     /// Add a sequence collection from a FASTA file.
+    #[cfg(feature = "filesystem")]
     pub fn add_sequence_collection_from_fasta<P: AsRef<Path>>(
         &mut self,
         file_path: P,
         opts: FastaImportOptions<'_>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         self.inner.add_sequence_collection_from_fasta(file_path, opts)
+    }
+
+    /// Add sequence collections from multiple FASTA files, decoding up to
+    /// `opts.file_jobs` files concurrently. Inserts in fixed input order so the
+    /// resulting store is byte-identical to a serial build.
+    #[cfg(feature = "filesystem")]
+    pub fn add_sequence_collections_from_fastas(
+        &mut self,
+        files: &[std::path::PathBuf],
+        opts: FastaImportOptions<'_>,
+    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+        self.inner.add_sequence_collections_from_fastas(files, opts)
     }
 
     /// Add a SequenceRecord directly to the store.
@@ -262,20 +278,14 @@ impl RefgetStore {
         self.inner.import_collection(&source.inner, digest)
     }
 
-    /// Ensure a sequence is decoded into the decoded cache.
-    pub fn ensure_decoded<K: AsRef<[u8]>>(&mut self, seq_digest: K) -> Result<()> {
-        self.inner.ensure_sequence_index_loaded()?;
-        self.inner.ensure_decoded(seq_digest)
-    }
-
-    /// Clear the decoded sequence cache.
-    pub fn clear_decoded_cache(&mut self) {
-        self.inner.clear_decoded_cache();
-    }
-
-    /// Clear in-memory sequence data and decoded cache, preserving metadata.
+    /// Clear in-memory sequence data, preserving metadata.
     pub fn clear(&mut self) {
         self.inner.clear();
+    }
+
+    /// Check whether a sequence is loaded (Full).
+    pub fn is_sequence_loaded<K: AsRef<[u8]>>(&self, seq_digest: K) -> bool {
+        self.inner.is_sequence_loaded(seq_digest)
     }
 
     // --- Seqcol config methods ---

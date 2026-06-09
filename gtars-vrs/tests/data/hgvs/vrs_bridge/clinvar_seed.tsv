@@ -1,0 +1,21 @@
+hgvs_expression	assembly	expected_vrs_id	clinvar_vcv	notes
+NM_004333.6:c.1799T>A	GRCh38		VCV000040389	BRAF V600E — canonical example, MANE Select
+NM_007294.4:c.5266dupC	GRCh38		VCV000017661	BRCA1 founder duplication (Ashkenazi); long-tail dup
+NM_000051.3:c.9170_9171delGA	GRCh38		VCV000003235	ATM frameshift del; pair-deletion edge case
+NM_000546.6:c.524G>A	GRCh38		VCV000012347	TP53 R175H hotspot
+NM_000059.4:c.2808_2811delACAA	GRCh38		VCV000037595	BRCA2 deletion; multi-base reference
+NM_000277.3:c.1A>G	GRCh38		VCV000000596	PAH start-codon variant; first-CDS-base
+NM_000352.5:c.215-1G>C	GRCh38		VCV000178081	ABCC8 splice acceptor; intronic offset (-)
+NM_001754.5:c.1057+1G>A	GRCh38		VCV000005378	RUNX1 splice donor; intronic offset (+)
+NM_000546.6:c.*1175C>T	GRCh38		VCV000376571	TP53 3' UTR variant
+NM_000546.6:c.-28-1G>A	GRCh38		VCV000182968	TP53 5' UTR + intronic offset; gnarly
+NC_000007.14:g.140753336A>T	GRCh38		VCV000040389	BRAF V600E genomic form
+NC_000017.11:g.43093525delC	GRCh38		VCV000054450	BRCA1 genomic deletion
+NM_001005484.2:c.1A>G	GRCh38		VCV000050929	OR4F5 — synthesized example for n.-style edge
+BRAF:c.1799T>A	GRCh38		VCV000040389	gene-symbol-resolved-via-MANE; bridge needs gene_to_mane
+NM_152274.3:c.21_22insT	GRCh38		VCV000050930	insertion; long-tail ins edge
+NM_004333.6(BRAF):c.1799T>A	GRCh38		VCV000040389	parenthesized-gene annotation form
+NC_000023.10:g.152864509_152864510insA	GRCh37		VCV000050931	X-chromosome insertion (GRCh37)
+NM_000257.4:c.4516G>A	GRCh38		VCV000164028	MYH7 cardiomyopathy variant
+NM_000277.3:c.1241A>G	GRCh38		VCV000000599	PAH R414H
+NM_000038.6:c.3927_3931del	GRCh38		VCV000004943	APC frameshift; deletion at long position

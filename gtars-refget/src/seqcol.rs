@@ -374,7 +374,29 @@ impl SeqColService for ReadonlyRefgetStore {
     }
 }
 
+// Non-filesystem seqcol tests: in-memory store only, no FASTA import.
 #[cfg(test)]
+mod nofs_tests {
+    use crate::store::RefgetStore;
+
+    #[test]
+    fn test_compare_with_level2_unknown_digest_returns_error() {
+        let store = RefgetStore::in_memory();
+        // Build a minimal CollectionLevel2 body
+        use crate::digest::CollectionLevel2;
+        let level2 = CollectionLevel2 {
+            names: vec!["chr1".to_string()],
+            lengths: vec![100],
+            sequences: vec!["SQ.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()],
+        };
+
+        let result = store.compare_with_level2("nonexistent_digest", &level2);
+        assert!(result.is_err(), "Expected error for unknown digest");
+    }
+}
+
+// The remaining seqcol tests import FASTA via the filesystem-only API.
+#[cfg(all(test, feature = "filesystem"))]
 mod tests {
     use crate::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore};
     use std::path::PathBuf;
@@ -868,20 +890,8 @@ mod tests {
     }
 
     /// Test 3: compare_with_level2 with an unknown digest returns an error.
-    #[test]
-    fn test_compare_with_level2_unknown_digest_returns_error() {
-        let store = RefgetStore::in_memory();
-        // Build a minimal CollectionLevel2 body
-        use crate::digest::CollectionLevel2;
-        let level2 = CollectionLevel2 {
-            names: vec!["chr1".to_string()],
-            lengths: vec![100],
-            sequences: vec!["SQ.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string()],
-        };
-
-        let result = store.compare_with_level2("nonexistent_digest", &level2);
-        assert!(result.is_err(), "Expected error for unknown digest");
-    }
+    // `test_compare_with_level2_unknown_digest_returns_error` is non-filesystem;
+    // it lives in the always-compiled `nofs_tests` module above.
 
     /// Test 4: ancillary attributes from the stored collection appear in a_only when
     /// the external level-2 body does not contain them.

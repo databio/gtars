@@ -1,0 +1,40 @@
+HGVS Test Corpora — Vendored Sources
+=====================================
+
+The TSVs and parser corpora under this directory are vendored verbatim from
+two upstream projects, both Apache-2.0 licensed. They are used only for
+regression testing of the gtars-vrs HGVS parser and (later) the HGVS->VRS
+bridge. No upstream code is bundled — only the test fixtures.
+
+------------------------------------------------------------------------
+1. varfish-org/hgvs-rs
+------------------------------------------------------------------------
+Repo:        https://github.com/varfish-org/hgvs-rs
+Commit:      05e75a9c63849453e538b624ae713c2331831aa3
+License:     Apache License 2.0
+Copyright:   Copyright (c) 2023 BIH CUBI / Berliner Institut fuer
+             Gesundheitsforschung. See upstream LICENSE.
+
+Files vendored:
+  varfish/parser/gauntlet
+  varfish/parser/reject
+
+------------------------------------------------------------------------
+2. biocommons/hgvs
+------------------------------------------------------------------------
+Repo:        https://github.com/biocommons/hgvs
+Commit:      fa02ca5ec0c9e28a1a6377b551e41ae77b450ce9
+License:     Apache License 2.0
+Copyright:   Copyright 2014- biocommons contributors. See upstream LICENSE.
+
+Files vendored:
+  biocommons/grammar_test.tsv
+
+------------------------------------------------------------------------
+Apache-2.0 NOTICE
+------------------------------------------------------------------------
+Both upstream repositories are licensed under the Apache License, Version
+2.0. The full text is at http://www.apache.org/licenses/LICENSE-2.0.
+Neither upstream repository ships a NOTICE file at the SHAs pinned above;
+this NOTICE file therefore acts as the attribution record required by
+section 4 of the Apache-2.0 license.

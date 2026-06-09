@@ -57,6 +57,28 @@ pub enum MultiChromOverlapperError {
 /// `MultiChromOverlapper` maintains a separate overlap data structure (either [`AIList`] or [`Bits`])
 /// for each chromosome, enabling efficient queries across the entire genome.
 ///
+/// ## Source-free indexed variant (`MultiChromOverlapper<u32, ()>`)
+///
+/// `MultiChromOverlapper` is **internal index machinery**, not a public
+/// "indexed region set" — that role belongs to [`IndexedRegionSet`](crate::IndexedRegionSet).
+/// When built from a [`RegionSet`] (via [`build_indexed_overlapper`] or
+/// [`from_region_set`](MultiChromOverlapper::from_region_set)) it is
+/// `MultiChromOverlapper<u32, ()>`: it stores **no** source RegionSet and **no**
+/// back-reference payload. Intervals are enumerated straight from the index via
+/// [`Overlapper::iter`], and per-chromosome reduced regions are reconstructed on
+/// demand by `reduced_by_chr`.
+///
+/// This enables:
+///
+/// - **[`IntervalSetOps`](gtars_core::models::IntervalSetOps) trait**: index-native
+///   set algebra computed from the index (not delegated to a stored source).
+/// - **MCO query methods**: [`subset_by`](MultiChromOverlapper::subset_by),
+///   [`count_overlaps`](MultiChromOverlapper::count_overlaps),
+///   [`any_overlaps`](MultiChromOverlapper::any_overlaps),
+///   [`find_overlaps_regions`](MultiChromOverlapper::find_overlaps_regions),
+///   [`intersect_all`](MultiChromOverlapper::intersect_all).
+/// - **Build-once-query-many**: build the index once, then call any combination
+///   of the above methods without rebuilding.
 ///
 /// # Examples
 ///
@@ -215,98 +237,6 @@ where
     }
 }
 
-/// Query methods for indexed `MultiChromOverlapper` (where `T = usize` stores
-/// indices back into the original [`RegionSet`]).
-///
-/// These methods enable a build-once-query-many pattern: build the index with
-/// [`build_indexed_overlapper`], then call any of these methods repeatedly
-/// without rebuilding.
-///
-/// # Examples
-///
-/// ```
-/// use gtars_overlaprs::multi_chrom_overlapper::build_indexed_overlapper;
-/// use gtars_overlaprs::OverlapperType;
-/// use gtars_core::models::{Region, RegionSet};
-///
-/// let source = RegionSet::from(vec![
-///     Region { chr: "chr1".to_string(), start: 100, end: 200, rest: None },
-///     Region { chr: "chr1".to_string(), start: 300, end: 400, rest: None },
-/// ]);
-///
-/// // Build the index once
-/// let index = build_indexed_overlapper(&source, OverlapperType::AIList);
-///
-/// // Query multiple times without rebuilding
-/// let query = RegionSet::from(vec![
-///     Region { chr: "chr1".to_string(), start: 150, end: 250, rest: None },
-/// ]);
-/// let counts = index.count_query_overlaps(&query);
-/// let any = index.any_query_overlaps(&query);
-/// ```
-impl MultiChromOverlapper<u32, usize> {
-    /// Returns regions from `source` that overlap any region in `query`.
-    ///
-    /// The `source` parameter is the original [`RegionSet`] that was indexed
-    /// (since the MCO stores indices into it, not the regions themselves).
-    /// Results are deduplicated and returned in index order.
-    pub fn intersect_all(&self, query: &RegionSet, source: &RegionSet) -> RegionSet {
-        let mut hit_indices = std::collections::BTreeSet::new();
-        for region in &query.regions {
-            if let Some(lapper) = self.index_maps.get(&region.chr) {
-                for iv in lapper.find_iter(region.start, region.end) {
-                    hit_indices.insert(iv.val);
-                }
-            }
-        }
-        let kept: Vec<Region> = hit_indices
-            .into_iter()
-            .map(|idx| source.regions[idx].clone())
-            .collect();
-        RegionSet::from(kept)
-    }
-
-    /// For each region in `query`, count how many indexed regions overlap it.
-    pub fn count_query_overlaps(&self, query: &RegionSet) -> Vec<usize> {
-        query
-            .regions
-            .iter()
-            .map(|region| match self.index_maps.get(&region.chr) {
-                Some(lapper) => lapper.find_iter(region.start, region.end).count(),
-                None => 0,
-            })
-            .collect()
-    }
-
-    /// For each region in `query`, whether any indexed region overlaps it.
-    pub fn any_query_overlaps(&self, query: &RegionSet) -> Vec<bool> {
-        query
-            .regions
-            .iter()
-            .map(|region| match self.index_maps.get(&region.chr) {
-                Some(lapper) => lapper.find_iter(region.start, region.end).next().is_some(),
-                None => false,
-            })
-            .collect()
-    }
-
-    /// For each region in `query`, return the indices of overlapping regions
-    /// in the original [`RegionSet`] that was indexed.
-    pub fn find_query_overlaps(&self, query: &RegionSet) -> Vec<Vec<usize>> {
-        query
-            .regions
-            .iter()
-            .map(|region| match self.index_maps.get(&region.chr) {
-                Some(lapper) => lapper
-                    .find_iter(region.start, region.end)
-                    .map(|iv| iv.val)
-                    .collect(),
-                None => Vec::new(),
-            })
-            .collect()
-    }
-}
-
 /// A trait for converting region-based data into a [`MultiChromOverlapper`].
 ///
 /// This trait provides a convenient way to build a genome-wide index from a collection
@@ -392,30 +322,30 @@ impl IntoMultiChromOverlapper<u32, Option<String>> for RegionSet {
     }
 }
 
-/// Build a [`MultiChromOverlapper`] from a [`RegionSet`] where each interval's
-/// val is the original index (position) of that region in the RegionSet.
+/// Build a source-free [`MultiChromOverlapper`] index from a [`RegionSet`].
 ///
-/// This is useful for overlap operations that need to track which regions in
-/// `other` were hit (e.g., `find_overlaps` returning indices).
+/// The resulting `MultiChromOverlapper<u32, ()>` stores no source RegionSet and
+/// no back-reference payload — intervals carry `()`. Regions are reconstructed
+/// from the index on demand via [`Overlapper::iter`].
 pub fn build_indexed_overlapper(
     rs: &RegionSet,
     overlapper_type: OverlapperType,
-) -> MultiChromOverlapper<u32, usize> {
-    let mut core: HashMap<String, Box<dyn Overlapper<u32, usize>>> = HashMap::default();
-    let mut intervals: HashMap<String, Vec<Interval<u32, usize>>> = HashMap::default();
+) -> MultiChromOverlapper<u32, ()> {
+    let mut core: HashMap<String, Box<dyn Overlapper<u32, ()>>> = HashMap::default();
+    let mut intervals: HashMap<String, Vec<Interval<u32, ()>>> = HashMap::default();
 
-    for (idx, region) in rs.regions.iter().enumerate() {
+    for region in rs.regions.iter() {
         let interval = Interval {
             start: region.start,
             end: region.end,
-            val: idx,
+            val: (),
         };
         let chr_intervals = intervals.entry(region.chr.clone()).or_default();
         chr_intervals.push(interval);
     }
 
     for (chr, chr_intervals) in intervals.into_iter() {
-        let lapper: Box<dyn Overlapper<u32, usize>> = match overlapper_type {
+        let lapper: Box<dyn Overlapper<u32, ()>> = match overlapper_type {
             OverlapperType::Bits => Box::new(Bits::build(chr_intervals)),
             OverlapperType::AIList => Box::new(AIList::build(chr_intervals)),
         };
@@ -426,6 +356,361 @@ pub fn build_indexed_overlapper(
         index_maps: core,
         overlapper_type,
     }
+}
+
+impl MultiChromOverlapper<u32, ()> {
+    /// Build a new source-free MCO index from a [`RegionSet`].
+    ///
+    /// This enables the build-once-query-many pattern: build the index once,
+    /// then call any of the query methods or `IntervalSetOps` methods repeatedly
+    /// without rebuilding. The source RegionSet is not retained.
+    pub fn from_region_set(rs: RegionSet, overlapper_type: OverlapperType) -> Self {
+        build_indexed_overlapper(&rs, overlapper_type)
+    }
+
+    /// Reconstruct a [`RegionSet`] by enumerating every interval in the index.
+    ///
+    /// Regions are reconstructed directly from the index (via [`Overlapper::iter`]),
+    /// not from a stored source. The resulting order is the per-chromosome stored
+    /// order of the underlying overlappers and is not guaranteed to match any
+    /// original input order. Reconstructed regions carry no `rest` metadata.
+    pub fn to_region_set(&self) -> RegionSet {
+        let mut regions: Vec<Region> = Vec::new();
+        let mut chrs: Vec<&String> = self.index_maps.keys().collect();
+        chrs.sort();
+        for chr in chrs {
+            let lapper = &self.index_maps[chr];
+            for iv in lapper.iter() {
+                regions.push(Region {
+                    chr: chr.clone(),
+                    start: iv.start,
+                    end: iv.end,
+                    rest: None,
+                });
+            }
+        }
+        RegionSet::from(regions)
+    }
+
+    /// Union of the index-reconstructed regions with `other`.
+    pub fn union(&self, other: &RegionSet) -> RegionSet {
+        self.to_region_set().union(other)
+    }
+
+    /// Cluster the index-reconstructed regions within `max_gap`.
+    pub fn cluster(&self, max_gap: u32) -> Vec<u32> {
+        self.to_region_set().cluster(max_gap)
+    }
+
+    /// Produce sorted, reduced (merged) regions per chromosome directly from the
+    /// index, without reconstructing a full `RegionSet`.
+    fn reduced_by_chr(&self) -> HashMap<String, Vec<Region>> {
+        let mut result: HashMap<String, Vec<Region>> = HashMap::new();
+
+        for (chr, overlapper) in &self.index_maps {
+            // Collect intervals from the overlapper and sort by start.
+            let mut intervals: Vec<(u32, u32)> =
+                overlapper.iter().map(|iv| (iv.start, iv.end)).collect();
+            intervals.sort_unstable();
+
+            if intervals.is_empty() {
+                continue;
+            }
+
+            // Merge overlapping/adjacent intervals inline.
+            let mut merged: Vec<Region> = Vec::new();
+            let (mut cur_start, mut cur_end) = intervals[0];
+
+            for &(s, e) in &intervals[1..] {
+                if s <= cur_end {
+                    cur_end = cur_end.max(e);
+                } else {
+                    merged.push(Region {
+                        chr: chr.clone(),
+                        start: cur_start,
+                        end: cur_end,
+                        rest: None,
+                    });
+                    cur_start = s;
+                    cur_end = e;
+                }
+            }
+            merged.push(Region {
+                chr: chr.clone(),
+                start: cur_start,
+                end: cur_end,
+                rest: None,
+            });
+
+            result.insert(chr.clone(), merged);
+        }
+
+        result
+    }
+
+    /// Return reconstructed regions from the index that overlap any region in
+    /// `query`, honoring an optional minimum overlap in base pairs.
+    ///
+    /// Because the index is source-free, the returned regions are reconstructed
+    /// from the index and carry no `rest` metadata. Results are deduplicated and
+    /// returned sorted by chromosome and start.
+    pub fn subset_by(&self, query: &RegionSet) -> RegionSet {
+        self.subset_by_overlaps(query, None)
+    }
+
+    /// Return reconstructed overlapping regions, honoring `min_overlap` (bp).
+    pub fn subset_by_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> RegionSet {
+        let min_bp = min_overlap.unwrap_or(0);
+        let mut hits: std::collections::BTreeSet<(String, u32, u32)> =
+            std::collections::BTreeSet::new();
+        for region in &query.regions {
+            for iv in self.find_overlaps_for_region(&region.chr, region.start, region.end) {
+                if min_bp > 1
+                    && overlap_bp(region.start, region.end, iv.start, iv.end) < min_bp as i64
+                {
+                    continue;
+                }
+                hits.insert((region.chr.clone(), iv.start, iv.end));
+            }
+        }
+        let kept: Vec<Region> = hits
+            .into_iter()
+            .map(|(chr, start, end)| Region {
+                chr,
+                start,
+                end,
+                rest: None,
+            })
+            .collect();
+        RegionSet::from(kept)
+    }
+
+    /// For each region in `query`, count how many indexed regions overlap it.
+    ///
+    /// Optionally filter by minimum overlap in base pairs.
+    pub fn count_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> Vec<usize> {
+        let min_bp = min_overlap.unwrap_or(0);
+        query
+            .regions
+            .iter()
+            .map(|region| {
+                self.find_overlaps_for_region(&region.chr, region.start, region.end)
+                    .filter(|iv| {
+                        min_bp <= 1
+                            || overlap_bp(region.start, region.end, iv.start, iv.end)
+                                >= min_bp as i64
+                    })
+                    .count()
+            })
+            .collect()
+    }
+
+    /// For each region in `query`, whether any indexed region overlaps it.
+    ///
+    /// Optionally filter by minimum overlap in base pairs.
+    pub fn any_overlaps(&self, query: &RegionSet, min_overlap: Option<i32>) -> Vec<bool> {
+        let min_bp = min_overlap.unwrap_or(0);
+        query
+            .regions
+            .iter()
+            .map(|region| {
+                self.find_overlaps_for_region(&region.chr, region.start, region.end)
+                    .any(|iv| {
+                        min_bp <= 1
+                            || overlap_bp(region.start, region.end, iv.start, iv.end)
+                                >= min_bp as i64
+                    })
+            })
+            .collect()
+    }
+
+    /// For each region in `query`, return the reconstructed indexed regions that
+    /// overlap it, honoring an optional minimum overlap in base pairs.
+    ///
+    /// Because the index is source-free, overlapping regions are reconstructed
+    /// from the index (carrying no `rest` metadata) rather than returned as
+    /// indices into a stored source.
+    pub fn find_overlaps_regions(
+        &self,
+        query: &RegionSet,
+        min_overlap: Option<i32>,
+    ) -> Vec<Vec<Region>> {
+        let min_bp = min_overlap.unwrap_or(0);
+        query
+            .regions
+            .iter()
+            .map(|region| {
+                self.find_overlaps_for_region(&region.chr, region.start, region.end)
+                    .filter(|iv| {
+                        min_bp <= 1
+                            || overlap_bp(region.start, region.end, iv.start, iv.end)
+                                >= min_bp as i64
+                    })
+                    .map(|iv| Region {
+                        chr: region.chr.clone(),
+                        start: iv.start,
+                        end: iv.end,
+                        rest: None,
+                    })
+                    .collect()
+            })
+            .collect()
+    }
+
+    /// Return all indexed regions (reconstructed) that overlap any region in
+    /// `query`, deduplicated and sorted. Equivalent to [`subset_by`](Self::subset_by).
+    pub fn intersect_all(&self, query: &RegionSet) -> RegionSet {
+        self.subset_by(query)
+    }
+}
+
+/// Compute actual overlap in base pairs between two regions.
+#[inline]
+fn overlap_bp(a_start: u32, a_end: u32, b_start: u32, b_end: u32) -> i64 {
+    a_end.min(b_end) as i64 - a_start.max(b_start) as i64
+}
+
+// ── Index-native IntervalSetOps implementation for MCO ──────────────────
+//
+// Uses per-chromosome sweep-line algorithms operating directly on the index
+// (via `reduced_by_chr`), avoiding the cost of reconstructing a full
+// RegionSet and never consulting a stored source (there is none).
+
+use gtars_core::models::region_set::{sweep_intersect_chr, sweep_setdiff_chr};
+use gtars_core::models::IntervalSetOps;
+
+impl IntervalSetOps for MultiChromOverlapper<u32, ()> {
+    fn setdiff(&self, other: &RegionSet) -> RegionSet {
+        let self_by_chr = self.reduced_by_chr();
+
+        let b = other.reduce();
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        // Iterate chromosomes in sorted order for deterministic output.
+        let mut chrs: Vec<&String> = self_by_chr.keys().collect();
+        chrs.sort();
+
+        let mut result: Vec<Region> = Vec::new();
+        for chr in chrs {
+            let a_regions = &self_by_chr[chr];
+            let empty = vec![];
+            let b_regions = b_by_chr.get(chr.as_str()).unwrap_or(&empty);
+            result.extend(sweep_setdiff_chr(chr, a_regions, b_regions));
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn intersect(&self, other: &RegionSet) -> RegionSet {
+        let self_by_chr = self.reduced_by_chr();
+
+        let b = other.reduce();
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        let mut chrs: Vec<&String> = self_by_chr.keys().collect();
+        chrs.sort();
+
+        let mut result: Vec<Region> = Vec::new();
+        for chr in chrs {
+            let a_regions = &self_by_chr[chr];
+            if let Some(b_regions) = b_by_chr.get(chr.as_str()) {
+                result.extend(sweep_intersect_chr(chr, a_regions, b_regions));
+            }
+        }
+
+        RegionSet::from(result)
+    }
+
+    fn jaccard(&self, other: &RegionSet) -> f64 {
+        let self_by_chr = self.reduced_by_chr();
+        let self_bp: u32 = self_by_chr
+            .values()
+            .flat_map(|rs| rs.iter())
+            .map(|r| r.end - r.start)
+            .sum();
+        let b = other.reduce();
+        let other_bp = b.nucleotides_length();
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        let intersection_bp = intersect_bp(&self_by_chr, &b_by_chr);
+        let union_bp = self_bp + other_bp - intersection_bp;
+        if union_bp == 0 {
+            return 0.0;
+        }
+        intersection_bp as f64 / union_bp as f64
+    }
+
+    fn coverage(&self, other: &RegionSet) -> f64 {
+        let self_by_chr = self.reduced_by_chr();
+        let self_bp: u32 = self_by_chr
+            .values()
+            .flat_map(|rs| rs.iter())
+            .map(|r| r.end - r.start)
+            .sum();
+        if self_bp == 0 {
+            return 0.0;
+        }
+        let diff_bp = self.setdiff(other).nucleotides_length();
+        1.0 - (diff_bp as f64 / self_bp as f64)
+    }
+
+    fn overlap_coefficient(&self, other: &RegionSet) -> f64 {
+        let self_by_chr = self.reduced_by_chr();
+        let self_bp: u32 = self_by_chr
+            .values()
+            .flat_map(|rs| rs.iter())
+            .map(|r| r.end - r.start)
+            .sum();
+        let b = other.reduce();
+        let other_bp = b.nucleotides_length();
+        let min_bp = self_bp.min(other_bp);
+        if min_bp == 0 {
+            return 0.0;
+        }
+
+        let mut b_by_chr: HashMap<String, Vec<Region>> = HashMap::new();
+        for r in b.regions {
+            b_by_chr.entry(r.chr.clone()).or_default().push(r);
+        }
+
+        let intersection_bp = intersect_bp(&self_by_chr, &b_by_chr);
+        intersection_bp as f64 / min_bp as f64
+    }
+
+    fn closest(&self, other: &RegionSet) -> Vec<(usize, usize, i64)> {
+        // `closest` indices reference the order produced by `to_region_set()`
+        // (the reconstructed ordering), not any original source order.
+        self.to_region_set().closest(other)
+    }
+}
+
+/// Sum of intersected base pairs across chromosomes, computed per-chromosome
+/// from the sweep-line intersection.
+fn intersect_bp(
+    self_by_chr: &HashMap<String, Vec<Region>>,
+    b_by_chr: &HashMap<String, Vec<Region>>,
+) -> u32 {
+    let mut chrs: Vec<&String> = self_by_chr.keys().collect();
+    chrs.sort();
+    let mut total = 0u32;
+    for chr in chrs {
+        if let Some(b_regions) = b_by_chr.get(chr.as_str()) {
+            for r in sweep_intersect_chr(chr, &self_by_chr[chr], b_regions) {
+                total += r.end - r.start;
+            }
+        }
+    }
+    total
 }
 
 #[cfg(test)]
@@ -742,7 +1027,7 @@ mod tests {
     }
 
     // -------------------------------------------------------
-    // Tests for MCO query methods (indexed overlapper)
+    // Tests for source-free MCO query methods + IntervalSetOps
     // -------------------------------------------------------
 
     fn make_region(chr: &str, start: u32, end: u32) -> Region {
@@ -752,6 +1037,16 @@ mod tests {
             end,
             rest: None,
         }
+    }
+
+    fn coords(rs: &RegionSet) -> Vec<(String, u32, u32)> {
+        let mut v: Vec<(String, u32, u32)> = rs
+            .regions
+            .iter()
+            .map(|r| (r.chr.clone(), r.start, r.end))
+            .collect();
+        v.sort();
+        v
     }
 
     #[rstest]
@@ -770,18 +1065,20 @@ mod tests {
             make_region("chr2", 550, 650), // overlaps source[2]
         ]);
 
-        let result = index.intersect_all(&query, &source);
-        assert_eq!(result.regions.len(), 2);
-        assert_eq!(result.regions[0].start, 100);
-        assert_eq!(result.regions[0].end, 200);
-        assert_eq!(result.regions[1].start, 500);
-        assert_eq!(result.regions[1].end, 600);
+        let result = index.intersect_all(&query);
+        assert_eq!(
+            coords(&result),
+            vec![
+                ("chr1".to_string(), 100, 200),
+                ("chr2".to_string(), 500, 600),
+            ]
+        );
     }
 
     #[rstest]
     #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
-    fn test_count_query_overlaps(#[case] overlapper_type: OverlapperType) {
+    fn test_count_overlaps(#[case] overlapper_type: OverlapperType) {
         let source = RegionSet::from(vec![
             make_region("chr1", 150, 200),
             make_region("chr1", 250, 350),
@@ -790,14 +1087,13 @@ mod tests {
         let index = build_indexed_overlapper(&source, overlapper_type);
 
         let query = RegionSet::from(vec![make_region("chr1", 100, 300)]);
-        let counts = index.count_query_overlaps(&query);
-        assert_eq!(counts, vec![2]);
+        assert_eq!(index.count_overlaps(&query, None), vec![2]);
     }
 
     #[rstest]
     #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
-    fn test_any_query_overlaps(#[case] overlapper_type: OverlapperType) {
+    fn test_any_overlaps(#[case] overlapper_type: OverlapperType) {
         let source = RegionSet::from(vec![make_region("chr1", 150, 250)]);
         let index = build_indexed_overlapper(&source, overlapper_type);
 
@@ -805,27 +1101,40 @@ mod tests {
             make_region("chr1", 100, 200), // overlaps
             make_region("chr1", 300, 400), // no overlap
         ]);
-        let any = index.any_query_overlaps(&query);
-        assert_eq!(any, vec![true, false]);
+        assert_eq!(index.any_overlaps(&query, None), vec![true, false]);
     }
 
     #[rstest]
     #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
-    fn test_find_query_overlaps(#[case] overlapper_type: OverlapperType) {
+    fn test_find_overlaps_regions(#[case] overlapper_type: OverlapperType) {
         let source = RegionSet::from(vec![
-            make_region("chr1", 50, 150),  // index 0
-            make_region("chr1", 200, 250), // index 1
-            make_region("chr1", 400, 500), // index 2
+            make_region("chr1", 50, 150),
+            make_region("chr1", 200, 250),
+            make_region("chr1", 400, 500),
         ]);
         let index = build_indexed_overlapper(&source, overlapper_type);
 
         let query = RegionSet::from(vec![make_region("chr1", 100, 300)]);
-        let indices = index.find_query_overlaps(&query);
-        assert_eq!(indices.len(), 1);
-        let mut sorted = indices[0].clone();
-        sorted.sort();
-        assert_eq!(sorted, vec![0, 1]);
+        let regions = index.find_overlaps_regions(&query, None);
+        assert_eq!(regions.len(), 1);
+        let mut got: Vec<(u32, u32)> = regions[0].iter().map(|r| (r.start, r.end)).collect();
+        got.sort();
+        assert_eq!(got, vec![(50, 150), (200, 250)]);
+    }
+
+    #[rstest]
+    #[case(OverlapperType::AIList)]
+    #[case(OverlapperType::Bits)]
+    fn test_min_overlap_filtering(#[case] overlapper_type: OverlapperType) {
+        let source = RegionSet::from(vec![make_region("chr1", 100, 110)]);
+        let index = build_indexed_overlapper(&source, overlapper_type);
+
+        // 5bp overlap with query [105, 200)
+        let query = RegionSet::from(vec![make_region("chr1", 105, 200)]);
+        assert_eq!(index.count_overlaps(&query, Some(5)), vec![1]);
+        assert_eq!(index.count_overlaps(&query, Some(6)), vec![0]);
+        assert_eq!(index.any_overlaps(&query, Some(6)), vec![false]);
     }
 
     #[rstest]
@@ -836,13 +1145,10 @@ mod tests {
         let index = build_indexed_overlapper(&source, overlapper_type);
         let query = RegionSet::from(vec![]);
 
-        assert_eq!(index.count_query_overlaps(&query), Vec::<usize>::new());
-        assert_eq!(index.any_query_overlaps(&query), Vec::<bool>::new());
-        assert_eq!(
-            index.find_query_overlaps(&query),
-            Vec::<Vec<usize>>::new()
-        );
-        assert_eq!(index.intersect_all(&query, &source).regions.len(), 0);
+        assert_eq!(index.count_overlaps(&query, None), Vec::<usize>::new());
+        assert_eq!(index.any_overlaps(&query, None), Vec::<bool>::new());
+        assert_eq!(index.find_overlaps_regions(&query, None).len(), 0);
+        assert_eq!(index.intersect_all(&query).regions.len(), 0);
     }
 
     #[rstest]
@@ -853,105 +1159,78 @@ mod tests {
         let index = build_indexed_overlapper(&source, overlapper_type);
         let query = RegionSet::from(vec![make_region("chr1", 100, 200)]);
 
-        assert_eq!(index.count_query_overlaps(&query), vec![0]);
-        assert_eq!(index.any_query_overlaps(&query), vec![false]);
-        assert_eq!(index.find_query_overlaps(&query), vec![vec![]]);
-        assert_eq!(index.intersect_all(&query, &source).regions.len(), 0);
+        assert_eq!(index.count_overlaps(&query, None), vec![0]);
+        assert_eq!(index.any_overlaps(&query, None), vec![false]);
+        assert_eq!(index.intersect_all(&query).regions.len(), 0);
     }
 
     #[rstest]
     #[case(OverlapperType::AIList)]
     #[case(OverlapperType::Bits)]
-    fn test_mco_multi_chrom(#[case] overlapper_type: OverlapperType) {
+    fn test_to_region_set_roundtrip(#[case] overlapper_type: OverlapperType) {
         let source = RegionSet::from(vec![
             make_region("chr1", 100, 200),
-            make_region("chr2", 100, 200),
-        ]);
-        let index = build_indexed_overlapper(&source, overlapper_type);
-
-        let query = RegionSet::from(vec![
-            make_region("chr1", 150, 250),
-            make_region("chr2", 150, 250),
-            make_region("chr3", 150, 250), // nonexistent chrom
-        ]);
-
-        let counts = index.count_query_overlaps(&query);
-        assert_eq!(counts, vec![1, 1, 0]);
-
-        let any = index.any_query_overlaps(&query);
-        assert_eq!(any, vec![true, true, false]);
-    }
-
-    #[rstest]
-    #[case(OverlapperType::AIList)]
-    #[case(OverlapperType::Bits)]
-    fn test_mco_index_reuse_consistency(#[case] overlapper_type: OverlapperType) {
-        let source = RegionSet::from(vec![
-            make_region("chr1", 100, 200),
-            make_region("chr1", 300, 400),
-            make_region("chr2", 500, 600),
-        ]);
-        let index = build_indexed_overlapper(&source, overlapper_type);
-
-        let query = RegionSet::from(vec![
-            make_region("chr1", 150, 350),
-            make_region("chr2", 550, 650),
-        ]);
-
-        let counts1 = index.count_query_overlaps(&query);
-        let counts2 = index.count_query_overlaps(&query);
-        assert_eq!(counts1, counts2);
-
-        let any1 = index.any_query_overlaps(&query);
-        let any2 = index.any_query_overlaps(&query);
-        assert_eq!(any1, any2);
-
-        let find1 = index.find_query_overlaps(&query);
-        let find2 = index.find_query_overlaps(&query);
-        assert_eq!(find1, find2);
-    }
-
-    #[rstest]
-    #[case(OverlapperType::AIList)]
-    #[case(OverlapperType::Bits)]
-    fn test_mco_matches_regionset_overlaps(#[case] overlapper_type: OverlapperType) {
-        use crate::RegionSetOverlaps;
-
-        let query_rs = RegionSet::from(vec![
-            make_region("chr1", 100, 300),
+            make_region("chr2", 300, 400),
             make_region("chr1", 500, 600),
+        ]);
+        let index = build_indexed_overlapper(&source, overlapper_type);
+        let reconstructed = index.to_region_set();
+        assert_eq!(coords(&reconstructed), coords(&source));
+    }
+
+    /// Cross-check that the index-native IntervalSetOps on the source-free MCO
+    /// agrees with RegionSet's direct implementation for all 6 methods.
+    #[rstest]
+    #[case(OverlapperType::AIList)]
+    #[case(OverlapperType::Bits)]
+    fn test_mco_intervalsetops_matches_regionset(#[case] overlapper_type: OverlapperType) {
+        // Includes overlapping self-intervals on chr1 to exercise the merge
+        // inside reduced_by_chr().
+        let self_rs = RegionSet::from(vec![
+            make_region("chr1", 100, 200),
+            make_region("chr1", 180, 260), // overlaps previous
+            make_region("chr1", 400, 500),
             make_region("chr2", 100, 200),
         ]);
-        let source_rs = RegionSet::from(vec![
-            make_region("chr1", 150, 200),
-            make_region("chr1", 250, 350),
-            make_region("chr1", 550, 650),
+        let other = RegionSet::from(vec![
+            make_region("chr1", 150, 220),
+            make_region("chr1", 450, 470),
             make_region("chr2", 50, 150),
+            make_region("chr2", 300, 400),
+            make_region("chr3", 0, 100),
         ]);
 
-        // RegionSetOverlaps builds index from `other` and queries `self`
-        let trait_counts = query_rs.count_overlaps(&source_rs, None);
-        let trait_any = query_rs.any_overlaps(&source_rs, None);
-        let trait_find = query_rs.find_overlaps(&source_rs, None);
+        let index = build_indexed_overlapper(&self_rs, overlapper_type);
 
-        // MCO: build index from source, query with query
-        let index = build_indexed_overlapper(&source_rs, overlapper_type);
-        let mco_counts = index.count_query_overlaps(&query_rs);
-        let mco_any = index.any_query_overlaps(&query_rs);
-        let mco_find = index.find_query_overlaps(&query_rs);
+        assert_eq!(
+            coords(&index.setdiff(&other)),
+            coords(&self_rs.setdiff(&other)),
+            "setdiff mismatch"
+        );
+        assert_eq!(
+            coords(&index.intersect(&other)),
+            coords(&self_rs.intersect(&other)),
+            "intersect mismatch"
+        );
+        assert!(
+            (index.jaccard(&other) - self_rs.jaccard(&other)).abs() < 1e-9,
+            "jaccard mismatch"
+        );
+        assert!(
+            (index.coverage(&other) - self_rs.coverage(&other)).abs() < 1e-9,
+            "coverage mismatch"
+        );
+        assert!(
+            (index.overlap_coefficient(&other) - self_rs.overlap_coefficient(&other)).abs() < 1e-9,
+            "overlap_coefficient mismatch"
+        );
 
-        assert_eq!(trait_counts, mco_counts);
-        assert_eq!(trait_any, mco_any);
-
-        // Sort inner vecs for comparison since order may differ
-        let mut trait_find_sorted = trait_find.clone();
-        let mut mco_find_sorted = mco_find.clone();
-        for v in &mut trait_find_sorted {
-            v.sort();
-        }
-        for v in &mut mco_find_sorted {
-            v.sort();
-        }
-        assert_eq!(trait_find_sorted, mco_find_sorted);
+        // closest: indices reference reconstructed ordering, so compare the
+        // distances (which are order-independent) as a set.
+        let mut mco_dists: Vec<i64> = index.closest(&other).iter().map(|t| t.2).collect();
+        let mut rs_dists: Vec<i64> = self_rs.closest(&other).iter().map(|t| t.2).collect();
+        mco_dists.sort();
+        rs_dists.sort();
+        assert_eq!(mco_dists, rs_dists, "closest distances mismatch");
     }
 }

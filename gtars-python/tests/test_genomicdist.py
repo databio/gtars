@@ -115,18 +115,27 @@ class TestRegionSetStatistics:
         assert len(dist) > 0
 
     def test_distribution_with_chrom_sizes(self):
-        """Passing chrom_sizes uses reference-derived per-chrom bin sizes."""
+        """Passing chrom_sizes uses a uniform bin width across chromosomes.
+
+        Binning is proportional: the longest chromosome gets n_bins bins and
+        every chromosome uses the same bin width (longest_chrom_len / n_bins),
+        so bin index N maps to the same genomic position across files of the
+        same genome. Here the longest chrom is chr1 (1000) so bin width is
+        1000/10 = 100 for both chr1 and chr2 (the final chr2 bin is clamped to
+        the chrom size). See gtars-genomicdist statistics.rs
+        region_distribution_with_chrom_sizes.
+        """
         rs = make_regionset([("chr1", 0, 100), ("chr2", 200, 300)])
-        # chr1 size 1000, chr2 size 500, 10 bins each → chr1 bin=100, chr2 bin=50
         chrom_sizes = {"chr1": 1000, "chr2": 500}
         dist = rs.distribution(10, chrom_sizes)
         assert isinstance(dist, list)
-        # chr1 bin width should be 100 (1000/10)
+        # Uniform bin width = max_chrom_len / n_bins = 1000 / 10 = 100.
         chr1_bins = [d for d in dist if d["chr"] == "chr1"]
         assert all(d["end"] - d["start"] == 100 for d in chr1_bins)
-        # chr2 bin width should be 50 (500/10)
+        # chr2 uses the same 100bp bin width; non-clamped bins are 100 wide and
+        # any bin clamped at the chrom size (500) is at most 100 wide.
         chr2_bins = [d for d in dist if d["chr"] == "chr2"]
-        assert all(d["end"] - d["start"] == 50 for d in chr2_bins)
+        assert all(0 < d["end"] - d["start"] <= 100 for d in chr2_bins)
 
     def test_distribution_chrom_sizes_skips_out_of_range(self):
         """Regions beyond stated chrom_size are skipped (assembly mismatch case)."""
