@@ -61,57 +61,21 @@ impl<'a> CoordinateMapper<'a> {
     }
 
     /// Map a coding coordinate (c.) to genomic coordinate (g.).
+    ///
+    /// Thin wrapper over [`Self::c_to_g_full`] with no intronic offset and no
+    /// 3' UTR (`c.*N`) anchoring. Delegating keeps a single, strand-correct
+    /// CDS-anchoring implementation (see `cds_tx_bounds`): anchoring directly
+    /// on the genomic `cds_start` would map `c.1` to the stop codon on
+    /// reverse-strand genes.
     pub fn c_to_g(&self, accession: &str, c_pos: i64) -> Result<MappingResult, MappingError> {
-        let tx = self
-            .store
-            .lookup(accession)
-            .ok_or_else(|| MappingError::TranscriptNotFound(accession.to_string()))?;
-
-        let cds_start = match (tx.cds_start, tx.cds_end) {
-            (Some(s), Some(_)) => s,
-            _ => return Err(MappingError::NonCodingTranscript),
-        };
-
-        let mut offsets = Vec::with_capacity(tx.exons.len());
-        build_exon_offsets_into(&tx, &mut offsets);
-
-        let cds_tx_start = genomic_to_transcript_fast(&tx, cds_start as u64, &offsets)
-            .ok_or(MappingError::OutsideCds(c_pos))?;
-
-        let tx_pos = if c_pos > 0 {
-            cds_tx_start + (c_pos as u64) - 1
-        } else {
-            cds_tx_start
-                .checked_sub((-c_pos) as u64)
-                .ok_or(MappingError::OutsideCds(c_pos))?
-        };
-
-        let g_pos = transcript_to_genomic_fast(&tx, tx_pos, &offsets)?;
-
-        Ok(MappingResult {
-            position: g_pos,
-            chrom_digest: tx.chrom_digest,
-        })
+        self.c_to_g_full(accession, c_pos, 0, false)
     }
 
     /// Map a non-coding coordinate (n.) to genomic coordinate.
+    ///
+    /// Thin wrapper over [`Self::n_to_g_full`] with no intronic offset.
     pub fn n_to_g(&self, accession: &str, n_pos: u64) -> Result<MappingResult, MappingError> {
-        if n_pos == 0 {
-            return Err(MappingError::OutsideTranscript(0));
-        }
-        let tx = self
-            .store
-            .lookup(accession)
-            .ok_or_else(|| MappingError::TranscriptNotFound(accession.to_string()))?;
-
-        let mut offsets = Vec::with_capacity(tx.exons.len());
-        build_exon_offsets_into(&tx, &mut offsets);
-        let g_pos = transcript_to_genomic_fast(&tx, n_pos - 1, &offsets)?;
-
-        Ok(MappingResult {
-            position: g_pos,
-            chrom_digest: tx.chrom_digest,
-        })
+        self.n_to_g_full(accession, n_pos as i64, 0)
     }
 
     /// Map a full HGVS c. coordinate to genomic.
@@ -230,43 +194,24 @@ impl<'a> CoordinateMapperWriter<'a> {
         }
     }
 
+    /// Map a coding coordinate (c.) to genomic, reusing scratch buffers.
+    ///
+    /// Delegates to the shared, strand-correct [`c_to_g_inner`] (see the note
+    /// on [`CoordinateMapper::c_to_g`]); only the exon-offset buffer is reused.
     pub fn c_to_g(&mut self, accession: &str, c_pos: i64) -> Result<MappingResult, MappingError> {
         let tx = self
             .store
             .lookup(accession)
             .ok_or_else(|| MappingError::TranscriptNotFound(accession.to_string()))?;
 
-        let cds_start = match (tx.cds_start, tx.cds_end) {
-            (Some(s), Some(_)) => s,
-            _ => return Err(MappingError::NonCodingTranscript),
-        };
-
         self.exon_offsets.clear();
         build_exon_offsets_into(&tx, &mut self.exon_offsets);
 
-        let cds_tx_start = genomic_to_transcript_fast(&tx, cds_start as u64, &self.exon_offsets)
-            .ok_or(MappingError::OutsideCds(c_pos))?;
-
-        let tx_pos = if c_pos > 0 {
-            cds_tx_start + (c_pos as u64) - 1
-        } else {
-            cds_tx_start
-                .checked_sub((-c_pos) as u64)
-                .ok_or(MappingError::OutsideCds(c_pos))?
-        };
-
-        let g_pos = transcript_to_genomic_fast(&tx, tx_pos, &self.exon_offsets)?;
-
-        Ok(MappingResult {
-            position: g_pos,
-            chrom_digest: tx.chrom_digest,
-        })
+        c_to_g_inner(&tx, &self.exon_offsets, c_pos, 0, false)
     }
 
+    /// Map a non-coding coordinate (n.) to genomic, reusing scratch buffers.
     pub fn n_to_g(&mut self, accession: &str, n_pos: u64) -> Result<MappingResult, MappingError> {
-        if n_pos == 0 {
-            return Err(MappingError::OutsideTranscript(0));
-        }
         let tx = self
             .store
             .lookup(accession)
@@ -275,12 +220,7 @@ impl<'a> CoordinateMapperWriter<'a> {
         self.exon_offsets.clear();
         build_exon_offsets_into(&tx, &mut self.exon_offsets);
 
-        let g_pos = transcript_to_genomic_fast(&tx, n_pos - 1, &self.exon_offsets)?;
-
-        Ok(MappingResult {
-            position: g_pos,
-            chrom_digest: tx.chrom_digest,
-        })
+        n_to_g_inner(&tx, &self.exon_offsets, n_pos as i64, 0)
     }
 
     #[inline]

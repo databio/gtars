@@ -9,11 +9,14 @@ pub enum ReferenceType {
     C,
     /// Non-coding transcript (`n.`)
     N,
-    /// Mitochondrial (`m.`) — handled as genomic.
+    /// Mitochondrial (`m.`) — parsed but not bridged; the bridge rejects it
+    /// with `UnsupportedReferenceType` (no `m.`→`g.` mapping yet).
     M,
-    /// RNA (`r.`) — handled similarly to `n.`; `U` is treated as `T`.
+    /// RNA (`r.`) — parsed but not bridged; rejected with
+    /// `UnsupportedReferenceType`. (`U` is treated as `T` at parse time.)
     R,
-    /// Protein (`p.`) — parsed but not bridged in v1.
+    /// Protein (`p.`) — parsed but not bridged; rejected with
+    /// `UnsupportedReferenceType`.
     P,
 }
 

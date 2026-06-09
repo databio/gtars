@@ -297,6 +297,46 @@ mod tests {
     }
 
     #[test]
+    fn test_c_to_g_reverse_strand_anchors_on_atg() {
+        // Reverse strand, single exon [50, 250), CDS genomic [100, 200).
+        // On the reverse strand the ATG (c.1) sits at the HIGHEST genomic
+        // coordinate of the CDS (199), and the last coding base (c.100) at the
+        // lowest (100). Anchoring directly on the genomic `cds_start` (the old
+        // simple-path bug) maps c.1 to 100 — the stop codon — instead of 199.
+        let tx = Transcript {
+            accession: "NM_REV.1".to_string(),
+            gene: "REV".to_string(),
+            chrom_digest: [0u8; 24],
+            strand: Strand::Reverse,
+            cds_start: Some(100),
+            cds_end: Some(200),
+            exons: vec![Exon { start: 50, end: 250 }],
+            mane: Default::default(),
+        };
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("rev.reftx");
+        let mut builder = TxStoreBuilder::new();
+        builder.transcripts.push(tx);
+        builder.build(&path).unwrap();
+        let store = TxStore::open(&path).unwrap().into_readonly();
+
+        // Owning mapper: c.1 → ATG at 199 (NOT 100), c.100 → last base at 100.
+        let mapper = CoordinateMapper::new(&store);
+        assert_eq!(mapper.c_to_g("NM_REV.1", 1).unwrap().position, 199);
+        assert_eq!(mapper.c_to_g("NM_REV.1", 100).unwrap().position, 100);
+        // c.1 must agree with the full path it now delegates to.
+        assert_eq!(
+            mapper.c_to_g("NM_REV.1", 1).unwrap().position,
+            mapper.c_to_g_full("NM_REV.1", 1, 0, false).unwrap().position
+        );
+
+        // The reusable Writer variant must produce identical results.
+        let mut writer = CoordinateMapperWriter::new(&store);
+        assert_eq!(writer.c_to_g("NM_REV.1", 1).unwrap().position, 199);
+        assert_eq!(writer.c_to_g("NM_REV.1", 100).unwrap().position, 100);
+    }
+
+    #[test]
     fn test_c_to_g_by_gene_uses_mane() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("mane2.reftx");

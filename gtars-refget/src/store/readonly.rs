@@ -146,13 +146,14 @@ fn open_remote_range(
 
     let byte_len = byte_end - byte_start;
     let last_byte = byte_end.saturating_sub(1);
-    let agent = ureq::AgentBuilder::new()
-        .timeout_connect(std::time::Duration::from_secs(30))
-        .timeout_read(std::time::Duration::from_secs(60))
-        .build();
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(std::time::Duration::from_secs(30)))
+        .timeout_recv_response(Some(std::time::Duration::from_secs(60)))
+        .build()
+        .into();
     let response = agent
         .get(&url)
-        .set("Range", &format!("bytes={}-{}", byte_start, last_byte))
+        .header("Range", &format!("bytes={}-{}", byte_start, last_byte))
         .call()
         .map_err(|e| anyhow!("Failed to open remote byte range: {}", e))?;
 
@@ -160,7 +161,7 @@ fn open_remote_range(
     // body with HTTP 200 instead of a 206 Partial Content slice. Wrapping the
     // full body here would silently produce wrong bases, so refuse outright.
     let status = response.status();
-    if status != 206 {
+    if status.as_u16() != 206 {
         return Err(anyhow!(
             "Remote server did not honor Range header (got HTTP {}); \
              refusing to stream to avoid silent data corruption. URL: {}",
@@ -171,7 +172,7 @@ fn open_remote_range(
 
     Ok(Box::new(BufReader::with_capacity(
         64 * 1024,
-        response.into_reader().take(byte_len),
+        response.into_body().into_reader().take(byte_len),
     )))
 }
 
@@ -1736,6 +1737,7 @@ impl ReadonlyRefgetStore {
 
             let mut data = Vec::new();
             response
+                .into_body()
                 .into_reader()
                 .read_to_end(&mut data)
                 .context("Failed to read response body")?;

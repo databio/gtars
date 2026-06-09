@@ -111,6 +111,8 @@ pub fn hgvs_to_vrs_id(
         &store,
         &name_to_digest,
     )
+    // NOTE: warnings (`Bridged::warnings`) are dropped at the WASM boundary;
+    // surfacing them to JS is out of scope. Mirrors the Python FFI.
     .map(|b| b.value)
     .map_err(|e| JsValue::from_str(&format!("{e}")))
 }
@@ -154,6 +156,8 @@ pub fn hgvs_to_vrs_id_with_transcripts(
         &store,
         &name_to_digest,
     )
+    // NOTE: warnings (`Bridged::warnings`) are dropped at the WASM boundary;
+    // surfacing them to JS is out of scope. Mirrors the Python FFI.
     .map(|b| b.value)
     .map_err(|e| JsValue::from_str(&format!("{e}")))
 }

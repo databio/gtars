@@ -612,7 +612,15 @@ pub(crate) fn serialize_record_into(buf: &mut Vec<u8>, tx: &Transcript) -> Resul
     buf.push(tx.mane.to_flags_byte());
     buf.extend_from_slice(&tx.cds_start.unwrap_or(NONE_SENTINEL).to_le_bytes());
     buf.extend_from_slice(&tx.cds_end.unwrap_or(NONE_SENTINEL).to_le_bytes());
-    buf.extend_from_slice(&(tx.exons.len() as u16).to_le_bytes());
+    let exon_count: u16 = tx.exons.len().try_into().map_err(|_| {
+        anyhow!(
+            "transcript {:?} has {} exons; exceeds {}-exon .reftx limit",
+            tx.accession,
+            tx.exons.len(),
+            u16::MAX
+        )
+    })?;
+    buf.extend_from_slice(&exon_count.to_le_bytes());
     for exon in &tx.exons {
         buf.extend_from_slice(&exon.start.to_le_bytes());
         buf.extend_from_slice(&exon.end.to_le_bytes());

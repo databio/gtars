@@ -593,8 +593,10 @@ fn process_vcf_line_bytes(
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
     {
-        Some(p) => p.saturating_sub(1),
-        None => return, // matches serial parse_vcf_record: unparseable POS -> skip
+        // matches serial parse_vcf_record (vcf_core.rs): POS is 1-based, so
+        // POS<1 is malformed -> skip, exactly like an unparseable POS.
+        Some(p) if p >= 1 => p - 1,
+        _ => return,
     };
     let ref_str = match std::str::from_utf8(ref_b) {
         Ok(s) => s,
@@ -1059,6 +1061,14 @@ mod tests {
     #[test]
     fn non_numeric_pos_is_none() {
         assert!(parse_vcf_record("chr1\tNOPE\t.\tA\tG").is_none());
+    }
+
+    #[test]
+    fn pos_zero_is_none() {
+        // POS is 1-based; POS=0 is malformed and must be skipped, NOT
+        // saturated to interbase 0. The BGZF parallel worker
+        // (process_vcf_line_bytes) shares this contract.
+        assert!(parse_vcf_record("chr1\t0\t.\tA\tG").is_none());
     }
 
     #[test]
