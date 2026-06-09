@@ -413,7 +413,12 @@ fn apply_offset_to_tx_pos(
         Strand::Forward => {
             // Positive tx offset = +genomic; negative tx offset = -genomic.
             if offset_positive {
-                g_anchor + offset as u64
+                g_anchor
+                    .checked_add(offset as u64)
+                    .ok_or(MappingError::InvalidIntronicOffset {
+                        pos: original_pos,
+                        offset,
+                    })?
             } else {
                 let off = (-offset) as u64;
                 g_anchor
@@ -436,7 +441,12 @@ fn apply_offset_to_tx_pos(
                     })?
             } else {
                 let off = (-offset) as u64;
-                g_anchor + off
+                g_anchor
+                    .checked_add(off)
+                    .ok_or(MappingError::InvalidIntronicOffset {
+                        pos: original_pos,
+                        offset,
+                    })?
             }
         }
     };

@@ -74,3 +74,10 @@ required-features = ["filesystem"]
 name = "gnomad_vrs_parallel_encoded"
 harness = false
 required-features = ["filesystem"]
+
+# Uses the mutable RefgetStore FASTA import path, which is filesystem-gated.
+# Declared so `cargo build --examples` under a feature set without `filesystem`
+# skips it instead of failing to compile.
+[[example]]
+name = "gnomad_vrs"
+required-features = ["filesystem"]

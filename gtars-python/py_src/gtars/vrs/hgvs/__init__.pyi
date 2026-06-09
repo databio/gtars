@@ -6,6 +6,9 @@ The real implementation lives in `gtars-python/src/vrs/hgvs.rs`.
 from enum import Enum
 from typing import Any, Dict, Optional
 
+from gtars.refget import RefgetStore
+from gtars.reftx import ReftxProvider
+
 
 class ReferenceType(Enum):
     Coding: int
@@ -66,8 +69,8 @@ def parse_hgvs(s: str) -> HgvsVariant: ...
 
 def hgvs_to_vrs_id(
     hgvs_str: str,
-    provider: Any,
-    refget: Any,
+    provider: ReftxProvider,
+    refget: RefgetStore,
     collection_digest: str,
 ) -> str: ...
 
