@@ -5,47 +5,79 @@ on:
     branches: [ "master" ]
   workflow_dispatch:
 
+# Cancel superseded runs on the same ref instead of queueing them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
+# NOTE: The Rust test suite is run (instrumented) by the "Compute coverage"
+# workflow via `cargo llvm-cov --workspace`, which is itself a test run. To
+# avoid paying for a second full compile of the same tests, this workflow only
+# covers the language-binding suites (R and Python), each in its own parallel
+# job with its own cache.
 jobs:
-  run:
+  r:
+    name: R tests
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install R
-      uses: r-lib/actions/setup-r@v2
-      with:
-        r-version: '4.4'
-    
-    - name: Set R library path
-      run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
 
-    - name: Run tests
-      run: cargo test --verbose --workspace --all-features
+      # gtars-r compiles a Rust crate (via extendr) during R CMD INSTALL.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gtars-r/src/rust
 
-    - name: Install R dependencies
-      run: Rscript -e 'install.packages(c("testthat", "data.table", "BiocManager"), repos="https://cloud.r-project.org"); BiocManager::install(c("BiocGenerics", "IRanges"))'
+      - name: Install R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: '4.4'
 
-    - name: Install R package
-      run: R CMD INSTALL gtars-r
+      # Installs Imports + Suggests from gtars-r/DESCRIPTION (testthat,
+      # data.table, BiocGenerics, IRanges, ...) from binary repos and caches
+      # the package library. Fails the step if a dependency cannot be installed.
+      - name: Install R dependencies (cached)
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: gtars-r
+          dependencies: '"all"'
 
-    - name: Run R tests
-      run: Rscript -e 'testthat::test_dir("gtars-r/tests/testthat")'
+      - name: Set R library path
+        run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-    - name: Install uv
-      uses: astral-sh/setup-uv@v4
-    - name: Build and install Python bindings
-      working-directory: ./gtars-python
-      run: |
-        uv venv
-        uv pip install maturin pytest pytest-cov
-        uv run maturin develop --release
-    - name: Run Python tests
-      working-directory: ./gtars-python
-      run: uv run pytest tests/ -v
+      - name: Install R package
+        run: R CMD INSTALL gtars-r
+
+      - name: Run R tests
+        run: Rscript -e 'testthat::test_dir("gtars-r/tests/testthat")'
+
+  python:
+    name: Python tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Build and install Python bindings
+        working-directory: ./gtars-python
+        run: |
+          uv venv
+          uv pip install maturin pytest pytest-cov
+          uv run maturin develop --release
+
+      - name: Run Python tests
+        working-directory: ./gtars-python
+        run: uv run pytest tests/ -v
