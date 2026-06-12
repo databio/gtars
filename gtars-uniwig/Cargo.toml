@@ -25,3 +25,10 @@ indicatif = { workspace = true }
 
 # our code
 gtars-core = { path = "../gtars-core", version="0.5.5" }
+
+# Integration tests are separate crates and can only use [dev-dependencies]
+# (not the crate's normal [dependencies]). The `csi` feature is needed for the
+# binning_index::Indexer used to build the BAI index in the audit test.
+[dev-dependencies]
+noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf", "csi", "core"] }
+tempfile = "3.23.0"

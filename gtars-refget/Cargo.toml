@@ -58,6 +58,10 @@ required-features = ["transcripts", "filesystem"]
 name = "test_decode"
 required-features = ["filesystem"]
 
+[[test]]
+name = "audit_stream_sequence_truncation"
+required-features = ["filesystem"]
+
 [[example]]
 name = "bench_fasta"
 required-features = ["filesystem"]
