@@ -137,6 +137,30 @@ setMethod("distribution", "ANY", function(x, nBins = 250L, chromSizes = NULL, ..
   distribution(RegionSet(x), nBins = nBins, chromSizes = chromSizes)
 })
 
+#' Cluster regions via single-linkage with a stitching radius
+#'
+#' @description Assigns a cluster ID to each region. Regions within
+#'   ``maxGap`` bp of another region on the same chromosome are linked
+#'   into the same cluster; chromosome boundaries always break clusters.
+#' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param maxGap Maximum bp gap between regions to link (default 0)
+#' @param ... ignored
+#' @return Integer vector of 0-based cluster IDs in original region order
+#' @export
+setGeneric("clusterRegions", function(x, maxGap = 0L, ...) standardGeneric("clusterRegions"))
+
+#' @rdname clusterRegions
+#' @export
+setMethod("clusterRegions", "RegionSet", function(x, maxGap = 0L, ...) {
+  .Call(wrap__r_cluster, .ptr(x), as.integer(maxGap))
+})
+
+#' @rdname clusterRegions
+#' @export
+setMethod("clusterRegions", "ANY", function(x, maxGap = 0L, ...) {
+  clusterRegions(RegionSet(x), maxGap = maxGap)
+})
+
 # =========================================================================
 # IRanges generics: trim, reduce, promoters
 #
@@ -380,29 +404,44 @@ setMethod("disjoin", "data.frame", function(x, ...) {
   disjoin(RegionSet(x))
 })
 
-#' Return gaps between regions per chromosome
+#' Return gaps between regions per chromosome, bounded by chromosome sizes
+#'
+#' Emits the peak-free intervals of each chromosome listed in ``chrom_sizes``:
+#' leading gaps from 0, inter-region gaps, trailing gaps to the chromosome
+#' end, and full-chromosome gaps for any chromosome with no regions.
+#' Regions on chromosomes not listed in ``chrom_sizes`` are skipped.
 #'
 #' @param x A RegionSet, GRanges, file path, or data.frame
+#' @param chrom_sizes Named integer vector of chromosome sizes (name =
+#'   chromosome, value = size in bp). Required.
+#' @param start,end Ignored. Accepted only for compatibility with the
+#'   \code{IRanges::gaps} generic signature; use ``chrom_sizes`` instead.
 #' @param ... ignored
-#' @return A RegionSet with gap regions
+#' @return A RegionSet containing the gap intervals
 #' @rdname gaps
 #' @export
-setMethod("gaps", "RegionSet", function(x, start = NA, end = NA, ...) {
-  .rs_from_ptr(.Call(wrap__r_gaps, .ptr(x)))
+setMethod("gaps", "RegionSet", function(x, start = NA, end = NA, chrom_sizes = NULL, ...) {
+  if (is.null(chrom_sizes)) {
+    stop("'chrom_sizes' is required: pass a named integer vector of chromosome sizes")
+  }
+  .rs_from_ptr(.Call(
+    wrap__r_gaps,
+    .ptr(x),
+    names(chrom_sizes),
+    as.integer(chrom_sizes)
+  ))
 })
 
 #' @rdname gaps
 #' @export
-setMethod("gaps", "character", function(x, start = NA,
-                                         end = NA, ...) {
-  gaps(RegionSet(x))
+setMethod("gaps", "character", function(x, start = NA, end = NA, chrom_sizes = NULL, ...) {
+  gaps(RegionSet(x), chrom_sizes = chrom_sizes)
 })
 
 #' @rdname gaps
 #' @export
-setMethod("gaps", "data.frame", function(x, start = NA,
-                                          end = NA, ...) {
-  gaps(RegionSet(x))
+setMethod("gaps", "data.frame", function(x, start = NA, end = NA, chrom_sizes = NULL, ...) {
+  gaps(RegionSet(x), chrom_sizes = chrom_sizes)
 })
 
 # =========================================================================

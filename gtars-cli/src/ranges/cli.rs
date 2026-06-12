@@ -133,8 +133,14 @@ pub fn create_ranges_cli() -> Command {
         )
         .subcommand(
             Command::new("gaps")
-                .about("Compute gaps between regions per chromosome.")
+                .about("Compute gaps between regions per chromosome, bounded by chrom sizes.")
                 .arg(arg!(--input <BED> "Input BED file").required(true))
+                .arg(
+                    Arg::new("chrom-sizes")
+                        .long("chrom-sizes")
+                        .required(true)
+                        .help("Path to chrom.sizes file"),
+                )
                 .arg(arg!(--output <OUTPUT> "Output BED file (default: stdout)").required(false)),
         )
         .subcommand(

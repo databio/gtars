@@ -1,0 +1,12 @@
+{
+  "collection_digest_advisory": "SQ.ZqDFGIbJz6BBY7MRqsLcwyfH1ly35zDX",
+  "fixture_version": 1,
+  "sequences": {
+    "chr_synth": {
+      "ga4gh": "SQ.xR1CjxR1t5kbrBkPm59BbDSSId73exim",
+      "length": 30000,
+      "md5": "bb632aef21b89faf33a2544420385cfb",
+      "sha512t24u": "xR1CjxR1t5kbrBkPm59BbDSSId73exim"
+    }
+  }
+}

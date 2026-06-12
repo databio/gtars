@@ -1,28 +1,43 @@
-from typing import Optional, List, Dict
-from gtars.models import RegionSet, GenomeAssembly, PartitionList, SignalMatrix
+from typing import Optional, Union, List, Dict
+from gtars.models import RegionSet, GenomeAssembly, BinaryGenomeAssembly, PartitionList, SignalMatrix
 
 def calc_gc_content(
-    rs: RegionSet, genome: GenomeAssembly, ignore_unk_chroms: Optional[bool] = False
+    rs: RegionSet,
+    genome: Union[GenomeAssembly, BinaryGenomeAssembly],
+    ignore_unk_chroms: Optional[bool] = False,
 ) -> List[float]:
     """
     Calculate GC content for each region.
 
     :param rs: RegionSet object
-    :param genome: GenomeAssembly object (reference genome)
+    :param genome: GenomeAssembly or BinaryGenomeAssembly (reference genome)
     :param ignore_unk_chroms: ignore unknown chromosomes
     :return: GC content per region (0 to 1)
     """
     ...
 
-def calc_dinucleotide_frequency(
-    rs: RegionSet, genome: GenomeAssembly
-) -> Dict[str, int]:
+def calc_dinucl_freq(
+    rs: RegionSet,
+    genome: Union[GenomeAssembly, BinaryGenomeAssembly],
+    raw_counts: bool = False,
+    ignore_unk_chroms: bool = False,
+) -> Dict[str, object]:
     """
-    Calculate dinucleotide frequencies across all regions.
+    Per-region dinucleotide frequencies, matching R GenomicDistributions ``calcDinuclFreq``.
 
     :param rs: RegionSet object
-    :param genome: GenomeAssembly object (reference genome)
-    :return: dict mapping dinucleotide names to counts
+    :param genome: GenomeAssembly or BinaryGenomeAssembly (reference genome)
+    :param raw_counts: if False (default), return percentages (0–100) per row;
+        if True, return raw integer-valued counts
+    :param ignore_unk_chroms: skip regions on chromosomes not in the assembly
+    :return: dict with keys:
+        - ``region_labels``: list of ``chr_start_end`` strings (one per region)
+        - ``dinucleotides``: list of 16 dinucleotide names in canonical order
+        - ``frequencies``: list of lists — one row per region, 16 values per row
+          matching ``dinucleotides`` order
+
+    For pooled global counts across all regions, sum each column of the
+    raw-counts matrix.
     """
     ...
 

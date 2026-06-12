@@ -1,4 +1,6 @@
+mod bed_stream;
 mod asset;
+mod hgvs;
 mod lola;
 mod models;
 mod overlaprs;
@@ -7,20 +9,14 @@ mod refget;
 mod regionset;
 mod signal;
 mod tokenizers;
+mod transcripts;
 mod tss;
 mod utils;
+mod vcf;
 
-use wasm_bindgen::prelude::*;
-
-// Re-export refget functions at the top level
+// Re-export functions at the top level
+pub use bed_stream::*;
+pub use hgvs::*;
 pub use refget::*;
-
-#[wasm_bindgen]
-pub fn greet(name: &str) {
-    alert(&format!("Hello, {}!", name));
-}
-
-#[wasm_bindgen]
-extern "C" {
-    fn alert(s: &str);
-}
+pub use transcripts::*;
+pub use vcf::*;

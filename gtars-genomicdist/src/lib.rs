@@ -26,11 +26,12 @@ pub mod asset;
 pub mod bed_classifier;
 pub mod consensus;
 pub mod errors;
-pub mod interval_ranges;
 pub mod models;
 pub mod partitions;
+pub mod region_set_list_ops;
 pub mod signal;
 pub mod statistics;
+pub mod stranded_region_set;
 pub mod utils;
 
 // re-exports
@@ -39,8 +40,8 @@ pub use asset::GenomicDistAnnotation;
 pub use bed_classifier::classify_bed;
 pub use gtars_core::models::CoordinateMode;
 pub use consensus::{ConsensusRegion, consensus};
-pub use interval_ranges::IntervalRanges;
-pub use interval_ranges::pairwise_jaccard;
+pub use region_set_list_ops::pairwise_jaccard;
+pub use region_set_list_ops::RegionSetListOps;
 pub use partitions::{
     calc_expected_partitions, calc_partitions, genome_partition_list, ExpectedPartitionResult,
     ExpectedPartitionRow, GeneModel, PartitionList, PartitionResult,
@@ -49,4 +50,4 @@ pub use models::{SortedRegionSet, Strand, StrandedRegionSet};
 pub use signal::{calc_summary_signal, ConditionStats, SignalMatrix, SignalSummaryResult};
 pub use statistics::GenomicIntervalSetStatistics;
 pub use utils::{chrom_karyotype_key, median_abs_distance};
-pub use statistics::{calc_dinucl_freq, calc_dinucl_freq_per_region, calc_gc_content, DINUCL_ORDER};
+pub use statistics::{calc_dinucl_freq, calc_gc_content, DINUCL_ORDER};

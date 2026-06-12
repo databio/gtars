@@ -3,7 +3,6 @@
 use super::*;
 use super::readonly::ReadonlyRefgetStore;
 
-use std::collections::HashMap;
 use std::ffi::OsStr;
 
 use indexmap::IndexMap;
@@ -216,53 +215,16 @@ impl ReadonlyRefgetStore {
             Box::new(file)
         };
 
-        let collection_key = collection_digest.as_ref().to_key();
-
-        let name_to_metadata: HashMap<String, SequenceMetadata> = self
-            .name_lookup
-            .get(&collection_key)
-            .map(|name_map| {
-                name_map
-                    .iter()
-                    .filter_map(|(name, seq_digest)| {
-                        self.sequence_store.get(seq_digest).map(|record| {
-                            (name.clone(), record.metadata().clone())
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
-
         let seq_iter = self.substrings_from_regions(&collection_digest, bed_file_path)?;
-
-        let mut previous_parsed_chr = String::new();
-        let mut current_header: String = String::new();
-        let mut previous_header: String = String::new();
 
         for rs in seq_iter.into_iter() {
             let rs = rs?;
 
-            if previous_parsed_chr != rs.chrom_name {
-                previous_parsed_chr = rs.chrom_name.clone();
-
-                if let Some(meta) = name_to_metadata.get(&rs.chrom_name) {
-                    current_header =
-                        format!(">{} {} {} {} {}", meta.name, meta.length, meta.alphabet, meta.sha512t24u, meta.md5);
-                }
-            }
-
-            let retrieved_substring = rs.sequence;
-
-            if previous_header != current_header {
-                let prefix = if previous_header.is_empty() { "" } else { "\n" };
-
-                previous_header = current_header.clone();
-
-                let header_to_be_written = format!("{}{}\n", prefix, current_header);
-                writer.write_all(header_to_be_written.as_bytes())?;
-            }
-
-            writer.write_all(retrieved_substring.as_ref())?;
+            // Write one header per region with coordinates
+            let header = format!(">{}:{}-{}\n", rs.chrom_name, rs.start, rs.end);
+            writer.write_all(header.as_bytes())?;
+            writer.write_all(rs.sequence.as_bytes())?;
+            writer.write_all(b"\n")?;
         }
 
         writer.flush()?;
@@ -320,11 +282,11 @@ impl ReadonlyRefgetStore {
                 .get(seq_digest)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {:?}", seq_digest))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
             };
 
             write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
@@ -364,14 +326,14 @@ impl ReadonlyRefgetStore {
                 .get(&digest_key)
                 .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", digest_str))?;
 
-            let (metadata, sequence_data) = match record {
+            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!(
                         "Sequence data not loaded for digest: {}",
                         digest_str
                     ));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence),
+                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
             };
 
             write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;

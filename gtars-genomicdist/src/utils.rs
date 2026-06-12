@@ -57,18 +57,10 @@ pub fn median_abs_distance(dists: &[i64]) -> Option<f64> {
 
 /// Returns a sort key that orders chromosome names karyotypically:
 /// numeric (1, 2, …, 22) → X → Y → M/MT → everything else alphabetically.
-pub fn chrom_karyotype_key(chr: &str) -> (u8, u32, String) {
-    let bare = chr.strip_prefix("chr").unwrap_or(chr);
-    match bare {
-        "X" => (1, 0, String::new()),
-        "Y" => (2, 0, String::new()),
-        "M" | "MT" => (3, 0, String::new()),
-        _ => match bare.parse::<u32>() {
-            Ok(n) => (0, n, String::new()),
-            Err(_) => (4, 0, bare.to_string()),
-        },
-    }
-}
+///
+/// Re-exported from [`gtars_core::utils`] to keep a single implementation;
+/// this crate's callers and public API continue to reference it here.
+pub use gtars_core::utils::chrom_karyotype_key;
 
 #[cfg(test)]
 mod tests {

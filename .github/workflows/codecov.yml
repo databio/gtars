@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: [ "master" ]
 
+# Cancel superseded runs on the same ref instead of queueing them.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   CARGO_TERM_COLOR: always
 
@@ -24,7 +29,10 @@ jobs:
       
       - name: Install Rust
         run: rustup update stable
-      
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
       

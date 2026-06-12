@@ -1,6 +1,35 @@
 use clap::{Arg, ArgAction, Command};
 
 pub const UNIWIG_CMD: &str = "uniwig";
+pub const BAMQC_SUBCMD: &str = "bamqc";
+
+/// Creates the bamqc subcommand
+fn create_bamqc_subcommand() -> Command {
+    Command::new(BAMQC_SUBCMD)
+        .about("Compute library complexity metrics (NRF, PBC1, PBC2) from a BAM file")
+        .arg(
+            Arg::new("input")
+                .long("input")
+                .short('i')
+                .help("Path to input BAM file (must have .bai index for parallel mode)")
+                .required(true),
+        )
+        .arg(
+            Arg::new("output")
+                .long("output")
+                .short('o')
+                .help("Path to output TSV file")
+                .required(true),
+        )
+        .arg(
+            Arg::new("threads")
+                .long("threads")
+                .short('t')
+                .help("Number of threads for parallel processing (requires BAM index)")
+                .value_parser(clap::value_parser!(usize))
+                .default_value("1"),
+        )
+}
 
 /// Creates the uniwig CLI Command object
 ///
@@ -8,6 +37,7 @@ pub const UNIWIG_CMD: &str = "uniwig";
 /// `cargo run uniwig -f /sourcefiles/test.bed -t "bed" -c /sourcefiles/hg38.chrom.sizes -m 5 -t 1 -l /numpy_arrays_created_with_rust/ -y npy`
 pub fn create_uniwig_cli() -> Command {
     Command::new(UNIWIG_CMD)
+        .subcommand(create_bamqc_subcommand())
         .author("DRC")
         .about("Create accumulation files from a BED or BAM file")
         .arg(
@@ -36,16 +66,16 @@ pub fn create_uniwig_cli() -> Command {
                 .long("smoothsize")
                 .short('m')
                 .value_parser(clap::value_parser!(i32))
-                .help("Integer value for smoothing")
-                .required(true),
+                .help("Integer value for smoothing (required except for subcommands)")
+                .required(false),
         )
         .arg(
             Arg::new("stepsize")
                 .long("stepsize")
                 .short('s')
                 .value_parser(clap::value_parser!(i32))
-                .help("Integer value for stepsize")
-                .required(true),
+                .help("Integer value for stepsize (required except for subcommands)")
+                .required(false),
         )
         .arg(
             Arg::new("bamscale")

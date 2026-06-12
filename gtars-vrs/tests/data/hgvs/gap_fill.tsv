@@ -1,0 +1,51 @@
+# Hand-authored HGVS expressions filling gaps left by the vendored
+# corpora. Each line is `<HGVS expression><TAB><reason>`. The parser
+# harness consumes the first column and asserts each line PARSES. Lines
+# starting with `#` and blank lines are ignored.
+#
+# Sourced from the HGVS Nomenclature site examples
+# (https://hgvs-nomenclature.org/) and from the empty cells reported by
+# `coverage.py` against varfish gauntlet + biocommons grammar_test +
+# vrs_bridge seed.
+
+# g. deletions, insertions, delins, inv, equals
+NC_000023.10:g.33038255delC	g.del with reference base
+NC_000007.14:g.140753336_140753340delAGCTG	g.del range
+NC_000007.14:g.140753336_140753337insTAA	g.ins
+NC_000007.14:g.140753336_140753340delinsCC	g.delins
+NC_000007.14:g.140753336_140753340inv	g.inv on a range
+NC_000007.14:g.140753336=	g.equals (no change)
+
+# c. inv and equals
+NM_004333.6:c.1799_1810inv	c.inv on a range
+NM_004333.6:c.1799=	c.equals
+
+# n. forms (non-coding)
+NR_002196.2:n.12_15delAACG	n.del with reference
+NR_002196.2:n.12_14dupATC	n.dup with reference
+NR_002196.2:n.12_13insTT	n.ins
+NR_002196.2:n.12_15delinsCC	n.delins
+NR_002196.2:n.12_15inv	n.inv
+NR_002196.2:n.12=	n.equals
+
+# m. (mitochondrial) forms
+NC_012920.1:m.3243delA	m.del
+NC_012920.1:m.3243_3245dupAGC	m.dup
+NC_012920.1:m.3243_3244insT	m.ins
+NC_012920.1:m.3243_3245delinsCC	m.delins
+NC_012920.1:m.3243_3245inv	m.inv
+NC_012920.1:m.3243=	m.equals
+NC_012920.1:m.3243?	m.unknown
+
+# r. (RNA) forms
+NM_004333.6:r.1799del	r.del
+NM_004333.6:r.1799_1801dup	r.dup
+NM_004333.6:r.1799_1800insuuu	r.ins (lowercase per RNA convention — may go through known_skips)
+NM_004333.6:r.1799_1810inv	r.inv
+NM_004333.6:r.1799=	r.equals
+NM_004333.6:r.1799?	r.unknown
+NM_004333.6:r.1799_1800delinsAU	r.delins (uppercase — covers basic delins)
+
+# Gene-symbol form (no NM_): MANE-resolution path
+BRAF:c.1798_1800delAGT	gene-symbol c.del
+BRAF:c.1798=	gene-symbol c.equals

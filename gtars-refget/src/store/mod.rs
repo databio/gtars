@@ -14,12 +14,73 @@ mod readonly;
 mod core;
 mod alias;
 mod fhr_metadata;
+// FASTA import (crossbeam-channel) and export (gtars-core) are filesystem-only.
+#[cfg(feature = "filesystem")]
 mod import;
 mod persistence;
+#[cfg(feature = "filesystem")]
 mod export;
 
-#[cfg(test)]
+// The bulk of the store tests import FASTA via the filesystem-only API.
+#[cfg(all(test, feature = "filesystem"))]
 mod tests;
+
+// Non-filesystem store tests: pure path/template/mode logic that needs no FASTA
+// import, so they run under `--no-default-features`.
+#[cfg(test)]
+mod nofs_tests {
+    use super::*;
+
+    #[test]
+    fn test_expand_template() {
+        let digest = "ABCDEFghijklmnop";
+
+        let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s.seq");
+        assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCDEFghijklmnop.seq"));
+
+        let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s4/%s.seq");
+        assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCD/ABCDEFghijklmnop.seq"));
+
+        let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s.seq");
+        assert_eq!(result, std::path::PathBuf::from("sequences/ABCDEFghijklmnop.seq"));
+    }
+
+    #[test]
+    fn test_sanitize_relative_path() {
+        // Rejects traversal
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("../etc/passwd").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../bar").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../../bar").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("..").is_err());
+
+        // Rejects absolute
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("/etc/passwd").is_err());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
+
+        // Accepts valid
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("rgstore.json").is_ok());
+        assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
+    }
+
+    #[test]
+    fn test_mode_basics() {
+        let mut store = RefgetStore::in_memory();
+
+        assert_eq!(store.mode, StorageMode::Encoded);
+
+        store.disable_encoding();
+        assert_eq!(store.mode, StorageMode::Raw);
+        store.enable_encoding();
+        assert_eq!(store.mode, StorageMode::Encoded);
+
+        store.set_encoding_mode(StorageMode::Raw);
+        assert_eq!(store.mode, StorageMode::Raw);
+        store.set_encoding_mode(StorageMode::Encoded);
+        assert_eq!(store.mode, StorageMode::Encoded);
+    }
+}
 
 // Re-export public types from submodules
 pub use self::readonly::ReadonlyRefgetStore;
@@ -32,7 +93,11 @@ pub use self::fhr_metadata::{
 };
 
 use serde::{Deserialize, Serialize};
-use std::io::{BufRead, BufReader, Read};
+use std::io::{BufReader, Read};
+// `BufRead` is only used by the filesystem-only FASTA import path (via `super::*`).
+#[cfg(feature = "filesystem")]
+#[allow(unused_imports)]
+use std::io::BufRead;
 
 pub(crate) use crate::hashkeyable::DigestKey;
 
@@ -77,10 +142,22 @@ pub struct RetrievedSequence {
 }
 
 /// Options for importing a FASTA file into a RefgetStore.
+///
+/// ## Single-knob parallelism model
+///
+/// `jobs` is the number of input FASTA files imported concurrently. `0` = auto
+/// (`std::thread::available_parallelism`). `1` = serial. It has no effect with a
+/// single input file (each file is processed by the basic read->digest->encode
+/// pipeline either way).
 #[derive(Clone, Copy)]
 pub struct FastaImportOptions<'a> {
     pub(crate) force: bool,
     pub(crate) namespaces: &'a [&'a str],
+    /// Number of input FASTA files imported concurrently. Each file gets its own
+    /// decoder so gzip decompression is parallelized across files. `0` = auto
+    /// (`std::thread::available_parallelism`), `1` = serial. No effect with a
+    /// single input file.
+    pub(crate) jobs: usize,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -88,6 +165,7 @@ impl<'a> Default for FastaImportOptions<'a> {
         Self {
             force: false,
             namespaces: &[],
+            jobs: 0,
         }
     }
 }
@@ -107,6 +185,15 @@ impl<'a> FastaImportOptions<'a> {
     #[must_use]
     pub fn namespaces(mut self, ns: &'a [&'a str]) -> Self {
         self.namespaces = ns;
+        self
+    }
+
+    /// Set the number of input FASTA files imported concurrently.
+    /// `0` (the default) means auto via `std::thread::available_parallelism`;
+    /// `1` means serial. No effect with a single input file.
+    #[must_use]
+    pub fn jobs(mut self, n: usize) -> Self {
+        self.jobs = n;
         self
     }
 }
@@ -232,6 +319,9 @@ pub struct AvailableAliases<'a> {
 }
 
 /// Iterator over BED file regions yielding substrings from a store.
+// Constructed only by the filesystem BED-streaming path; fields go unread on
+// the WASM (no-filesystem) build.
+#[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
 pub struct SubstringsFromRegions<'a, K>
 where
     K: AsRef<[u8]>,

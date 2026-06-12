@@ -4,11 +4,11 @@ use pyo3::types::PyDict;
 use std::collections::HashMap;
 
 use crate::models::PyRegion;
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::{Region, RegionSet};
 use gtars_genomicdist::models::ChromosomeStatistics;
 use gtars_genomicdist::statistics::GenomicIntervalSetStatistics;
-use gtars_genomicdist::IntervalRanges;
-use gtars_overlaprs::RegionSetOverlaps;
+use gtars_overlaprs::IndexedRegionSet;
 
 #[pyclass(name = "ChromosomeStatistics", module = "gtars.models")]
 #[derive(Clone, Debug)]
@@ -298,43 +298,38 @@ impl PyRegionSet {
         self.regionset.calc_widths()
     }
 
-    fn neighbor_distances(&self) -> PyResult<Vec<Option<f64>>> {
-        let dists = self
-            .regionset
+    /// Signed gaps between consecutive regions on each chromosome.
+    ///
+    /// Output length may be shorter than input region count — chromosomes with
+    /// fewer than 2 regions are skipped (no neighbors to measure against). Output
+    /// is not aligned 1:1 with input regions.
+    fn neighbor_distances(&self) -> PyResult<Vec<i64>> {
+        self.regionset
             .calc_neighbor_distances()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(dists
-            .into_iter()
-            .map(|d| {
-                if d == i64::MAX {
-                    None
-                } else {
-                    Some(d as f64)
-                }
-            })
-            .collect())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    fn nearest_neighbors(&self) -> PyResult<Vec<Option<f64>>> {
-        let dists = self
-            .regionset
+    /// Distance from each region to its nearest neighbor on the same chromosome.
+    ///
+    /// Output length may be shorter than input region count — chromosomes with
+    /// only one region are skipped. Output is not aligned 1:1 with input regions.
+    fn nearest_neighbors(&self) -> PyResult<Vec<u32>> {
+        self.regionset
             .calc_nearest_neighbors()
-            .map_err(|e| PyValueError::new_err(e.to_string()))?;
-        Ok(dists
-            .into_iter()
-            .map(|d| {
-                if d == u32::MAX {
-                    None
-                } else {
-                    Some(d as f64)
-                }
-            })
-            .collect())
+            .map_err(|e| PyValueError::new_err(e.to_string()))
     }
 
-    #[pyo3(signature = (n_bins = 250))]
-    fn distribution<'py>(&self, py: Python<'py>, n_bins: u32) -> PyResult<Vec<Bound<'py, PyDict>>> {
-        let bins = self.regionset.region_distribution_with_bins(n_bins);
+    #[pyo3(signature = (n_bins = 250, chrom_sizes = None))]
+    fn distribution<'py>(
+        &self,
+        py: Python<'py>,
+        n_bins: u32,
+        chrom_sizes: Option<HashMap<String, u32>>,
+    ) -> PyResult<Vec<Bound<'py, PyDict>>> {
+        let bins = match chrom_sizes {
+            Some(cs) => self.regionset.region_distribution_with_chrom_sizes(n_bins, &cs),
+            None => self.regionset.region_distribution_with_bins(n_bins),
+        };
         let mut sorted_bins: Vec<_> = bins.into_values().collect();
         sorted_bins.sort_by(|a, b| {
             a.chr
@@ -445,37 +440,46 @@ impl PyRegionSet {
         self.regionset.nucleotides_length()
     }
 
-    /// Return a new RegionSet containing only regions that overlap at least
-    /// one region in other.
+    /// Return a new RegionSet containing only regions in self that overlap at
+    /// least one region in other.
     fn subset_by_overlaps(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subset_by_overlaps(&other.regionset, None);
-        Ok(Self::from_regionset(rs))
+        // Index `other`, query `self`, keep self regions that hit.
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        let counts = index.count_overlaps(&self.regionset, None);
+        let kept: Vec<Region> = self
+            .regionset
+            .regions
+            .iter()
+            .zip(counts)
+            .filter_map(|(r, c)| if c > 0 { Some(r.clone()) } else { None })
+            .collect();
+        Ok(Self::from_regionset(RegionSet::from(kept)))
     }
 
-    /// Return a list of overlap counts, one per region in self.
+    /// Return a list of overlap counts, one per region in self, counting how
+    /// many regions of other overlap each region of self.
     fn count_overlaps(&self, other: &PyRegionSet) -> Vec<usize> {
-        RegionSetOverlaps::count_overlaps(&self.regionset, &other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.count_overlaps(&self.regionset, None)
     }
 
-    /// Return a list of booleans indicating whether each region overlaps
-    /// any region in other.
+    /// Return a list of booleans indicating whether each region in self
+    /// overlaps any region in other.
     fn any_overlaps(&self, other: &PyRegionSet) -> Vec<bool> {
-        self.regionset.any_overlaps(&other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.any_overlaps(&self.regionset, None)
     }
 
-    /// Return a list of lists of indices into other that overlap each
-    /// region in self.
+    /// Return a list of lists of indices into other that overlap each region
+    /// in self.
     fn find_overlaps(&self, other: &PyRegionSet) -> Vec<Vec<usize>> {
-        RegionSetOverlaps::find_overlaps(&self.regionset, &other.regionset, None)
+        let index = IndexedRegionSet::new(other.regionset.clone());
+        index.find_overlaps(&self.regionset, None)
     }
 
+    /// Range-level intersection: the positions covered by both self and other.
     fn intersect_all(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.intersect_all(&other.regionset);
-        Ok(Self::from_regionset(rs))
-    }
-
-    fn subtract(&self, other: &PyRegionSet) -> PyResult<Self> {
-        let rs = self.regionset.subtract(&other.regionset);
+        let rs = self.regionset.intersect(&other.regionset);
         Ok(Self::from_regionset(rs))
     }
 
@@ -512,6 +516,17 @@ impl PyRegionSet {
 
         result
     }
+
+    /// Return gaps between regions per chromosome, bounded by chrom sizes.
+    ///
+    /// Emits leading gaps, inter-region gaps, trailing gaps (to chrom_size),
+    /// and full-chromosome gaps for any chromosome in ``chrom_sizes`` that
+    /// has no regions at all.
+    fn gaps(&self, chrom_sizes: HashMap<String, u32>) -> PyResult<Self> {
+        let rs = self.regionset.gaps(&chrom_sizes);
+        Ok(Self::from_regionset(rs))
+    }
+
 }
 
 #[pymethods]
@@ -556,3 +571,4 @@ impl PyChromosomeStatistics {
         self.median_region_length
     }
 }
+

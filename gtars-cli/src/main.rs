@@ -28,6 +28,9 @@ mod consensus;
 #[cfg(feature = "genomicdist")]
 mod prep;
 
+#[cfg(feature = "refget")]
+mod refget;
+
 use anyhow::Result;
 use clap::Command;
 
@@ -74,6 +77,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "genomicdist")]
     let cmd = cmd.subcommand(prep::cli::create_prep_cli());
+
+    #[cfg(feature = "refget")]
+    let cmd = cmd.subcommand(refget::cli::create_refget_cli());
 
     cmd
 }
@@ -168,6 +174,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "genomicdist")]
         Some((prep::cli::PREP_CMD, matches)) => {
             prep::handlers::run_prep(matches)?;
+        }
+
+        //
+        // REFGET STORE
+        //
+        #[cfg(feature = "refget")]
+        Some((refget::cli::REFGET_CMD, matches)) => {
+            refget::handlers::run_refget(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),

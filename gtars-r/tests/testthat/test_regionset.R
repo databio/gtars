@@ -82,9 +82,10 @@ test_that("widths returns correct values", {
   # dummy.bed: chr1:2-6, chr1:4-7, chr1:5-9, chr1:7-12
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   w <- widths(rs)
-  expect_type(w, "integer")
+  # doubles instead of integers: u32 widths can exceed i32::MAX (2.1 Gbp)
+  expect_type(w, "double")
   expect_equal(length(w), 4L)
-  expect_equal(w[1], 4L)
+  expect_equal(w[1], 4)
 })
 
 test_that("neighborDistances returns numeric vector", {
@@ -98,7 +99,8 @@ test_that("nearestNeighbors returns numeric vector", {
   skip_if_no_data()
   rs <- RegionSet(file.path(data_dir, "dummy.bed"))
   nn <- nearestNeighbors(rs)
-  expect_type(nn, "integer")
+  # doubles instead of integers: distances can be chromosome-scale
+  expect_type(nn, "double")
 })
 
 test_that("chromosomeStatistics returns data.frame", {
@@ -179,12 +181,54 @@ test_that("disjoin returns non-overlapping pieces", {
   expect_true(length(rs_dj) >= 1L)
 })
 
-test_that("gaps returns inter-region gaps", {
+test_that("gaps returns inter-region gaps bounded by chrom_sizes", {
   skip_if_no_data()
-  # dummy.bed regions all overlap, so gaps may be empty
-  rs <- RegionSet(file.path(data_dir, "dummy.bed"))
-  rs_gaps <- gaps(rs)
+  # Three non-overlapping peaks → leading, 2 inter-region, trailing = 4 gaps.
+  df <- data.frame(
+    chr = "chr1",
+    start = c(10L, 30L, 50L),
+    end   = c(20L, 40L, 60L)
+  )
+  rs <- RegionSet(df)
+  chrom_sizes <- c(chr1 = 100L)
+  rs_gaps <- gaps(rs, chrom_sizes = chrom_sizes)
   expect_s4_class(rs_gaps, "RegionSet")
+  expect_equal(length(rs_gaps), 4L)
+})
+
+test_that("gaps errors when chrom_sizes is missing", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  expect_error(gaps(rs), "chrom_sizes")
+})
+
+test_that("gaps emits full-chromosome gap for empty chromosomes", {
+  df <- data.frame(chr = "chr1", start = 10L, end = 20L)
+  rs <- RegionSet(df)
+  chrom_sizes <- c(chr1 = 100L, chr2 = 50L)
+  rs_gaps <- gaps(rs, chrom_sizes = chrom_sizes)
+  gaps_df <- as.data.frame(rs_gaps)
+  chr2 <- gaps_df[gaps_df$chr == "chr2", ]
+  expect_equal(nrow(chr2), 1L)
+  expect_equal(chr2$start, 0L)
+  expect_equal(chr2$end, 50L)
+})
+
+# =========================================================================
+# Spatial-arrangement summary statistics
+# =========================================================================
+
+test_that("clusterRegions returns cluster IDs", {
+  df <- data.frame(
+    chr = "chr1",
+    start = c(0L, 13L, 100L),
+    end   = c(10L, 20L, 110L)
+  )
+  rs <- RegionSet(df)
+  ids <- clusterRegions(rs, maxGap = 5L)
+  expect_length(ids, 3L)
+  expect_equal(ids[1], ids[2])   # first two are within 5bp → same cluster
+  expect_false(ids[1] == ids[3]) # third is far away
 })
 
 # =========================================================================

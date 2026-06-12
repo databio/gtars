@@ -2,8 +2,9 @@
 
 use super::*;
 
-use crate::collection::{
-    SequenceCollection, SequenceCollectionExt, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
+use crate::collection::SequenceCollectionExt;
+use crate::digest::types::{
+    SequenceCollection, SequenceCollectionMetadata, SequenceMetadata, SequenceRecord,
 };
 use crate::digest::{AlphabetType, md5, sha512t24u};
 use crate::hashkeyable::{DigestKey, HashKeyable};
@@ -61,60 +62,13 @@ fn setup_export_test_store(temp_path: &std::path::Path) -> (RefgetStore, DigestK
 // =========================================================================
 // Template and path tests (merged parametric)
 // =========================================================================
-
-#[test]
-fn test_expand_template() {
-    let digest = "ABCDEFghijklmnop";
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCDEFghijklmnop.seq"));
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s2/%s4/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/AB/ABCD/ABCDEFghijklmnop.seq"));
-
-    let result = ReadonlyRefgetStore::expand_template(digest, "sequences/%s.seq");
-    assert_eq!(result, std::path::PathBuf::from("sequences/ABCDEFghijklmnop.seq"));
-}
-
-#[test]
-fn test_sanitize_relative_path() {
-    // Rejects traversal
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("../etc/passwd").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../bar").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("foo/../../bar").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("..").is_err());
-
-    // Rejects absolute
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("/etc/passwd").is_err());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("\\windows\\system32").is_err());
-
-    // Accepts valid
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/ab/abc123.seq").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("collections/xyz.rgsi").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("rgstore.json").is_ok());
-    assert!(ReadonlyRefgetStore::sanitize_relative_path("sequences/%s2/%s.seq").is_ok());
-}
+// `test_expand_template`, `test_sanitize_relative_path`, and `test_mode_basics`
+// are non-filesystem tests; they live in the always-compiled `nofs_tests`
+// module in `store/mod.rs` so they run under `--no-default-features`.
 
 // =========================================================================
 // Mode tests
 // =========================================================================
-
-#[test]
-fn test_mode_basics() {
-    let mut store = RefgetStore::in_memory();
-
-    assert_eq!(store.mode, StorageMode::Encoded);
-
-    store.disable_encoding();
-    assert_eq!(store.mode, StorageMode::Raw);
-    store.enable_encoding();
-    assert_eq!(store.mode, StorageMode::Encoded);
-
-    store.set_encoding_mode(StorageMode::Raw);
-    assert_eq!(store.mode, StorageMode::Raw);
-    store.set_encoding_mode(StorageMode::Encoded);
-    assert_eq!(store.mode, StorageMode::Encoded);
-}
 
 #[test]
 fn test_mode_switching() {
@@ -136,7 +90,7 @@ fn test_mode_switching() {
             .unwrap();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_before = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
 
@@ -164,7 +118,7 @@ fn test_mode_switching() {
         store.disable_encoding();
 
         if let Some(SequenceRecord::Full { sequence, .. }) = store.sequence_store.get(&chr1_key) {
-            assert_eq!(sequence, b"ATGCATGCATGC");
+            assert_eq!(&sequence[..], b"ATGCATGCATGC");
         }
         let seq_after = store.get_sequence(&chr1_sha).unwrap().decode().unwrap();
         assert_eq!(seq_before, seq_after);
@@ -196,9 +150,6 @@ GGGGAAAA
 
     let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
 
-    let (chr1_sha, chr1_md5) = calculate_test_digests(b"ATGCATGCATGC");
-    let (chr2_sha, chr2_md5) = calculate_test_digests(b"GGGGAAAA");
-
     // Test BED-based export
     let bed_content = "\
 chr1\t0\t5
@@ -221,10 +172,7 @@ chr2\t0\t4
     let output_fa_content =
         fs::read_to_string(&temp_output_fa_path).expect("Failed to read output FASTA file");
 
-    let expected_fa_content = format!(
-        ">chr1 12 dna2bit {} {}\nATGCAATGC\n>chr2 8 dna2bit {} {}\nGGGG\n",
-        chr1_sha, chr1_md5, chr2_sha, chr2_md5
-    );
+    let expected_fa_content = ">chr1:0-5\nATGCA\n>chr1:8-12\nATGC\n>chr2:0-4\nGGGG\n";
     assert_eq!(
         output_fa_content.trim(),
         expected_fa_content.trim(),
@@ -333,7 +281,7 @@ fn test_global_refget_store() {
 
     let record = SequenceRecord::Full {
         metadata: seq_metadata.clone(),
-        sequence: sequence.to_vec(),
+        sequence: std::sync::Arc::new(sequence.to_vec()),
     };
 
     collection.sequences.push(record);
@@ -1011,55 +959,6 @@ fn test_add_sequence_record_standalone() {
 }
 
 // =========================================================================
-// Decoded cache tests
-// =========================================================================
-
-#[test]
-fn test_ensure_decoded_then_sequence_bytes() {
-    use crate::digest::digest_sequence;
-
-    let mut store = RefgetStore::in_memory();
-    let record = digest_sequence("chr1", b"ACGTACGT");
-    let digest = record.metadata().sha512t24u.clone();
-
-    store.add_sequence_record(record, false).unwrap();
-    store.ensure_decoded(digest.as_bytes()).unwrap();
-
-    let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
-    assert_eq!(bytes, b"ACGTACGT");
-}
-
-#[test]
-fn test_sequence_bytes_returns_none_before_ensure_decoded() {
-    use crate::digest::digest_sequence;
-
-    let mut store = RefgetStore::in_memory();
-    let record = digest_sequence("chr1", b"ACGT");
-    let digest = record.metadata().sha512t24u.clone();
-
-    store.add_sequence_record(record, false).unwrap();
-    assert!(store.sequence_bytes(digest.as_bytes()).is_none());
-}
-
-#[test]
-fn test_ensure_decoded_is_idempotent() {
-    use crate::digest::digest_sequence;
-
-    let mut store = RefgetStore::in_memory();
-    let record = digest_sequence("chr1", b"GATTACA");
-    let digest = record.metadata().sha512t24u.clone();
-
-    store.add_sequence_record(record, false).unwrap();
-
-    store.ensure_decoded(digest.as_bytes()).unwrap();
-    store.ensure_decoded(digest.as_bytes()).unwrap();
-    store.ensure_decoded(digest.as_bytes()).unwrap();
-
-    let bytes = store.sequence_bytes(digest.as_bytes()).unwrap();
-    assert_eq!(bytes, b"GATTACA");
-}
-
-// =========================================================================
 // Iterator error visibility tests
 // =========================================================================
 
@@ -1526,6 +1425,92 @@ fn test_collection_order_preserved_after_roundtrip() {
     );
 }
 
+/// Test that multiple collections sharing sequences under different names and different orderings
+/// all preserve their correct per-collection names and element orderings across a disk roundtrip.
+///
+/// This covers the intersection of two previously-fixed bugs:
+/// 1. HashMap ordering (fixed: inner map now IndexMap)
+/// 2. Global name leakage (fixed: get_collection() overrides meta.name from name_lookup)
+#[test]
+fn test_shared_sequences_order_preserved_after_disk_roundtrip() {
+    // FASTA A: base ordering — chrX first, then chr1, then chr2
+    let fasta_a = ">chrX\nTTGGGGAA\n>chr1\nGGAA\n>chr2\nGCGC\n";
+    // FASTA B: different order — chr1 first, same sequences as A
+    let fasta_b = ">chr1\nGGAA\n>chr2\nGCGC\n>chrX\nTTGGGGAA\n";
+    // FASTA C: name swap — chr2 has GGAA, chr1 has GCGC (opposite of A/B)
+    let fasta_c = ">chrX\nTTGGGGAA\n>chr2\nGGAA\n>chr1\nGCGC\n";
+
+    let dir = tempdir().unwrap();
+    let fasta_a_path = dir.path().join("a.fa");
+    let fasta_b_path = dir.path().join("b.fa");
+    let fasta_c_path = dir.path().join("c.fa");
+    fs::write(&fasta_a_path, fasta_a).unwrap();
+    fs::write(&fasta_b_path, fasta_b).unwrap();
+    fs::write(&fasta_c_path, fasta_c).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_quiet(true);
+
+    let (meta_a, _) = store.add_sequence_collection_from_fasta(&fasta_a_path, FastaImportOptions::new()).unwrap();
+    let (meta_b, _) = store.add_sequence_collection_from_fasta(&fasta_b_path, FastaImportOptions::new()).unwrap();
+    let (meta_c, _) = store.add_sequence_collection_from_fasta(&fasta_c_path, FastaImportOptions::new()).unwrap();
+
+    let digest_a = meta_a.digest.clone();
+    let digest_b = meta_b.digest.clone();
+    let digest_c = meta_c.digest.clone();
+
+    // Load collections before write and record level2 output
+    store.load_all_collections().unwrap();
+    let pre_a = store.get_collection_level2(&digest_a).unwrap();
+    let pre_b = store.get_collection_level2(&digest_b).unwrap();
+    let pre_c = store.get_collection_level2(&digest_c).unwrap();
+
+    // Verify pre-write ordering for FASTA A: chrX, chr1, chr2
+    assert_eq!(pre_a.names, vec!["chrX", "chr1", "chr2"], "A: names before roundtrip");
+    // Verify pre-write ordering for FASTA B: chr1, chr2, chrX
+    assert_eq!(pre_b.names, vec!["chr1", "chr2", "chrX"], "B: names before roundtrip");
+    // Verify pre-write ordering for FASTA C: chrX, chr2, chr1 (name swap)
+    assert_eq!(pre_c.names, vec!["chrX", "chr2", "chr1"], "C: names before roundtrip");
+
+    store.write().unwrap();
+
+    // Drop and reopen from disk
+    drop(store);
+    let mut reloaded = RefgetStore::open_local(&store_path).unwrap();
+    reloaded.load_all_collections().unwrap();
+
+    let post_a = reloaded.get_collection_level2(&digest_a).unwrap();
+    let post_b = reloaded.get_collection_level2(&digest_b).unwrap();
+    let post_c = reloaded.get_collection_level2(&digest_c).unwrap();
+
+    // Names must match exactly (order-sensitive) after roundtrip
+    assert_eq!(post_a.names, pre_a.names, "A: names after roundtrip");
+    assert_eq!(post_b.names, pre_b.names, "B: names after roundtrip");
+    assert_eq!(post_c.names, pre_c.names, "C: names after roundtrip");
+
+    // Lengths must match exactly after roundtrip
+    assert_eq!(post_a.lengths, pre_a.lengths, "A: lengths after roundtrip");
+    assert_eq!(post_b.lengths, pre_b.lengths, "B: lengths after roundtrip");
+    assert_eq!(post_c.lengths, pre_c.lengths, "C: lengths after roundtrip");
+
+    // Sequence digests must match exactly after roundtrip
+    assert_eq!(post_a.sequences, pre_a.sequences, "A: sequences after roundtrip");
+    assert_eq!(post_b.sequences, pre_b.sequences, "B: sequences after roundtrip");
+    assert_eq!(post_c.sequences, pre_c.sequences, "C: sequences after roundtrip");
+
+    // Cross-check: FASTA C has chr2=GGAA and chr1=GCGC (opposite of A's chr1=GGAA, chr2=GCGC)
+    // The sequence digest for chr2 in C should equal chr1 in A
+    assert_eq!(
+        post_c.sequences[1], post_a.sequences[1],
+        "C.chr2 and A.chr1 share GGAA bytes, should have same sequence digest"
+    );
+    assert_eq!(
+        post_c.sequences[2], post_a.sequences[2],
+        "C.chr1 and A.chr2 share GCGC bytes, should have same sequence digest"
+    );
+}
+
 // =========================================================================
 // Name source tests
 // =========================================================================
@@ -1591,10 +1576,30 @@ fn test_shared_sequence_different_names() {
 // Import collection tests
 // =========================================================================
 
+/// Helper: create a disk-backed store with one collection from a FASTA string.
+fn disk_store_with_one_collection(fasta_content: &str) -> (RefgetStore, String, tempfile::TempDir, tempfile::TempDir) {
+    let store_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(store_dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    // Load collection so name_lookup is populated
+    store.load_all_collections().unwrap();
+    (store, digest, store_dir, fasta_dir)
+}
+
 #[test]
 fn test_import_collection_basic() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
-    let mut target = RefgetStore::in_memory();
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
 
     target.import_collection(&mut source, &digest).unwrap();
 
@@ -1605,7 +1610,8 @@ fn test_import_collection_basic() {
 
 #[test]
 fn test_import_collection_copies_sequence_aliases() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
 
     // Add sequence aliases in source
     let coll = source.get_collection(&digest).unwrap();
@@ -1615,7 +1621,8 @@ fn test_import_collection_copies_sequence_aliases() {
     source.add_sequence_alias("ucsc", "chr1", &seq0_digest).unwrap();
     source.add_sequence_alias("ncbi", "NC_000002.1", &seq1_digest).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     // Target should have the sequence aliases
@@ -1631,12 +1638,14 @@ fn test_import_collection_copies_sequence_aliases() {
 
 #[test]
 fn test_import_collection_copies_collection_aliases() {
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
 
     source.add_collection_alias("insdc", "GCA_000001.1", &digest).unwrap();
     source.add_collection_alias("refseq", "GCF_000001.1", &digest).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     let ns = target.list_collection_alias_namespaces();
@@ -1651,7 +1660,8 @@ fn test_import_collection_copies_collection_aliases() {
 fn test_import_collection_copies_fhr_metadata() {
     use super::fhr_metadata::FhrMetadata;
 
-    let (mut source, digest) = store_with_one_collection(">chr1\nATGC\n");
+    let (mut source, digest, _src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n");
 
     let fhr = FhrMetadata {
         genome: Some("Homo sapiens".to_string()),
@@ -1659,7 +1669,8 @@ fn test_import_collection_copies_fhr_metadata() {
     };
     source.set_fhr_metadata(&digest, fhr).unwrap();
 
-    let mut target = RefgetStore::in_memory();
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
     target.import_collection(&mut source, &digest).unwrap();
 
     let fhr = target.get_fhr_metadata(&digest);
@@ -1682,6 +1693,7 @@ fn test_import_collection_disk_roundtrip_aliases() {
     let seq0_digest;
     {
         let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+        source.set_quiet(true);
         let (meta, _) = source
             .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
             .unwrap();
@@ -1719,4 +1731,1485 @@ fn test_import_collection_disk_roundtrip_aliases() {
 
     let coll_aliases = target.get_aliases_for_collection(&digest);
     assert_eq!(coll_aliases.len(), 1, "Expected 1 collection alias in target: {:?}", coll_aliases);
+}
+
+#[test]
+fn test_import_collection_file_copy_roundtrip() {
+    // Verify RGSI and .seq files are byte-for-byte identical after import
+    // when ancillary digests match between source and dest.
+    let (mut source, digest, src_dir, _fasta_dir) =
+        disk_store_with_one_collection(">chr1\nATGC\n>chr2\nGGGG\n");
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Verify RGSI file is byte-for-byte identical
+    let src_rgsi = fs::read(
+        src_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    let dst_rgsi = fs::read(
+        target_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert_eq!(src_rgsi, dst_rgsi, "RGSI files should be byte-identical");
+
+    // Verify .seq files are byte-for-byte identical
+    let coll = target.get_collection(&digest).unwrap();
+    for seq in &coll.sequences {
+        let seq_digest = &seq.metadata().sha512t24u;
+        let src_seq_path = source.sequence_file_path(seq_digest).unwrap();
+        let dst_seq_path = target.sequence_file_path(seq_digest).unwrap();
+        let src_data = fs::read(&src_seq_path).unwrap();
+        let dst_data = fs::read(&dst_seq_path).unwrap();
+        assert_eq!(src_data, dst_data, "Sequence file for {} should be byte-identical", seq_digest);
+    }
+
+    // Verify in-memory metadata matches
+    let src_coll = source.get_collection(&digest).unwrap();
+    assert_eq!(coll.metadata.digest, src_coll.metadata.digest);
+    assert_eq!(coll.sequences.len(), src_coll.sequences.len());
+    for (src_seq, dst_seq) in src_coll.sequences.iter().zip(coll.sequences.iter()) {
+        assert_eq!(src_seq.metadata().sha512t24u, dst_seq.metadata().sha512t24u);
+        assert_eq!(src_seq.metadata().name, dst_seq.metadata().name);
+        assert_eq!(src_seq.metadata().length, dst_seq.metadata().length);
+    }
+}
+
+#[test]
+fn test_import_collection_ancillary_digest_enrichment() {
+    // Source store has ancillary_digests: false, destination has ancillary_digests: true.
+    // The destination RGSI should contain ancillary digest headers that the source lacks.
+    let source_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nATGC\n>chr2\nGGGG\n").unwrap();
+
+    // Create source store with ancillary_digests: false
+    let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+    source.set_quiet(true);
+    source.disable_ancillary_digests();
+    let (meta, _) = source
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    source.load_all_collections().unwrap();
+
+    // Verify source RGSI lacks ancillary digests
+    let src_rgsi_content = fs::read_to_string(
+        source_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert!(
+        !src_rgsi_content.contains("name_length_pairs_digest"),
+        "Source should NOT have ancillary digests",
+    );
+
+    // Create destination store with ancillary_digests: true (default)
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+    target.enable_ancillary_digests();
+    target.import_collection(&mut source, &digest).unwrap();
+
+    // Verify destination RGSI has ancillary digest headers
+    let dst_rgsi_content = fs::read_to_string(
+        target_dir.path().join(format!("collections/{}.rgsi", digest)),
+    ).unwrap();
+    assert!(
+        dst_rgsi_content.contains("name_length_pairs_digest"),
+        "Destination should have ancillary digests. RGSI:\n{}",
+        dst_rgsi_content,
+    );
+    assert!(
+        dst_rgsi_content.contains("sorted_name_length_pairs_digest"),
+        "Destination should have sorted_name_length_pairs_digest",
+    );
+    assert!(
+        dst_rgsi_content.contains("sorted_sequences_digest"),
+        "Destination should have sorted_sequences_digest",
+    );
+
+    // Verify in-memory metadata has non-None ancillary fields
+    let coll_meta = target.get_collection_metadata(&digest).unwrap();
+    assert!(coll_meta.name_length_pairs_digest.is_some(), "name_length_pairs_digest should be Some");
+    assert!(coll_meta.sorted_name_length_pairs_digest.is_some(), "sorted_name_length_pairs_digest should be Some");
+    assert!(coll_meta.sorted_sequences_digest.is_some(), "sorted_sequences_digest should be Some");
+}
+
+#[test]
+fn test_import_collection_mode_mismatch_error() {
+    // Source with Raw mode, destination with Encoded mode should fail.
+    let source_dir = tempdir().unwrap();
+    let fasta_dir = tempdir().unwrap();
+    let fasta = fasta_dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nATGC\n").unwrap();
+
+    // Create source store in Raw mode
+    let mut source = RefgetStore::on_disk(source_dir.path()).unwrap();
+    source.set_quiet(true);
+    source.disable_encoding();
+    let (meta, _) = source
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+    source.load_all_collections().unwrap();
+
+    // Create destination store in Encoded mode (default)
+    let target_dir = tempdir().unwrap();
+    let mut target = RefgetStore::on_disk(target_dir.path()).unwrap();
+    // target uses Encoded mode by default
+
+    let result = target.import_collection(&mut source, &digest);
+    assert!(result.is_err(), "Should fail with mode mismatch");
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("matching storage modes"),
+        "Error should mention storage modes: {}",
+        err_msg,
+    );
+}
+
+// =========================================================================
+// Parallel encode parity / determinism tests
+// =========================================================================
+
+/// Recursively collect every `*.seq` file under `dir`, keyed by path relative
+/// to `dir`, with its bytes. Used to compare two on-disk stores.
+fn collect_seq_files(dir: &std::path::Path) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        base: &std::path::Path,
+        cur: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(cur).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, out);
+            } else if path.extension().and_then(|e| e.to_str()) == Some("seq") {
+                let rel = path.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                out.insert(rel, std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    let seqdir = dir.join("sequences");
+    if seqdir.exists() {
+        walk(dir, &seqdir, &mut out);
+    }
+    out
+}
+
+/// Multi-record FASTA with names deliberately NOT in sorted order so that a
+/// digest-sorted index would differ from FASTA (name_lookup) order, exercising
+/// the order-preservation logic.
+const PARITY_FASTA: &str =
+    ">chrX\nTTGGGGAACCCCTTTT\n>chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n\
+     >chrM\nGGGGCCCCAAAATTTT\n>chr10\nTACGTACGTACGTACG\n";
+
+fn build_on_disk_store(dir: &std::path::Path, fasta: &std::path::Path, jobs: usize) -> String {
+    let mut store = RefgetStore::on_disk(dir).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(fasta, FastaImportOptions::new().jobs(jobs))
+        .unwrap();
+    meta.digest
+}
+
+#[test]
+fn test_parallel_equals_serial_on_disk() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digest_serial = build_on_disk_store(dir_serial.path(), &fasta, 1);
+    let digest_parallel = build_on_disk_store(dir_parallel.path(), &fasta, 8);
+
+    // Collection digest identical.
+    assert_eq!(digest_serial, digest_parallel, "collection digest must match");
+
+    // sequences.rgsi byte-identical (digest-sorted, so order-independent).
+    let rgsi_serial = fs::read(dir_serial.path().join("sequences.rgsi")).unwrap();
+    let rgsi_parallel = fs::read(dir_parallel.path().join("sequences.rgsi")).unwrap();
+    assert_eq!(rgsi_serial, rgsi_parallel, "sequences.rgsi must be byte-identical");
+
+    // collections.rgci byte-identical.
+    let rgci_serial = fs::read(dir_serial.path().join("collections.rgci")).unwrap();
+    let rgci_parallel = fs::read(dir_parallel.path().join("collections.rgci")).unwrap();
+    assert_eq!(rgci_serial, rgci_parallel, "collections.rgci must be byte-identical");
+
+    // Every .seq file present with identical bytes (both directions).
+    let seqs_serial = collect_seq_files(dir_serial.path());
+    let seqs_parallel = collect_seq_files(dir_parallel.path());
+    assert_eq!(
+        seqs_serial, seqs_parallel,
+        ".seq files must match between serial and parallel builds"
+    );
+    assert!(!seqs_serial.is_empty(), "expected some .seq files");
+}
+
+#[test]
+fn test_parallel_name_lookup_matches_fasta_order() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    // Raw FASTA header order.
+    let fasta_order = vec!["chrX", "chr1", "chr2", "chrM", "chr10"];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+    let digest = build_on_disk_store(dir_serial.path(), &fasta, 1);
+    let _ = build_on_disk_store(dir_parallel.path(), &fasta, 8);
+
+    let mut serial = RefgetStore::open_local(dir_serial.path()).unwrap();
+    let mut parallel = RefgetStore::open_local(dir_parallel.path()).unwrap();
+    serial.load_all_collections().unwrap();
+    parallel.load_all_collections().unwrap();
+
+    let key = digest.to_key();
+    let serial_names: Vec<String> = serial
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+    let parallel_names: Vec<String> = parallel
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect();
+
+    assert_eq!(serial_names, fasta_order, "serial name_lookup must follow FASTA order");
+    assert_eq!(
+        parallel_names, fasta_order,
+        "parallel name_lookup must follow FASTA order"
+    );
+}
+
+#[test]
+fn test_parallel_equals_serial_in_memory() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let mut serial = RefgetStore::in_memory();
+    serial.set_quiet(true);
+    let (meta_s, _) = serial
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+        .unwrap();
+
+    let mut parallel = RefgetStore::in_memory();
+    parallel.set_quiet(true);
+    let (meta_p, _) = parallel
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(8))
+        .unwrap();
+
+    assert_eq!(meta_s.digest, meta_p.digest);
+
+    let key = meta_s.digest.to_key();
+
+    // Identical name_lookup order and contents.
+    let names_s: Vec<(String, DigestKey)> = serial
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .iter()
+        .map(|(n, d)| (n.clone(), *d))
+        .collect();
+    let names_p: Vec<(String, DigestKey)> = parallel
+        .name_lookup
+        .get(&key)
+        .unwrap()
+        .iter()
+        .map(|(n, d)| (n.clone(), *d))
+        .collect();
+    assert_eq!(names_s, names_p, "name_lookup order+contents must match");
+
+    // Identical set of digests.
+    let digs_s: std::collections::BTreeSet<DigestKey> = serial.sequence_digests().collect();
+    let digs_p: std::collections::BTreeSet<DigestKey> = parallel.sequence_digests().collect();
+    assert_eq!(digs_s, digs_p, "digest sets must match");
+
+    // Per-digest metadata + decoded bytes parity.
+    for name in ["chrX", "chr1", "chr2", "chrM", "chr10"] {
+        let rec_s = serial.get_sequence_by_name(&meta_s.digest, name).unwrap();
+        let rec_p = parallel.get_sequence_by_name(&meta_p.digest, name).unwrap();
+        let m_s = rec_s.metadata();
+        let m_p = rec_p.metadata();
+        assert_eq!(m_s.sha512t24u, m_p.sha512t24u);
+        assert_eq!(m_s.md5, m_p.md5);
+        assert_eq!(m_s.alphabet, m_p.alphabet);
+        assert_eq!(m_s.length, m_p.length);
+
+        let sub_s = serial.get_substring(&m_s.sha512t24u, 0, m_s.length).unwrap();
+        let sub_p = parallel.get_substring(&m_p.sha512t24u, 0, m_p.length).unwrap();
+        assert_eq!(sub_s, sub_p, "decoded bytes must match for {}", name);
+    }
+}
+
+#[test]
+fn test_parallel_cached_metadata_parity() {
+    // First import (no cache) writes the .rgsi cache; second import hits the
+    // cached-metadata fast path. Build serial+parallel on-disk stores via the
+    // cached path and assert full equality.
+
+    // Build the rgsi cache by importing once into a throwaway store. The cache
+    // is written next to the FASTA, so use a per-arm FASTA copy.
+    let build_cached = |jobs: usize| -> (tempfile::TempDir, String) {
+        let src_dir = tempdir().unwrap();
+        let fasta = src_dir.path().join("cached.fa");
+        fs::write(&fasta, PARITY_FASTA).unwrap();
+
+        // Prime the cache (writes cached.rgsi next to the FASTA).
+        let prime_dir = tempdir().unwrap();
+        let mut prime = RefgetStore::on_disk(prime_dir.path()).unwrap();
+        prime.set_quiet(true);
+        prime
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(1))
+            .unwrap();
+        assert!(
+            src_dir.path().join("cached.rgsi").exists(),
+            "rgsi cache should have been written"
+        );
+
+        // Now build a fresh store via the cached fast path.
+        let dir = tempdir().unwrap();
+        let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+        store.set_quiet(true);
+        let (meta, _) = store
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(jobs))
+            .unwrap();
+        (dir, meta.digest)
+    };
+
+    let (dir_serial, digest_serial) = build_cached(1);
+    let (dir_parallel, digest_parallel) = build_cached(8);
+
+    assert_eq!(digest_serial, digest_parallel);
+
+    let rgsi_s = fs::read(dir_serial.path().join("sequences.rgsi")).unwrap();
+    let rgsi_p = fs::read(dir_parallel.path().join("sequences.rgsi")).unwrap();
+    assert_eq!(rgsi_s, rgsi_p, "cached-path sequences.rgsi must match");
+
+    let seqs_s = collect_seq_files(dir_serial.path());
+    let seqs_p = collect_seq_files(dir_parallel.path());
+    assert_eq!(seqs_s, seqs_p, "cached-path .seq files must match");
+
+    // name_lookup order should follow FASTA order in both.
+    let mut serial = RefgetStore::open_local(dir_serial.path()).unwrap();
+    let mut parallel = RefgetStore::open_local(dir_parallel.path()).unwrap();
+    serial.load_all_collections().unwrap();
+    parallel.load_all_collections().unwrap();
+    let key = digest_serial.to_key();
+    let names_s: Vec<String> = serial.name_lookup.get(&key).unwrap().keys().cloned().collect();
+    let names_p: Vec<String> = parallel.name_lookup.get(&key).unwrap().keys().cloned().collect();
+    assert_eq!(names_s, vec!["chrX", "chr1", "chr2", "chrM", "chr10"]);
+    assert_eq!(names_s, names_p);
+}
+
+#[test]
+fn test_parallel_duplicate_contig_dedup() {
+    // Two records with identical sequence but different names. Must dedup to a
+    // single .seq file / single sequence_store entry; name_lookup keeps both
+    // names in FASTA order mapping to the same digest.
+    let fasta_content = ">dupA\nACGTACGTACGT\n>uniq\nGGGGCCCCAAAA\n>dupB\nACGTACGTACGT\n";
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("dup.fa");
+    fs::write(&fasta, fasta_content).unwrap();
+
+    let dir = tempdir().unwrap();
+    let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(8))
+        .unwrap();
+
+    // Two distinct digests (the duplicate collapses).
+    let digs: std::collections::BTreeSet<DigestKey> = store.sequence_digests().collect();
+    assert_eq!(digs.len(), 2, "duplicate sequence must dedup to 2 entries");
+
+    let seqs = collect_seq_files(dir.path());
+    assert_eq!(seqs.len(), 2, "duplicate sequence must dedup to 2 .seq files");
+
+    let key = meta.digest.to_key();
+    let nl = store.name_lookup.get(&key).unwrap();
+    let names: Vec<String> = nl.keys().cloned().collect();
+    assert_eq!(names, vec!["dupA", "uniq", "dupB"], "name_lookup keeps FASTA order");
+    // dupA and dupB map to same digest.
+    assert_eq!(nl.get("dupA"), nl.get("dupB"));
+    assert_ne!(nl.get("dupA"), nl.get("uniq"));
+}
+
+#[test]
+fn test_parallel_determinism_across_runs() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("parity.fa");
+    fs::write(&fasta, PARITY_FASTA).unwrap();
+
+    let mut prev: Option<Vec<u8>> = None;
+    for _ in 0..3 {
+        let dir = tempdir().unwrap();
+        build_on_disk_store(dir.path(), &fasta, 8);
+        let rgsi = fs::read(dir.path().join("sequences.rgsi")).unwrap();
+        if let Some(p) = &prev {
+            assert_eq!(p, &rgsi, "sequences.rgsi must be identical across parallel runs");
+        }
+        prev = Some(rgsi);
+    }
+}
+
+// =========================================================================
+// Multi-file (file-level) parallelism determinism tests
+// =========================================================================
+
+/// Collect every data/index file under a store dir EXCEPT the `rgstore.json`
+/// manifest (which embeds wall-clock timestamps). Keyed by path relative to
+/// `dir`, with bytes. Used to assert byte-identical stores.
+fn collect_store_data_files(
+    dir: &std::path::Path,
+) -> std::collections::BTreeMap<String, Vec<u8>> {
+    fn walk(
+        base: &std::path::Path,
+        cur: &std::path::Path,
+        out: &mut std::collections::BTreeMap<String, Vec<u8>>,
+    ) {
+        for entry in std::fs::read_dir(cur).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.is_dir() {
+                walk(base, &path, out);
+            } else {
+                let rel = path.strip_prefix(base).unwrap().to_string_lossy().to_string();
+                // rgstore.json embeds created_at/modified timestamps and the
+                // hashes of those files; skip it for byte-identity comparison.
+                if rel == "rgstore.json" {
+                    continue;
+                }
+                out.insert(rel, std::fs::read(&path).unwrap());
+            }
+        }
+    }
+    let mut out = std::collections::BTreeMap::new();
+    walk(dir, dir, &mut out);
+    out
+}
+
+/// Write `content` gzip-compressed to `path`.
+fn write_gzipped(path: &std::path::Path, content: &str) {
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+    let f = fs::File::create(path).unwrap();
+    let mut enc = GzEncoder::new(f, Compression::default());
+    enc.write_all(content.as_bytes()).unwrap();
+    enc.finish().unwrap();
+}
+
+/// Build an on-disk store from multiple FASTA files with the given `jobs`
+/// (files-in-flight) setting. Returns the per-file collection digests in input
+/// order.
+fn build_multi(
+    dir: &std::path::Path,
+    files: &[std::path::PathBuf],
+    jobs: usize,
+) -> Vec<String> {
+    let mut store = RefgetStore::on_disk(dir).unwrap();
+    store.set_quiet(true);
+    let opts = FastaImportOptions::new().jobs(jobs);
+    store
+        .add_sequence_collections_from_fastas(files, opts)
+        .unwrap()
+        .into_iter()
+        .map(|(m, _)| m.digest)
+        .collect()
+}
+
+#[test]
+fn test_multifile_parallel_equals_serial() {
+    let work = tempdir().unwrap();
+
+    // Three distinct collections. File "c" deliberately SHARES a sequence
+    // (the chr1 record) with file "a" to exercise cross-collection dedup.
+    let fa_a = work.path().join("a.fa");
+    let fa_b = work.path().join("b.fa");
+    let fa_c = work.path().join("c.fa");
+    fs::write(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n").unwrap();
+    fs::write(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n").unwrap();
+    // Shares the chr1 sequence content with file a (different collection).
+    fs::write(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n").unwrap();
+    let files = vec![fa_a.clone(), fa_b.clone(), fa_c.clone()];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digests_serial = build_multi(dir_serial.path(), &files, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8);
+
+    // Per-file collection digests identical and in the same (input) order.
+    assert_eq!(
+        digests_serial, digests_parallel,
+        "per-file collection digests must match in input order"
+    );
+
+    // The whole store (sans rgstore.json timestamp manifest) is byte-identical.
+    let serial = collect_store_data_files(dir_serial.path());
+    let parallel = collect_store_data_files(dir_parallel.path());
+    assert_eq!(
+        serial, parallel,
+        "multi-file parallel store must be byte-identical to serial store"
+    );
+
+    // Cross-collection dedup: the chr1 sequence is shared by file a and file c,
+    // so the total number of distinct .seq files must be 5 (chr1, chr2, chrX,
+    // chrM, chr9) -- NOT 6.
+    let seqs = collect_seq_files(dir_serial.path());
+    assert_eq!(seqs.len(), 5, "shared chr1 sequence must be stored once");
+}
+
+#[test]
+fn test_multifile_parallel_gzipped() {
+    let work = tempdir().unwrap();
+
+    // Same content as the plain-text case, but gzipped to exercise K concurrent
+    // MultiGzDecoders.
+    let fa_a = work.path().join("a.fa.gz");
+    let fa_b = work.path().join("b.fa.gz");
+    let fa_c = work.path().join("c.fa.gz");
+    write_gzipped(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n");
+    write_gzipped(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n");
+    write_gzipped(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n");
+    let files = vec![fa_a, fa_b, fa_c];
+
+    let dir_serial = tempdir().unwrap();
+    let dir_parallel = tempdir().unwrap();
+
+    let digests_serial = build_multi(dir_serial.path(), &files, 1);
+    let digests_parallel = build_multi(dir_parallel.path(), &files, 8);
+
+    assert_eq!(digests_serial, digests_parallel, "gzipped digests must match");
+
+    let serial = collect_store_data_files(dir_serial.path());
+    let parallel = collect_store_data_files(dir_parallel.path());
+    assert_eq!(
+        serial, parallel,
+        "gzipped multi-file parallel store must be byte-identical to serial"
+    );
+}
+
+/// Regression test for the parallel-import "resume re-decode" bug.
+///
+/// On RESUME (re-importing a FASTA whose collection is already in the store and
+/// whose sibling `.rgsi` cache exists), the import MUST short-circuit BEFORE
+/// opening/decoding the FASTA. The old serial path did this; a refactor moved
+/// the "already exists" check to `End`, AFTER the whole file had been
+/// re-decoded + re-encoded -- wasting enormous CPU on resume.
+///
+/// This test makes the regression deterministic WITHOUT any production hooks:
+/// after the first import we CORRUPT the FASTA bytes while keeping the `.rgsi`
+/// sidecar intact. A correct (short-circuiting) implementation never opens the
+/// corrupt FASTA, so the resume succeeds, reports `was_new = false`, and leaves
+/// the store unchanged. A regressed implementation would try to decode the
+/// garbage FASTA and either error or mis-build -- failing the test.
+#[test]
+fn test_resume_skips_present_collection_before_decoding_fasta() {
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+
+    // FASTA whose collection we will import, then "resume".
+    let fasta_path = temp_path.join("genome.fa");
+    fs::write(
+        &fasta_path,
+        ">chr1\nACGTACGTACGTACGT\n>chr2\nTTTTGGGGCCCCAAAA\n",
+    )
+    .unwrap();
+
+    // Disk-backed store so RGSI caching is enabled (use_cache = local_path set).
+    let cache_path = temp_path.join("store");
+    let mut store = RefgetStore::on_disk(&cache_path).unwrap();
+
+    // First import: builds the collection and writes the sibling genome.rgsi.
+    let (meta_first, was_new_first) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert!(was_new_first, "first import must add a new collection");
+
+    let rgsi_sidecar = temp_path.join("genome.rgsi");
+    assert!(
+        rgsi_sidecar.exists(),
+        "first import must write the sibling .rgsi cache"
+    );
+
+    // --force must NOT skip: with the FASTA still intact and the collection
+    // already present, forcing must RE-PROCESS it (was_new = true), proving the
+    // short-circuit respects --force. (Done before corrupting so the forced
+    // decode has a valid FASTA to read.)
+    let (_meta_forced, was_new_forced) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_path,
+            FastaImportOptions::new().jobs(4).force(true),
+        )
+        .expect("forced re-import of an intact FASTA must succeed");
+    assert!(
+        was_new_forced,
+        "--force must bypass the skip and re-process the present collection (was_new = true)"
+    );
+
+    // Snapshot store contents to prove the resume changes nothing.
+    let collections_before: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    let sequences_before: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        v.sort();
+        v
+    };
+
+    // CORRUPT the FASTA: replace it with a record whose sequence NAME is absent
+    // from the cached metadata. Any code path that actually opens + decodes this
+    // FASTA fails ("Sequence '...' not found in cached metadata"). The .rgsi
+    // sidecar stays intact, so the collection digest is still discoverable for
+    // free -- a correct short-circuit never reaches the decode.
+    fs::write(&fasta_path, b">totally_bogus_name_not_in_cache\nNNNNNNNN\n").unwrap();
+
+    // Resume: re-import the SAME (now-corrupt) FASTA in parallel (jobs > 1).
+    let (meta_resume, was_new_resume) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new().jobs(4))
+        .expect(
+            "resume must succeed: a present collection with an intact .rgsi must be skipped \
+             BEFORE the (now-corrupt) FASTA is opened/decoded",
+        );
+
+    assert!(
+        !was_new_resume,
+        "resume of an already-present collection must report was_new = false"
+    );
+    assert_eq!(
+        meta_resume.digest, meta_first.digest,
+        "resume must report the same collection digest from the cached .rgsi"
+    );
+
+    // Store must be byte-for-byte unchanged by the resume.
+    let collections_after: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.collections.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    let sequences_after: Vec<DigestKey> = {
+        let mut v: Vec<DigestKey> = store.sequence_store.keys().cloned().collect();
+        v.sort();
+        v
+    };
+    assert_eq!(
+        collections_before, collections_after,
+        "resume must not change the set of collections"
+    );
+    assert_eq!(
+        sequences_before, sequences_after,
+        "resume must not change the set of sequences"
+    );
+}
+
+// =========================================================================
+// Many-tiny-sequence throughput (writer-pool) tests
+// =========================================================================
+
+/// Generate a FASTA with `n` short, DISTINCT sequences. Each record encodes its
+/// index in base-4 as DNA so every sequence has a unique content digest (no
+/// dedup), mimicking a transcriptome with hundreds of thousands of tiny records
+/// -- the workload the writer pool is meant to accelerate (the old single
+/// inserter did a File::create + create_dir_all per record).
+fn write_many_tiny_fasta(path: &std::path::Path, n: usize) {
+    use std::io::Write;
+    const BASES: [u8; 4] = [b'A', b'C', b'G', b'T'];
+    let f = fs::File::create(path).unwrap();
+    let mut w = std::io::BufWriter::new(f);
+    for i in 0..n {
+        // 16-base sequence uniquely encoding `i` (4^16 ≈ 4.3e9 >> n), padded so
+        // every record is distinct and a constant small size.
+        let mut seq = [b'A'; 16];
+        let mut v = i;
+        let mut p = 15usize;
+        while v > 0 {
+            seq[p] = BASES[v & 0b11];
+            v >>= 2;
+            p = p.wrapping_sub(1);
+        }
+        writeln!(w, ">seq{}", i).unwrap();
+        w.write_all(&seq).unwrap();
+        w.write_all(b"\n").unwrap();
+    }
+    w.flush().unwrap();
+}
+
+/// Throughput regression test for the parallel `.seq` writer pool.
+///
+/// Builds an on-disk store from a synthetic FASTA with MANY tiny sequences. The
+/// pre-writer-pool code funneled every per-sequence `File::create` +
+/// `create_dir_all` through the single inserter thread; this test asserts the
+/// build finishes well under a generous bound (so a regression that re-serializes
+/// the writes -- or reintroduces a per-sequence `create_dir_all` -- shows up),
+/// while staying fast and bounded (no benchmark loop, no giant dataset).
+#[test]
+fn test_many_tiny_sequences_throughput() {
+    let work = tempdir().unwrap();
+    let fasta = work.path().join("tiny.fa");
+    // ~100k distinct tiny records: enough to expose a single-thread file-create
+    // bottleneck, small enough to build in a few seconds.
+    let n = 100_000usize;
+    write_many_tiny_fasta(&fasta, n);
+
+    let dir = tempdir().unwrap();
+    let start = std::time::Instant::now();
+    let mut store = RefgetStore::on_disk(dir.path()).unwrap();
+    store.set_quiet(true);
+    let (meta, was_new) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    let elapsed = start.elapsed();
+
+    assert!(was_new, "collection must be new");
+    assert_eq!(
+        meta.n_sequences, n,
+        "all {} distinct sequences must be registered",
+        n
+    );
+
+    // Every distinct sequence must have produced a .seq file on disk (the writer
+    // pool drained at the end-of-run barrier before indexes were written).
+    let seqs = collect_seq_files(dir.path());
+    assert_eq!(
+        seqs.len(),
+        n,
+        "every distinct tiny sequence must have a .seq file on disk after the barrier"
+    );
+
+    // Generous wall-clock bound: this is NOT a benchmark, just a guard against a
+    // re-serialized (single-thread file-create) regression. With the writer pool
+    // this completes in a couple seconds on CI; 60s leaves ample slack.
+    assert!(
+        elapsed.as_secs() < 60,
+        "building {} tiny sequences took {:?}; expected well under the single-inserter bound",
+        n,
+        elapsed
+    );
+
+    eprintln!(
+        "throughput: built {} tiny seqs in {:?} ({:.0} seqs/sec)",
+        n,
+        elapsed,
+        n as f64 / elapsed.as_secs_f64()
+    );
+}
+
+// =========================================================================
+// stream_sequence tests
+// =========================================================================
+
+fn first_seq_digest(store: &RefgetStore) -> String {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .sha512t24u
+        .clone()
+}
+
+fn first_seq_length(store: &RefgetStore) -> usize {
+    store
+        .sequence_store
+        .values()
+        .next()
+        .unwrap()
+        .metadata()
+        .length
+}
+
+fn build_on_disk_store_streaming(mode: StorageMode) -> (tempfile::TempDir, RefgetStore, String, usize) {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGTACGTACGTACGTACGT\n").unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+    let length = first_seq_length(&store);
+    (dir, store, digest, length)
+}
+
+#[test]
+fn test_stream_sequence_local_full() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+}
+
+#[test]
+fn test_stream_sequence_local_substring() {
+    use std::io::Read;
+    let (_dir, mut store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    store.load_sequence(&digest).unwrap();
+    let ranges: Vec<(u64, u64)> = vec![
+        (0, 4),
+        (1, 5),
+        (2, 10),
+        (5, 6),
+        (0, length as u64),
+        (length as u64 - 1, length as u64),
+    ];
+    for (s, e) in ranges {
+        let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+
+        let expected = store.get_substring(&digest, s as usize, e as usize).unwrap();
+        assert_eq!(
+            String::from_utf8(streamed).unwrap(),
+            expected,
+            "mismatch for range {}..{}",
+            s,
+            e
+        );
+    }
+}
+
+// =========================================================================
+// Partial-read fd-cache eviction test
+// =========================================================================
+
+/// Tiny deterministic xorshift RNG so the test is reproducible without adding
+/// a `rand` dependency.
+struct XorShift(u64);
+impl XorShift {
+    fn new(seed: u64) -> Self {
+        XorShift(seed | 1)
+    }
+    fn next_u64(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+    fn range(&mut self, n: usize) -> usize {
+        (self.next_u64() % n as u64) as usize
+    }
+}
+
+/// Build a FASTA with several distinct, multi-base sequences so byte windows
+/// are non-trivial and span multiple packed bytes in Encoded mode.
+fn multi_seq_fasta() -> String {
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut out = String::new();
+    for (i, len) in [400usize, 333, 512, 271, 600].iter().enumerate() {
+        out.push_str(&format!(">seq{}\n", i));
+        let mut s = String::with_capacity(*len);
+        // deterministic but distinct per-sequence content
+        for j in 0..*len {
+            s.push(bases[(i * 7 + j * 3 + (j / 5)) % 4] as char);
+        }
+        out.push_str(&s);
+        out.push('\n');
+    }
+    out
+}
+
+/// With a TINY fd-cache cap (2) and reads interleaved across >2 sequences,
+/// every partial-read result must be byte-identical to the resident decode
+/// path. Interleaving across 5 sequences with cap 2 forces constant
+/// eviction+reopen, exercising the LRU close/reopen logic. Run for both
+/// Encoded and Raw storage modes.
+fn run_fd_cache_eviction_for_mode(raw: bool) {
+    let temp_dir = tempdir().unwrap();
+    let fasta_content = multi_seq_fasta();
+    let fasta = temp_dir.path().join("multi.fa");
+    fs::write(&fasta, &fasta_content).unwrap();
+    let store_path = temp_dir.path().join("store");
+
+    // Build the store on disk.
+    let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+    if raw {
+        builder.disable_encoding();
+    }
+    let (coll_meta, _) = builder
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let coll_digest = coll_meta.digest.clone();
+    drop(builder);
+
+    // Reference: a resident store with everything loaded (whole-sequence decode).
+    let mut resident = RefgetStore::open_local(&store_path).unwrap();
+    resident.set_quiet(true);
+    resident.load_all_collections().unwrap();
+    resident.load_all_sequences().unwrap();
+
+    // Subject: a stub-only store driving the partial-read path with cap=2.
+    let mut partial = RefgetStore::open_local(&store_path).unwrap();
+    partial.set_quiet(true);
+    partial.load_all_collections().unwrap();
+    partial.set_seq_fd_cache_cap_for_test(2);
+
+    // Collect (digest, length) for each of the >2 sequences in the collection.
+    let names: Vec<String> = (0..5).map(|i| format!("seq{}", i)).collect();
+    let mut seqs: Vec<(String, usize)> = Vec::new();
+    for name in &names {
+        let rec = resident.get_sequence_by_name(&coll_digest, name).unwrap();
+        seqs.push((rec.metadata().sha512t24u.clone(), rec.metadata().length));
+    }
+    assert!(seqs.len() > 2, "need >2 sequences to force eviction with cap 2");
+
+    let mut rng = XorShift::new(0xC0FFEE_u64 ^ (raw as u64));
+    for _ in 0..2000 {
+        let (digest, len) = &seqs[rng.range(seqs.len())];
+        let len = *len;
+        let a = rng.range(len);
+        let b = rng.range(len);
+        let (start, end) = if a == b {
+            (a.min(len - 1), a.min(len - 1) + 1)
+        } else {
+            (a.min(b), a.max(b))
+        };
+        let expected = resident.get_substring(digest, start, end).unwrap();
+        let got = partial.get_substring(digest, start, end).unwrap();
+        assert_eq!(
+            got, expected,
+            "partial-read mismatch (raw={}) digest={} [{}, {})",
+            raw, digest, start, end
+        );
+    }
+}
+
+#[test]
+fn test_stream_sequence_raw_mode() {
+    use std::io::Read;
+    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Raw);
+    let mut reader = store.stream_sequence(&digest, Some(2), Some(8)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(&out[..], b"GTACGT");
+    assert!(length >= 8);
+}
+
+#[test]
+fn test_stream_sequence_u64_bounds_compile_and_match() {
+    // Compile-level guarantee: stream_sequence accepts u64 bounds.
+    // Sequences > u32::MAX (>4 Gb) cannot be fixtured in unit tests, but
+    // the arithmetic path (start_bit/end_bit/byte_start/byte_end/bases_to_emit)
+    // is u64 throughout, so this test exercises the widened API surface.
+    use std::io::Read;
+    let (_dir, store, digest, _length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    let s: u64 = 0;
+    let e: u64 = 8;
+    let mut reader = store.stream_sequence(&digest, Some(s), Some(e)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), 8);
+}
+
+#[test]
+fn test_stream_sequence_zero_length() {
+    use std::io::Read;
+    let (_dir, store, digest, _) = build_on_disk_store_streaming(StorageMode::Encoded);
+    let mut reader = store.stream_sequence(&digest, Some(5), Some(5)).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert!(out.is_empty());
+}
+
+#[test]
+fn test_stream_sequence_invalid_range() {
+    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+    assert!(store.stream_sequence(&digest, Some(5), Some(3)).is_err());
+    assert!(
+        store
+            .stream_sequence(&digest, Some(0), Some(length as u64 + 1))
+            .is_err()
+    );
+}
+
+#[test]
+fn test_stream_sequence_bounded_memory() {
+    use std::io::Read;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let mut content = String::from(">chr1\n");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(1_000_000);
+    for i in 0..1_000_000 {
+        seq.push(bases[i % 4]);
+    }
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut buf = [0u8; 4096];
+    let mut collected = Vec::with_capacity(1_000_000);
+    loop {
+        let n = reader.read(&mut buf).unwrap();
+        if n == 0 {
+            break;
+        }
+        collected.extend_from_slice(&buf[..n]);
+    }
+    assert_eq!(collected, seq);
+}
+
+// =========================================================================
+// Bounded-memory tests for stream_sequence
+// =========================================================================
+//
+// These tests verify the O(1) memory claim of `stream_sequence`: regardless
+// of sequence size, neither the Rust decoder nor the napi binding should
+// materialize the full (sub)sequence in memory.
+
+/// Install peak_alloc as the global allocator (tests-only) so we can measure
+/// allocation deltas.
+#[global_allocator]
+static PEAK_ALLOC: peak_alloc::PeakAlloc = peak_alloc::PeakAlloc;
+
+/// Serialize allocator-sensitive tests so concurrent tests don't pollute the
+/// process-wide peak counter.
+static ALLOC_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+// NOTE: `#[ignore]` because this measures the *process-global* `PEAK_ALLOC`
+// high-water mark, which is polluted by any other test allocating concurrently.
+// `ALLOC_TEST_LOCK` only serializes the two allocator tests against each other,
+// not against the rest of the suite, so under default parallel `cargo test` the
+// peak is unreliable. Run the allocation-profiling guards explicitly and serially:
+//   cargo test -p gtars-refget -- --ignored --test-threads=1
+#[test]
+#[ignore = "allocation profiling: process-global PeakAlloc; run with --ignored --test-threads=1"]
+fn test_stream_sequence_bounded_memory_full_record() {
+    use std::io::Read;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+    // Build a large FASTA (~1M bases) and import into an in-memory store in
+    // Encoded mode. The in-memory store holds the encoded sequence as a
+    // `SequenceRecord::Full { sequence: Vec<u8>, .. }` — for a 2-bit alphabet
+    // that's ~250 KB encoded, decoding to ~1 MB raw bases.
+    const SEQ_LEN: usize = 1_000_000;
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    // Use Raw mode so the Full record holds SEQ_LEN bytes verbatim. The old
+    // buggy code path cloned that entire buffer during streaming; with the
+    // Arc-backed reader it must not.
+    store.set_encoding_mode(StorageMode::Raw);
+    store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = first_seq_digest(&store);
+
+    // Confirm the record is Full (in-memory resident).
+    {
+        use crate::hashkeyable::HashKeyable;
+        let key = digest.to_key();
+        let rec = store.sequence_store.get(&key).unwrap();
+        assert!(rec.is_loaded(), "expected Full record for in-memory store");
+    }
+
+    // Measure peak allocation across stream_sequence + drain. The whole
+    // buffer is already resident; streaming should not allocate another
+    // copy of it.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    {
+        let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+        let mut chunk = [0u8; 4096];
+        let mut total = 0usize;
+        loop {
+            let n = reader.read(&mut chunk).unwrap();
+            if n == 0 {
+                break;
+            }
+            total += n;
+        }
+        assert_eq!(total, SEQ_LEN);
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    // Streaming must not allocate anywhere near the sequence size. The
+    // previous bug cloned the entire byte range (1 MB for this test); with
+    // the fix, allocations are bounded by a few reader frames. The bound
+    // below is loose enough to tolerate concurrent test allocator noise
+    // but tight enough to catch a full-buffer clone (which would be
+    // >= SEQ_LEN bytes).
+    let bound: usize = SEQ_LEN / 4; // 250 KiB; a clone would cost >= 1 MiB.
+    assert!(
+        peak_delta < bound,
+        "stream_sequence peak allocation delta {} bytes exceeds bound {} bytes \
+         (SEQ_LEN={} bytes raw). \
+         Streaming is cloning the buffer instead of sharing ownership.",
+        peak_delta,
+        bound,
+        SEQ_LEN,
+    );
+}
+
+// See `test_stream_sequence_bounded_memory_full_record` for why this is
+// `#[ignore]`d (process-global PeakAlloc). Run via --ignored --test-threads=1.
+#[test]
+#[ignore = "allocation profiling: process-global PeakAlloc; run with --ignored --test-threads=1"]
+fn test_stream_sequence_bounded_memory_stub_record() {
+    // Regression guard for the production path: the Node proxy opens a store
+    // via `open_local` / `open_remote`, so records are `Stub` (metadata only,
+    // never loaded into memory) and `stream_sequence` must fall back to the
+    // on-disk `.seq` file (or HTTP Range GET) without buffering the whole
+    // file. This test directly measures peak allocation on that Stub-backed
+    // path — analogous to `test_stream_sequence_bounded_memory_full_record`
+    // but for the disk-streaming branch.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let _guard = ALLOC_TEST_LOCK.lock().unwrap_or_else(|p| p.into_inner());
+
+    // Measure peak at two very different sizes; the bound must not depend
+    // on SEQ_LEN. (A full-file buffer would scale linearly; a fixed-size
+    // BufReader would stay constant.) We drain into a fixed-size scratch
+    // buffer — not `read_to_end` — because `read_to_end`'s geometric Vec
+    // growth introduces transient realloc peaks of ~0.5 * SEQ_LEN that
+    // swamp the actual streaming memory and falsely suggest scaling.
+    for &SEQ_LEN in &[1_000_000usize, 16_000_000] {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("big.fa");
+    let bases = [b'A', b'C', b'G', b'T'];
+    let mut seq = Vec::with_capacity(SEQ_LEN);
+    for i in 0..SEQ_LEN {
+        seq.push(bases[i % 4]);
+    }
+    let mut content = String::from(">chr1\n");
+    content.push_str(std::str::from_utf8(&seq).unwrap());
+    content.push('\n');
+    fs::write(&fasta, &content).unwrap();
+
+    let store_path = dir.path().join("store");
+    let digest;
+    {
+        let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+        builder.set_encoding_mode(StorageMode::Raw);
+        builder
+            .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+            .unwrap();
+        digest = first_seq_digest(&builder);
+        // Drop `builder` here — `add_sequence_collection_from_fasta` populates
+        // an in-memory Full record; we want a fresh open so records are Stub.
+    }
+
+    // Reopen the store fresh — records should be Stub (metadata only).
+    let store = RefgetStore::open_local(&store_path).unwrap();
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(
+            !rec.is_loaded(),
+            "expected Stub record after open_local, got Full"
+        );
+    }
+
+    // Reset peak AFTER opening the store so we don't count store-open
+    // allocations.
+    PEAK_ALLOC.reset_peak_usage();
+    let baseline = PEAK_ALLOC.current_usage();
+
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    // Drain into a fixed-size buffer, checksumming as we go.
+    // Avoids `read_to_end`'s geometric Vec growth, whose realloc
+    // doubles transiently dominate peak (giving a false ~0.5N signal).
+    let mut scratch = [0u8; 8192];
+    let mut total = 0usize;
+    let mut checksum: u64 = 0;
+    loop {
+        let n = reader.read(&mut scratch).unwrap();
+        if n == 0 { break; }
+        for &b in &scratch[..n] { checksum = checksum.wrapping_add(b as u64); }
+        total += n;
+    }
+
+    let peak = PEAK_ALLOC.peak_usage();
+    let peak_delta = peak.saturating_sub(baseline);
+
+    assert_eq!(total, SEQ_LEN);
+    let expected_checksum: u64 = seq.iter().map(|&b| b as u64).sum();
+    assert_eq!(checksum, expected_checksum);
+
+    // A full-file buffer in the Stub fallback would give peak_delta
+    // proportional to SEQ_LEN. A BufReader-based stream is constant
+    // (~8 KiB default). 64 KiB leaves headroom for allocator noise.
+    assert!(
+        peak_delta < 64 * 1024,
+        "stream_sequence (Stub path) peak allocation {} bytes exceeds \
+         64 KiB at SEQ_LEN={} — streaming is not O(1) in sequence size",
+        peak_delta, SEQ_LEN,
+    );
+    }
+}
+
+#[test]
+fn test_stream_sequence_no_preload_for_stub_record() {
+    // Structural assertion for fix B: streaming must work when the record is
+    // a Stub (not in memory), pulling bytes directly from the backing store,
+    // without populating the in-memory cache. This lets the napi layer drop
+    // its pre-`load_sequence` call.
+    use std::io::Read;
+    use crate::hashkeyable::HashKeyable;
+
+    let (_dir, store, digest, length) = build_on_disk_store_streaming(StorageMode::Encoded);
+
+    // Drop the in-memory sequence buffer back to Stub, preserving metadata.
+    let mut store = store;
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap().clone();
+        let meta = rec.metadata().clone();
+        store
+            .inner
+            .sequence_store
+            .insert(key, SequenceRecord::Stub(meta));
+    }
+
+    // Confirm the record is a Stub going in.
+    {
+        let key = digest.to_key();
+        let rec = store.inner.sequence_store.get(&key).unwrap();
+        assert!(!rec.is_loaded(), "expected Stub before stream_sequence");
+    }
+
+    // Stream without calling load_sequence() first.
+    let mut reader = store.stream_sequence(&digest, None, None).unwrap();
+    let mut out = Vec::new();
+    reader.read_to_end(&mut out).unwrap();
+    assert_eq!(out.len(), length);
+    assert_eq!(&out[..], b"ACGTACGTACGTACGTACGT");
+
+    // And the store should still be a Stub (no pre-loading side effect).
+    let key = digest.to_key();
+    let rec = store.inner.sequence_store.get(&key).unwrap();
+    assert!(
+        !rec.is_loaded(),
+        "stream_sequence must not populate the in-memory Full record"
+    );
+}
+
+// =========================================================================
+// Lazy sequence index loading tests
+// =========================================================================
+
+#[test]
+fn test_list_collections_without_sequence_index() {
+    // Simulate a remote store where the sequence index is not yet loaded.
+    // list_collections should work without triggering the sequence index download.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    // Create a store with a collection
+    let fasta_content = ">chr1\nATGCATGC\n>chr2\nGGGGAAAA\n";
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
+
+    // Re-open and clear the sequence store + mark index as not loaded
+    // (simulating what open_remote now does)
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    // list_collections should work — it only touches collection metadata
+    let result = store.list_collections(0, 100, &[]).unwrap();
+    assert_eq!(result.results.len(), 1, "Should find 1 collection");
+    assert!(!store.inner.sequence_index_loaded, "Sequence index should NOT be loaded after list_collections");
+}
+
+#[test]
+fn test_load_all_sequences_triggers_index_load() {
+    // When calling load_all_sequences on a store with deferred index,
+    // it should lazily load the sequence index first.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let fasta_content = ">chr1\nATGCATGC\n";
+    let fasta_path = dir.path().join("test.fa");
+    fs::write(&fasta_path, fasta_content).unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new()).unwrap();
+
+    // Simulate deferred state
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    store.inner.sequence_store.clear();
+    store.inner.md5_lookup.clear();
+    store.inner.sequence_index_loaded = false;
+    store.inner.sequence_index_path = Some("sequences.rgsi".to_string());
+
+    assert!(!store.inner.sequence_index_loaded);
+
+    // load_all_sequences should trigger the index load
+    store.load_all_sequences().unwrap();
+    assert!(store.inner.sequence_index_loaded, "Sequence index should be loaded after load_all_sequences");
+    assert!(!store.inner.sequence_store.is_empty(), "Sequences should be populated");
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_encoded() {
+    run_fd_cache_eviction_for_mode(false);
+}
+
+#[test]
+fn test_fd_cache_eviction_matches_resident_raw() {
+    run_fd_cache_eviction_for_mode(true);
+}
+
+/// `get_substrings` must produce output byte-identical to (a) a loop of
+/// `get_substring` on the same disk-backed store and (b) the resident decode,
+/// for BOTH branches of the adaptive heuristic:
+///   - sparse small ranges (total coverage < WHOLE_DECODE_FRACTION) -> partial branch
+///   - wide/overlapping ranges (total coverage >= WHOLE_DECODE_FRACTION) -> whole-decode branch
+/// Run for both Encoded and Raw storage modes.
+fn run_get_substrings_matches_for_mode(raw: bool) {
+    let temp_dir = tempdir().unwrap();
+    let fasta_content = multi_seq_fasta();
+    let fasta = temp_dir.path().join("multi.fa");
+    fs::write(&fasta, &fasta_content).unwrap();
+    let store_path = temp_dir.path().join("store");
+
+    let mut builder = RefgetStore::on_disk(&store_path).unwrap();
+    if raw {
+        builder.disable_encoding();
+    }
+    let (coll_meta, _) = builder
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let coll_digest = coll_meta.digest.clone();
+    drop(builder);
+
+    // Reference: resident store (whole-sequence decode held in memory).
+    let mut resident = RefgetStore::open_local(&store_path).unwrap();
+    resident.set_quiet(true);
+    resident.load_all_collections().unwrap();
+    resident.load_all_sequences().unwrap();
+
+    // Subject: stub-only disk-backed store.
+    let mut disk = RefgetStore::open_local(&store_path).unwrap();
+    disk.set_quiet(true);
+    disk.load_all_collections().unwrap();
+
+    // Use seq0 (length 400) for the per-sequence range sets.
+    let rec = resident.get_sequence_by_name(&coll_digest, "seq0").unwrap();
+    let digest = rec.metadata().sha512t24u.clone();
+    let len = rec.metadata().length;
+    assert_eq!(len, 400);
+
+    // BRANCH A (partial): many sparse small ranges; total coverage tiny relative
+    // to len (well below the 0.125 threshold).
+    let sparse: Vec<(usize, usize)> = vec![
+        (0, 3),
+        (10, 14),
+        (50, 51),
+        (100, 105),
+        (200, 202),
+        (399, 400),
+    ];
+    let sparse_total: usize = sparse.iter().map(|&(s, e)| e - s).sum();
+    assert!((sparse_total as f64) < 0.125 * (len as f64), "branch A must be partial");
+
+    // BRANCH B (whole-decode): wide and overlapping ranges whose total coverage
+    // far exceeds the threshold.
+    let wide: Vec<(usize, usize)> = vec![
+        (0, 200),
+        (100, 350),
+        (50, 400),
+        (10, 390),
+    ];
+    let wide_total: usize = wide.iter().map(|&(s, e)| e - s).sum();
+    assert!((wide_total as f64) >= 0.125 * (len as f64), "branch B must be whole-decode");
+
+    for ranges in [&sparse, &wide] {
+        // Expected from resident decode.
+        let expected_resident: Vec<String> = ranges
+            .iter()
+            .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
+            .collect();
+        // Loop of disk get_substring.
+        let expected_disk_loop: Vec<String> = ranges
+            .iter()
+            .map(|&(s, e)| disk.get_substring(&digest, s, e).unwrap())
+            .collect();
+        // Batch.
+        let batch = disk.get_substrings(&digest, ranges).unwrap();
+
+        assert_eq!(
+            batch, expected_resident,
+            "batch != resident (raw={}) ranges={:?}",
+            raw, ranges
+        );
+        assert_eq!(
+            batch, expected_disk_loop,
+            "batch != disk loop (raw={}) ranges={:?}",
+            raw, ranges
+        );
+    }
+
+    // Resident store batch path (Full arm) must also match.
+    let batch_resident = resident.get_substrings(&digest, &wide).unwrap();
+    let expected: Vec<String> = wide
+        .iter()
+        .map(|&(s, e)| resident.get_substring(&digest, s, e).unwrap())
+        .collect();
+    assert_eq!(batch_resident, expected, "resident Full-arm batch mismatch (raw={})", raw);
+
+    // Invalid range must error.
+    assert!(disk.get_substrings(&digest, &[(0, len + 1)]).is_err());
+}
+
+#[test]
+fn test_get_substrings_matches_encoded() {
+    run_get_substrings_matches_for_mode(false);
+}
+
+#[test]
+fn test_get_substrings_matches_raw() {
+    run_get_substrings_matches_for_mode(true);
 }

@@ -56,6 +56,7 @@ pub use digest::{
     SequenceCollectionRecord,
     SequenceEncoder,
     SequenceMetadata,
+    StreamingDecoder,
     // Types
     SequenceRecord,
     canonicalize_json,
@@ -86,38 +87,66 @@ pub use digest::{
 #[cfg(feature = "filesystem")]
 pub mod fasta;
 
-/// Extended SequenceCollection with filesystem operations.
-/// Adds methods for RGSI file I/O, caching, and file-based construction.
-#[cfg(feature = "filesystem")]
+/// Extended SequenceCollection with RGSI file I/O and the `*Ext` traits.
+/// WASM-safe except the `SequenceCollectionExt` (FASTA digesting) trait, which
+/// is gated behind `filesystem` inside the module.
 pub mod collection;
 
 /// Persistent sequence storage (RefgetStore).
-#[cfg(feature = "filesystem")]
+///
+/// The module is always compiled. The in-memory read path of
+/// `ReadonlyRefgetStore` is WASM-safe; filesystem/HTTP-backed pieces (the
+/// `RefgetStore` wrapper, FASTA import, persistence, export) are gated behind
+/// the `filesystem`/`http` features inside the module.
 pub mod store;
 
 /// Seqcol spec operations (comparison, level-based retrieval, attribute search).
-#[cfg(feature = "filesystem")]
+/// WASM-safe (operates on in-memory metadata).
 pub mod seqcol;
 
-// Internal modules for filesystem operations
+/// Binary transcript store and HGVS coordinate mapper.
+///
+/// Mirrors this crate's core/filesystem split: the in-memory readonly store and
+/// the mapper are WASM-safe and compile whenever `transcripts` is on (including
+/// WASM, which uses `default-features = false`); the mmap backend and the
+/// file-writing builder are gated behind `filesystem` inside the module.
+#[cfg(feature = "transcripts")]
+pub mod transcripts;
+
+#[cfg(feature = "transcripts")]
+pub use transcripts::{
+    build_reftx_bytes_in_memory, CoordinateMapper, CoordinateMapperWriter, Exon, ManeStatus,
+    MappingError, MappingResult, ReadonlyTxStore, Strand, Transcript, TranscriptRef,
+    concat_regions, mature_mrna, mature_mrna_for_transcript,
+};
+// Native-only re-exports (mmap-backed store, file-backed backend selector, and
+// the atomic file-writing builder). `ReadonlyTxStore::open_mmap`/`open_pread`/
+// `open_with_backend` are inherent methods reached through `ReadonlyTxStore`.
+#[cfg(all(feature = "transcripts", feature = "filesystem"))]
+pub use transcripts::{TxBackend, TxStore, TxStoreBuilder};
+
+/// Expansion of multi-FASTA input specifications (paths, globs, dirs, fofn).
 #[cfg(feature = "filesystem")]
+pub mod inputs;
+
+// Internal modules.
+// `hashkeyable` provides `DigestKey`, the in-memory map key type, so it must be
+// WASM-safe and ungated. `utils` is filesystem-only.
 mod hashkeyable;
 #[cfg(feature = "filesystem")]
 mod utils;
+// Positioned-read helper shared by the store partial-read path and the
+// transcript pread backend. Ungated: the store caller compiles in all
+// configs (incl. --no-default-features), so this must too.
+mod posread;
 
-// Re-export filesystem functions at crate root for backward compatibility
-#[cfg(feature = "filesystem")]
-pub use collection::{
-    SequenceCollectionExt, SequenceCollectionRecordExt, SequenceMetadataExt, SequenceRecordExt,
-    read_rgsi_file,
-};
 #[cfg(feature = "filesystem")]
 pub use fasta::{FaiRecord, compute_fai, digest_fasta, load_fasta};
 #[cfg(feature = "filesystem")]
 pub use store::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
-#[cfg(feature = "filesystem")]
 pub use seqcol::SeqColService;
 #[cfg(feature = "filesystem")]
+pub use inputs::{expand_fasta_inputs, FastaInputs, FASTA_EXTENSIONS};
 pub use store::{AvailableAliases, PagedResult, Pagination, PullResult, SyncStrategy};
 
 // ============================================================================

@@ -11,12 +11,16 @@ mod genomic_distributions;
 mod models;
 #[cfg(feature = "refget")]
 mod refget;
+#[cfg(feature = "reftx")]
+mod reftx;
 #[cfg(feature = "tokenizers")]
 mod tokenizers;
 #[cfg(any(feature = "utils", feature = "tokenizers"))]
 mod utils;
 #[cfg(feature = "lola")]
 mod lola;
+#[cfg(feature = "vrs")]
+mod vrs;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -69,6 +73,28 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         let lola_module = pyo3::wrap_pymodule!(lola::lola);
         m.add_wrapped(lola_module)?;
         sys_modules.set_item("gtars.lola", m.getattr("lola")?)?;
+    }
+
+    #[cfg(feature = "reftx")]
+    {
+        let reftx_module = pyo3::wrap_pymodule!(reftx::reftx);
+        m.add_wrapped(reftx_module)?;
+        sys_modules.set_item("gtars.reftx", m.getattr("reftx")?)?;
+    }
+
+    #[cfg(feature = "vrs")]
+    {
+        let vrs_module = pyo3::wrap_pymodule!(vrs::vrs);
+        m.add_wrapped(vrs_module)?;
+        let vrs_bound = m.getattr("vrs")?;
+        sys_modules.set_item("gtars.vrs", &vrs_bound)?;
+        // Register the nested gtars.vrs.hgvs submodule so
+        // `from gtars.vrs.hgvs import parse_hgvs` works.
+        let vrs_module_ref = vrs_bound.downcast::<PyModule>()?;
+        let hgvs_mod = PyModule::new(py, "hgvs")?;
+        vrs::hgvs::register(py, &hgvs_mod)?;
+        vrs_module_ref.add_submodule(&hgvs_mod)?;
+        sys_modules.set_item("gtars.vrs.hgvs", &hgvs_mod)?;
     }
 
     // add constants

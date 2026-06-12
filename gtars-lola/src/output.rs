@@ -1,7 +1,6 @@
 //! Output formatting, FDR correction, and annotation.
 
 use std::io::Write;
-use std::path::Path;
 
 use crate::database::RegionDB;
 use crate::models::LolaResult;
@@ -16,7 +15,7 @@ pub fn annotate_results(results: &mut [LolaResult], db: &RegionDB) {
             let anno = &db.region_anno[r.db_set];
             r.collection = anno.collection.clone();
             // Truncate description to 80 chars (matches R LOLA behavior)
-            r.description = anno.description.chars().take(80).collect();
+            r.description = anno.description.as_ref().map(|d| d.chars().take(80).collect());
             r.cell_type = anno.cell_type.clone();
             r.tissue = anno.tissue.clone();
             r.antibody = anno.antibody.clone();
@@ -105,6 +104,94 @@ pub fn apply_fdr_correction(results: &mut [LolaResult]) {
     }
 }
 
+/// Column-oriented representation of LOLA results.
+///
+/// Each field is a parallel Vec — row `i` across all fields describes one result.
+/// Bindings should convert this to their native columnar type (JS object, PyDict,
+/// R data.frame) rather than reimplementing the row→column pivot.
+#[derive(Debug, Clone)]
+pub struct LolaColumnar {
+    pub user_set: Vec<usize>,
+    pub db_set: Vec<usize>,
+    pub p_value_log: Vec<f64>,
+    pub odds_ratio: Vec<f64>,
+    pub support: Vec<u64>,
+    pub rnk_pv: Vec<usize>,
+    pub rnk_or: Vec<usize>,
+    pub rnk_sup: Vec<usize>,
+    pub max_rnk: Vec<usize>,
+    pub mean_rnk: Vec<f64>,
+    pub b: Vec<i64>,
+    pub c: Vec<i64>,
+    pub d: Vec<i64>,
+    pub q_value: Vec<Option<f64>>,
+    pub filename: Vec<String>,
+    pub collection: Vec<Option<String>>,
+    pub description: Vec<Option<String>>,
+    pub cell_type: Vec<Option<String>>,
+    pub tissue: Vec<Option<String>>,
+    pub antibody: Vec<Option<String>>,
+    pub treatment: Vec<Option<String>>,
+    pub data_source: Vec<Option<String>>,
+    pub db_set_size: Vec<u64>,
+}
+
+/// Convert a slice of LolaResults into column-oriented vectors.
+pub fn results_to_columns(results: &[LolaResult]) -> LolaColumnar {
+    let n = results.len();
+    let mut c = LolaColumnar {
+        user_set: Vec::with_capacity(n),
+        db_set: Vec::with_capacity(n),
+        p_value_log: Vec::with_capacity(n),
+        odds_ratio: Vec::with_capacity(n),
+        support: Vec::with_capacity(n),
+        rnk_pv: Vec::with_capacity(n),
+        rnk_or: Vec::with_capacity(n),
+        rnk_sup: Vec::with_capacity(n),
+        max_rnk: Vec::with_capacity(n),
+        mean_rnk: Vec::with_capacity(n),
+        b: Vec::with_capacity(n),
+        c: Vec::with_capacity(n),
+        d: Vec::with_capacity(n),
+        q_value: Vec::with_capacity(n),
+        filename: Vec::with_capacity(n),
+        collection: Vec::with_capacity(n),
+        description: Vec::with_capacity(n),
+        cell_type: Vec::with_capacity(n),
+        tissue: Vec::with_capacity(n),
+        antibody: Vec::with_capacity(n),
+        treatment: Vec::with_capacity(n),
+        data_source: Vec::with_capacity(n),
+        db_set_size: Vec::with_capacity(n),
+    };
+    for r in results {
+        c.user_set.push(r.user_set);
+        c.db_set.push(r.db_set);
+        c.p_value_log.push(r.p_value_log);
+        c.odds_ratio.push(r.odds_ratio);
+        c.support.push(r.support);
+        c.rnk_pv.push(r.rnk_pv);
+        c.rnk_or.push(r.rnk_or);
+        c.rnk_sup.push(r.rnk_sup);
+        c.max_rnk.push(r.max_rnk);
+        c.mean_rnk.push(r.mean_rnk);
+        c.b.push(r.b);
+        c.c.push(r.c);
+        c.d.push(r.d);
+        c.q_value.push(r.q_value);
+        c.filename.push(r.filename.clone());
+        c.collection.push(r.collection.clone());
+        c.description.push(r.description.clone());
+        c.cell_type.push(r.cell_type.clone());
+        c.tissue.push(r.tissue.clone());
+        c.antibody.push(r.antibody.clone());
+        c.treatment.push(r.treatment.clone());
+        c.data_source.push(r.data_source.clone());
+        c.db_set_size.push(r.db_set_size);
+    }
+    c
+}
+
 /// Write LOLA results as TSV matching R LOLA's `writeCombinedEnrichment` format.
 pub fn write_results_tsv<W: Write>(
     writer: &mut W,
@@ -124,14 +211,13 @@ pub fn write_results_tsv<W: Write>(
             .q_value
             .map(|q| format!("{:.6e}", q))
             .unwrap_or_else(|| "NA".to_string());
-
         writeln!(
             writer,
             "{}\t{}\t{}\t{:.4}\t{:.4}\t{}\t{}\t{}\t{}\t{}\t{:.2}\t{}\t{}\t{}\t\
              {}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             r.user_set + 1, // 1-based for R compatibility
             r.db_set + 1,
-            r.collection,
+            r.collection.as_deref().unwrap_or(""),
             r.p_value_log,
             r.odds_ratio,
             r.support,
@@ -143,12 +229,12 @@ pub fn write_results_tsv<W: Write>(
             r.b,
             r.c,
             r.d,
-            r.description,
-            r.cell_type,
-            r.tissue,
-            r.antibody,
-            r.treatment,
-            r.data_source,
+            r.description.as_deref().unwrap_or(""),
+            r.cell_type.as_deref().unwrap_or(""),
+            r.tissue.as_deref().unwrap_or(""),
+            r.antibody.as_deref().unwrap_or(""),
+            r.treatment.as_deref().unwrap_or(""),
+            r.data_source.as_deref().unwrap_or(""),
             r.filename,
             qv,
             r.db_set_size,
@@ -156,15 +242,6 @@ pub fn write_results_tsv<W: Write>(
     }
 
     Ok(())
-}
-
-/// Write results to a TSV file on disk.
-pub fn write_results_to_file(
-    path: &Path,
-    results: &[LolaResult],
-) -> std::io::Result<()> {
-    let mut file = std::fs::File::create(path)?;
-    write_results_tsv(&mut file, results)
 }
 
 #[cfg(test)]
@@ -189,13 +266,13 @@ mod tests {
             d: 100,
             q_value: None,
             filename: format!("file{}.bed", db_set),
-            collection: String::new(),
-            description: String::new(),
-            cell_type: String::new(),
-            tissue: String::new(),
-            antibody: String::new(),
-            treatment: String::new(),
-            data_source: String::new(),
+            collection: None,
+            description: None,
+            cell_type: None,
+            tissue: None,
+            antibody: None,
+            treatment: None,
+            data_source: None,
             db_set_size: 0,
         }
     }
@@ -399,5 +476,56 @@ mod tests {
         write_results_tsv(&mut buf, &results).unwrap();
         let output = String::from_utf8(buf).unwrap();
         assert!(output.contains("NA")); // q_value should be NA
+    }
+
+    #[test]
+    fn test_results_to_columns_basic() {
+        let results = vec![
+            make_result(0, 0, 3.0),
+            make_result(1, 2, 5.0),
+        ];
+        let c = results_to_columns(&results);
+
+        assert_eq!(c.user_set.len(), 2);
+        assert_eq!(c.user_set, vec![0, 1]);
+        assert_eq!(c.db_set, vec![0, 2]);
+        assert_eq!(c.p_value_log, vec![3.0, 5.0]);
+        assert_eq!(c.odds_ratio, vec![1.0, 1.0]);
+        assert_eq!(c.support, vec![10, 10]);
+        assert_eq!(c.b, vec![5, 5]);
+        assert_eq!(c.c, vec![5, 5]);
+        assert_eq!(c.d, vec![100, 100]);
+        assert_eq!(c.filename, vec!["file0.bed", "file2.bed"]);
+        assert_eq!(c.db_set_size, vec![0, 0]);
+        // empty strings → None
+        assert_eq!(c.collection, vec![None, None]);
+        assert_eq!(c.description, vec![None, None]);
+        assert_eq!(c.cell_type, vec![None, None]);
+        assert_eq!(c.tissue, vec![None, None]);
+        assert_eq!(c.antibody, vec![None, None]);
+        assert_eq!(c.treatment, vec![None, None]);
+        assert_eq!(c.data_source, vec![None, None]);
+    }
+
+    #[test]
+    fn test_results_to_columns_empty() {
+        let c = results_to_columns(&[]);
+        assert!(c.user_set.is_empty());
+        assert!(c.filename.is_empty());
+    }
+
+    #[test]
+    fn test_results_to_columns_with_metadata() {
+        let mut r = make_result(0, 0, 1.0);
+        r.collection = Some("ENCODE".to_string());
+        r.cell_type = Some("K562".to_string());
+        r.tissue = None; // stays None
+        r.q_value = Some(0.05);
+
+        let c = results_to_columns(&[r]);
+        assert_eq!(c.collection, vec![Some("ENCODE".to_string())]);
+        assert_eq!(c.cell_type, vec![Some("K562".to_string())]);
+        assert_eq!(c.tissue, vec![None]);
+        assert_eq!(c.q_value, vec![Some(0.05)]);
     }
 }

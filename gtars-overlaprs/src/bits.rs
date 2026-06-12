@@ -171,6 +171,10 @@ where
         };
         Box::new(finder)
     }
+
+    fn iter(&self) -> Box<dyn Iterator<Item = &Interval<I, T>> + '_> {
+        Box::new(self.intervals.iter())
+    }
 }
 
 impl<I, T> Bits<I, T>

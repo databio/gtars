@@ -24,7 +24,7 @@ pub fn create_genomicdist_cli() -> Command {
             Arg::new("chrom-sizes")
                 .long("chrom-sizes")
                 .required(false)
-                .help("Path to chrom.sizes file (enables expected partitions and promoter trimming)"),
+                .help("Path to chrom.sizes file. When provided, region distribution uses a per-chromosome bin size derived from the reference genome (stable across files). Also enables expected partitions and promoter trimming."),
         )
         .arg(
             arg!(--output <OUTPUT>)
@@ -35,13 +35,37 @@ pub fn create_genomicdist_cli() -> Command {
             arg!(--bins <BINS>)
                 .required(false)
                 .default_value("250")
-                .help("Number of bins for region distribution"),
+                .help("Number of bins for the region distribution. Bin width is derived as max_chrom_len/bins; shorter chromosomes get proportionally fewer bins."),
         )
         .arg(
             Arg::new("signal-matrix")
                 .long("signal-matrix")
                 .required(false)
                 .help("Path to open signal matrix TSV (enables cell-type open chromatin enrichment)"),
+        )
+        .arg(
+            Arg::new("fasta")
+                .long("fasta")
+                .required(false)
+                .help("Path to genome FASTA (.fa) or binary FASTA (.fab) file. Enables GC content; also enables dinucleotide frequencies when --dinucl-freq is set. Use .fab format (via gtars prep --fasta) for best performance."),
+        )
+        .arg(
+            Arg::new("ignore-unk-chroms")
+                .long("ignore-unk-chroms")
+                .action(clap::ArgAction::SetTrue)
+                .help("When computing GC content, skip regions on chromosomes not in the FASTA (default: error)"),
+        )
+        .arg(
+            Arg::new("dinucl-freq")
+                .long("dinucl-freq")
+                .action(clap::ArgAction::SetTrue)
+                .help("Compute per-region dinucleotide frequencies (expensive for wide regions; opt-in even when --fasta is provided)"),
+        )
+        .arg(
+            Arg::new("dinucl-raw-counts")
+                .long("dinucl-raw-counts")
+                .action(clap::ArgAction::SetTrue)
+                .help("Return raw per-region dinucleotide counts instead of percentages (matches R GenomicDistributions' rawCounts=TRUE)"),
         )
         .arg(
             Arg::new("promoter-upstream")

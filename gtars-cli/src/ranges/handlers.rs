@@ -4,9 +4,9 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use clap::ArgMatches;
 
+use gtars_core::models::region_set::IntervalSetOps;
 use gtars_core::models::RegionSet;
 use gtars_core::utils::get_chrom_sizes;
-use gtars_genomicdist::IntervalRanges;
 
 pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
@@ -122,7 +122,11 @@ pub fn run_ranges(matches: &ArgMatches) -> Result<()> {
         }
         Some(("gaps", m)) => {
             let rs = load_input(m)?;
-            let result = rs.gaps();
+            let cs_path = m
+                .get_one::<String>("chrom-sizes")
+                .expect("--chrom-sizes is required");
+            let chrom_sizes = get_chrom_sizes(cs_path);
+            let result = rs.gaps(&chrom_sizes);
             write_output(&result, m.get_one::<String>("output"))
         }
         Some(("intersect", m)) => {

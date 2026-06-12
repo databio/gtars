@@ -90,4 +90,11 @@ where
         start: I,
         end: I,
     ) -> Box<dyn Iterator<Item = &'a Interval<I, T>> + 'a>;
+
+    /// Returns an iterator over all intervals in the data structure.
+    ///
+    /// This provides access to every stored interval, regardless of overlap with any query.
+    /// It is the basis for reconstructing the underlying region set from the index without
+    /// keeping a separate copy of the source regions.
+    fn iter(&self) -> Box<dyn Iterator<Item = &Interval<I, T>> + '_>;
 }
