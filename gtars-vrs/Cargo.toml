@@ -40,7 +40,7 @@ crossbeam-channel = { version = "0.5", optional = true }
 
 # Internal dependency. default-features = false keeps the WASM build free of
 # filesystem/http; the `filesystem` feature re-enables them.
-gtars-refget = { path = "../gtars-refget", version = "0.8.0", default-features = false }
+gtars-refget = { path = "../gtars-refget", version = "0.9.0", default-features = false }
 
 [dev-dependencies]
 tempfile = "3.8.1"

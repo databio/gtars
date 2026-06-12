@@ -19,7 +19,6 @@ on:
           - gtars-genomicdist
           - gtars-igd
           - gtars-io
-          - gtars-lola
           - gtars-overlaprs
           - gtars-refget
           - gtars-scoring
@@ -99,7 +98,7 @@ jobs:
       - name: Wait for crates.io indexing
         run: sleep 30
 
-      # Wave 2: depend on wave 1
+      # Wave 2: depend on wave 1 (gtars-core / gtars-io)
       - name: Publish gtars-overlaprs
         run: |
           if cargo publish -p gtars-overlaprs --locked 2>publish_err.log; then
@@ -124,6 +123,46 @@ jobs:
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-uniwig
+        run: |
+          if cargo publish -p gtars-uniwig --locked 2>publish_err.log; then
+            echo "published gtars-uniwig"
+          elif grep -qiE "already uploaded|already exists" publish_err.log; then
+            echo "gtars-uniwig already on crates.io — skipping"
+          else
+            cat publish_err.log >&2
+            exit 1
+          fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-bbcache
+        run: |
+          if cargo publish -p gtars-bbcache --locked 2>publish_err.log; then
+            echo "published gtars-bbcache"
+          elif grep -qiE "already uploaded|already exists" publish_err.log; then
+            echo "gtars-bbcache already on crates.io — skipping"
+          else
+            cat publish_err.log >&2
+            exit 1
+          fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Publish gtars-fragsplit
+        run: |
+          if cargo publish -p gtars-fragsplit --locked 2>publish_err.log; then
+            echo "published gtars-fragsplit"
+          elif grep -qiE "already uploaded|already exists" publish_err.log; then
+            echo "gtars-fragsplit already on crates.io — skipping"
+          else
+            cat publish_err.log >&2
+            exit 1
+          fi
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+      - name: Wait for crates.io indexing
+        run: sleep 30
+
+      # Wave 3: depend on wave 2 (gtars-overlaprs / gtars-refget)
       - name: Publish gtars-tokenizers
         run: |
           if cargo publish -p gtars-tokenizers --locked 2>publish_err.log; then
@@ -142,30 +181,6 @@ jobs:
             echo "published gtars-igd"
           elif grep -qiE "already uploaded|already exists" publish_err.log; then
             echo "gtars-igd already on crates.io — skipping"
-          else
-            cat publish_err.log >&2
-            exit 1
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      - name: Publish gtars-uniwig
-        run: |
-          if cargo publish -p gtars-uniwig --locked 2>publish_err.log; then
-            echo "published gtars-uniwig"
-          elif grep -qiE "already uploaded|already exists" publish_err.log; then
-            echo "gtars-uniwig already on crates.io — skipping"
-          else
-            cat publish_err.log >&2
-            exit 1
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      - name: Publish gtars-fragsplit
-        run: |
-          if cargo publish -p gtars-fragsplit --locked 2>publish_err.log; then
-            echo "published gtars-fragsplit"
-          elif grep -qiE "already uploaded|already exists" publish_err.log; then
-            echo "gtars-fragsplit already on crates.io — skipping"
           else
             cat publish_err.log >&2
             exit 1
@@ -196,23 +211,6 @@ jobs:
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      - name: Publish gtars-bbcache
-        run: |
-          if cargo publish -p gtars-bbcache --locked 2>publish_err.log; then
-            echo "published gtars-bbcache"
-          elif grep -qiE "already uploaded|already exists" publish_err.log; then
-            echo "gtars-bbcache already on crates.io — skipping"
-          else
-            cat publish_err.log >&2
-            exit 1
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      - name: Wait for crates.io indexing
-        run: sleep 30
-
-      # Wave 3: depend on wave 2
-      # gtars-vrs depends on gtars-refget (wave 2); gtars-lola depends on gtars-igd (wave 2).
       - name: Publish gtars-vrs
         run: |
           if cargo publish -p gtars-vrs --locked 2>publish_err.log; then
@@ -225,22 +223,10 @@ jobs:
           fi
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-      - name: Publish gtars-lola
-        run: |
-          if cargo publish -p gtars-lola --locked 2>publish_err.log; then
-            echo "published gtars-lola"
-          elif grep -qiE "already uploaded|already exists" publish_err.log; then
-            echo "gtars-lola already on crates.io — skipping"
-          else
-            cat publish_err.log >&2
-            exit 1
-          fi
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
       - name: Wait for crates.io indexing
         run: sleep 30
 
-      # Wave 4: aggregators (gtars depends on gtars-vrs from wave 3)
+      # Wave 4: aggregators (gtars depends on wave 3; gtars-cli depends on gtars)
       - name: Publish gtars
         run: |
           if cargo publish -p gtars --locked 2>publish_err.log; then
