@@ -216,14 +216,24 @@ impl GenomicIntervalSetStatistics for RegionSet {
             let mid = region.mid_point();
             // Skip regions whose midpoint falls beyond the stated chromosome size
             // (e.g. BED file assembled against a different reference than the one
-            // supplied by chrom_sizes). Without this, rid would exceed n_bins and
-            // produce bins with end < start.
+            // supplied by chrom_sizes), which would otherwise place a region in a
+            // bin past the end of the chromosome.
             if mid >= chrom_size {
                 continue;
             }
-            let rid = mid / bin_size;
+            // Clamp to the last bin so a midpoint in the leftover tail of the
+            // longest chromosome (when chrom_size is not divisible by n_bins)
+            // folds into the final bin instead of spilling into an extra
+            // (n_bins + 1)-th bin. n_bins >= 1 is guaranteed above.
+            let rid = (mid / bin_size).min(n_bins - 1);
             let bin_start = rid * bin_size;
-            let bin_end = (bin_start + bin_size).min(chrom_size);
+            // The final bin absorbs the non-divisible remainder so it spans the
+            // rest of the chromosome rather than leaving a short tail uncovered.
+            let bin_end = if rid == n_bins - 1 {
+                chrom_size
+            } else {
+                (bin_start + bin_size).min(chrom_size)
+            };
 
             let key = format!("{}-{}-{}", region.chr, bin_start, bin_end);
             if let Some(bin) = plot_results.get_mut(&key) {
@@ -853,6 +863,40 @@ mod tests {
         // (chr1's third region, chr2's second, and chr3's only region are all skipped)
         let total: u32 = bins.values().map(|b| b.n).sum();
         assert_eq!(total, 3, "expected 3 in-range regions counted");
+    }
+
+    #[rstest]
+    fn test_region_distribution_with_chrom_sizes_no_extra_trailing_bin() {
+        // Non-divisible boundary: bin_width = max_chrom_len / n_bins truncates,
+        // leaving a tail [bin_width*n_bins, max_chrom_len) on the longest
+        // chromosome. A midpoint in that tail must fold into the final bin, not
+        // spill into an extra (n_bins+1)-th bin.
+        // chr1=1000, n_bins=3 -> bin_width=333, bin_width*n_bins=999, tail=[999,1000).
+        // The previous code (guard `mid >= chrom_size` only) produced a stray
+        // RegionBin{ start: 999, end: 1000, rid: 3 }. NOTE: the existing test
+        // above uses 1000/10 (evenly divisible) and so never exercised this.
+        let regions = vec![
+            Region { chr: "chr1".into(), start: 998, end: 1000, rest: None }, // mid=999, in tail
+        ];
+        let rs = RegionSet::from(regions);
+        let mut chrom_sizes = HashMap::new();
+        chrom_sizes.insert("chr1".to_string(), 1000u32);
+
+        let n_bins = 3u32;
+        let bins = rs.region_distribution_with_chrom_sizes(n_bins, &chrom_sizes);
+
+        // No bin index may reach n_bins, and the longest chromosome has at most
+        // n_bins bins.
+        for bin in bins.values() {
+            assert!(bin.rid < n_bins, "bin {:?} has rid >= n_bins (off-by-one extra bin)", bin);
+            assert!(bin.end > bin.start, "bin {:?} has end <= start", bin);
+        }
+        let chr1_bins = bins.values().filter(|b| b.chr == "chr1").count() as u32;
+        assert!(chr1_bins <= n_bins, "chr1 has {} bins, expected <= {}", chr1_bins, n_bins);
+
+        // The tail region is still counted (folded into the final bin), not dropped.
+        let total: u32 = bins.values().map(|b| b.n).sum();
+        assert_eq!(total, 1, "tail region must be counted in the final bin, not dropped");
     }
 
     #[rstest]
