@@ -31,6 +31,9 @@ mod prep;
 #[cfg(feature = "refget")]
 mod refget;
 
+#[cfg(feature = "scatrs")]
+mod scatrs;
+
 use anyhow::Result;
 use clap::Command;
 
@@ -80,6 +83,9 @@ fn build_parser() -> Command {
 
     #[cfg(feature = "refget")]
     let cmd = cmd.subcommand(refget::cli::create_refget_cli());
+
+    #[cfg(feature = "scatrs")]
+    let cmd = cmd.subcommand(scatrs::cli::create_scatrs_cli());
 
     cmd
 }
@@ -182,6 +188,14 @@ fn main() -> Result<()> {
         #[cfg(feature = "refget")]
         Some((refget::cli::REFGET_CMD, matches)) => {
             refget::handlers::run_refget(matches)?;
+        }
+
+        //
+        // SCATRS
+        //
+        #[cfg(feature = "scatrs")]
+        Some((scatrs::SCATRS_CMD, matches)) => {
+            scatrs::handlers::run_scatrs(matches)?;
         }
 
         _ => unreachable!("Subcommand not found"),
