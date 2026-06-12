@@ -283,7 +283,14 @@ jobs:
           npm install -g npm@latest   # OIDC trusted publishing requires npm >= 11.5.1
           wasm-pack build --release --target web gtars-wasm
           jq '.name = "@databio/gtars" | .repository = {"type": "git", "url": "https://github.com/databio/gtars"}' gtars-wasm/pkg/package.json > tmp.json && mv tmp.json gtars-wasm/pkg/package.json
-          npm publish --provenance --access public gtars-wasm/pkg/
+          if npm publish --provenance --access public gtars-wasm/pkg/ 2>npm_err.log; then
+            echo "published @databio/gtars"
+          elif grep -qiE "cannot publish over|previously published|already exists" npm_err.log; then
+            echo "@databio/gtars already published at this version — skipping"
+          else
+            cat npm_err.log >&2
+            exit 1
+          fi
 
   build-node:
     if: ${{ always() && (github.event_name == 'release' || inputs.node != false) }}
@@ -358,7 +365,12 @@ jobs:
               # repository.url; the napi-generated platform package.json lacks it.
               jq '.repository = {"type":"git","url":"https://github.com/databio/gtars"}' "$dir/package.json" > "$dir/package.json.tmp" && mv "$dir/package.json.tmp" "$dir/package.json"
               echo "Publishing $dir..."
-              if ! npm publish "$dir" --access public; then
+              if npm publish "$dir" --access public 2>npm_err.log; then
+                echo "published $dir"
+              elif grep -qiE "cannot publish over|previously published|already exists" npm_err.log; then
+                echo "$dir already published — skipping"
+              else
+                cat npm_err.log >&2
                 echo "::error::Failed to publish $dir"
                 FAILED=$((FAILED + 1))
               fi
