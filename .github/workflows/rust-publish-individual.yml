@@ -12,16 +12,16 @@ on:
             - gtars-cli
             - gtars-core
             - gtars-fragsplit
+            - gtars-genomicdist
             - gtars-igd
             - gtars-io
+            - gtars-lola
             - gtars-overlaprs
-            - gtars-python
             - gtars-refget
             - gtars-scoring
             - gtars-tokenizers
             - gtars-uniwig
-            - gtars-wasm
-            - gtars-genomicdist
+            - gtars-vrs
 
 permissions:
     contents: read
