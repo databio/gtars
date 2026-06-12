@@ -20,6 +20,10 @@ pub mod vcf_core;
 // `RefgetStore`; it is not part of the WASM surface.
 #[cfg(feature = "filesystem")]
 pub mod vcf;
+// Parallel VRS pipeline reading the refget-anchored binary rgvcf format.
+// mmap + scoped threads, so it is part of the native (filesystem) surface only.
+#[cfg(feature = "filesystem")]
+pub mod rgvcf_input;
 
 pub use models::{Allele, AlleleState, SequenceLocation, SequenceReference};
 pub use digest::{allele_digest, allele_identifier, sequence_location_digest};
