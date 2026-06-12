@@ -43,13 +43,9 @@ hgvs = pytest.importorskip(
     reason="gtars.vrs.hgvs extension not built/importable in this environment",
 )
 
-# Audit reproduction (PR #256): these assert the correct behavior and currently
-# fail, documenting the data-loss bug. Marked xfail (non-strict) so they don't
-# gate CI; remove this marker once the bug is fixed and they pass.
-pytestmark = pytest.mark.xfail(
-    reason="audit reproduction (PR #256): HGVS AST drops uncertain/whole-sequence position info",
-    strict=False,
-)
+# Audit reproduction (PR #256): the bug is now fixed. PosEditPy faithfully
+# projects every LocationRange variant via the structured PositionBound API, so
+# these tests now assert the correct behavior and must PASS (no xfail).
 
 parse_hgvs = hgvs.parse_hgvs
 
@@ -58,61 +54,56 @@ def test_uncertain_end_low_unknown_keeps_end_bound():
     """`c.4_(?_246)del` bounds the end at 246 (high bound); it must not vanish.
 
     The parser stores 246 in `end_high` and leaves `end_low = None` (the `?`).
-    PosEditPy::from_rs does `end = end_low.map(...)`, so it silently returns
-    `end is None`, dropping the 246 end bound. A faithful binding would expose
-    the end position (246) and/or flag it as approximate.
+    The faithful binding exposes the end as an uncertain PositionBound whose
+    `high` carries 246 and whose `low` is None (the `?`).
     """
     v = parse_hgvs("NM_000546.6:c.4_(?_246)del")
     pe = v.pos_edit
 
-    # Sanity: this expression IS a range with an uncertain component.
-    assert pe.start.base == 4, "start should be the certain position 4"
+    # This expression IS a range with an uncertain end component.
+    assert pe.location_kind == "range"
+    assert pe.start.kind == "certain"
+    assert pe.start.position.base == 4, "start should be the certain position 4"
 
-    # EXPECTED-CORRECT: the end bound 246 from the input must be represented.
-    assert pe.end is not None, (
-        "end position silently dropped: HGVS specifies an end bound (246) via "
-        "the high estimate, but PosEditPy::from_rs reads only end_low and "
-        "returns end=None (data-loss bug, hgvs.rs ~line 295)"
-    )
-    assert pe.end.base == 246, (
-        f"end bound should reflect the input (246), got base={pe.end.base}"
+    # The end bound 246 from the input must be represented (not dropped).
+    assert pe.end is not None, "end endpoint must be present for this range"
+    assert pe.end.kind == "uncertain"
+    assert pe.end.low is None, "the `?` low bound is represented as None"
+    assert pe.end.high is not None, "the high bound (246) must be preserved"
+    assert pe.end.high.base == 246, (
+        f"end high bound should reflect the input (246), got base={pe.end.high.base}"
     )
 
 
 def test_whole_sequence_not_misrepresented_as_base_1():
     """`g.=` is a whole-sequence identity; it must not masquerade as base=1.
 
-    PosEditPy::from_rs substitutes Position{base:1, offset:0} and end=None for
-    WholeSequence, fabricating a concrete-looking position that was never in the
-    input, with no flag. A faithful binding would either expose a whole-sequence
-    marker or at least set `uncertain`/some indicator -- not silently report a
-    real-looking base=1.
+    The faithful binding marks `location_kind == "whole_sequence"` and exposes
+    no fabricated positions: both `start` and `end` are None.
     """
     v = parse_hgvs("NC_000017.11:g.=")
     pe = v.pos_edit
 
-    # EXPECTED-CORRECT: a caller must be able to tell this is NOT a concrete
-    # base-1 single position. Either an explicit approximation/whole-sequence
-    # flag is set, or the fabricated base=1 placeholder is not presented as a
-    # genuine position. The current code reports base=1, offset=0, end=None,
-    # uncertain=False -- indistinguishable from a real `g.1` identity.
-    fabricated_placeholder = (
-        pe.start.base == 1 and pe.start.offset == 0 and pe.end is None
-    )
-    assert not (fabricated_placeholder and not pe.uncertain), (
-        "whole-sequence `g.=` is silently flattened to a fabricated concrete "
-        "position base=1/offset=0/end=None with uncertain=False, "
-        "indistinguishable from a real single-base identity (hgvs.rs ~line 285)"
-    )
+    assert pe.location_kind == "whole_sequence"
+    assert pe.start is None, "no fabricated base=1 start position should exist"
+    assert pe.end is None, "whole-sequence has no end endpoint"
 
 
 def test_uncertain_both_low_unknown_keeps_end_bound():
-    """`c.(?_6)_(?_246)del`: end bound 246 lives in end_high and is dropped."""
+    """`c.(?_6)_(?_246)del`: both endpoints uncertain; bounds preserved."""
     v = parse_hgvs("NM_000546.6:c.(?_6)_(?_246)del")
     pe = v.pos_edit
 
-    assert pe.end is not None, (
-        "UncertainBoth end bound (246) dropped: from_rs uses end_low.map(...) "
-        "and ignores end_high (hgvs.rs ~line 302)"
-    )
-    assert pe.end.base == 246
+    assert pe.location_kind == "range"
+
+    assert pe.start is not None
+    assert pe.start.kind == "uncertain"
+    assert pe.start.low is None, "the `?` start low bound is represented as None"
+    assert pe.start.high is not None
+    assert pe.start.high.base == 6
+
+    assert pe.end is not None, "UncertainBoth end bound (246) must not be dropped"
+    assert pe.end.kind == "uncertain"
+    assert pe.end.low is None, "the `?` end low bound is represented as None"
+    assert pe.end.high is not None
+    assert pe.end.high.base == 246

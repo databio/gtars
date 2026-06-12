@@ -78,7 +78,6 @@ fn drain_to_string(mut reader: Box<dyn Read + Send>) -> std::io::Result<String> 
     Ok(String::from_utf8_lossy(&buf).into_owned())
 }
 
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
 #[test]
 fn audit_stream_sequence_silent_truncation_local_file() {
     // A known single chromosome. 64 bases, plain ACGT so it is valid in Raw mode.

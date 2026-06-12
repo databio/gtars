@@ -5,21 +5,26 @@
 //! because `compute_bam_qc` queries the BAM by region per-chromosome and
 //! therefore REQUIRES a valid index plus `@SQ` header entries.
 //!
-//! They are intended to CONFIRM two suspected bugs:
+//! They are regression tests guarding the fixes for two audited bugs:
 //!
-//!   BUG 1 (bamqc.rs:212 / :286): the REPORTED `m2` field is forced to
-//!     `m2.max(1)`. `m2` is the count of positions/read-pairs observed
-//!     EXACTLY twice. The `.max(1)` is only needed for the pbc2 *denominator*
-//!     (already handled separately via `m2_f`). Forcing the reported value
-//!     to >= 1 means the "Two_read_pairs" column shows 1 even when the true
-//!     count is 0.
+//!   BUG 1 (bamqc.rs `compute_bam_qc` / `compute_bam_qc_parallel`): the
+//!     REPORTED `m2` field was forced to `m2.max(1)`. `m2` is the count of
+//!     positions/read-pairs observed EXACTLY twice. The `.max(1)` floor is
+//!     only needed for the pbc2 *denominator* (handled separately via
+//!     `m2_f`); forcing the reported value to >= 1 made the "Two_read_pairs"
+//!     column show 1 even when the true count was 0. FIXED: the struct now
+//!     emits the true `m2`, so these tests assert `result.m2 == 0`.
 //!
-//!   BUG 2 (bamqc.rs ~133-139, ~200-211): the NRF denominator
-//!     (`total_pairs = paired_read_count / 2`) counts ALL segmented reads,
-//!     including reads whose mate lies on another chromosome, while the
-//!     M1 / M_distinct numerators are built only from within-chromosome
-//!     read1+read2 joins. An inter-chromosomal pair therefore inflates the
-//!     denominator without contributing to M1/M_distinct, understating NRF.
+//!   BUG 4 (bamqc.rs `process_chromosome`): the NRF denominator
+//!     (`total_pairs`) was derived from `paired_read_count / 2`, counting ALL
+//!     segmented reads — including reads whose mate lies on another chromosome
+//!     — while the M1 / M_distinct numerators are built only from
+//!     within-chromosome read1+read2 joins. Inter-chromosomal / orphan pairs
+//!     therefore inflated the denominator without contributing to
+//!     M1/M_distinct, understating NRF. FIXED: `num_pairs` now counts only
+//!     successful within-chromosome read1/read2 joins, so the denominator
+//!     counts the SAME population as the numerator. The test below asserts the
+//!     corrected invariant (split pairs do not change `total_reads` or NRF).
 
 use std::num::NonZeroUsize;
 use std::path::PathBuf;
@@ -224,7 +229,6 @@ fn no_multiplicity_two_records() -> (Header, Vec<RecordBuf>) {
 
 /// BUG 1: reported `m2` should be the TRUE count of multiplicity-2 positions
 /// (here 0), but the code returns `m2.max(1)`.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
 #[test]
 fn test_bug1_m2_forced_to_one_serial() {
     let (header, records) = no_multiplicity_two_records();
@@ -248,7 +252,6 @@ fn test_bug1_m2_forced_to_one_serial() {
 }
 
 /// BUG 1, parallel path (bamqc.rs:212).
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
 #[test]
 fn test_bug1_m2_forced_to_one_parallel() {
     let (header, records) = no_multiplicity_two_records();
@@ -343,24 +346,25 @@ fn leak_name(s: &str) -> &'static str {
     Box::leak(s.to_string().into_boxed_str())
 }
 
-/// BUG 2: inter-chromosomal pair inflates the NRF denominator (total_pairs)
-/// without contributing to m1/distinct, so NRF drops even though the read
-/// population that builds m1 is unchanged.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
+/// BUG 4 (regression): inter-chromosomal / orphan pairs must be EXCLUDED from
+/// the NRF denominator. The denominator (`total_pairs`/`num_pairs`) now counts
+/// only successful within-chromosome read1/read2 joins — the same population
+/// that feeds m1/distinct. So adding split pairs that never join changes
+/// neither the numerator nor the denominator, and NRF is unchanged.
 #[test]
-fn test_bug2_interchromosomal_pair_inflates_denominator() {
+fn test_bug4_interchromosomal_pair_excluded_from_denominator() {
     // Control: 2 within-chromosome pairs, no split pairs.
     let (h_ctrl, r_ctrl) = paired_records(2, 0);
     let (_d1, p_ctrl) = write_indexed_bam(&h_ctrl, &r_ctrl);
     let ctrl = compute_bam_qc(&p_ctrl).expect("ctrl qc");
-    eprintln!("[bug2 control]   = {ctrl:?}");
+    eprintln!("[bug4 control]   = {ctrl:?}");
 
     // Treatment: same 2 within-chromosome pairs PLUS two inter-chromosomal
-    // pairs (even per-chromosome so the `/2` truncation doesn't mask them).
+    // pairs (even per-chromosome so the old `/2` truncation didn't mask them).
     let (h_tx, r_tx) = paired_records(2, 2);
     let (_d2, p_tx) = write_indexed_bam(&h_tx, &r_tx);
     let tx = compute_bam_qc(&p_tx).expect("tx qc");
-    eprintln!("[bug2 treatment] = {tx:?}");
+    eprintln!("[bug4 treatment] = {tx:?}");
 
     // The within-chromosome joins are identical between control and treatment,
     // so m1 and distinct must be unchanged.
@@ -372,25 +376,30 @@ fn test_bug2_interchromosomal_pair_inflates_denominator() {
     assert_eq!(ctrl.m1, 2, "expected 2 multiplicity-1 within-chrom pairs");
 
     // total_reads (== effective_total == total_pairs for paired data) is the
-    // NRF denominator. The two split pairs add 2 orphan segmented reads to sq0
-    // (paired_read_count: 4 -> 6 -> num_pairs 2 -> 3) and 2 to sq1
-    // (paired_read_count 0 -> 2 -> num_pairs 0 -> 1), so total_pairs 2 -> 4,
-    // even though none of these reads join into an m1/distinct entry.
-    assert!(
-        tx.total_reads > ctrl.total_reads,
-        "BUG 2: inter-chromosomal pairs should inflate total_pairs (denominator). \
+    // NRF denominator. With the fix, `num_pairs` counts only within-chromosome
+    // read1/read2 joins, so the split pairs (which never join) do NOT inflate
+    // the denominator: total_reads is identical between control and treatment.
+    assert_eq!(
+        tx.total_reads, ctrl.total_reads,
+        "FIXED: inter-chromosomal pairs must NOT inflate total_pairs (denominator). \
          ctrl.total_reads={}, tx.total_reads={}",
-        ctrl.total_reads,
+        ctrl.total_reads, tx.total_reads
+    );
+
+    // Pin the absolute denominator: only the two within-chromosome joined pairs
+    // count, proving split pairs are fully excluded.
+    assert_eq!(
+        tx.total_reads, 2,
+        "only the two within-chromosome joined pairs should count toward the \
+         denominator; got total_reads={}",
         tx.total_reads
     );
 
-    // Because the numerator (m1) is unchanged but the denominator grew, NRF
-    // must DECREASE solely due to the inter-chromosomal pair: numerator and
-    // denominator populations differ.
+    // Numerator and denominator are both unchanged, so NRF is unchanged.
     assert!(
-        tx.nrf < ctrl.nrf,
-        "BUG 2 CONFIRMED if NRF drops with no change to m1/distinct: \
-         ctrl.nrf={}, tx.nrf={} (denominator inflated by cross-chrom pair)",
+        (tx.nrf - ctrl.nrf).abs() < 1e-12,
+        "NRF should be unchanged by split pairs (neither numerator nor \
+         denominator counts them): ctrl.nrf={}, tx.nrf={}",
         ctrl.nrf,
         tx.nrf
     );

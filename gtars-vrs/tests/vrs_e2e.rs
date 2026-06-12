@@ -30,8 +30,8 @@ fn test_vcf_to_vrs_ids_end_to_end() {
         writeln!(f, "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO").unwrap();
         // SNV at chr1:5 (1-based), 0-based pos 4
         writeln!(f, "chr1\t5\t.\tA\tT\t.\tPASS\t.").unwrap();
-        // SNV at chr1:10 (1-based)
-        writeln!(f, "chr1\t10\t.\tG\tC\t.\tPASS\t.").unwrap();
+        // SNV at chr1:10 (1-based, 0-based 9): reference base is 'C'.
+        writeln!(f, "chr1\t10\t.\tC\tA\t.\tPASS\t.").unwrap();
         // Insertion in A-repeat: chr1:51 (1-based = 0-based 50), ref=A, alt=AA
         writeln!(f, "chr1\t51\t.\tA\tAA\t.\tPASS\t.").unwrap();
         // Deletion in A-repeat: chr1:51, ref=AA, alt=A

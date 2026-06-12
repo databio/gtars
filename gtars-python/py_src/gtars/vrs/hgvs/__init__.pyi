@@ -46,9 +46,19 @@ class Edit:
     def to_dict(self) -> Dict[str, Any]: ...
 
 
+class PositionBound:
+    kind: str          # "certain" | "uncertain"
+    position: Optional[Position]   # set when kind == "certain"
+    low: Optional[Position]        # uncertain low bound; None == "?"
+    high: Optional[Position]       # uncertain high bound; None == "?"
+
+    def to_dict(self) -> Dict[str, Any]: ...
+
+
 class PosEdit:
-    start: Position
-    end: Optional[Position]
+    location_kind: str   # "single" | "range" | "whole_sequence"
+    start: Optional[PositionBound]
+    end: Optional[PositionBound]
     edit: Edit
     uncertain: bool
 

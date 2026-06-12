@@ -298,6 +298,9 @@ pub enum NormalizeError {
     StartOutOfBounds { start: u64, seq_len: usize },
     /// Reference allele extends past the end of the sequence.
     RefAllelePastEnd { start: usize, ref_len: usize, seq_len: usize },
+    /// Supplied REF allele disagrees with the actual reference bases at the
+    /// variant position (wrong-assembly / liftover / data-entry error).
+    RefMismatch { start: usize, supplied_ref: Vec<u8>, actual_ref: Vec<u8> },
 }
 
 impl std::fmt::Display for NormalizeError {
@@ -311,6 +314,15 @@ impl std::fmt::Display for NormalizeError {
                     f,
                     "ref allele (start={}, len={}) extends past sequence length {}",
                     start, ref_len, seq_len
+                )
+            }
+            NormalizeError::RefMismatch { start, supplied_ref, actual_ref } => {
+                write!(
+                    f,
+                    "ref allele mismatch at interbase {}: VCF says {}, reference has {}",
+                    start,
+                    String::from_utf8_lossy(supplied_ref),
+                    String::from_utf8_lossy(actual_ref)
                 )
             }
         }
@@ -369,6 +381,24 @@ pub fn normalize_ref<R: RefSeq + ?Sized>(
             ref_len: ref_allele.len(),
             seq_len,
         });
+    }
+
+    // Validate the supplied REF against the actual reference bases.
+    // (s_usize..e is the un-trimmed REF window; bounds already checked above.)
+    // A wrong REF is the classic signature of wrong-assembly / liftover /
+    // data-entry corruption and must fail loudly. An empty `ref_allele`
+    // (insertion) loops zero times and is correctly accepted.
+    for (k, &rb) in ref_allele.iter().enumerate() {
+        let actual = sequence.base_at(s_usize + k);
+        if rb.to_ascii_uppercase() != actual.to_ascii_uppercase() {
+            let mut actual_ref = Vec::with_capacity(ref_allele.len());
+            sequence.extend_range(s_usize, e, &mut actual_ref);
+            return Err(NormalizeError::RefMismatch {
+                start: s_usize,
+                supplied_ref: ref_allele.to_vec(),
+                actual_ref,
+            });
+        }
     }
 
     // Step 1: Trim common prefix
@@ -501,5 +531,61 @@ mod tests {
         let seq = b"ACGT";
         let result = normalize(seq, 10, b"G", b"T");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_normalize_ref_mismatch_rejected() {
+        // Position 2 in "ACGTACGT" is 'G'. Claiming REF='A' must error.
+        let seq = b"ACGTACGT";
+        let result = normalize(seq, 2, b"A", b"T");
+        assert!(
+            matches!(result, Err(NormalizeError::RefMismatch { .. })),
+            "expected RefMismatch, got {result:?}"
+        );
+        if let Err(NormalizeError::RefMismatch { start, supplied_ref, actual_ref }) = result {
+            assert_eq!(start, 2);
+            assert_eq!(supplied_ref, b"A");
+            assert_eq!(actual_ref, b"G");
+        }
+    }
+
+    #[test]
+    fn test_normalize_ref_correct_succeeds() {
+        // Positive control: the true REF at position 2 is 'G'.
+        let seq = b"ACGTACGT";
+        let result = normalize(seq, 2, b"G", b"T").unwrap();
+        assert_eq!(result.start, 2);
+        assert_eq!(result.end, 3);
+        assert_eq!(result.allele, b"T");
+    }
+
+    #[test]
+    fn test_normalize_ref_mismatch_case_insensitive() {
+        // Lowercase REF that matches the (uppercase) reference must succeed.
+        let seq = b"ACGTACGT";
+        let result = normalize(seq, 2, b"g", b"t").unwrap();
+        assert_eq!(result.start, 2);
+        assert_eq!(result.end, 3);
+        assert_eq!(result.allele, b"t");
+    }
+
+    #[test]
+    fn test_normalize_ref_indel_mismatch_rejected() {
+        // Reference at interbase 2..4 is "GT"; claiming REF="GG" is wrong.
+        let seq = b"ACGTACGT";
+        let result = normalize(seq, 2, b"GG", b"G");
+        assert!(
+            matches!(result, Err(NormalizeError::RefMismatch { .. })),
+            "expected RefMismatch for indel, got {result:?}"
+        );
+    }
+
+    #[test]
+    fn test_normalize_empty_ref_insertion_accepted() {
+        // A pure insertion has no REF bases to validate; must be accepted.
+        let seq = b"ACGTACGT";
+        let result = normalize(seq, 2, b"", b"AA").unwrap();
+        // No REF bytes -> no mismatch possible; insertion rolls/normalizes fine.
+        assert_eq!(result.start, result.end);
     }
 }

@@ -6,6 +6,18 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
+/// Minimum MAPQ for a read to count toward QC metrics, matching ENCODE's
+/// `samtools view -q 30` "uniquely mapping" prefilter. Reads with a present
+/// MAPQ below this are excluded from all counts; a missing MAPQ (255) passes,
+/// as it does with samtools.
+const MIN_MAPQ: u8 = 30;
+
+/// True if the read has a present MAPQ below `MIN_MAPQ`. A missing MAPQ (the
+/// 255 sentinel, which noodles surfaces as `None`) is treated as passing.
+fn is_below_min_mapq(record: &bam::Record) -> bool {
+    matches!(record.mapping_quality(), Some(mapq) if mapq.get() < MIN_MAPQ)
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct BamQcResult {
     pub total_reads: u64,
@@ -67,6 +79,9 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
     if is_mitochondrial(chrom) {
         for record_result in records {
             let record = record_result?;
+            if is_below_min_mapq(&record) {
+                continue;
+            }
             if !record.flags().is_unmapped() {
                 result.total_reads += 1;
                 result.mito_reads += 1;
@@ -80,10 +95,13 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
 
     let mut read1_data: HashMap<Vec<u8>, (i64, i64)> = HashMap::new();
     let mut read2_data: HashMap<Vec<u8>, (i64, i64)> = HashMap::new();
-    let mut paired_read_count: u64 = 0;
 
     for record_result in records {
         let record = record_result?;
+
+        if is_below_min_mapq(&record) {
+            continue;
+        }
 
         if record.flags().is_unmapped() {
             continue;
@@ -105,7 +123,6 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
 
         if record.flags().is_segmented() {
             result.is_paired = true;
-            paired_read_count += 1;
 
             let qname = match record.name() {
                 Some(name) => name.to_vec(),
@@ -125,12 +142,21 @@ fn process_chromosome(bam_path: &Path, chrom: &str) -> Result<ChromResult, Box<d
     }
 
     if result.is_paired {
-        result.num_pairs = paired_read_count / 2;
+        // The NRF denominator must count the SAME population as the numerator:
+        // within-chromosome read1/read2 joins. Count one joined pair per
+        // successful `read2_data` lookup (not per distinct position), so
+        // duplicate fragment copies remain counted (ENCODE NRF < 1 relies on
+        // duplicate copies staying in the denominator). Orphan reads whose mate
+        // is on another chromosome (or unmapped) never join, so they no longer
+        // inflate the denominator.
+        let mut joined_pairs: u64 = 0;
         for (qname, (pos1, tlen1)) in &read1_data {
             if let Some(&(pos2, tlen2)) = read2_data.get(qname) {
                 *result.position_counts.entry((*pos1, *tlen1, pos2, tlen2)).or_insert(0) += 1;
+                joined_pairs += 1;
             }
         }
+        result.num_pairs = joined_pairs;
     }
 
     Ok(result)
@@ -209,7 +235,7 @@ pub fn compute_bam_qc_parallel(bam_path: &Path, num_threads: usize) -> Result<Ba
         total_reads: effective_total,
         distinct: m_distinct,
         m1,
-        m2: m2.max(1),
+        m2,
         dups: dup_count,
         mito_reads: mito_count,
         nrf,
@@ -283,7 +309,7 @@ pub fn compute_bam_qc(bam_path: &Path) -> Result<BamQcResult, Box<dyn Error>> {
         total_reads: effective_total,
         distinct: m_distinct,
         m1,
-        m2: m2.max(1),
+        m2,
         dups: dup_count,
         mito_reads: mito_count,
         nrf,

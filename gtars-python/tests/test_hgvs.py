@@ -23,8 +23,10 @@ def test_parse_substitution():
     assert v.pos_edit.edit.kind == "substitution"
     assert v.pos_edit.edit.ref == "C"
     assert v.pos_edit.edit.alt == "G"
-    assert v.pos_edit.start.base == 215
-    assert v.pos_edit.start.offset == 0
+    assert v.pos_edit.location_kind == "single"
+    assert v.pos_edit.start.kind == "certain"
+    assert v.pos_edit.start.position.base == 215
+    assert v.pos_edit.start.position.offset == 0
     assert v.pos_edit.end is None
 
 
@@ -68,22 +70,23 @@ def test_to_dict_roundtrip():
     assert parsed["pos_edit"]["edit"]["kind"] == "substitution"
     assert parsed["pos_edit"]["edit"]["ref"] == "C"
     assert parsed["pos_edit"]["edit"]["alt"] == "G"
-    assert parsed["pos_edit"]["start"]["base"] == 215
+    assert parsed["pos_edit"]["location_kind"] == "single"
+    assert parsed["pos_edit"]["start"]["position"]["base"] == 215
 
 
 def test_intronic_offset():
     v = parse_hgvs("NM_000546.6:c.215+5C>G")
-    assert v.pos_edit.start.base == 215
-    assert v.pos_edit.start.offset == 5
+    assert v.pos_edit.start.position.base == 215
+    assert v.pos_edit.start.position.offset == 5
 
 
 def test_three_prime_utr():
     v = parse_hgvs("NM_000546.6:c.*37C>G")
-    assert v.pos_edit.start.datum == Datum.CdsStop
-    assert v.pos_edit.start.base == 37
+    assert v.pos_edit.start.position.datum == Datum.CdsStop
+    assert v.pos_edit.start.position.base == 37
 
 
 def test_five_prime_utr():
     v = parse_hgvs("NM_000546.6:c.-14C>G")
-    assert v.pos_edit.start.base == -14
-    assert v.pos_edit.start.datum == Datum.Cds
+    assert v.pos_edit.start.position.base == -14
+    assert v.pos_edit.start.position.datum == Datum.Cds

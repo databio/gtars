@@ -1,29 +1,30 @@
-//! AUDIT TEST — finding #2 (HIGH): `looks_like_gene_symbol` blocklist false positives.
+//! REGRESSION TEST — finding #2 (HIGH): `looks_like_gene_symbol` blocklist false positives.
 //!
-//! `gtars_vrs::hgvs::bridge::looks_like_gene_symbol` (bridge.rs:552) classifies an
-//! accession token as a *gene symbol* (eligible for MANE resolution via
-//! `gene_to_mane_accession`) iff it does NOT start with one of a fixed list of
-//! blocked prefixes. That list contains the TWO-LETTER prefixes `"MT"`, `"KI"`,
-//! and `"GL"`, matched with `str::starts_with`. As a result, perfectly real
-//! HGNC gene symbols whose names merely *begin* with those two letters —
-//! `KIT`, `MTOR`, `MTHFR`, `GLI1`, ... — are misclassified as NON-gene-symbols.
+//! `gtars_vrs::hgvs::bridge::looks_like_gene_symbol` classifies an accession
+//! token as a *gene symbol* (eligible for MANE resolution via
+//! `gene_to_mane_accession`). It previously rejected any token starting with one
+//! of a fixed list of blocked prefixes that included the TWO-LETTER prefixes
+//! `"MT"`, `"KI"`, and `"GL"`, matched with `str::starts_with`. As a result,
+//! perfectly real HGNC gene symbols whose names merely *begin* with those two
+//! letters — `KIT`, `MTOR`, `MTHFR`, `GLI1`, ... — were misclassified as
+//! NON-gene-symbols.
 //!
-//! Consequence under test: an HGVS expression like `KIT:c.1A>G` is treated as if
-//! "KIT" were itself a transcript accession. The MANE lookup
-//! (`gene_to_mane_accession("KIT")`) is SKIPPED, the bridge asks the provider to
-//! resolve the chromosome for accession "KIT" directly, that fails, and the call
-//! errors (TranscriptNotFound / UnknownChrom) instead of resolving to the MANE
-//! transcript and producing a VRS id.
+//! Behavior guarded here: an HGVS expression like `KIT:c.1A>G` must NOT be
+//! treated as if "KIT" were itself a transcript accession. The MANE lookup
+//! (`gene_to_mane_accession("KIT")`) must run; the bridge must resolve via the
+//! MANE transcript and produce a VRS id, rather than asking the provider to
+//! resolve the chromosome for accession "KIT" directly (which would error with
+//! TranscriptNotFound / UnknownChrom).
 //!
 //! This file builds the same in-memory `RefgetStore` + `MockProvider` fixture as
 //! `hgvs_bridge.rs`, but wires the mock's `gene_to_mane_accession` so that the
-//! gene symbols "KIT" (blocked-prefix collision) and "BRAF" (clean control) both
-//! map to the forward fixture transcript `NM_FWD.1`. A correctly-behaving bridge
-//! resolves BOTH via MANE to the SAME VRS id. The blocklist bug makes only
-//! "BRAF" resolve; "KIT" errors.
+//! gene symbols "KIT" (former blocked-prefix collision) and "BRAF" (clean
+//! control) both map to the forward fixture transcript `NM_FWD.1`. A
+//! correctly-behaving bridge resolves BOTH via MANE to the SAME VRS id.
 //!
-//! The asserts encode the EXPECTED-CORRECT behavior ("KIT" resolves), so the
-//! test FAILS while the bug is present — a failing run CONFIRMS the bug.
+//! The asserts encode the CORRECT behavior ("KIT" resolves), and now pass with
+//! the fixed predicate — they stand as regression guards against reintroducing
+//! the over-broad two-letter blocklist.
 
 use std::collections::HashMap;
 
@@ -168,7 +169,6 @@ fn build_store_and_provider() -> (RefgetStore, MockProvider, String, tempfile::T
 /// as a gene symbol, resolved via MANE to NM_FWD.1, and produces a VRS id.
 /// This shows the gene-symbol → MANE path itself works end-to-end in the
 /// fixture, isolating the failure below to the blocklist collision.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
 #[test]
 fn control_braf_gene_symbol_resolves_via_mane() {
     let (mut store, provider, coll, _temp) = build_store_and_provider();
@@ -183,18 +183,17 @@ fn control_braf_gene_symbol_resolves_via_mane() {
     eprintln!("control BRAF:c.2C>T -> {id}");
 }
 
-// ── BUG A: blocked two-letter prefixes shadow real gene symbols ──────────────
+// ── Regression: two-letter prefixes must NOT shadow real gene symbols ────────
 
-/// EXPECTED-CORRECT behavior: `KIT:c.2C>T` resolves via MANE (KIT -> NM_FWD.1)
-/// to the SAME VRS id as the non-colliding control `BRAF:c.2C>T`.
+/// `KIT:c.2C>T` resolves via MANE (KIT -> NM_FWD.1) to the SAME VRS id as the
+/// non-colliding control `BRAF:c.2C>T`.
 ///
-/// ACTUAL (buggy) behavior: "KIT" starts with the blocked prefix "KI", so
-/// `looks_like_gene_symbol("KIT")` returns false, MANE resolution is skipped,
-/// and the bridge tries to resolve "KIT" as a transcript accession — which the
+/// Former (buggy) behavior: "KIT" started with the blocked prefix "KI", so
+/// `looks_like_gene_symbol("KIT")` returned false, MANE resolution was skipped,
+/// and the bridge tried to resolve "KIT" as a transcript accession — which the
 /// provider does not know — yielding an error.
 ///
-/// This assertion (KIT == BRAF id) FAILS while the bug is present.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
+/// This assertion (KIT == BRAF id) guards against reintroducing that defect.
 #[test]
 fn kit_gene_symbol_must_resolve_via_mane() {
     let (mut store, provider, coll, _temp) = build_store_and_provider();
@@ -208,9 +207,9 @@ fn kit_gene_symbol_must_resolve_via_mane() {
 
     assert!(
         kit.is_ok(),
-        "BUG A: 'KIT' is a real gene symbol but is blocked by the two-letter \
-         'KI' prefix in looks_like_gene_symbol, so MANE resolution is skipped \
-         and the call errors instead of resolving. got {kit:?}"
+        "'KIT' is a real gene symbol; it must not be blocked by a two-letter \
+         'KI' prefix in looks_like_gene_symbol. MANE resolution must run instead \
+         of the call erroring. got {kit:?}"
     );
     assert_eq!(
         kit.unwrap().value,
@@ -221,8 +220,7 @@ fn kit_gene_symbol_must_resolve_via_mane() {
 
 /// Same defect via a different colliding symbol family, to show it is the
 /// two-letter-prefix rule and not specific to "KIT". `MTOR` collides with "MT",
-/// `GLI1` collides with "GL". Both should resolve via MANE; both are blocked.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
+/// `GLI1` collides with "GL". Both must resolve via MANE.
 #[test]
 fn mtor_and_gli1_gene_symbols_must_resolve_via_mane() {
     let (mut store, provider, coll, _temp) = build_store_and_provider();
@@ -234,10 +232,10 @@ fn mtor_and_gli1_gene_symbols_must_resolve_via_mane() {
 
     assert!(
         mtor.is_ok(),
-        "BUG A: 'MTOR' blocked by two-letter 'MT' prefix. got {mtor:?}"
+        "'MTOR' must not be blocked by a two-letter 'MT' prefix. got {mtor:?}"
     );
     assert!(
         gli1.is_ok(),
-        "BUG A: 'GLI1' blocked by two-letter 'GL' prefix. got {gli1:?}"
+        "'GLI1' must not be blocked by a two-letter 'GL' prefix. got {gli1:?}"
     );
 }

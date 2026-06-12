@@ -1622,6 +1622,17 @@ impl ReadonlyRefgetStore {
                     .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
                 file.seek(SeekFrom::Start(byte_start))
                     .context("Failed to seek in local seq file")?;
+                let file_len = file.metadata()
+                    .with_context(|| format!("Failed to stat local seq file: {}", full.display()))?.len();
+                if file_len < byte_start + byte_len {
+                    return Err(anyhow!(
+                        "Local seq file is too short to satisfy the requested byte range \
+                         [{}..{}) (file has {} bytes): {}",
+                        byte_start, byte_start + byte_len,
+                        file_len,
+                        full.display()
+                    ));
+                }
                 Box::new(BufReader::new(file).take(byte_len))
             } else if let Some(remote) = self.remote_source.as_ref() {
                 open_remote_range(remote, &relpath, byte_start, byte_end)?

@@ -343,21 +343,37 @@ mod parallel {
         // Build the VCF text in memory. A long-ish INFO field on the chr1/A>T
         // records makes some lines straddle small BGZF blocks (this only affects
         // block-straddling, not VRS output).
+        let chr1_bytes = chr1_seq.as_bytes();
+        let chr2_bytes = chr2_seq.as_bytes();
         let mut vcf = String::new();
         vcf.push_str("##fileformat=VCFv4.2\n");
         vcf.push_str("#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n");
         for i in 0..200 {
             let pos = 5 + (i % 40);
+            // Derive REF from the actual reference base at this position (VCF POS
+            // is 1-based, so the reference base is seq[pos-1]). `normalize_ref`
+            // validates REF against the reference, so a hardcoded REF would only
+            // match at some positions. Pick an ALT that differs from REF.
+            let r1 = chr1_bytes[pos - 1] as char;
+            let a1 = if r1 == 'A' { 'C' } else { 'A' };
             vcf.push_str(&format!(
-                "chr1\t{pos}\t.\tA\tT\t.\tPASS\tAF=0.1;INFO_PAD=XXXXXXXXXXXXXXXXXXXX\n"
+                "chr1\t{pos}\t.\t{r1}\t{a1}\t.\tPASS\tAF=0.1;INFO_PAD=XXXXXXXXXXXXXXXXXXXX\n"
             ));
-            vcf.push_str(&format!("chr2\t{pos}\t.\tG\tA,T\t.\tPASS\t.\n"));
+            // chr2 records stay multi-allelic; both ALTs must differ from REF.
+            let r2 = chr2_bytes[pos - 1] as char;
+            let (a2a, a2b) = match r2 {
+                'A' => ('C', 'G'),
+                'C' => ('A', 'G'),
+                'G' => ('A', 'C'),
+                _ => ('A', 'C'), // r2 == 'T'
+            };
+            vcf.push_str(&format!("chr2\t{pos}\t.\t{r2}\t{a2a},{a2b}\t.\tPASS\t.\n"));
         }
         // Insertion + deletion in the A-repeat (1-based 51 == 0-based 50).
         vcf.push_str("chr1\t51\t.\tA\tAA\t.\tPASS\t.\n");
         vcf.push_str("chr1\t51\t.\tAA\tA\t.\tPASS\t.\n");
-        // SNV.
-        vcf.push_str("chr1\t10\t.\tG\tC\t.\tPASS\t.\n");
+        // SNV. REF must match chr1[9] (0-based) == 'C'.
+        vcf.push_str("chr1\t10\t.\tC\tA\t.\tPASS\t.\n");
         // Symbolic allele: must be skipped by both paths.
         vcf.push_str("chr1\t20\t.\tA\t<DEL>\t.\tPASS\t.\n");
         // Unknown chromosome: must be skipped by both paths.

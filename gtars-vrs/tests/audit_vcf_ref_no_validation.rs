@@ -1,32 +1,19 @@
-//! AUDIT TEST — finding #4 (MEDIUM): VCF→VRS does not validate the VCF REF
-//! allele against the actual reference sequence.
+//! REGRESSION GUARDS: VCF→VRS must validate the VCF REF allele against the
+//! actual reference sequence.
 //!
 //! The readonly VCF streaming core
 //! (`gtars_vrs::compute_vrs_ids_streaming_readonly_from_reader`, in
-//! `vcf_core.rs`) hands the VCF's REF allele straight into
-//! `normalize::normalize_ref(view, pos, ref_allele, alt_allele)`. `normalize_ref`
-//! uses the supplied REF only for its LENGTH (to compute the end coordinate and
-//! to trim shared prefix/suffix between REF and ALT); it then ROLLS against the
-//! *real* reference bases pulled from the store. At no point does it compare the
-//! supplied REF bytes to the actual reference bases at that position.
+//! `vcf_core.rs`) hands the VCF's REF allele into
+//! `normalize::normalize_ref(view, pos, ref_allele, alt_allele)`, which now
+//! compares the supplied REF bytes to the actual reference bases at that
+//! position and raises `NormalizeError::RefMismatch` on disagreement. This
+//! mirrors the HGVS bridge's `BridgeError::RefMismatch` guard.
 //!
-//! Contrast: the HGVS bridge DOES cross-check the parsed REF against the real
-//! reference and raises `BridgeError::RefMismatch` on disagreement
-//! (`hgvs/bridge.rs` ~line 372 / 730). The VCF path has no equivalent guard.
-//!
-//! Consequence: a VCF record whose REF disagrees with the loaded reference (a
-//! common real-world symptom of wrong-assembly / liftover / data-entry errors)
-//! is silently processed. Because trimming is driven by the (wrong) REF while
-//! rolling uses the (right) reference, the emitted VRS id can be computed from a
-//! REF the reference never had — a wrong id, emitted with no error and no flag.
-//!
-//! This test loads a reference where position (1-based) 6 is 'C'. It computes a
-//! VRS id from a record claiming `REF=G` (WRONG) and compares it to the id from
-//! the correct `REF=C`. The asserts encode the EXPECTED-CORRECT behavior — a
-//! REF/reference mismatch should be rejected (error) or at minimum should not
-//! silently yield the same id as a correct REF — so the test FAILS while the
-//! bug is present, CONFIRMING it. We also print the concrete ids so the
-//! silent-acceptance is visible in `--nocapture` output.
+//! A VCF record whose REF disagrees with the loaded reference (a common
+//! real-world symptom of wrong-assembly / liftover / data-entry errors) must
+//! fail loudly rather than emit a VRS id computed from a REF the reference
+//! never had. These tests pin that behavior for both a same-length SNV
+//! mismatch and an indel mismatch.
 
 use std::collections::HashMap;
 use std::io::Cursor;
@@ -98,20 +85,11 @@ fn run_one_record(
     Ok(out)
 }
 
-/// BUG B. A VCF record at chrF:6 with the CORRECT ref ('C') and one with a
-/// WRONG ref ('G', the reference is actually 'C') are both fed to the VCF→VRS
-/// path.
-///
-/// EXPECTED-CORRECT behavior (encoded by the asserts): the wrong-REF record is
-/// rejected (the call errors, or yields no result, or at the very least yields
-/// a DIFFERENT id than the correct-REF record — never silently the same id as
-/// if the REF had been right).
-///
-/// ACTUAL behavior: no REF validation exists. The wrong REF 'G' has the same
-/// length as the correct 'C', so trimming behaves identically and the variant
-/// is rolled against the real reference. The path emits an id with NO error.
-/// The assert below therefore FAILS, confirming the bug.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
+/// A VCF record at chrF:6 with the CORRECT ref ('C') processes, while one with
+/// a WRONG ref ('G', the reference is actually 'C') must be rejected with a
+/// `RefMismatch` error. The wrong REF 'G' has the same length as the correct
+/// 'C', so trimming behaves identically — only an explicit REF-vs-reference
+/// comparison can catch it.
 #[test]
 fn vcf_wrong_ref_must_be_rejected() {
     let (store, n2d, _temp) = build_readonly_store();
@@ -126,55 +104,35 @@ fn vcf_wrong_ref_must_be_rejected() {
     // WRONG REF: claims 'G' at a position whose reference base is 'C'.
     let wrong = run_one_record(&store, &n2d, "chrF\t6\t.\tG\tT\t.\tPASS\t.");
 
-    match &wrong {
-        Err(e) => {
-            // Desired outcome: pipeline errored on the REF/reference mismatch.
-            eprintln!("wrong REF=G -> Err: {e:#}  (validation present — good)");
-        }
-        Ok(results) => {
-            let wrong_id = results
-                .first()
-                .map(|r| r.vrs_id.clone())
-                .unwrap_or_else(|| "<no result>".to_string());
-            eprintln!(
-                "wrong REF=G -> Ok, vrs_id = {wrong_id}  \
-                 (NO error raised on a REF that disagrees with the reference)"
-            );
-        }
-    }
-
-    // EXPECTED-CORRECT contract: a REF that contradicts the loaded reference
-    // must NOT be silently accepted and turned into a VRS id. Either the call
-    // errors, or it must at least not produce a result that pretends the REF
-    // was valid.
+    let err = wrong.expect_err(
+        "VCF→VRS must reject REF=G at a position whose reference base is 'C'",
+    );
+    let msg = format!("{err:#}");
+    eprintln!("wrong REF=G -> Err: {msg}");
     assert!(
-        wrong.is_err() || wrong.as_ref().unwrap().is_empty(),
-        "BUG #4: VCF→VRS accepted REF=G at a position whose reference base is \
-         'C' and emitted a VRS id with no error/flag. The VCF REF allele is \
-         never validated against the actual reference sequence. \
-         correct(REF=C) id = {correct_id}; wrong(REF=G) outcome = {wrong:?}"
+        msg.contains("ref allele mismatch"),
+        "expected a RefMismatch error, got: {msg}"
     );
 }
 
-/// Companion that makes the silent-corruption concrete: with a WRONG ref whose
-/// trimming differs from the correct ref, the emitted id can differ from the
-/// correct one while STILL being emitted without error. Here REF="GT" ALT="G"
-/// (a claimed 1bp deletion of the base after pos 6) is processed against a
-/// reference whose bytes at 6_7 are actually "CG", so the claimed REF is wrong.
-/// A correct pipeline would reject the mismatch; this one emits an id.
-#[ignore = "audit reproduction (PR #256) — run with --ignored"]
+/// Indel companion: REF="GG" ALT="G" at chrF:6, where the reference bytes at
+/// interbase 5..7 are actually "CG". The first REF base disagrees, so the
+/// record must be rejected with a `RefMismatch` error rather than emitting an id.
 #[test]
-fn vcf_wrong_ref_indel_emits_without_validation() {
+fn vcf_wrong_ref_indel_must_be_rejected() {
     let (store, n2d, _temp) = build_readonly_store();
 
     // chrF[ib5..ib7] (1-based 6..7) == "CG". A truthful deletion record would be
     // REF="CG" ALT="C". We instead claim REF="GG" ALT="G" — first base wrong.
     let wrong = run_one_record(&store, &n2d, "chrF\t6\t.\tGG\tG\t.\tPASS\t.");
-    eprintln!("wrong indel REF=GG -> {wrong:?}");
 
+    let err = wrong.expect_err(
+        "VCF→VRS must reject indel REF='GG' that disagrees with reference 'CG'",
+    );
+    let msg = format!("{err:#}");
+    eprintln!("wrong indel REF=GG -> Err: {msg}");
     assert!(
-        wrong.is_err() || wrong.as_ref().unwrap().is_empty(),
-        "BUG #4: VCF→VRS accepted an indel REF='GG' that disagrees with the \
-         reference ('CG') and emitted a VRS id with no error. got {wrong:?}"
+        msg.contains("ref allele mismatch"),
+        "expected a RefMismatch error, got: {msg}"
     );
 }

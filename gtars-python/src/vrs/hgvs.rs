@@ -237,16 +237,87 @@ impl EditPy {
 }
 
 // ---------------------------------------------------------------------------
+// PositionBound
+// ---------------------------------------------------------------------------
+
+/// One side (start or end) of a location range.
+///
+/// `kind` is one of:
+/// - `"certain"`: a concrete point, available in `position` (`low`/`high` None).
+/// - `"uncertain"`: an interval bounded by `low` and `high`, where a `None`
+///   bound represents the HGVS `?` token (unbounded on that side).
+#[pyclass(name = "PositionBound", module = "gtars.vrs.hgvs")]
+#[derive(Debug, Clone)]
+pub struct PositionBoundPy {
+    /// "certain" | "uncertain"
+    #[pyo3(get)]
+    pub kind: String,
+    /// For kind="certain": the position. None for uncertain.
+    #[pyo3(get)]
+    pub position: Option<PositionPy>,
+    /// For kind="uncertain": low bound; None means `?` (unbounded-low).
+    #[pyo3(get)]
+    pub low: Option<PositionPy>,
+    /// For kind="uncertain": high bound; None means `?` (unbounded-high).
+    #[pyo3(get)]
+    pub high: Option<PositionPy>,
+}
+
+#[pymethods]
+impl PositionBoundPy {
+    fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
+        let d = PyDict::new(py);
+        d.set_item("kind", &self.kind)?;
+        d.set_item("position", self.position.map(|p| p.to_dict(py)).transpose()?)?;
+        d.set_item("low", self.low.map(|p| p.to_dict(py)).transpose()?)?;
+        d.set_item("high", self.high.map(|p| p.to_dict(py)).transpose()?)?;
+        Ok(d)
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "PositionBound(kind={:?}, position={:?}, low={:?}, high={:?})",
+            self.kind, self.position, self.low, self.high
+        )
+    }
+}
+
+impl PositionBoundPy {
+    fn certain(p: Position) -> Self {
+        Self {
+            kind: "certain".to_string(),
+            position: Some(PositionPy::from_rs(p)),
+            low: None,
+            high: None,
+        }
+    }
+
+    fn uncertain(low: Option<Position>, high: Option<Position>) -> Self {
+        Self {
+            kind: "uncertain".to_string(),
+            position: None,
+            low: low.map(PositionPy::from_rs),
+            high: high.map(PositionPy::from_rs),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // PosEdit
 // ---------------------------------------------------------------------------
 
 #[pyclass(name = "PosEdit", module = "gtars.vrs.hgvs")]
 #[derive(Debug, Clone)]
 pub struct PosEditPy {
+    /// One of: "single", "range", "whole_sequence".
     #[pyo3(get)]
-    pub start: PositionPy,
+    pub location_kind: String,
+    /// Start endpoint. None only for whole_sequence.
     #[pyo3(get)]
-    pub end: Option<PositionPy>,
+    pub start: Option<PositionBoundPy>,
+    /// End endpoint. None for single and whole_sequence.
+    #[pyo3(get)]
+    pub end: Option<PositionBoundPy>,
     #[pyo3(get)]
     pub edit: EditPy,
     #[pyo3(get)]
@@ -257,8 +328,15 @@ pub struct PosEditPy {
 impl PosEditPy {
     fn to_dict<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyDict>> {
         let d = PyDict::new(py);
-        d.set_item("start", self.start.to_dict(py)?)?;
-        d.set_item("end", self.end.map(|p| p.to_dict(py)).transpose()?)?;
+        d.set_item("location_kind", &self.location_kind)?;
+        d.set_item(
+            "start",
+            self.start.as_ref().map(|b| b.to_dict(py)).transpose()?,
+        )?;
+        d.set_item(
+            "end",
+            self.end.as_ref().map(|b| b.to_dict(py)).transpose()?,
+        )?;
         d.set_item("edit", self.edit.to_dict(py)?)?;
         d.set_item("uncertain", self.uncertain)?;
         Ok(d)
@@ -266,44 +344,55 @@ impl PosEditPy {
 
     fn __repr__(&self) -> String {
         format!(
-            "PosEdit(start={:?}, end={:?}, edit={:?}, uncertain={})",
-            self.start, self.end, self.edit, self.uncertain
+            "PosEdit(location_kind={:?}, start={:?}, end={:?}, edit={:?}, uncertain={})",
+            self.location_kind, self.start, self.end, self.edit, self.uncertain
         )
     }
 }
 
 impl PosEditPy {
     fn from_rs(pe: PosEditOwned) -> Self {
-        let (start, end) = match pe.pos {
-            LocationRange::Single(p) => (PositionPy::from_rs(p), None),
+        let (location_kind, start, end) = match pe.pos {
+            LocationRange::Single(p) => {
+                ("single", Some(PositionBoundPy::certain(p)), None)
+            }
             LocationRange::Range { start, end } => (
-                PositionPy::from_rs(start),
-                Some(PositionPy::from_rs(end)),
+                "range",
+                Some(PositionBoundPy::certain(start)),
+                Some(PositionBoundPy::certain(end)),
             ),
-            LocationRange::WholeSequence => {
-                // Whole sequence - use placeholder positions
-                (PositionPy { base: 1, offset: 0, datum: DatumPy::SeqStart }, None)
-            },
-            LocationRange::UncertainStart { start_high, end, .. } => {
-                // Use the high estimate of the start if available, otherwise the end
-                let start_pos = start_high.map(PositionPy::from_rs)
-                    .unwrap_or_else(|| PositionPy::from_rs(end));
-                (start_pos, Some(PositionPy::from_rs(end)))
-            },
-            LocationRange::UncertainEnd { start, end_low, .. } => {
-                // Use the low estimate of the end if available
-                let end_pos = end_low.map(PositionPy::from_rs);
-                (PositionPy::from_rs(start), end_pos)
-            },
-            LocationRange::UncertainBoth { start_high, end_low, .. } => {
-                // Use high estimate of start and low estimate of end if available
-                let start_pos = start_high.map(PositionPy::from_rs)
-                    .unwrap_or_else(|| PositionPy { base: 1, offset: 0, datum: DatumPy::SeqStart });
-                let end_pos = end_low.map(PositionPy::from_rs);
-                (start_pos, end_pos)
-            },
+            LocationRange::WholeSequence => ("whole_sequence", None, None),
+            LocationRange::UncertainStart {
+                start_low,
+                start_high,
+                end,
+            } => (
+                "range",
+                Some(PositionBoundPy::uncertain(start_low, start_high)),
+                Some(PositionBoundPy::certain(end)),
+            ),
+            LocationRange::UncertainEnd {
+                start,
+                end_low,
+                end_high,
+            } => (
+                "range",
+                Some(PositionBoundPy::certain(start)),
+                Some(PositionBoundPy::uncertain(end_low, end_high)),
+            ),
+            LocationRange::UncertainBoth {
+                start_low,
+                start_high,
+                end_low,
+                end_high,
+            } => (
+                "range",
+                Some(PositionBoundPy::uncertain(start_low, start_high)),
+                Some(PositionBoundPy::uncertain(end_low, end_high)),
+            ),
         };
         Self {
+            location_kind: location_kind.to_string(),
             start,
             end,
             edit: EditPy::from_rs(pe.edit),
@@ -442,6 +531,7 @@ pub fn register(py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<DatumPy>()?;
     m.add_class::<PositionPy>()?;
     m.add_class::<EditPy>()?;
+    m.add_class::<PositionBoundPy>()?;
     m.add_class::<PosEditPy>()?;
     m.add_class::<HgvsVariantPy>()?;
     m.add_function(wrap_pyfunction!(parse_hgvs, m)?)?;

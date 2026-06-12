@@ -550,14 +550,42 @@ struct AlleleParts {
 /// True if the accession looks like a bare gene symbol (not an NCBI / chrom
 /// accession), for the gene-symbol → MANE resolution path.
 pub(crate) fn looks_like_gene_symbol(accession: &str) -> bool {
+    // Versioned accessions (NCBI/Ensembl/scaffold) always carry a version dot;
+    // none of those are gene symbols.
     if accession.contains('.') {
         return false;
     }
-    let blocked_prefixes = [
-        "NC_", "NM_", "NR_", "NG_", "NW_", "NT_", "XM_", "XR_", "ENST", "ENSG", "chr", "GL",
-        "KI", "MT",
+
+    // Exact mitochondrial chromosome name. (chrM / chrMT are covered by the
+    // "chr" prefix below; bare "MT" is the only mito alias the prefix misses.)
+    if accession == "MT" {
+        return false;
+    }
+
+    // Unambiguous accession prefixes: an underscore- or multi-letter-anchored
+    // namespace can never collide with an HGNC symbol.
+    const ACCESSION_PREFIXES: [&str; 11] = [
+        "NC_", "NM_", "NR_", "NG_", "NW_", "NT_", "XM_", "XR_", "ENST", "ENSG", "chr",
     ];
-    !blocked_prefixes.iter().any(|p| accession.starts_with(p))
+    if ACCESSION_PREFIXES
+        .iter()
+        .any(|p| accession.starts_with(p))
+    {
+        return false;
+    }
+
+    // Unplaced-scaffold accessions GL000220 / KI270728 are "GL"/"KI" followed by
+    // a digit. Real gene symbols (GLI1, KIT, KIF5B) put a LETTER after GL/KI, so
+    // only block the digit-after-prefix scaffold shape.
+    for scaffold_prefix in ["GL", "KI"] {
+        if let Some(rest) = accession.strip_prefix(scaffold_prefix) {
+            if rest.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+                return false;
+            }
+        }
+    }
+
+    true
 }
 
 /// Standard A/T/C/G/N reverse complement. Errors on any other byte.
@@ -901,13 +929,32 @@ mod tests {
 
     #[test]
     fn test_looks_like_gene_symbol() {
+        // Real HGNC gene symbols — must be treated as gene symbols.
         assert!(looks_like_gene_symbol("BRAF"));
         assert!(looks_like_gene_symbol("TP53"));
+        assert!(looks_like_gene_symbol("KIT")); // was blocked by "KI"
+        assert!(looks_like_gene_symbol("MTOR")); // was blocked by "MT"
+        assert!(looks_like_gene_symbol("MTHFR")); // was blocked by "MT"
+        assert!(looks_like_gene_symbol("GLI1")); // was blocked by "GL"
+        assert!(looks_like_gene_symbol("KIF5B")); // letter after "KI"
+        assert!(looks_like_gene_symbol("MT-CO1")); // mito gene symbol, not the chrom
+        assert!(looks_like_gene_symbol("MT-ND1"));
+
+        // NCBI / Ensembl / chrom accessions — not gene symbols.
         assert!(!looks_like_gene_symbol("NM_004333.6"));
         assert!(!looks_like_gene_symbol("NC_000007.14"));
-        assert!(!looks_like_gene_symbol("chr7"));
-        assert!(!looks_like_gene_symbol("MT"));
         assert!(!looks_like_gene_symbol("ENST00000288602"));
+        assert!(!looks_like_gene_symbol("ENSG00000157764"));
+        assert!(!looks_like_gene_symbol("chr7"));
+        assert!(!looks_like_gene_symbol("chrM"));
+        assert!(!looks_like_gene_symbol("chrMT"));
+
+        // Mitochondrial chromosome name and unplaced-scaffold accessions.
+        assert!(!looks_like_gene_symbol("MT")); // exact chrom name
+        assert!(!looks_like_gene_symbol("GL000220.1")); // versioned scaffold
+        assert!(!looks_like_gene_symbol("KI270728.1")); // versioned scaffold
+        assert!(!looks_like_gene_symbol("GL000220")); // unversioned scaffold
+        assert!(!looks_like_gene_symbol("KI270728")); // unversioned scaffold
     }
 
     /// Golden VRS id for `chrF:g.6C>T` over the synthetic `chrF` contig. This is
