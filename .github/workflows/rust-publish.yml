@@ -354,19 +354,31 @@ jobs:
           FAILED=0
           for dir in npm/*/; do
             if [ -f "$dir/package.json" ]; then
+              # OIDC trusted publishing auto-generates provenance, which validates
+              # repository.url; the napi-generated platform package.json lacks it.
+              jq '.repository = {"type":"git","url":"https://github.com/databio/gtars"}' "$dir/package.json" > "$dir/package.json.tmp" && mv "$dir/package.json.tmp" "$dir/package.json"
               echo "Publishing $dir..."
               if ! npm publish "$dir" --access public; then
-                echo "::warning::Failed to publish $dir"
+                echo "::error::Failed to publish $dir"
                 FAILED=$((FAILED + 1))
               fi
             fi
           done
           if [ "$FAILED" -gt 0 ]; then
-            echo "::warning::$FAILED platform package(s) failed to publish"
+            echo "::error::$FAILED platform package(s) failed to publish"
+            exit 1
           fi
       - name: Publish main package
         working-directory: gtars-node
-        run: npm publish --access public --ignore-scripts
+        run: |
+          if npm publish --access public --ignore-scripts 2>npm_err.log; then
+            echo "published @databio/gtars-node"
+          elif grep -qiE "cannot publish over|previously published|already exists" npm_err.log; then
+            echo "@databio/gtars-node already published at this version — skipping"
+          else
+            cat npm_err.log >&2
+            exit 1
+          fi
 
   create-tags:
     if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
