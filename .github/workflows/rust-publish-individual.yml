@@ -15,7 +15,6 @@ on:
             - gtars-genomicdist
             - gtars-igd
             - gtars-io
-            - gtars-lola
             - gtars-overlaprs
             - gtars-refget
             - gtars-scoring
