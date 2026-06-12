@@ -1,0 +1,45 @@
+[package]
+name = "gtars-scatrs"
+version = "0.1.0"
+edition = "2021"
+description = "SCATRS: Single-Cell ATAC-seq Region Simulator - High-performance single-cell ATAC-seq fragment simulation"
+license = "MIT"
+repository = "https://github.com/databio/gtars"
+
+[dependencies]
+# Core dependencies
+clap = { version = "4.4.7", features = ["derive"] }
+bio = "1.3"
+memmap2 = "0.5"
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+rand_distr = "0.4"
+rayon = "1.10.0"
+glob = "0.3.1"
+tempfile = "3.10.1"
+seq_io = "0.3.2"
+thiserror = "2.0.12"
+ndarray = "0.15.6"
+ndarray-npy = "0.8.1"
+noodles = { version = "0.83.0", features = ["bam", "sam", "bgzf"] }
+csv = "1.3"
+serde_yaml = "0.9"
+toml = "0.8"
+bincode = "1.3"
+pathdiff = "0.2"
+
+# Workspace dependencies
+anyhow = { workspace = true }
+flate2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+byteorder = { workspace = true }
+fxhash = { workspace = true }
+indicatif = { workspace = true }
+
+# Internal dependencies
+gtars-core = { path = "../gtars-core" }
+
+[dev-dependencies]
+pretty_assertions = "1.4.1"
+rstest = "0.26.1"
