@@ -29,6 +29,12 @@ gtars-genomicdist = { path = "../gtars-genomicdist", optional=true, version="0.8
 gtars-refget = { path = "../gtars-refget", optional=true, version="0.9.0" }
 gtars-core = { path = "../gtars-core", version="0.5.5", features=["bigbed", "http"] }
 
+# Force SQLite (pulled transitively via gtars-bbcache -> diesel) to compile
+# from bundled source so the build doesn't require a system sqlite3 library.
+# Without this, the Windows release build fails: LNK1181 cannot open sqlite3.lib.
+# Version must match the libsqlite3-sys diesel resolves to for feature unification.
+libsqlite3-sys = { version = "0.35", features = ["bundled"], optional = true }
+
 # serialization
 serde = { workspace = true }
 serde_json = "1"
@@ -42,7 +48,7 @@ path = "src/main.rs"
 default = ["scoring", "uniwig", "bbcache", "igd", "fragsplit", "overlaprs", "genomicdist", "refget"]
 scoring = ["dep:gtars-scoring"]
 uniwig = ["dep:gtars-uniwig"]
-bbcache = ["dep:gtars-bbcache"]
+bbcache = ["dep:gtars-bbcache", "dep:libsqlite3-sys"]
 igd = ["dep:gtars-igd"]
 fragsplit = ["dep:gtars-fragsplit"]
 overlaprs = ["dep:gtars-overlaprs"]
