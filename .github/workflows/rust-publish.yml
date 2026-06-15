@@ -408,6 +408,6 @@ jobs:
           VERSION="${{ steps.version.outputs.version }}"
           for prefix in py cli wasm node; do
             TAG="${prefix}-${VERSION}"
-            git tag "$TAG"
-            git push origin "$TAG"
+            git tag -f "$TAG"
+            git push -f origin "$TAG"
           done

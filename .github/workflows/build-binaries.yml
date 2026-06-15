@@ -11,6 +11,7 @@ jobs:
   release:
     name: Release - ${{ matrix.platform.os-name }}
     strategy:
+      fail-fast: false
       matrix:
         platform:
           - os-name: FreeBSD-x86_64
@@ -22,7 +23,7 @@ jobs:
             target: x86_64-unknown-linux-musl
 
           - os-name: Linux-aarch64
-            runs-on: ubuntu-24.04
+            runs-on: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
 
           - os-name: Windows-x86_64
