@@ -1,0 +1,101 @@
+name: Build and publish R bindings binary package
+
+# Builds the gtars R package (extendr-based) once into a prebuilt binary
+# tarball so downstream CI can install it in seconds without a Rust toolchain:
+#
+#   install.packages(
+#     "https://github.com/databio/gtars/releases/download/v<ver>/gtars_<ver>_R_x86_64-pc-linux-gnu.tar.gz",
+#     repos = NULL, type = "binary"
+#   )
+#
+# IMPORTANT: R binary packages are tied to (OS + arch) x R minor version.
+# The consuming runner MUST use the same R minor version (see `r-version`
+# below) or R will refuse to load the binary. Keep this in sync with the R
+# version pinned in tests.yml / codecov.yml.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build R package - ${{ matrix.config.os-name }} (R ${{ matrix.config.r }})
+    runs-on: ${{ matrix.config.runs-on }}
+    # Build inside the official Bioconductor image: it ships BiocGenerics,
+    # IRanges, GenomicRanges, etc. preinstalled, so the build never hits the
+    # flaky Bioconductor source mirror. It's Ubuntu-noble + R 4.4, matching the
+    # r-lib/setup-r 4.4 environment downstream consumers use, so the binary
+    # tarball stays loadable for them.
+    container:
+      image: ${{ matrix.config.container }}
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - os-name: linux-x86_64
+            runs-on: ubuntu-24.04
+            r: '4.4'
+            container: bioconductor/bioconductor_docker:RELEASE_3_20
+    steps:
+      - uses: actions/checkout@v4
+
+      # gtars-r compiles a Rust crate (via extendr) during R CMD INSTALL.
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: gtars-r/src/rust
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      # Install DESCRIPTION deps via BiocManager (plain install.packages does
+      # not know the Bioconductor repos and silently skips Bioc packages).
+      # Point Bioconductor at Posit P3M — a fast, reliable CDN serving Bioc
+      # Linux binaries — instead of the default osn/xsede mirror, which times
+      # out from GitHub runners. Verify afterwards so a silent skip can't pass.
+      - name: Install R dependencies
+        run: |
+          Rscript - <<'EOF'
+          options(repos = c(P3M = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+          options(BioC_mirror = "https://packagemanager.posit.co/bioconductor")
+          options(BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/config.yaml")
+          pkgs <- c("BiocGenerics", "IRanges", "GenomicRanges", "data.table", "jsonlite", "testthat")
+          BiocManager::install(pkgs, update = FALSE, ask = FALSE)
+          miss <- pkgs[!pkgs %in% rownames(installed.packages())]
+          if (length(miss)) stop("Failed to install: ", paste(miss, collapse = ", "))
+          EOF
+
+      # `--build` produces a binary tarball (gtars_<ver>_R_<platform>.tar.gz)
+      # in the working directory, with the compiled gtars.so already inside.
+      - name: Build binary package
+        run: R CMD INSTALL --build gtars-r
+
+      - name: Identify built tarball
+        id: pkg
+        run: |
+          file=$(ls gtars_*_R_*.tar.gz | head -n1)
+          if [ -z "$file" ]; then
+            echo "::error::No binary tarball produced by R CMD INSTALL --build"
+            ls -la
+            exit 1
+          fi
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+          echo "Built $file"
+
+      # Always available as a workflow artifact (used to verify manual-dispatch
+      # runs, since those have no associated release to attach to).
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gtars-r-${{ matrix.config.os-name }}-R${{ matrix.config.r }}
+          path: ${{ steps.pkg.outputs.file }}
+
+      # On a published release, attach the binary as a release asset.
+      - name: Attach to GitHub release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pkg.outputs.file }}
