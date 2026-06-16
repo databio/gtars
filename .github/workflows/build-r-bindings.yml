@@ -55,11 +55,12 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # BiocGenerics/IRanges/GenomicRanges are preinstalled in the image; this
-      # only tops up the remaining DESCRIPTION deps (data.table, jsonlite,
-      # testthat) from the image's configured binary repos.
-      - name: Install remaining R dependencies
-        run: Rscript -e 'pkgs <- c("data.table", "jsonlite", "testthat"); need <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(need)) install.packages(need)'
+      # Install DESCRIPTION deps. The Bioconductor image has BiocManager and
+      # the Bioc binary repos preconfigured, so install.packages() resolves the
+      # Bioconductor packages (BiocGenerics, IRanges, GenomicRanges) as binaries
+      # without touching the flaky source mirror.
+      - name: Install R dependencies
+        run: Rscript -e 'pkgs <- c("BiocGenerics", "IRanges", "GenomicRanges", "data.table", "jsonlite", "testthat"); need <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(need)) install.packages(need)'
 
       # `--build` produces a binary tarball (gtars_<ver>_R_<platform>.tar.gz)
       # in the working directory, with the compiled gtars.so already inside.
