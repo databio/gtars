@@ -22,8 +22,12 @@ This repository is a work in progress, and still in early development. This repo
 
 1. Each piece of core functionality is implemented as a separate rust crate and is mostly independent.
 2. Common functionality (structs, traits, helpers) are stored in a `gtars-core` crate.
-3. Python bindings are stored in `gtars-py`. They pull in the necessary rust crates and provide a Pythonic interface.
+3. Python bindings are stored in `gtars-python`. They pull in the necessary rust crates and provide a Pythonic interface.
 4. A command-line interface is implemented in the `gtars-cli` crate.
+
+### Releasing
+
+Each component is versioned and released independently. To release one, bump its version, then cut a GitHub release whose tag names the component: `<package>-v<version>` (e.g. `gtars-refget-v0.9.1`, `gtars-r-v0.9.2`, `gtars-python-v0.10.0`). Only that component publishes (to crates.io, PyPI, or npm; the R and CLI releases also attach prebuilt binaries). See [RELEASING.md](RELEASING.md) for the full scheme.
 
 ## Installation
 
