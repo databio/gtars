@@ -40,7 +40,7 @@ jobs:
             r: '4.4'
             container: bioconductor/bioconductor_docker:RELEASE_3_20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # gtars-r compiles a Rust crate (via extendr) during R CMD INSTALL.
       - name: Cache Rust build
@@ -88,7 +88,7 @@ jobs:
       # Always available as a workflow artifact (used to verify manual-dispatch
       # runs, since those have no associated release to attach to).
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: gtars-r-${{ matrix.config.os-name }}-R${{ matrix.config.r }}
           path: ${{ steps.pkg.outputs.file }}
