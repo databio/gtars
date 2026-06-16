@@ -41,6 +41,10 @@ on:
         description: 'Publish Node native bindings to NPM'
         type: boolean
         default: true
+      r:
+        description: 'Publish R bindings binary package'
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -267,6 +271,13 @@ jobs:
     uses: ./.github/workflows/build-binaries.yml
     secrets: inherit
 
+  # R bindings build from source in-repo, so this does not need the crates to
+  # be published first. Attaches the prebuilt binary tarball to the release.
+  publish-r:
+    if: ${{ always() && (github.event_name == 'release' || inputs.r != false) }}
+    uses: ./.github/workflows/build-r-bindings.yml
+    secrets: inherit
+
   publish-wasm:
     if: ${{ always() && (github.event_name == 'release' || inputs.wasm != false) }}
     runs-on: ubuntu-latest
@@ -394,7 +405,7 @@ jobs:
 
   create-tags:
     if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
-    needs: [publish-python, publish-cli, publish-wasm, publish-node]
+    needs: [publish-python, publish-cli, publish-wasm, publish-node, publish-r]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -406,7 +417,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
-          for prefix in py cli wasm node; do
+          for prefix in py cli wasm node r; do
             TAG="${prefix}-${VERSION}"
             git tag -f "$TAG"
             git push -f origin "$TAG"
