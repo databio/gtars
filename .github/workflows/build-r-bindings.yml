@@ -16,6 +16,10 @@ name: Build and publish R bindings binary package
 on:
   workflow_dispatch:
   workflow_call:
+  # TEMPORARY: test on dev before promoting to master. Remove before merge.
+  push:
+    branches: [dev]
+    paths: ['.github/workflows/build-r-bindings.yml']
 
 permissions:
   contents: write
