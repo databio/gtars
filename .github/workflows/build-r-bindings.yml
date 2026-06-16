@@ -28,6 +28,13 @@ jobs:
   build:
     name: Build R package - ${{ matrix.config.os-name }} (R ${{ matrix.config.r }})
     runs-on: ${{ matrix.config.runs-on }}
+    # Build inside the official Bioconductor image: it ships BiocGenerics,
+    # IRanges, GenomicRanges, etc. preinstalled, so the build never hits the
+    # flaky Bioconductor source mirror. It's Ubuntu-noble + R 4.4, matching the
+    # r-lib/setup-r 4.4 environment downstream consumers use, so the binary
+    # tarball stays loadable for them.
+    container:
+      image: ${{ matrix.config.container }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +42,7 @@ jobs:
           - os-name: linux-x86_64
             runs-on: ubuntu-24.04
             r: '4.4'
+            container: bioconductor/bioconductor_docker:RELEASE_3_20
     steps:
       - uses: actions/checkout@v4
 
@@ -47,22 +55,14 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install R
-        uses: r-lib/actions/setup-r@v2
-        with:
-          r-version: ${{ matrix.config.r }}
-
-      # Installs Imports + Suggests from gtars-r/DESCRIPTION (testthat,
-      # data.table, BiocGenerics, IRanges, ...) from binary repos and caches
-      # the package library.
-      - name: Install R dependencies (cached)
-        uses: r-lib/actions/setup-r-dependencies@v2
-        with:
-          working-directory: gtars-r
-          dependencies: '"all"'
-
-      - name: Set R library path
-        run: echo "LD_LIBRARY_PATH=$(R RHOME)/lib" >> "$GITHUB_ENV"
+      # BiocGenerics/IRanges/GenomicRanges are preinstalled in the image; this
+      # only tops up the remaining DESCRIPTION deps (data.table, jsonlite,
+      # testthat) from the image's configured binary repos.
+      - name: Install remaining R dependencies
+        run: |
+          Rscript -e 'pkgs <- c("data.table", "jsonlite", "testthat"); \
+            need <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; \
+            if (length(need)) install.packages(need)'
 
       # `--build` produces a binary tarball (gtars_<ver>_R_<platform>.tar.gz)
       # in the working directory, with the compiled gtars.so already inside.
