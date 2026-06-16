@@ -716,6 +716,25 @@ get_seqs_bed_file_store <- function(store_ptr, collection_digest, bed_file_path,
 #' @param bed_file_path Path to BED file
 get_seqs_bed_file_to_vec_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_vec_store, store_ptr, collection_digest, bed_file_path)
 
+#' Extract BED file sequences from store into a flat structure-of-arrays.
+#' Returns a single named list with four parallel vectors:
+#'   sequence (character), chrom_name (character), start (integer), end (integer).
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Sequence collection digest
+#' @param bed_file_path Path to BED file
+get_seqs_bed_file_to_df_store <- function(store_ptr, collection_digest, bed_file_path) .Call(wrap__get_seqs_bed_file_to_df_store, store_ptr, collection_digest, bed_file_path)
+
+#' Extract sequences for regions given as parallel vectors into a flat
+#' structure-of-arrays. No temp BED file is written. Returns a single named
+#' list with four parallel vectors:
+#'   sequence (character), chrom_name (character), start (integer), end (integer).
+#' @param store_ptr External pointer to RefgetStore
+#' @param collection_digest Sequence collection digest
+#' @param chroms Character vector of chromosome / sequence names
+#' @param starts Integer vector of 0-based start coordinates (BED convention)
+#' @param ends Integer vector of 0-based half-open end coordinates (BED convention)
+get_seqs_from_region_vectors_store <- function(store_ptr, collection_digest, chroms, starts, ends) .Call(wrap__get_seqs_from_region_vectors_store, store_ptr, collection_digest, chroms, starts, ends)
+
 #' Add a sequence alias
 #' @param store_ptr External pointer to RefgetStore
 #' @param namespace Alias namespace

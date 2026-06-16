@@ -333,3 +333,24 @@ where
     pub(crate) current_seq_digest: String,
     pub(crate) line_num: usize,
 }
+
+/// Iterator over in-memory region vectors yielding substrings from a store.
+///
+/// Unlike `SubstringsFromRegions`, this has no filesystem dependency: it
+/// iterates caller-supplied parallel `chroms`/`starts`/`ends` vectors.
+// Constructed only by the filesystem-gated `export` module today; fields go
+// unread on the WASM (no-filesystem) build.
+#[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+pub struct SubstringsFromRegionVectors<'a, K>
+where
+    K: AsRef<[u8]>,
+{
+    pub(crate) store: &'a ReadonlyRefgetStore,
+    pub(crate) collection_digest: K,
+    pub(crate) chroms: Vec<String>,
+    pub(crate) starts: Vec<u32>,
+    pub(crate) ends: Vec<u32>,
+    pub(crate) index: usize,
+    pub(crate) previous_parsed_chr: String,
+    pub(crate) current_seq_digest: String,
+}

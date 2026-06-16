@@ -211,6 +211,112 @@ chr2\t0\t4
 }
 
 #[test]
+fn test_substrings_from_region_vectors() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n";
+    let temp_fasta_path = temp_path.join("test.fa");
+    fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
+        .unwrap();
+
+    let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
+
+    // Parallel input vectors equivalent to the BED rows used in the file-based test.
+    let chroms = ["chr1", "chr1", "chr2"];
+    let starts = [0u32, 8, 0];
+    let ends = [5u32, 12, 4];
+
+    let vec_result: Vec<_> = store
+        .substrings_from_region_vectors(collection_digest_ref, &chroms, &starts, &ends)
+        .expect("substrings_from_region_vectors failed")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("substrings_from_region_vectors had errors");
+
+    let expected_vec = vec![
+        RetrievedSequence {
+            sequence: "ATGCA".to_string(),
+            chrom_name: "chr1".to_string(),
+            start: 0,
+            end: 5,
+        },
+        RetrievedSequence {
+            sequence: "ATGC".to_string(),
+            chrom_name: "chr1".to_string(),
+            start: 8,
+            end: 12,
+        },
+        RetrievedSequence {
+            sequence: "GGGG".to_string(),
+            chrom_name: "chr2".to_string(),
+            start: 0,
+            end: 4,
+        },
+    ];
+
+    assert_eq!(
+        vec_result, expected_vec,
+        "Vectors-based retrieval mismatch vs expected"
+    );
+
+    // Missing-sequence case: a chrom not in the collection returns an Err with the
+    // "Region N" label.
+    let missing_chroms = ["chrX"];
+    let missing_starts = [0u32];
+    let missing_ends = [4u32];
+    let missing_result: Result<Vec<_>, _> = store
+        .substrings_from_region_vectors(
+            collection_digest_ref,
+            &missing_chroms,
+            &missing_starts,
+            &missing_ends,
+        )
+        .expect("constructor should succeed for equal-length vectors")
+        .collect();
+    let missing_err = missing_result.unwrap_err().to_string();
+    assert!(
+        missing_err.contains("Region 1") && missing_err.contains("not found"),
+        "unexpected missing-sequence error: {missing_err}"
+    );
+}
+
+#[test]
+fn test_substrings_from_region_vectors_mismatched_lengths() {
+    let temp_dir = tempdir().expect("Failed to create temporary directory");
+    let temp_path = temp_dir.path();
+
+    let fasta_content = ">chr1\nATGCATGCATGC\n>chr2\nGGGGAAAA\n";
+    let temp_fasta_path = temp_path.join("test.fa");
+    fs::write(&temp_fasta_path, fasta_content).expect("Failed to write test FASTA file");
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(&temp_fasta_path, FastaImportOptions::new())
+        .unwrap();
+
+    let collection_digest_ref: &str = "uC_UorBNf3YUu1YIDainBhI94CedlNeH";
+
+    let chroms = ["chr1", "chr2"];
+    let starts = [0u32]; // intentionally shorter
+    let ends = [5u32, 4];
+
+    let result =
+        store.substrings_from_region_vectors(collection_digest_ref, &chroms, &starts, &ends);
+    let err_msg = match result {
+        Ok(_) => panic!("mismatched lengths should error"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        err_msg.contains("Mismatched region vector lengths"),
+        "unexpected error: {err_msg}"
+    );
+}
+
+#[test]
 fn test_negative_bed_coordinates() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let temp_path = temp_dir.path();

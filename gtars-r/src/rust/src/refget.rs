@@ -820,6 +820,129 @@ pub fn get_seqs_bed_file_to_vec_store(
     })
 }
 
+/// Extract BED file sequences from store into a flat structure-of-arrays.
+/// Returns a single named list with four parallel vectors:
+///   sequence (character), chrom_name (character), start (integer), end (integer).
+/// @param store_ptr External pointer to RefgetStore
+/// @param collection_digest Sequence collection digest
+/// @param bed_file_path Path to BED file
+#[extendr]
+pub fn get_seqs_bed_file_to_df_store(
+    store_ptr: Robj,
+    collection_digest: &str,
+    bed_file_path: &str,
+) -> extendr_api::Result<Robj> {
+    with_store!(store_ptr, store, {
+        match store.substrings_from_regions(collection_digest, bed_file_path) {
+            Ok(iter) => {
+                let mut sequences: Vec<String> = Vec::new();
+                let mut chrom_names: Vec<String> = Vec::new();
+                let mut starts: Vec<i32> = Vec::new();
+                let mut ends: Vec<i32> = Vec::new();
+                for result in iter {
+                    match result {
+                        Ok(rs) => {
+                            sequences.push(rs.sequence);
+                            chrom_names.push(rs.chrom_name);
+                            starts.push(rs.start as i32);
+                            ends.push(rs.end as i32);
+                        }
+                        Err(e) => {
+                            eprintln!("Warning: {}", e);
+                        }
+                    }
+                }
+                // Single allocation: one named list of four atomic vectors.
+                Ok(list!(
+                    sequence = sequences,
+                    chrom_name = chrom_names,
+                    start = starts,
+                    end = ends
+                )
+                .into())
+            }
+            Err(e) => Err(format!("Error retrieving sequences from BED file: {}", e).into()),
+        }
+    })
+}
+
+/// Extract sequences for regions given as parallel vectors into a flat
+/// structure-of-arrays. No temp BED file is written. Returns a single named
+/// list with four parallel vectors:
+///   sequence (character), chrom_name (character), start (integer), end (integer).
+/// @param store_ptr External pointer to RefgetStore
+/// @param collection_digest Sequence collection digest
+/// @param chroms Character vector of chromosome / sequence names
+/// @param starts Integer vector of 0-based start coordinates (BED convention)
+/// @param ends Integer vector of 0-based half-open end coordinates (BED convention)
+#[extendr]
+pub fn get_seqs_from_region_vectors_store(
+    store_ptr: Robj,
+    collection_digest: &str,
+    chroms: Vec<String>,
+    starts: Vec<i32>,
+    ends: Vec<i32>,
+) -> extendr_api::Result<Robj> {
+    if chroms.len() != starts.len() || chroms.len() != ends.len() {
+        return Err(format!(
+            "chroms ({}), starts ({}), ends ({}) must have equal length",
+            chroms.len(),
+            starts.len(),
+            ends.len()
+        )
+        .into());
+    }
+    if let Some(bad) = starts.iter().chain(ends.iter()).find(|&&c| c < 0) {
+        return Err(format!("negative coordinate not allowed: {}", bad).into());
+    }
+    let starts_u32: Vec<u32> = starts.iter().map(|&s| s as u32).collect();
+    let ends_u32: Vec<u32> = ends.iter().map(|&e| e as u32).collect();
+
+    with_store!(store_ptr, store, {
+        match store.substrings_from_region_vectors(
+            collection_digest,
+            &chroms,
+            &starts_u32,
+            &ends_u32,
+        ) {
+            Ok(iter) => {
+                let mut sequences: Vec<String> = Vec::new();
+                let mut chrom_names: Vec<String> = Vec::new();
+                let mut out_starts: Vec<i32> = Vec::new();
+                let mut out_ends: Vec<i32> = Vec::new();
+                for result in iter {
+                    match result {
+                        Ok(rs) => {
+                            sequences.push(rs.sequence);
+                            chrom_names.push(rs.chrom_name);
+                            out_starts.push(rs.start as i32);
+                            out_ends.push(rs.end as i32);
+                        }
+                        Err(e) => {
+                            return Err(format!(
+                                "Error retrieving sequences from region vectors: {}",
+                                e
+                            )
+                            .into());
+                        }
+                    }
+                }
+                // Single allocation: one named list of four atomic vectors.
+                Ok(list!(
+                    sequence = sequences,
+                    chrom_name = chrom_names,
+                    start = out_starts,
+                    end = out_ends
+                )
+                .into())
+            }
+            Err(e) => {
+                Err(format!("Error retrieving sequences from region vectors: {}", e).into())
+            }
+        }
+    })
+}
+
 // =========================================================================
 // Sequence Alias Operations
 // =========================================================================
@@ -1376,6 +1499,8 @@ extendr_module! {
     fn export_fasta_by_digests_store;
     fn get_seqs_bed_file_store;
     fn get_seqs_bed_file_to_vec_store;
+    fn get_seqs_bed_file_to_df_store;
+    fn get_seqs_from_region_vectors_store;
 
     // Sequence aliases
     fn add_sequence_alias_store;

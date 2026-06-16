@@ -463,6 +463,80 @@ test_that("BED file sequence extraction to vector works", {
   expect_true(nchar(vec[[1]]@sequence) > 0)
 })
 
+test_that("BED file sequence extraction to data.frame works", {
+  skip_if_no_fasta()
+  store <- refget_store("encoded")
+  import_fasta(store, fasta_path)
+  result <- digest_fasta(fasta_path)
+
+  temp_bed <- file.path(tempdir(), "refget_test_df.bed")
+  on.exit(unlink(temp_bed))
+
+  writeLines(c("chr1\t0\t4", "chr2\t0\t4"), temp_bed)
+
+  df <- get_seqs_bed_file_to_df(store, result@digest, temp_bed)
+  expect_s3_class(df, "data.frame")
+  expect_equal(nrow(df), 2)
+  expect_equal(
+    sort(colnames(df)),
+    sort(c("sequence", "chrom_name", "start", "end"))
+  )
+  expect_type(df$sequence, "character")
+  expect_type(df$chrom_name, "character")
+  expect_type(df$start, "integer")
+  expect_type(df$end, "integer")
+  expect_true(all(nchar(df$sequence) > 0))
+
+  # Equivalence with the existing S4 vec path, row-for-row.
+  vec <- get_seqs_bed_file_to_vec(store, result@digest, temp_bed)
+  expect_equal(length(vec), nrow(df))
+  expect_equal(df$sequence[1], vec[[1]]@sequence)
+  expect_equal(df$chrom_name[1], vec[[1]]@chrom_name)
+  expect_equal(df$start[1], vec[[1]]@start)
+  expect_equal(df$end[1], vec[[1]]@end)
+})
+
+test_that("region-vector sequence extraction returns a data.frame (SoA)", {
+  skip_if_no_fasta()
+  store <- refget_store("encoded")
+  import_fasta(store, fasta_path)
+  result <- digest_fasta(fasta_path)
+
+  df <- get_seqs_from_regions(
+    store, result@digest,
+    chroms = c("chr1", "chr2"),
+    starts = c(0L, 0L),
+    ends   = c(4L, 4L)
+  )
+
+  expect_s3_class(df, "data.frame")
+  expect_equal(nrow(df), 2)
+  expect_setequal(colnames(df), c("sequence", "chrom_name", "start", "end"))
+  expect_type(df$sequence, "character")
+  expect_type(df$chrom_name, "character")
+  expect_equal(df$start, c(0L, 0L))
+  expect_equal(df$end, c(4L, 4L))
+  expect_true(all(nchar(df$sequence) == 4))
+
+  # Vector path agrees byte-for-byte with the BED-file path for the same regions.
+  temp_bed <- file.path(tempdir(), "refget_test_regions.bed")
+  on.exit(unlink(temp_bed))
+  writeLines(c("chr1\t0\t4", "chr2\t0\t4"), temp_bed)
+  bed_df <- get_seqs_bed_file_to_df(store, result@digest, temp_bed)
+  expect_equal(df, bed_df)
+})
+
+test_that("region-vector extraction errors on mismatched vector lengths", {
+  skip_if_no_fasta()
+  store <- refget_store("encoded")
+  import_fasta(store, fasta_path)
+  result <- digest_fasta(fasta_path)
+
+  expect_error(
+    get_seqs_from_regions(store, result@digest, c("chr1"), c(0L), c(4L, 8L))
+  )
+})
+
 # =========================================================================
 # Sequence aliases
 # =========================================================================
