@@ -1,17 +1,38 @@
 name: Build and publish R bindings binary package
 
 # Builds the gtars R package (extendr-based) once into a prebuilt binary
-# tarball so downstream CI can install it in seconds without a Rust toolchain:
+# tarball so downstream CI / users can install it in seconds without a Rust
+# toolchain:
 #
+#   # Linux:
 #   install.packages(
 #     "https://github.com/databio/gtars/releases/download/v<ver>/gtars_<ver>_R_x86_64-pc-linux-gnu.tar.gz",
 #     repos = NULL, type = "binary"
 #   )
 #
+#   # macOS (Apple Silicon / arm64):
+#   install.packages(
+#     "https://github.com/databio/gtars/releases/download/v<ver>/gtars_<ver>_R_aarch64-apple-darwin20.tgz",
+#     repos = NULL, type = "binary"
+#   )
+#
 # IMPORTANT: R binary packages are tied to (OS + arch) x R minor version.
-# The consuming runner MUST use the same R minor version (see `r-version`
-# below) or R will refuse to load the binary. Keep this in sync with the R
-# version pinned in tests.yml / codecov.yml.
+# The consuming runner MUST use the same R minor version (see `r` below) AND
+# the same arch/OS, or R will refuse to load the binary. Keep this in sync with
+# the R version pinned in tests.yml / codecov.yml.
+#
+# Build strategy differs by platform:
+#   * Linux  builds inside the official Bioconductor Docker image (Bioc deps
+#     preinstalled, avoids the flaky Bioc source mirror).
+#   * macOS  cannot use a Linux container, so it sets up R + deps via
+#     r-lib/actions (same approach as tests.yml). The matrix `container` field
+#     is empty for macOS, and the container-only / non-container steps are
+#     gated with `if:` conditions accordingly.
+#
+# macOS arch note: we build BOTH architectures. macos-14 = Apple Silicon /
+# arm64 (aarch64-apple-darwin, R 4.4's primary "big-sur-arm64" CRAN build) and
+# macos-13 = Intel (x86_64-apple-darwin). macos-13 is the last Intel runner
+# GitHub provides; if it is retired, the Intel entry must be dropped or moved.
 
 on:
   workflow_dispatch:
@@ -24,11 +45,8 @@ jobs:
   build:
     name: Build R package - ${{ matrix.config.os-name }} (R ${{ matrix.config.r }})
     runs-on: ${{ matrix.config.runs-on }}
-    # Build inside the official Bioconductor image: it ships BiocGenerics,
-    # IRanges, GenomicRanges, etc. preinstalled, so the build never hits the
-    # flaky Bioconductor source mirror. It's Ubuntu-noble + R 4.4, matching the
-    # r-lib/setup-r 4.4 environment downstream consumers use, so the binary
-    # tarball stays loadable for them.
+    # `container` is empty ('') for non-container (macOS) builds; GitHub treats
+    # an empty image as "no container" and runs steps directly on the runner.
     container:
       image: ${{ matrix.config.container }}
     strategy:
@@ -38,7 +56,23 @@ jobs:
           - os-name: linux-x86_64
             runs-on: ubuntu-24.04
             r: '4.4'
+            # Build inside the official Bioconductor image: it ships
+            # BiocGenerics, IRanges, GenomicRanges, etc. preinstalled, so the
+            # build never hits the flaky Bioconductor source mirror. It's
+            # Ubuntu-noble + R 4.4, matching the r-lib/setup-r 4.4 environment
+            # downstream consumers use, so the binary tarball stays loadable.
             container: bioconductor/bioconductor_docker:RELEASE_3_20
+          - os-name: macos-arm64
+            runs-on: macos-14
+            r: '4.4'
+            # No Linux container on macOS; deps come from r-lib/actions below.
+            container: ''
+          - os-name: macos-x86_64
+            runs-on: macos-13
+            r: '4.4'
+            # Intel macOS. macos-13 is the last Intel runner GitHub provides;
+            # produces gtars_<ver>_R_x86_64-apple-darwin<NN>.tgz for Intel Macs.
+            container: ''
     steps:
       - uses: actions/checkout@v6
 
@@ -51,12 +85,33 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      # --- macOS only: set up R via r-lib (the Bioc container already has R) ---
+      - name: Set up R (macOS)
+        if: matrix.config.container == ''
+        uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+
+      # Installs Imports + Suggests from gtars-r/DESCRIPTION (BiocGenerics,
+      # IRanges, GenomicRanges, data.table, jsonlite, testthat) from binary
+      # repos and caches the package library. macOS binaries for Bioc packages
+      # are served by the configured repos. Fails the step if a dep can't
+      # install.
+      - name: Install R dependencies (macOS)
+        if: matrix.config.container == ''
+        uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          working-directory: gtars-r
+          dependencies: '"all"'
+
+      # --- Linux (container) only: install Bioc deps via BiocManager ---
       # Install DESCRIPTION deps via BiocManager (plain install.packages does
       # not know the Bioconductor repos and silently skips Bioc packages).
       # Point Bioconductor at Posit P3M — a fast, reliable CDN serving Bioc
       # Linux binaries — instead of the default osn/xsede mirror, which times
       # out from GitHub runners. Verify afterwards so a silent skip can't pass.
-      - name: Install R dependencies
+      - name: Install R dependencies (Linux container)
+        if: matrix.config.container != ''
         run: |
           Rscript - <<'EOF'
           options(repos = c(P3M = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
@@ -68,15 +123,17 @@ jobs:
           if (length(miss)) stop("Failed to install: ", paste(miss, collapse = ", "))
           EOF
 
-      # `--build` produces a binary tarball (gtars_<ver>_R_<platform>.tar.gz)
-      # in the working directory, with the compiled gtars.so already inside.
+      # `--build` produces a binary tarball in the working directory, with the
+      # compiled gtars.so/.dylib already inside. On Linux this is
+      # gtars_<ver>_R_x86_64-pc-linux-gnu.tar.gz; on macOS R emits a .tgz named
+      # gtars_<ver>_R_<arch>-apple-darwin<NN>.tgz.
       - name: Build binary package
         run: R CMD INSTALL --build gtars-r
 
       - name: Identify built tarball
         id: pkg
         run: |
-          file=$(ls gtars_*_R_*.tar.gz | head -n1)
+          file=$(ls gtars_*_R_*.tgz gtars_*_R_*.tar.gz 2>/dev/null | head -n1)
           if [ -z "$file" ]; then
             echo "::error::No binary tarball produced by R CMD INSTALL --build"
             ls -la
