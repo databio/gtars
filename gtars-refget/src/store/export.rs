@@ -64,6 +64,76 @@ pub(crate) fn write_fasta_record(
 }
 
 // ============================================================================
+// Shared per-region substring retrieval
+// ============================================================================
+
+/// Retrieve the substring for a single region, shared by the file-based and
+/// vectors-based iterators.
+///
+/// Mutates the caller-owned `previous_parsed_chr` / `current_seq_digest` cache
+/// so the consecutive-same-chrom optimization works across either path.
+/// `region_label` (e.g. `"Line 5"` or `"Region 5"`) is interpolated into error
+/// messages.
+#[allow(clippy::too_many_arguments)]
+fn retrieve_substring_for_region<K: AsRef<[u8]>>(
+    store: &ReadonlyRefgetStore,
+    collection_digest: &K,
+    parsed_chr: String,
+    parsed_start: i64,
+    parsed_end: i64,
+    previous_parsed_chr: &mut String,
+    current_seq_digest: &mut String,
+    region_label: &str,
+) -> Result<RetrievedSequence> {
+    if parsed_start < 0 || parsed_end < 0 {
+        return Err(anyhow!(
+            "{} has invalid start or end coordinates: start={}, end={}",
+            region_label,
+            parsed_start,
+            parsed_end
+        ));
+    }
+
+    if *previous_parsed_chr != parsed_chr {
+        *previous_parsed_chr = parsed_chr.clone();
+
+        let result = store
+            .get_sequence_by_name(collection_digest, &parsed_chr)
+            .map_err(|e| {
+                anyhow!(
+                    "{}: sequence '{}' not found in collection '{}': {}",
+                    region_label,
+                    parsed_chr,
+                    String::from_utf8_lossy(collection_digest.as_ref()),
+                    e
+                )
+            })?;
+
+        *current_seq_digest = result.metadata().sha512t24u.clone();
+    }
+
+    let retrieved_substring = store
+        .get_substring(&*current_seq_digest, parsed_start as usize, parsed_end as usize)
+        .map_err(|e| {
+            anyhow!(
+                "{}: failed to get substring for digest '{}' from {} to {}: {}",
+                region_label,
+                current_seq_digest,
+                parsed_start,
+                parsed_end,
+                e
+            )
+        })?;
+
+    Ok(RetrievedSequence {
+        sequence: retrieved_substring,
+        chrom_name: parsed_chr,
+        start: parsed_start as u32,
+        end: parsed_end as u32,
+    })
+}
+
+// ============================================================================
 // SubstringsFromRegions Iterator impl
 // ============================================================================
 
@@ -102,63 +172,50 @@ where
             }
         };
 
-        if parsed_start < 0 || parsed_end < 0 {
-            let err_str = format!(
-                "Error reading line {} due to invalid start or end coordinates: '{}'",
-                self.line_num + 1,
-                line_string
-            );
-            return Some(Err(anyhow!(err_str)));
+        Some(retrieve_substring_for_region(
+            self.store,
+            &self.collection_digest,
+            parsed_chr,
+            parsed_start as i64,
+            parsed_end as i64,
+            &mut self.previous_parsed_chr,
+            &mut self.current_seq_digest,
+            &format!("Line {}", self.line_num + 1),
+        ))
+    }
+}
+
+// ============================================================================
+// SubstringsFromRegionVectors Iterator impl
+// ============================================================================
+
+impl<K> Iterator for SubstringsFromRegionVectors<'_, K>
+where
+    K: AsRef<[u8]>,
+{
+    type Item = Result<RetrievedSequence, anyhow::Error>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.chroms.len() {
+            return None;
         }
+        let i = self.index;
+        self.index += 1;
 
-        if self.previous_parsed_chr != parsed_chr {
-            self.previous_parsed_chr = parsed_chr.clone();
+        let parsed_chr = self.chroms[i].clone();
+        let parsed_start = self.starts[i] as i64;
+        let parsed_end = self.ends[i] as i64;
 
-            let result = match self
-                .store
-                .get_sequence_by_name(&self.collection_digest, &parsed_chr)
-            {
-                Ok(seq_record) => seq_record,
-                Err(e) => {
-                    let err_str = format!(
-                        "Line {}: sequence '{}' not found in collection '{}': {}",
-                        self.line_num + 1,
-                        parsed_chr,
-                        String::from_utf8_lossy(self.collection_digest.as_ref()),
-                        e
-                    );
-                    return Some(Err(anyhow!(err_str)));
-                }
-            };
-
-            self.current_seq_digest = result.metadata().sha512t24u.clone();
-        }
-
-        let retrieved_substring = match self.store.get_substring(
-            &self.current_seq_digest,
-            parsed_start as usize,
-            parsed_end as usize,
-        ) {
-            Ok(substring) => substring,
-            Err(e) => {
-                let err_str = format!(
-                    "Line {}: failed to get substring for digest '{}' from {} to {}: {}",
-                    self.line_num + 1,
-                    self.current_seq_digest,
-                    parsed_start,
-                    parsed_end,
-                    e
-                );
-                return Some(Err(anyhow!(err_str)));
-            }
-        };
-
-        Some(Ok(RetrievedSequence {
-            sequence: retrieved_substring,
-            chrom_name: parsed_chr,
-            start: parsed_start as u32,
-            end: parsed_end as u32,
-        }))
+        Some(retrieve_substring_for_region(
+            self.store,
+            &self.collection_digest,
+            parsed_chr,
+            parsed_start,
+            parsed_end,
+            &mut self.previous_parsed_chr,
+            &mut self.current_seq_digest,
+            &format!("Region {}", i + 1),
+        ))
     }
 }
 
@@ -192,6 +249,43 @@ impl ReadonlyRefgetStore {
             previous_parsed_chr: String::new(),
             current_seq_digest: String::new(),
             line_num: 0,
+        })
+    }
+
+    /// Get an iterator over substrings defined by in-memory region vectors.
+    ///
+    /// `chroms`, `starts`, and `ends` are parallel slices; element `i` defines
+    /// region `chroms[i]:starts[i]-ends[i]`. Yields the same `RetrievedSequence`
+    /// results as `substrings_from_regions` without any temp-file round-trip.
+    pub fn substrings_from_region_vectors<'a, K, S>(
+        &'a self,
+        collection_digest: K,
+        chroms: &[S],
+        starts: &[u32],
+        ends: &[u32],
+    ) -> Result<SubstringsFromRegionVectors<'a, K>>
+    where
+        K: AsRef<[u8]>,
+        S: AsRef<str>,
+    {
+        if chroms.len() != starts.len() || chroms.len() != ends.len() {
+            return Err(anyhow!(
+                "Mismatched region vector lengths: chroms={}, starts={}, ends={}",
+                chroms.len(),
+                starts.len(),
+                ends.len()
+            ));
+        }
+
+        Ok(SubstringsFromRegionVectors {
+            store: self,
+            collection_digest,
+            chroms: chroms.iter().map(|c| c.as_ref().to_string()).collect(),
+            starts: starts.to_vec(),
+            ends: ends.to_vec(),
+            index: 0,
+            previous_parsed_chr: String::new(),
+            current_seq_digest: String::new(),
         })
     }
 

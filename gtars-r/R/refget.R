@@ -663,6 +663,61 @@ setMethod('get_seqs_bed_file_to_vec', 'RefgetStore', function(store, collection_
   }
 })
 
+#' Extract BED file sequences as a data.frame (flat structure-of-arrays).
+#'
+#' Returns one data.frame with columns sequence (character), chrom_name
+#' (character), start (integer), end (integer) -- one row per region. This avoids
+#' the per-region S4 construction of \code{get_seqs_bed_file_to_vec}.
+#'
+#' @param store A RefgetStore object
+#' @param collection_digest Sequence collection digest
+#' @param bed_file_path Path to BED file
+#' @return A data.frame with columns sequence, chrom_name, start, end
+#' @export
+setGeneric('get_seqs_bed_file_to_df', function(store, collection_digest, bed_file_path) standardGeneric('get_seqs_bed_file_to_df'))
+setMethod('get_seqs_bed_file_to_df', 'RefgetStore', function(store, collection_digest, bed_file_path) {
+  result <- .Call(wrap__get_seqs_bed_file_to_df_store, store@ptr, collection_digest, bed_file_path)
+  data.frame(
+    sequence = as.character(result$sequence),
+    chrom_name = as.character(result$chrom_name),
+    start = as.integer(result$start),
+    end = as.integer(result$end),
+    stringsAsFactors = FALSE
+  )
+})
+
+#' Extract sequences for regions given as parallel vectors (flat structure-of-arrays).
+#'
+#' Pass parallel \code{chroms}/\code{starts}/\code{ends} vectors directly into the
+#' store with no temp BED file written to disk. Returns one data.frame with columns
+#' sequence (character), chrom_name (character), start (integer), end (integer) --
+#' one row per region. Coordinates are 0-based, half-open (BED convention): a region
+#' with start=0, end=4 yields the same bytes as a BED line \code{chrom\\t0\\t4}.
+#'
+#' @param store A RefgetStore object
+#' @param collection_digest Sequence collection digest
+#' @param chroms Character vector of chromosome / sequence names
+#' @param starts Integer vector of 0-based start coordinates (BED convention)
+#' @param ends Integer vector of 0-based half-open end coordinates (BED convention)
+#' @return A data.frame with columns sequence, chrom_name, start, end
+#' @export
+setGeneric('get_seqs_from_regions', function(store, collection_digest, chroms, starts, ends) standardGeneric('get_seqs_from_regions'))
+setMethod('get_seqs_from_regions', 'RefgetStore', function(store, collection_digest, chroms, starts, ends) {
+  stopifnot(length(chroms) == length(starts), length(chroms) == length(ends))
+  result <- .Call(
+    wrap__get_seqs_from_region_vectors_store,
+    store@ptr, collection_digest,
+    as.character(chroms), as.integer(starts), as.integer(ends)
+  )
+  data.frame(
+    sequence = as.character(result$sequence),
+    chrom_name = as.character(result$chrom_name),
+    start = as.integer(result$start),
+    end = as.integer(result$end),
+    stringsAsFactors = FALSE
+  )
+})
+
 # =========================================================================
 # Sequence Alias Operations
 # =========================================================================
