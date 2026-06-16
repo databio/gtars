@@ -55,12 +55,22 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      # Install DESCRIPTION deps. The Bioconductor image has BiocManager and
-      # the Bioc binary repos preconfigured, so install.packages() resolves the
-      # Bioconductor packages (BiocGenerics, IRanges, GenomicRanges) as binaries
-      # without touching the flaky source mirror.
+      # Install DESCRIPTION deps via BiocManager (plain install.packages does
+      # not know the Bioconductor repos and silently skips Bioc packages).
+      # Point Bioconductor at Posit P3M — a fast, reliable CDN serving Bioc
+      # Linux binaries — instead of the default osn/xsede mirror, which times
+      # out from GitHub runners. Verify afterwards so a silent skip can't pass.
       - name: Install R dependencies
-        run: Rscript -e 'pkgs <- c("BiocGenerics", "IRanges", "GenomicRanges", "data.table", "jsonlite", "testthat"); need <- pkgs[!vapply(pkgs, requireNamespace, logical(1), quietly = TRUE)]; if (length(need)) install.packages(need)'
+        run: |
+          Rscript - <<'EOF'
+          options(repos = c(P3M = "https://packagemanager.posit.co/cran/__linux__/noble/latest"))
+          options(BioC_mirror = "https://packagemanager.posit.co/bioconductor")
+          options(BIOCONDUCTOR_CONFIG_FILE = "https://packagemanager.posit.co/bioconductor/config.yaml")
+          pkgs <- c("BiocGenerics", "IRanges", "GenomicRanges", "data.table", "jsonlite", "testthat")
+          BiocManager::install(pkgs, update = FALSE, ask = FALSE)
+          miss <- pkgs[!pkgs %in% rownames(installed.packages())]
+          if (length(miss)) stop("Failed to install: ", paste(miss, collapse = ", "))
+          EOF
 
       # `--build` produces a binary tarball (gtars_<ver>_R_<platform>.tar.gz)
       # in the working directory, with the compiled gtars.so already inside.
