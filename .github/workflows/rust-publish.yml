@@ -63,8 +63,46 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+  # Publish exactly one crate to crates.io, keyed off a release tag of the form
+  # `<crate>-v<version>` (e.g. `gtars-refget-v0.9.1`). The crate name is the tag
+  # with the trailing `-v<version>` stripped. Dependencies must already be on
+  # crates.io, so cut crate releases in dependency order (gtars-core before
+  # gtars-refget, then gtars, etc.). Tags that don't name a crates.io package
+  # (the pure bindings) are skipped here.
+  publish-crate:
+    if: ${{ github.event_name == 'release' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+      - name: Resolve crate from tag and publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          CRATE="${TAG%-v*}"
+          # Workspace members published to crates.io (everything except the pure
+          # bindings gtars-python / gtars-r / gtars-wasm / gtars-node).
+          CRATES="gtars-core gtars-io gtars-overlaprs gtars-refget gtars-uniwig gtars-bbcache gtars-fragsplit gtars-tokenizers gtars-igd gtars-scoring gtars-genomicdist gtars-vrs gtars gtars-cli"
+          case " $CRATES " in
+            *" $CRATE "*) : ;;
+            *) echo "Tag '$TAG' -> '$CRATE' is not a crates.io package; skipping crate publish."; exit 0 ;;
+          esac
+          if cargo publish -p "$CRATE" --locked 2>publish_err.log; then
+            echo "published $CRATE"
+          elif grep -qiE "already uploaded|already exists" publish_err.log; then
+            echo "$CRATE already on crates.io — skipping"
+          else
+            cat publish_err.log >&2
+            exit 1
+          fi
+
+  # Emergency "republish the whole workspace" path. No longer runs on a
+  # release — releases publish a single crate via `publish-crate` (keyed off
+  # the `<crate>-v<version>` tag). Kept for manual dispatch only.
   publish-all-crates:
-    if: ${{ github.event_name == 'release' || inputs.crates == 'all' || inputs.crates == '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && (inputs.crates == 'all' || inputs.crates == '') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -259,27 +297,35 @@ jobs:
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
 
+  # Bindings build from source in-repo (path deps), so none of them need the
+  # crates published first. Each runs only when its own `<package>-v*` release
+  # tag is cut (or when explicitly toggled on a manual dispatch).
   publish-python:
-    if: ${{ always() && (github.event_name == 'release' || inputs.python != false) && needs.publish-all-crates.result == 'success' }}
-    needs: publish-all-crates
+    if: >-
+      ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'gtars-python-v'))
+        || (github.event_name == 'workflow_dispatch' && inputs.python) }}
     uses: ./.github/workflows/build-python-bindings.yml
     secrets: inherit
 
   publish-cli:
-    if: ${{ always() && (github.event_name == 'release' || inputs.cli != false) && needs.publish-all-crates.result == 'success' }}
-    needs: publish-all-crates
+    if: >-
+      ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'gtars-cli-v'))
+        || (github.event_name == 'workflow_dispatch' && inputs.cli) }}
     uses: ./.github/workflows/build-binaries.yml
     secrets: inherit
 
-  # R bindings build from source in-repo, so this does not need the crates to
-  # be published first. Attaches the prebuilt binary tarball to the release.
+  # Attaches the prebuilt binary tarball to the release (gtars-r-v* tags only).
   publish-r:
-    if: ${{ always() && (github.event_name == 'release' || inputs.r != false) }}
+    if: >-
+      ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'gtars-r-v'))
+        || (github.event_name == 'workflow_dispatch' && inputs.r) }}
     uses: ./.github/workflows/build-r-bindings.yml
     secrets: inherit
 
   publish-wasm:
-    if: ${{ always() && (github.event_name == 'release' || inputs.wasm != false) }}
+    if: >-
+      ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'gtars-wasm-v'))
+        || (github.event_name == 'workflow_dispatch' && inputs.wasm) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -304,7 +350,9 @@ jobs:
           fi
 
   build-node:
-    if: ${{ always() && (github.event_name == 'release' || inputs.node != false) }}
+    if: >-
+      ${{ (github.event_name == 'release' && startsWith(github.event.release.tag_name, 'gtars-node-v'))
+        || (github.event_name == 'workflow_dispatch' && inputs.node) }}
     strategy:
       matrix:
         include:
@@ -334,7 +382,7 @@ jobs:
           path: gtars-node/*.node
 
   publish-node:
-    if: ${{ always() && (github.event_name == 'release' || inputs.node != false) && needs.build-node.result == 'success' }}
+    if: ${{ always() && needs.build-node.result == 'success' }}
     needs: build-node
     runs-on: ubuntu-latest
     steps:
@@ -403,22 +451,3 @@ jobs:
             exit 1
           fi
 
-  create-tags:
-    if: ${{ always() && (inputs.crates == 'all' || inputs.crates == '') }}
-    needs: [publish-python, publish-cli, publish-wasm, publish-node, publish-r]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v6
-      - name: Extract version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-      - name: Create component tags
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          for prefix in py cli wasm node r; do
-            TAG="${prefix}-${VERSION}"
-            git tag -f "$TAG"
-            git push -f origin "$TAG"
-          done
