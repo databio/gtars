@@ -28,7 +28,7 @@ vrs = ["dep:gtars-vrs", "gtars-vrs?/transcripts", "reftx"]
 [dependencies]
 anyhow = { workspace = true }
 serde_json = { workspace = true }
-pyo3 = { version = "0.27.1", features=["anyhow", "extension-module"] }
+pyo3 = { version = "0.29.0", features=["anyhow", "extension-module"] }
 openssl = { version = "0.10", features = ["vendored"] }
 
 # our code (optional, behind feature flags)

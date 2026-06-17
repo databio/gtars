@@ -90,7 +90,7 @@ fn gtars(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
         sys_modules.set_item("gtars.vrs", &vrs_bound)?;
         // Register the nested gtars.vrs.hgvs submodule so
         // `from gtars.vrs.hgvs import parse_hgvs` works.
-        let vrs_module_ref = vrs_bound.downcast::<PyModule>()?;
+        let vrs_module_ref = vrs_bound.cast::<PyModule>()?;
         let hgvs_mod = PyModule::new(py, "hgvs")?;
         vrs::hgvs::register(py, &hgvs_mod)?;
         vrs_module_ref.add_submodule(&hgvs_mod)?;
