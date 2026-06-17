@@ -33,6 +33,16 @@ use std::sync::{Arc, Mutex};
 /// `fd_cache_size`.
 const SEQ_FD_CACHE_CAP: usize = 256;
 
+/// Batch size at which `get_substrings` against a *remote-only* sequence stops
+/// issuing one HTTP byte-range request per range and instead downloads the whole
+/// `.seq` once (cached locally, like `load_sequence`), then serves every range
+/// from the local file. Each remote range is a separate round-trip, so for bulk
+/// extraction (e.g. BED region sets) the per-request latency dominates and a
+/// single cached download wins; below the threshold, fetching only the touched
+/// bytes is cheaper than pulling a whole chromosome. Heuristic, count-based:
+/// small/ad-hoc reads stay lean, bulk reads promote.
+const REMOTE_BULK_FETCH_THRESHOLD: usize = 16;
+
 /// A tiny bounded LRU cache mapping a sequence digest to an open, shared
 /// `.seq` file handle. `.seq` content for a digest is immutable, so a cached
 /// handle never goes stale and needs no invalidation. When the cache is full,
@@ -1408,6 +1418,31 @@ impl ReadonlyRefgetStore {
                     return Err(anyhow!("Sequence data not loaded (stub only)"));
                 }
 
+                // Bulk remote extraction: one HTTP round-trip per range is slow
+                // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download and
+                // cache the whole `.seq` once (needs a local cache dir + path
+                // template to write into), then read every range from the local
+                // file. Single / small-batch reads fall through to pure byte-range.
+                if !local_seq_exists
+                    && has_remote
+                    && self.local_path.is_some()
+                    && self.seqdata_path_template.is_some()
+                    && ranges.len() >= REMOTE_BULK_FETCH_THRESHOLD
+                {
+                    let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
+                    let relpath_str = relpath
+                        .to_str()
+                        .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
+                    // persist_to_disk=true caches the file for this and future
+                    // reads; force_refresh=false reuses it if already present.
+                    Self::fetch_file(&self.local_path, &self.remote_source, relpath_str, true, false)?;
+                    let mut out = Vec::with_capacity(ranges.len());
+                    for &(start, end) in ranges {
+                        out.push(self.get_substring_from_disk(meta, start, end)?);
+                    }
+                    return Ok(out);
+                }
+
                 let mut out = Vec::with_capacity(ranges.len());
                 for &(start, end) in ranges {
                     if local_seq_exists {
@@ -2431,5 +2466,79 @@ mod remote_partial_read_tests {
             ),
             "remote partial read must not promote the record to Full (no caching)"
         );
+    }
+
+    #[test]
+    fn test_get_substrings_bulk_remote_promotes_to_whole_download() {
+        // 64-base sequence so we can request many disjoint ranges.
+        let bases: &[u8] =
+            b"ACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGTACGT";
+        let record = digest_sequence("chrBulk", bases);
+        let meta = record.metadata().clone();
+        let alphabet = lookup_alphabet(&meta.alphabet);
+        let encoded = encode_sequence(bases, alphabet);
+
+        let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
+
+        // Remote store WITH a local cache dir, so the bulk path can promote into it.
+        let cache_dir =
+            std::env::temp_dir().join(format!("gtars_bulk_fetch_test_{}", meta.sha512t24u));
+        let _ = std::fs::remove_dir_all(&cache_dir);
+        std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+
+        let mut store = ReadonlyRefgetStore::new(StorageMode::Encoded);
+        store.remote_source = Some(base_url);
+        store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+        store.local_path = Some(cache_dir.clone());
+        store
+            .sequence_store
+            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta.clone()));
+
+        let cached_path = cache_dir.join(ReadonlyRefgetStore::expand_template(
+            &meta.sha512t24u,
+            DEFAULT_SEQDATA_PATH_TEMPLATE,
+        ));
+
+        // Sub-threshold batch: served per-range by byte-range; nothing cached.
+        let small: Vec<(usize, usize)> = vec![(0, 3), (8, 11), (60, 63)];
+        let small_out = store
+            .get_substrings(meta.sha512t24u.as_bytes(), &small)
+            .expect("small remote get_substrings should succeed");
+        for (i, &(s, e)) in small.iter().enumerate() {
+            assert_eq!(small_out[i], String::from_utf8(bases[s..e].to_vec()).unwrap());
+        }
+        assert!(
+            !cached_path.exists(),
+            "a sub-threshold batch must not download/cache the whole .seq"
+        );
+
+        // Bulk batch (>= REMOTE_BULK_FETCH_THRESHOLD): promote to one whole
+        // download, cache it, and serve every range from the local file.
+        let bulk: Vec<(usize, usize)> = (0..REMOTE_BULK_FETCH_THRESHOLD)
+            .map(|i| (i * 4, i * 4 + 3))
+            .collect();
+        assert_eq!(bulk.len(), REMOTE_BULK_FETCH_THRESHOLD);
+        let bulk_out = store
+            .get_substrings(meta.sha512t24u.as_bytes(), &bulk)
+            .expect("bulk remote get_substrings should succeed");
+        shutdown();
+        for (i, &(s, e)) in bulk.iter().enumerate() {
+            assert_eq!(
+                bulk_out[i],
+                String::from_utf8(bases[s..e].to_vec()).unwrap(),
+                "bulk range {} decode mismatch",
+                i
+            );
+        }
+
+        // The promotion cached the WHOLE encoded `.seq` (not a partial window).
+        assert!(
+            cached_path.exists(),
+            "bulk batch must cache the whole .seq locally"
+        );
+        let on_disk = std::fs::read(&cached_path).expect("read cached .seq");
+        assert_eq!(on_disk, encoded, "cached file must be the full encoded sequence");
+
+        let _ = std::fs::remove_dir_all(&cache_dir);
     }
 }
