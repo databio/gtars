@@ -415,6 +415,59 @@ fn test_global_refget_store() {
 }
 
 #[test]
+fn test_get_substring_by_md5() {
+    // get_substring must resolve an md5 digest via the md5_lookup map,
+    // matching the behavior of get_substrings / get_sequence.
+    let sequence = b"ACGTACGTAC";
+    let name = "test_seq";
+
+    let mut collection = SequenceCollection {
+        metadata: SequenceCollectionMetadata {
+            digest: "test_collection".to_string(),
+            n_sequences: 0,
+            names_digest: "test".to_string(),
+            sequences_digest: "test".to_string(),
+            lengths_digest: "test".to_string(),
+            name_length_pairs_digest: None,
+            sorted_name_length_pairs_digest: None,
+            sorted_sequences_digest: None,
+            file_path: None,
+        },
+        sequences: Vec::new(),
+    };
+
+    let seq_metadata = SequenceMetadata {
+        name: name.to_string(),
+        description: None,
+        length: sequence.len(),
+        sha512t24u: sha512t24u(sequence),
+        md5: md5(sequence),
+        alphabet: AlphabetType::Dna2bit,
+        fai: None,
+    };
+
+    collection.sequences.push(SequenceRecord::Full {
+        metadata: seq_metadata.clone(),
+        sequence: std::sync::Arc::new(sequence.to_vec()),
+    });
+
+    let mut store = RefgetStore::in_memory();
+    store.add_sequence_collection(collection).unwrap();
+
+    // Baseline: resolution by sha512t24u digest.
+    let by_sha = store
+        .get_substring(&seq_metadata.sha512t24u, 2, 6)
+        .expect("get_substring by sha512t24u should succeed");
+    assert_eq!(by_sha.len(), 4);
+
+    // The fix: resolution by md5 digest must yield identical bytes.
+    let by_md5 = store
+        .get_substring(&seq_metadata.md5, 2, 6)
+        .expect("get_substring by md5 should succeed");
+    assert_eq!(by_md5, by_sha);
+}
+
+#[test]
 fn test_import_fasta() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let temp_path = temp_dir.path();

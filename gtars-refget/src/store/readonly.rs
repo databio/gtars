@@ -1261,8 +1261,13 @@ impl ReadonlyRefgetStore {
         end: usize,
     ) -> Result<String> {
         let digest_key = sha512_digest.to_key();
+        let actual_key = self
+            .md5_lookup
+            .get(&digest_key)
+            .copied()
+            .unwrap_or(digest_key);
 
-        let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
+        let record = self.sequence_store.get(&actual_key).ok_or_else(|| {
             anyhow!(
                 "Sequence not found: {}",
                 String::from_utf8_lossy(sha512_digest.as_ref())
