@@ -677,7 +677,7 @@ impl Default for RefgetStore {
 /// `Range: bytes=byte_start-(byte_end-1)` request, then pass the fetched bytes
 /// (with `byte_start` as `byte_offset`) to [`decode_encoded_range`]. Returns
 /// `[byte_start, byte_end]` as a 2-element array.
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "encodedByteRange")]
 pub fn encoded_byte_range(start: usize, end: usize, alphabet: &str) -> Result<Vec<usize>, JsError> {
     let alphabet_type = parse_alphabet(alphabet)
         .ok_or_else(|| JsError::new(&format!("unsupported alphabet: {alphabet}")))?;
@@ -692,7 +692,7 @@ pub fn encoded_byte_range(start: usize, end: usize, alphabet: &str) -> Result<Ve
 /// the absolute byte index of `bytes[0]` in the complete encoding (the
 /// `byte_start` returned by [`encoded_byte_range`]). Returns the decoded ASCII
 /// bases as a string.
-#[wasm_bindgen]
+#[wasm_bindgen(js_name = "decodeEncodedRange")]
 pub fn decode_encoded_range(
     bytes: &[u8],
     byte_offset: usize,
