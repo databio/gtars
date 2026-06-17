@@ -67,12 +67,11 @@ jobs:
             r: '4.4'
             # No Linux container on macOS; deps come from r-lib/actions below.
             container: ''
-          - os-name: macos-x86_64
-            runs-on: macos-13
-            r: '4.4'
-            # Intel macOS. macos-13 is the last Intel runner GitHub provides;
-            # produces gtars_<ver>_R_x86_64-apple-darwin<NN>.tgz for Intel Macs.
-            container: ''
+          # Intel macOS (macos-13) dropped 2026-06: GitHub's Intel runners no
+          # longer reliably allocate (jobs sit queued indefinitely), hanging the
+          # release. Apple Silicon (macos-arm64) + Linux cover the user base. If
+          # GitHub Intel capacity recovers, re-add an os-name: macos-x86_64 entry
+          # on runs-on: macos-13 with container: ''.
     steps:
       - uses: actions/checkout@v6
 
