@@ -1266,8 +1266,19 @@ impl ReadonlyRefgetStore {
             // so a per-query partial read avoids the cost of `load_sequence`
             // pulling entire chromosomes into memory.
             SequenceRecord::Stub(meta) => {
-                if self.local_path.is_some() && self.seqdata_path_template.is_some() {
-                    return self.get_substring_from_disk(meta, start, end);
+                // Partial-read resolution for a non-resident sequence:
+                //   local `.seq` (if present) -> remote byte-range (if configured).
+                // A missing local file falls through to the remote fallback
+                // rather than erroring.
+                if self.seqdata_path_template.is_some() {
+                    if let Some(path) = self.sequence_file_path(&meta.sha512t24u) {
+                        if path.exists() {
+                            return self.get_substring_from_disk(meta, start, end);
+                        }
+                    }
+                }
+                if self.remote_source.is_some() {
+                    return self.get_substring_from_remote(meta, start, end);
                 }
                 return Err(anyhow!("Sequence data not loaded (stub only)"));
             }
@@ -1384,13 +1395,26 @@ impl ReadonlyRefgetStore {
                 Ok(out)
             }
             SequenceRecord::Stub(meta) => {
-                if self.local_path.is_none() || self.seqdata_path_template.is_none() {
+                // Resolve once for the whole batch: local `.seq` (if present) ->
+                // remote byte-range (if configured). A missing local file falls
+                // through to the remote fallback rather than erroring.
+                let local_seq_exists = self.seqdata_path_template.is_some()
+                    && self
+                        .sequence_file_path(&meta.sha512t24u)
+                        .map(|p| p.exists())
+                        .unwrap_or(false);
+                let has_remote = self.remote_source.is_some();
+                if !local_seq_exists && !has_remote {
                     return Err(anyhow!("Sequence data not loaded (stub only)"));
                 }
 
                 let mut out = Vec::with_capacity(ranges.len());
                 for &(start, end) in ranges {
-                    out.push(self.get_substring_from_disk(meta, start, end)?);
+                    if local_seq_exists {
+                        out.push(self.get_substring_from_disk(meta, start, end)?);
+                    } else {
+                        out.push(self.get_substring_from_remote(meta, start, end)?);
+                    }
                 }
                 Ok(out)
             }
@@ -1497,6 +1521,76 @@ impl ReadonlyRefgetStore {
         }
         cache.insert(key, Arc::clone(&file));
         Ok(file)
+    }
+
+    /// Read a substring from a remote `.seq` file via an HTTP byte-range
+    /// request, fetching only the bytes that cover `[start, end)` and persisting
+    /// nothing locally.
+    ///
+    /// This is the remote fallback for the partial-read path (flow 1): when a
+    /// sequence is a remote-only `Stub` — no resident bytes and no cached local
+    /// `.seq` — [`get_substring`](Self::get_substring) /
+    /// [`get_substrings`](Self::get_substrings) fall through to here instead of
+    /// erroring. It mirrors
+    /// [`get_substring_from_disk`](Self::get_substring_from_disk) but fetches the
+    /// covering byte window over HTTP `Range:` (reusing [`open_remote_range`], the
+    /// same machinery as [`stream_sequence`](Self::stream_sequence)) rather than
+    /// reading from a local file. Decoded with
+    /// [`decode_substring_from_bytes_at_offset`].
+    ///
+    /// Kept `&self` so the `Arc`-shared readonly store stays usable; this path
+    /// never mutates the store and never writes to disk (use `load_sequence`,
+    /// flow 3, for caching).
+    fn get_substring_from_remote(
+        &self,
+        metadata: &SequenceMetadata,
+        start: usize,
+        end: usize,
+    ) -> Result<String> {
+        if start >= metadata.length || end > metadata.length || start >= end {
+            return Err(anyhow!(
+                "Invalid substring range: start={}, end={}, sequence length={}",
+                start,
+                end,
+                metadata.length
+            ));
+        }
+
+        let remote = self
+            .remote_source
+            .as_ref()
+            .ok_or_else(|| anyhow!("Remote partial read requires a remote source"))?;
+
+        let relpath = self.resolve_seq_file_relpath(&metadata.sha512t24u)?;
+
+        // Compute the covering byte window. `.seq` files are headerless raw byte
+        // arrays, so byte offsets map directly to base positions.
+        let (byte_start, byte_end) = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                byte_range_for_bases(start, end, alphabet.bits_per_symbol)
+            }
+            StorageMode::Raw => (start, end),
+        };
+
+        let mut reader =
+            open_remote_range(remote, &relpath, byte_start as u64, byte_end as u64)?;
+        let mut buf = Vec::with_capacity(byte_end - byte_start);
+        reader
+            .read_to_end(&mut buf)
+            .context("Failed to read remote byte range")?;
+
+        let decoded: Vec<u8> = match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                decode_substring_from_bytes_at_offset(&buf, byte_start, start, end, alphabet)
+            }
+            StorageMode::Raw => buf,
+        };
+
+        // SAFETY: see `get_substring` — Encoded decode emits only ASCII alphabet
+        // bytes; Raw stores ASCII sequence bytes. Either way valid UTF-8.
+        Ok(unsafe { String::from_utf8_unchecked(decoded) })
     }
 
     // =========================================================================
@@ -2204,5 +2298,138 @@ mod open_remote_range_tests {
                 );
             }
         }
+    }
+}
+
+/// Tests for the flow-1 remote byte-range fallback: a cold `get_substring` /
+/// `get_substrings` against a remote-only `Stub` must fetch just the covering
+/// bytes over HTTP `Range:`, decode correctly, and persist nothing.
+#[cfg(all(test, feature = "http"))]
+mod remote_partial_read_tests {
+    use super::*;
+    use crate::digest::digest_sequence;
+    use std::io::{Read as _, Write as _};
+    use std::net::TcpListener;
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    /// Spin up an HTTP server that HONORS the `Range` header, replying 206 with
+    /// the requested byte slice (and 200 + full body if no Range is sent). The
+    /// same `body` is served for every path. Returns (base_url, shutdown_fn).
+    fn start_range_honoring_server(body: Vec<u8>) -> (String, impl FnOnce()) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().unwrap().port();
+        let base_url = format!("http://127.0.0.1:{}", port);
+        let stop = Arc::new(AtomicBool::new(false));
+        let stop_clone = Arc::clone(&stop);
+
+        std::thread::spawn(move || {
+            while !stop_clone.load(Ordering::Relaxed) {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let mut buf = [0u8; 4096];
+                        let n = stream.read(&mut buf).unwrap_or(0);
+                        let req = String::from_utf8_lossy(&buf[..n]);
+                        // Parse "Range: bytes=START-END" (inclusive END).
+                        let range = req.lines().find_map(|l| {
+                            let l = l.trim();
+                            if !l.to_ascii_lowercase().starts_with("range:") {
+                                return None;
+                            }
+                            let v = l.split('=').nth(1)?.trim();
+                            let mut parts = v.split('-');
+                            let s: usize = parts.next()?.trim().parse().ok()?;
+                            let e: usize = parts.next()?.trim().parse().ok()?;
+                            Some((s, e))
+                        });
+                        if let Some((s, e)) = range {
+                            let s = s.min(body.len());
+                            let end_excl = (e + 1).min(body.len());
+                            let slice = &body[s..end_excl];
+                            let header = format!(
+                                "HTTP/1.1 206 Partial Content\r\nContent-Range: bytes {}-{}/{}\r\n\
+                                 Content-Length: {}\r\nConnection: close\r\n\r\n",
+                                s,
+                                end_excl.saturating_sub(1),
+                                body.len(),
+                                slice.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(slice);
+                        } else {
+                            let header = format!(
+                                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                                body.len()
+                            );
+                            let _ = stream.write_all(header.as_bytes());
+                            let _ = stream.write_all(&body);
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
+        let shutdown = move || {
+            stop.store(true, Ordering::Relaxed);
+            let _ = std::net::TcpStream::connect(format!("127.0.0.1:{}", port));
+        };
+
+        (base_url, shutdown)
+    }
+
+    /// A remote-only store: a `Stub` whose encoded bytes live solely on the
+    /// remote server. No `local_path`, so nothing can be (or is) persisted.
+    fn remote_only_store(remote: &str, record: &SequenceRecord) -> ReadonlyRefgetStore {
+        let mut store = ReadonlyRefgetStore::new(StorageMode::Encoded);
+        store.remote_source = Some(remote.to_string());
+        store.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+        let meta = record.metadata().clone();
+        store
+            .sequence_store
+            .insert(meta.sha512t24u.to_key(), SequenceRecord::Stub(meta));
+        store
+    }
+
+    #[test]
+    fn test_get_substring_cold_remote_byte_range_and_no_persist() {
+        // Mixed ACGT + IUPAC (N) bases exercise the variable-bit decode path.
+        let bases = b"ACGTACGTACGTTTGGCCAANNNNACGTACGTACGTACGTACGT";
+        let record = digest_sequence("chrTest", bases);
+        let meta = record.metadata().clone();
+        let alphabet = lookup_alphabet(&meta.alphabet);
+        let encoded = encode_sequence(&bases[..], alphabet);
+
+        let (base_url, shutdown) = start_range_honoring_server(encoded.clone());
+        let store = remote_only_store(&base_url, &record);
+
+        // Cold read of an interior sub-range: must fetch via byte-range + decode.
+        let got = store
+            .get_substring(meta.sha512t24u.as_bytes(), 4, 12)
+            .expect("cold remote get_substring should succeed");
+        let expected = String::from_utf8(bases[4..12].to_vec()).unwrap();
+        assert_eq!(got, expected, "remote byte-range decode mismatch");
+
+        // Batch read of several disjoint ranges via the same remote fallback.
+        let batch = store
+            .get_substrings(meta.sha512t24u.as_bytes(), &[(0, 4), (20, 24), (40, 44)])
+            .expect("cold remote get_substrings should succeed");
+        shutdown();
+        assert_eq!(batch[0], String::from_utf8(bases[0..4].to_vec()).unwrap());
+        assert_eq!(batch[1], String::from_utf8(bases[20..24].to_vec()).unwrap());
+        assert_eq!(batch[2], String::from_utf8(bases[40..44].to_vec()).unwrap());
+
+        // Persists nothing: no local path, and the record stays a Stub (never
+        // promoted to a resident Full by the partial-read path).
+        assert!(store.local_path.is_none());
+        assert!(
+            matches!(
+                store.sequence_store.get(&meta.sha512t24u.to_key()).unwrap(),
+                SequenceRecord::Stub(_)
+            ),
+            "remote partial read must not promote the record to Full (no caching)"
+        );
     }
 }

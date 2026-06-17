@@ -468,6 +468,45 @@ setMethod('get_substring', 'RefgetStore', function(store, seq_digest, start, end
   if (is.null(result)) NULL else as.character(result)
 })
 
+#' Stream a (sub)sequence's decoded bases (flow 2).
+#'
+#' Reads only the bytes covering \code{[start, end)} from resident memory, a
+#' local \code{.seq} file, or a remote HTTP byte-range, and returns the decoded
+#' region as a character string. Pass \code{NULL} for \code{start}/\code{end} to
+#' stream the whole sequence. Works on remote-backed stores with no preload.
+#' @param store A RefgetStore.
+#' @param seq_digest Sequence digest (optionally "SQ."-prefixed).
+#' @param start Start position (0-based, inclusive), or NULL for the start.
+#' @param end End position (0-based, exclusive), or NULL for the sequence length.
+#' @export
+setGeneric('stream_sequence', function(store, seq_digest, start = NULL, end = NULL) standardGeneric('stream_sequence'))
+setMethod('stream_sequence', 'RefgetStore', function(store, seq_digest, start = NULL, end = NULL) {
+  if (!is.null(start)) start <- as.integer(start)
+  if (!is.null(end)) end <- as.integer(end)
+  as.character(.Call(wrap__stream_sequence_store, store@ptr, seq_digest, start, end))
+})
+
+#' Download and cache a single sequence's whole byte data (flow 3).
+#'
+#' Opt-in for repeat-heavy workloads: after this the sequence is resident (and
+#' persisted to the local cache dir when the store persists), so subsequent
+#' \code{get_substring}/\code{stream_sequence} calls are served from memory.
+#' @param store A RefgetStore.
+#' @param digest Sequence digest (optionally "SQ."-prefixed).
+#' @export
+setGeneric('load_sequence', function(store, digest) standardGeneric('load_sequence'))
+setMethod('load_sequence', 'RefgetStore', function(store, digest) {
+  invisible(.Call(wrap__load_sequence_store, store@ptr, digest))
+})
+
+#' Download and cache every sequence in the store (flow 3, in bulk).
+#' @param store A RefgetStore.
+#' @export
+setGeneric('load_all_sequences', function(store) standardGeneric('load_all_sequences'))
+setMethod('load_all_sequences', 'RefgetStore', function(store) {
+  invisible(.Call(wrap__load_all_sequences_store, store@ptr))
+})
+
 # Keep old function name for backwards compatibility
 #' @export
 setGeneric('get_sequence_by_id', function(store, digest) standardGeneric('get_sequence_by_id'))

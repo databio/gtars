@@ -9,6 +9,44 @@
 //!   that automatically lazy-load data on first access. Use for CLI and scripts.
 //! - **`ReadonlyRefgetStore`** (inner): All reads are `&self`. Suitable for
 //!   `Arc<ReadonlyRefgetStore>` in servers. Requires explicit preloading.
+//!
+//! ## Sequence retrieval flows
+//!
+//! Sequence *bytes* can be served three ways, depending on where the data lives
+//! (resident in RAM, a local `.seq` file, or a remote HTTP store) and how much
+//! you want to move over the wire. All three are first-class; choose by access
+//! pattern.
+//!
+//! 1. **Partial read** — `get_substring` / `get_substrings`. Returns the bases
+//!    for `[start, end)` as a `String`, reading only the bytes that cover the
+//!    region. Source resolution: resident `Full` bytes -> local `.seq`
+//!    (positioned read; the whole sequence never enters RAM) -> remote
+//!    byte-range (HTTP `Range:` via `open_remote_range`). The whole sequence
+//!    never enters RAM and nothing is persisted, so this is the smart default
+//!    for sparse, random-access extraction regardless of where the data lives.
+//!    A remote-only `Stub` is served by fetching just the covering bytes; it
+//!    does NOT trigger a whole-chromosome download (use flow 3 for that).
+//!    Repeated remote reads re-fetch, so promote to flow 3 for repeat-heavy
+//!    workloads.
+//!
+//! 2. **Streaming** — `stream_sequence`. Returns a `Read`er over `[start, end)`
+//!    and decodes on the fly, so peak memory stays O(1) in the region length.
+//!    Source resolution: resident `Full` bytes -> local `.seq` (seek) -> remote
+//!    byte-range (HTTP `Range:` via `open_remote_range`). This is the only flow
+//!    that pulls a *region* straight from a remote store, fetching just the
+//!    covering bytes; nothing is persisted, so repeated remote reads re-fetch.
+//!
+//! 3. **Load & cache** — `load_sequence` / `load_all_sequences` (via
+//!    `ensure_sequence_loaded`). Downloads the *whole* `.seq` once, persists it
+//!    under the local cache (when `persist_to_disk` is set) and loads it into
+//!    RAM. Subsequent reads are served resident (flow 1's first branch) with no
+//!    further I/O. Best when the same sequence is read many times; costs a
+//!    full-sequence download + allocation up front (a whole chromosome can be
+//!    tens of MB encoded), so avoid it for one-off region pulls.
+//!
+//! Flows 1 and 2 need only metadata loaded (a `Stub`); flow 3 promotes a `Stub`
+//! to a `Full` record. Remote byte-range (flows 1-2) requires the `http`
+//! feature; without it, only resident and local sources are available.
 
 mod readonly;
 mod core;

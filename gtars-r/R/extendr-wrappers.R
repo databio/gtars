@@ -591,6 +591,22 @@ get_sequence_metadata_store <- function(store_ptr, digest) .Call(wrap__get_seque
 #' @param end End position
 get_substring_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__get_substring_store, store_ptr, seq_digest, start, end)
 
+#' Stream a (sub)sequence's decoded bases (flow 2)
+#' @param store_ptr External pointer to RefgetStore
+#' @param seq_digest Sequence digest (optionally "SQ."-prefixed)
+#' @param start Start position (0-based, inclusive) or NULL
+#' @param end End position (0-based, exclusive) or NULL
+stream_sequence_store <- function(store_ptr, seq_digest, start, end) .Call(wrap__stream_sequence_store, store_ptr, seq_digest, start, end)
+
+#' Download and cache a single sequence's whole byte data (flow 3)
+#' @param store_ptr External pointer to RefgetStore
+#' @param digest Sequence digest (optionally "SQ."-prefixed)
+load_sequence_store <- function(store_ptr, digest) .Call(wrap__load_sequence_store, store_ptr, digest)
+
+#' Download and cache every sequence in the store (flow 3, in bulk)
+#' @param store_ptr External pointer to RefgetStore
+load_all_sequences_store <- function(store_ptr) .Call(wrap__load_all_sequences_store, store_ptr)
+
 #' List all collections in the store
 #' @param store_ptr External pointer to RefgetStore
 list_collections_store <- function(store_ptr) .Call(wrap__list_collections_store, store_ptr)

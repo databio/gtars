@@ -253,6 +253,33 @@ class RetrievedSequence:
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
+class SequenceStream:
+    """Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases.
+
+    Produced by ``RefgetStore.stream_sequence()`` /
+    ``ReadonlyRefgetStore.stream_sequence()`` (flow 2). Iterating yields ``str``
+    chunks of decoded bases as they are read from the backing source (resident
+    bytes, a local ``.seq``, or a remote HTTP byte-range), so peak memory stays
+    bounded regardless of region length.
+
+    Example::
+
+        stream = store.stream_sequence("chr1_digest", 0, 1_000_000)
+        total = 0
+        for chunk in stream:
+            total += len(chunk)
+    """
+
+    def __iter__(self) -> "SequenceStream": ...
+    def __next__(self) -> str: ...
+    def read_all(self) -> str:
+        """Read and return all remaining bases as a single string.
+
+        Exhausts the stream; defeats the O(1)-memory guarantee for the size of
+        the result.
+        """
+        ...
+
 class StorageMode(Enum):
     """Defines how sequence data is stored in the Refget store.
 
@@ -952,12 +979,15 @@ class RefgetStore:
         ...
 
     def get_substring(self, seq_digest: str, start: int, end: int) -> str:
-        """Extract a substring from a sequence.
+        """Extract a substring from a sequence (flow 1: lean partial read).
 
-        Retrieves a specific region from a sequence using 0-based, half-open
-        coordinates [start, end). Automatically loads sequence data if not
-        already cached (for lazy-loaded stores). Automatically strips "SQ."
-        prefix from digest if present.
+        Retrieves a specific region using 0-based, half-open coordinates
+        [start, end), reading only the bytes that cover the region. Source
+        resolution is resident -> local ``.seq`` -> remote HTTP byte-range, so a
+        remote-backed store is served directly with no manual preload and
+        without downloading or caching the whole sequence. For repeat-heavy
+        access call ``load_sequence()`` (flow 3) first. Automatically strips
+        "SQ." prefix from digest if present.
 
         Args:
             seq_digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
@@ -975,6 +1005,31 @@ class RefgetStore:
             # Get first 1000 bases of chr1
             seq = store.get_substring("chr1_digest", 0, 1000)
             print(f"First 50bp: {seq[:50]}")
+        """
+        ...
+
+    def stream_sequence(
+        self,
+        seq_digest: str,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        chunk_size: int = 65536,
+    ) -> SequenceStream:
+        """Stream a (sub)sequence as decoded bases without loading it (flow 2).
+
+        Returns a :class:`SequenceStream` that yields ``str`` chunks lazily,
+        reading from resident bytes, a local ``.seq``, or a remote HTTP
+        byte-range as needed. Peak memory is O(1) in the region length. Omit
+        ``start``/``end`` to stream the whole sequence.
+
+        Args:
+            seq_digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
+            start: Start position (0-based, inclusive). Defaults to 0.
+            end: End position (0-based, exclusive). Defaults to the sequence length.
+            chunk_size: Bytes read per chunk (default 64 KiB).
+
+        Returns:
+            A SequenceStream iterator of decoded base chunks.
         """
         ...
 
@@ -1491,7 +1546,11 @@ class ReadonlyRefgetStore:
         ...
 
     def get_substring(self, seq_digest: str, start: int, end: int) -> str:
-        """Extract a substring from a sequence.
+        """Extract a substring from a sequence (flow 1: lean partial read).
+
+        Source resolution is resident -> local ``.seq`` -> remote HTTP
+        byte-range; remote stores are served with no preload and without
+        downloading whole sequences.
 
         Args:
             seq_digest: Sequence digest (SHA-512/24u).
@@ -1503,6 +1562,22 @@ class ReadonlyRefgetStore:
 
         Raises:
             KeyError: If the sequence is not found.
+        """
+        ...
+
+    def stream_sequence(
+        self,
+        seq_digest: str,
+        start: Optional[int] = None,
+        end: Optional[int] = None,
+        chunk_size: int = 65536,
+    ) -> SequenceStream:
+        """Stream a (sub)sequence as decoded bases without loading it (flow 2).
+
+        Returns a :class:`SequenceStream` yielding ``str`` chunks lazily from
+        resident bytes, a local ``.seq``, or a remote HTTP byte-range. Peak
+        memory is O(1) in the region length. Omit ``start``/``end`` to stream
+        the whole sequence.
         """
         ...
 

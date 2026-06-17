@@ -104,16 +104,28 @@ impl RefgetStore {
         }
     }
 
-    // -- Sequence retrieval (auto-loads stubs from disk/remote) --
+    // -- Sequence retrieval (flow 1: lean partial read) --
+    //
+    // These read only the bytes covering the requested region, resolving
+    // resident -> local `.seq` -> remote HTTP byte-range, and persist nothing.
+    // They do NOT implicitly download whole sequences; for repeat-heavy
+    // workloads call `loadSequence` (flow 3) first to cache the sequence.
 
     #[napi]
     pub fn get_sequence(&self, digest: String) -> Result<String> {
         let mut store = self.inner.lock().map_err(lock_err)?;
-        store.load_sequence(&digest).map_err(to_napi_err)?;
-        let record = store.get_sequence(&digest).map_err(to_napi_err)?;
-        record
-            .decode()
-            .ok_or_else(|| napi::Error::from_reason("Failed to decode sequence"))
+        // Ensure the sequence index (metadata stubs) is loaded so a remote
+        // sequence is locatable; this is cheap and a no-op once loaded. It does
+        // NOT download sequence bytes.
+        store.load_sequence_index().map_err(to_napi_err)?;
+        // Whole sequence via the lean partial-read path (no implicit caching).
+        let length = store
+            .get_sequence_metadata(&digest)
+            .ok_or_else(|| napi::Error::from_reason(format!("Sequence not found: {}", digest)))?
+            .length;
+        store
+            .get_substring(&digest, 0, length)
+            .map_err(to_napi_err)
     }
 
     #[napi]
@@ -126,7 +138,9 @@ impl RefgetStore {
         let start = bigint_to_u64(start, "start")?;
         let end = bigint_to_u64(end, "end")?;
         let mut store = self.inner.lock().map_err(lock_err)?;
-        store.load_sequence(&digest).map_err(to_napi_err)?;
+        // Cheap, no-op-once-loaded index load so remote sequences are locatable;
+        // does not download sequence bytes (those come via byte-range below).
+        store.load_sequence_index().map_err(to_napi_err)?;
         store
             .get_substring(&digest, start as usize, end as usize)
             .map_err(to_napi_err)
@@ -144,15 +158,31 @@ impl RefgetStore {
         let record = store
             .get_sequence_by_name(&collection_digest, &name)
             .map_err(to_napi_err)?;
-        // Get the digest so we can load the sequence data
+        // Resolve the digest + length, then serve the whole sequence via the
+        // lean partial-read path (no implicit whole-sequence download/cache).
         let seq_digest = record.metadata().sha512t24u.clone();
-        store.load_sequence(&seq_digest).map_err(to_napi_err)?;
-        let record = store
-            .get_sequence_by_name(&collection_digest, &name)
-            .map_err(to_napi_err)?;
-        record
-            .decode()
-            .ok_or_else(|| napi::Error::from_reason("Failed to decode sequence"))
+        let length = record.metadata().length;
+        store
+            .get_substring(&seq_digest, 0, length)
+            .map_err(to_napi_err)
+    }
+
+    // -- Flow 3: explicit whole-sequence download + cache --
+
+    /// Download a whole sequence and cache it (resident, and persisted to the
+    /// local cache dir when the store is configured to persist). Opt-in for
+    /// repeat-heavy workloads; subsequent reads are served from memory.
+    #[napi]
+    pub fn load_sequence(&self, digest: String) -> Result<()> {
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        store.load_sequence(&digest).map_err(to_napi_err)
+    }
+
+    /// Download and cache every sequence in the store (flow 3, in bulk).
+    #[napi]
+    pub fn load_all_sequences(&self) -> Result<()> {
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        store.load_all_sequences().map_err(to_napi_err)
     }
 
     // -- Listing / metadata --
@@ -312,11 +342,12 @@ impl RefgetStore {
         // Note: we deliberately do NOT call `load_sequence` here. Pulling the
         // entire sequence into memory before streaming defeats the O(1) memory
         // guarantee of `stream_sequence` — peak memory would grow to roughly
-        // 2x the encoded sequence for chromosome-sized reads. `stream_sequence`
-        // already falls back to the on-disk / remote byte source when the
-        // record is a `Stub`, so no pre-loading is required.
+        // 2x the encoded sequence for chromosome-sized reads. We only ensure the
+        // sequence *index* (metadata stubs) is loaded so a remote sequence is
+        // locatable; `stream_sequence` then byte-ranges the data itself.
         let reader: Box<dyn Read + Send> = {
-            let store = self.inner.lock().map_err(lock_err)?;
+            let mut store = self.inner.lock().map_err(lock_err)?;
+            store.load_sequence_index().map_err(to_napi_err)?;
             store
                 .stream_sequence(&digest, start, end)
                 .map_err(to_napi_err)?
