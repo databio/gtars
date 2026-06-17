@@ -35,7 +35,7 @@
     "@napi-rs/cli": "^2"
   },
   "optionalDependencies": {
-    "@databio/gtars-node-linux-x64-gnu": "0.7.0",
-    "@databio/gtars-node-darwin-arm64": "0.7.0"
+    "@databio/gtars-node-linux-x64-gnu": "0.7.1",
+    "@databio/gtars-node-darwin-arm64": "0.7.1"
   }
 }
