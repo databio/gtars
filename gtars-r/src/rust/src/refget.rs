@@ -368,10 +368,11 @@ pub fn get_substring_store(
 /// Stream a (sub)sequence's decoded bases (flow 2).
 ///
 /// Reads only the bytes covering the region from resident memory, a local
-/// `.seq` file, or a remote HTTP byte-range, decoding on the fly with O(1)
-/// memory, and returns the decoded region as a single string. Pass NULL for
-/// `start`/`end` to stream the whole sequence. Works on remote-backed stores
-/// without any preload.
+/// `.seq` file, or a remote HTTP byte-range, decoding it using bounded
+/// intermediate buffers, and returns the decoded region as a single string
+/// (so peak memory is O(region length), the size of the returned string). Pass
+/// NULL for `start`/`end` to stream the whole sequence. Works on remote-backed
+/// stores without any preload.
 /// @param store_ptr External pointer to RefgetStore
 /// @param seq_digest Sequence digest (optionally "SQ."-prefixed)
 /// @param start Start position (0-based, inclusive) or NULL
