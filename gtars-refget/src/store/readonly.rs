@@ -1273,6 +1273,20 @@ impl ReadonlyRefgetStore {
                 String::from_utf8_lossy(sha512_digest.as_ref())
             )
         })?;
+
+        // Zero-length range: a request for `[start, start)` is a well-formed
+        // empty interval, so return the empty string instead of erroring. This
+        // is the natural substring semantics, matches the wasm/JS
+        // `RemoteRefgetStore.getSubstring` contract, and is what bulk/region
+        // callers expect for an empty interval. Handling it here, before record
+        // resolution, means every downstream path (resident `Full`, on-disk
+        // `Stub`, remote `Stub`) agrees without each needing its own guard.
+        // An inverted range (`start > end`) is still rejected by the bounds
+        // checks below / in the partial-read paths.
+        if start == end {
+            return Ok(String::new());
+        }
+
         let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
             // Not resident: for a disk-backed store, read only the bytes covering
             // [start, end) directly from the `.seq` file instead of loading the
@@ -1372,9 +1386,14 @@ impl ReadonlyRefgetStore {
         let metadata = record.metadata();
         let seq_length = metadata.length;
 
-        // Validate every range up front (same rule as get_substring).
+        // Validate every range up front (same rule as get_substring). A
+        // zero-length range (`start == end`) is a valid empty interval that
+        // yields "" (see get_substring); only an inverted range (`start > end`)
+        // or an out-of-bounds end is rejected. `start == seq_length` is allowed
+        // only when it is also an empty range (start == end == seq_length).
         for &(start, end) in ranges {
-            if start >= seq_length || end > seq_length || start >= end {
+            let empty = start == end;
+            if (!empty && start >= seq_length) || end > seq_length || start > end {
                 return Err(anyhow!(
                     "Invalid substring range: start={}, end={}, sequence length={}",
                     start,
@@ -1443,14 +1462,24 @@ impl ReadonlyRefgetStore {
                     Self::fetch_file(&self.local_path, &self.remote_source, relpath_str, true, false)?;
                     let mut out = Vec::with_capacity(ranges.len());
                     for &(start, end) in ranges {
-                        out.push(self.get_substring_from_disk(meta, start, end)?);
+                        // Zero-length range -> "" (see get_substring). Short-circuit
+                        // before the partial-read path, which rejects start == end.
+                        if start == end {
+                            out.push(String::new());
+                        } else {
+                            out.push(self.get_substring_from_disk(meta, start, end)?);
+                        }
                     }
                     return Ok(out);
                 }
 
                 let mut out = Vec::with_capacity(ranges.len());
                 for &(start, end) in ranges {
-                    if local_seq_exists {
+                    // Zero-length range -> "" (see get_substring). Short-circuit
+                    // before the partial-read paths, which reject start == end.
+                    if start == end {
+                        out.push(String::new());
+                    } else if local_seq_exists {
                         out.push(self.get_substring_from_disk(meta, start, end)?);
                     } else {
                         out.push(self.get_substring_from_remote(meta, start, end)?);
@@ -2451,6 +2480,24 @@ mod remote_partial_read_tests {
             .expect("cold remote get_substring should succeed");
         let expected = String::from_utf8(bases[4..12].to_vec()).unwrap();
         assert_eq!(got, expected, "remote byte-range decode mismatch");
+
+        // Zero-length range on the REMOTE path returns "" (no HTTP request),
+        // matching the resident/disk paths and the wasm/JS contract; an
+        // inverted range (start > end) still errors.
+        assert_eq!(
+            store.get_substring(meta.sha512t24u.as_bytes(), 5, 5).unwrap(),
+            "",
+            "remote: zero-length range should return empty string"
+        );
+        assert!(
+            store.get_substring(meta.sha512t24u.as_bytes(), 8, 4).is_err(),
+            "remote: inverted range (start > end) must error"
+        );
+        let mixed = store
+            .get_substrings(meta.sha512t24u.as_bytes(), &[(2, 2), (4, 8)])
+            .expect("remote get_substrings with empty range should succeed");
+        assert_eq!(mixed[0], "", "remote batch: empty range -> empty string");
+        assert_eq!(mixed[1], String::from_utf8(bases[4..8].to_vec()).unwrap());
 
         // Batch read of several disjoint ranges via the same remote fallback.
         let batch = store

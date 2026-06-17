@@ -468,6 +468,100 @@ fn test_get_substring_by_md5() {
 }
 
 #[test]
+fn test_get_substring_zero_length_range() {
+    // CONTRACT: a zero-length range (start == end) is a valid empty interval and
+    // returns "" (matching wasm/JS RemoteRefgetStore.getSubstring), while an
+    // inverted range (start > end) is still rejected. Verified on:
+    //   1. a resident (in-memory `Full`) sequence, and
+    //   2. a disk-backed `Stub` sequence (exercises get_substring_from_disk),
+    // both via single-range get_substring and batch get_substrings, so all
+    // retrieval paths agree on the contract.
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+    let temp_fasta = copy_test_fasta(temp_path, "base.fa.gz");
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
+        .unwrap();
+
+    // Pick a non-empty resident sequence.
+    let (digest, length) = store
+        .sequence_metadata()
+        .find(|m| m.length > 1)
+        .map(|m| (m.sha512t24u.clone(), m.length))
+        .expect("expected at least one non-empty sequence");
+
+    // --- Resident (Full) path ---
+    // Zero-length range anywhere within bounds returns "".
+    assert_eq!(
+        store.get_substring(&digest, 0, 0).unwrap(),
+        "",
+        "resident: start == end == 0 should return empty string"
+    );
+    assert_eq!(
+        store.get_substring(&digest, 3, 3).unwrap(),
+        "",
+        "resident: interior zero-length range should return empty string"
+    );
+    // Zero-length range at the sequence end is also valid/empty.
+    assert_eq!(
+        store.get_substring(&digest, length, length).unwrap(),
+        "",
+        "resident: zero-length range at end should return empty string"
+    );
+    // Inverted range (start > end) still errors.
+    assert!(
+        store.get_substring(&digest, 5, 2).is_err(),
+        "resident: inverted range (start > end) must error"
+    );
+    // Batch path agrees: empty ranges -> "", interleaved with a real range.
+    let batch = store
+        .get_substrings(&digest, &[(0, 0), (1, 4), (3, 3)])
+        .unwrap();
+    assert_eq!(batch.len(), 3);
+    assert_eq!(batch[0], "");
+    assert_eq!(batch[1].len(), 3);
+    assert_eq!(batch[2], "");
+    // Batch with an inverted range still errors.
+    assert!(
+        store.get_substrings(&digest, &[(5, 2)]).is_err(),
+        "batch: inverted range must error"
+    );
+
+    // --- Disk-backed (Stub -> get_substring_from_disk) path ---
+    store
+        .write_store_to_dir(temp_path, Some("sequences/%s2/%s.seq"))
+        .unwrap();
+    let disk_store = RefgetStore::open_local(temp_path).unwrap();
+    // Sequence is a Stub on disk (not resident), so this exercises the
+    // partial-read path, which must also honor the zero-length contract.
+    assert!(
+        !disk_store.is_sequence_loaded(&digest),
+        "disk-backed sequence should be a stub, not resident"
+    );
+    assert_eq!(
+        disk_store.get_substring(&digest, 0, 0).unwrap(),
+        "",
+        "disk: start == end == 0 should return empty string"
+    );
+    assert_eq!(
+        disk_store.get_substring(&digest, 4, 4).unwrap(),
+        "",
+        "disk: interior zero-length range should return empty string"
+    );
+    assert!(
+        disk_store.get_substring(&digest, 5, 2).is_err(),
+        "disk: inverted range (start > end) must error"
+    );
+    let disk_batch = disk_store
+        .get_substrings(&digest, &[(2, 2), (0, 3)])
+        .unwrap();
+    assert_eq!(disk_batch[0], "");
+    assert_eq!(disk_batch[1].len(), 3);
+}
+
+#[test]
 fn test_import_fasta() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let temp_path = temp_dir.path();
