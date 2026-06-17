@@ -319,10 +319,10 @@ impl TxStoreBuilderPy {
 
     /// Add a transcript directly. Accepts either a `Transcript` instance or a
     /// dict with the same keys as `Transcript.to_dict()`.
-    fn add_transcript(&mut self, py: Python<'_>, value: PyObject) -> PyResult<()> {
+    fn add_transcript(&mut self, py: Python<'_>, value: Py<PyAny>) -> PyResult<()> {
         let tx = if let Ok(t) = value.extract::<TranscriptPy>(py) {
             t
-        } else if let Ok(d) = value.downcast_bound::<PyDict>(py) {
+        } else if let Ok(d) = value.cast_bound::<PyDict>(py) {
             transcript_from_dict(d)?
         } else {
             return Err(pyo3::exceptions::PyTypeError::new_err(
@@ -373,7 +373,7 @@ impl TxStoreBuilderPy {
     /// Ingest a cdot JSON file. Auto-detects `.gz`.
     fn load_cdot(&mut self, py: Python<'_>, path: &str) -> PyResult<usize> {
         let path = path.to_string();
-        py.allow_threads(|| self.inner.ingest_cdot(&path))
+        py.detach(|| self.inner.ingest_cdot(&path))
             .map_err(map_store_err)
     }
 
@@ -385,7 +385,7 @@ impl TxStoreBuilderPy {
     /// Load MANE flags from an NCBI MANE summary TSV (auto-detects `.gz`).
     fn load_mane_summary(&mut self, py: Python<'_>, path: &str) -> PyResult<usize> {
         let path = path.to_string();
-        py.allow_threads(|| self.inner.load_mane_summary(&path))
+        py.detach(|| self.inner.load_mane_summary(&path))
             .map_err(map_store_err)
     }
 
@@ -396,7 +396,7 @@ impl TxStoreBuilderPy {
     /// Build and write the binary store at `out_path`.
     fn build(&mut self, py: Python<'_>, out_path: &str) -> PyResult<()> {
         let out_path = out_path.to_string();
-        py.allow_threads(|| self.inner.build(&out_path))
+        py.detach(|| self.inner.build(&out_path))
             .map_err(map_store_err)
     }
 }
@@ -456,7 +456,7 @@ fn transcript_from_dict(d: &Bound<'_, PyDict>) -> PyResult<TranscriptPy> {
         let item = item?;
         let exon = if let Ok(e) = item.extract::<ExonPy>() {
             e
-        } else if let Ok(d) = item.downcast::<PyDict>() {
+        } else if let Ok(d) = item.cast::<PyDict>() {
             let start: u32 = get(d, "start")?;
             let end: u32 = get(d, "end")?;
             ExonPy { start, end }
@@ -476,7 +476,7 @@ fn transcript_from_dict(d: &Bound<'_, PyDict>) -> PyResult<TranscriptPy> {
         Some(v) => {
             if let Ok(m) = v.extract::<ManeStatusPy>() {
                 Some(m)
-            } else if let Ok(dd) = v.downcast::<PyDict>() {
+            } else if let Ok(dd) = v.cast::<PyDict>() {
                 let select: bool = get_opt(dd, "select")?.unwrap_or(false);
                 let plus_clinical: bool = get_opt(dd, "plus_clinical")?.unwrap_or(false);
                 Some(ManeStatusPy {
@@ -520,7 +520,7 @@ impl ReadonlyTxStorePy {
     fn open(_cls: &Bound<'_, PyType>, py: Python<'_>, path: &str) -> PyResult<Self> {
         let path = path.to_string();
         let store = py
-            .allow_threads(|| RsTxStore::open(&path))
+            .detach(|| RsTxStore::open(&path))
             .map_err(map_store_err)?;
         Ok(Self {
             inner: Arc::new(store.into_readonly()),
@@ -528,7 +528,7 @@ impl ReadonlyTxStorePy {
     }
 
     fn lookup(&self, py: Python<'_>, accession: &str) -> Option<TranscriptPy> {
-        py.allow_threads(|| {
+        py.detach(|| {
             self.inner
                 .lookup(accession)
                 .map(TranscriptPy::from_ref)
@@ -536,7 +536,7 @@ impl ReadonlyTxStorePy {
     }
 
     fn lookup_mane(&self, py: Python<'_>, gene: &str) -> Option<TranscriptPy> {
-        py.allow_threads(|| self.inner.lookup_mane(gene).map(TranscriptPy::from_rs))
+        py.detach(|| self.inner.lookup_mane(gene).map(TranscriptPy::from_rs))
     }
 
     fn has_mane_index(&self) -> bool {
@@ -546,7 +546,7 @@ impl ReadonlyTxStorePy {
     /// Returns the `SQ.<base64url>` accession of the chromosome for the given
     /// transcript, or `None` if the accession is not present.
     fn get_chrom_accession(&self, py: Python<'_>, accession: &str) -> Option<String> {
-        py.allow_threads(|| {
+        py.detach(|| {
             self.inner
                 .lookup(accession)
                 .map(|tx| format!("SQ.{}", base64_url::encode(&tx.chrom_digest)))
@@ -554,7 +554,7 @@ impl ReadonlyTxStorePy {
     }
 
     fn get_strand(&self, py: Python<'_>, accession: &str) -> Option<Strand> {
-        py.allow_threads(|| self.inner.lookup(accession).map(|tx| Strand::from_rs(tx.strand)))
+        py.detach(|| self.inner.lookup(accession).map(|tx| Strand::from_rs(tx.strand)))
     }
 
     fn __len__(&self) -> usize {
@@ -591,7 +591,7 @@ impl CoordinateMapperPy {
     ) -> PyResult<u64> {
         let is_cds_end = matches!(datum, Some(1));
         let acc = accession.to_string();
-        py.allow_threads(|| {
+        py.detach(|| {
             let mapper = RsCoordinateMapper::new(&self.store);
             mapper
                 .c_to_g_full(&acc, c_pos, 0, is_cds_end)
@@ -603,7 +603,7 @@ impl CoordinateMapperPy {
     /// Map a non-coding (`n.`) coordinate to a 0-based genomic position.
     fn n_to_g(&self, py: Python<'_>, accession: &str, n_pos: u32) -> PyResult<u64> {
         let acc = accession.to_string();
-        py.allow_threads(|| {
+        py.detach(|| {
             let mapper = RsCoordinateMapper::new(&self.store);
             mapper.n_to_g(&acc, n_pos as u64).map(|r| r.position)
         })
@@ -627,7 +627,7 @@ impl CoordinateMapperPy {
         let acc = accession.to_string();
         let store = self.store.clone();
         let (result, strand) = py
-            .allow_threads(|| {
+            .detach(|| {
                 let mapper = RsCoordinateMapper::new(&store);
                 let r = mapper.c_to_g_full(&acc, c_pos, 0, is_cds_end)?;
                 let strand = store.lookup(&acc).map(|tx| Strand::from_rs(tx.strand));
@@ -647,7 +647,7 @@ impl CoordinateMapperPy {
         let acc = accession.to_string();
         let store = self.store.clone();
         let (result, strand) = py
-            .allow_threads(|| {
+            .detach(|| {
                 let mapper = RsCoordinateMapper::new(&store);
                 let r = mapper.n_to_g(&acc, n_pos as u64)?;
                 let strand = store.lookup(&acc).map(|tx| Strand::from_rs(tx.strand));
@@ -673,7 +673,7 @@ impl CoordinateMapperPy {
         let g = gene.to_string();
         let store = self.store.clone();
         let (acc, result, strand) = py
-            .allow_threads(|| {
+            .detach(|| {
                 let mapper = RsCoordinateMapper::new(&store);
                 let (acc, r) = mapper.c_to_g_by_gene(&g, c_pos, 0, is_cds_end)?;
                 let strand = store.lookup(&acc).map(|tx| Strand::from_rs(tx.strand));

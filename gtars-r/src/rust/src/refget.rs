@@ -352,11 +352,92 @@ pub fn get_substring_store(
 ) -> extendr_api::Result<Robj> {
     let seq_digest = strip_sq_prefix(seq_digest);
     with_store!(store_ptr, store, {
+        // Ensure the sequence index (metadata stubs) is loaded so a remote
+        // sequence is locatable; cheap, no-op once loaded, no byte download.
+        store
+            .load_sequence_index()
+            .map_err(|e| extendr_api::Error::Other(format!("Error loading index: {}", e)))?;
         if let Ok(substr) = store.get_substring(seq_digest, start as usize, end as usize) {
             Ok(Robj::from(substr))
         } else {
             Ok(Robj::from(())) // NULL
         }
+    })
+}
+
+/// Stream a (sub)sequence's decoded bases (flow 2).
+///
+/// Reads only the bytes covering the region from resident memory, a local
+/// `.seq` file, or a remote HTTP byte-range, decoding it using bounded
+/// intermediate buffers, and returns the decoded region as a single string
+/// (so peak memory is O(region length), the size of the returned string). Pass
+/// NULL for `start`/`end` to stream the whole sequence. Works on remote-backed
+/// stores without any preload.
+/// @param store_ptr External pointer to RefgetStore
+/// @param seq_digest Sequence digest (optionally "SQ."-prefixed)
+/// @param start Start position (0-based, inclusive) or NULL
+/// @param end End position (0-based, exclusive) or NULL
+#[extendr]
+pub fn stream_sequence_store(
+    store_ptr: Robj,
+    seq_digest: &str,
+    start: Nullable<i32>,
+    end: Nullable<i32>,
+) -> extendr_api::Result<Robj> {
+    use std::io::Read;
+    let seq_digest = strip_sq_prefix(seq_digest);
+    let start = match start {
+        Null => None,
+        NotNull(v) => Some(v as u64),
+    };
+    let end = match end {
+        Null => None,
+        NotNull(v) => Some(v as u64),
+    };
+    with_store!(store_ptr, store, {
+        // Ensure the sequence index is loaded so a remote sequence is locatable.
+        store
+            .load_sequence_index()
+            .map_err(|e| extendr_api::Error::Other(format!("Error loading index: {}", e)))?;
+        let mut reader = store
+            .stream_sequence(seq_digest, start, end)
+            .map_err(|e| extendr_api::Error::Other(format!("Error streaming sequence: {}", e)))?;
+        let mut out = String::new();
+        reader
+            .read_to_string(&mut out)
+            .map_err(|e| extendr_api::Error::Other(format!("Error reading stream: {}", e)))?;
+        Ok(Robj::from(out))
+    })
+}
+
+/// Download and cache a single sequence's whole byte data (flow 3).
+///
+/// Opt-in for repeat-heavy workloads: after this the sequence is resident (and
+/// persisted to the local cache dir when the store persists), so subsequent
+/// `get_substring`/`stream_sequence` calls are served from memory with no
+/// further I/O.
+/// @param store_ptr External pointer to RefgetStore
+/// @param digest Sequence digest (optionally "SQ."-prefixed)
+#[extendr]
+pub fn load_sequence_store(store_ptr: Robj, digest: &str) -> extendr_api::Result<()> {
+    let digest = strip_sq_prefix(digest);
+    with_store!(store_ptr, store, {
+        store
+            .load_sequence(digest)
+            .map_err(|e| extendr_api::Error::Other(format!("Error loading sequence: {}", e)))?;
+        Ok(())
+    })
+}
+
+/// Download and cache every sequence in the store (flow 3, in bulk).
+/// @param store_ptr External pointer to RefgetStore
+#[extendr]
+pub fn load_all_sequences_store(store_ptr: Robj) -> extendr_api::Result<()> {
+    with_store!(store_ptr, store, {
+        store
+            .load_all_sequences()
+            .map_err(|e| extendr_api::Error::Other(format!("Error loading sequences: {}", e)))?;
+        Ok(())
     })
 }
 
@@ -1468,6 +1549,9 @@ extendr_module! {
     fn get_sequence_by_name_store;
     fn get_sequence_metadata_store;
     fn get_substring_store;
+    fn stream_sequence_store;
+    fn load_sequence_store;
+    fn load_all_sequences_store;
 
     // Collection retrieval
     fn list_collections_store;

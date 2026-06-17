@@ -1249,3 +1249,65 @@ def test_fasta_no_namespaces_no_aliases(tmp_path):
     # Without namespaces, no aliases are registered; lookup returns None
     result = store.get_sequence_by_alias("ncbi", "NC_000001.11")
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Remote retrieval flows (flow 1 partial read / flow 2 stream / flow 3 load).
+#
+# These hit the public refgenie pangenome refget store over HTTP. They are
+# skipped when the network (or that bucket) is unreachable so offline runs and
+# CI without egress stay green.
+# ---------------------------------------------------------------------------
+
+_REMOTE_URL = "https://refgenie.s3.us-east-1.amazonaws.com/pangenome_refget_store"
+_REMOTE_COLLECTION = "0qveCdMlbF_kYn6XWb7YBy-FtRZ6gSAL"
+
+
+def _remote_reachable():
+    import urllib.request
+
+    try:
+        req = urllib.request.Request(
+            _REMOTE_URL + "/rgstore.json", headers={"Range": "bytes=0-10"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return resp.status in (200, 206)
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _remote_reachable(), reason="remote refget store unreachable")
+def test_remote_three_flows(tmp_path):
+    """flow 1 (byte-range, no persist), flow 2 (stream), flow 3 (load+cache)."""
+    cache = tmp_path / "rgcache"
+    cache.mkdir()
+    store = RefgetStore.open_remote(str(cache), _REMOTE_URL)
+    store.load_all_collections()
+
+    # Pull a real sequence digest out of the collection.
+    coll = store.get_collection(_REMOTE_COLLECTION)
+    digest = coll.sequences[0].metadata.sha512t24u
+
+    def seq_files():
+        return [f for _, _, fs in os.walk(str(cache)) for f in fs if f.endswith(".seq")]
+
+    # Flow 1: lean partial read of an interior window. Must persist nothing.
+    sub = store.get_substring(digest, 1_000_000, 1_000_060)
+    assert len(sub) == 60
+    assert set(sub) <= set("ACGTN")
+    assert seq_files() == [], "flow 1 must not download/cache the whole sequence"
+
+    # Flow 1 batch over disjoint ranges.
+    batch = store.get_substrings(digest, [(0, 10), (2_000_000, 2_000_010)])
+    assert [len(b) for b in batch] == [10, 10]
+
+    # Flow 2: streaming the same window yields identical bases.
+    streamed = store.stream_sequence(digest, 1_000_000, 1_000_060).read_all()
+    assert streamed == sub
+    chunks = list(store.stream_sequence(digest, 1_000_000, 1_000_250, chunk_size=64))
+    assert sum(len(c) for c in chunks) == 250
+
+    # Flow 3: explicit whole-sequence load caches it; warm read still matches.
+    store.load_sequence(digest)
+    assert store.get_substring(digest, 1_000_000, 1_000_060) == sub
+    assert len(seq_files()) == 1, "flow 3 should persist the sequence to cache"

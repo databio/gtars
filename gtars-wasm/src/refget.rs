@@ -25,8 +25,9 @@
 //! ```
 
 use gtars_refget::digest::{
-    canonicalize_json, digest_fasta_bytes, digest_sequence, lookup_alphabet, md5, sha512t24u,
-    AlphabetType, FastaStreamHasher, SequenceCollection, SequenceMetadata, SequenceRecord,
+    byte_range_for_bases, canonicalize_json, decode_substring_from_bytes_at_offset,
+    digest_fasta_bytes, digest_sequence, lookup_alphabet, md5, sha512t24u, AlphabetType,
+    FastaStreamHasher, SequenceCollection, SequenceMetadata, SequenceRecord,
 };
 use gtars_refget::store::{ReadonlyRefgetStore, RefgetStore as CoreRefgetStore};
 use serde::{Deserialize, Serialize};
@@ -653,6 +654,60 @@ impl Default for RefgetStore {
 /// Parse a JS-supplied alphabet name into an [`AlphabetType`]. Accepts the
 /// `Display` spellings used elsewhere in gtars (`"dna2bit"`, `"dna3bit"`,
 /// `"dnaio"`), plus the friendlier `"dnaiupac"`.
+// ============================================================================
+// Remote byte-range decoding (flow 2, wasm equivalent)
+// ============================================================================
+//
+// The native bindings reach a remote region by issuing an HTTP `Range:` request
+// for just the covering bytes and decoding them (see `open_remote_range` /
+// `get_substring_from_remote` in gtars-refget). wasm has no HTTP client, so JS
+// does the `fetch`; these two primitives do the byte-math and decode so JS never
+// has to download or decode a whole chromosome to read a small region:
+//
+//   const [bs, be] = encodedByteRange(start, end, "dna2bit");
+//   const buf = await fetch(url, { headers: { Range: `bytes=${bs}-${be - 1}` } })
+//                     .then(r => r.arrayBuffer());
+//   const bases = decodeEncodedRange(new Uint8Array(buf), bs, start, end, "dna2bit");
+
+/// Compute the half-open byte range `[byte_start, byte_end)` of an encoded
+/// `.seq` file that covers bases `[start, end)` for the given alphabet.
+///
+/// `.seq` files are headerless bit-packed byte arrays, so byte offsets map
+/// directly to base positions. Use the result to build an HTTP
+/// `Range: bytes=byte_start-(byte_end-1)` request, then pass the fetched bytes
+/// (with `byte_start` as `byte_offset`) to [`decode_encoded_range`]. Returns
+/// `[byte_start, byte_end]` as a 2-element array.
+#[wasm_bindgen(js_name = "encodedByteRange")]
+pub fn encoded_byte_range(start: usize, end: usize, alphabet: &str) -> Result<Vec<usize>, JsError> {
+    let alphabet_type = parse_alphabet(alphabet)
+        .ok_or_else(|| JsError::new(&format!("unsupported alphabet: {alphabet}")))?;
+    let bps = lookup_alphabet(&alphabet_type).bits_per_symbol;
+    let (byte_start, byte_end) = byte_range_for_bases(start, end, bps);
+    Ok(vec![byte_start, byte_end])
+}
+
+/// Decode bases `[start, end)` from a partial slice of an encoded `.seq` file.
+///
+/// `bytes` is the slice fetched via an HTTP `Range:` request; `byte_offset` is
+/// the absolute byte index of `bytes[0]` in the complete encoding (the
+/// `byte_start` returned by [`encoded_byte_range`]). Returns the decoded ASCII
+/// bases as a string.
+#[wasm_bindgen(js_name = "decodeEncodedRange")]
+pub fn decode_encoded_range(
+    bytes: &[u8],
+    byte_offset: usize,
+    start: usize,
+    end: usize,
+    alphabet: &str,
+) -> Result<String, JsError> {
+    let alphabet_type = parse_alphabet(alphabet)
+        .ok_or_else(|| JsError::new(&format!("unsupported alphabet: {alphabet}")))?;
+    let alphabet = lookup_alphabet(&alphabet_type);
+    let decoded = decode_substring_from_bytes_at_offset(bytes, byte_offset, start, end, alphabet);
+    String::from_utf8(decoded)
+        .map_err(|e| JsError::new(&format!("decoded bytes were not valid UTF-8: {e}")))
+}
+
 fn parse_alphabet(alphabet: &str) -> Option<AlphabetType> {
     match alphabet.to_ascii_lowercase().as_str() {
         "dna2bit" => Some(AlphabetType::Dna2bit),

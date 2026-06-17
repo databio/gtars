@@ -469,7 +469,7 @@ impl From<HgvsVariantOwned> for HgvsVariantPy {
 #[pyo3(signature = (s))]
 pub fn parse_hgvs(py: Python<'_>, s: &str) -> PyResult<HgvsVariantPy> {
     let owned = py
-        .allow_threads(|| {
+        .detach(|| {
             rs_parse(s).map(HgvsVariantOwned::from)
         })
         .map_err(map_hgvs_err)?;
@@ -510,7 +510,7 @@ pub fn hgvs_to_vrs_id(
     let prov = provider.inner.clone();
     // NOTE: warnings are currently dropped at the FFI boundary; surfacing them
     // to Python is out of scope for this change.
-    py.allow_threads(|| {
+    py.detach(|| {
         gtars_vrs::hgvs::bridge::hgvs_str_to_vrs_id(
             &s,
             &prov,

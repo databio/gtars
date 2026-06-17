@@ -2,6 +2,7 @@
 // It will allow computing ga4gh digests, creating sequence store objects,
 // and sequence collection objects from Python.
 
+use std::io::Read;
 use std::path::PathBuf;
 
 use pyo3::exceptions::{PyIndexError, PyTypeError};
@@ -1071,6 +1072,81 @@ fn strip_sq_prefix(digest: &str) -> &str {
 ///             "/local/cache",
 ///             "https://example.com/hg38"
 ///         )
+/// Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases (flow 2).
+///
+/// Produced by `RefgetStore.stream_sequence()` / `ReadonlyRefgetStore.stream_sequence()`.
+/// Iterating yields `str` chunks of decoded bases as they are read from the
+/// backing source (resident bytes, a local `.seq`, or a remote HTTP byte-range),
+/// so peak memory stays bounded regardless of region length. Use `read_all()` to
+/// collect the remaining bases into a single string.
+///
+/// Example:
+///     >>> stream = store.stream_sequence("chr1_digest", 0, 1_000_000)
+///     >>> total = 0
+///     >>> for chunk in stream:
+///     ...     total += len(chunk)
+// `unsendable`: the boxed reader is `Send` but not `Sync`, and a streaming
+// cursor is inherently single-owner anyway. `unsendable` lets pyo3 hold a
+// non-`Sync` payload (it panics only if touched from a foreign thread).
+#[pyclass(name = "SequenceStream", module = "gtars.refget", unsendable)]
+pub struct PySequenceStream {
+    reader: Option<Box<dyn std::io::Read + Send>>,
+    chunk_size: usize,
+}
+
+#[pymethods]
+impl PySequenceStream {
+    fn __iter__(slf: PyRef<'_, Self>) -> PyRef<'_, Self> {
+        slf
+    }
+
+    fn __next__(&mut self) -> PyResult<Option<String>> {
+        let reader = match self.reader.as_mut() {
+            Some(r) => r,
+            None => return Ok(None),
+        };
+        // Fill a chunk; Read::read may return short, so loop until the buffer is
+        // full or EOF. The decoded stream emits only ASCII bases, so a chunk
+        // boundary never splits a multi-byte UTF-8 character.
+        let mut buf = vec![0u8; self.chunk_size];
+        let mut filled = 0;
+        while filled < buf.len() {
+            match reader.read(&mut buf[filled..]) {
+                Ok(0) => break,
+                Ok(n) => filled += n,
+                Err(e) => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                        "stream read error: {}",
+                        e
+                    )))
+                }
+            }
+        }
+        if filled == 0 {
+            self.reader = None;
+            return Ok(None);
+        }
+        buf.truncate(filled);
+        // SAFETY-adjacent: bytes are guaranteed ASCII bases by the decoder.
+        String::from_utf8(buf)
+            .map(Some)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("{}", e)))
+    }
+
+    /// Read and return all remaining bases as a single string, exhausting the
+    /// stream. Defeats the O(1)-memory guarantee for the size of the result.
+    fn read_all(&mut self) -> PyResult<String> {
+        let mut reader = self.reader.take().ok_or_else(|| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>("stream already exhausted")
+        })?;
+        let mut s = String::new();
+        reader
+            .read_to_string(&mut s)
+            .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+        Ok(s)
+    }
+}
+
 #[pyclass(name = "RefgetStore", module = "gtars.refget")]
 pub struct PyRefgetStore {
     pub(crate) inner: RefgetStore,
@@ -1575,11 +1651,14 @@ impl PyRefgetStore {
             .map(|meta| PySequenceMetadata::from(meta.clone()))
     }
 
-    /// Extract a substring from a sequence.
+    /// Extract a substring from a sequence (flow 1: lean partial read).
     ///
-    /// Retrieves a specific region from a sequence using 0-based, half-open
-    /// coordinates [start, end). Automatically loads sequence data if not
-    /// already cached (for lazy-loaded stores).
+    /// Retrieves a specific region using 0-based, half-open coordinates
+    /// [start, end), reading only the bytes that cover the region. Source
+    /// resolution is resident -> local `.seq` -> remote HTTP byte-range, so a
+    /// remote-backed store is served directly without any manual preload and
+    /// without downloading or caching the whole sequence. For repeat-heavy
+    /// access, call `load_sequence()` (flow 3) first to cache the sequence.
     /// Automatically strips "SQ." prefix from digest if present.
     ///
     /// Args:
@@ -1597,7 +1676,13 @@ impl PyRefgetStore {
     ///     >>> # Get first 1000 bases of chr1
     ///     >>> seq = store.get_substring("chr1_digest", 0, 1000)
     ///     >>> print(f"First 50bp: {seq[:50]}")
-    fn get_substring(&self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
+    fn get_substring(&mut self, seq_digest: &str, start: usize, end: usize) -> PyResult<String> {
+        // Ensure the sequence index (metadata stubs) is loaded so a remote
+        // sequence is locatable. Cheap and a no-op once loaded; does NOT
+        // download sequence bytes (those come via the lean byte-range path).
+        self.inner.load_sequence_index().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading index: {}", e))
+        })?;
         let seq_digest = strip_sq_prefix(seq_digest);
         self.inner
             .get_substring(seq_digest, start, end)
@@ -1612,16 +1697,21 @@ impl PyRefgetStore {
     /// Extract many substrings from ONE sequence in a single call.
     ///
     /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
-    /// substrings in the same order. The store adaptively reads the whole
-    /// sequence once when the ranges cover a large fraction (heavy overlap),
-    /// otherwise partial-reads each range. Output is identical to calling
-    /// `get_substring` per range, but amortizes record lookup, whole-sequence
-    /// decode, and FFI overhead.
+    /// substrings in the same order. Each range is partial-read (flow 1) from
+    /// the same source resolution as `get_substring` — resident -> local `.seq`
+    /// -> remote HTTP byte-range — so this works on remote-backed stores with no
+    /// manual preload and without downloading whole sequences. Output is
+    /// identical to calling `get_substring` per range, but amortizes record
+    /// lookup and FFI overhead. For repeat-heavy access call `load_sequence()`
+    /// (flow 3) first.
     fn get_substrings(
-        &self,
+        &mut self,
         seq_digest: &str,
         ranges: Vec<(usize, usize)>,
     ) -> PyResult<Vec<String>> {
+        self.inner.load_sequence_index().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading index: {}", e))
+        })?;
         let seq_digest = strip_sq_prefix(seq_digest);
         self.inner
             .get_substrings(seq_digest, &ranges)
@@ -1631,6 +1721,48 @@ impl PyRefgetStore {
                     seq_digest, e
                 ))
             })
+    }
+
+    /// Stream a (sub)sequence as decoded bases without loading it into memory (flow 2).
+    ///
+    /// Returns a `SequenceStream` that yields `str` chunks lazily, reading from
+    /// resident bytes, a local `.seq` (seek), or a remote HTTP byte-range as
+    /// needed. Peak memory is O(1) in the region length. Omit `start`/`end` to
+    /// stream the whole sequence.
+    ///
+    /// Args:
+    ///     seq_digest: Sequence digest (SHA-512/24u), optionally with "SQ." prefix.
+    ///     start: Start position (0-based, inclusive). Defaults to 0.
+    ///     end: End position (0-based, exclusive). Defaults to the sequence length.
+    ///     chunk_size: Bytes read per chunk (default 64 KiB).
+    ///
+    /// Returns:
+    ///     SequenceStream: An iterator of decoded base chunks.
+    #[pyo3(signature = (seq_digest, start=None, end=None, chunk_size=65536))]
+    fn stream_sequence(
+        &mut self,
+        seq_digest: &str,
+        start: Option<u64>,
+        end: Option<u64>,
+        chunk_size: usize,
+    ) -> PyResult<PySequenceStream> {
+        self.inner.load_sequence_index().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading index: {}", e))
+        })?;
+        let seq_digest = strip_sq_prefix(seq_digest);
+        let reader = self
+            .inner
+            .stream_sequence(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    seq_digest, e
+                ))
+            })?;
+        Ok(PySequenceStream {
+            reader: Some(reader),
+            chunk_size: chunk_size.max(1),
+        })
     }
 
     #[getter]
@@ -3144,9 +3276,9 @@ impl PyReadonlyRefgetStore {
     /// Extract many substrings from ONE sequence in a single call.
     ///
     /// `ranges` is a list of `(start, end)` tuples. Returns the decoded
-    /// substrings in the same order. Adaptively reads the whole sequence once
-    /// when the ranges cover a large fraction; otherwise partial-reads each
-    /// range. Identical output to per-range `get_substring`.
+    /// substrings in the same order. Each range is partial-read (flow 1):
+    /// resident -> local `.seq` -> remote HTTP byte-range. Works on remote
+    /// stores with no preload; identical output to per-range `get_substring`.
     fn get_substrings(
         &self,
         seq_digest: &str,
@@ -3158,6 +3290,35 @@ impl PyReadonlyRefgetStore {
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!("Sequence not found: {} ({})", seq_digest, e))
             })
+    }
+
+    /// Stream a (sub)sequence as decoded bases without loading it into memory (flow 2).
+    ///
+    /// Returns a `SequenceStream` yielding `str` chunks lazily from resident
+    /// bytes, a local `.seq`, or a remote HTTP byte-range. Peak memory is O(1)
+    /// in the region length. Omit `start`/`end` to stream the whole sequence.
+    #[pyo3(signature = (seq_digest, start=None, end=None, chunk_size=65536))]
+    fn stream_sequence(
+        &self,
+        seq_digest: &str,
+        start: Option<u64>,
+        end: Option<u64>,
+        chunk_size: usize,
+    ) -> PyResult<PySequenceStream> {
+        let seq_digest = strip_sq_prefix(seq_digest);
+        let reader = self
+            .store
+            .stream_sequence(seq_digest, start, end)
+            .map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!(
+                    "Sequence not found: {} ({})",
+                    seq_digest, e
+                ))
+            })?;
+        Ok(PySequenceStream {
+            reader: Some(reader),
+            chunk_size: chunk_size.max(1),
+        })
     }
 
     // --- Alias read methods ---
@@ -3313,6 +3474,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;
     m.add_class::<PyReadonlyRefgetStore>()?;
+    m.add_class::<PySequenceStream>()?;
     m.add_class::<PyRetrievedSequence>()?;
     m.add_class::<PyFhrMetadata>()?;
     Ok(())
