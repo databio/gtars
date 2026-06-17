@@ -133,12 +133,24 @@ jobs:
       - name: Identify built tarball
         id: pkg
         run: |
-          file=$(ls gtars_*_R_*.tgz gtars_*_R_*.tar.gz 2>/dev/null | head -n1)
+          file=$(ls gtars_*_R_*.tgz gtars_*_R_*.tar.gz gtars_*.tgz gtars_*.tar.gz 2>/dev/null | head -n1)
           if [ -z "$file" ]; then
             echo "::error::No binary tarball produced by R CMD INSTALL --build"
             ls -la
             exit 1
           fi
+          # macOS `R CMD INSTALL --build` names the tarball gtars_<ver>.tgz with no
+          # platform infix; rename it to an arch-qualified name so the arm64 and
+          # Intel macOS assets are distinct and never collide on the release.
+          case "$file" in
+            *_R_*) ;;
+            *.tgz)
+              ver=$(echo "$file" | sed -E 's/^gtars_(.+)\.tgz$/\1/')
+              new="gtars_${ver}_R_$(uname -m)-apple-darwin.tgz"
+              mv "$file" "$new"
+              file="$new"
+              ;;
+          esac
           echo "file=$file" >> "$GITHUB_OUTPUT"
           echo "Built $file"
 
