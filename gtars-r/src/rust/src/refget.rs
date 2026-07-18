@@ -546,7 +546,8 @@ pub fn stats_store(store_ptr: Robj) -> extendr_api::Result<List> {
             n_sequences_loaded = stats.n_sequences_loaded as i32,
             n_collections = stats.n_collections as i32,
             n_collections_loaded = stats.n_collections_loaded as i32,
-            storage_mode = stats.storage_mode
+            storage_mode = stats.storage_mode,
+            logical_sequence_bytes = stats.logical_sequence_bytes as f64
         ))
     })
 }

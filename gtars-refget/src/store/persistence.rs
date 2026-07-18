@@ -171,6 +171,7 @@ impl ReadonlyRefgetStore {
             sequences_digest,
             aliases_digest,
             fhr_digest,
+            logical_sequence_bytes: Some(self.logical_sequence_bytes() as u64),
         };
 
         let json = serde_json::to_string_pretty(&metadata)
@@ -287,7 +288,8 @@ impl ReadonlyRefgetStore {
     /// Read the store metadata from rgstore.json, returning state digests and timestamp.
     ///
     /// Returns a HashMap with keys: modified, collections_digest, sequences_digest,
-    /// aliases_digest, fhr_digest. Missing values are omitted from the map.
+    /// aliases_digest, fhr_digest, logical_sequence_bytes. Missing values are omitted
+    /// from the map.
     pub fn store_metadata(&self) -> Result<HashMap<String, String>> {
         let local_path = self.local_path.as_ref().context("local_path not set")?;
         let json = fs::read_to_string(local_path.join("rgstore.json"))
@@ -301,6 +303,7 @@ impl ReadonlyRefgetStore {
         if let Some(v) = metadata.sequences_digest { map.insert("sequences_digest".to_string(), v); }
         if let Some(v) = metadata.aliases_digest { map.insert("aliases_digest".to_string(), v); }
         if let Some(v) = metadata.fhr_digest { map.insert("fhr_digest".to_string(), v); }
+        if let Some(v) = metadata.logical_sequence_bytes { map.insert("logical_sequence_bytes".to_string(), v.to_string()); }
         Ok(map)
     }
 

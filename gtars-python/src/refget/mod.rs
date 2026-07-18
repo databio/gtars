@@ -2064,7 +2064,7 @@ impl PyRefgetStore {
     /// Returns statistics about the store.
     ///
     /// Returns:
-    ///     dict: Dictionary with keys 'n_sequences', 'n_collections', 'n_collections_loaded', 'storage_mode'
+    ///     dict: Dictionary with keys 'n_sequences', 'n_sequences_loaded', 'n_collections', 'n_collections_loaded', 'storage_mode', 'logical_sequence_bytes'
     ///
     /// Note:
     ///     n_collections is the total number of collections (both loaded and stubs).
@@ -2095,6 +2095,10 @@ impl PyRefgetStore {
             extended_stats.n_collections_loaded.to_string(),
         );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats.insert(
+            "logical_sequence_bytes".to_string(),
+            extended_stats.logical_sequence_bytes.to_string(),
+        );
         stats
     }
 
@@ -3224,6 +3228,10 @@ impl PyReadonlyRefgetStore {
         stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
         stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats.insert(
+            "logical_sequence_bytes".to_string(),
+            extended_stats.logical_sequence_bytes.to_string(),
+        );
         stats
     }
 

@@ -67,6 +67,7 @@ pub struct StoreStatsJs {
     pub n_collections: u32,
     pub n_collections_loaded: u32,
     pub storage_mode: String,
+    pub logical_sequence_bytes: BigInt,
 }
 
 // -- Main wrapper class --
@@ -272,6 +273,7 @@ impl RefgetStore {
             n_collections: s.n_collections as u32,
             n_collections_loaded: s.n_collections_loaded as u32,
             storage_mode: s.storage_mode,
+            logical_sequence_bytes: BigInt::from(s.logical_sequence_bytes),
         })
     }
 
