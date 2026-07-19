@@ -6,7 +6,7 @@
 </h1>
 
 
-`gtars` is a rust project that provides a set of tools for working with genomic interval data. It includes modules for genomic distribution analysis (`genomicdist`), locus overlap enrichment analysis (`lola`), integrated genome database overlap queries (`igd`), sequence collection management (`refget`), and more. Its primary goal is to provide processors for our python package, [`geniml`](https:github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well. For more information, see the [public-facing documentation](https://docs.bedbase.org/gtars/) (under construction).
+`gtars` is a rust project that provides a set of tools for working with genomic interval data. It includes modules for genomic distribution analysis (`genomicdist`), locus overlap enrichment analysis (`lola`), integrated genome database overlap queries (`igd`), sequence collection management (`refget`), and more. Its primary goal is to provide processors for our python package, [`geniml`](https://github.com/databio/geniml), a library for machine learning on genomic intervals. However, it can be used as a standalone library for working with genomic intervals as well. For more information, see the [public-facing documentation](https://docs.bedbase.org/gtars/) (under construction).
 
 
 `gtars` provides these things:
@@ -130,14 +130,14 @@ You can link `gtars` as a library in your rust project. To do so, add the follow
 
 ```toml
 [dependencies]
-gtars = { git = "https://github.com/databio/gtars/gtars" }
+gtars = { git = "https://github.com/databio/gtars" }
 ```
 
 We wall off crates using features, so you will need to enable the features you want. For example, to use the overlap tool:
 
 ```toml
 [dependencies]
-gtars = { git = "https://github.com/databio/gtars/gtars", features = ["overlaprs"] }
+gtars = { git = "https://github.com/databio/gtars", features = ["overlaprs"] }
 ```
 
 Then, in your rust code, you can use it like so:
