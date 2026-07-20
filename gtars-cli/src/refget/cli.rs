@@ -48,6 +48,12 @@ pub fn create_refget_cli() -> Command {
                         .long("force")
                         .action(ArgAction::SetTrue)
                         .help("Overwrite existing collections/sequences in the store"),
+                )
+                .arg(
+                    Arg::new("collection_alias")
+                        .long("collection-alias")
+                        .value_name("NAMESPACE:ALIAS")
+                        .help("Register the imported collection under this collection alias, e.g. 'ucsc:hg38'. This names the collection as a whole and is distinct from per-sequence aliases parsed from FASTA headers. Only valid with a single input FASTA."),
                 ),
         )
 }

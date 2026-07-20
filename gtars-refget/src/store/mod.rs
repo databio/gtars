@@ -187,6 +187,21 @@ pub struct RetrievedSequence {
 /// (`std::thread::available_parallelism`). `1` = serial. It has no effect with a
 /// single input file (each file is processed by the basic read->digest->encode
 /// pipeline either way).
+///
+/// ## Two independent alias indexes
+///
+/// A store keeps *two* separate alias indexes, and these options feed exactly
+/// one each:
+///
+/// - `namespaces` feeds only the **sequence** alias index. It is a *parsing*
+///   directive: it lists which `ns:value` tokens to harvest out of each FASTA
+///   header and register per sequence.
+/// - `collection_alias` feeds only the **collection** alias index. It is an
+///   *assertion* by the caller naming the collection as a whole, because a FASTA
+///   says what each sequence is called but never what the assembly is called.
+///
+/// They are deliberately decoupled: setting `namespaces` never names the
+/// collection, and setting `collection_alias` never registers a sequence alias.
 #[derive(Clone, Copy)]
 pub struct FastaImportOptions<'a> {
     pub(crate) force: bool,
@@ -196,6 +211,15 @@ pub struct FastaImportOptions<'a> {
     /// (`std::thread::available_parallelism`), `1` = serial. No effect with a
     /// single input file.
     pub(crate) jobs: usize,
+    /// Optional `(namespace, alias)` under which the imported collection is
+    /// registered in the **collection** alias index (e.g. `("ucsc", "hg38")`).
+    ///
+    /// Independent of `namespaces`, which only controls per-sequence FASTA
+    /// header parsing and never names the collection. Rejected with an error
+    /// when more than one FASTA file is imported in a single call, since one
+    /// alias cannot name N collections. When unset, nothing is registered and
+    /// nothing is derived from the filename.
+    pub(crate) collection_alias: Option<(&'a str, &'a str)>,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -204,6 +228,7 @@ impl<'a> Default for FastaImportOptions<'a> {
             force: false,
             namespaces: &[],
             jobs: 0,
+            collection_alias: None,
         }
     }
 }
@@ -232,6 +257,28 @@ impl<'a> FastaImportOptions<'a> {
     #[must_use]
     pub fn jobs(mut self, n: usize) -> Self {
         self.jobs = n;
+        self
+    }
+
+    /// Register the imported collection in the **collection** alias index under
+    /// `namespace:alias` (e.g. `.collection_alias("ucsc", "hg38")`).
+    ///
+    /// This is an explicit assertion by the caller — nothing in a FASTA file
+    /// names the assembly. It is independent of [`Self::namespaces`], which only
+    /// harvests per-sequence aliases from headers.
+    ///
+    /// Only valid when importing a single FASTA file; importing multiple files
+    /// with this set returns an error, because one alias cannot name N
+    /// collections. For the multi-file case, import without this option and call
+    /// `add_collection_alias` per returned collection (results come back in
+    /// input order).
+    ///
+    /// If the alias already resolves to a *different* collection digest, the
+    /// import errors rather than silently remapping it, unless
+    /// [`Self::force`] is set. Re-registering the same digest is a no-op.
+    #[must_use]
+    pub fn collection_alias(mut self, namespace: &'a str, alias: &'a str) -> Self {
+        self.collection_alias = Some((namespace, alias));
         self
     }
 }

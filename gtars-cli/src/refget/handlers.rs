@@ -33,6 +33,28 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let raw = matches.get_flag("raw");
     let force = matches.get_flag("force");
 
+    // Parse --collection-alias NAMESPACE:ALIAS. Owned up front so the borrows
+    // in FastaImportOptions outlive the builder chain.
+    let collection_alias: Option<(String, String)> = matches
+        .get_one::<String>("collection_alias")
+        .map(|raw| {
+            let (ns, alias) = raw.split_once(':').ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--collection-alias expects NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                    raw
+                )
+            })?;
+            if ns.is_empty() || alias.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "--collection-alias expects a non-empty namespace and alias in \
+                     NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                    raw
+                ));
+            }
+            Ok((ns.to_string(), alias.to_string()))
+        })
+        .transpose()?;
+
     let mut store = RefgetStore::on_disk(output)
         .map_err(|e| anyhow::anyhow!("Failed to create store at {}: {}", output, e))?;
     if raw {
@@ -54,9 +76,12 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mut total_seqs: usize = 0;
     let start = Instant::now();
 
-    let opts = FastaImportOptions::new()
+    let mut opts = FastaImportOptions::new()
         .force(force)
         .jobs(jobs);
+    if let Some((ns, alias)) = collection_alias.as_ref() {
+        opts = opts.collection_alias(ns, alias);
+    }
     let results = store
         .add_sequence_collections_from_fastas(&fastas, opts)
         .map_err(|e| anyhow::anyhow!("Failed to import FASTA files: {}", e))?;
