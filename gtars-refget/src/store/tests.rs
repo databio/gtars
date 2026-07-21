@@ -9,6 +9,7 @@ use crate::digest::types::{
 use crate::digest::{AlphabetType, md5, sha512t24u};
 use crate::hashkeyable::{DigestKey, HashKeyable};
 use std::fs;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 // =========================================================================
@@ -1478,6 +1479,60 @@ fn test_remove_collection_on_disk_with_orphan_sequences() {
     let rgsi_content = fs::read_to_string(store_path.join("sequences.rgsi")).unwrap();
     let non_comment_lines: Vec<_> = rgsi_content.lines().filter(|l| !l.starts_with('#')).collect();
     assert!(non_comment_lines.is_empty());
+}
+
+#[test]
+fn test_remove_collection_on_disk_cleans_up_empty_shard_dirs() {
+    // The rmdir of the two-char shard directories is hoisted OUT of the
+    // per-file unlink loop (see `remove_collection` in readonly.rs). This test
+    // pins that the hoisted pass actually runs: every orphan `.seq` file is
+    // unlinked AND every shard dir it emptied is removed.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGT\n>chr2\nTTTT\n>chr3\nGGGG\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+
+    let seq_files: Vec<PathBuf> = [b"ACGT".as_slice(), b"TTTT".as_slice(), b"GGGG".as_slice()]
+        .iter()
+        .map(|seq| {
+            let d = sha512t24u(seq);
+            store_path.join(format!("sequences/{}/{}.seq", &d[..2], d))
+        })
+        .collect();
+
+    for f in &seq_files {
+        assert!(f.exists(), "expected seq file to exist before removal: {:?}", f);
+    }
+    // Distinct shard dirs (dedup via the set) that should be emptied by removal.
+    let shard_dirs: std::collections::HashSet<PathBuf> = seq_files
+        .iter()
+        .map(|f| f.parent().unwrap().to_path_buf())
+        .collect();
+    for d in &shard_dirs {
+        assert!(d.is_dir(), "expected shard dir to exist before removal: {:?}", d);
+    }
+
+    store.remove_collection(&digest, true).unwrap();
+
+    for f in &seq_files {
+        assert!(!f.exists(), "orphan seq file was not removed: {:?}", f);
+    }
+    for d in &shard_dirs {
+        assert!(
+            !d.exists(),
+            "emptied shard dir was not cleaned up (hoisted rmdir pass did not run): {:?}",
+            d
+        );
+    }
+    // The `sequences/` root itself is part of the store layout and stays put.
+    assert!(store_path.join("sequences").is_dir());
 }
 
 // =========================================================================
