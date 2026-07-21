@@ -765,6 +765,11 @@ impl ReadonlyRefgetStore {
     }
 
     /// Remove a collection from the store.
+    ///
+    /// When `remove_orphan_sequences` is true, the orphan-cleanup path is
+    /// O(sequences + collections): `md5_lookup` is scanned exactly once, not
+    /// once per orphan. Do not reintroduce a per-orphan scan here — on large
+    /// stores that is quadratic and effectively unbounded.
     pub fn remove_collection(
         &mut self,
         digest: &str,
@@ -814,8 +819,13 @@ impl ReadonlyRefgetStore {
 
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);
-                self.md5_lookup.retain(|_, v| v != orphan_key);
             }
+
+            // Single pass over md5_lookup instead of one full scan per orphan.
+            // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
+            let orphan_set: std::collections::HashSet<DigestKey> =
+                orphans.iter().copied().collect();
+            self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
 
             if self.persist_to_disk {
                 if let (Some(local_path), Some(template)) =
@@ -856,7 +866,8 @@ impl ReadonlyRefgetStore {
     /// received an `End` message (and was therefore never added to
     /// `self.collections`).  Those sequences are orphans — they have no
     /// owning collection — and this method removes them so the store stays
-    /// internally consistent. The operation is O(sequences + collections).
+    /// internally consistent. The operation is O(sequences + collections):
+    /// `md5_lookup` is scanned exactly once, not once per orphan.
     ///
     /// Sequences shared with a successfully-finalized collection are preserved.
     #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
@@ -886,8 +897,12 @@ impl ReadonlyRefgetStore {
         // Remove from in-memory structures.
         for key in &orphans {
             self.sequence_store.remove(key);
-            self.md5_lookup.retain(|_, v| v != key);
         }
+
+        // Single pass over md5_lookup instead of one full scan per orphan.
+        // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
+        let orphan_set: std::collections::HashSet<DigestKey> = orphans.iter().copied().collect();
+        self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
 
         // Best-effort remove on-disk `.seq` files.
         if self.persist_to_disk {
