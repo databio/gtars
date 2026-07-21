@@ -3574,3 +3574,485 @@ fn test_get_substrings_matches_encoded() {
 fn test_get_substrings_matches_raw() {
     run_get_substrings_matches_for_mode(true);
 }
+
+// =========================================================================
+// Import-time collection alias tests
+// =========================================================================
+
+/// REQUIRED REGRESSION GUARD: omitting `.collection_alias(..)` must change
+/// nothing. An import with plain options registers no collection alias at all.
+#[test]
+fn test_import_without_collection_alias_registers_none() {
+    let dir = tempdir().unwrap();
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+
+    assert!(
+        store.list_collection_alias_namespaces().is_empty(),
+        "plain import must not create any collection alias namespace"
+    );
+    assert!(
+        store.get_aliases_for_collection(&meta.digest).is_empty(),
+        "plain import must not name the collection"
+    );
+}
+
+/// `namespaces` feeds the SEQUENCE index only; it must never name the
+/// collection. Proves the two alias indexes stay decoupled.
+#[test]
+fn test_import_without_collection_alias_but_with_namespaces() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("ns.fa");
+    fs::write(&fasta, ">chr1 ucsc:chr1\nAAAACCCC\n>chr2 ucsc:chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ucsc"]))
+        .unwrap();
+
+    let seq_aliases = store
+        .list_sequence_aliases("ucsc")
+        .expect("ucsc sequence alias namespace should exist");
+    assert!(!seq_aliases.is_empty(), "header aliases should be registered");
+
+    assert!(
+        store.list_collection_alias_namespaces().is_empty(),
+        "namespaces must not leak into the collection alias index"
+    );
+    assert!(store.get_aliases_for_collection(&meta.digest).is_empty());
+}
+
+#[test]
+fn test_import_with_collection_alias_registers_collection_alias() {
+    let dir = tempdir().unwrap();
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let resolved = store
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("ucsc:hg38 should resolve");
+    assert_eq!(resolved.digest, meta.digest);
+
+    assert!(
+        store.list_sequence_alias_namespaces().is_empty(),
+        "collection alias must not leak into the sequence alias index"
+    );
+}
+
+/// The collection alias works with `namespaces` unset (decision 1: the option is
+/// explicit, not derived from the namespaces list).
+#[test]
+fn test_collection_alias_without_namespaces() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("bare.fa");
+    // Bare headers: no `ns:value` tokens anywhere in the file.
+    fs::write(&fasta, ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let opts = FastaImportOptions::new().collection_alias("ucsc", "hg38");
+    assert!(opts.namespaces.is_empty(), "namespaces deliberately unset");
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, opts)
+        .unwrap();
+
+    let resolved = store
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("ucsc:hg38 should resolve without namespaces set");
+    assert_eq!(resolved.digest, meta.digest);
+}
+
+#[test]
+fn test_collection_alias_persists_to_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    let tsv = store_path.join("aliases").join("collections").join("ucsc.tsv");
+    assert!(tsv.exists(), "collection alias TSV should be written");
+    let contents = fs::read_to_string(&tsv).unwrap();
+    assert!(
+        contents.contains(&format!("hg38\t{}", meta.digest)),
+        "TSV should map hg38 to the collection digest, got: {}",
+        contents
+    );
+
+    // `store_metadata()` only surfaces the state digests, so read rgstore.json
+    // directly for the advertised namespace list.
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store_path.join("rgstore.json")).unwrap()).unwrap();
+    let coll_ns = manifest_json
+        .get("collection_alias_namespaces")
+        .and_then(|v| v.as_array())
+        .expect("rgstore.json should carry collection_alias_namespaces");
+    assert!(
+        coll_ns.iter().any(|v| v.as_str() == Some("ucsc")),
+        "rgstore.json should advertise the ucsc collection alias namespace, got {:?}",
+        coll_ns
+    );
+    assert!(
+        manifest_json
+            .get("sequence_alias_namespaces")
+            .and_then(|v| v.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "no sequence alias namespaces should be advertised"
+    );
+
+    let manifest = store.store_metadata().unwrap();
+    assert!(
+        manifest.get("aliases_digest").is_some(),
+        "rgstore.json should carry an aliases_digest"
+    );
+
+    // Round-trip through a fresh open.
+    let reopened = RefgetStore::open_local(&store_path).unwrap();
+    let resolved = reopened
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("alias should survive a reopen");
+    assert_eq!(resolved.digest, meta.digest);
+}
+
+/// Re-importing the same FASTA with the same alias is a no-op, on both the
+/// in-run duplicate path and the build-side `Skip` path (fresh store from disk).
+#[test]
+fn test_collection_alias_idempotent_on_reimport() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta1, was_new1) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(was_new1);
+
+    // In-run duplicate path: same store, same file again.
+    let (meta2, was_new2) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new2, "second import of the same FASTA is not new");
+    assert_eq!(meta2.digest, meta1.digest);
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta1.digest
+    );
+    store.write().unwrap();
+
+    // Build-side Skip path: reopen from disk so the collection is in
+    // `present_collections` before any decode happens.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (meta3, was_new3) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new3, "already-present collection should be skipped");
+    assert_eq!(meta3.digest, meta1.digest);
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta1.digest
+    );
+}
+
+/// A previously-imported collection that was NOT named still gets its name on a
+/// later re-import via the build-side Skip path. This is the silent-drop bug.
+#[test]
+fn test_collection_alias_registered_on_build_side_skip() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+    assert!(store.list_collection_alias_namespaces().is_empty());
+
+    // Reopen: the collection is already present, so the builder emits Skip and
+    // finalize_collection is never reached. The alias must still land.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (_, was_new) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new, "collection was already present");
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .expect("alias must be registered even on the skip path")
+            .digest,
+        meta.digest
+    );
+}
+
+#[test]
+fn test_collection_alias_conflict_errors() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let err = store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+    let msg = format!("{}", err);
+    assert!(msg.contains("ucsc"), "error should name the namespace: {}", msg);
+    assert!(msg.contains("hg38"), "error should name the alias: {}", msg);
+
+    // The failed import must not have remapped the alias.
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_a.digest
+    );
+}
+
+/// A failed conflicting-alias import must not leave the collection behind.
+///
+/// The alias conflict is validated up front, before any part of the import is
+/// committed, so a rejected import is a true no-op: the store must hold exactly
+/// the one collection that succeeded. Previously the collection was inserted
+/// first and the alias checked afterwards, so a "failed" import still added a
+/// second collection to `store.collections`.
+#[test]
+fn test_collection_alias_conflict_does_not_leak_collection() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert_eq!(store.collections.len(), 1);
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // The rejected import must not have been committed.
+    assert_eq!(
+        store.collections.len(),
+        1,
+        "a failed import must not leave its collection in the store"
+    );
+    assert!(
+        store.collections.contains_key(&meta_a.digest.to_key()),
+        "the surviving collection should be the one that imported successfully"
+    );
+    assert!(
+        store.name_lookup.len() <= 1,
+        "no name_lookup entry should be installed for the rejected collection"
+    );
+}
+
+/// Disk-backed counterpart: a rejected conflicting-alias import must not leave
+/// an orphaned `collections/<digest>.rgsi` that the top-level index never
+/// references. The per-collection `.rgsi` is written immediately, but
+/// `collections.rgci` is only written at the end of a successful import, so
+/// erroring after the collection write used to strand a file on disk.
+#[test]
+fn test_collection_alias_conflict_leaves_no_orphan_on_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // Exactly one per-collection index file, and it belongs to the collection
+    // that actually imported.
+    let coll_dir = store_path.join("collections");
+    let mut rgsi: Vec<String> = fs::read_dir(&coll_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".rgsi"))
+        .collect();
+    rgsi.sort();
+    assert_eq!(
+        rgsi,
+        vec![format!("{}.rgsi", meta_a.digest)],
+        "failed import must not leave an orphaned collection .rgsi on disk"
+    );
+
+    assert_eq!(store.collections.len(), 1);
+
+    // The store on disk is still coherent: reopening sees exactly the one
+    // collection, still reachable through the alias.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(reopened.collections.len(), 1);
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .expect("alias should still resolve after the failed import")
+            .digest,
+        meta_a.digest
+    );
+    // And the surviving collection is fully readable, not a dangling index row.
+    reopened
+        .get_collection(&meta_a.digest)
+        .expect("the committed collection must still load");
+}
+
+#[test]
+fn test_collection_alias_conflict_force_overwrites() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let (meta_b, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new()
+                .collection_alias("ucsc", "hg38")
+                .force(true),
+        )
+        .unwrap();
+
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_b.digest,
+        "force should remap the alias to the new collection"
+    );
+}
+
+#[test]
+fn test_collection_alias_rejected_for_multiple_files() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let err = store
+        .add_sequence_collections_from_fastas(
+            &[fasta_a, fasta_b],
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("collection_alias with multiple files must error");
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("add_collection_alias"),
+        "error should teach the per-file workaround: {}",
+        msg
+    );
+
+    // The guard runs before any thread spawns, so the store must be untouched.
+    assert!(store.sequence_store.is_empty(), "no sequences imported");
+    assert!(store.collections.is_empty(), "no collections imported");
+    assert!(store.list_collection_alias_namespaces().is_empty());
+    assert!(store.list_sequence_alias_namespaces().is_empty());
+}
+
+/// The multi-file guard must be a `> 1` check, not a `!= 1` check -- the
+/// single-file wrapper goes through this same entry point with a 1-element slice.
+#[test]
+fn test_collection_alias_single_element_slice_ok() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("one.fa");
+    fs::write(&fasta, ">chr1\nAAAACCCC\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let results = store
+        .add_sequence_collections_from_fastas(
+            &[fasta],
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect("one-element slice with an alias must succeed");
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        results[0].0.digest
+    );
+}

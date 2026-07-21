@@ -669,6 +669,21 @@ impl ReadonlyRefgetStore {
             return Ok(Vec::new());
         }
 
+        // One collection alias cannot name N collections. Reject BEFORE any
+        // thread spawns or any file is opened, so a rejected call leaves the
+        // store completely untouched. Applying the alias to every collection
+        // would let an arbitrary one win (finalize order across builder threads
+        // is non-deterministic), which is a worse version of the silent
+        // misnaming this option exists to eliminate.
+        if opts.collection_alias.is_some() && files.len() > 1 {
+            return Err(anyhow!(
+                "collection_alias names a single collection but {} FASTA files were given; \
+                 import them without collection_alias and call add_collection_alias() per \
+                 returned collection metadata (results are in input order)",
+                files.len(),
+            ));
+        }
+
         // Resolve concurrency: 0 = auto (available_parallelism). Has no effect
         // with a single file (clamped to 1).
         let jobs = match opts.jobs {
@@ -828,6 +843,19 @@ impl ReadonlyRefgetStore {
                     InsertMsg::Skip { file_idx, metadata } => {
                         // Already-present collection skipped before any decode.
                         // No scratch was created (no Begin), nothing to persist.
+                        // This path never reaches finalize_collection, so the
+                        // requested collection alias must be registered HERE --
+                        // otherwise re-importing an already-imported FASTA would
+                        // silently drop the name the caller asked for.
+                        if let Err(e) = self.register_import_collection_alias(
+                            opts.collection_alias,
+                            &metadata.digest,
+                            opts.force,
+                        ) {
+                            let mut slot = build_err_ref.lock().unwrap();
+                            if slot.is_none() { *slot = Some(e); }
+                            break;
+                        }
                         results[file_idx] = Some((metadata, false));
                     }
                     InsertMsg::Seq { file_idx, ready } => {
@@ -925,6 +953,7 @@ impl ReadonlyRefgetStore {
                             &source_path,
                             seq_count,
                             opts.force,
+                            opts.collection_alias,
                         ) {
                             Ok((meta, was_new)) => results[file_idx] = Some((meta, was_new)),
                             Err(e) => {
@@ -1037,11 +1066,30 @@ impl ReadonlyRefgetStore {
         source_path: &Path,
         seq_count: usize,
         force: bool,
+        collection_alias: Option<(&str, &str)>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         let coll_key = metadata.digest.to_key();
         let coll_digest_display = metadata.digest.clone();
 
+        // Validate the requested collection alias BEFORE touching any state.
+        // A conflicting alias is a hard error, and it must be raised while the
+        // store is still untouched: everything below this point (the collection
+        // record, its on-disk `.rgsi`, name_lookup, sequence aliases) is
+        // committed immediately, but the top-level index is only written once
+        // at the very end of the import. Erroring after those mutations would
+        // report a failed import while leaving the collection in the store --
+        // and, on disk, an orphaned `collections/<digest>.rgsi` that no index
+        // ever references. The actual alias write still happens below, after
+        // the collection is committed.
+        self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
+
         if !force && self.collections.contains_key(&coll_key) {
+            // Register the name even on the in-run duplicate path: the
+            // collection IS in the store and the caller DID ask for it to be
+            // named. Skipping here would mean a re-import silently drops the
+            // alias. The helper is idempotent, so a second registration of the
+            // same digest is a no-op.
+            self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
             if !self.quiet {
                 println!("Skipped {} (already exists)", coll_digest_display);
             }
@@ -1080,6 +1128,11 @@ impl ReadonlyRefgetStore {
         for (ns, alias_value, sha512t24u) in &scratch.aliases {
             self.add_sequence_alias(ns, alias_value, sha512t24u)?;
         }
+
+        // Register the collection alias (if requested). Conflicts were already
+        // rejected up front, while nothing had been mutated; this is the write
+        // half, and it runs only once the collection itself is committed.
+        self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
 
         if !self.quiet {
             println!(
