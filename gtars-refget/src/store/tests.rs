@@ -3749,6 +3749,117 @@ fn test_collection_alias_conflict_errors() {
     );
 }
 
+/// A failed conflicting-alias import must not leave the collection behind.
+///
+/// The alias conflict is validated up front, before any part of the import is
+/// committed, so a rejected import is a true no-op: the store must hold exactly
+/// the one collection that succeeded. Previously the collection was inserted
+/// first and the alias checked afterwards, so a "failed" import still added a
+/// second collection to `store.collections`.
+#[test]
+fn test_collection_alias_conflict_does_not_leak_collection() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert_eq!(store.collections.len(), 1);
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // The rejected import must not have been committed.
+    assert_eq!(
+        store.collections.len(),
+        1,
+        "a failed import must not leave its collection in the store"
+    );
+    assert!(
+        store.collections.contains_key(&meta_a.digest.to_key()),
+        "the surviving collection should be the one that imported successfully"
+    );
+    assert!(
+        store.name_lookup.len() <= 1,
+        "no name_lookup entry should be installed for the rejected collection"
+    );
+}
+
+/// Disk-backed counterpart: a rejected conflicting-alias import must not leave
+/// an orphaned `collections/<digest>.rgsi` that the top-level index never
+/// references. The per-collection `.rgsi` is written immediately, but
+/// `collections.rgci` is only written at the end of a successful import, so
+/// erroring after the collection write used to strand a file on disk.
+#[test]
+fn test_collection_alias_conflict_leaves_no_orphan_on_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // Exactly one per-collection index file, and it belongs to the collection
+    // that actually imported.
+    let coll_dir = store_path.join("collections");
+    let mut rgsi: Vec<String> = fs::read_dir(&coll_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".rgsi"))
+        .collect();
+    rgsi.sort();
+    assert_eq!(
+        rgsi,
+        vec![format!("{}.rgsi", meta_a.digest)],
+        "failed import must not leave an orphaned collection .rgsi on disk"
+    );
+
+    assert_eq!(store.collections.len(), 1);
+
+    // The store on disk is still coherent: reopening sees exactly the one
+    // collection, still reachable through the alias.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(reopened.collections.len(), 1);
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .expect("alias should still resolve after the failed import")
+            .digest,
+        meta_a.digest
+    );
+    // And the surviving collection is fully readable, not a dangling index row.
+    reopened
+        .get_collection(&meta_a.digest)
+        .expect("the committed collection must still load");
+}
+
 #[test]
 fn test_collection_alias_conflict_force_overwrites() {
     let dir = tempdir().unwrap();

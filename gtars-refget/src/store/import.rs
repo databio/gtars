@@ -1071,6 +1071,18 @@ impl ReadonlyRefgetStore {
         let coll_key = metadata.digest.to_key();
         let coll_digest_display = metadata.digest.clone();
 
+        // Validate the requested collection alias BEFORE touching any state.
+        // A conflicting alias is a hard error, and it must be raised while the
+        // store is still untouched: everything below this point (the collection
+        // record, its on-disk `.rgsi`, name_lookup, sequence aliases) is
+        // committed immediately, but the top-level index is only written once
+        // at the very end of the import. Erroring after those mutations would
+        // report a failed import while leaving the collection in the store --
+        // and, on disk, an orphaned `collections/<digest>.rgsi` that no index
+        // ever references. The actual alias write still happens below, after
+        // the collection is committed.
+        self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
+
         if !force && self.collections.contains_key(&coll_key) {
             // Register the name even on the in-run duplicate path: the
             // collection IS in the store and the caller DID ask for it to be
@@ -1117,9 +1129,9 @@ impl ReadonlyRefgetStore {
             self.add_sequence_alias(ns, alias_value, sha512t24u)?;
         }
 
-        // Register the collection alias (if requested) BEFORE announcing
-        // success, so a collision error aborts without claiming the import
-        // succeeded.
+        // Register the collection alias (if requested). Conflicts were already
+        // rejected up front, while nothing had been mutated; this is the write
+        // half, and it runs only once the collection itself is committed.
         self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
 
         if !self.quiet {

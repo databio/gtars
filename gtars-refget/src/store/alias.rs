@@ -370,6 +370,43 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
+    /// Check whether an import-time collection alias request would conflict,
+    /// WITHOUT mutating anything.
+    ///
+    /// This is the read-only half of [`Self::register_import_collection_alias`]:
+    /// it returns exactly the error registration would return, so callers can
+    /// validate up front and bail out before committing any part of an import.
+    /// Returns `Ok(())` when `spec` is `None`, when `force` is set, when the
+    /// alias is unused, or when it already points at this same collection (the
+    /// idempotent re-import case).
+    pub(crate) fn check_import_collection_alias(
+        &self,
+        spec: Option<(&str, &str)>,
+        collection_digest: &str,
+        force: bool,
+    ) -> Result<()> {
+        let Some((namespace, alias)) = spec else {
+            return Ok(());
+        };
+        if force {
+            return Ok(());
+        }
+
+        let new_key = collection_digest.to_key();
+        match self.aliases.resolve_collection(namespace, alias) {
+            Some(existing) if existing != new_key => Err(anyhow::anyhow!(
+                "collection alias {}:{} already resolves to collection {} \
+                 but this import would point it at {}; \
+                 pass force to overwrite, or choose a different alias",
+                namespace,
+                alias,
+                key_to_digest_string(&existing),
+                collection_digest,
+            )),
+            _ => Ok(()),
+        }
+    }
+
     /// Register a collection alias requested at import time.
     ///
     /// No-op when `spec` is `None`. Idempotent when the alias already points at
@@ -389,6 +426,10 @@ impl ReadonlyRefgetStore {
             return Ok(());
         };
 
+        // Same error, evaluated the same way, as the up-front validation
+        // callers run before mutating anything.
+        self.check_import_collection_alias(spec, collection_digest, force)?;
+
         let new_key = collection_digest.to_key();
         match self.aliases.resolve_collection(namespace, alias) {
             // Same collection: already registered, nothing to do (and no
@@ -396,17 +437,6 @@ impl ReadonlyRefgetStore {
             Some(existing) if existing == new_key => return Ok(()),
             Some(existing) => {
                 let existing_digest = key_to_digest_string(&existing);
-                if !force {
-                    return Err(anyhow::anyhow!(
-                        "collection alias {}:{} already resolves to collection {} \
-                         but this import would point it at {}; \
-                         pass force to overwrite, or choose a different alias",
-                        namespace,
-                        alias,
-                        existing_digest,
-                        collection_digest,
-                    ));
-                }
                 if !self.quiet {
                     println!(
                         "Warning: remapping collection alias {}:{} from {} to {} (force)",
