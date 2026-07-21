@@ -622,15 +622,23 @@ impl ReadonlyRefgetStore {
         self.sequence_store.values().map(|rec| rec.metadata())
     }
 
-    /// Calculate the total disk size of all sequences in the store
-    pub fn total_disk_size(&self) -> usize {
+    /// Logical size in bytes of all sequence *payloads*, computed from metadata
+    /// (length x storage mode). Cheap: O(n_sequences) arithmetic, no I/O, no walk,
+    /// works on stubs. Does NOT include index files, sidecars, or rgstore.json.
+    /// This is the value cached in the manifest at write time (see write path); for
+    /// the exact full on-disk footprint use `actual_disk_usage()` (walks the dir).
+    pub fn logical_sequence_bytes(&self) -> usize {
         self.sequence_store
             .values()
             .map(|rec| rec.metadata().disk_size(&self.mode))
             .sum()
     }
 
-    /// Returns the actual disk usage of the store directory.
+    /// Exact on-disk footprint of the store: recursively walks the store directory
+    /// and sums every file's byte length (`.seq` data, `.rgsi`/`.rgci` indexes, FHR
+    /// sidecars, alias data, `rgstore.json`). Accurate and complete, but does I/O on
+    /// every call. Use this when an exact footprint is needed; for the cheap cached
+    /// sequence-content size use `logical_sequence_bytes()`.
     pub fn actual_disk_usage(&self) -> usize {
         let Some(path) = &self.local_path else {
             return 0;
@@ -2233,6 +2241,7 @@ impl ReadonlyRefgetStore {
             n_collections,
             n_collections_loaded,
             storage_mode: mode_str.to_string(),
+            logical_sequence_bytes: self.logical_sequence_bytes() as u64,
         }
     }
 
@@ -2247,7 +2256,7 @@ impl ReadonlyRefgetStore {
 
 impl Display for ReadonlyRefgetStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let total_size = self.total_disk_size();
+        let total_size = self.logical_sequence_bytes();
         let size_str = format_bytes(total_size);
         writeln!(f, "ReadonlyRefgetStore object:")?;
         writeln!(f, "  Mode: {:?}", self.mode)?;

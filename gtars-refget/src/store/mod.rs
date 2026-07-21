@@ -282,6 +282,12 @@ pub(crate) struct StoreMetadata {
     /// SHA256 digest of combined FHR sidecar data
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) fhr_digest: Option<String>,
+    /// Logical sequence-data size in bytes (sum of length x storage-mode encoding),
+    /// computed once at index-write time. Lets a consumer read the store's size from
+    /// the manifest without loading the sequence index. Excludes index/sidecar
+    /// overhead. `None` for manifests written before this field existed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) logical_sequence_bytes: Option<u64>,
 }
 
 pub(crate) fn default_true() -> bool {
@@ -301,6 +307,10 @@ pub struct StoreStats {
     pub n_collections_loaded: usize,
     /// Storage mode (Raw or Encoded)
     pub storage_mode: String,
+    /// Logical size in bytes of all sequence payloads (length x storage-mode
+    /// encoding). Excludes index/sidecar/manifest overhead. For the exact full
+    /// on-disk footprint use `ReadonlyRefgetStore::actual_disk_usage()`.
+    pub logical_sequence_bytes: u64,
 }
 
 /// Format bytes into human-readable size (KB, MB, GB, etc.)

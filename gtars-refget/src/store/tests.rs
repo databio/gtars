@@ -919,7 +919,7 @@ fn test_disk_size_calculation() {
         .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz", FastaImportOptions::new())
         .unwrap();
 
-    let disk_size = store.total_disk_size();
+    let disk_size = store.logical_sequence_bytes();
     assert!(disk_size > 0);
 
     let manual: usize = store
@@ -1605,6 +1605,62 @@ fn test_aliases_digest_changes_on_alias_add() {
 
     let meta2 = store.store_metadata().unwrap();
     assert!(meta2.get("aliases_digest").is_some(), "aliases_digest should appear after alias + index rewrite");
+}
+
+#[test]
+fn test_logical_sequence_bytes_persisted_in_manifest() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let expected = store.logical_sequence_bytes() as u64;
+    assert!(expected > 0);
+
+    // Read the raw rgstore.json and confirm the cached value matches.
+    let json = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        manifest.get("logical_sequence_bytes").and_then(|v| v.as_u64()),
+        Some(expected),
+        "manifest should cache logical_sequence_bytes matching the store"
+    );
+
+    // store_metadata() should surface it too.
+    let meta = store.store_metadata().unwrap();
+    assert_eq!(
+        meta.get("logical_sequence_bytes").map(|s| s.as_str()),
+        Some(expected.to_string().as_str())
+    );
+}
+
+#[test]
+fn test_logical_sequence_bytes_survives_alias_refresh() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let expected = store.logical_sequence_bytes() as u64;
+    assert!(expected > 0);
+
+    // Alias-only mutation goes through the cheap manifest-refresh path, which must
+    // preserve the cached logical_sequence_bytes untouched.
+    store.add_sequence_alias("test_ns", "my_alias", &meta.sequences_digest).unwrap();
+
+    let json = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        manifest.get("logical_sequence_bytes").and_then(|v| v.as_u64()),
+        Some(expected),
+        "logical_sequence_bytes should survive an alias-only refresh"
+    );
 }
 
 #[test]
