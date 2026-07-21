@@ -1369,6 +1369,58 @@ fn test_remove_with_orphan_cleanup_retains_shared_sequences() {
 }
 
 #[test]
+fn test_remove_with_orphan_cleanup_clears_md5_lookup() {
+    let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
+
+    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.md5_lookup.len(), 2);
+
+    store.remove_collection(&digest, true).unwrap();
+
+    assert_eq!(store.list_sequences().len(), 0);
+    // Regression: md5_lookup must be emptied along with the sequences.
+    assert_eq!(store.md5_lookup.len(), 0);
+}
+
+#[test]
+fn test_remove_with_orphan_cleanup_md5_lookup_retains_shared_sequences() {
+    let dir = tempdir().unwrap();
+    let fasta1 = dir.path().join("a.fa");
+    let fasta2 = dir.path().join("b.fa");
+    // chr1/ACGT is shared; TTTT is unique to coll1; GGGG is unique to coll2.
+    fs::write(&fasta1, ">chr1\nACGT\n>chr2\nTTTT\n").unwrap();
+    fs::write(&fasta2, ">chr1\nACGT\n>chr3\nGGGG\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta1, _) = store
+        .add_sequence_collection_from_fasta(&fasta1, FastaImportOptions::new())
+        .unwrap();
+    let (meta2, _) = store
+        .add_sequence_collection_from_fasta(&fasta2, FastaImportOptions::new())
+        .unwrap();
+
+    let md5_shared = md5(b"ACGT").to_key(); // retained (shared)
+    let md5_orphan = md5(b"TTTT").to_key(); // reclaimed (unique to coll1)
+    let md5_other = md5(b"GGGG").to_key(); // retained (unique to coll2)
+
+    assert_eq!(store.md5_lookup.len(), 3);
+
+    store.remove_collection(&meta1.digest, true).unwrap();
+
+    // Reclaimed sequence's md5 entry is gone...
+    assert!(!store.md5_lookup.contains_key(&md5_orphan));
+    // ...but retained sequences' md5 entries survive.
+    assert!(store.md5_lookup.contains_key(&md5_shared));
+    assert!(store.md5_lookup.contains_key(&md5_other));
+    assert_eq!(store.md5_lookup.len(), 2);
+
+    // And the surviving collection is still fully readable.
+    let coll = store.get_collection(&meta2.digest).unwrap();
+    assert_eq!(coll.sequences.len(), 2);
+    assert_eq!(store.list_sequences().len(), 2);
+}
+
+#[test]
 fn test_remove_collection_on_disk() {
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
