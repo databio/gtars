@@ -839,14 +839,27 @@ impl ReadonlyRefgetStore {
                 if let (Some(local_path), Some(template)) =
                     (&self.local_path, &self.seqdata_path_template)
                 {
+                    // Collect parent shard dirs while unlinking, then rmdir them
+                    // ONCE at the end. Do NOT move the rmdir back into this loop:
+                    // `.seq` files are sharded over ~4096 two-char prefix dirs, so
+                    // a per-file rmdir issues N syscalls (nearly all failing with
+                    // ENOTEMPTY) to remove at most ~4096 dirs -- roughly doubling
+                    // syscall count in a loop that is filesystem-metadata bound.
+                    // The rmdir pass must run AFTER all unlinks, or dirs that only
+                    // become empty later would be skipped.
+                    let mut parent_dirs: std::collections::HashSet<PathBuf> =
+                        std::collections::HashSet::new();
                     for orphan_key in &orphans {
                         let orphan_digest = key_to_digest_string(orphan_key);
                         let seq_file_path = Self::expand_template(&orphan_digest, template);
                         let full_path = local_path.join(&seq_file_path);
                         let _ = fs::remove_file(&full_path);
                         if let Some(parent) = full_path.parent() {
-                            let _ = fs::remove_dir(parent);
+                            parent_dirs.insert(parent.to_path_buf());
                         }
+                    }
+                    for parent in &parent_dirs {
+                        let _ = fs::remove_dir(parent); // ignore if non-empty
                     }
                 }
             }
@@ -917,14 +930,27 @@ impl ReadonlyRefgetStore {
             if let (Some(local_path), Some(template)) =
                 (&self.local_path, &self.seqdata_path_template)
             {
+                // Collect parent shard dirs while unlinking, then rmdir them ONCE
+                // at the end. Do NOT move the rmdir back into this loop: `.seq`
+                // files are sharded over ~4096 two-char prefix dirs, so a per-file
+                // rmdir issues N syscalls (nearly all failing with ENOTEMPTY) to
+                // remove at most ~4096 dirs -- roughly doubling syscall count in a
+                // loop that is filesystem-metadata bound. The rmdir pass must run
+                // AFTER all unlinks, or dirs that only become empty later would be
+                // skipped.
+                let mut parent_dirs: std::collections::HashSet<PathBuf> =
+                    std::collections::HashSet::new();
                 for key in &orphans {
                     let digest_str = key_to_digest_string(key);
                     let rel = Self::expand_template(&digest_str, template);
                     let full = local_path.join(&rel);
                     let _ = fs::remove_file(&full);
                     if let Some(parent) = full.parent() {
-                        let _ = fs::remove_dir(parent); // ignore if non-empty
+                        parent_dirs.insert(parent.to_path_buf());
                     }
+                }
+                for parent in &parent_dirs {
+                    let _ = fs::remove_dir(parent); // ignore if non-empty
                 }
             }
         }
