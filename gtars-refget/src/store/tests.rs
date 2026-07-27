@@ -1023,7 +1023,7 @@ fn test_collection_metadata_methods() {
 
     let stats = store.stats();
     assert_eq!(stats.n_collections, 1);
-    assert_eq!(stats.n_collections_loaded, 1);
+    assert_eq!(stats.n_collections_in_memory, 1);
     assert_eq!(stats.n_sequences, 3);
 }
 
@@ -1050,7 +1050,7 @@ fn test_collection_explicit_loading() {
 
     let stats_before = loaded_store.stats();
     assert_eq!(stats_before.n_collections, 1);
-    assert_eq!(stats_before.n_collections_loaded, 0);
+    assert_eq!(stats_before.n_collections_in_memory, 0);
 
     let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
     assert!(seq.is_err());
@@ -1064,7 +1064,7 @@ fn test_collection_explicit_loading() {
     assert!(loaded_store.is_collection_loaded(&digest));
 
     let stats_after = loaded_store.stats();
-    assert_eq!(stats_after.n_collections_loaded, 1);
+    assert_eq!(stats_after.n_collections_in_memory, 1);
 }
 
 #[test]
@@ -1097,8 +1097,12 @@ fn test_get_collection() {
     assert_eq!(collection.sequences.len(), 3);
 
     let stats_after = loaded_store.stats();
-    assert_eq!(stats_after.n_sequences_loaded, 0);
-    assert_eq!(stats_after.n_collections_loaded, 1);
+    // RESIDENCY INVARIANT: on a disk-backed store no sequence bytes are ever
+    // held in RAM by loading a collection — records are Stubs. This is 0 even
+    // right after an import, which is why the field is named `_in_memory` and
+    // not `_loaded`: it is not an ingest counter.
+    assert_eq!(stats_after.n_sequences_in_memory, 0);
+    assert_eq!(stats_after.n_collections_in_memory, 1);
 
     for record in loaded_store.sequence_store.values() {
         assert!(!record.is_loaded());
@@ -1168,7 +1172,7 @@ fn test_get_collection_idempotent() {
     let result2 = loaded_store.get_collection(&digest);
     assert!(result2.is_ok());
 
-    assert_eq!(loaded_store.stats().n_collections_loaded, 1);
+    assert_eq!(loaded_store.stats().n_collections_in_memory, 1);
 }
 
 // =========================================================================
@@ -2640,9 +2644,79 @@ fn build_multi(
     store
         .add_sequence_collections_from_fastas(files, opts)
         .unwrap()
+        .collections
         .into_iter()
         .map(|(m, _)| m.digest)
         .collect()
+}
+
+/// The per-run `ImportReport` counters must reflect what an import ACTUALLY
+/// did, unlike `stats()`, which is a RAM-residency snapshot.
+#[test]
+fn test_import_report_per_run_counters() {
+    let work = tempdir().unwrap();
+
+    // Same fixture shape as the parallel-equals-serial test: file "c" shares
+    // the chr1 sequence content with file "a", so 6 records are seen but only
+    // 5 distinct digests exist.
+    let fa_a = work.path().join("a.fa");
+    let fa_b = work.path().join("b.fa");
+    let fa_c = work.path().join("c.fa");
+    fs::write(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n").unwrap();
+    fs::write(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n").unwrap();
+    fs::write(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n").unwrap();
+    let files = vec![fa_a, fa_b, fa_c];
+
+    let store_dir = tempdir().unwrap();
+    let mut store = RefgetStore::on_disk(store_dir.path()).unwrap();
+    store.set_quiet(true);
+
+    let report = store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+
+    assert_eq!(report.collections.len(), 3);
+    assert_eq!(report.n_collections_new, 3);
+    // Each distinct digest is written exactly once; the shared chr1 content is
+    // seen twice, so exactly one record is deduped.
+    assert_eq!(report.n_sequences_written, 5);
+    assert_eq!(report.n_sequences_deduped, 1);
+    // Every record seen across all processed files is accounted for.
+    assert_eq!(
+        report.n_sequences_written + report.n_sequences_deduped,
+        6,
+        "written + deduped must equal the records seen"
+    );
+    assert_eq!(collect_seq_files(store_dir.path()).len(), 5);
+
+    // Re-importing the same files into the same store adds nothing. Whether the
+    // records are counted as deduped or not seen at all depends on the `.rgsi`
+    // sidecar short-circuit (which skips a present collection before its FASTA
+    // is ever opened), so only the "nothing new" half is pinned here.
+    let report2 = store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert_eq!(report2.collections.len(), 3);
+    assert_eq!(report2.n_collections_new, 0);
+    assert_eq!(
+        report2.n_sequences_written, 0,
+        "a re-import must write no sequence bytes"
+    );
+    assert!(report2.collections.iter().all(|(_, was_new)| !*was_new));
+
+    // Contrast: the residency gauge says nothing about either run.
+    assert_eq!(store.stats().n_sequences_in_memory, 0);
+
+    // An in-memory store dispatches no disk writes at all, so it is classified
+    // by a separate branch; it must produce the same counts.
+    let mut mem_store = RefgetStore::in_memory();
+    mem_store.set_quiet(true);
+    let mem_report = mem_store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert_eq!(mem_report.n_collections_new, 3);
+    assert_eq!(mem_report.n_sequences_written, 5);
+    assert_eq!(mem_report.n_sequences_deduped, 1);
 }
 
 #[test]
@@ -4096,18 +4170,18 @@ fn test_collection_alias_single_element_slice_ok() {
     fs::write(&fasta, ">chr1\nAAAACCCC\n").unwrap();
 
     let mut store = RefgetStore::in_memory();
-    let results = store
+    let report = store
         .add_sequence_collections_from_fastas(
             &[fasta],
             FastaImportOptions::new().collection_alias("ucsc", "hg38"),
         )
         .expect("one-element slice with an alias must succeed");
-    assert_eq!(results.len(), 1);
+    assert_eq!(report.collections.len(), 1);
     assert_eq!(
         store
             .get_collection_metadata_by_alias("ucsc", "hg38")
             .unwrap()
             .digest,
-        results[0].0.digest
+        report.collections[0].0.digest
     );
 }

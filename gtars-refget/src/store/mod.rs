@@ -138,6 +138,7 @@ use std::io::{BufReader, Read};
 use std::io::BufRead;
 
 pub(crate) use crate::hashkeyable::DigestKey;
+use crate::digest::SequenceCollectionMetadata;
 
 
 // =========================================================================
@@ -341,23 +342,59 @@ pub(crate) fn default_true() -> bool {
     true
 }
 
-/// Statistics for a RefgetStore
+/// Statistics for a RefgetStore.
+///
+/// These are a snapshot of the store's CURRENT RAM residency, not a record of
+/// what a given import run did. For per-run ingest counts, use [`ImportReport`]
+/// returned by `add_sequence_collections_from_fastas`.
 #[derive(Debug, Clone)]
 pub struct StoreStats {
     /// Total number of sequences (Stub + Full)
     pub n_sequences: usize,
-    /// Number of sequences with data loaded (Full)
-    pub n_sequences_loaded: usize,
+    /// Number of sequences whose bytes are currently held in RAM (`Full`
+    /// records). Structurally always 0 for a disk-backed store: importing
+    /// downgrades every record to a `Stub` after handing its bytes to the
+    /// writer pool (see `add_sequence_record_deferred_write`). Only an
+    /// on-demand remote fetch ever makes a record `Full` again.
+    pub n_sequences_in_memory: usize,
     /// Total number of collections (Stub + Full)
     pub n_collections: usize,
-    /// Number of collections with sequences loaded (Full)
-    pub n_collections_loaded: usize,
+    /// Number of collections whose sequence list is currently held in RAM
+    /// (`Full` records). Collections finalized by this process are `Full`;
+    /// collections rehydrated from `collections.rgci` are `Stub`. This is a
+    /// residency gauge, NOT a count of collections added by this run — it
+    /// resets on process start and also counts collections merely touched by
+    /// a read.
+    pub n_collections_in_memory: usize,
     /// Storage mode (Raw or Encoded)
     pub storage_mode: String,
     /// Logical size in bytes of all sequence payloads (length x storage-mode
     /// encoding). Excludes index/sidecar/manifest overhead. For the exact full
     /// on-disk footprint use `ReadonlyRefgetStore::actual_disk_usage()`.
     pub logical_sequence_bytes: u64,
+}
+
+/// Result of importing one or more FASTA files.
+///
+/// Unlike [`StoreStats`] (a RAM-residency gauge), these are genuine per-run
+/// counters describing what this import actually did.
+///
+/// `n_sequences_written + n_sequences_deduped` equals the total number of
+/// sequence records seen across all *processed* files. Files short-circuited
+/// as already-present collections (before their FASTA is ever opened)
+/// contribute nothing to either counter.
+#[derive(Debug, Clone)]
+pub struct ImportReport {
+    /// Per-file results in input order: `(metadata, was_new)`.
+    pub collections: Vec<(SequenceCollectionMetadata, bool)>,
+    /// Sequences whose bytes were dispatched to the writer pool this run
+    /// (i.e. genuinely new content). For in-memory stores, sequences newly
+    /// inserted into the in-memory map.
+    pub n_sequences_written: usize,
+    /// Sequences already present (by content digest), so no bytes were written.
+    pub n_sequences_deduped: usize,
+    /// Number of collections newly added by this run.
+    pub n_collections_new: usize,
 }
 
 /// Format bytes into human-readable size (KB, MB, GB, etc.)

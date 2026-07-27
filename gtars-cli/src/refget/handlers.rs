@@ -82,11 +82,11 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     if let Some((ns, alias)) = collection_alias.as_ref() {
         opts = opts.collection_alias(ns, alias);
     }
-    let results = store
+    let report = store
         .add_sequence_collections_from_fastas(&fastas, opts)
         .map_err(|e| anyhow::anyhow!("Failed to import FASTA files: {}", e))?;
 
-    for (fa, (metadata, was_new)) in fastas.iter().zip(results.iter()) {
+    for (fa, (metadata, was_new)) in fastas.iter().zip(report.collections.iter()) {
         total_seqs += metadata.n_sequences;
         eprintln!(
             "  {} {}: {} ({} sequences)",
@@ -120,6 +120,12 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         elapsed,
         mbps,
         fmt_auto(jobs),
+    );
+    // Per-run ingest counters: what THIS run actually added, as opposed to the
+    // store-wide residency numbers reported by `store stats`.
+    eprintln!(
+        "Ingested this run: {} collection(s) new, {} sequence(s) written, {} sequence(s) deduped",
+        report.n_collections_new, report.n_sequences_written, report.n_sequences_deduped,
     );
 
     Ok(())

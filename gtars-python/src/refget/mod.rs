@@ -16,7 +16,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
+use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -322,6 +322,73 @@ impl From<SequenceCollectionMetadata> for PySequenceCollectionMetadata {
             name_length_pairs_digest: value.name_length_pairs_digest,
             sorted_name_length_pairs_digest: value.sorted_name_length_pairs_digest,
             sorted_sequences_digest: value.sorted_sequences_digest,
+        }
+    }
+}
+
+/// Result of importing one or more FASTA files.
+///
+/// These are genuine per-run counters describing what the import actually did,
+/// unlike `RefgetStore.stats()`, which is a snapshot of current RAM residency.
+///
+/// `n_sequences_written + n_sequences_deduped` equals the total number of
+/// sequence records seen across all *processed* files. Files short-circuited as
+/// already-present collections (before their FASTA is ever opened) contribute
+/// nothing to either counter.
+///
+/// Attributes:
+///     collections (list[tuple[SequenceCollectionMetadata, bool]]): Per-file
+///         results in expanded-input order; the bool is True if the collection
+///         was newly added.
+///     n_sequences_written (int): Sequences whose bytes were written this run
+///         (genuinely new content).
+///     n_sequences_deduped (int): Sequences already present by content digest,
+///         so no bytes were written.
+///     n_collections_new (int): Number of collections newly added this run.
+#[pyclass(name = "ImportReport", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PyImportReport {
+    #[pyo3(get)]
+    pub collections: Vec<(PySequenceCollectionMetadata, bool)>,
+    #[pyo3(get)]
+    pub n_sequences_written: usize,
+    #[pyo3(get)]
+    pub n_sequences_deduped: usize,
+    #[pyo3(get)]
+    pub n_collections_new: usize,
+}
+
+#[pymethods]
+impl PyImportReport {
+    fn __repr__(&self) -> String {
+        format!(
+            "ImportReport(n_files={}, n_collections_new={}, n_sequences_written={}, n_sequences_deduped={})",
+            self.collections.len(),
+            self.n_collections_new,
+            self.n_sequences_written,
+            self.n_sequences_deduped
+        )
+    }
+
+    /// Number of files processed (length of `collections`).
+    fn __len__(&self) -> usize {
+        self.collections.len()
+    }
+}
+
+impl From<ImportReport> for PyImportReport {
+    fn from(value: ImportReport) -> Self {
+        PyImportReport {
+            collections: value
+                .collections
+                .into_iter()
+                .map(|(metadata, was_new)| {
+                    (PySequenceCollectionMetadata::from(metadata), was_new)
+                })
+                .collect(),
+            n_sequences_written: value.n_sequences_written,
+            n_sequences_deduped: value.n_sequences_deduped,
+            n_collections_new: value.n_collections_new,
         }
     }
 }
@@ -1454,8 +1521,12 @@ impl PyRefgetStore {
     ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
     ///
     /// Returns:
-    ///     list[tuple[SequenceCollectionMetadata, bool]]: per-file results in
-    ///         expanded-input order.
+    ///     ImportReport: `.collections` holds the per-file
+    ///         `(SequenceCollectionMetadata, was_new)` results in
+    ///         expanded-input order; `.n_sequences_written`,
+    ///         `.n_sequences_deduped`, and `.n_collections_new` are per-run
+    ///         ingest counters. Use these — not `store.stats()` — to report
+    ///         what an import actually added.
     ///
     /// Raises:
     ///     ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
@@ -1463,7 +1534,8 @@ impl PyRefgetStore {
     ///
     /// Example:
     ///     >>> store = RefgetStore.in_memory()
-    ///     >>> results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    ///     >>> report = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    ///     >>> print(report.n_collections_new, report.n_sequences_written)
     #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None))]
     fn add_sequence_collections_from_fastas(
         &mut self,
@@ -1472,7 +1544,7 @@ impl PyRefgetStore {
         jobs: usize,
         force: bool,
         namespaces: Option<Vec<String>>,
-    ) -> PyResult<Vec<(PySequenceCollectionMetadata, bool)>> {
+    ) -> PyResult<PyImportReport> {
         // Normalize `fastas` into a Vec<PathBuf>. Accept a single str/PathLike
         // or a list/tuple of them. `expand_fasta_inputs` handles glob/dir/file
         // classification, so we just stringify each entry here.
@@ -1514,14 +1586,7 @@ impl PyRefgetStore {
 
         self.inner
             .add_sequence_collections_from_fastas(&expanded, opts)
-            .map(|results| {
-                results
-                    .into_iter()
-                    .map(|(metadata, was_new)| {
-                        (PySequenceCollectionMetadata::from(metadata), was_new)
-                    })
-                    .collect()
-            })
+            .map(PyImportReport::from)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error importing FASTA files: {}",
@@ -2064,17 +2129,26 @@ impl PyRefgetStore {
     /// Returns statistics about the store.
     ///
     /// Returns:
-    ///     dict: Dictionary with keys 'n_sequences', 'n_sequences_loaded', 'n_collections', 'n_collections_loaded', 'storage_mode', 'logical_sequence_bytes'
+    ///     dict: Dictionary with keys 'n_sequences', 'n_sequences_in_memory',
+    ///         'n_collections', 'n_collections_in_memory', 'storage_mode',
+    ///         'logical_sequence_bytes'.
     ///
     /// Note:
-    ///     n_collections is the total number of collections (both loaded and stubs).
-    ///     n_collections_loaded only reflects collections fully loaded in memory.
-    ///     For remote stores, collections are loaded on-demand when accessed.
+    ///     These are a snapshot of CURRENT RAM residency, not a record of what
+    ///     an import run did. n_sequences and n_collections are the totals
+    ///     (stubs included). n_sequences_in_memory counts only sequences whose
+    ///     bytes are held in RAM; it is structurally always 0 for a disk-backed
+    ///     store, because importing writes bytes to disk and keeps only a stub.
+    ///     n_collections_in_memory counts collections whose sequence list is in
+    ///     RAM; it resets on process start and also counts collections merely
+    ///     touched by a read, so it is NOT a count of collections ingested.
+    ///     For per-run ingest counts, use the report returned by
+    ///     add_sequence_collections_from_fastas.
     ///
     /// Example:
     ///     >>> stats = store.stats()
     ///     >>> print(f"Store has {stats['n_sequences']} sequences")
-    ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
+    ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_in_memory']} in memory")
     fn stats(&self) -> std::collections::HashMap<String, String> {
         let extended_stats = self.inner.stats();
         let mut stats = std::collections::HashMap::new();
@@ -2083,16 +2157,16 @@ impl PyRefgetStore {
             extended_stats.n_sequences.to_string(),
         );
         stats.insert(
-            "n_sequences_loaded".to_string(),
-            extended_stats.n_sequences_loaded.to_string(),
+            "n_sequences_in_memory".to_string(),
+            extended_stats.n_sequences_in_memory.to_string(),
         );
         stats.insert(
             "n_collections".to_string(),
             extended_stats.n_collections.to_string(),
         );
         stats.insert(
-            "n_collections_loaded".to_string(),
-            extended_stats.n_collections_loaded.to_string(),
+            "n_collections_in_memory".to_string(),
+            extended_stats.n_collections_in_memory.to_string(),
         );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
         stats.insert(
@@ -2883,8 +2957,8 @@ impl PyRefgetStore {
         };
 
         format!(
-            "RefgetStore(n_sequences={}, n_sequences_loaded={}, n_collections={}, n_collections_loaded={}, mode={}, {}, {}, {})",
-            stats.n_sequences, stats.n_sequences_loaded, stats.n_collections, stats.n_collections_loaded, stats.storage_mode, persist_str, quiet_str, location
+            "RefgetStore(n_sequences={}, n_sequences_in_memory={}, n_collections={}, n_collections_in_memory={}, mode={}, {}, {}, {})",
+            stats.n_sequences, stats.n_sequences_in_memory, stats.n_collections, stats.n_collections_in_memory, stats.storage_mode, persist_str, quiet_str, location
         )
     }
 
@@ -3220,13 +3294,16 @@ impl PyReadonlyRefgetStore {
     }
 
     /// Returns statistics about the store.
+    ///
+    /// The `*_in_memory` keys are a RAM-residency snapshot, not per-run ingest
+    /// counts; see `RefgetStore.stats`.
     fn stats(&self) -> std::collections::HashMap<String, String> {
         let extended_stats = self.store.stats();
         let mut stats = std::collections::HashMap::new();
         stats.insert("n_sequences".to_string(), extended_stats.n_sequences.to_string());
-        stats.insert("n_sequences_loaded".to_string(), extended_stats.n_sequences_loaded.to_string());
+        stats.insert("n_sequences_in_memory".to_string(), extended_stats.n_sequences_in_memory.to_string());
         stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
-        stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
+        stats.insert("n_collections_in_memory".to_string(), extended_stats.n_collections_in_memory.to_string());
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
         stats.insert(
             "logical_sequence_bytes".to_string(),
@@ -3427,8 +3504,8 @@ impl PyReadonlyRefgetStore {
     fn __repr__(&self) -> String {
         let stats = self.store.stats();
         format!(
-            "ReadonlyRefgetStore(n_sequences={}, n_collections={}, n_collections_loaded={}, mode={})",
-            stats.n_sequences, stats.n_collections, stats.n_collections_loaded, stats.storage_mode
+            "ReadonlyRefgetStore(n_sequences={}, n_collections={}, n_collections_in_memory={}, mode={})",
+            stats.n_sequences, stats.n_collections, stats.n_collections_in_memory, stats.storage_mode
         )
     }
 
@@ -3478,6 +3555,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequenceRecord>()?;
     m.add_class::<PySeqColDigestLvl1>()?;
     m.add_class::<PySequenceCollectionMetadata>()?;
+    m.add_class::<PyImportReport>()?;
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;

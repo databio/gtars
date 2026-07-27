@@ -63,9 +63,9 @@ pub struct CollectionMetadataJs {
 #[napi(object, js_name = "StoreStats")]
 pub struct StoreStatsJs {
     pub n_sequences: u32,
-    pub n_sequences_loaded: u32,
+    pub n_sequences_in_memory: u32,
     pub n_collections: u32,
-    pub n_collections_loaded: u32,
+    pub n_collections_in_memory: u32,
     pub storage_mode: String,
     pub logical_sequence_bytes: BigInt,
 }
@@ -269,9 +269,9 @@ impl RefgetStore {
         let s = store.stats();
         Ok(StoreStatsJs {
             n_sequences: s.n_sequences as u32,
-            n_sequences_loaded: s.n_sequences_loaded as u32,
+            n_sequences_in_memory: s.n_sequences_in_memory as u32,
             n_collections: s.n_collections as u32,
-            n_collections_loaded: s.n_collections_loaded as u32,
+            n_collections_in_memory: s.n_collections_in_memory as u32,
             storage_mode: s.storage_mode,
             logical_sequence_bytes: BigInt::from(s.logical_sequence_bytes),
         })

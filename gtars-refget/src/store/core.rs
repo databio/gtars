@@ -245,12 +245,15 @@ impl RefgetStore {
     /// Add sequence collections from multiple FASTA files, decoding up to
     /// `opts.file_jobs` files concurrently. Inserts in fixed input order so the
     /// resulting store is byte-identical to a serial build.
+    ///
+    /// Returns an [`ImportReport`] with per-file results and per-run ingest
+    /// counters.
     #[cfg(feature = "filesystem")]
     pub fn add_sequence_collections_from_fastas(
         &mut self,
         files: &[std::path::PathBuf],
         opts: FastaImportOptions<'_>,
-    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+    ) -> Result<ImportReport> {
         self.inner.add_sequence_collections_from_fastas(files, opts)
     }
 

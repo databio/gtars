@@ -2243,16 +2243,19 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
-    /// Returns statistics about the store
+    /// Returns statistics about the store.
+    ///
+    /// The `*_in_memory` fields are a RAM-residency snapshot, not a record of
+    /// what any import run did; see [`StoreStats`].
     pub fn stats(&self) -> StoreStats {
         let n_sequences = self.sequence_store.len();
-        let n_sequences_loaded = self
+        let n_sequences_in_memory = self
             .sequence_store
             .values()
             .filter(|record| record.is_loaded())
             .count();
         let n_collections = self.collections.len();
-        let n_collections_loaded = self
+        let n_collections_in_memory = self
             .collections
             .values()
             .filter(|record| record.has_sequences())
@@ -2263,9 +2266,9 @@ impl ReadonlyRefgetStore {
         };
         StoreStats {
             n_sequences,
-            n_sequences_loaded,
+            n_sequences_in_memory,
             n_collections,
-            n_collections_loaded,
+            n_collections_in_memory,
             storage_mode: mode_str.to_string(),
             logical_sequence_bytes: self.logical_sequence_bytes() as u64,
         }

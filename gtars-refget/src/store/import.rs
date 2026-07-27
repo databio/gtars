@@ -644,7 +644,11 @@ impl ReadonlyRefgetStore {
     /// content/collection digest), guaranteeing a byte-identical store to a serial
     /// build regardless of build/arrival order.
     ///
-    /// Returns per-file `(collection_metadata, was_new)` results in input order.
+    /// Returns an [`ImportReport`]: per-file `(collection_metadata, was_new)`
+    /// results in input order, plus genuine per-run ingest counters
+    /// (`n_sequences_written`, `n_sequences_deduped`, `n_collections_new`).
+    /// Note these are per-RUN counts, unlike [`StoreStats`], which is a
+    /// RAM-residency snapshot.
     ///
     /// ## Error handling / non-transactional semantics
     ///
@@ -664,9 +668,14 @@ impl ReadonlyRefgetStore {
         &mut self,
         files: &[PathBuf],
         opts: FastaImportOptions<'_>,
-    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+    ) -> Result<ImportReport> {
         if files.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ImportReport {
+                collections: Vec::new(),
+                n_sequences_written: 0,
+                n_sequences_deduped: 0,
+                n_collections_new: 0,
+            });
         }
 
         // One collection alias cannot name N collections. Reject BEFORE any
@@ -744,6 +753,13 @@ impl ReadonlyRefgetStore {
         let created_shards_ref = &created_shards;
         let write_err: Mutex<Option<anyhow::Error>> = Mutex::new(None);
         let write_err_ref = &write_err;
+
+        // --- Per-run ingest counters ----------------------------------------
+        // Plain locals, not atomics: the inserter loop runs on THIS thread
+        // (inside the scope closure), so these are ordinary register/stack
+        // increments with no synchronization in the per-sequence hot path.
+        let mut n_seqs_written: usize = 0;
+        let mut n_seqs_deduped: usize = 0;
 
         let scope_result = std::thread::scope(|scope| -> Result<()> {
             // Spawn the writer pool. Each writer drains `WriteJob`s and writes
@@ -905,31 +921,56 @@ impl ReadonlyRefgetStore {
                             Some(_) => {
                                 // Lower-or-equal file index already owns the name;
                                 // skip (still deduped, no re-write).
+                                n_seqs_deduped += 1;
                                 continue;
                             }
                         };
                         // A forced overwrite only changes in-memory name metadata
                         // (identical bytes); skip dispatching a redundant write.
                         let already_written = force;
-                        if let Some((full_path, bytes)) = self
-                            .add_sequence_record_deferred_write(
-                                SequenceRecord::Full {
-                                    metadata,
-                                    sequence: std::sync::Arc::new(sequence_data),
-                                },
-                                force,
-                            )?
-                        {
-                            if !already_written {
-                                // BOUNDED send: blocks (back-pressure) when the
-                                // writer pool is saturated, capping in-flight RAM.
-                                if write_tx
-                                    .send(WriteJob { full_path, bytes })
-                                    .is_err()
-                                {
-                                    // Writers all hung up (an earlier write error);
-                                    // stop feeding and let the error propagate.
-                                    break;
+                        // Per-run counter classification costs NOTHING on the
+                        // disk-backed (throughput-critical) path: it is derived
+                        // from `force` plus whether a write was dispatched, both
+                        // of which we already have. Only an in-memory store is
+                        // ambiguous -- there a `None` return means either a dedup
+                        // hit or a fresh insert -- so it alone pays for a lookup,
+                        // and the `!writer_disk_backed` short-circuit keeps that
+                        // lookup out of the disk path entirely.
+                        let mem_is_new =
+                            !writer_disk_backed && !self.sequence_store.contains_key(&seq_key);
+                        match self.add_sequence_record_deferred_write(
+                            SequenceRecord::Full {
+                                metadata,
+                                sequence: std::sync::Arc::new(sequence_data),
+                            },
+                            force,
+                        )? {
+                            Some((full_path, bytes)) => {
+                                if !already_written {
+                                    n_seqs_written += 1;
+                                    // BOUNDED send: blocks (back-pressure) when the
+                                    // writer pool is saturated, capping in-flight RAM.
+                                    if write_tx
+                                        .send(WriteJob { full_path, bytes })
+                                        .is_err()
+                                    {
+                                        // Writers all hung up (an earlier write error);
+                                        // stop feeding and let the error propagate.
+                                        break;
+                                    }
+                                } else {
+                                    // `force` name-overwrite: identical bytes are
+                                    // already on disk, so nothing was written.
+                                    n_seqs_deduped += 1;
+                                }
+                            }
+                            // Disk-backed: `None` is always a dedup hit. In-memory:
+                            // the pre-check above decided it.
+                            None => {
+                                if !writer_disk_backed && mem_is_new {
+                                    n_seqs_written += 1;
+                                } else {
+                                    n_seqs_deduped += 1;
                                 }
                             }
                         }
@@ -1029,14 +1070,21 @@ impl ReadonlyRefgetStore {
             );
         }
 
-        let results: Vec<(SequenceCollectionMetadata, bool)> = results
+        let collections: Vec<(SequenceCollectionMetadata, bool)> = results
             .into_iter()
             .map(|slot| {
                 slot.ok_or_else(|| anyhow!("internal error: a file index was not finalized"))
             })
             .collect::<Result<_>>()?;
 
-        Ok(results)
+        let n_collections_new = collections.iter().filter(|(_, was_new)| *was_new).count();
+
+        Ok(ImportReport {
+            collections,
+            n_sequences_written: n_seqs_written,
+            n_sequences_deduped: n_seqs_deduped,
+            n_collections_new,
+        })
     }
 
     /// Import a single FASTA file. Thin wrapper over the multi-file path.
@@ -1046,8 +1094,9 @@ impl ReadonlyRefgetStore {
         opts: FastaImportOptions<'_>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         let files = [file_path.as_ref().to_path_buf()];
-        let mut results = self.add_sequence_collections_from_fastas(&files, opts)?;
-        results
+        let mut report = self.add_sequence_collections_from_fastas(&files, opts)?;
+        report
+            .collections
             .pop()
             .ok_or_else(|| anyhow!("internal error: importing one file yielded no result"))
     }
