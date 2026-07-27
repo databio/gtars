@@ -30,7 +30,11 @@ use crate::hashkeyable::{DigestKey, HashKeyable};
 /// Helper function to decode a sequence record and write it as a FASTA entry.
 ///
 /// Handles decoding (encoded or raw storage modes), header formatting (with optional
-/// description), and line-wrapped sequence output.
+/// description), and sequence output.
+///
+/// `line_width` controls sequence wrapping: a value `> 0` wraps the sequence body at
+/// that many bases per line; a value of `0` disables wrapping entirely, emitting the
+/// whole sequence on a single line (one-sequence-per-line, as GGCAT/SSHash expect).
 pub(crate) fn write_fasta_record(
     writer: &mut dyn Write,
     metadata: &SequenceMetadata,
@@ -55,9 +59,16 @@ pub(crate) fn write_fasta_record(
     };
     writeln!(writer, "{}", header)?;
 
-    for chunk in decoded_sequence.as_bytes().chunks(line_width) {
-        writer.write_all(chunk)?;
+    if line_width == 0 {
+        // Unwrapped: emit the entire sequence on a single line. `chunks(0)` would
+        // panic, so this branch is required, not merely an optimization.
+        writer.write_all(decoded_sequence.as_bytes())?;
         writer.write_all(b"\n")?;
+    } else {
+        for chunk in decoded_sequence.as_bytes().chunks(line_width) {
+            writer.write_all(chunk)?;
+            writer.write_all(b"\n")?;
+        }
     }
 
     Ok(())
@@ -290,6 +301,9 @@ impl ReadonlyRefgetStore {
     }
 
     /// Export sequences from BED file regions to a FASTA file.
+    ///
+    /// Region export is inherently unwrapped: each region's sequence is written on a
+    /// single line under a `>chrom:start-end` header, regardless of any line width.
     pub fn export_fasta_from_regions<K: AsRef<[u8]>>(
         &self,
         collection_digest: K,
@@ -327,6 +341,11 @@ impl ReadonlyRefgetStore {
     }
 
     /// Export sequences from a collection to a FASTA file.
+    ///
+    /// `line_width` controls sequence wrapping via the sentinel convention:
+    /// `None` defaults to 80 bases per line; `Some(n)` with `n > 0` wraps at `n`;
+    /// `Some(0)` disables wrapping, emitting one sequence per line (unwrapped) as
+    /// GGCAT/SSHash and similar k-mer tooling expect.
     pub fn export_fasta<K: AsRef<[u8]>, P: AsRef<Path>>(
         &self,
         collection_digest: K,
@@ -392,6 +411,10 @@ impl ReadonlyRefgetStore {
     }
 
     /// Export sequences by their sequence digests to a FASTA file.
+    ///
+    /// `line_width` follows the same sentinel convention as [`Self::export_fasta`]:
+    /// `None` defaults to 80; `Some(n)` with `n > 0` wraps at `n`; `Some(0)` disables
+    /// wrapping, emitting one sequence per line (unwrapped).
     pub fn export_fasta_by_digests<P: AsRef<Path>>(
         &self,
         seq_digests: Vec<&str>,
@@ -436,5 +459,93 @@ impl ReadonlyRefgetStore {
         writer.flush()?;
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::store::{FastaImportOptions, RefgetStore};
+    use std::io::Write;
+    use tempfile::{NamedTempFile, TempDir};
+
+    /// Build a small in-memory store from a temp FASTA and return it plus the
+    /// digest of the single collection created.
+    fn build_store() -> (RefgetStore, String) {
+        let mut fasta = NamedTempFile::new().expect("create temp fasta");
+        // A sequence longer than 80 bases so the wrapped export spans >1 line.
+        writeln!(fasta, ">seq1").unwrap();
+        writeln!(fasta, "{}", "ACGT".repeat(30)).unwrap(); // 120 bases
+        writeln!(fasta, ">seq2").unwrap();
+        writeln!(fasta, "TTGGCCAA").unwrap();
+        fasta.flush().unwrap();
+
+        let mut store = RefgetStore::in_memory();
+        store
+            .add_sequence_collection_from_fasta(fasta.path(), FastaImportOptions::new())
+            .expect("import fasta");
+
+        let collections = store.list_collections(0, usize::MAX, &[]).unwrap();
+        let digest = collections.results[0].digest.clone();
+        (store, digest)
+    }
+
+    /// Split a FASTA into (header, body-lines) pairs.
+    fn records(fasta: &str) -> Vec<(String, Vec<String>)> {
+        let mut out: Vec<(String, Vec<String>)> = Vec::new();
+        for line in fasta.lines() {
+            if let Some(header) = line.strip_prefix('>') {
+                out.push((header.to_string(), Vec::new()));
+            } else if let Some(last) = out.last_mut() {
+                last.1.push(line.to_string());
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn export_unwrapped_puts_each_sequence_on_one_line() {
+        let (store, digest) = build_store();
+        let readonly = store.into_readonly();
+
+        let dir = TempDir::new().unwrap();
+        let out = dir.path().join("unwrapped.fa");
+        readonly
+            .export_fasta(&digest, &out, None, Some(0))
+            .expect("export unwrapped");
+
+        let content = std::fs::read_to_string(&out).unwrap();
+        let recs = records(&content);
+        assert_eq!(recs.len(), 2, "expected two records");
+        for (header, body) in &recs {
+            assert_eq!(
+                body.len(),
+                1,
+                "record '{}' should have exactly one body line when unwrapped, got {:?}",
+                header,
+                body
+            );
+        }
+        // seq1 body is the full 120 bases on a single line.
+        assert_eq!(recs[0].1[0].len(), 120);
+    }
+
+    #[test]
+    fn export_wrapped_at_80_splits_long_sequences() {
+        let (store, digest) = build_store();
+        let readonly = store.into_readonly();
+
+        let dir = TempDir::new().unwrap();
+        let out = dir.path().join("wrapped.fa");
+        readonly
+            .export_fasta(&digest, &out, None, Some(80))
+            .expect("export wrapped");
+
+        let content = std::fs::read_to_string(&out).unwrap();
+        let recs = records(&content);
+        // seq1 (120 bases) wraps to two lines at width 80; seq2 (8 bases) stays one.
+        assert_eq!(recs[0].1.len(), 2, "120-base seq should wrap to 2 lines");
+        assert_eq!(recs[0].1[0].len(), 80);
+        assert_eq!(recs[0].1[1].len(), 40);
+        assert_eq!(recs[1].1.len(), 1);
     }
 }

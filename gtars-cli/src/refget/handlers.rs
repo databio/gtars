@@ -9,6 +9,7 @@ use gtars_refget::{expand_fasta_inputs, FastaInputs};
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         Some((super::cli::REFGET_BUILD, sub)) => run_build(sub),
+        Some((super::cli::REFGET_EXPORT, sub)) => run_export(sub),
         _ => unreachable!("refget subcommand not found"),
     }
 }
@@ -126,6 +127,105 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     eprintln!(
         "Ingested this run: {} collection(s) new, {} sequence(s) written, {} sequence(s) deduped",
         report.n_collections_new, report.n_sequences_written, report.n_sequences_deduped,
+    );
+
+    Ok(())
+}
+
+fn run_export(matches: &ArgMatches) -> Result<()> {
+    let store_path = matches
+        .get_one::<String>("store")
+        .expect("store is required");
+    let output = matches
+        .get_one::<String>("output")
+        .expect("output is required");
+    let requested_collection = matches.get_one::<String>("collection");
+    let names: Option<Vec<&str>> = matches
+        .get_many::<String>("names")
+        .map(|vals| vals.map(|s| s.as_str()).collect());
+    let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
+
+    // Open the store and load collection metadata (stub records + name_lookup).
+    // Sequence BYTES are loaded further down, after the digest is validated and
+    // only for what this export actually needs.
+    let mut store = RefgetStore::open_local(store_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    store
+        .load_all_collections()
+        .map_err(|e| anyhow::anyhow!("Failed to load collections: {}", e))?;
+
+    // Resolve the collection digest.
+    let collections = store
+        .list_collections(0, usize::MAX, &[])
+        .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
+    let digest = match requested_collection {
+        Some(c) => {
+            if !collections.results.iter().any(|m| &m.digest == c) {
+                let available: Vec<String> =
+                    collections.results.iter().map(|m| m.digest.clone()).collect();
+                return Err(anyhow::anyhow!(
+                    "Collection '{}' not found in store. Available: {}",
+                    c,
+                    available.join(", ")
+                ));
+            }
+            c.clone()
+        }
+        None => match collections.results.len() {
+            0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
+            1 => collections.results[0].digest.clone(),
+            _ => {
+                let available: Vec<String> =
+                    collections.results.iter().map(|m| m.digest.clone()).collect();
+                return Err(anyhow::anyhow!(
+                    "Store contains multiple collections; specify one with --collection. Available: {}",
+                    available.join(", ")
+                ));
+            }
+        },
+    };
+
+    // Load ONLY the sequence bytes this export needs. `load_all_sequences()`
+    // would pull EVERY sequence in the store into RAM, not just this
+    // collection's -- fatal on a large store (the vgp store holds ~384k
+    // sequences / hundreds of GB) and wasteful even when it fits. With
+    // `--names`, narrow further to just the requested sequences.
+    let collection = store
+        .get_collection(&digest)
+        .map_err(|e| anyhow::anyhow!("Failed to load collection {}: {}", digest, e))?;
+    let wanted: Option<std::collections::HashSet<&str>> =
+        names.as_ref().map(|v| v.iter().copied().collect());
+    for record in &collection.sequences {
+        let meta = record.metadata();
+        if wanted
+            .as_ref()
+            .is_some_and(|wanted| !wanted.contains(meta.name.as_str()))
+        {
+            continue;
+        }
+        store.load_sequence(&meta.sha512t24u).map_err(|e| {
+            anyhow::anyhow!("Failed to load sequence '{}': {}", meta.name, e)
+        })?;
+    }
+    let store = store.into_readonly();
+
+    let n_names = names.as_ref().map(|v| v.len());
+    store
+        .export_fasta(&digest, output, names, Some(line_width))
+        .map_err(|e| anyhow::anyhow!("Failed to export FASTA: {}", e))?;
+
+    let wrap_desc = if line_width == 0 {
+        "unwrapped (one sequence per line)".to_string()
+    } else {
+        format!("wrapped at {} bases/line", line_width)
+    };
+    let seq_desc = match n_names {
+        Some(n) => format!("{} named sequence(s)", n),
+        None => "all sequences".to_string(),
+    };
+    eprintln!(
+        "Exported collection {} ({}) to {} [{}]",
+        digest, seq_desc, output, wrap_desc
     );
 
     Ok(())
