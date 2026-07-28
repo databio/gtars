@@ -267,6 +267,33 @@ impl RefgetStore {
         self.inner.remove_collection(digest, remove_orphan_sequences)
     }
 
+    /// Dry-run of the orphan cleanup in [`Self::remove_collection`].
+    pub fn plan_orphan_removal(&self, digest: &str) -> Result<Vec<String>> {
+        self.inner.plan_orphan_removal(digest)
+    }
+
+    // --- Write locking (delegates; `Deref` only yields `&`) ---
+
+    /// Hold the store's exclusive writer lock across several mutations.
+    pub fn lock_for_batch(&mut self, operation: &str) -> Result<()> {
+        self.inner.lock_for_batch(operation)
+    }
+
+    /// Release a lock taken by [`Self::lock_for_batch`].
+    pub fn release_batch_lock(&mut self) {
+        self.inner.release_batch_lock();
+    }
+
+    /// Override the timeout/staleness settings used when acquiring the write lock.
+    pub fn set_lock_options(&mut self, options: super::LockOptions) {
+        self.inner.set_lock_options(options);
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published.
+    pub fn set_force_alias(&mut self, force: bool) {
+        self.inner.set_force_alias(force);
+    }
+
     /// Import a collection (with sequences, aliases, FHR) from another store.
     /// The source must already have the collection loaded.
     pub fn import_collection_from_readonly(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {

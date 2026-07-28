@@ -62,6 +62,14 @@ required-features = ["filesystem"]
 name = "audit_stream_sequence_truncation"
 required-features = ["filesystem"]
 
+# Spawns real processes writing one store directory concurrently; needs the
+# FASTA import path. `harness = false` so the binary can become a writer child
+# on re-exec BEFORE any test-runner output.
+[[test]]
+name = "concurrent_store_writers"
+required-features = ["filesystem"]
+harness = false
+
 [[example]]
 name = "bench_fasta"
 required-features = ["filesystem"]

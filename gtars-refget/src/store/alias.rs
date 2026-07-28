@@ -9,7 +9,7 @@ use super::core::RefgetStore;
 
 use std::collections::HashMap;
 use std::fs::{self, File, create_dir_all};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -21,7 +21,7 @@ use crate::hashkeyable::{DigestKey, HashKeyable, key_to_digest_string};
 // =========================================================================
 
 /// Identifies whether an alias targets a sequence or a collection.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AliasKind {
     Sequence,
     Collection,
@@ -141,10 +141,7 @@ fn write_all_aliases(store: &AliasStore, dir: &Path) -> Result<()> {
     create_dir_all(dir)?;
     for (namespace, aliases) in store {
         let tsv_path = dir.join(format!("{}.tsv", namespace));
-        let mut file = File::create(&tsv_path)?;
-        for (alias, digest) in aliases {
-            writeln!(file, "{}\t{}", alias, key_to_digest_string(digest))?;
-        }
+        super::persistence::write_alias_namespace(&tsv_path, aliases)?;
     }
     Ok(())
 }
@@ -273,30 +270,29 @@ impl AliasManager {
         Ok(())
     }
 
-    pub fn write_namespace(
-        &self,
-        aliases_dir: &Path,
-        kind: AliasKind,
-        namespace: &str,
-    ) -> Result<()> {
-        let dir = aliases_dir.join(kind.subdir());
-        create_dir_all(&dir)?;
+    // --- Kind-generic accessors (used by the commit path) ---
 
-        let store = match kind {
+    /// This manager's in-memory namespaces for one alias kind.
+    pub(crate) fn namespaces_for(&self, kind: AliasKind) -> Vec<String> {
+        alias_namespaces(self.store_for(kind))
+    }
+
+    /// This manager's in-memory `alias -> digest` map for one namespace.
+    /// Empty when the namespace is not in memory — which is NOT the same as
+    /// "the namespace has no aliases on disk"; see
+    /// [`ReadonlyRefgetStore::commit_alias_namespace`](super::readonly::ReadonlyRefgetStore).
+    pub(crate) fn namespace_map(&self, kind: AliasKind, namespace: &str) -> HashMap<String, DigestKey> {
+        self.store_for(kind)
+            .get(namespace)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn store_for(&self, kind: AliasKind) -> &AliasStore {
+        match kind {
             AliasKind::Sequence => &self.sequence_aliases,
             AliasKind::Collection => &self.collection_aliases,
-        };
-
-        let tsv_path = dir.join(format!("{}.tsv", namespace));
-        if let Some(ns) = store.get(namespace) {
-            let mut file = File::create(&tsv_path)?;
-            for (alias, digest) in ns {
-                writeln!(file, "{}\t{}", alias, key_to_digest_string(digest))?;
-            }
-        } else {
-            let _ = fs::remove_file(&tsv_path);
         }
-        Ok(())
     }
 }
 
@@ -351,6 +347,10 @@ impl ReadonlyRefgetStore {
     pub fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
         let removed = self.aliases.remove_sequence(namespace, alias);
         if removed {
+            // Tombstone BEFORE persisting: the commit merges with the copy still
+            // on disk, so without an explicit removal record the alias comes
+            // straight back.
+            self.tombstone_alias(AliasKind::Sequence, namespace, alias);
             self.persist_alias_namespace(AliasKind::Sequence, namespace)?;
         }
         Ok(removed)
@@ -483,6 +483,7 @@ impl ReadonlyRefgetStore {
     pub fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
         let removed = self.aliases.remove_collection(namespace, alias);
         if removed {
+            self.tombstone_alias(AliasKind::Collection, namespace, alias);
             self.persist_alias_namespace(AliasKind::Collection, namespace)?;
         }
         Ok(removed)
@@ -495,21 +496,57 @@ impl ReadonlyRefgetStore {
         Ok(count)
     }
 
-    /// Write a single alias namespace to disk (if disk-backed).
+    /// Commit a single alias namespace to disk (if disk-backed).
+    ///
+    /// The cheap alias-mutation path: it merges and publishes ONE namespace and
+    /// patches only the manifest's alias-derived fields, rather than rehashing
+    /// the (potentially 60+ MB) sequence and collection indexes. Takes the store
+    /// write lock for the duration, like any other commit.
     pub(crate) fn persist_alias_namespace(&self, kind: AliasKind, namespace: &str) -> Result<()> {
-        if self.persist_to_disk {
-            if let Some(ref local_path) = self.local_path {
-                let aliases_dir = local_path.join("aliases");
-                self.aliases.write_namespace(&aliases_dir, kind, namespace)?;
-                // Keep rgstore.json in lock-step with the alias files on disk, so a
-                // served store always advertises its true alias namespaces. Without
-                // this, aliases added after the index was written (e.g. a post-build
-                // alias step) leave the manifest stale and remote/HTTP clients —
-                // which cannot list the aliases/ directory — never discover them.
-                self.refresh_manifest_alias_namespaces()?;
-            }
+        if !self.persist_to_disk {
+            return Ok(());
         }
+        let Some(local_path) = self.local_path.clone() else {
+            return Ok(());
+        };
+
+        let _guard = self.acquire_commit_lock("persist_alias_namespace")?;
+
+        let tombstones = self.tombstones.lock().unwrap().clone();
+        let aliases_dir = local_path.join("aliases");
+        self.commit_alias_namespace(&aliases_dir, kind, namespace, &tombstones)?;
+
+        // Keep rgstore.json in lock-step with the alias files on disk, so a
+        // served store always advertises its true alias namespaces. Without
+        // this, aliases added after the index was written (e.g. a post-build
+        // alias step) leave the manifest stale and remote/HTTP clients —
+        // which cannot list the aliases/ directory — never discover them.
+        self.refresh_manifest_alias_namespaces()?;
+
+        // Only this namespace's tombstones have been applied; leave the rest for
+        // the next full commit.
+        self.tombstones
+            .lock()
+            .unwrap()
+            .clear_alias_namespace(kind, namespace);
+
         Ok(())
+    }
+
+    /// Record that an alias was deliberately removed, so the merge at commit
+    /// time does not resurrect it from the copy still on disk.
+    pub(crate) fn tombstone_alias(&self, kind: AliasKind, namespace: &str, alias: &str) {
+        let mut tombstones = self.tombstones.lock().unwrap();
+        tombstones
+            .aliases
+            .insert((kind, namespace.to_string(), alias.to_string()));
+        // A namespace that just lost its last in-memory alias is explicitly
+        // emptied, as distinct from "we never loaded it".
+        if self.aliases.namespace_map(kind, namespace).is_empty() {
+            tombstones
+                .emptied_alias_namespaces
+                .insert((kind, namespace.to_string()));
+        }
     }
 }
 
@@ -895,10 +932,38 @@ mod tests {
         mgr.add_sequence("ncbi", "NC_000001.11", "d1");
         mgr.add_sequence("ucsc", "chr1", "d2");
 
-        mgr.write_namespace(&aliases_dir, AliasKind::Sequence, "ncbi").unwrap();
+        let tsv = aliases_dir.join("sequences/ncbi.tsv");
+        super::super::persistence::write_alias_namespace(
+            &tsv,
+            &mgr.namespace_map(AliasKind::Sequence, "ncbi"),
+        )
+        .unwrap();
 
-        assert!(aliases_dir.join("sequences/ncbi.tsv").exists());
+        assert!(tsv.exists());
         assert!(!aliases_dir.join("sequences/ucsc.tsv").exists());
+    }
+
+    #[test]
+    fn test_write_namespace_absent_from_memory_does_not_delete() {
+        // The old `write_namespace` deleted the TSV whenever the namespace was
+        // missing from memory, which is how another writer's brand-new namespace
+        // got orphaned: `open_local` loads only what the manifest advertises, so
+        // "not in memory" routinely means "not mine", not "deleted".
+        let dir = tempdir().unwrap();
+        let tsv = dir.path().join("aliases/sequences/ncbi.tsv");
+        std::fs::create_dir_all(tsv.parent().unwrap()).unwrap();
+        std::fs::write(&tsv, "NC_000001.11\tother_writers_digest\n").unwrap();
+
+        let mgr = AliasManager::new();
+        let mut merged = super::super::persistence::read_alias_tsv(&tsv).unwrap();
+        merged.extend(mgr.namespace_map(AliasKind::Sequence, "ncbi"));
+        super::super::persistence::write_alias_namespace(&tsv, &merged).unwrap();
+
+        assert!(tsv.exists(), "another writer's namespace was deleted");
+        assert_eq!(
+            std::fs::read_to_string(&tsv).unwrap(),
+            "NC_000001.11\tother_writers_digest\n"
+        );
     }
 
     #[test]

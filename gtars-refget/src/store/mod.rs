@@ -47,11 +47,48 @@
 //! Flows 1 and 2 need only metadata loaded (a `Stub`); flow 3 promotes a `Stub`
 //! to a `Full` record. Remote byte-range (flows 1-2) requires the `http`
 //! feature; without it, only resident and local sources are available.
+//!
+//! ## Write discipline (concurrency)
+//!
+//! A store directory may be written by several processes at once — separate
+//! `gtars refget build` invocations, SLURM jobs, Python callers. Three rules make
+//! that safe; all three live in Rust, because callers routinely bypass any
+//! coordination arranged above it.
+//!
+//! 1. **Per-item files are digest-addressed and lock-free.** A `.seq` file, a
+//!    `collections/<digest>.rgsi`, and an FHR sidecar are named by the digest of
+//!    their own content, so two writers producing the same file produce the same
+//!    bytes. These are written outside any lock — which is what keeps the
+//!    expensive part of an import (parsing, digesting, writing hundreds of
+//!    thousands of sequences) fully parallel.
+//!
+//! 2. **Writers commit under an exclusive lock, and MERGE rather than
+//!    overwrite.** The shared artifacts — `sequences.rgsi`, `collections.rgci`,
+//!    the alias TSVs, `rgstore.json` — are rewritten wholesale, so a writer that
+//!    serialized its open-time snapshot would silently drop every row another
+//!    writer added in the meantime. Instead, [`ReadonlyRefgetStore::write_index_files`]
+//!    takes [`lock::StoreLock`] on `<store>/.rgstore.lock`, re-reads the current
+//!    on-disk rows, unions them with memory, subtracts explicit tombstones, and
+//!    publishes. Both indexes are digest-keyed sets of content-derived rows, so
+//!    the union is well-defined. The lock is held for the commit only (seconds),
+//!    never for the lifetime of the handle (hours).
+//!
+//! 3. **Readers never lock.** Every whole-file write goes through
+//!    [`atomic::atomic_write`] (temp file, `fsync`, `rename(2)`, `fsync` the
+//!    directory), so a reader always sees a complete file. `rgstore.json` is
+//!    published LAST in the commit sequence, after the files whose digests it
+//!    advertises, so a manifest never describes bytes that have not landed.
+//!
+//! Transient files (`.rgstore.lock`, `.rgstore.lock.stale.*`, `.rgstore.tmp.*`)
+//! may briefly appear in a store directory; anything mirroring or auditing the
+//! directory must skip them (see [`atomic::is_transient_store_file`]).
 
 mod readonly;
 mod core;
 mod alias;
+pub(crate) mod atomic;
 mod fhr_metadata;
+mod lock;
 // FASTA import (crossbeam-channel) and export (gtars-core) are filesystem-only.
 #[cfg(feature = "filesystem")]
 mod import;
@@ -124,6 +161,8 @@ mod nofs_tests {
 pub use self::readonly::ReadonlyRefgetStore;
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
+pub use self::atomic::is_transient_store_file;
+pub use self::lock::{LockInfo, LockOptions, StoreLock, force_unlock, lock_status};
 pub use self::fhr_metadata::{
     FhrMetadata, FhrAuthor, FhrIdentifier, FhrTaxon, FhrVitalStats,
     // Disk I/O helpers used by persistence and externally

@@ -3,15 +3,52 @@ use std::time::Instant;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
+use gtars_refget::store::{
+    FastaImportOptions, LockOptions, RefgetStore, StorageMode, force_unlock, lock_status,
+};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         Some((super::cli::REFGET_BUILD, sub)) => run_build(sub),
         Some((super::cli::REFGET_EXPORT, sub)) => run_export(sub),
+        Some((super::cli::REFGET_LOCK_STATUS, sub)) => run_lock_status(sub),
         _ => unreachable!("refget subcommand not found"),
     }
+}
+
+fn run_lock_status(matches: &ArgMatches) -> Result<()> {
+    let store = matches.get_one::<String>("store").expect("store is required");
+    let path = std::path::Path::new(store);
+
+    match lock_status(path)? {
+        Some(info) => {
+            println!("RefgetStore write lock HELD at {}", store);
+            println!("  holder:        {}", info.describe());
+            println!("  last heartbeat: {}", info.heartbeat_at);
+        }
+        None => println!("RefgetStore write lock is free at {}", store),
+    }
+
+    if matches.get_flag("force_unlock") {
+        if force_unlock(path)? {
+            println!("Lock forcibly cleared.");
+        } else {
+            println!("Nothing to clear.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Build [`LockOptions`] from the shared `--lock-timeout` / `--force-unlock`
+/// flags, falling back to the environment-driven defaults.
+fn lock_options_from(matches: &ArgMatches) -> LockOptions {
+    let mut opts = LockOptions::default();
+    if let Some(secs) = matches.get_one::<u64>("lock_timeout") {
+        opts = opts.timeout_secs(*secs);
+    }
+    opts.force(matches.get_flag("force_unlock"))
 }
 
 fn run_build(matches: &ArgMatches) -> Result<()> {
@@ -58,6 +95,8 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
 
     let mut store = RefgetStore::on_disk(output)
         .map_err(|e| anyhow::anyhow!("Failed to create store at {}: {}", output, e))?;
+    store.set_lock_options(lock_options_from(matches));
+    store.set_force_alias(matches.get_flag("force_alias"));
     if raw {
         store.set_encoding_mode(StorageMode::Raw);
     } else {

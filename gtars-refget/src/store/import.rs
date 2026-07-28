@@ -1053,10 +1053,23 @@ impl ReadonlyRefgetStore {
             return Err(e);
         }
 
-        // Finalize ALL indexes ONCE, after every collection is persisted. This
-        // is what makes parallel == serial byte-identical: sequences.rgsi sorts
-        // by sha512t24u and collections.rgci sorts by collection digest, so the
-        // arrival/build order is irrelevant.
+        // Finalize ALL indexes ONCE, after every collection is persisted -- and
+        // therefore take the store write lock ONCE, for the length of a merge
+        // rather than the length of the import.
+        //
+        // WITHIN ONE PROCESS this is byte-identical to a serial import:
+        // sequences.rgsi sorts by sha512t24u and collections.rgci sorts by
+        // collection digest, so arrival/build order is irrelevant.
+        //
+        // ACROSS PROCESSES that guarantee does not hold, and the reason is worth
+        // knowing. The commit merges with whatever is on disk and keeps the
+        // already-published row for a sequence digest, so the `name` column is
+        // first-committer-wins: if another process publishes the same sequence as
+        // `1` before we publish it as `chr1`, `1` is what stays in the index.
+        // Every content-derived column (length, alphabet, md5, and all the
+        // collection digests) is unaffected -- only `name`/`description`, which
+        // are advisory in this file. The authoritative per-collection names live
+        // in each collections/<digest>.rgsi.
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }

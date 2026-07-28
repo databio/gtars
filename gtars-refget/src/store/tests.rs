@@ -4185,3 +4185,386 @@ fn test_collection_alias_single_element_slice_ok() {
         report.collections[0].0.digest
     );
 }
+
+// =========================================================================
+// Concurrent-writer safety
+//
+// These are the regression tests for the 2026-07-23 incident, where four
+// concurrent `genome_init` jobs wrote one store directory and one genome's
+// collection was written to disk but dropped from both indexes -- its alias
+// stopped resolving and the nightly build failed. Neither writer errored.
+// =========================================================================
+
+/// Build a one-collection store at `path` from an inline FASTA.
+fn add_collection_to_store(store: &mut RefgetStore, dir: &std::path::Path, name: &str, fasta: &str) -> String {
+    let fasta_path = dir.join(format!("{}.fa", name));
+    fs::write(&fasta_path, fasta).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    meta.digest
+}
+
+/// THE incident, reproduced: two handles open the same store, each adds a
+/// different collection, and they commit in an interleaved order. Before the
+/// merge, whoever committed last rewrote the index from its own open-time
+/// snapshot and the other's collection vanished.
+#[test]
+fn test_interleaved_writers_both_survive() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    // Seed the store so both writers have something to load at open time.
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    // Both writers snapshot the store at the same moment.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    // A stages its collection first...
+    let digest_a = add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    // ...B stages and commits while A is still holding a stale snapshot...
+    let digest_b = add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    // ...and only then does A commit, from the snapshot that predates B.
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    for (label, digest) in [("seed", &seed_digest), ("A", &digest_a), ("B", &digest_b)] {
+        assert!(
+            reopened.get_collection_metadata(digest).is_some(),
+            "collection {} ({}) was dropped from the index by the other writer",
+            label,
+            digest
+        );
+    }
+}
+
+/// The same shape at the sequence level: rows another writer published must not
+/// be dropped by a commit from a stale snapshot.
+#[test]
+fn test_interleaved_writers_preserve_sequence_rows() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let names: std::collections::HashSet<String> = reopened
+        .list_sequences()
+        .iter()
+        .map(|m| m.name.clone())
+        .collect();
+    for expected in ["chrS", "chrA", "chrB"] {
+        assert!(names.contains(expected), "sequence {} was dropped; have {:?}", expected, names);
+    }
+}
+
+/// An alias namespace one writer creates must not be dropped from the manifest
+/// (or deleted from disk) by another writer that never loaded it. The manifest
+/// is the only discovery mechanism over HTTP, so an unadvertised TSV is
+/// unreachable.
+#[test]
+fn test_alias_namespace_from_other_writer_survives_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    // A opens the store BEFORE the namespace exists, so it will never load it.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+    writer_b
+        .add_collection_alias("refgenie", "athaliana", &seed_digest)
+        .unwrap();
+    drop(writer_b);
+
+    // A commits from its stale snapshot.
+    add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    writer_a.write().unwrap();
+    drop(writer_a);
+
+    assert!(
+        store_dir.join("aliases/collections/refgenie.tsv").exists(),
+        "the other writer's alias TSV was deleted"
+    );
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "athaliana")
+            .is_some(),
+        "alias stopped resolving after another writer committed"
+    );
+}
+
+/// Removal must still work: a blind union would resurrect whatever
+/// `remove_collection` deleted.
+#[test]
+fn test_removal_is_not_resurrected_by_the_merge() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let keep = add_collection_to_store(&mut store, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let drop_me = add_collection_to_store(&mut store, work.path(), "drop", ">chrD\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    assert!(store.remove_collection(&drop_me, true).unwrap());
+    drop(store);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(reopened.get_collection_metadata(&keep).is_some());
+    assert!(
+        reopened.get_collection_metadata(&drop_me).is_none(),
+        "removed collection came back through the merge"
+    );
+}
+
+/// Orphan GC on a freshly-opened store. `open_local` loads collection STUBS and
+/// never populates `name_lookup`, so the old `name_lookup`-derived live set was
+/// empty here and unlinked sequences the surviving collection still needs.
+/// This test fails against the pre-merge implementation.
+#[test]
+fn test_orphan_gc_keeps_sequences_shared_with_another_collection() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    // Two collections that SHARE chrShared, plus one sequence unique to each.
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "a",
+        ">chrShared\nAAAACCCCGGGGTTTT\n>chrOnlyA\nACACACAC\n",
+    );
+    let coll_b = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "b",
+        ">chrShared\nAAAACCCCGGGGTTTT\n>chrOnlyB\nGTGTGTGT\n",
+    );
+    store.write().unwrap();
+    drop(store);
+
+    // Reopen fresh: stub load, so name_lookup is empty.
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        store.name_lookup.is_empty(),
+        "precondition: a fresh open must not populate name_lookup"
+    );
+
+    // The dry-run must agree with what actually happens.
+    let planned = store.plan_orphan_removal(&coll_a).unwrap();
+    assert_eq!(
+        planned.len(),
+        1,
+        "only chrOnlyA is an orphan; planned {:?}",
+        planned
+    );
+
+    assert!(store.remove_collection(&coll_a, true).unwrap());
+    drop(store);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    reopened.load_collection(&coll_b).unwrap();
+    let collection = reopened.get_collection(&coll_b).unwrap();
+    assert_eq!(collection.sequences.len(), 2);
+    for seq in &collection.sequences {
+        let digest = &seq.metadata().sha512t24u;
+        assert!(
+            reopened.get_sequence_metadata(digest).is_some(),
+            "sequence {} ({}) survived in the index but not in the store",
+            seq.metadata().name,
+            digest
+        );
+        assert!(
+            reopened.get_sequence(digest).is_ok(),
+            "sequence {} ({}) was unlinked from disk by the orphan GC",
+            seq.metadata().name,
+            digest
+        );
+    }
+}
+
+/// Orphan GC must fail closed. If a collection listed in the index has no
+/// readable `.rgsi`, the live set is unknowable and nothing may be deleted --
+/// treating a missing input as "references nothing" is how live data gets
+/// unlinked.
+#[test]
+fn test_orphan_gc_refuses_when_a_collection_rgsi_is_missing() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+    drop(store);
+
+    fs::remove_file(store_dir.join(format!("collections/{}.rgsi", coll_b))).unwrap();
+
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    let err = store.remove_collection(&coll_a, true).unwrap_err();
+    assert!(
+        err.to_string().contains("refusing to remove orphan sequences"),
+        "expected a fail-closed error, got: {}",
+        err
+    );
+}
+
+/// Conflicting alias bindings are a semantic conflict, not a merge detail.
+/// Error by default; `--force-alias` takes the in-memory value.
+#[test]
+fn test_conflicting_alias_errors_unless_forced() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.add_collection_alias("ucsc", "hg38", &coll_a).unwrap();
+    store.write().unwrap();
+    drop(store);
+
+    // Another writer rebinds the same alias to a different collection.
+    let mut other = RefgetStore::open_local(&store_dir).unwrap();
+    let err = other
+        .add_collection_alias("ucsc", "hg38", &coll_b)
+        .expect_err("a conflicting alias binding must not be silently resolved");
+    assert!(err.to_string().contains("alias conflict"), "got: {}", err);
+    // The published binding is untouched by the failed commit.
+    assert_eq!(
+        fs::read_to_string(store_dir.join("aliases/collections/ucsc.tsv")).unwrap(),
+        format!("hg38\t{}\n", coll_a)
+    );
+
+    other.set_force_alias(true);
+    other
+        .add_collection_alias("ucsc", "hg38", &coll_b)
+        .expect("force-alias must overwrite the published binding");
+    drop(other);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        coll_b
+    );
+}
+
+/// `rgstore.json` is published LAST, so the digests it advertises always
+/// describe files that are already on disk.
+#[test]
+fn test_manifest_digests_match_published_indexes() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    let metadata = store.store_metadata().unwrap();
+    let sha = |name: &str| {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(fs::read(store_dir.join(name)).unwrap()))
+    };
+    assert_eq!(metadata.get("sequences_digest").unwrap(), &sha("sequences.rgsi"));
+    assert_eq!(metadata.get("collections_digest").unwrap(), &sha("collections.rgci"));
+}
+
+/// `created_at` now means what it says. It used to be stamped with `now()` on
+/// every commit, making it a duplicate of `modified`.
+#[test]
+fn test_created_at_survives_subsequent_commits() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    let read_created_at = || -> String {
+        let json = fs::read_to_string(store_dir.join("rgstore.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v["created_at"].as_str().unwrap().to_string()
+    };
+    let first = read_created_at();
+
+    add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    assert_eq!(read_created_at(), first, "created_at was overwritten by a later commit");
+}
+
+/// The lock serializes writers, and a store that already holds a batch lock
+/// must not deadlock against the commit each mutation triggers.
+#[test]
+fn test_batch_lock_is_reentrant_and_exclusive() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    store.lock_for_batch("test-batch").unwrap();
+    assert!(store.holds_batch_lock());
+
+    // Nested commits must not block on the lock this store already holds.
+    add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    // Meanwhile another process would be locked out.
+    assert!(
+        super::lock_status(&store_dir).unwrap().is_some(),
+        "the batch lock should be visible on disk"
+    );
+
+    store.release_batch_lock();
+    assert!(super::lock_status(&store_dir).unwrap().is_none());
+}
+
+/// Transient lock/temp files must be recognizable so anything mirroring a store
+/// directory (`aws s3 sync`, integrity checkers) can skip them.
+#[test]
+fn test_commit_leaves_no_transient_files_behind() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+    drop(store);
+
+    let leftovers: Vec<String> = fs::read_dir(&store_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str().map(String::from))
+        .filter(|n| super::is_transient_store_file(n))
+        .collect();
+    assert!(leftovers.is_empty(), "transient files left behind: {:?}", leftovers);
+}

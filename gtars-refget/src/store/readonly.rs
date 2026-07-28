@@ -2,8 +2,9 @@
 
 use super::*;
 use super::alias::AliasManager;
+use super::lock::{LockOptions, StoreLock};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
@@ -289,6 +290,74 @@ pub struct ReadonlyRefgetStore {
     /// The relative path to the sequence index file (from rgstore.json),
     /// stored for deferred loading in remote stores.
     pub(crate) sequence_index_path: Option<String>,
+    /// Rows this store has deliberately removed, suppressed at commit time.
+    /// See [`Tombstones`]. Behind a `Mutex` because the commit path is `&self`.
+    pub(crate) tombstones: Mutex<Tombstones>,
+    /// A store-directory write lock held across several mutations, set by
+    /// [`Self::lock_for_batch`]. When present, individual commits skip acquiring
+    /// their own lock — otherwise a batch guard would deadlock against the
+    /// `write_index_files` each mutation triggers.
+    pub(crate) commit_lock: Option<Arc<StoreLock>>,
+    /// Timeout/staleness settings used when acquiring the store write lock.
+    pub(crate) lock_options: LockOptions,
+    /// Overwrite an alias already published on disk with a different target,
+    /// instead of erroring on the conflict. Off by default: two writers binding
+    /// one human-readable name to different content is a semantic conflict, not
+    /// a merge detail.
+    pub(crate) force_alias: bool,
+}
+
+/// Rows this store has deliberately removed.
+///
+/// A commit is a union of the on-disk rows with the in-memory rows, so removal
+/// has to be recorded explicitly — otherwise the copy still on disk is merged
+/// straight back in and nothing can ever be deleted.
+///
+/// In-memory only. Tombstones are never written to disk: they describe an intent
+/// that is fully discharged by the commit that applies them, and they are cleared
+/// as soon as it succeeds.
+#[derive(Debug, Default, Clone)]
+pub struct Tombstones {
+    /// Collection digests removed from `collections.rgci`.
+    pub(crate) collections: HashSet<DigestKey>,
+    /// Sequence digests removed from `sequences.rgsi`.
+    pub(crate) sequences: HashSet<DigestKey>,
+    /// `(kind, namespace, alias)` triples removed from the alias TSVs.
+    pub(crate) aliases: HashSet<(AliasKind, String, String)>,
+    /// `(kind, namespace)` pairs the caller explicitly emptied, as opposed to
+    /// namespaces that were simply never loaded into memory. Only the former may
+    /// cause a TSV to be deleted.
+    pub(crate) emptied_alias_namespaces: HashSet<(AliasKind, String)>,
+}
+
+impl Tombstones {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.collections.is_empty()
+            && self.sequences.is_empty()
+            && self.aliases.is_empty()
+            && self.emptied_alias_namespaces.is_empty()
+    }
+
+    /// Drop exactly the tombstones a completed commit applied.
+    ///
+    /// Set difference, not `clear()`: another thread may have recorded a removal
+    /// after the commit snapshotted, and that one still has to be applied.
+    pub(crate) fn clear_matching(&mut self, applied: &Tombstones) {
+        self.collections.retain(|k| !applied.collections.contains(k));
+        self.sequences.retain(|k| !applied.sequences.contains(k));
+        self.aliases.retain(|k| !applied.aliases.contains(k));
+        self.emptied_alias_namespaces
+            .retain(|k| !applied.emptied_alias_namespaces.contains(k));
+    }
+
+    /// Drop the tombstones for one alias namespace, after the cheap
+    /// single-namespace commit path published it.
+    pub(crate) fn clear_alias_namespace(&mut self, kind: AliasKind, namespace: &str) {
+        self.aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.emptied_alias_namespaces
+            .retain(|(k, ns)| !(*k == kind && ns == namespace));
+    }
 }
 
 impl ReadonlyRefgetStore {
@@ -315,7 +384,67 @@ impl ReadonlyRefgetStore {
             seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
             sequence_index_loaded: true,
             sequence_index_path: None,
+            tombstones: Mutex::new(Tombstones::default()),
+            commit_lock: None,
+            lock_options: LockOptions::default(),
+            force_alias: false,
         }
+    }
+
+    // =========================================================================
+    // Write locking
+    // =========================================================================
+
+    /// Hold the store's exclusive writer lock across several mutations.
+    ///
+    /// Individual mutations already commit under the lock, so this is only needed
+    /// when a sequence of them must be atomic with respect to other writers — the
+    /// registry's alias step, for instance, which adds many aliases and expects
+    /// them to appear together. The guard is dropped by
+    /// [`Self::release_batch_lock`] or when the store is dropped.
+    ///
+    /// Nested commits are re-entrant: they see the held guard and skip acquiring.
+    pub fn lock_for_batch(&mut self, operation: &str) -> Result<()> {
+        if self.commit_lock.is_some() {
+            return Ok(());
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .context("lock_for_batch requires a disk-backed store")?;
+        let lock = StoreLock::acquire(local_path, operation, self.lock_options.clone())?;
+        self.commit_lock = Some(Arc::new(lock));
+        Ok(())
+    }
+
+    /// Release a lock taken by [`Self::lock_for_batch`].
+    pub fn release_batch_lock(&mut self) {
+        self.commit_lock = None;
+    }
+
+    /// Whether this store currently holds a batch write lock.
+    pub fn holds_batch_lock(&self) -> bool {
+        self.commit_lock.is_some()
+    }
+
+    /// Whether this store has removals that have not yet been committed.
+    ///
+    /// Tombstones live only in memory, so dropping a store without committing
+    /// silently abandons its deletions — the rows are still on disk and the next
+    /// commit by anyone merges them straight back.
+    pub fn has_uncommitted_removals(&self) -> bool {
+        !self.tombstones.lock().unwrap().is_empty()
+    }
+
+    /// Override the timeout/staleness settings used when acquiring the write lock.
+    pub fn set_lock_options(&mut self, options: LockOptions) {
+        self.lock_options = options;
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published
+    /// under a different digest, instead of erroring on the conflict.
+    pub fn set_force_alias(&mut self, force: bool) {
+        self.force_alias = force;
     }
 
     /// Test-only: shrink the partial-read fd-cache to a tiny capacity so the
@@ -772,12 +901,65 @@ impl ReadonlyRefgetStore {
         })
     }
 
+    /// Dry-run of [`Self::remove_collection`]'s orphan cleanup: the sequence
+    /// digests that WOULD be deleted, without touching anything.
+    ///
+    /// Uses the same disk-derived live set as the real thing, so it fails with the
+    /// same error if the store is not in a state where orphan GC is safe.
+    pub fn plan_orphan_removal(&self, digest: &str) -> Result<Vec<String>> {
+        let key = digest.to_key();
+        let candidates = self.orphan_candidates(digest)?;
+        let live = self.live_sequence_set(&key)?;
+        Ok(candidates
+            .into_iter()
+            .filter(|k| !live.contains(k))
+            .map(|k| key_to_digest_string(&k))
+            .collect())
+    }
+
+    /// Sequence digests belonging to the collection being removed.
+    fn orphan_candidates(&self, digest: &str) -> Result<Vec<DigestKey>> {
+        if self.local_path.is_some() {
+            self.collection_sequence_digests(digest)
+        } else {
+            Ok(self
+                .name_lookup
+                .get(&digest.to_key())
+                .map(|name_map| name_map.values().cloned().collect())
+                .unwrap_or_default())
+        }
+    }
+
+    /// Sequence digests still referenced by some OTHER collection.
+    ///
+    /// Disk-backed stores derive this from disk. Only a pure in-memory store
+    /// (`local_path == None`) falls back to `name_lookup` — there, the in-memory
+    /// maps are all there is, so they are authoritative rather than incidental.
+    fn live_sequence_set(&self, exclude: &DigestKey) -> Result<HashSet<DigestKey>> {
+        if self.local_path.is_some() {
+            return self.live_sequence_digests_from_disk(exclude);
+        }
+        let mut live = HashSet::new();
+        for (key, name_map) in &self.name_lookup {
+            if key == exclude {
+                continue;
+            }
+            live.extend(name_map.values().copied());
+        }
+        Ok(live)
+    }
+
     /// Remove a collection from the store.
     ///
     /// When `remove_orphan_sequences` is true, the orphan-cleanup path is
     /// O(sequences + collections): `md5_lookup` is scanned exactly once, not
     /// once per orphan. Do not reintroduce a per-orphan scan here — on large
     /// stores that is quadratic and effectively unbounded.
+    ///
+    /// The live set is derived from DISK, not from `name_lookup` — see
+    /// [`Self::live_sequence_digests_from_disk`] for why that distinction is the
+    /// difference between a GC and a data-loss bug. The whole removal runs under
+    /// the store write lock, so the live set cannot go stale mid-delete.
     pub fn remove_collection(
         &mut self,
         digest: &str,
@@ -785,45 +967,80 @@ impl ReadonlyRefgetStore {
     ) -> Result<bool> {
         let key = digest.to_key();
 
-        if self.collections.remove(&key).is_none() {
+        if !self.collections.contains_key(&key) {
             return Ok(false);
         }
 
-        let orphan_candidates: Vec<DigestKey> = self
-            .name_lookup
-            .get(&key)
-            .map(|name_map| name_map.values().cloned().collect())
-            .unwrap_or_default();
+        // Hold the lock for the WHOLE removal: computing the live set, unlinking
+        // the orphans, and committing the indexes must not interleave with
+        // another writer adding a collection that references those sequences. The
+        // nested `write_index_files` sees the guard and does not re-acquire.
+        let acquired = self.acquire_commit_lock("remove_collection")?;
+        let restore = match acquired {
+            Some(lock) => {
+                let previous = self.commit_lock.replace(Arc::new(lock));
+                Some(previous)
+            }
+            // Already inside a caller's `lock_for_batch`; leave it alone.
+            None => None,
+        };
 
+        let result = self.remove_collection_locked(digest, key, remove_orphan_sequences);
+
+        if let Some(previous) = restore {
+            self.commit_lock = previous;
+        }
+        result
+    }
+
+    fn remove_collection_locked(
+        &mut self,
+        digest: &str,
+        key: DigestKey,
+        remove_orphan_sequences: bool,
+    ) -> Result<bool> {
+        // Compute both sets BEFORE mutating anything: the candidates come from
+        // the collection's own `.rgsi`, which the cleanup below unlinks.
+        let orphan_candidates: Vec<DigestKey> = if remove_orphan_sequences {
+            self.orphan_candidates(digest)?
+        } else {
+            Vec::new()
+        };
+        let still_referenced: HashSet<DigestKey> = if remove_orphan_sequences {
+            self.live_sequence_set(&key)?
+        } else {
+            HashSet::new()
+        };
+
+        self.collections.remove(&key);
         self.name_lookup.remove(&key);
         self.fhr_metadata.remove(&key);
+        self.tombstones.lock().unwrap().collections.insert(key);
 
         // Remove collection aliases pointing to this digest
         let alias_pairs = self.aliases.reverse_lookup_collection(digest);
-        let affected_namespaces: std::collections::HashSet<String> = alias_pairs
+        let affected_namespaces: HashSet<String> = alias_pairs
             .iter()
             .map(|(ns, _)| ns.clone())
             .collect();
         for (ns, alias) in &alias_pairs {
             self.aliases.remove_collection(ns, alias);
+            self.tombstone_alias(AliasKind::Collection, ns, alias);
         }
         for ns in &affected_namespaces {
             self.persist_alias_namespace(AliasKind::Collection, ns)?;
         }
 
         if remove_orphan_sequences && !orphan_candidates.is_empty() {
-            let mut still_referenced: std::collections::HashSet<DigestKey> =
-                std::collections::HashSet::new();
-            for name_map in self.name_lookup.values() {
-                for seq_key in name_map.values() {
-                    still_referenced.insert(*seq_key);
-                }
-            }
-
             let orphans: Vec<DigestKey> = orphan_candidates
                 .into_iter()
                 .filter(|k| !still_referenced.contains(k))
                 .collect();
+
+            {
+                let mut tombstones = self.tombstones.lock().unwrap();
+                tombstones.sequences.extend(orphans.iter().copied());
+            }
 
             for orphan_key in &orphans {
                 self.sequence_store.remove(orphan_key);

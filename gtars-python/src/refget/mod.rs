@@ -2032,6 +2032,79 @@ impl PyRefgetStore {
             })
     }
 
+    /// Preview which sequences remove_collection would delete, without deleting.
+    ///
+    /// Uses the same disk-derived live set as the real removal, so it raises the
+    /// same error if the store is not in a state where orphan cleanup is safe
+    /// (e.g. a collection listed in the index whose .rgsi file is unreadable).
+    ///
+    /// Args:
+    ///     digest: The collection's SHA-512/24u digest string.
+    ///
+    /// Returns:
+    ///     list[str]: Sequence digests that would be unlinked.
+    ///
+    /// Example:
+    ///     >>> doomed = store.plan_orphan_removal("abc123")
+    ///     >>> print(f"{len(doomed)} sequences would be deleted")
+    fn plan_orphan_removal(&self, digest: &str) -> PyResult<Vec<String>> {
+        self.inner.plan_orphan_removal(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error planning orphan removal: {}",
+                e
+            ))
+        })
+    }
+
+    /// Hold this store's exclusive writer lock across several mutations.
+    ///
+    /// Individual mutations already commit under the lock, so this is only needed
+    /// when a sequence of them must be atomic with respect to other processes
+    /// writing the same store directory.
+    ///
+    /// Args:
+    ///     operation: A short label recorded in the lock file, shown to whoever
+    ///         is blocked waiting for it (e.g. "build_aliases").
+    ///
+    /// Example:
+    ///     >>> store.lock_for_batch("build_aliases")
+    ///     >>> try:
+    ///     ...     for ns, alias, digest in rows:
+    ///     ...         store.add_collection_alias(ns, alias, digest)
+    ///     ... finally:
+    ///     ...     store.release_batch_lock()
+    #[pyo3(signature = (operation="batch"))]
+    fn lock_for_batch(&mut self, operation: &str) -> PyResult<()> {
+        self.inner.lock_for_batch(operation).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error acquiring store lock: {}", e))
+        })
+    }
+
+    /// Release a lock taken by lock_for_batch().
+    fn release_batch_lock(&mut self) {
+        self.inner.release_batch_lock();
+    }
+
+    /// Whether this store currently holds a batch write lock.
+    fn holds_batch_lock(&self) -> bool {
+        self.inner.holds_batch_lock()
+    }
+
+    /// Set how long commits wait for another process's write lock.
+    ///
+    /// Args:
+    ///     timeout_seconds: Seconds to wait before giving up. 0 = wait forever.
+    fn set_lock_timeout(&mut self, timeout_seconds: u64) {
+        let opts = gtars_refget::store::LockOptions::default().timeout_secs(timeout_seconds);
+        self.inner.set_lock_options(opts);
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published
+    /// under a different digest, instead of raising on the conflict.
+    fn set_force_alias(&mut self, force: bool) {
+        self.inner.set_force_alias(force);
+    }
+
     /// Import a collection from another store, including sequences, aliases, and FHR metadata.
     ///
     /// Args:
@@ -3539,9 +3612,59 @@ fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<Py<PyAn
     })
 }
 
+/// Report who holds a RefgetStore's exclusive writer lock.
+///
+/// Args:
+///     store_path: Path to the RefgetStore directory.
+///
+/// Returns:
+///     dict | None: None if the lock is free. Otherwise a dict with keys
+///     pid, hostname, started_at, heartbeat_at, operation, gtars_version.
+///
+/// Example:
+///     >>> from gtars.refget import store_lock_status
+///     >>> info = store_lock_status("/data/stores/demo")
+///     >>> if info:
+///     ...     print(f"held by pid {info['pid']} on {info['hostname']}")
+#[pyfunction]
+fn store_lock_status(store_path: &str) -> PyResult<Option<Py<PyAny>>> {
+    let info = gtars_refget::store::lock_status(std::path::Path::new(store_path))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+    let Some(info) = info else { return Ok(None) };
+    Python::attach(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("pid", info.pid)?;
+        dict.set_item("hostname", info.hostname)?;
+        dict.set_item("started_at", info.started_at)?;
+        dict.set_item("heartbeat_at", info.heartbeat_at)?;
+        dict.set_item("operation", info.operation)?;
+        dict.set_item("gtars_version", info.gtars_version)?;
+        Ok(Some(dict.into()))
+    })
+}
+
+/// Forcibly clear a RefgetStore's exclusive writer lock.
+///
+/// Operator escape hatch for a lock left behind by a killed job. Check
+/// `store_lock_status()` first: clearing a lock a LIVE writer holds lets two
+/// processes commit at once, which is the failure this lock exists to prevent.
+///
+/// Args:
+///     store_path: Path to the RefgetStore directory.
+///
+/// Returns:
+///     bool: True if a lock was present and cleared.
+#[pyfunction]
+fn force_unlock_store(store_path: &str) -> PyResult<bool> {
+    gtars_refget::store::force_unlock(std::path::Path::new(store_path))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+}
+
 // This represents the Python module to be created
 #[pymodule]
 pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(store_lock_status, m)?)?;
+    m.add_function(wrap_pyfunction!(force_unlock_store, m)?)?;
     m.add_function(wrap_pyfunction!(sha512t24u_digest, m)?)?;
     m.add_function(wrap_pyfunction!(md5_digest, m)?)?;
     m.add_function(wrap_pyfunction!(digest_fasta, m)?)?;

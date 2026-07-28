@@ -4,6 +4,10 @@
 //! defined in `crate::digest::types`.
 
 use anyhow::Result;
+// The RGSI writers get their `Write` through `atomic_write`'s `&mut dyn Write`
+// (trait objects need no import); only the filesystem-only FASTA writer needs
+// the trait itself in scope.
+#[cfg(feature = "filesystem")]
 use std::io::Write;
 use std::path::Path;
 
@@ -20,50 +24,54 @@ use crate::digest::types::{
 };
 
 /// Shared implementation for writing RGSI (Refget Sequence Index) files.
+///
+/// Published atomically (temp + `rename(2)`): a `collections/<digest>.rgsi` is a
+/// content-addressed per-item file that concurrent writers may produce
+/// simultaneously, and the orphan-GC live-set computation reads these files, so a
+/// torn one would be read as "this collection references nothing".
 fn write_rgsi_impl<P: AsRef<Path>>(
     file_path: P,
     metadata: &SequenceCollectionMetadata,
     sequences: Option<&[SequenceRecord]>,
 ) -> Result<()> {
-    let file_path = file_path.as_ref();
-    let mut file = std::fs::File::create(file_path)?;
-
-    // Write collection digest headers
-    writeln!(file, "##seqcol_digest={}", metadata.digest)?;
-    writeln!(file, "##names_digest={}", metadata.names_digest)?;
-    writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
-    writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
-    if let Some(ref nlp) = metadata.name_length_pairs_digest {
-        writeln!(file, "##name_length_pairs_digest={}", nlp)?;
-    }
-    if let Some(ref snlp) = metadata.sorted_name_length_pairs_digest {
-        writeln!(file, "##sorted_name_length_pairs_digest={}", snlp)?;
-    }
-    if let Some(ref ss) = metadata.sorted_sequences_digest {
-        writeln!(file, "##sorted_sequences_digest={}", ss)?;
-    }
-    writeln!(
-        file,
-        "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
-    )?;
-
-    // Write sequence metadata if available
-    if let Some(seqs) = sequences {
-        for seq_record in seqs {
-            let seq_meta = seq_record.metadata();
-            writeln!(
-                file,
-                "{}\t{}\t{}\t{}\t{}\t{}",
-                seq_meta.name,
-                seq_meta.length,
-                seq_meta.alphabet,
-                seq_meta.sha512t24u,
-                seq_meta.md5,
-                seq_meta.description.as_deref().unwrap_or("")
-            )?;
+    crate::store::atomic::atomic_write(file_path.as_ref(), |file| {
+        // Write collection digest headers
+        writeln!(file, "##seqcol_digest={}", metadata.digest)?;
+        writeln!(file, "##names_digest={}", metadata.names_digest)?;
+        writeln!(file, "##sequences_digest={}", metadata.sequences_digest)?;
+        writeln!(file, "##lengths_digest={}", metadata.lengths_digest)?;
+        if let Some(ref nlp) = metadata.name_length_pairs_digest {
+            writeln!(file, "##name_length_pairs_digest={}", nlp)?;
         }
-    }
-    Ok(())
+        if let Some(ref snlp) = metadata.sorted_name_length_pairs_digest {
+            writeln!(file, "##sorted_name_length_pairs_digest={}", snlp)?;
+        }
+        if let Some(ref ss) = metadata.sorted_sequences_digest {
+            writeln!(file, "##sorted_sequences_digest={}", ss)?;
+        }
+        writeln!(
+            file,
+            "#name\tlength\talphabet\tsha512t24u\tmd5\tdescription"
+        )?;
+
+        // Write sequence metadata if available
+        if let Some(seqs) = sequences {
+            for seq_record in seqs {
+                let seq_meta = seq_record.metadata();
+                writeln!(
+                    file,
+                    "{}\t{}\t{}\t{}\t{}\t{}",
+                    seq_meta.name,
+                    seq_meta.length,
+                    seq_meta.alphabet,
+                    seq_meta.sha512t24u,
+                    seq_meta.md5,
+                    seq_meta.description.as_deref().unwrap_or("")
+                )?;
+            }
+        }
+        Ok(())
+    })
 }
 
 // ============================================================================
