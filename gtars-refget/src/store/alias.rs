@@ -96,10 +96,15 @@ fn alias_remove(store: &mut AliasStore, namespace: &str, alias: &str) -> bool {
     }
 }
 
-fn alias_load_tsv(store: &mut AliasStore, namespace: &str, path: &Path) -> Result<usize> {
+/// Load a TSV into `store` under `namespace`, returning the alias names read.
+///
+/// Returns the names rather than a count because the store-level loaders have to
+/// record each one as a pending change — a commit only publishes aliases this
+/// handle actually touched.
+fn alias_load_tsv(store: &mut AliasStore, namespace: &str, path: &Path) -> Result<Vec<String>> {
     let file = File::open(path)?;
     let reader = BufReader::new(file);
-    let mut count = 0;
+    let mut loaded = Vec::new();
     for line in reader.lines() {
         let line = line?;
         if line.starts_with('#') || line.trim().is_empty() {
@@ -109,10 +114,10 @@ fn alias_load_tsv(store: &mut AliasStore, namespace: &str, path: &Path) -> Resul
         if parts.len() == 2 {
             let key = parts[1].to_key();
             alias_add(store, namespace, parts[0], key);
-            count += 1;
+            loaded.push(parts[0].to_string());
         }
     }
-    Ok(count)
+    Ok(loaded)
 }
 
 fn load_aliases_from_dir(store: &mut AliasStore, dir: &Path) -> Result<()> {
@@ -190,7 +195,8 @@ impl AliasManager {
         alias_remove(&mut self.sequence_aliases, namespace, alias)
     }
 
-    pub fn load_sequence_tsv(&mut self, namespace: &str, path: &Path) -> Result<usize> {
+    /// Load a TSV of sequence aliases, returning the alias names read.
+    pub fn load_sequence_tsv(&mut self, namespace: &str, path: &Path) -> Result<Vec<String>> {
         alias_load_tsv(&mut self.sequence_aliases, namespace, path)
     }
 
@@ -222,7 +228,8 @@ impl AliasManager {
         alias_remove(&mut self.collection_aliases, namespace, alias)
     }
 
-    pub fn load_collection_tsv(&mut self, namespace: &str, path: &Path) -> Result<usize> {
+    /// Load a TSV of collection aliases, returning the alias names read.
+    pub fn load_collection_tsv(&mut self, namespace: &str, path: &Path) -> Result<Vec<String>> {
         alias_load_tsv(&mut self.collection_aliases, namespace, path)
     }
 
@@ -288,6 +295,12 @@ impl AliasManager {
             .unwrap_or_default()
     }
 
+    /// Kind-generic single-alias resolve, used by the commit path to look up the
+    /// target of an alias it has recorded as a pending change.
+    pub(crate) fn resolve(&self, kind: AliasKind, namespace: &str, alias: &str) -> Option<DigestKey> {
+        alias_resolve(self.store_for(kind), namespace, alias)
+    }
+
     fn store_for(&self, kind: AliasKind) -> &AliasStore {
         match kind {
             AliasKind::Sequence => &self.sequence_aliases,
@@ -310,6 +323,7 @@ impl ReadonlyRefgetStore {
     /// Add a sequence alias and persist to disk if applicable.
     pub fn add_sequence_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
         self.aliases.add_sequence(namespace, alias, digest);
+        self.record(|p| p.add_alias(AliasKind::Sequence, namespace, alias));
         self.persist_alias_namespace(AliasKind::Sequence, namespace)?;
         Ok(())
     }
@@ -347,10 +361,9 @@ impl ReadonlyRefgetStore {
     pub fn remove_sequence_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
         let removed = self.aliases.remove_sequence(namespace, alias);
         if removed {
-            // Tombstone BEFORE persisting: the commit merges with the copy still
-            // on disk, so without an explicit removal record the alias comes
-            // straight back.
-            self.tombstone_alias(AliasKind::Sequence, namespace, alias);
+            // Record BEFORE persisting: the commit starts from the TSV on disk,
+            // so without an explicit removal the alias is simply left alone.
+            self.record_alias_removal(AliasKind::Sequence, namespace, alias);
             self.persist_alias_namespace(AliasKind::Sequence, namespace)?;
         }
         Ok(removed)
@@ -358,14 +371,20 @@ impl ReadonlyRefgetStore {
 
     /// Load sequence aliases from a TSV file into a namespace.
     pub fn load_sequence_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let count = self.aliases.load_sequence_tsv(namespace, Path::new(path))?;
+        let loaded = self.aliases.load_sequence_tsv(namespace, Path::new(path))?;
+        self.record(|p| {
+            for alias in &loaded {
+                p.add_alias(AliasKind::Sequence, namespace, alias);
+            }
+        });
         self.persist_alias_namespace(AliasKind::Sequence, namespace)?;
-        Ok(count)
+        Ok(loaded.len())
     }
 
     /// Add a collection alias and persist to disk if applicable.
     pub fn add_collection_alias(&mut self, namespace: &str, alias: &str, digest: &str) -> Result<()> {
         self.aliases.add_collection(namespace, alias, digest);
+        self.record(|p| p.add_alias(AliasKind::Collection, namespace, alias));
         self.persist_alias_namespace(AliasKind::Collection, namespace)?;
         Ok(())
     }
@@ -483,7 +502,7 @@ impl ReadonlyRefgetStore {
     pub fn remove_collection_alias(&mut self, namespace: &str, alias: &str) -> Result<bool> {
         let removed = self.aliases.remove_collection(namespace, alias);
         if removed {
-            self.tombstone_alias(AliasKind::Collection, namespace, alias);
+            self.record_alias_removal(AliasKind::Collection, namespace, alias);
             self.persist_alias_namespace(AliasKind::Collection, namespace)?;
         }
         Ok(removed)
@@ -491,17 +510,23 @@ impl ReadonlyRefgetStore {
 
     /// Load collection aliases from a TSV file into a namespace.
     pub fn load_collection_aliases(&mut self, namespace: &str, path: &str) -> Result<usize> {
-        let count = self.aliases.load_collection_tsv(namespace, Path::new(path))?;
+        let loaded = self.aliases.load_collection_tsv(namespace, Path::new(path))?;
+        self.record(|p| {
+            for alias in &loaded {
+                p.add_alias(AliasKind::Collection, namespace, alias);
+            }
+        });
         self.persist_alias_namespace(AliasKind::Collection, namespace)?;
-        Ok(count)
+        Ok(loaded.len())
     }
 
     /// Commit a single alias namespace to disk (if disk-backed).
     ///
-    /// The cheap alias-mutation path: it merges and publishes ONE namespace and
-    /// patches only the manifest's alias-derived fields, rather than rehashing
-    /// the (potentially 60+ MB) sequence and collection indexes. Takes the store
-    /// write lock for the duration, like any other commit.
+    /// The cheap alias-mutation path: it applies this handle's pending changes
+    /// for ONE namespace and patches only the manifest's alias-derived fields,
+    /// rather than rehashing the (potentially 60+ MB) sequence and collection
+    /// indexes. Takes the store write lock for the duration, like any other
+    /// commit.
     pub(crate) fn persist_alias_namespace(&self, kind: AliasKind, namespace: &str) -> Result<()> {
         if !self.persist_to_disk {
             return Ok(());
@@ -512,9 +537,9 @@ impl ReadonlyRefgetStore {
 
         let _guard = self.acquire_commit_lock("persist_alias_namespace")?;
 
-        let tombstones = self.tombstones.lock().unwrap().clone();
+        let pending = self.pending.lock().unwrap().clone();
         let aliases_dir = local_path.join("aliases");
-        self.commit_alias_namespace(&aliases_dir, kind, namespace, &tombstones)?;
+        self.commit_alias_namespace(&aliases_dir, kind, namespace, &pending)?;
 
         // Keep rgstore.json in lock-step with the alias files on disk, so a
         // served store always advertises its true alias namespaces. Without
@@ -523,9 +548,9 @@ impl ReadonlyRefgetStore {
         // which cannot list the aliases/ directory — never discover them.
         self.refresh_manifest_alias_namespaces()?;
 
-        // Only this namespace's tombstones have been applied; leave the rest for
-        // the next full commit.
-        self.tombstones
+        // Only this namespace has been published; leave the rest of the pending
+        // changes for the next full commit.
+        self.pending
             .lock()
             .unwrap()
             .clear_alias_namespace(kind, namespace);
@@ -533,20 +558,22 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
-    /// Record that an alias was deliberately removed, so the merge at commit
-    /// time does not resurrect it from the copy still on disk.
-    pub(crate) fn tombstone_alias(&self, kind: AliasKind, namespace: &str, alias: &str) {
-        let mut tombstones = self.tombstones.lock().unwrap();
-        tombstones
-            .aliases
-            .insert((kind, namespace.to_string(), alias.to_string()));
-        // A namespace that just lost its last in-memory alias is explicitly
-        // emptied, as distinct from "we never loaded it".
-        if self.aliases.namespace_map(kind, namespace).is_empty() {
-            tombstones
-                .emptied_alias_namespaces
-                .insert((kind, namespace.to_string()));
-        }
+    /// Record that an alias was deliberately removed, so the commit drops it
+    /// from the TSV it reads back from disk instead of leaving it alone.
+    pub(crate) fn record_alias_removal(&self, kind: AliasKind, namespace: &str, alias: &str) {
+        let emptied = self.aliases.namespace_map(kind, namespace).is_empty();
+        self.record(|p| {
+            p.remove_alias(kind, namespace, alias);
+            // A namespace that just lost its last in-memory alias is explicitly
+            // emptied, as distinct from "we never loaded it". This only makes
+            // the commit VISIT the namespace; whether the TSV is deleted depends
+            // on the merged result being empty, because another writer may have
+            // added aliases we never saw.
+            if emptied {
+                p.emptied_alias_namespaces
+                    .insert((kind, namespace.to_string()));
+            }
+        });
     }
 }
 
@@ -985,8 +1012,8 @@ mod tests {
         std::fs::write(&tsv_path, "NC_000001.11\tsome_digest\n# comment\n\nNC_000002.12\tanother_digest\n").unwrap();
 
         let mut mgr = AliasManager::new();
-        let count = mgr.load_sequence_tsv("ncbi", &tsv_path).unwrap();
-        assert_eq!(count, 2);
+        let loaded = mgr.load_sequence_tsv("ncbi", &tsv_path).unwrap();
+        assert_eq!(loaded, vec!["NC_000001.11", "NC_000002.12"]);
         assert!(mgr.resolve_sequence("ncbi", "NC_000001.11").is_some());
         assert!(mgr.resolve_sequence("ncbi", "NC_000002.12").is_some());
     }

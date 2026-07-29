@@ -5,38 +5,44 @@
 //!
 //! [`ReadonlyRefgetStore::write_index_files`] is the ONE place the shared,
 //! whole-file store artifacts are published. It is not a "serialize my memory to
-//! disk" operation — it is a MERGE:
+//! disk" operation — it is a DELTA:
 //!
 //! ```text
-//! committed = (rows currently on disk  ∪  rows in memory)  \  tombstones
+//! committed = (rows currently on disk  +  my additions)  \  my removals
 //! ```
 //!
-//! This matters because a store handle holds a snapshot taken at `open_local`
-//! time and nothing re-reads it afterwards. For a FASTA import that snapshot is
-//! hours old. A writer that serialized its own map would silently drop every row
-//! another writer committed in the meantime — which is exactly how a genome went
-//! missing from a production store on 2026-07-23 (its `collections/<digest>.rgsi`
-//! was on disk, but no index referenced it).
+//! Both halves matter, and for different reasons.
 //!
-//! The merge is well-defined because both index files are digest-keyed sets of
-//! content-derived rows: the same key implies the same content, so a union cannot
-//! conflict on anything load-bearing. See [`merge_sequence_rows`] and
-//! [`merge_collection_rows`] for the two places it is not purely mechanical.
+//! Reading the rows *currently on disk* is what makes concurrent writers safe. A
+//! store handle holds a snapshot taken at `open_local` time and nothing re-reads
+//! it afterwards; for a FASTA import that snapshot is hours old. A writer that
+//! serialized its own map would silently drop every row another writer committed
+//! in the meantime — which is exactly how a genome went missing from a production
+//! store on 2026-07-23 (its `collections/<digest>.rgsi` was on disk, but no index
+//! referenced it).
 //!
-//! Removal has to be explicit, or a blind union would resurrect whatever
-//! `remove_collection` just deleted. Hence tombstones (see
-//! [`super::readonly::Tombstones`]) — in-memory only, cleared on a successful
-//! commit, never written to disk.
+//! Applying only *my own changes* is what makes deletion safe. The obvious
+//! alternative — union the whole in-memory pile onto what is on disk — cannot
+//! distinguish a row this handle produced from one it merely LOADED so it could
+//! be read (`open_local` loads a stub for every collection in the index). Such a
+//! commit writes back the loaded rows too, so a collection some OTHER process
+//! removed and unlinked comes back from this handle's stale snapshot: index rows
+//! pointing at `.seq` files that no longer exist, an alias resolving to a
+//! collection that cannot be opened. That failure needs no lock race at all —
+//! the removal can have completed before this commit even started. Recording
+//! changes explicitly (see [`super::readonly::PendingChanges`]) removes the
+//! ambiguity, and with it the need for any "not this row" tombstone mechanism.
 //!
 //! Everything expensive stays OUTSIDE the lock: FASTA parsing, digesting, and
 //! every per-`.seq` and per-`collections/*.rgsi` write. Those are
 //! digest-addressed and concurrency-safe by construction (see
 //! [`ReadonlyRefgetStore::write_seq_bytes_to_full_path`]). The exclusive section
-//! is O(index size): parse two TSVs, union two hashmaps, publish. Seconds, not
-//! hours.
+//! is O(index size): parse two TSVs, apply a small delta, publish. Seconds, not
+//! hours. The one deliberate exception is orphan GC — see
+//! [`ReadonlyRefgetStore::remove_collection`].
 
 use super::*;
-use super::readonly::{ReadonlyRefgetStore, Tombstones};
+use super::readonly::{PendingChanges, ReadonlyRefgetStore};
 use super::alias::AliasKind;
 use super::atomic::atomic_write;
 use super::fhr_metadata;
@@ -177,8 +183,9 @@ impl ReadonlyRefgetStore {
 
     /// Commit the store's shared index/manifest/alias artifacts.
     ///
-    /// This MERGES with what is currently on disk rather than overwriting from
-    /// the open-time snapshot — see the module docs for why. The publish order is
+    /// Applies this handle's [`PendingChanges`] to the index as it is on disk
+    /// RIGHT NOW, rather than serializing the open-time snapshot — see the module
+    /// docs for why both halves of that matter. The publish order is
     /// load-bearing: indexes and alias files first, `rgstore.json` LAST, because
     /// the manifest advertises digests of the files it describes. A reader that
     /// catches the manifest mid-commit would otherwise be told about bytes that
@@ -200,29 +207,30 @@ impl ReadonlyRefgetStore {
 
         let _guard = self.acquire_commit_lock("write_index_files")?;
 
-        // Snapshot the tombstones under the store lock, so the merge and the
-        // subsequent clear agree on exactly which rows were suppressed.
-        let tombstones = self.tombstones.lock().unwrap().clone();
+        // Snapshot the pending changes under the store lock, so what gets
+        // applied and what gets cleared afterwards are exactly the same set.
+        let pending = self.pending.lock().unwrap().clone();
 
         let sequence_index_path = local_path.join("sequences.rgsi");
         let collection_index_path = local_path.join("collections.rgci");
 
-        // (1) Re-read the CURRENT on-disk rows -- not the open-time snapshot --
-        // and union them with memory, minus tombstones.
-        let merged_sequences = self.merged_sequence_rows(&sequence_index_path, &tombstones)?;
-        let merged_collections =
-            self.merged_collection_rows(&collection_index_path, &tombstones)?;
+        // (1) Start from the CURRENT on-disk rows -- not the open-time snapshot
+        // -- and apply only what this handle changed.
+        let mut sequences = read_sequences_rgsi_rows(&sequence_index_path)?;
+        self.apply_pending_sequence_rows(&mut sequences, &pending);
+        let mut collections = read_collections_rgci_rows(&collection_index_path)?;
+        self.apply_pending_collection_rows(&mut collections, &pending);
 
         // (2) Publish the indexes atomically.
-        write_sequences_rgsi_rows(&sequence_index_path, &merged_sequences)?;
-        write_collections_rgci_rows(&collection_index_path, &merged_collections)?;
+        write_sequences_rgsi_rows(&sequence_index_path, &sequences)?;
+        write_collections_rgci_rows(&collection_index_path, &collections)?;
 
-        // (3) Publish the alias TSVs (also merged, per namespace).
-        self.commit_all_alias_namespaces(&local_path, &tombstones)?;
+        // (3) Publish the alias TSVs this handle touched (same delta rule).
+        self.commit_all_alias_namespaces(&local_path, &pending)?;
 
         // (4) Recompute manifest fields from what we just wrote -- NOT from
-        // memory, which is a subset after a merge.
-        let logical_bytes: u64 = merged_sequences
+        // memory, which is neither a superset nor a subset of what is on disk.
+        let logical_bytes: u64 = sequences
             .values()
             .map(|m| m.disk_size(&self.mode) as u64)
             .sum();
@@ -240,40 +248,78 @@ impl ReadonlyRefgetStore {
         // (5) Manifest LAST.
         write_manifest(&local_path, &metadata)?;
 
-        // (6) The tombstones have been applied to disk; forget them.
-        self.tombstones.lock().unwrap().clear_matching(&tombstones);
+        // (6) These changes are on disk now; forget them.
+        self.pending.lock().unwrap().clear_matching(&pending);
 
         Ok(())
     }
 
-    /// Union the on-disk `sequences.rgsi` rows with this store's in-memory rows,
-    /// minus tombstoned digests.
-    fn merged_sequence_rows(
+    /// Apply this handle's pending sequence additions and removals to rows read
+    /// fresh from `sequences.rgsi`.
+    ///
+    /// Additions do NOT overwrite a row already on disk. `length`, `alphabet`,
+    /// and `md5` are determined by the sha512t24u key, so a key collision cannot
+    /// disagree about them — but `name` and `description` are not: the same
+    /// sequence is `chr1` in one collection and `1` in another. Keeping the
+    /// published row makes the outcome stable, at the price of being
+    /// order-dependent across processes: whichever writer commits first sets the
+    /// name.
+    ///
+    /// The honest framing is that `sequences.rgsi`'s `name` column is ADVISORY.
+    /// The authoritative per-collection name mapping lives in `name_lookup` and
+    /// in each `collections/<digest>.rgsi`. A lexicographic tie-break would be
+    /// order-independent but would silently rename sequences on rebuild, which
+    /// is worse.
+    fn apply_pending_sequence_rows(
         &self,
-        index_path: &Path,
-        tombstones: &Tombstones,
-    ) -> Result<HashMap<DigestKey, SequenceMetadata>> {
-        let mut merged = read_sequences_rgsi_rows(index_path)?;
-        for (key, record) in &self.sequence_store {
-            merge_sequence_rows(&mut merged, *key, record.metadata());
+        rows: &mut HashMap<DigestKey, SequenceMetadata>,
+        pending: &PendingChanges,
+    ) {
+        for key in &pending.sequences {
+            if let Some(record) = self.sequence_store.get(key) {
+                rows.entry(*key)
+                    .or_insert_with(|| record.metadata().clone());
+            }
         }
-        merged.retain(|k, _| !tombstones.sequences.contains(k));
-        Ok(merged)
+        for key in &pending.removed_sequences {
+            rows.remove(key);
+        }
     }
 
-    /// Union the on-disk `collections.rgci` rows with this store's in-memory
-    /// rows, minus tombstoned digests.
-    fn merged_collection_rows(
+    /// Apply this handle's pending collection additions and removals to rows read
+    /// fresh from `collections.rgci`.
+    ///
+    /// The key is the collection digest and every other column is a digest of the
+    /// collection's CONTENT, so the same key implies the same row. The one
+    /// asymmetry is vintage: rows written by older gtars may have empty ancillary
+    /// columns (`name_length_pairs_digest`, `sorted_name_length_pairs_digest`,
+    /// `sorted_sequences_digest`). Prefer whichever row carries more of them, so
+    /// re-adding a collection upgrades an old row instead of pinning it.
+    fn apply_pending_collection_rows(
         &self,
-        index_path: &Path,
-        tombstones: &Tombstones,
-    ) -> Result<HashMap<DigestKey, SequenceCollectionMetadata>> {
-        let mut merged = read_collections_rgci_rows(index_path)?;
-        for (key, record) in &self.collections {
-            merge_collection_rows(&mut merged, *key, record.metadata());
+        rows: &mut HashMap<DigestKey, SequenceCollectionMetadata>,
+        pending: &PendingChanges,
+    ) {
+        let ancillary_count = |m: &SequenceCollectionMetadata| {
+            m.name_length_pairs_digest.is_some() as u8
+                + m.sorted_name_length_pairs_digest.is_some() as u8
+                + m.sorted_sequences_digest.is_some() as u8
+        };
+        for key in &pending.collections {
+            let Some(record) = self.collections.get(key) else {
+                continue;
+            };
+            let mine = record.metadata();
+            match rows.get(key) {
+                Some(existing) if ancillary_count(existing) >= ancillary_count(mine) => {}
+                _ => {
+                    rows.insert(*key, mine.clone());
+                }
+            }
         }
-        merged.retain(|k, _| !tombstones.collections.contains(k));
-        Ok(merged)
+        for key in &pending.removed_collections {
+            rows.remove(key);
+        }
     }
 
     /// Build the manifest to publish, preserving fields that must survive a
@@ -381,8 +427,9 @@ impl ReadonlyRefgetStore {
 
     /// Write this store's in-memory collection metadata to a `.rgci` file.
     ///
-    /// EXPORT ONLY: serializes exactly what is in memory. The commit path uses
-    /// [`write_collections_rgci_rows`] with merged rows instead — do not route a
+    /// EXPORT ONLY: serializes exactly what is in memory, which is correct when
+    /// producing a fresh store image in an empty directory. The commit path
+    /// applies a delta to the rows already on disk instead — do not route a
     /// commit through here, or rows another writer added are lost.
     pub(crate) fn write_collections_rgci<P: AsRef<Path>>(&self, file_path: P) -> Result<()> {
         let rows: HashMap<DigestKey, SequenceCollectionMetadata> = self
@@ -409,66 +456,62 @@ impl ReadonlyRefgetStore {
     // Alias commit
     // =========================================================================
 
-    /// Merge and publish every alias namespace this store or the directory knows
-    /// about. Caller must hold the store lock.
+    /// Publish every alias namespace this handle has TOUCHED. Caller must hold
+    /// the store lock.
+    ///
+    /// Namespaces with no pending change are not rewritten at all — not even
+    /// read. That is the point: the previous implementation visited every
+    /// namespace in memory plus every `*.tsv` on disk and republished each one
+    /// from its own snapshot, which is how an alias another process had just
+    /// removed came back.
     fn commit_all_alias_namespaces(
         &self,
         local_path: &Path,
-        tombstones: &Tombstones,
+        pending: &PendingChanges,
     ) -> Result<()> {
         let aliases_dir = local_path.join("aliases");
         for kind in [AliasKind::Sequence, AliasKind::Collection] {
-            let mut namespaces: HashSet<String> = self
-                .aliases
-                .namespaces_for(kind)
-                .into_iter()
-                .collect();
-            namespaces.extend(scan_alias_namespaces(&aliases_dir.join(kind.subdir())));
-            namespaces.extend(
-                tombstones
-                    .aliases
-                    .iter()
-                    .filter(|(k, _, _)| *k == kind)
-                    .map(|(_, ns, _)| ns.clone()),
-            );
-            namespaces.extend(
-                tombstones
-                    .emptied_alias_namespaces
-                    .iter()
-                    .filter(|(k, _)| *k == kind)
-                    .map(|(_, ns)| ns.clone()),
-            );
-
-            for ns in namespaces {
-                self.commit_alias_namespace(&aliases_dir, kind, &ns, tombstones)?;
+            for ns in pending.touched_alias_namespaces(kind) {
+                self.commit_alias_namespace(&aliases_dir, kind, &ns, pending)?;
             }
         }
         Ok(())
     }
 
-    /// Merge one alias namespace (disk ∪ memory, minus tombstones) and publish
-    /// it atomically. Deletes the TSV only when the MERGED result is empty.
+    /// Apply this handle's pending alias changes for ONE namespace to the TSV as
+    /// it is on disk, and publish the result atomically. Deletes the TSV only
+    /// when the resulting map is empty.
     ///
-    /// The old behavior — delete the TSV whenever the namespace was absent from
-    /// memory — is what orphaned namespaces: `open_local` loads only the
-    /// namespaces the manifest advertises, so a writer holding a stale manifest
-    /// snapshot simply did not have another writer's brand-new namespace in
-    /// memory, and deleted it.
+    /// Two behaviours here exist because their opposites each destroyed data:
+    ///
+    /// * Only aliases in `pending` are written. Republishing the whole in-memory
+    ///   namespace resurrects entries another writer deleted.
+    /// * Deletion is decided by the RESULT, not by intent. Deleting the TSV
+    ///   because this handle emptied the namespace throws away aliases another
+    ///   writer added to it; deleting it because the namespace is absent from
+    ///   memory is worse still, since `open_local` loads only the namespaces the
+    ///   manifest advertises, so "not in memory" routinely means "not mine".
     pub(crate) fn commit_alias_namespace(
         &self,
         aliases_dir: &Path,
         kind: AliasKind,
         namespace: &str,
-        tombstones: &Tombstones,
+        pending: &PendingChanges,
     ) -> Result<()> {
         let tsv_path = aliases_dir.join(kind.subdir()).join(format!("{}.tsv", namespace));
 
-        let disk = read_alias_tsv(&tsv_path)?;
-        let memory = self.aliases.namespace_map(kind, namespace);
+        let mut merged = read_alias_tsv(&tsv_path)?;
 
-        let mut merged = disk;
-        for (alias, digest) in memory {
-            match merged.get(&alias) {
+        for (k, ns, alias) in &pending.aliases {
+            if *k != kind || ns != namespace {
+                continue;
+            }
+            // The alias may have been removed from memory again after being
+            // recorded; nothing to publish then.
+            let Some(digest) = self.aliases.resolve(kind, namespace, alias) else {
+                continue;
+            };
+            match merged.get(alias) {
                 Some(existing) if *existing != digest => {
                     // A genuine semantic conflict: two writers bound the same
                     // human-readable name to different content. Silently picking
@@ -486,16 +529,16 @@ impl ReadonlyRefgetStore {
                             key_to_digest_string(&digest),
                         ));
                     }
-                    merged.insert(alias, digest);
+                    merged.insert(alias.clone(), digest);
                 }
                 Some(_) => {}
                 None => {
-                    merged.insert(alias, digest);
+                    merged.insert(alias.clone(), digest);
                 }
             }
         }
 
-        for (k, ns, alias) in &tombstones.aliases {
+        for (k, ns, alias) in &pending.removed_aliases {
             if *k == kind && ns == namespace {
                 merged.remove(alias);
             }
@@ -529,9 +572,12 @@ impl ReadonlyRefgetStore {
         exclude: &DigestKey,
     ) -> Result<HashSet<DigestKey>> {
         let local_path = self.local_path.as_ref().context("local_path not set")?;
-        let tombstones = self.tombstones.lock().unwrap().clone();
+        let pending = self.pending.lock().unwrap().clone();
         let index_path = local_path.join("collections.rgci");
-        let collections = self.merged_collection_rows(&index_path, &tombstones)?;
+        // The same view the commit will publish: what is on disk now, plus this
+        // handle's uncommitted adds, minus its uncommitted removals.
+        let mut collections = read_collections_rgci_rows(&index_path)?;
+        self.apply_pending_collection_rows(&mut collections, &pending);
 
         let mut live = HashSet::new();
         for (key, meta) in &collections {
@@ -915,7 +961,7 @@ impl ReadonlyRefgetStore {
 // Row readers / writers (free functions)
 //
 // These read and write index ROWS without touching store state, which is what
-// makes a merge possible: `load_sequences_from_index` and
+// makes a delta commit possible: `load_sequences_from_index` and
 // `load_collection_stubs_from_rgci` mutate a store, so they cannot be used to
 // look at what is currently on disk during a commit.
 // ============================================================================
@@ -958,54 +1004,6 @@ pub(crate) fn read_collections_rgci_rows(
         }
     }
     Ok(rows)
-}
-
-/// Fold one in-memory sequence row into the merged set.
-///
-/// `length`, `alphabet`, and `md5` are determined by the sha512t24u key, so a
-/// key collision cannot disagree about them. `name` and `description` are NOT:
-/// the same sequence is `chr1` in one collection and `1` in another. We keep the
-/// row already on disk — never rewrite a published row — which makes the outcome
-/// stable but order-dependent across processes: whichever writer commits first
-/// sets the name.
-///
-/// The honest framing is that `sequences.rgsi`'s `name` column is ADVISORY. The
-/// authoritative per-collection name mapping lives in `name_lookup` and in each
-/// `collections/<digest>.rgsi`. A lexicographic tie-break would be
-/// order-independent but would silently rename sequences on rebuild, which is
-/// worse.
-fn merge_sequence_rows(
-    merged: &mut HashMap<DigestKey, SequenceMetadata>,
-    key: DigestKey,
-    memory: &SequenceMetadata,
-) {
-    merged.entry(key).or_insert_with(|| memory.clone());
-}
-
-/// Fold one in-memory collection row into the merged set.
-///
-/// The key is the collection digest and every other column is a digest of the
-/// collection's CONTENT, so the same key implies the same row. The one asymmetry
-/// is vintage: rows written by older gtars may have empty ancillary columns
-/// (`name_length_pairs_digest`, `sorted_name_length_pairs_digest`,
-/// `sorted_sequences_digest`). Prefer whichever row carries more of them, so a
-/// merge upgrades an old row instead of pinning it.
-fn merge_collection_rows(
-    merged: &mut HashMap<DigestKey, SequenceCollectionMetadata>,
-    key: DigestKey,
-    memory: &SequenceCollectionMetadata,
-) {
-    let ancillary_count = |m: &SequenceCollectionMetadata| {
-        m.name_length_pairs_digest.is_some() as u8
-            + m.sorted_name_length_pairs_digest.is_some() as u8
-            + m.sorted_sequences_digest.is_some() as u8
-    };
-    match merged.get(&key) {
-        Some(existing) if ancillary_count(existing) >= ancillary_count(memory) => {}
-        _ => {
-            merged.insert(key, memory.clone());
-        }
-    }
 }
 
 /// Atomically publish `sequences.rgsi` from a row set.

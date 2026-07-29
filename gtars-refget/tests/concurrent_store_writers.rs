@@ -26,6 +26,8 @@ const CHILD_NAME: &str = "GTARS_TEST_CHILD_NAME";
 const CHILD_ABORT_HOLDING_LOCK: &str = "GTARS_TEST_CHILD_ABORT_HOLDING_LOCK";
 /// Env var turning a re-exec into a READER that loops until told to stop.
 const CHILD_READ_UNTIL: &str = "GTARS_TEST_CHILD_READ_UNTIL";
+/// Env var turning a re-exec into a REMOVER of one collection (with orphans).
+const CHILD_REMOVE: &str = "GTARS_TEST_CHILD_REMOVE";
 
 /// A distinct 32-base sequence per child, so every writer contributes rows no
 /// other writer could have produced.
@@ -113,8 +115,25 @@ fn run_as_reader(store_dir: &str, sentinel: &str, min_collections: usize) -> ! {
     std::process::exit(0);
 }
 
+/// Runs in the CHILD process: remove one collection (and its orphan sequences)
+/// from the shared store, then exit. Used to make the removal a genuinely
+/// separate process from the writer holding the stale snapshot.
+fn run_as_remover(store_dir: &str, digest: &str) -> ! {
+    let mut store = RefgetStore::open_local(store_dir).expect("remover could not open store");
+    store.set_quiet(true);
+    let removed = store
+        .remove_collection(digest, true)
+        .expect("remover could not remove collection");
+    assert!(removed, "the collection to remove was not in the store");
+    drop(store);
+    std::process::exit(0);
+}
+
 fn main() {
     // Child roles first: a re-exec must never fall through into the tests.
+    if let (Ok(store), Ok(digest)) = (std::env::var(CHILD_STORE), std::env::var(CHILD_REMOVE)) {
+        run_as_remover(&store, &digest);
+    }
     if let (Ok(store), Ok(sentinel)) = (std::env::var(CHILD_STORE), std::env::var(CHILD_READ_UNTIL))
     {
         let min: usize = std::env::var(CHILD_NAME)
@@ -139,6 +158,10 @@ fn main() {
         (
             "reader_never_observes_a_torn_store",
             reader_never_observes_a_torn_store,
+        ),
+        (
+            "another_processs_removal_is_not_resurrected",
+            another_processs_removal_is_not_resurrected,
         ),
     ];
 
@@ -345,4 +368,104 @@ fn reader_never_observes_a_torn_store() {
         "the reader observed a torn store (exit {:?})",
         status.code()
     );
+}
+
+/// A removal performed by a DIFFERENT process must survive the next commit of a
+/// writer that opened before it.
+///
+/// This is the 2026-07-28 finding as an executable test, and the ordering is the
+/// whole point: the remover's commit completes before the writer's begins, so
+/// the lock never even contends. Merge-at-commit still lost it, because the
+/// writer wrote back the collection stub `open_local` had loaded for reading —
+/// re-adding index rows for `.seq` files the remover had already unlinked.
+fn another_processs_removal_is_not_resurrected() {
+    let work = tempfile::tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    // Seed: a collection to keep, and a victim with its own sequences + alias.
+    let keep_fasta = work.path().join("keep.fa");
+    std::fs::write(&keep_fasta, ">chr_keep\nAAAACCCCGGGGTTTT\n").unwrap();
+    let victim_fasta = work.path().join("victim.fa");
+    std::fs::write(&victim_fasta, ">chr_v1\nGGGGTTTTAAAACCCC\n>chr_v2\nTTTTAAAACCCCGGGG\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    store.set_quiet(true);
+    let (keep, _) = store
+        .add_sequence_collection_from_fasta(&keep_fasta, FastaImportOptions::new())
+        .unwrap();
+    let (victim, _) = store
+        .add_sequence_collection_from_fasta(&victim_fasta, FastaImportOptions::new())
+        .unwrap();
+    store
+        .add_collection_alias("refgenie", "victim", &victim.digest)
+        .unwrap();
+    store.write().unwrap();
+    store.load_collection(&victim.digest).unwrap();
+    let victim_sequences: Vec<String> = store
+        .get_collection(&victim.digest)
+        .unwrap()
+        .sequences
+        .iter()
+        .map(|s| s.metadata().sha512t24u.clone())
+        .collect();
+    drop(store);
+
+    // The writer opens NOW, while the victim is still in the index.
+    let mut writer = RefgetStore::open_local(&store_dir).unwrap();
+    writer.set_quiet(true);
+    assert!(writer.get_collection_metadata(&victim.digest).is_some());
+
+    // A separate process removes the victim and exits. Fully sequenced: the
+    // removal is finished and committed before the writer touches anything.
+    let exe = std::env::current_exe().expect("test binary path");
+    let status = Command::new(exe)
+        .env(CHILD_STORE, &store_dir)
+        .env(CHILD_REMOVE, &victim.digest)
+        .status()
+        .expect("failed to spawn remover child");
+    assert!(status.success(), "the remover process failed: {:?}", status);
+    assert!(
+        !collection_digests_on_disk(&store_dir).contains(&victim.digest),
+        "precondition: the remover's commit must have landed"
+    );
+
+    // Only now does the writer commit its own, unrelated addition.
+    let added_fasta = work.path().join("added.fa");
+    std::fs::write(&added_fasta, ">chr_added\nACACACACGTGTGTGT\n").unwrap();
+    let (added, _) = writer
+        .add_sequence_collection_from_fasta(&added_fasta, FastaImportOptions::new())
+        .unwrap();
+    writer.write().unwrap();
+    drop(writer);
+
+    let digests = collection_digests_on_disk(&store_dir);
+    assert!(
+        !digests.contains(&victim.digest),
+        "the other process's removal was undone: {} is back in collections.rgci",
+        victim.digest
+    );
+    assert!(digests.contains(&keep.digest), "the untouched collection was dropped");
+    assert!(digests.contains(&added.digest), "the writer's own addition was dropped");
+
+    // Its sequence rows must be gone too -- a resurrected row points at a `.seq`
+    // file the remover unlinked, which is corruption, not merely stale metadata.
+    let rgsi = std::fs::read_to_string(store_dir.join("sequences.rgsi")).unwrap();
+    for seq in &victim_sequences {
+        assert!(
+            !rgsi.contains(seq.as_str()),
+            "orphan sequence {} came back into sequences.rgsi",
+            seq
+        );
+    }
+
+    // And the alias must not resolve to a collection that no longer exists.
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "victim")
+            .is_none(),
+        "the removed collection's alias came back"
+    );
+
+    assert!(lock_status(&store_dir).unwrap().is_none(), "lock left behind");
 }

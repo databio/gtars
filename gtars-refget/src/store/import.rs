@@ -1054,22 +1054,22 @@ impl ReadonlyRefgetStore {
         }
 
         // Finalize ALL indexes ONCE, after every collection is persisted -- and
-        // therefore take the store write lock ONCE, for the length of a merge
-        // rather than the length of the import.
+        // therefore take the store write lock ONCE, for the length of a delta
+        // commit rather than the length of the import.
         //
         // WITHIN ONE PROCESS this is byte-identical to a serial import:
         // sequences.rgsi sorts by sha512t24u and collections.rgci sorts by
         // collection digest, so arrival/build order is irrelevant.
         //
         // ACROSS PROCESSES that guarantee does not hold, and the reason is worth
-        // knowing. The commit merges with whatever is on disk and keeps the
-        // already-published row for a sequence digest, so the `name` column is
-        // first-committer-wins: if another process publishes the same sequence as
-        // `1` before we publish it as `chr1`, `1` is what stays in the index.
-        // Every content-derived column (length, alphabet, md5, and all the
-        // collection digests) is unaffected -- only `name`/`description`, which
-        // are advisory in this file. The authoritative per-collection names live
-        // in each collections/<digest>.rgsi.
+        // knowing. The commit starts from whatever is on disk and does not
+        // overwrite an already-published row for a sequence digest, so the `name`
+        // column is first-committer-wins: if another process publishes the same
+        // sequence as `1` before we publish it as `chr1`, `1` is what stays in
+        // the index. Every content-derived column (length, alphabet, md5, and all
+        // the collection digests) is unaffected -- only `name`/`description`,
+        // which are advisory in this file. The authoritative per-collection names
+        // live in each collections/<digest>.rgsi.
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }
@@ -1182,6 +1182,7 @@ impl ReadonlyRefgetStore {
             self.write_collection_to_disk_single(&record)?;
         }
         self.collections.insert(coll_key, record);
+        self.record(|p| p.add_collection(coll_key));
 
         // Install the buffered name_lookup in FASTA order.
         self.name_lookup.insert(coll_key, scratch.name_to_digest);

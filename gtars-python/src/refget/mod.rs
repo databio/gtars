@@ -2038,6 +2038,14 @@ impl PyRefgetStore {
     /// same error if the store is not in a state where orphan cleanup is safe
     /// (e.g. a collection listed in the index whose .rgsi file is unreadable).
     ///
+    /// ADVISORY. This takes no lock -- it is meant for confirmation prompts, and
+    /// blocking every concurrent writer for the length of a full-store scan to
+    /// answer a question the user may decline would be absurd. The authoritative
+    /// scan runs again inside remove_collection() under the lock, and the two may
+    /// legitimately differ: a collection committed in between makes some planned
+    /// orphan live again, and the real removal correctly spares it. Treat a
+    /// shortfall as ordinary concurrency, not corruption.
+    ///
     /// Args:
     ///     digest: The collection's SHA-512/24u digest string.
     ///

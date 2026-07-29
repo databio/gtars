@@ -4568,3 +4568,295 @@ fn test_commit_leaves_no_transient_files_behind() {
         .collect();
     assert!(leftovers.is_empty(), "transient files left behind: {:?}", leftovers);
 }
+
+// =========================================================================
+// Delta-at-commit: a stale handle must not resurrect another writer's removal
+//
+// These are the regression tests for the 2026-07-28 finding. Merge-at-commit
+// wrote back EVERYTHING a handle had in memory, and `open_local` loads a stub
+// for every collection in the index purely so it can be read. A handle that
+// opened before a removal therefore re-added the removed rows on its next
+// commit -- after the `.seq` files were already unlinked. Not a lock race: the
+// removal completes entirely before the offending commit begins.
+// =========================================================================
+
+/// Sequence digests of one collection, read from its on-disk `.rgsi`.
+fn sequence_digests_of(store: &mut RefgetStore, digest: &str) -> Vec<String> {
+    store.load_collection(digest).unwrap();
+    store
+        .get_collection(digest)
+        .unwrap()
+        .sequences
+        .iter()
+        .map(|s| s.metadata().sha512t24u.clone())
+        .collect()
+}
+
+fn index_contains(store_dir: &std::path::Path, file: &str, needle: &str) -> bool {
+    fs::read_to_string(store_dir.join(file))
+        .unwrap()
+        .lines()
+        .any(|l| l.contains(needle))
+}
+
+/// THE resurrection bug. W opens the store, R removes a collection and its
+/// orphan sequences and commits, then W commits an unrelated addition. W's
+/// commit must not bring the removed collection, its sequences, or its alias
+/// back.
+///
+/// Fails against merge-at-commit with dangling index rows: the `.seq` files are
+/// gone but the rows point at them.
+#[test]
+fn test_stale_handle_does_not_resurrect_a_removed_collection() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let keep = add_collection_to_store(&mut seed, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let victim = add_collection_to_store(
+        &mut seed,
+        work.path(),
+        "victim",
+        ">chrV1\nGGGGTTTT\n>chrV2\nTTTTGGGG\n",
+    );
+    seed.add_collection_alias("refgenie", "oluc", &victim).unwrap();
+    seed.write().unwrap();
+    let victim_sequences = sequence_digests_of(&mut seed, &victim);
+    drop(seed);
+
+    // W opens BEFORE the removal. Its snapshot contains the victim.
+    let mut writer = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(writer.get_collection_metadata(&victim).is_some());
+
+    // R removes the victim and commits. Disk is correct at this point.
+    let mut remover = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(remover.remove_collection(&victim, true).unwrap());
+    drop(remover);
+    assert!(!index_contains(&store_dir, "collections.rgci", &victim));
+
+    // W now commits an unrelated addition from its stale snapshot.
+    let added = add_collection_to_store(&mut writer, work.path(), "added", ">chrN\nACACACAC\n");
+    writer.write().unwrap();
+    drop(writer);
+
+    assert!(
+        !index_contains(&store_dir, "collections.rgci", &victim),
+        "the removed collection came back into collections.rgci"
+    );
+    for seq in &victim_sequences {
+        assert!(
+            !index_contains(&store_dir, "sequences.rgsi", seq),
+            "orphan sequence {} came back into sequences.rgsi -- its .seq file is gone",
+            seq
+        );
+    }
+    assert!(
+        !store_dir.join("aliases/collections/refgenie.tsv").exists(),
+        "the removed collection's alias namespace came back"
+    );
+
+    // ...and the concurrent addition is not collateral damage.
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(reopened.get_collection_metadata(&keep).is_some());
+    assert!(reopened.get_collection_metadata(&added).is_some());
+    assert!(reopened.get_collection_metadata(&victim).is_none());
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "oluc")
+            .is_none(),
+        "the alias still resolves to a collection that no longer exists"
+    );
+}
+
+/// Every index row a delta commit publishes must have its `.seq` file on disk.
+/// The observable symptom of the resurrection bug was not a missing row but a
+/// present one that could not be read.
+#[test]
+fn test_no_dangling_sequence_rows_after_a_stale_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut seed, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let victim = add_collection_to_store(&mut seed, work.path(), "victim", ">chrV\nGGGGTTTT\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer = RefgetStore::open_local(&store_dir).unwrap();
+
+    let mut remover = RefgetStore::open_local(&store_dir).unwrap();
+    remover.remove_collection(&victim, true).unwrap();
+    drop(remover);
+
+    add_collection_to_store(&mut writer, work.path(), "added", ">chrN\nACACACAC\n");
+    writer.write().unwrap();
+    drop(writer);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let digests: Vec<String> = reopened
+        .list_sequences()
+        .iter()
+        .map(|m| m.sha512t24u.clone())
+        .collect();
+    for digest in &digests {
+        // `load_sequence` reads the `.seq` file, so this fails on a row whose
+        // bytes were unlinked. `get_sequence` would NOT: it happily returns the
+        // Stub built from the index row, which is why the corruption was
+        // invisible until someone actually asked for bases.
+        assert!(
+            reopened.load_sequence(digest).is_ok(),
+            "sequences.rgsi lists {} but its .seq file is gone",
+            digest
+        );
+    }
+}
+
+/// The lost-update case merge-at-commit existed to prevent must not regress:
+/// two handles open together, one commits, the other commits after, and both
+/// additions survive.
+#[test]
+fn test_delta_commit_still_preserves_a_concurrent_addition() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    let digest_a = add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    let digest_b = add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    for (label, digest) in [("seed", &seed_digest), ("A", &digest_a), ("B", &digest_b)] {
+        assert!(
+            reopened.get_collection_metadata(digest).is_some(),
+            "collection {} ({}) was dropped by the other writer's commit",
+            label,
+            digest
+        );
+    }
+}
+
+/// Removing one of two collections that share sequences reclaims exactly the
+/// unshared digests, and the shared ones stay readable byte-for-byte.
+#[test]
+fn test_removal_reclaims_only_unshared_sequences() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    const SHARED: &str = "AAAACCCCGGGGTTTT";
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "a",
+        &format!(">chrShared\n{}\n>chrOnlyA\nACACACAC\n", SHARED),
+    );
+    let coll_b = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "b",
+        &format!(">chrShared\n{}\n>chrOnlyB\nGTGTGTGT\n", SHARED),
+    );
+    store.write().unwrap();
+    let a_sequences = sequence_digests_of(&mut store, &coll_a);
+    let b_sequences = sequence_digests_of(&mut store, &coll_b);
+    drop(store);
+
+    let shared: Vec<&String> = a_sequences.iter().filter(|d| b_sequences.contains(d)).collect();
+    assert_eq!(shared.len(), 1, "precondition: exactly one shared sequence");
+    let only_a: Vec<&String> = a_sequences.iter().filter(|d| !b_sequences.contains(d)).collect();
+    assert_eq!(only_a.len(), 1);
+
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    let planned = store.plan_orphan_removal(&coll_a).unwrap();
+    assert_eq!(planned, vec![only_a[0].clone()], "the dry-run must name exactly chrOnlyA");
+    assert!(store.remove_collection(&coll_a, true).unwrap());
+    drop(store);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened.get_sequence_metadata(only_a[0]).is_none(),
+        "the unshared sequence was not reclaimed"
+    );
+    reopened.load_sequence(shared[0]).unwrap();
+    assert_eq!(
+        reopened.get_substring(shared[0], 0, SHARED.len()).unwrap(),
+        SHARED,
+        "the shared sequence did not survive intact"
+    );
+}
+
+/// A namespace this handle empties must still not be deleted when another writer
+/// has added an alias to it. Intent is not the deciding factor; the merged
+/// result is.
+#[test]
+fn test_emptying_a_namespace_spares_another_writers_alias() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut seed, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut seed, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    seed.add_collection_alias("refgenie", "mine", &coll_a).unwrap();
+    seed.write().unwrap();
+    drop(seed);
+
+    // A opens with only `mine` in the namespace.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+
+    // B adds a second alias to the same namespace and commits.
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+    writer_b.add_collection_alias("refgenie", "theirs", &coll_b).unwrap();
+    drop(writer_b);
+
+    // A removes its only alias -- emptying the namespace as far as A can see.
+    assert!(writer_a.remove_collection_alias("refgenie", "mine").unwrap());
+    drop(writer_a);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "theirs")
+            .is_some(),
+        "the other writer's alias was deleted with the namespace"
+    );
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "mine")
+            .is_none(),
+        "the removed alias came back"
+    );
+}
+
+/// Uncommitted work is visible to callers, so a caller that must not lose a
+/// removal can check before dropping the handle.
+#[test]
+fn test_has_uncommitted_changes_tracks_the_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    // on_disk commits after each add, so the store starts clean.
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+    assert!(!store.has_uncommitted_changes());
+
+    store.lock_for_batch("test-batch").unwrap();
+    let digest = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    assert!(store.get_collection_metadata(&digest).is_some());
+    store.write().unwrap();
+    assert!(
+        !store.has_uncommitted_changes(),
+        "a successful commit must clear the pending set"
+    );
+    store.release_batch_lock();
+}

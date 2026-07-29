@@ -62,16 +62,19 @@
 //!    expensive part of an import (parsing, digesting, writing hundreds of
 //!    thousands of sequences) fully parallel.
 //!
-//! 2. **Writers commit under an exclusive lock, and MERGE rather than
-//!    overwrite.** The shared artifacts — `sequences.rgsi`, `collections.rgci`,
-//!    the alias TSVs, `rgstore.json` — are rewritten wholesale, so a writer that
-//!    serialized its open-time snapshot would silently drop every row another
-//!    writer added in the meantime. Instead, [`ReadonlyRefgetStore::write_index_files`]
-//!    takes [`lock::StoreLock`] on `<store>/.rgstore.lock`, re-reads the current
-//!    on-disk rows, unions them with memory, subtracts explicit tombstones, and
-//!    publishes. Both indexes are digest-keyed sets of content-derived rows, so
-//!    the union is well-defined. The lock is held for the commit only (seconds),
-//!    never for the lifetime of the handle (hours).
+//! 2. **Writers commit a DELTA under an exclusive lock.** The shared artifacts —
+//!    `sequences.rgsi`, `collections.rgci`, the alias TSVs, `rgstore.json` — are
+//!    rewritten wholesale, so a writer that serialized its open-time snapshot
+//!    would drop every row another writer added in the meantime, and resurrect
+//!    every row another writer removed. Instead,
+//!    [`ReadonlyRefgetStore::write_index_files`] takes [`lock::StoreLock`] on
+//!    `<store>/.rgstore.lock`, re-reads the current on-disk rows, applies only
+//!    the changes this handle actually made (see [`PendingChanges`]), and
+//!    publishes. A row nobody
+//!    touched is never rewritten. The lock is held for the commit only (seconds),
+//!    never for the lifetime of the handle (hours) — with one deliberate
+//!    exception, the orphan scan in
+//!    [`ReadonlyRefgetStore::remove_collection`].
 //!
 //! 3. **Readers never lock.** Every whole-file write goes through
 //!    [`atomic::atomic_write`] (temp file, `fsync`, `rename(2)`, `fsync` the
@@ -158,7 +161,7 @@ mod nofs_tests {
 }
 
 // Re-export public types from submodules
-pub use self::readonly::ReadonlyRefgetStore;
+pub use self::readonly::{PendingChanges, ReadonlyRefgetStore};
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
 pub use self::atomic::is_transient_store_file;

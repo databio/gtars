@@ -290,9 +290,10 @@ pub struct ReadonlyRefgetStore {
     /// The relative path to the sequence index file (from rgstore.json),
     /// stored for deferred loading in remote stores.
     pub(crate) sequence_index_path: Option<String>,
-    /// Rows this store has deliberately removed, suppressed at commit time.
-    /// See [`Tombstones`]. Behind a `Mutex` because the commit path is `&self`.
-    pub(crate) tombstones: Mutex<Tombstones>,
+    /// What this handle has actually changed since its last successful commit.
+    /// See [`PendingChanges`]. Behind a `Mutex` because the commit path is
+    /// `&self`.
+    pub(crate) pending: Mutex<PendingChanges>,
     /// A store-directory write lock held across several mutations, set by
     /// [`Self::lock_for_batch`]. When present, individual commits skip acquiring
     /// their own lock — otherwise a batch guard would deadlock against the
@@ -307,53 +308,142 @@ pub struct ReadonlyRefgetStore {
     pub(crate) force_alias: bool,
 }
 
-/// Rows this store has deliberately removed.
+/// What this handle has actually created, modified, or deleted since its last
+/// successful commit.
 ///
-/// A commit is a union of the on-disk rows with the in-memory rows, so removal
-/// has to be recorded explicitly — otherwise the copy still on disk is merged
-/// straight back in and nothing can ever be deleted.
+/// A store handle's in-memory maps hold two different things mixed together:
+/// rows it produced, and rows it merely LOADED so they could be read
+/// (`open_local` loads a stub for every collection in `collections.rgci`, and
+/// every row of `sequences.rgsi`). A commit that cannot tell those apart has to
+/// write the whole pile back — and the pile is an open-time snapshot, which on a
+/// long import is hours stale.
 ///
-/// In-memory only. Tombstones are never written to disk: they describe an intent
-/// that is fully discharged by the commit that applies them, and they are cleared
-/// as soon as it succeeds.
+/// Recording changes explicitly is what makes a commit a DELTA: take the lock,
+/// re-read the index from disk, apply exactly these sets, publish. A row this
+/// handle never touched is never rewritten, so a concurrent writer's additions
+/// cannot be clobbered and its deletions cannot be resurrected.
+///
+/// In-memory only, never written to disk: this describes an intent that is fully
+/// discharged by the commit that applies it, and is cleared as soon as that
+/// commit succeeds. A handle dropped without committing abandons its pending
+/// changes — see [`ReadonlyRefgetStore::has_uncommitted_changes`].
 #[derive(Debug, Default, Clone)]
-pub struct Tombstones {
-    /// Collection digests removed from `collections.rgci`.
+pub struct PendingChanges {
+    /// Collection digests to publish into `collections.rgci`.
     pub(crate) collections: HashSet<DigestKey>,
-    /// Sequence digests removed from `sequences.rgsi`.
+    /// Sequence digests to publish into `sequences.rgsi`.
     pub(crate) sequences: HashSet<DigestKey>,
-    /// `(kind, namespace, alias)` triples removed from the alias TSVs.
+    /// `(kind, namespace, alias)` triples to publish into the alias TSVs.
     pub(crate) aliases: HashSet<(AliasKind, String, String)>,
-    /// `(kind, namespace)` pairs the caller explicitly emptied, as opposed to
-    /// namespaces that were simply never loaded into memory. Only the former may
-    /// cause a TSV to be deleted.
+    /// Collection digests to drop from `collections.rgci`.
+    pub(crate) removed_collections: HashSet<DigestKey>,
+    /// Sequence digests to drop from `sequences.rgsi`.
+    pub(crate) removed_sequences: HashSet<DigestKey>,
+    /// `(kind, namespace, alias)` triples to drop from the alias TSVs.
+    pub(crate) removed_aliases: HashSet<(AliasKind, String, String)>,
+    /// `(kind, namespace)` pairs this handle explicitly emptied. Recorded so the
+    /// commit visits the namespace at all; whether the TSV is actually deleted
+    /// depends on the MERGED result being empty, not on this handle's intent.
     pub(crate) emptied_alias_namespaces: HashSet<(AliasKind, String)>,
 }
 
-impl Tombstones {
+impl PendingChanges {
     pub(crate) fn is_empty(&self) -> bool {
         self.collections.is_empty()
             && self.sequences.is_empty()
             && self.aliases.is_empty()
+            && self.removed_collections.is_empty()
+            && self.removed_sequences.is_empty()
+            && self.removed_aliases.is_empty()
             && self.emptied_alias_namespaces.is_empty()
     }
 
-    /// Drop exactly the tombstones a completed commit applied.
+    /// Record a collection this handle added. An add supersedes a pending
+    /// removal of the same digest (and vice versa), so the two sets stay
+    /// disjoint and the commit never has to guess which wins.
+    pub(crate) fn add_collection(&mut self, key: DigestKey) {
+        self.removed_collections.remove(&key);
+        self.collections.insert(key);
+    }
+
+    pub(crate) fn remove_collection(&mut self, key: DigestKey) {
+        self.collections.remove(&key);
+        self.removed_collections.insert(key);
+    }
+
+    pub(crate) fn add_sequence(&mut self, key: DigestKey) {
+        self.removed_sequences.remove(&key);
+        self.sequences.insert(key);
+    }
+
+    pub(crate) fn remove_sequence(&mut self, key: DigestKey) {
+        self.sequences.remove(&key);
+        self.removed_sequences.insert(key);
+    }
+
+    /// Drop sequences from the pending set WITHOUT recording a removal.
     ///
-    /// Set difference, not `clear()`: another thread may have recorded a removal
+    /// For rows that were staged but never published — the failed-import
+    /// cleanup path. Recording a removal instead would be wrong: it would delete
+    /// an identical row another writer had legitimately published, since
+    /// sequence rows are content-addressed and therefore shared.
+    pub(crate) fn forget_sequences(&mut self, keys: &HashSet<DigestKey>) {
+        self.sequences.retain(|k| !keys.contains(k));
+    }
+
+    pub(crate) fn add_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        let entry = (kind, namespace.to_string(), alias.to_string());
+        self.removed_aliases.remove(&entry);
+        self.aliases.insert(entry);
+    }
+
+    pub(crate) fn remove_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        let entry = (kind, namespace.to_string(), alias.to_string());
+        self.aliases.remove(&entry);
+        self.removed_aliases.insert(entry);
+    }
+
+    /// Namespaces of one kind this handle has touched — the only ones a commit
+    /// needs to rewrite. Namespaces nobody changed are left alone on disk.
+    pub(crate) fn touched_alias_namespaces(&self, kind: AliasKind) -> HashSet<String> {
+        let mut out = HashSet::new();
+        for (k, ns, _) in self.aliases.iter().chain(self.removed_aliases.iter()) {
+            if *k == kind {
+                out.insert(ns.clone());
+            }
+        }
+        for (k, ns) in &self.emptied_alias_namespaces {
+            if *k == kind {
+                out.insert(ns.clone());
+            }
+        }
+        out
+    }
+
+    /// Drop exactly the changes a completed commit applied.
+    ///
+    /// Set difference, not `clear()`: another thread may have recorded a change
     /// after the commit snapshotted, and that one still has to be applied.
-    pub(crate) fn clear_matching(&mut self, applied: &Tombstones) {
+    pub(crate) fn clear_matching(&mut self, applied: &PendingChanges) {
         self.collections.retain(|k| !applied.collections.contains(k));
         self.sequences.retain(|k| !applied.sequences.contains(k));
         self.aliases.retain(|k| !applied.aliases.contains(k));
+        self.removed_collections
+            .retain(|k| !applied.removed_collections.contains(k));
+        self.removed_sequences
+            .retain(|k| !applied.removed_sequences.contains(k));
+        self.removed_aliases
+            .retain(|k| !applied.removed_aliases.contains(k));
         self.emptied_alias_namespaces
             .retain(|k| !applied.emptied_alias_namespaces.contains(k));
     }
 
-    /// Drop the tombstones for one alias namespace, after the cheap
+    /// Drop the alias changes for one namespace, after the cheap
     /// single-namespace commit path published it.
     pub(crate) fn clear_alias_namespace(&mut self, kind: AliasKind, namespace: &str) {
         self.aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.removed_aliases
             .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
         self.emptied_alias_namespaces
             .retain(|(k, ns)| !(*k == kind && ns == namespace));
@@ -384,7 +474,7 @@ impl ReadonlyRefgetStore {
             seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
             sequence_index_loaded: true,
             sequence_index_path: None,
-            tombstones: Mutex::new(Tombstones::default()),
+            pending: Mutex::new(PendingChanges::default()),
             commit_lock: None,
             lock_options: LockOptions::default(),
             force_alias: false,
@@ -427,13 +517,20 @@ impl ReadonlyRefgetStore {
         self.commit_lock.is_some()
     }
 
-    /// Whether this store has removals that have not yet been committed.
+    /// Whether this store has additions or removals that have not yet been
+    /// committed to the shared index files.
     ///
-    /// Tombstones live only in memory, so dropping a store without committing
-    /// silently abandons its deletions — the rows are still on disk and the next
-    /// commit by anyone merges them straight back.
-    pub fn has_uncommitted_removals(&self) -> bool {
-        !self.tombstones.lock().unwrap().is_empty()
+    /// Pending changes live only in memory, so dropping a store without
+    /// committing silently abandons them: added rows never reach
+    /// `sequences.rgsi`/`collections.rgci`, and removed rows are still on disk.
+    pub fn has_uncommitted_changes(&self) -> bool {
+        !self.pending.lock().unwrap().is_empty()
+    }
+
+    /// Record a change this handle made, so the next commit applies it to the
+    /// index it reads fresh from disk.
+    pub(crate) fn record<F: FnOnce(&mut PendingChanges)>(&self, f: F) {
+        f(&mut self.pending.lock().unwrap());
     }
 
     /// Override the timeout/staleness settings used when acquiring the write lock.
@@ -524,6 +621,27 @@ impl ReadonlyRefgetStore {
 
         create_dir_all(path.join("sequences"))?;
         create_dir_all(path.join("collections"))?;
+
+        // Materializing an in-memory store onto disk: EVERYTHING resident is a
+        // change, because none of it came from this directory. This is the one
+        // place where "write back the whole in-memory pile" is the correct
+        // commit, and it is correct precisely because nothing here was loaded.
+        {
+            let mut pending = self.pending.lock().unwrap();
+            for key in self.sequence_store.keys() {
+                pending.add_sequence(*key);
+            }
+            for key in self.collections.keys() {
+                pending.add_collection(*key);
+            }
+            for kind in [AliasKind::Sequence, AliasKind::Collection] {
+                for ns in self.aliases.namespaces_for(kind) {
+                    for alias in self.aliases.namespace_map(kind, &ns).keys() {
+                        pending.add_alias(kind, &ns, alias);
+                    }
+                }
+            }
+        }
 
         let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
         for key in keys {
@@ -620,6 +738,7 @@ impl ReadonlyRefgetStore {
         }
 
         self.collections.insert(coll_digest, record);
+        self.record(|p| p.add_collection(coll_digest));
 
         for sequence_record in sequences {
             self.add_sequence(sequence_record, coll_digest, force)?;
@@ -649,12 +768,16 @@ impl ReadonlyRefgetStore {
             "add_sequence_record: sequence bytes must be ASCII"
         );
 
+        // A dedup hit records NOTHING: the row is already in memory, which for a
+        // disk-backed store means it is already in `sequences.rgsi`. Re-asserting
+        // it would put a row this handle did not produce back into the delta.
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(());
         }
 
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
             match &sr {
@@ -694,12 +817,15 @@ impl ReadonlyRefgetStore {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
+        // Dedup hit: nothing inserted, so nothing to record. See
+        // [`Self::add_sequence_record`].
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(None);
         }
 
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
             match sr {
@@ -906,6 +1032,17 @@ impl ReadonlyRefgetStore {
     ///
     /// Uses the same disk-derived live set as the real thing, so it fails with the
     /// same error if the store is not in a state where orphan GC is safe.
+    ///
+    /// # Advisory, by design
+    ///
+    /// This takes NO lock. It exists for confirmation prompts ("this will free
+    /// 21 sequences, proceed?"), where blocking every concurrent writer for the
+    /// length of a full-store scan to answer a question the user may say no to
+    /// would be absurd. The authoritative scan runs again inside
+    /// `remove_collection`, under the lock, and the two can legitimately differ:
+    /// a collection committed in between makes some planned orphan live again,
+    /// and the real removal will correctly spare it. Callers comparing the two
+    /// should treat a shortfall as normal concurrency, not corruption.
     pub fn plan_orphan_removal(&self, digest: &str) -> Result<Vec<String>> {
         let key = digest.to_key();
         let candidates = self.orphan_candidates(digest)?;
@@ -958,8 +1095,19 @@ impl ReadonlyRefgetStore {
     ///
     /// The live set is derived from DISK, not from `name_lookup` — see
     /// [`Self::live_sequence_digests_from_disk`] for why that distinction is the
-    /// difference between a GC and a data-loss bug. The whole removal runs under
-    /// the store write lock, so the live set cannot go stale mid-delete.
+    /// difference between a GC and a data-loss bug.
+    ///
+    /// # The lock is held across the orphan scan, deliberately
+    ///
+    /// The scan is the expensive part — on the plantref store (147 collections,
+    /// ~1.5M sequence digests) it reads every `collections/*.rgsi` and takes
+    /// roughly a minute. Everywhere else in this module the rule is "do the
+    /// expensive work outside the lock"; here that rule is wrong. Computing the
+    /// live set before taking the lock leaves a window in which another writer
+    /// commits a collection referencing one of the digests the scan just
+    /// classified as an orphan, and the unlink that follows deletes live data.
+    /// Removals are rare and hand-run, so blocking concurrent builds for a
+    /// minute is the cheap side of that trade.
     pub fn remove_collection(
         &mut self,
         digest: &str,
@@ -971,10 +1119,11 @@ impl ReadonlyRefgetStore {
             return Ok(false);
         }
 
-        // Hold the lock for the WHOLE removal: computing the live set, unlinking
-        // the orphans, and committing the indexes must not interleave with
-        // another writer adding a collection that references those sequences. The
-        // nested `write_index_files` sees the guard and does not re-acquire.
+        // Take the lock BEFORE the orphan scan and hold it through the scan, the
+        // index commit, and the unlinks. All three have to see the same store: a
+        // collection another writer adds in between would make an "orphan" live
+        // again, and we would unlink it anyway. The nested `write_index_files`
+        // sees the guard and does not re-acquire.
         let acquired = self.acquire_commit_lock("remove_collection")?;
         let restore = match acquired {
             Some(lock) => {
@@ -1015,7 +1164,7 @@ impl ReadonlyRefgetStore {
         self.collections.remove(&key);
         self.name_lookup.remove(&key);
         self.fhr_metadata.remove(&key);
-        self.tombstones.lock().unwrap().collections.insert(key);
+        self.record(|p| p.remove_collection(key));
 
         // Remove collection aliases pointing to this digest
         let alias_pairs = self.aliases.reverse_lookup_collection(digest);
@@ -1025,21 +1174,29 @@ impl ReadonlyRefgetStore {
             .collect();
         for (ns, alias) in &alias_pairs {
             self.aliases.remove_collection(ns, alias);
-            self.tombstone_alias(AliasKind::Collection, ns, alias);
+            self.record_alias_removal(AliasKind::Collection, ns, alias);
         }
         for ns in &affected_namespaces {
             self.persist_alias_namespace(AliasKind::Collection, ns)?;
         }
 
-        if remove_orphan_sequences && !orphan_candidates.is_empty() {
-            let orphans: Vec<DigestKey> = orphan_candidates
+        // Which sequences to unlink, decided under the lock from the live set
+        // computed under the same lock.
+        let orphans: Vec<DigestKey> = if remove_orphan_sequences {
+            orphan_candidates
                 .into_iter()
                 .filter(|k| !still_referenced.contains(k))
-                .collect();
+                .collect()
+        } else {
+            Vec::new()
+        };
 
+        if !orphans.is_empty() {
             {
-                let mut tombstones = self.tombstones.lock().unwrap();
-                tombstones.sequences.extend(orphans.iter().copied());
+                let mut pending = self.pending.lock().unwrap();
+                for orphan_key in &orphans {
+                    pending.remove_sequence(*orphan_key);
+                }
             }
 
             for orphan_key in &orphans {
@@ -1051,45 +1208,51 @@ impl ReadonlyRefgetStore {
             let orphan_set: std::collections::HashSet<DigestKey> =
                 orphans.iter().copied().collect();
             self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
-
-            if self.persist_to_disk {
-                if let (Some(local_path), Some(template)) =
-                    (&self.local_path, &self.seqdata_path_template)
-                {
-                    // Collect parent shard dirs while unlinking, then rmdir them
-                    // ONCE at the end. Do NOT move the rmdir back into this loop:
-                    // `.seq` files are sharded over ~4096 two-char prefix dirs, so
-                    // a per-file rmdir issues N syscalls (nearly all failing with
-                    // ENOTEMPTY) to remove at most ~4096 dirs -- roughly doubling
-                    // syscall count in a loop that is filesystem-metadata bound.
-                    // The rmdir pass must run AFTER all unlinks, or dirs that only
-                    // become empty later would be skipped.
-                    let mut parent_dirs: std::collections::HashSet<PathBuf> =
-                        std::collections::HashSet::new();
-                    for orphan_key in &orphans {
-                        let orphan_digest = key_to_digest_string(orphan_key);
-                        let seq_file_path = Self::expand_template(&orphan_digest, template);
-                        let full_path = local_path.join(&seq_file_path);
-                        let _ = fs::remove_file(&full_path);
-                        if let Some(parent) = full_path.parent() {
-                            parent_dirs.insert(parent.to_path_buf());
-                        }
-                    }
-                    for parent in &parent_dirs {
-                        let _ = fs::remove_dir(parent); // ignore if non-empty
-                    }
-                }
-            }
         }
 
+        // INDEX FIRST, FILES SECOND. Both orderings can be interrupted by a
+        // crash; only one of the two resulting states is recoverable. Rows gone,
+        // files present is garbage on disk that a later GC can reclaim. Rows
+        // present, files gone is a store that lies: `get_substring` raises,
+        // `get_collection` cannot open its sequences, and an alias resolves to a
+        // collection that no longer exists. That second state is exactly what the
+        // pre-delta implementation produced.
         if self.persist_to_disk {
+            self.write_index_files()?;
+
+            if let (Some(local_path), Some(template)) =
+                (self.local_path.clone(), self.seqdata_path_template.clone())
+            {
+                // Collect parent shard dirs while unlinking, then rmdir them
+                // ONCE at the end. Do NOT move the rmdir back into this loop:
+                // `.seq` files are sharded over ~4096 two-char prefix dirs, so
+                // a per-file rmdir issues N syscalls (nearly all failing with
+                // ENOTEMPTY) to remove at most ~4096 dirs -- roughly doubling
+                // syscall count in a loop that is filesystem-metadata bound.
+                // The rmdir pass must run AFTER all unlinks, or dirs that only
+                // become empty later would be skipped.
+                let mut parent_dirs: std::collections::HashSet<PathBuf> =
+                    std::collections::HashSet::new();
+                for orphan_key in &orphans {
+                    let orphan_digest = key_to_digest_string(orphan_key);
+                    let seq_file_path = Self::expand_template(&orphan_digest, &template);
+                    let full_path = local_path.join(&seq_file_path);
+                    let _ = fs::remove_file(&full_path);
+                    if let Some(parent) = full_path.parent() {
+                        parent_dirs.insert(parent.to_path_buf());
+                    }
+                }
+                for parent in &parent_dirs {
+                    let _ = fs::remove_dir(parent); // ignore if non-empty
+                }
+            }
+
             if let Some(local_path) = &self.local_path {
                 let rgsi_path = local_path.join(format!("collections/{}.rgsi", digest));
                 let _ = fs::remove_file(&rgsi_path);
                 let fhr_path = local_path.join(format!("fhr/{}.fhr.json", digest));
                 let _ = fs::remove_file(&fhr_path);
             }
-            self.write_index_files()?;
         }
 
         Ok(true)
@@ -1141,6 +1304,13 @@ impl ReadonlyRefgetStore {
         // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
         let orphan_set: std::collections::HashSet<DigestKey> = orphans.iter().copied().collect();
         self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
+
+        // FORGET these, do not tombstone them. They were staged by an import
+        // that failed before its single commit, so no row of ours was ever
+        // published; recording a removal would delete the identical row a
+        // different writer legitimately published, since sequence rows are
+        // content-addressed and therefore shared between collections.
+        self.record(|p| p.forget_sequences(&orphan_set));
 
         // Best-effort remove on-disk `.seq` files.
         if self.persist_to_disk {
@@ -1317,6 +1487,7 @@ impl ReadonlyRefgetStore {
             sequences: stub_sequences,
         };
         self.collections.insert(coll_key, record);
+        self.record(|p| p.add_collection(coll_key));
 
         // Register sequences and populate name_lookup
         let mut name_map = IndexMap::new();
@@ -1332,6 +1503,7 @@ impl ReadonlyRefgetStore {
                     .insert(seq_key, SequenceRecord::Stub(seq_meta.clone()));
                 self.md5_lookup
                     .insert(seq_meta.md5.to_key(), seq_key);
+                self.record(|p| p.add_sequence(seq_key));
             }
         }
         self.name_lookup.insert(coll_key, name_map);
