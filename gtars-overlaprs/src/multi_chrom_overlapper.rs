@@ -37,20 +37,8 @@ use std::{collections::HashMap, fmt::Debug};
 
 use gtars_core::models::{Interval, Region, RegionSet};
 use num_traits::{PrimInt, Unsigned};
-use thiserror::Error;
 
 use crate::{AIList, Bits, Overlapper, OverlapperType};
-
-/// Errors that can occur when working with [`MultiChromOverlapper`].
-#[derive(Debug, Error)]
-pub enum MultiChromOverlapperError {
-    /// Error parsing a genomic region string.
-    #[error("Error parsing region: {0}")]
-    RegionParsingError(String),
-    /// Error converting interval coordinates to the required integer type.
-    #[error("Error converting interval coordinates to u32: start={0}, end={1}")]
-    CoordinateConversionError(String, String),
-}
 
 /// A genome-wide index for efficient overlap queries across multiple chromosomes.
 ///
@@ -165,6 +153,7 @@ where
                     // This is a programming error: the MultiChromOverlapper type I cannot represent
                     // the Region's u32 coordinates. This should never happen in practice since
                     // genomic coordinates are u32 and the index should be MultiChromOverlapper<u32, T>.
+                    // We panic rather than return an error: it is an unrecoverable invariant violation.
                     panic!(
                         "Type conversion error: cannot convert Region coordinates to index type. \
                          Region: {}:{}-{}, expected type: {}",
