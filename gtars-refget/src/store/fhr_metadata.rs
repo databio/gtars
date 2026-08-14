@@ -251,7 +251,15 @@ pub fn write_sidecars(
 /// whatever it finds — a torn sidecar would poison the manifest digest.
 pub fn write_sidecar(path: &Path, metadata: &FhrMetadata) -> Result<()> {
     let json = serde_json::to_string_pretty(metadata)?;
-    super::atomic::atomic_write_bytes(path, json.as_bytes())
+    let new_bytes = json.as_bytes();
+    if path.exists() {
+        if let Ok(existing) = fs::read(path) {
+            if existing == new_bytes {
+                return Ok(());
+            }
+        }
+    }
+    super::atomic::atomic_write_bytes(path, new_bytes)
 }
 
 /// Remove a single FHR sidecar file (if it exists). Returns quietly if missing.
