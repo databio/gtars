@@ -16,7 +16,7 @@ export interface SeqMeta {
 
 /** The two wasm primitives RemoteRefgetStore needs (import them from @databio/gtars). */
 export interface RefgetWasm {
-  encodedByteRange(start: number, end: number, alphabet: string): number[];
+  encodedByteRange(start: number, end: number, alphabet: string): Uint32Array;
   decodeEncodedRange(
     bytes: Uint8Array,
     byteOffset: number,

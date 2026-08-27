@@ -78,7 +78,7 @@ export class RemoteRefgetStore {
    * @param {object} opts
    * @param {string} opts.baseUrl                 Base URL of the served store.
    * @param {object} opts.wasm                    The wasm module (or the two fns).
-   *        Must expose `encodedByteRange(start, end, alphabet) -> [bs, be]` and
+   *        Must expose `encodedByteRange(start, end, alphabet) -> Uint32Array [bs, be]` and
    *        `decodeEncodedRange(bytes, byteOffset, start, end, alphabet) -> string`.
    * @param {string} [opts.opfsDir]               OPFS subdir for the cache.
    * @param {number} [opts.windowPadBases]        Base padding per range fetch.
