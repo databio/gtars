@@ -1216,6 +1216,34 @@ fn test_add_sequence_record_standalone() {
     assert_eq!(retrieved.metadata().length, 4);
 }
 
+#[test]
+fn test_add_sequence_record_packed_bytes_in_encoded_mode() {
+    // Mirrors panget's pre-packing insert pattern: digest the ASCII sequence,
+    // then pack it to the alphabet's encoded byte size before inserting into
+    // an Encoded-mode store. This must be accepted (not just raw ASCII).
+    use crate::digest::{digest_sequence, encode_sequence, lookup_alphabet};
+
+    let mut store = RefgetStore::in_memory();
+    store.set_encoding_mode(StorageMode::Encoded);
+
+    let record = digest_sequence("test", b"ACGTACGT");
+    let digest = record.metadata().sha512t24u.clone();
+
+    let packed_record = match record {
+        SequenceRecord::Full { metadata, sequence } => {
+            let alphabet = lookup_alphabet(&metadata.alphabet);
+            let encoded = encode_sequence(&*sequence, alphabet);
+            SequenceRecord::Full { metadata, sequence: encoded.into() }
+        }
+        other => other,
+    };
+
+    store.add_sequence_record(packed_record, false).unwrap();
+
+    let substring = store.get_substring(digest.as_bytes(), 0, 8).unwrap();
+    assert_eq!(substring, "ACGTACGT");
+}
+
 // =========================================================================
 // Iterator error visibility tests
 // =========================================================================

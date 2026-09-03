@@ -756,16 +756,22 @@ impl ReadonlyRefgetStore {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
-        // CONTRACT: ingested sequence bytes are ASCII (the refget digest and the
-        // on-the-fly decode paths assume one byte == one residue). Enforced in
-        // debug builds only to keep the ingestion hot path allocation/branch
-        // free in release.
+        // CONTRACT: ingested sequence bytes are ASCII (one byte == one residue),
+        // OR, for an Encoded-mode store, already packed to the alphabet's
+        // bits-per-symbol encoded size. Enforced in debug builds only to keep
+        // the ingestion hot path allocation/branch free in release.
         debug_assert!(
             match &sr {
-                SequenceRecord::Full { sequence, .. } => sequence.is_ascii(),
+                SequenceRecord::Full { metadata, sequence } => {
+                    sequence.is_ascii()
+                        || (self.mode == StorageMode::Encoded && {
+                            let bps = lookup_alphabet(&metadata.alphabet).bits_per_symbol;
+                            sequence.len() == metadata.length.saturating_mul(bps).div_ceil(8)
+                        })
+                }
                 SequenceRecord::Stub(_) => true,
             },
-            "add_sequence_record: sequence bytes must be ASCII"
+            "add_sequence_record: sequence bytes must be ASCII, or packed to the alphabet's encoded size in an Encoded-mode store"
         );
 
         // A dedup hit records NOTHING: the row is already in memory, which for a
