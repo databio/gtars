@@ -30,6 +30,7 @@ indexmap = "2"  # Order-preserving HashMap for name_lookup
 memmap2 = { version = "0.9", optional = true }  # native-only transcript mmap backend (via `filesystem`)
 tempfile = { version = "3.8.1", optional = true }  # native-only atomic .reftx publish (via `filesystem`)
 thiserror = { workspace = true }                  # transcript mapper error types
+libc = "0.2"  # getrlimit(RLIMIT_NOFILE) to size the seq fd cache (unix only; no-op elsewhere)
 
 # shared workspace dependencies
 anyhow = { workspace = true }

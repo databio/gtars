@@ -27,12 +27,73 @@ use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
-/// Default capacity of the per-store open-file-descriptor cache used by the
-/// partial-read path. MUST stay well under typical OS fd limits (often 1024):
-/// stores can have huge sequence counts (e.g. ~122k for a transcriptome), so an
-/// unbounded cache would exhaust file descriptors. Mirrors seqrepo's
-/// `fd_cache_size`.
-const SEQ_FD_CACHE_CAP: usize = 256;
+/// Fallback capacity for the per-store open-file-descriptor cache, used when
+/// the process's soft `RLIMIT_NOFILE` cannot be read at all (non-unix
+/// targets, or the `getrlimit` syscall failing). Matches the old fixed cap
+/// this replaces.
+const SEQ_FD_CACHE_CAP_FLOOR: usize = 256;
+
+/// Ceiling for the adaptive fd-cache capacity. Even under a very high or
+/// unlimited `RLIMIT_NOFILE`, the cache stays bounded so its O(n) LRU eviction
+/// scan (see `FdCache::insert`) stays cheap and a single store instance does
+/// not gratuitously hold an unbounded number of fds open (a process may have
+/// several stores open at once, plus its own stdio/sockets/other files).
+const SEQ_FD_CACHE_CAP_CEILING: usize = 8192;
+
+/// Headroom subtracted from the soft `RLIMIT_NOFILE` when sizing the fd
+/// cache, reserved for the rest of the process (stdio, sockets, other open
+/// files, other store instances).
+const SEQ_FD_CACHE_HEADROOM: usize = 64;
+
+/// Capacity of the per-store open-file-descriptor cache used by the
+/// partial-read path, adapted to the process's soft `RLIMIT_NOFILE`.
+///
+/// The old fixed cap of 256 mirrored seqrepo's `fd_cache_size`, but a
+/// genome-scale refget store has tens of thousands of segment `.seq` files
+/// (e.g. ~52k for a human genome at typical segment sizes; a transcriptome
+/// store can have ~122k sequences). A scattered/genome-wide batch of queries
+/// touches far more than 256 distinct files, so the fixed cap thrashed:
+/// nearly every region evicted and reopened its file, costing an extra
+/// `openat`+`close` pair per region. Sizing the cache from the process's own
+/// fd limit lets it hold far more open handles when the ulimit allows it,
+/// while still leaving headroom and an upper bound so it can't exhaust fds or
+/// let LRU eviction get expensive.
+fn default_fd_cache_cap() -> usize {
+    #[cfg(unix)]
+    {
+        let mut rlim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) } == 0 {
+            let soft = rlim.rlim_cur;
+            if soft == libc::RLIM_INFINITY {
+                // No real ceiling to respect; use our own bound.
+                return SEQ_FD_CACHE_CAP_CEILING;
+            }
+            let usable = (soft as usize).saturating_sub(SEQ_FD_CACHE_HEADROOM).max(1);
+            // Never size the cache above what the rlimit (minus headroom)
+            // actually allows, even when that is below the floor -- an
+            // unusually small ulimit must be respected, not overridden by a
+            // "typical minimum". Above the floor, cap at the ceiling.
+            return usable.min(SEQ_FD_CACHE_CAP_CEILING);
+        }
+    }
+    SEQ_FD_CACHE_CAP_FLOOR
+}
+
+/// True when `err` (as returned by [`ReadonlyRefgetStore::get_substring_from_disk`]
+/// / [`ReadonlyRefgetStore::get_cached_seq_file`]) is ultimately caused by the
+/// `.seq` file not existing, as opposed to some other failure (permission
+/// denied, a bad range, a genuine I/O error). Used to fall through to the
+/// remote fallback exactly on a missing file, replacing an upfront
+/// `path.exists()` stat with inspecting the result of an attempted open --
+/// the common case (file present) then costs no extra syscall at all, since
+/// the fd cache would have to open it anyway.
+fn is_missing_seq_file(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| matches!(cause.downcast_ref::<std::io::Error>(), Some(io_err) if io_err.kind() == std::io::ErrorKind::NotFound))
+}
 
 /// Batch size at which `get_substrings` against a *remote-only* sequence stops
 /// issuing one HTTP byte-range request per range and instead downloads the whole
@@ -471,7 +532,7 @@ impl ReadonlyRefgetStore {
             fhr_metadata: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
-            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
+            seq_fd_cache: Mutex::new(FdCache::new(default_fd_cache_cap())),
             sequence_index_loaded: true,
             sequence_index_path: None,
             pending: Mutex::new(PendingChanges::default()),
@@ -1776,13 +1837,18 @@ impl ReadonlyRefgetStore {
             SequenceRecord::Stub(meta) => {
                 // Partial-read resolution for a non-resident sequence:
                 //   local `.seq` (if present) -> remote byte-range (if configured).
-                // A missing local file falls through to the remote fallback
-                // rather than erroring.
-                if self.seqdata_path_template.is_some() {
-                    if let Some(path) = self.sequence_file_path(&meta.sha512t24u) {
-                        if path.exists() {
-                            return self.get_substring_from_disk(meta, start, end);
-                        }
+                // Attempt the disk read directly rather than `path.exists()`-ing
+                // first: the fd cache already amortizes opens across queries, so
+                // the pre-check was a pure-overhead `statx` on the overwhelmingly
+                // common case (the file exists). A missing local file still
+                // falls through to the remote fallback rather than erroring --
+                // detected from the open failing with `NotFound`, not from a
+                // stat beforehand.
+                if self.local_path.is_some() && self.seqdata_path_template.is_some() {
+                    match self.get_substring_from_disk(meta, start, end) {
+                        Ok(s) => return Ok(s),
+                        Err(e) if is_missing_seq_file(&e) => {} // fall through to remote below
+                        Err(e) => return Err(e),
                     }
                 }
                 if self.remote_source.is_some() {
@@ -1899,17 +1965,46 @@ impl ReadonlyRefgetStore {
             }
             SequenceRecord::Stub(meta) => {
                 // Resolve once for the whole batch: local `.seq` (if present) ->
-                // remote byte-range (if configured). A missing local file falls
-                // through to the remote fallback rather than erroring.
-                let local_seq_exists = self.seqdata_path_template.is_some()
+                // remote byte-range (if configured). Whether the local file
+                // exists is determined lazily below from an actual open/read
+                // attempt rather than a `path.exists()` stat here -- the fd
+                // cache already amortizes opens, so pre-checking existence is
+                // pure overhead on the common (file present) case. A missing
+                // local file still falls through to the remote fallback rather
+                // than erroring.
+                let has_local_path = self.local_path.is_some() && self.seqdata_path_template.is_some();
+                let has_remote = self.remote_source.is_some();
+                if !has_local_path && !has_remote {
+                    return Err(anyhow!("Sequence data not loaded (stub only)"));
+                }
+
+                // No remote fallback configured: there is nothing to branch on,
+                // so read every range straight from disk without ever stat-ing
+                // for existence -- an open failure has nowhere else to fall
+                // back to anyway and simply propagates. This is the common path
+                // for local (non-remote) batch extraction.
+                if !has_remote {
+                    let mut out = Vec::with_capacity(ranges.len());
+                    for &(start, end) in ranges {
+                        if start == end {
+                            out.push(String::new());
+                        } else {
+                            out.push(self.get_substring_from_disk(meta, start, end)?);
+                        }
+                    }
+                    return Ok(out);
+                }
+
+                // A remote fallback exists, so we do need to know up front
+                // whether the file is already cached locally in order to pick
+                // between the on-disk and (possibly bulk-downloaded) remote
+                // path below. This stat is paid once per batch call for this
+                // sequence, not once per range.
+                let local_seq_exists = has_local_path
                     && self
                         .sequence_file_path(&meta.sha512t24u)
                         .map(|p| p.exists())
                         .unwrap_or(false);
-                let has_remote = self.remote_source.is_some();
-                if !local_seq_exists && !has_remote {
-                    return Err(anyhow!("Sequence data not loaded (stub only)"));
-                }
 
                 // Bulk remote extraction: one HTTP round-trip per range is slow
                 // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download and
@@ -1917,7 +2012,6 @@ impl ReadonlyRefgetStore {
                 // template to write into), then read every range from the local
                 // file. Single / small-batch reads fall through to pure byte-range.
                 if !local_seq_exists
-                    && has_remote
                     && self.local_path.is_some()
                     && self.seqdata_path_template.is_some()
                     && ranges.len() >= REMOTE_BULK_FETCH_THRESHOLD
