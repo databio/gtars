@@ -54,6 +54,9 @@ jobs:
         with:
           executable-name: gtars
           target: ${{ matrix.platform.target }}
+          # The action only uploads to the GitHub Release when the tag starts
+          # with this prefix (default "v"). Our CLI tags are gtars-cli-v<ver>.
+          release-tag-prefix: gtars-cli-v
           # The changelog lives in the bedbase docs repo (docs/gtars/changelog.md),
           # so do not look for a Changes.md here.
           changes-file: ""
