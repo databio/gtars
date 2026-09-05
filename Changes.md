@@ -30,6 +30,12 @@
   `ImportReport` class, and printed by `gtars refget build` as an
   "Ingested this run" summary line.
 
+### Fixed
+
+- `gtars-refget`: `export_fasta` and `get_collection` now use the collection's
+  own sequence names and descriptions for FASTA headers instead of the
+  first-imported label of a shared sequence (#270).
+
 ## 0.9.0 - 2026-06-12
 
 The gtars 0.9.0 release. Highlights:

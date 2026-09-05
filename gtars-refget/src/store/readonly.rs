@@ -1039,6 +1039,20 @@ impl ReadonlyRefgetStore {
         self.collections.get(&key).map(|record| record.metadata())
     }
 
+    /// Per-collection sequence metadata (name, description, digest) in FASTA
+    /// order. This is the source of truth for names/headers; the global
+    /// `sequence_store` record only labels the shared bytes.
+    pub(crate) fn collection_sequence_metadata(&self, key: &DigestKey) -> Result<&[SequenceRecord]> {
+        match self.collections.get(key) {
+            Some(SequenceCollectionRecord::Full { sequences, .. }) => Ok(sequences),
+            Some(SequenceCollectionRecord::Stub(_)) => Err(anyhow!(
+                "Collection {} not loaded. Call load_collection() first.",
+                key_to_digest_string(key)
+            )),
+            None => Err(anyhow!("Collection not found: {}", key_to_digest_string(key))),
+        }
+    }
+
     /// Get a collection with all its sequences loaded.
     pub fn get_collection(&self, collection_digest: &str) -> Result<crate::digest::SequenceCollection> {
         let key = collection_digest.to_key();
@@ -1057,36 +1071,35 @@ impl ReadonlyRefgetStore {
             .metadata()
             .clone();
 
-        // Iterate name_lookup for (name, digest) pairs so each record gets the
-        // correct per-collection name, not the last-written global name.
+        // Iterate the collection's own per-sequence records so each result carries
+        // the per-collection name AND description, not the first-imported global
+        // label of a sequence shared across collections. Only the bytes (and `fai`,
+        // if the collection record lacks it) come from the global store.
         let sequences: Vec<SequenceRecord> = self
-            .name_lookup
-            .get(&key)
-            .map(|name_map| {
-                name_map
-                    .iter()
-                    .map(|(name, seq_key)| {
-                        let record = self.sequence_store.get(seq_key).ok_or_else(|| {
-                            anyhow!(
-                                "Sequence {} not found in store for collection {}",
-                                key_to_digest_string(seq_key),
-                                collection_digest,
-                            )
-                        })?;
-                        let mut meta = record.metadata().clone();
-                        meta.name = name.clone();
-                        Ok(match record.sequence_arc() {
-                            Some(seq) => SequenceRecord::Full {
-                                metadata: meta,
-                                sequence: seq,
-                            },
-                            None => SequenceRecord::Stub(meta),
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()
+            .collection_sequence_metadata(&key)?
+            .iter()
+            .map(|coll_record| {
+                let mut meta = coll_record.metadata().clone();
+                let seq_key = meta.sha512t24u.to_key();
+                let global = self.sequence_store.get(&seq_key).ok_or_else(|| {
+                    anyhow!(
+                        "Sequence {} not found in store for collection {}",
+                        key_to_digest_string(&seq_key),
+                        collection_digest,
+                    )
+                })?;
+                if meta.fai.is_none() {
+                    meta.fai = global.metadata().fai.clone();
+                }
+                Ok(match global.sequence_arc() {
+                    Some(seq) => SequenceRecord::Full {
+                        metadata: meta,
+                        sequence: seq,
+                    },
+                    None => SequenceRecord::Stub(meta),
+                })
             })
-            .transpose()?
-            .unwrap_or_default();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(crate::digest::SequenceCollection {
             metadata,

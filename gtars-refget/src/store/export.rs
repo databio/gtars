@@ -20,7 +20,7 @@ use crate::digest::{
     SequenceMetadata, SequenceRecord,
     decode_substring_from_bytes, lookup_alphabet,
 };
-use crate::hashkeyable::{DigestKey, HashKeyable};
+use crate::hashkeyable::HashKeyable;
 
 
 // ============================================================================
@@ -357,21 +357,25 @@ impl ReadonlyRefgetStore {
         let output_path = output_path.as_ref();
         let collection_key = collection_digest.as_ref().to_key();
 
-        let name_to_digest: IndexMap<String, DigestKey> = self
-            .name_lookup
-            .get(&collection_key)
-            .ok_or_else(|| {
-                anyhow!(
-                    "Collection not found: {:?}",
-                    String::from_utf8_lossy(collection_digest.as_ref())
-                )
-            })?
-            .clone();
+        // Headers come from the collection's own per-sequence records so a
+        // sequence shared across collections is exported under this collection's
+        // name and description, not the label of whichever import came first.
+        let records = self.collection_sequence_metadata(&collection_key).map_err(|e| {
+            anyhow!(
+                "Collection not found: {:?}: {}",
+                String::from_utf8_lossy(collection_digest.as_ref()),
+                e
+            )
+        })?;
+        let name_to_meta: IndexMap<&str, &SequenceMetadata> = records
+            .iter()
+            .map(|r| (r.metadata().name.as_str(), r.metadata()))
+            .collect();
 
-        let names_to_export: Vec<String> = if let Some(names) = sequence_names {
-            names.iter().map(|s| s.to_string()).collect()
+        let names_to_export: Vec<&str> = if let Some(names) = sequence_names {
+            names
         } else {
-            name_to_digest.keys().cloned().collect()
+            name_to_meta.keys().copied().collect()
         };
 
         let file = File::create(output_path).context(format!(
@@ -386,23 +390,26 @@ impl ReadonlyRefgetStore {
         };
 
         for seq_name in names_to_export {
-            let seq_digest = name_to_digest
-                .get(&seq_name)
+            let meta = *name_to_meta
+                .get(seq_name)
                 .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", seq_name))?;
+            let seq_digest = meta.sha512t24u.to_key();
 
             let record = self
                 .sequence_store
-                .get(seq_digest)
-                .ok_or_else(|| anyhow!("Sequence record not found for digest: {:?}", seq_digest))?;
+                .get(&seq_digest)
+                .ok_or_else(|| anyhow!("Sequence record not found for digest: {}", meta.sha512t24u))?;
 
-            let (metadata, sequence_data): (&SequenceMetadata, &[u8]) = match record {
+            // Only the bytes come from the global record. `alphabet` and `length`
+            // are content-derived and identical in the per-collection stub.
+            let sequence_data: &[u8] = match record {
                 SequenceRecord::Stub(_) => {
                     return Err(anyhow!("Sequence data not loaded for '{}'. Call load_sequence() or load_all_sequences() first.", seq_name));
                 }
-                SequenceRecord::Full { metadata, sequence } => (metadata, sequence.as_slice()),
+                SequenceRecord::Full { sequence, .. } => sequence.as_slice(),
             };
 
-            write_fasta_record(&mut *writer, metadata, sequence_data, self.mode, line_width)?;
+            write_fasta_record(&mut *writer, meta, sequence_data, self.mode, line_width)?;
         }
 
         writer.flush()?;
@@ -411,6 +418,10 @@ impl ReadonlyRefgetStore {
     }
 
     /// Export sequences by their sequence digests to a FASTA file.
+    ///
+    /// There is no collection context here, so each header uses the store-wide
+    /// record's name and description (first import wins for a sequence shared by
+    /// several collections). Use [`Self::export_fasta`] for collection-specific names.
     ///
     /// `line_width` follows the same sentinel convention as [`Self::export_fasta`]:
     /// `None` defaults to 80; `Some(n)` with `n > 0` wraps at `n`; `Some(0)` disables
@@ -489,6 +500,44 @@ mod tests {
         (store, digest)
     }
 
+    /// Two single-record FASTAs with byte-identical sequences but different
+    /// headers: `>chr1 ucsc desc` and `>1 flybase desc`. Mirrors the UCSC vs
+    /// FlyBase situation from issue #270.
+    fn shared_sequence_fastas() -> (NamedTempFile, NamedTempFile) {
+        let seq = "ACGT".repeat(10);
+        let mut a = NamedTempFile::new().expect("create temp fasta A");
+        writeln!(a, ">chr1 ucsc desc").unwrap();
+        writeln!(a, "{}", seq).unwrap();
+        a.flush().unwrap();
+
+        let mut b = NamedTempFile::new().expect("create temp fasta B");
+        writeln!(b, ">1 flybase desc").unwrap();
+        writeln!(b, "{}", seq).unwrap();
+        b.flush().unwrap();
+        (a, b)
+    }
+
+    /// Import `first` then `second` into `store`; return their collection digests.
+    fn import_pair(store: &mut RefgetStore, first: &NamedTempFile, second: &NamedTempFile) -> (String, String) {
+        let (meta_first, _) = store
+            .add_sequence_collection_from_fasta(first.path(), FastaImportOptions::new())
+            .expect("import first fasta");
+        let (meta_second, _) = store
+            .add_sequence_collection_from_fasta(second.path(), FastaImportOptions::new())
+            .expect("import second fasta");
+        (meta_first.digest, meta_second.digest)
+    }
+
+    /// Export a collection unwrapped and return the headers in order.
+    fn export_headers(store: &crate::store::ReadonlyRefgetStore, digest: &str, dir: &TempDir) -> Vec<String> {
+        let out = dir.path().join(format!("{}.fa", digest));
+        store
+            .export_fasta(digest, &out, None, Some(0))
+            .expect("export collection");
+        let content = std::fs::read_to_string(&out).unwrap();
+        records(&content).into_iter().map(|(h, _)| h).collect()
+    }
+
     /// Split a FASTA into (header, body-lines) pairs.
     fn records(fasta: &str) -> Vec<(String, Vec<String>)> {
         let mut out: Vec<(String, Vec<String>)> = Vec::new();
@@ -547,5 +596,95 @@ mod tests {
         assert_eq!(recs[0].1[0].len(), 80);
         assert_eq!(recs[0].1[1].len(), 40);
         assert_eq!(recs[1].1.len(), 1);
+    }
+
+    #[test]
+    fn shared_sequence_exports_with_each_collections_own_header() {
+        let (fasta_a, fasta_b) = shared_sequence_fastas();
+
+        // Both import orders: the first-imported label must never leak into
+        // the other collection's export.
+        for swap in [false, true] {
+            let mut store = RefgetStore::in_memory();
+            let (digest_a, digest_b) = if swap {
+                let (b, a) = import_pair(&mut store, &fasta_b, &fasta_a);
+                (a, b)
+            } else {
+                import_pair(&mut store, &fasta_a, &fasta_b)
+            };
+            let readonly = store.into_readonly();
+            let dir = TempDir::new().unwrap();
+
+            assert_eq!(
+                export_headers(&readonly, &digest_a, &dir),
+                vec!["chr1 ucsc desc".to_string()],
+                "swap={}",
+                swap
+            );
+            assert_eq!(
+                export_headers(&readonly, &digest_b, &dir),
+                vec!["1 flybase desc".to_string()],
+                "swap={}",
+                swap
+            );
+        }
+    }
+
+    #[test]
+    fn get_collection_returns_per_collection_description() {
+        let (fasta_a, fasta_b) = shared_sequence_fastas();
+        let mut store = RefgetStore::in_memory();
+        let (digest_a, digest_b) = import_pair(&mut store, &fasta_a, &fasta_b);
+        let readonly = store.into_readonly();
+
+        let coll_b = readonly.get_collection(&digest_b).expect("get collection B");
+        assert_eq!(coll_b.sequences.len(), 1);
+        assert_eq!(coll_b.sequences[0].metadata().name, "1");
+        assert_eq!(
+            coll_b.sequences[0].metadata().description.as_deref(),
+            Some("flybase desc")
+        );
+
+        let coll_a = readonly.get_collection(&digest_a).expect("get collection A");
+        assert_eq!(coll_a.sequences[0].metadata().name, "chr1");
+        assert_eq!(
+            coll_a.sequences[0].metadata().description.as_deref(),
+            Some("ucsc desc")
+        );
+    }
+
+    #[test]
+    fn shared_sequence_disk_roundtrip_exports_own_header() {
+        let (fasta_a, fasta_b) = shared_sequence_fastas();
+        let store_dir = TempDir::new().unwrap();
+
+        let (digest_a, digest_b) = {
+            let mut store = RefgetStore::on_disk(store_dir.path()).expect("create disk store");
+            import_pair(&mut store, &fasta_a, &fasta_b)
+        };
+
+        // Reopen so collection stubs come from collections/<digest>.rgsi via
+        // ensure_collection_loaded, not from the import-time in-memory records.
+        let mut store = RefgetStore::open_local(store_dir.path()).expect("reopen store");
+        store.load_collection(&digest_b).expect("load collection B");
+        store.load_collection(&digest_a).expect("load collection A");
+        store.load_all_sequences().expect("load sequences");
+        let readonly = store.into_readonly();
+
+        let dir = TempDir::new().unwrap();
+        assert_eq!(
+            export_headers(&readonly, &digest_b, &dir),
+            vec!["1 flybase desc".to_string()]
+        );
+        assert_eq!(
+            export_headers(&readonly, &digest_a, &dir),
+            vec!["chr1 ucsc desc".to_string()]
+        );
+
+        let coll_b = readonly.get_collection(&digest_b).unwrap();
+        assert_eq!(
+            coll_b.sequences[0].metadata().description.as_deref(),
+            Some("flybase desc")
+        );
     }
 }
