@@ -687,4 +687,94 @@ mod tests {
             Some("flybase desc")
         );
     }
+
+    #[test]
+    fn get_sequence_by_name_returns_per_collection_metadata() {
+        let (fasta_a, fasta_b) = shared_sequence_fastas();
+
+        // Both import orders: the first-imported label must never leak into
+        // the other collection's get_sequence_by_name() result.
+        for swap in [false, true] {
+            let mut store = RefgetStore::in_memory();
+            let (digest_a, digest_b) = if swap {
+                let (b, a) = import_pair(&mut store, &fasta_b, &fasta_a);
+                (a, b)
+            } else {
+                import_pair(&mut store, &fasta_a, &fasta_b)
+            };
+            let readonly = store.into_readonly();
+
+            let rec_b = readonly
+                .get_sequence_by_name(&digest_b, "1")
+                .expect("get sequence '1' from collection B");
+            assert_eq!(rec_b.metadata().name, "1", "swap={}", swap);
+            assert_eq!(
+                rec_b.metadata().description.as_deref(),
+                Some("flybase desc"),
+                "swap={}",
+                swap
+            );
+
+            let rec_a = readonly
+                .get_sequence_by_name(&digest_a, "chr1")
+                .expect("get sequence 'chr1' from collection A");
+            assert_eq!(rec_a.metadata().name, "chr1", "swap={}", swap);
+            assert_eq!(
+                rec_a.metadata().description.as_deref(),
+                Some("ucsc desc"),
+                "swap={}",
+                swap
+            );
+
+            // Same underlying bytes, shared across both collections.
+            assert_eq!(
+                rec_a.metadata().sha512t24u,
+                rec_b.metadata().sha512t24u,
+                "swap={}",
+                swap
+            );
+
+            // Names do not leak across collections.
+            assert!(
+                readonly.get_sequence_by_name(&digest_b, "chr1").is_err(),
+                "swap={}",
+                swap
+            );
+        }
+    }
+
+    #[test]
+    fn get_sequence_by_name_disk_roundtrip() {
+        let (fasta_a, fasta_b) = shared_sequence_fastas();
+        let store_dir = TempDir::new().unwrap();
+
+        let (digest_a, digest_b) = {
+            let mut store = RefgetStore::on_disk(store_dir.path()).expect("create disk store");
+            import_pair(&mut store, &fasta_a, &fasta_b)
+        };
+
+        // Reopen so collection stubs come from collections/<digest>.rgsi via
+        // ensure_collection_loaded, not from the import-time in-memory records.
+        let mut store = RefgetStore::open_local(store_dir.path()).expect("reopen store");
+        store.load_collection(&digest_b).expect("load collection B");
+        store.load_collection(&digest_a).expect("load collection A");
+        store.load_all_sequences().expect("load sequences");
+        let readonly = store.into_readonly();
+
+        let rec_b = readonly
+            .get_sequence_by_name(&digest_b, "1")
+            .expect("get sequence '1' from collection B");
+        assert_eq!(rec_b.metadata().name, "1");
+        assert_eq!(rec_b.metadata().description.as_deref(), Some("flybase desc"));
+        assert!(rec_b.is_loaded());
+        assert_eq!(rec_b.decode().unwrap(), "ACGT".repeat(10));
+
+        let rec_a = readonly
+            .get_sequence_by_name(&digest_a, "chr1")
+            .expect("get sequence 'chr1' from collection A");
+        assert_eq!(rec_a.metadata().name, "chr1");
+        assert_eq!(rec_a.metadata().description.as_deref(), Some("ucsc desc"));
+        assert!(rec_a.is_loaded());
+        assert_eq!(rec_a.decode().unwrap(), "ACGT".repeat(10));
+    }
 }

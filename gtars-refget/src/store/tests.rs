@@ -849,7 +849,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let seq1 = store.get_sequence_by_name(&collection_digest, name1);
         assert!(seq1.is_ok());
 
-        let seq1_meta = seq1.unwrap().metadata();
+        let seq1_record = seq1.unwrap();
+        let seq1_meta = seq1_record.metadata();
         assert_eq!(seq1_meta.name, "JAHKSE010000016.1");
         assert_eq!(
             seq1_meta.description,

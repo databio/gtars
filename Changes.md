@@ -20,6 +20,9 @@
   `ImportReport` instead of `Vec<(SequenceCollectionMetadata, bool)>`. The
   per-file results moved to `report.collections`. The singular
   `add_sequence_collection_from_fasta` is unchanged.
+- `gtars-refget`: `get_sequence_by_name` now returns an owned `SequenceRecord`
+  instead of `&SequenceRecord`. Rust callers holding a borrow must adjust;
+  bytes are `Arc`-shared, so the change is not a copy.
 
 ### Added
 
@@ -35,6 +38,10 @@
 - `gtars-refget`: `export_fasta` and `get_collection` now use the collection's
   own sequence names and descriptions for FASTA headers instead of the
   first-imported label of a shared sequence (#270).
+- `gtars-refget`: `get_sequence_by_name` now returns the collection's own
+  name and description for the sequence, not the first-imported label of a
+  sequence shared across collections (same class as #270). It returns an
+  owned `SequenceRecord` instead of a borrow; bytes are `Arc`-shared.
 
 ## 0.9.0 - 2026-06-12
 

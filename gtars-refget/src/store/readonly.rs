@@ -1664,11 +1664,16 @@ impl ReadonlyRefgetStore {
     }
 
     /// Get a sequence by collection digest and name.
+    ///
+    /// The returned record carries THIS collection's name and description for
+    /// the sequence, not the first-imported label of a sequence shared across
+    /// collections. Bytes (and `fai`, if the collection record lacks it) come
+    /// from the global store; the clone is an `Arc` bump, not a copy of the bases.
     pub fn get_sequence_by_name<K: AsRef<[u8]>>(
         &self,
         collection_digest: K,
         sequence_name: &str,
-    ) -> Result<&SequenceRecord> {
+    ) -> Result<SequenceRecord> {
         let collection_key = collection_digest.to_key();
 
         if !self.name_lookup.contains_key(&collection_key) {
@@ -1681,11 +1686,27 @@ impl ReadonlyRefgetStore {
             .and_then(|name_map| name_map.get(sequence_name).cloned())
             .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
 
-        let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
+        let coll_record = self
+            .collection_sequence_metadata(&collection_key)?
+            .iter()
+            .find(|r| r.metadata().sha512t24u.to_key() == digest_key)
+            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
+
+        let mut meta = coll_record.metadata().clone();
+        let global = self.sequence_store.get(&digest_key).ok_or_else(|| {
             anyhow!("Sequence record not found for '{}'. Call load_sequence() first.", sequence_name)
         })?;
+        if meta.fai.is_none() {
+            meta.fai = global.metadata().fai.clone();
+        }
 
-        Ok(record)
+        Ok(match global.sequence_arc() {
+            Some(seq) => SequenceRecord::Full {
+                metadata: meta,
+                sequence: seq,
+            },
+            None => SequenceRecord::Stub(meta),
+        })
     }
 
     // =========================================================================

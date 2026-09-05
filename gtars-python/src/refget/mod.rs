@@ -1690,7 +1690,7 @@ impl PyRefgetStore {
         let collection_digest = strip_sq_prefix(collection_digest);
         self.inner
             .get_sequence_by_name(collection_digest, sequence_name)
-            .map(|record| PySequenceRecord::from(record.clone()))
+            .map(PySequenceRecord::from)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!(
                     "Sequence '{}' not found in collection {} ({})",
@@ -3420,7 +3420,7 @@ impl PyReadonlyRefgetStore {
         let collection_digest = strip_sq_prefix(collection_digest);
         self.store
             .get_sequence_by_name(collection_digest, sequence_name)
-            .map(|record| PySequenceRecord::from(record.clone()))
+            .map(PySequenceRecord::from)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!(
                     "Sequence '{}' not found in collection {} ({})",

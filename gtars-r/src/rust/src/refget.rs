@@ -317,7 +317,7 @@ pub fn get_sequence_by_name_store(
     with_store!(store_ptr, store, {
         let result = store.get_sequence_by_name(collection_digest, sequence_name);
         if let Ok(record) = result {
-            Ok(record_to_list(record.clone()).into())
+            Ok(record_to_list(record).into())
         } else {
             Ok(Robj::from(())) // NULL
         }
