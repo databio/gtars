@@ -238,14 +238,12 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .map(|vals| vals.map(|s| s.as_str()).collect());
     let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
 
-    // Open the store and load collection metadata (stub records + name_lookup).
-    // Sequence BYTES are loaded further down, after the digest is validated and
-    // only for what this export actually needs.
+    // Open the store. The manifest gives a stub (metadata) for every
+    // collection, which is all that resolving the digest below needs; the one
+    // collection being exported is loaded lazily by `get_collection`, and its
+    // sequence BYTES only after that, for what this export actually needs.
     let mut store = RefgetStore::open_local(store_path)
         .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
-    store
-        .load_all_collections()
-        .map_err(|e| anyhow::anyhow!("Failed to load collections: {}", e))?;
 
     // Resolve the collection digest.
     let collections = store
