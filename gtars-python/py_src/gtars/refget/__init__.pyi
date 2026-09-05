@@ -648,6 +648,7 @@ class RefgetStore:
         file_path: Union[str, PathLike],
         force: bool = False,
         namespaces: Optional[List[str]] = None,
+        collection_alias: Optional[str] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -661,6 +662,11 @@ class RefgetStore:
             namespaces: Optional list of namespace prefixes to extract aliases from
                 FASTA headers. For example, ["ncbi", "refseq"] will scan headers
                 for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
+            collection_alias: Register the imported collection under this
+                collection alias, as ``"NAMESPACE:ALIAS"`` (e.g. ``"ucsc:hg38"``).
+                This names the collection as a whole and is distinct from
+                ``namespaces``. Errors if the alias already names a different
+                collection, unless ``force`` is set.
 
         Returns:
             A tuple containing:

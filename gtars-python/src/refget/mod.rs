@@ -1462,6 +1462,11 @@ impl PyRefgetStore {
     ///     file_path (str or Path): Path to the FASTA file to import.
     ///     force (bool, optional): If True, overwrite existing collections/sequences.
     ///                            If False (default), skip duplicates.
+    ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
+    ///     collection_alias (str, optional): Register the imported collection under
+    ///         this collection alias, as "NAMESPACE:ALIAS" (e.g. "ucsc:hg38").
+    ///         Errors if the alias already names a different collection, unless
+    ///         ``force`` is set.
     ///
     /// Returns:
     ///     tuple[SequenceCollectionMetadata, bool]: A tuple containing:
@@ -1475,21 +1480,37 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false, namespaces=None))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None, collection_alias=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
         namespaces: Option<Vec<String>>,
+        collection_alias: Option<String>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let ns_refs: Vec<&str> = namespaces
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect())
             .unwrap_or_default();
-        let opts = FastaImportOptions::new()
+        let alias_parts: Option<(&str, &str)> = match collection_alias.as_deref() {
+            None => None,
+            Some(raw) => match raw.split_once(':') {
+                Some((ns, alias)) if !ns.is_empty() && !alias.is_empty() => Some((ns, alias)),
+                _ => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "collection_alias expects 'NAMESPACE:ALIAS' (e.g. 'ucsc:hg38'), got '{}'",
+                        raw
+                    )))
+                }
+            },
+        };
+        let mut opts = FastaImportOptions::new()
             .force(force)
             .namespaces(&ns_refs);
+        if let Some((ns, alias)) = alias_parts {
+            opts = opts.collection_alias(ns, alias);
+        }
         let result = self.inner
             .add_sequence_collection_from_fasta(file_path, opts);
         result
