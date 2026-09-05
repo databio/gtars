@@ -98,6 +98,27 @@ versions: `gtars-refget` 0.10.0, `gtars-vrs` 0.7.1 (re-pinned to refget
   the collection is committed. Previously the collection was inserted and its
   `.rgsi` written, then the import failed, leaving an orphaned per-collection
   index file.
+- `gtars-refget`: import-time aliases (from `--collection-alias` and from
+  FASTA-header namespaces) are published in the same commit as the indexes
+  instead of one TSV rewrite per alias, so a reader can no longer see an
+  alias whose collection is not yet in `collections.rgci`, and a failed import
+  leaves no dangling alias. `FastaImportOptions::force` now also overrides an
+  alias another writer published under a different digest, as documented.
+- `gtars-refget`: stale-lock breaking is serialized through an `O_EXCL`
+  `.rgstore.lock.break` marker and re-verifies the exact lock instance before
+  renaming it away; two contenders judging the same lock stale could
+  previously both acquire.
+- `gtars-refget`: `.seq` payloads are published by temp-file + rename rather
+  than an in-place `File::create`, so a second process writing the same
+  digest can no longer truncate a live file or expose a partial one.
+- `gtars-refget`: cleanup after a failed import unlinks only the `.seq` files
+  that import staged. On a reopened store it previously classified every
+  pre-existing sequence as an orphan and deleted them.
+- `gtars-refget`: `remove_collection` also removes aliases for the collection
+  that another process published after this handle opened, and a commit
+  refuses to publish a collection whose sequences were removed from the index
+  by a concurrent orphan GC while the import ran.
+- `gtars-refget`: `fhr_digest` ignores `.rgstore.tmp.*` files in `fhr/`.
 - `gtars-refget`: `export_fasta` and `get_collection` now use the collection's
   own sequence names and descriptions for FASTA headers instead of the
   first-imported label of a shared sequence (#270).
