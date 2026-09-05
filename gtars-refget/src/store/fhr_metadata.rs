@@ -245,13 +245,21 @@ pub fn write_sidecars(
 }
 
 /// Write a single FHR sidecar JSON file.
+///
+/// Atomically published: sidecars are digest-addressed per-item files that
+/// concurrent writers may produce simultaneously, and `compute_fhr_digest` hashes
+/// whatever it finds — a torn sidecar would poison the manifest digest.
 pub fn write_sidecar(path: &Path, metadata: &FhrMetadata) -> Result<()> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let json = serde_json::to_string_pretty(metadata)?;
-    fs::write(path, json)?;
-    Ok(())
+    let new_bytes = json.as_bytes();
+    if path.exists() {
+        if let Ok(existing) = fs::read(path) {
+            if existing == new_bytes {
+                return Ok(());
+            }
+        }
+    }
+    super::atomic::atomic_write_bytes(path, new_bytes)
 }
 
 /// Remove a single FHR sidecar file (if it exists). Returns quietly if missing.

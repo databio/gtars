@@ -245,12 +245,15 @@ impl RefgetStore {
     /// Add sequence collections from multiple FASTA files, decoding up to
     /// `opts.file_jobs` files concurrently. Inserts in fixed input order so the
     /// resulting store is byte-identical to a serial build.
+    ///
+    /// Returns an [`ImportReport`] with per-file results and per-run ingest
+    /// counters.
     #[cfg(feature = "filesystem")]
     pub fn add_sequence_collections_from_fastas(
         &mut self,
         files: &[std::path::PathBuf],
         opts: FastaImportOptions<'_>,
-    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+    ) -> Result<ImportReport> {
         self.inner.add_sequence_collections_from_fastas(files, opts)
     }
 
@@ -262,6 +265,33 @@ impl RefgetStore {
     /// Remove a collection from the store.
     pub fn remove_collection(&mut self, digest: &str, remove_orphan_sequences: bool) -> Result<bool> {
         self.inner.remove_collection(digest, remove_orphan_sequences)
+    }
+
+    /// Dry-run of the orphan cleanup in [`Self::remove_collection`].
+    pub fn plan_orphan_removal(&self, digest: &str) -> Result<Vec<String>> {
+        self.inner.plan_orphan_removal(digest)
+    }
+
+    // --- Write locking (delegates; `Deref` only yields `&`) ---
+
+    /// Hold the store's exclusive writer lock across several mutations.
+    pub fn lock_for_batch(&mut self, operation: &str) -> Result<()> {
+        self.inner.lock_for_batch(operation)
+    }
+
+    /// Release a lock taken by [`Self::lock_for_batch`].
+    pub fn release_batch_lock(&mut self) {
+        self.inner.release_batch_lock();
+    }
+
+    /// Override the timeout/staleness settings used when acquiring the write lock.
+    pub fn set_lock_options(&mut self, options: super::LockOptions) {
+        self.inner.set_lock_options(options);
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published.
+    pub fn set_force_alias(&mut self, force: bool) {
+        self.inner.set_force_alias(force);
     }
 
     /// Import a collection (with sequences, aliases, FHR) from another store.

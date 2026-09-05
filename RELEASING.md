@@ -36,9 +36,13 @@ differs (`v` vs `c`). Keep the `-v`.
 
 1. Bump the component's version (e.g. `gtars-r/DESCRIPTION` + `gtars-r/src/rust/Cargo.toml`,
    or the crate's `Cargo.toml`). Merge to `master`.
-2. Create the GitHub Release (e.g. with `releasegh`), naming the tag
-   `<package>-v<version>` and writing release notes.
-3. Only that component's job runs; everything else is skipped.
+2. Add an entry to the changelog. It lives in the docs site, not in this repo:
+   [`databio/bedbase` → `docs/gtars/changelog.md`](https://github.com/databio/bedbase/blob/master/docs/gtars/changelog.md).
+   Follow the existing format: `## [version] -- YYYY-MM-DD`, then short bullets
+   prefixed by component (`refget:`, `cli:`, ...). Keep it concise.
+3. Create the GitHub Release (e.g. with `releasegh`), naming the tag
+   `<package>-v<version>`. Use the changelog entry as the release notes.
+4. Only that component's job runs; everything else is skipped.
 
 ## Bindings vs crates
 

@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context, Result};
@@ -219,54 +219,34 @@ impl TxStoreBuilder {
 
     /// Build and write the binary `.reftx` store to disk atomically.
     ///
-    /// Uses refget's write-once + atomic-publish discipline so any reader
-    /// (especially the mmap backend, whose `unsafe { Mmap::map }` requires the
-    /// file to be immutable) only ever observes a complete file:
+    /// Any reader (especially the mmap backend, whose `unsafe { Mmap::map }`
+    /// requires the file to be immutable) must only ever observe a complete file:
     ///
     /// 1. Acquire an advisory build lock on a `<dest>.lock` sidecar (serializes
     ///    BUILDERS only — readers never need it since they open only a fully
     ///    published, immutable file).
     /// 2. Build the full `.reftx` byte image in memory via the shared
     ///    [`build_reftx_bytes`] encoder (the ONE encoder; header already
-    ///    populated, no write-then-seek-back patch needed) and write it to a
-    ///    temp file in the SAME directory as the destination (so the final
-    ///    rename is same-filesystem and atomic).
-    /// 3. `sync_all()` to force bytes+metadata to disk BEFORE publishing.
-    /// 4. `NamedTempFile::persist` to atomically `rename(2)` onto the
-    ///    destination: the dest either is unchanged or flips wholesale to the
-    ///    complete file — never a torn intermediate.
+    ///    populated, no write-then-seek-back patch needed).
+    /// 3. Publish it through [`crate::store::atomic::atomic_write`], the ONE
+    ///    implementation of the temp-file → `fsync` → `rename(2)` → `fsync` dir
+    ///    discipline, shared with the store index/manifest/alias writes.
     pub fn build<P: AsRef<Path>>(&mut self, output: P) -> Result<()> {
         if self.transcripts.is_empty() {
             return Err(anyhow!("No transcripts to write"));
         }
 
         let dest = output.as_ref();
-        let dest_parent = dest.parent().filter(|p| !p.as_os_str().is_empty());
-        let dest_dir: PathBuf = match dest_parent {
-            Some(p) => p.to_path_buf(),
-            None => PathBuf::from("."),
-        };
 
         // (1) Advisory build lock (serializes concurrent builders only).
         let _lock = BuildLock::acquire(dest)?;
 
-        // (2) Assemble the complete byte image with the shared encoder (header
-        // already populated) and write it into a temp file in the dest dir.
+        // (2) Assemble the complete byte image with the shared encoder.
         let bytes = build_reftx_bytes(&self.transcripts)?;
-        let mut tmp = tempfile::NamedTempFile::new_in(&dest_dir)
-            .with_context(|| format!("creating temp file in {:?}", dest_dir))?;
-        {
-            let file = tmp.as_file_mut();
-            file.write_all(&bytes)?;
-            // (3) Durability: force bytes+metadata to disk BEFORE publishing.
-            file.sync_all()?;
-        }
 
-        // (4) Atomically publish via rename(2) onto the destination.
-        tmp.persist(dest)
-            .map_err(|e| anyhow!("failed to atomically publish {:?}: {}", dest, e.error))?;
-
-        Ok(())
+        // (3) Atomic publish.
+        crate::store::atomic::atomic_write_bytes(dest, &bytes)
+            .with_context(|| format!("failed to atomically publish {:?}", dest))
     }
 }
 

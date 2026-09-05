@@ -2,8 +2,9 @@
 
 use super::*;
 use super::alias::AliasManager;
+use super::lock::{LockOptions, StoreLock};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::{Path, PathBuf};
 
@@ -26,12 +27,73 @@ use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::sync::{Arc, Mutex};
 
-/// Default capacity of the per-store open-file-descriptor cache used by the
-/// partial-read path. MUST stay well under typical OS fd limits (often 1024):
-/// stores can have huge sequence counts (e.g. ~122k for a transcriptome), so an
-/// unbounded cache would exhaust file descriptors. Mirrors seqrepo's
-/// `fd_cache_size`.
-const SEQ_FD_CACHE_CAP: usize = 256;
+/// Fallback capacity for the per-store open-file-descriptor cache, used when
+/// the process's soft `RLIMIT_NOFILE` cannot be read at all (non-unix
+/// targets, or the `getrlimit` syscall failing). Matches the old fixed cap
+/// this replaces.
+const SEQ_FD_CACHE_CAP_FLOOR: usize = 256;
+
+/// Ceiling for the adaptive fd-cache capacity. Even under a very high or
+/// unlimited `RLIMIT_NOFILE`, the cache stays bounded so its O(n) LRU eviction
+/// scan (see `FdCache::insert`) stays cheap and a single store instance does
+/// not gratuitously hold an unbounded number of fds open (a process may have
+/// several stores open at once, plus its own stdio/sockets/other files).
+const SEQ_FD_CACHE_CAP_CEILING: usize = 8192;
+
+/// Headroom subtracted from the soft `RLIMIT_NOFILE` when sizing the fd
+/// cache, reserved for the rest of the process (stdio, sockets, other open
+/// files, other store instances).
+const SEQ_FD_CACHE_HEADROOM: usize = 64;
+
+/// Capacity of the per-store open-file-descriptor cache used by the
+/// partial-read path, adapted to the process's soft `RLIMIT_NOFILE`.
+///
+/// The old fixed cap of 256 mirrored seqrepo's `fd_cache_size`, but a
+/// genome-scale refget store has tens of thousands of segment `.seq` files
+/// (e.g. ~52k for a human genome at typical segment sizes; a transcriptome
+/// store can have ~122k sequences). A scattered/genome-wide batch of queries
+/// touches far more than 256 distinct files, so the fixed cap thrashed:
+/// nearly every region evicted and reopened its file, costing an extra
+/// `openat`+`close` pair per region. Sizing the cache from the process's own
+/// fd limit lets it hold far more open handles when the ulimit allows it,
+/// while still leaving headroom and an upper bound so it can't exhaust fds or
+/// let LRU eviction get expensive.
+fn default_fd_cache_cap() -> usize {
+    #[cfg(unix)]
+    {
+        let mut rlim = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlim) } == 0 {
+            let soft = rlim.rlim_cur;
+            if soft == libc::RLIM_INFINITY {
+                // No real ceiling to respect; use our own bound.
+                return SEQ_FD_CACHE_CAP_CEILING;
+            }
+            let usable = (soft as usize).saturating_sub(SEQ_FD_CACHE_HEADROOM).max(1);
+            // Never size the cache above what the rlimit (minus headroom)
+            // actually allows, even when that is below the floor -- an
+            // unusually small ulimit must be respected, not overridden by a
+            // "typical minimum". Above the floor, cap at the ceiling.
+            return usable.min(SEQ_FD_CACHE_CAP_CEILING);
+        }
+    }
+    SEQ_FD_CACHE_CAP_FLOOR
+}
+
+/// True when `err` (as returned by [`ReadonlyRefgetStore::get_substring_from_disk`]
+/// / [`ReadonlyRefgetStore::get_cached_seq_file`]) is ultimately caused by the
+/// `.seq` file not existing, as opposed to some other failure (permission
+/// denied, a bad range, a genuine I/O error). Used to fall through to the
+/// remote fallback exactly on a missing file, replacing an upfront
+/// `path.exists()` stat with inspecting the result of an attempted open --
+/// the common case (file present) then costs no extra syscall at all, since
+/// the fd cache would have to open it anyway.
+fn is_missing_seq_file(err: &anyhow::Error) -> bool {
+    err.chain()
+        .any(|cause| matches!(cause.downcast_ref::<std::io::Error>(), Some(io_err) if io_err.kind() == std::io::ErrorKind::NotFound))
+}
 
 /// Batch size at which `get_substrings` against a *remote-only* sequence stops
 /// issuing one HTTP byte-range request per range and instead downloads the whole
@@ -289,6 +351,183 @@ pub struct ReadonlyRefgetStore {
     /// The relative path to the sequence index file (from rgstore.json),
     /// stored for deferred loading in remote stores.
     pub(crate) sequence_index_path: Option<String>,
+    /// What this handle has actually changed since its last successful commit.
+    /// See [`PendingChanges`]. Behind a `Mutex` because the commit path is
+    /// `&self`.
+    pub(crate) pending: Mutex<PendingChanges>,
+    /// A store-directory write lock held across several mutations, set by
+    /// [`Self::lock_for_batch`]. When present, individual commits skip acquiring
+    /// their own lock — otherwise a batch guard would deadlock against the
+    /// `write_index_files` each mutation triggers.
+    pub(crate) commit_lock: Option<Arc<StoreLock>>,
+    /// Timeout/staleness settings used when acquiring the store write lock.
+    pub(crate) lock_options: LockOptions,
+    /// Overwrite an alias already published on disk with a different target,
+    /// instead of erroring on the conflict. Off by default: two writers binding
+    /// one human-readable name to different content is a semantic conflict, not
+    /// a merge detail.
+    pub(crate) force_alias: bool,
+}
+
+/// What this handle has actually created, modified, or deleted since its last
+/// successful commit.
+///
+/// A store handle's in-memory maps hold two different things mixed together:
+/// rows it produced, and rows it merely LOADED so they could be read
+/// (`open_local` loads a stub for every collection in `collections.rgci`, and
+/// every row of `sequences.rgsi`). A commit that cannot tell those apart has to
+/// write the whole pile back — and the pile is an open-time snapshot, which on a
+/// long import is hours stale.
+///
+/// Recording changes explicitly is what makes a commit a DELTA: take the lock,
+/// re-read the index from disk, apply exactly these sets, publish. A row this
+/// handle never touched is never rewritten, so a concurrent writer's additions
+/// cannot be clobbered and its deletions cannot be resurrected.
+///
+/// In-memory only, never written to disk: this describes an intent that is fully
+/// discharged by the commit that applies it, and is cleared as soon as that
+/// commit succeeds. A handle dropped without committing abandons its pending
+/// changes — see [`ReadonlyRefgetStore::has_uncommitted_changes`].
+#[derive(Debug, Default, Clone)]
+pub struct PendingChanges {
+    /// Collection digests to publish into `collections.rgci`.
+    pub(crate) collections: HashSet<DigestKey>,
+    /// Sequence digests to publish into `sequences.rgsi`.
+    pub(crate) sequences: HashSet<DigestKey>,
+    /// `(kind, namespace, alias)` triples to publish into the alias TSVs.
+    pub(crate) aliases: HashSet<(AliasKind, String, String)>,
+    /// Collection digests to drop from `collections.rgci`.
+    pub(crate) removed_collections: HashSet<DigestKey>,
+    /// Sequence digests to drop from `sequences.rgsi`.
+    pub(crate) removed_sequences: HashSet<DigestKey>,
+    /// `(kind, namespace, alias)` triples to drop from the alias TSVs.
+    pub(crate) removed_aliases: HashSet<(AliasKind, String, String)>,
+    /// `(kind, namespace)` pairs this handle explicitly emptied. Recorded so the
+    /// commit visits the namespace at all; whether the TSV is actually deleted
+    /// depends on the MERGED result being empty, not on this handle's intent.
+    pub(crate) emptied_alias_namespaces: HashSet<(AliasKind, String)>,
+    /// Subset of `aliases` the caller asked to force: on commit these overwrite
+    /// a conflicting binding another writer already published, as if
+    /// `force_alias` were set for that one entry.
+    pub(crate) forced_aliases: HashSet<(AliasKind, String, String)>,
+}
+
+impl PendingChanges {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.collections.is_empty()
+            && self.sequences.is_empty()
+            && self.aliases.is_empty()
+            && self.removed_collections.is_empty()
+            && self.removed_sequences.is_empty()
+            && self.removed_aliases.is_empty()
+            && self.emptied_alias_namespaces.is_empty()
+    }
+
+    /// Record a collection this handle added. An add supersedes a pending
+    /// removal of the same digest (and vice versa), so the two sets stay
+    /// disjoint and the commit never has to guess which wins.
+    pub(crate) fn add_collection(&mut self, key: DigestKey) {
+        self.removed_collections.remove(&key);
+        self.collections.insert(key);
+    }
+
+    pub(crate) fn remove_collection(&mut self, key: DigestKey) {
+        self.collections.remove(&key);
+        self.removed_collections.insert(key);
+    }
+
+    pub(crate) fn add_sequence(&mut self, key: DigestKey) {
+        self.removed_sequences.remove(&key);
+        self.sequences.insert(key);
+    }
+
+    pub(crate) fn remove_sequence(&mut self, key: DigestKey) {
+        self.sequences.remove(&key);
+        self.removed_sequences.insert(key);
+    }
+
+    /// Drop sequences from the pending set WITHOUT recording a removal.
+    ///
+    /// For rows that were staged but never published — the failed-import
+    /// cleanup path. Recording a removal instead would be wrong: it would delete
+    /// an identical row another writer had legitimately published, since
+    /// sequence rows are content-addressed and therefore shared.
+    pub(crate) fn forget_sequences(&mut self, keys: &HashSet<DigestKey>) {
+        self.sequences.retain(|k| !keys.contains(k));
+    }
+
+    pub(crate) fn add_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        let entry = (kind, namespace.to_string(), alias.to_string());
+        self.removed_aliases.remove(&entry);
+        self.aliases.insert(entry);
+    }
+
+    pub(crate) fn add_forced_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        self.add_alias(kind, namespace, alias);
+        self.forced_aliases
+            .insert((kind, namespace.to_string(), alias.to_string()));
+    }
+
+    pub(crate) fn is_forced(&self, kind: AliasKind, namespace: &str, alias: &str) -> bool {
+        self.forced_aliases
+            .contains(&(kind, namespace.to_string(), alias.to_string()))
+    }
+
+    pub(crate) fn remove_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        let entry = (kind, namespace.to_string(), alias.to_string());
+        self.aliases.remove(&entry);
+        self.forced_aliases.remove(&entry);
+        self.removed_aliases.insert(entry);
+    }
+
+    /// Namespaces of one kind this handle has touched — the only ones a commit
+    /// needs to rewrite. Namespaces nobody changed are left alone on disk.
+    pub(crate) fn touched_alias_namespaces(&self, kind: AliasKind) -> HashSet<String> {
+        let mut out = HashSet::new();
+        for (k, ns, _) in self.aliases.iter().chain(self.removed_aliases.iter()) {
+            if *k == kind {
+                out.insert(ns.clone());
+            }
+        }
+        for (k, ns) in &self.emptied_alias_namespaces {
+            if *k == kind {
+                out.insert(ns.clone());
+            }
+        }
+        out
+    }
+
+    /// Drop exactly the changes a completed commit applied.
+    ///
+    /// Set difference, not `clear()`: another thread may have recorded a change
+    /// after the commit snapshotted, and that one still has to be applied.
+    pub(crate) fn clear_matching(&mut self, applied: &PendingChanges) {
+        self.collections.retain(|k| !applied.collections.contains(k));
+        self.sequences.retain(|k| !applied.sequences.contains(k));
+        self.aliases.retain(|k| !applied.aliases.contains(k));
+        self.forced_aliases.retain(|k| !applied.aliases.contains(k));
+        self.removed_collections
+            .retain(|k| !applied.removed_collections.contains(k));
+        self.removed_sequences
+            .retain(|k| !applied.removed_sequences.contains(k));
+        self.removed_aliases
+            .retain(|k| !applied.removed_aliases.contains(k));
+        self.emptied_alias_namespaces
+            .retain(|k| !applied.emptied_alias_namespaces.contains(k));
+    }
+
+    /// Drop the alias changes for one namespace, after the cheap
+    /// single-namespace commit path published it.
+    pub(crate) fn clear_alias_namespace(&mut self, kind: AliasKind, namespace: &str) {
+        self.aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.forced_aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.removed_aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.emptied_alias_namespaces
+            .retain(|(k, ns)| !(*k == kind && ns == namespace));
+    }
 }
 
 impl ReadonlyRefgetStore {
@@ -312,10 +551,77 @@ impl ReadonlyRefgetStore {
             fhr_metadata: HashMap::new(),
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
-            seq_fd_cache: Mutex::new(FdCache::new(SEQ_FD_CACHE_CAP)),
+            seq_fd_cache: Mutex::new(FdCache::new(default_fd_cache_cap())),
             sequence_index_loaded: true,
             sequence_index_path: None,
+            pending: Mutex::new(PendingChanges::default()),
+            commit_lock: None,
+            lock_options: LockOptions::default(),
+            force_alias: false,
         }
+    }
+
+    // =========================================================================
+    // Write locking
+    // =========================================================================
+
+    /// Hold the store's exclusive writer lock across several mutations.
+    ///
+    /// Individual mutations already commit under the lock, so this is only needed
+    /// when a sequence of them must be atomic with respect to other writers — the
+    /// registry's alias step, for instance, which adds many aliases and expects
+    /// them to appear together. The guard is dropped by
+    /// [`Self::release_batch_lock`] or when the store is dropped.
+    ///
+    /// Nested commits are re-entrant: they see the held guard and skip acquiring.
+    pub fn lock_for_batch(&mut self, operation: &str) -> Result<()> {
+        if self.commit_lock.is_some() {
+            return Ok(());
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .context("lock_for_batch requires a disk-backed store")?;
+        let lock = StoreLock::acquire(local_path, operation, self.lock_options.clone())?;
+        self.commit_lock = Some(Arc::new(lock));
+        Ok(())
+    }
+
+    /// Release a lock taken by [`Self::lock_for_batch`].
+    pub fn release_batch_lock(&mut self) {
+        self.commit_lock = None;
+    }
+
+    /// Whether this store currently holds a batch write lock.
+    pub fn holds_batch_lock(&self) -> bool {
+        self.commit_lock.is_some()
+    }
+
+    /// Whether this store has additions or removals that have not yet been
+    /// committed to the shared index files.
+    ///
+    /// Pending changes live only in memory, so dropping a store without
+    /// committing silently abandons them: added rows never reach
+    /// `sequences.rgsi`/`collections.rgci`, and removed rows are still on disk.
+    pub fn has_uncommitted_changes(&self) -> bool {
+        !self.pending.lock().unwrap().is_empty()
+    }
+
+    /// Record a change this handle made, so the next commit applies it to the
+    /// index it reads fresh from disk.
+    pub(crate) fn record<F: FnOnce(&mut PendingChanges)>(&self, f: F) {
+        f(&mut self.pending.lock().unwrap());
+    }
+
+    /// Override the timeout/staleness settings used when acquiring the write lock.
+    pub fn set_lock_options(&mut self, options: LockOptions) {
+        self.lock_options = options;
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published
+    /// under a different digest, instead of erroring on the conflict.
+    pub fn set_force_alias(&mut self, force: bool) {
+        self.force_alias = force;
     }
 
     /// Test-only: shrink the partial-read fd-cache to a tiny capacity so the
@@ -395,6 +701,27 @@ impl ReadonlyRefgetStore {
 
         create_dir_all(path.join("sequences"))?;
         create_dir_all(path.join("collections"))?;
+
+        // Materializing an in-memory store onto disk: EVERYTHING resident is a
+        // change, because none of it came from this directory. This is the one
+        // place where "write back the whole in-memory pile" is the correct
+        // commit, and it is correct precisely because nothing here was loaded.
+        {
+            let mut pending = self.pending.lock().unwrap();
+            for key in self.sequence_store.keys() {
+                pending.add_sequence(*key);
+            }
+            for key in self.collections.keys() {
+                pending.add_collection(*key);
+            }
+            for kind in [AliasKind::Sequence, AliasKind::Collection] {
+                for ns in self.aliases.namespaces_for(kind) {
+                    for alias in self.aliases.namespace_map(kind, &ns).keys() {
+                        pending.add_alias(kind, &ns, alias);
+                    }
+                }
+            }
+        }
 
         let keys: Vec<DigestKey> = self.sequence_store.keys().cloned().collect();
         for key in keys {
@@ -491,6 +818,7 @@ impl ReadonlyRefgetStore {
         }
 
         self.collections.insert(coll_digest, record);
+        self.record(|p| p.add_collection(coll_digest));
 
         for sequence_record in sequences {
             self.add_sequence(sequence_record, coll_digest, force)?;
@@ -508,24 +836,34 @@ impl ReadonlyRefgetStore {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
-        // CONTRACT: ingested sequence bytes are ASCII (the refget digest and the
-        // on-the-fly decode paths assume one byte == one residue). Enforced in
-        // debug builds only to keep the ingestion hot path allocation/branch
-        // free in release.
+        // CONTRACT: ingested sequence bytes are ASCII (one byte == one residue),
+        // OR, for an Encoded-mode store, already packed to the alphabet's
+        // bits-per-symbol encoded size. Enforced in debug builds only to keep
+        // the ingestion hot path allocation/branch free in release.
         debug_assert!(
             match &sr {
-                SequenceRecord::Full { sequence, .. } => sequence.is_ascii(),
+                SequenceRecord::Full { metadata, sequence } => {
+                    sequence.is_ascii()
+                        || (self.mode == StorageMode::Encoded && {
+                            let bps = lookup_alphabet(&metadata.alphabet).bits_per_symbol;
+                            sequence.len() == metadata.length.saturating_mul(bps).div_ceil(8)
+                        })
+                }
                 SequenceRecord::Stub(_) => true,
             },
-            "add_sequence_record: sequence bytes must be ASCII"
+            "add_sequence_record: sequence bytes must be ASCII, or packed to the alphabet's encoded size in an Encoded-mode store"
         );
 
+        // A dedup hit records NOTHING: the row is already in memory, which for a
+        // disk-backed store means it is already in `sequences.rgsi`. Re-asserting
+        // it would put a row this handle did not produce back into the delta.
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(());
         }
 
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
             match &sr {
@@ -565,12 +903,15 @@ impl ReadonlyRefgetStore {
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
+        // Dedup hit: nothing inserted, so nothing to record. See
+        // [`Self::add_sequence_record`].
         if !force && self.sequence_store.contains_key(&key) {
             return Ok(None);
         }
 
         self.md5_lookup
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
+        self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
             match sr {
@@ -622,15 +963,23 @@ impl ReadonlyRefgetStore {
         self.sequence_store.values().map(|rec| rec.metadata())
     }
 
-    /// Calculate the total disk size of all sequences in the store
-    pub fn total_disk_size(&self) -> usize {
+    /// Logical size in bytes of all sequence *payloads*, computed from metadata
+    /// (length x storage mode). Cheap: O(n_sequences) arithmetic, no I/O, no walk,
+    /// works on stubs. Does NOT include index files, sidecars, or rgstore.json.
+    /// This is the value cached in the manifest at write time (see write path); for
+    /// the exact full on-disk footprint use `actual_disk_usage()` (walks the dir).
+    pub fn logical_sequence_bytes(&self) -> usize {
         self.sequence_store
             .values()
             .map(|rec| rec.metadata().disk_size(&self.mode))
             .sum()
     }
 
-    /// Returns the actual disk usage of the store directory.
+    /// Exact on-disk footprint of the store: recursively walks the store directory
+    /// and sums every file's byte length (`.seq` data, `.rgsi`/`.rgci` indexes, FHR
+    /// sidecars, alias data, `rgstore.json`). Accurate and complete, but does I/O on
+    /// every call. Use this when an exact footprint is needed; for the cheap cached
+    /// sequence-content size use `logical_sequence_bytes()`.
     pub fn actual_disk_usage(&self) -> usize {
         let Some(path) = &self.local_path else {
             return 0;
@@ -709,6 +1058,20 @@ impl ReadonlyRefgetStore {
         self.collections.get(&key).map(|record| record.metadata())
     }
 
+    /// Per-collection sequence metadata (name, description, digest) in FASTA
+    /// order. This is the source of truth for names/headers; the global
+    /// `sequence_store` record only labels the shared bytes.
+    pub(crate) fn collection_sequence_metadata(&self, key: &DigestKey) -> Result<&[SequenceRecord]> {
+        match self.collections.get(key) {
+            Some(SequenceCollectionRecord::Full { sequences, .. }) => Ok(sequences),
+            Some(SequenceCollectionRecord::Stub(_)) => Err(anyhow!(
+                "Collection {} not loaded. Call load_collection() first.",
+                key_to_digest_string(key)
+            )),
+            None => Err(anyhow!("Collection not found: {}", key_to_digest_string(key))),
+        }
+    }
+
     /// Get a collection with all its sequences loaded.
     pub fn get_collection(&self, collection_digest: &str) -> Result<crate::digest::SequenceCollection> {
         let key = collection_digest.to_key();
@@ -727,36 +1090,35 @@ impl ReadonlyRefgetStore {
             .metadata()
             .clone();
 
-        // Iterate name_lookup for (name, digest) pairs so each record gets the
-        // correct per-collection name, not the last-written global name.
+        // Iterate the collection's own per-sequence records so each result carries
+        // the per-collection name AND description, not the first-imported global
+        // label of a sequence shared across collections. Only the bytes (and `fai`,
+        // if the collection record lacks it) come from the global store.
         let sequences: Vec<SequenceRecord> = self
-            .name_lookup
-            .get(&key)
-            .map(|name_map| {
-                name_map
-                    .iter()
-                    .map(|(name, seq_key)| {
-                        let record = self.sequence_store.get(seq_key).ok_or_else(|| {
-                            anyhow!(
-                                "Sequence {} not found in store for collection {}",
-                                key_to_digest_string(seq_key),
-                                collection_digest,
-                            )
-                        })?;
-                        let mut meta = record.metadata().clone();
-                        meta.name = name.clone();
-                        Ok(match record.sequence_arc() {
-                            Some(seq) => SequenceRecord::Full {
-                                metadata: meta,
-                                sequence: seq,
-                            },
-                            None => SequenceRecord::Stub(meta),
-                        })
-                    })
-                    .collect::<Result<Vec<_>>>()
+            .collection_sequence_metadata(&key)?
+            .iter()
+            .map(|coll_record| {
+                let mut meta = coll_record.metadata().clone();
+                let seq_key = meta.sha512t24u.to_key();
+                let global = self.sequence_store.get(&seq_key).ok_or_else(|| {
+                    anyhow!(
+                        "Sequence {} not found in store for collection {}",
+                        key_to_digest_string(&seq_key),
+                        collection_digest,
+                    )
+                })?;
+                if meta.fai.is_none() {
+                    meta.fai = global.metadata().fai.clone();
+                }
+                Ok(match global.sequence_arc() {
+                    Some(seq) => SequenceRecord::Full {
+                        metadata: meta,
+                        sequence: seq,
+                    },
+                    None => SequenceRecord::Stub(meta),
+                })
             })
-            .transpose()?
-            .unwrap_or_default();
+            .collect::<Result<Vec<_>>>()?;
 
         Ok(crate::digest::SequenceCollection {
             metadata,
@@ -764,7 +1126,87 @@ impl ReadonlyRefgetStore {
         })
     }
 
+    /// Dry-run of [`Self::remove_collection`]'s orphan cleanup: the sequence
+    /// digests that WOULD be deleted, without touching anything.
+    ///
+    /// Uses the same disk-derived live set as the real thing, so it fails with the
+    /// same error if the store is not in a state where orphan GC is safe.
+    ///
+    /// # Advisory, by design
+    ///
+    /// This takes NO lock. It exists for confirmation prompts ("this will free
+    /// 21 sequences, proceed?"), where blocking every concurrent writer for the
+    /// length of a full-store scan to answer a question the user may say no to
+    /// would be absurd. The authoritative scan runs again inside
+    /// `remove_collection`, under the lock, and the two can legitimately differ:
+    /// a collection committed in between makes some planned orphan live again,
+    /// and the real removal will correctly spare it. Callers comparing the two
+    /// should treat a shortfall as normal concurrency, not corruption.
+    pub fn plan_orphan_removal(&self, digest: &str) -> Result<Vec<String>> {
+        let key = digest.to_key();
+        let candidates = self.orphan_candidates(digest)?;
+        let live = self.live_sequence_set(&key)?;
+        Ok(candidates
+            .into_iter()
+            .filter(|k| !live.contains(k))
+            .map(|k| key_to_digest_string(&k))
+            .collect())
+    }
+
+    /// Sequence digests belonging to the collection being removed.
+    fn orphan_candidates(&self, digest: &str) -> Result<Vec<DigestKey>> {
+        if self.local_path.is_some() {
+            self.collection_sequence_digests(digest)
+        } else {
+            Ok(self
+                .name_lookup
+                .get(&digest.to_key())
+                .map(|name_map| name_map.values().cloned().collect())
+                .unwrap_or_default())
+        }
+    }
+
+    /// Sequence digests still referenced by some OTHER collection.
+    ///
+    /// Disk-backed stores derive this from disk. Only a pure in-memory store
+    /// (`local_path == None`) falls back to `name_lookup` — there, the in-memory
+    /// maps are all there is, so they are authoritative rather than incidental.
+    fn live_sequence_set(&self, exclude: &DigestKey) -> Result<HashSet<DigestKey>> {
+        if self.local_path.is_some() {
+            return self.live_sequence_digests_from_disk(exclude);
+        }
+        let mut live = HashSet::new();
+        for (key, name_map) in &self.name_lookup {
+            if key == exclude {
+                continue;
+            }
+            live.extend(name_map.values().copied());
+        }
+        Ok(live)
+    }
+
     /// Remove a collection from the store.
+    ///
+    /// When `remove_orphan_sequences` is true, the orphan-cleanup path is
+    /// O(sequences + collections): `md5_lookup` is scanned exactly once, not
+    /// once per orphan. Do not reintroduce a per-orphan scan here — on large
+    /// stores that is quadratic and effectively unbounded.
+    ///
+    /// The live set is derived from DISK, not from `name_lookup` — see
+    /// [`Self::live_sequence_digests_from_disk`] for why that distinction is the
+    /// difference between a GC and a data-loss bug.
+    ///
+    /// # The lock is held across the orphan scan, deliberately
+    ///
+    /// The scan is the expensive part — on the plantref store (147 collections,
+    /// ~1.5M sequence digests) it reads every `collections/*.rgsi` and takes
+    /// roughly a minute. Everywhere else in this module the rule is "do the
+    /// expensive work outside the lock"; here that rule is wrong. Computing the
+    /// live set before taking the lock leaves a window in which another writer
+    /// commits a collection referencing one of the digests the scan just
+    /// classified as an orphan, and the unlink that follows deletes live data.
+    /// Removals are rare and hand-run, so blocking concurrent builds for a
+    /// minute is the cheap side of that trade.
     pub fn remove_collection(
         &mut self,
         digest: &str,
@@ -772,76 +1214,171 @@ impl ReadonlyRefgetStore {
     ) -> Result<bool> {
         let key = digest.to_key();
 
-        if self.collections.remove(&key).is_none() {
+        if !self.collections.contains_key(&key) {
             return Ok(false);
         }
 
-        let orphan_candidates: Vec<DigestKey> = self
-            .name_lookup
-            .get(&key)
-            .map(|name_map| name_map.values().cloned().collect())
-            .unwrap_or_default();
+        // Take the lock BEFORE the orphan scan and hold it through the scan, the
+        // index commit, and the unlinks. All three have to see the same store: a
+        // collection another writer adds in between would make an "orphan" live
+        // again, and we would unlink it anyway. The nested `write_index_files`
+        // sees the guard and does not re-acquire.
+        let acquired = self.acquire_commit_lock("remove_collection")?;
+        let restore = match acquired {
+            Some(lock) => {
+                let previous = self.commit_lock.replace(Arc::new(lock));
+                Some(previous)
+            }
+            // Already inside a caller's `lock_for_batch`; leave it alone.
+            None => None,
+        };
 
+        let result = self.remove_collection_locked(digest, key, remove_orphan_sequences);
+
+        if let Some(previous) = restore {
+            self.commit_lock = previous;
+        }
+        result
+    }
+
+    fn remove_collection_locked(
+        &mut self,
+        digest: &str,
+        key: DigestKey,
+        remove_orphan_sequences: bool,
+    ) -> Result<bool> {
+        // Compute both sets BEFORE mutating anything: the candidates come from
+        // the collection's own `.rgsi`, which the cleanup below unlinks.
+        let orphan_candidates: Vec<DigestKey> = if remove_orphan_sequences {
+            self.orphan_candidates(digest)?
+        } else {
+            Vec::new()
+        };
+        let still_referenced: HashSet<DigestKey> = if remove_orphan_sequences {
+            self.live_sequence_set(&key)?
+        } else {
+            HashSet::new()
+        };
+
+        self.collections.remove(&key);
         self.name_lookup.remove(&key);
         self.fhr_metadata.remove(&key);
+        self.record(|p| p.remove_collection(key));
 
-        // Remove collection aliases pointing to this digest
-        let alias_pairs = self.aliases.reverse_lookup_collection(digest);
-        let affected_namespaces: std::collections::HashSet<String> = alias_pairs
-            .iter()
-            .map(|(ns, _)| ns.clone())
-            .collect();
-        for (ns, alias) in &alias_pairs {
-            self.aliases.remove_collection(ns, alias);
-        }
-        for ns in &affected_namespaces {
-            self.persist_alias_namespace(AliasKind::Collection, ns)?;
-        }
-
-        if remove_orphan_sequences && !orphan_candidates.is_empty() {
-            let mut still_referenced: std::collections::HashSet<DigestKey> =
-                std::collections::HashSet::new();
-            for name_map in self.name_lookup.values() {
-                for seq_key in name_map.values() {
-                    still_referenced.insert(*seq_key);
-                }
-            }
-
-            let orphans: Vec<DigestKey> = orphan_candidates
-                .into_iter()
-                .filter(|k| !still_referenced.contains(k))
-                .collect();
-
-            for orphan_key in &orphans {
-                self.sequence_store.remove(orphan_key);
-                self.md5_lookup.retain(|_, v| v != orphan_key);
-            }
-
-            if self.persist_to_disk {
-                if let (Some(local_path), Some(template)) =
-                    (&self.local_path, &self.seqdata_path_template)
-                {
-                    for orphan_key in &orphans {
-                        let orphan_digest = key_to_digest_string(orphan_key);
-                        let seq_file_path = Self::expand_template(&orphan_digest, template);
-                        let full_path = local_path.join(&seq_file_path);
-                        let _ = fs::remove_file(&full_path);
-                        if let Some(parent) = full_path.parent() {
-                            let _ = fs::remove_dir(parent);
+        // Remove collection aliases pointing to this digest. The in-memory
+        // alias table is an open-time snapshot; an alias another process
+        // published for this collection since then is only on disk, and
+        // leaving it behind makes it resolve to nothing. Under the lock, also
+        // scan the published TSVs for every entry targeting this digest.
+        let mut alias_pairs = self.aliases.reverse_lookup_collection(digest);
+        if self.persist_to_disk {
+            if let Some(local_path) = &self.local_path {
+                let dir = local_path.join("aliases").join(AliasKind::Collection.subdir());
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.extension().map_or(true, |e| e != "tsv") {
+                            continue;
+                        }
+                        let Some(ns) = path.file_stem().and_then(|s| s.to_str()) else {
+                            continue;
+                        };
+                        for (alias, target) in super::persistence::read_alias_tsv(&path)? {
+                            if target == key {
+                                alias_pairs.push((ns.to_string(), alias));
+                            }
                         }
                     }
                 }
             }
         }
+        alias_pairs.sort();
+        alias_pairs.dedup();
+        let affected_namespaces: HashSet<String> = alias_pairs
+            .iter()
+            .map(|(ns, _)| ns.clone())
+            .collect();
+        for (ns, alias) in &alias_pairs {
+            self.aliases.remove_collection(ns, alias);
+            self.record_alias_removal(AliasKind::Collection, ns, alias);
+        }
+        for ns in &affected_namespaces {
+            self.persist_alias_namespace(AliasKind::Collection, ns)?;
+        }
 
+        // Which sequences to unlink, decided under the lock from the live set
+        // computed under the same lock.
+        let orphans: Vec<DigestKey> = if remove_orphan_sequences {
+            orphan_candidates
+                .into_iter()
+                .filter(|k| !still_referenced.contains(k))
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        if !orphans.is_empty() {
+            {
+                let mut pending = self.pending.lock().unwrap();
+                for orphan_key in &orphans {
+                    pending.remove_sequence(*orphan_key);
+                }
+            }
+
+            for orphan_key in &orphans {
+                self.sequence_store.remove(orphan_key);
+            }
+
+            // Single pass over md5_lookup instead of one full scan per orphan.
+            // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
+            let orphan_set: std::collections::HashSet<DigestKey> =
+                orphans.iter().copied().collect();
+            self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
+        }
+
+        // INDEX FIRST, FILES SECOND. Both orderings can be interrupted by a
+        // crash; only one of the two resulting states is recoverable. Rows gone,
+        // files present is garbage on disk that a later GC can reclaim. Rows
+        // present, files gone is a store that lies: `get_substring` raises,
+        // `get_collection` cannot open its sequences, and an alias resolves to a
+        // collection that no longer exists. That second state is exactly what the
+        // pre-delta implementation produced.
         if self.persist_to_disk {
+            self.write_index_files()?;
+
+            if let (Some(local_path), Some(template)) =
+                (self.local_path.clone(), self.seqdata_path_template.clone())
+            {
+                // Collect parent shard dirs while unlinking, then rmdir them
+                // ONCE at the end. Do NOT move the rmdir back into this loop:
+                // `.seq` files are sharded over ~4096 two-char prefix dirs, so
+                // a per-file rmdir issues N syscalls (nearly all failing with
+                // ENOTEMPTY) to remove at most ~4096 dirs -- roughly doubling
+                // syscall count in a loop that is filesystem-metadata bound.
+                // The rmdir pass must run AFTER all unlinks, or dirs that only
+                // become empty later would be skipped.
+                let mut parent_dirs: std::collections::HashSet<PathBuf> =
+                    std::collections::HashSet::new();
+                for orphan_key in &orphans {
+                    let orphan_digest = key_to_digest_string(orphan_key);
+                    let seq_file_path = Self::expand_template(&orphan_digest, &template);
+                    let full_path = local_path.join(&seq_file_path);
+                    let _ = fs::remove_file(&full_path);
+                    if let Some(parent) = full_path.parent() {
+                        parent_dirs.insert(parent.to_path_buf());
+                    }
+                }
+                for parent in &parent_dirs {
+                    let _ = fs::remove_dir(parent); // ignore if non-empty
+                }
+            }
+
             if let Some(local_path) = &self.local_path {
                 let rgsi_path = local_path.join(format!("collections/{}.rgsi", digest));
                 let _ = fs::remove_file(&rgsi_path);
                 let fhr_path = local_path.join(format!("fhr/{}.fhr.json", digest));
                 let _ = fs::remove_file(&fhr_path);
             }
-            self.write_index_files()?;
         }
 
         Ok(true)
@@ -856,9 +1393,18 @@ impl ReadonlyRefgetStore {
     /// received an `End` message (and was therefore never added to
     /// `self.collections`).  Those sequences are orphans — they have no
     /// owning collection — and this method removes them so the store stays
-    /// internally consistent. The operation is O(sequences + collections).
+    /// internally consistent. The operation is O(sequences + collections):
+    /// `md5_lookup` is scanned exactly once, not once per orphan.
     ///
     /// Sequences shared with a successfully-finalized collection are preserved.
+    ///
+    /// Only sequences THIS import staged (still pending, never committed) are
+    /// candidates. Anything already in the on-disk index is out of bounds:
+    /// `open_local` loads every global sequence stub but leaves `name_lookup`
+    /// empty for stub collections, so "in `sequence_store` but not in
+    /// `name_lookup`" describes the entire pre-existing store, not an orphan.
+    /// Deriving candidates from that would unlink every published `.seq` file
+    /// after one failed import into a reopened store.
     #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
     pub(crate) fn remove_orphan_seq_files(&mut self) {
         // Build the set of all sequence digest keys that are referenced by at
@@ -871,12 +1417,20 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        // Collect the orphan keys (present in sequence_store but not referenced).
-        let orphans: Vec<DigestKey> = self
-            .sequence_store
-            .keys()
-            .filter(|k| !referenced.contains(*k))
+        // Candidates: staged by this handle and not yet published.
+        let staged: Vec<DigestKey> = self
+            .pending
+            .lock()
+            .unwrap()
+            .sequences
+            .iter()
             .copied()
+            .collect();
+
+        // Collect the orphan keys (staged but not referenced).
+        let orphans: Vec<DigestKey> = staged
+            .into_iter()
+            .filter(|k| !referenced.contains(k))
             .collect();
 
         if orphans.is_empty() {
@@ -886,22 +1440,46 @@ impl ReadonlyRefgetStore {
         // Remove from in-memory structures.
         for key in &orphans {
             self.sequence_store.remove(key);
-            self.md5_lookup.retain(|_, v| v != key);
         }
+
+        // Single pass over md5_lookup instead of one full scan per orphan.
+        // md5_lookup maps md5 key -> sha512 key, so we filter on the VALUE.
+        let orphan_set: std::collections::HashSet<DigestKey> = orphans.iter().copied().collect();
+        self.md5_lookup.retain(|_, v| !orphan_set.contains(v));
+
+        // FORGET these, do not tombstone them. They were staged by an import
+        // that failed before its single commit, so no row of ours was ever
+        // published; recording a removal would delete the identical row a
+        // different writer legitimately published, since sequence rows are
+        // content-addressed and therefore shared between collections.
+        self.record(|p| p.forget_sequences(&orphan_set));
 
         // Best-effort remove on-disk `.seq` files.
         if self.persist_to_disk {
             if let (Some(local_path), Some(template)) =
                 (&self.local_path, &self.seqdata_path_template)
             {
+                // Collect parent shard dirs while unlinking, then rmdir them ONCE
+                // at the end. Do NOT move the rmdir back into this loop: `.seq`
+                // files are sharded over ~4096 two-char prefix dirs, so a per-file
+                // rmdir issues N syscalls (nearly all failing with ENOTEMPTY) to
+                // remove at most ~4096 dirs -- roughly doubling syscall count in a
+                // loop that is filesystem-metadata bound. The rmdir pass must run
+                // AFTER all unlinks, or dirs that only become empty later would be
+                // skipped.
+                let mut parent_dirs: std::collections::HashSet<PathBuf> =
+                    std::collections::HashSet::new();
                 for key in &orphans {
                     let digest_str = key_to_digest_string(key);
                     let rel = Self::expand_template(&digest_str, template);
                     let full = local_path.join(&rel);
                     let _ = fs::remove_file(&full);
                     if let Some(parent) = full.parent() {
-                        let _ = fs::remove_dir(parent); // ignore if non-empty
+                        parent_dirs.insert(parent.to_path_buf());
                     }
+                }
+                for parent in &parent_dirs {
+                    let _ = fs::remove_dir(parent); // ignore if non-empty
                 }
             }
         }
@@ -1051,6 +1629,7 @@ impl ReadonlyRefgetStore {
             sequences: stub_sequences,
         };
         self.collections.insert(coll_key, record);
+        self.record(|p| p.add_collection(coll_key));
 
         // Register sequences and populate name_lookup
         let mut name_map = IndexMap::new();
@@ -1066,6 +1645,7 @@ impl ReadonlyRefgetStore {
                     .insert(seq_key, SequenceRecord::Stub(seq_meta.clone()));
                 self.md5_lookup
                     .insert(seq_meta.md5.to_key(), seq_key);
+                self.record(|p| p.add_sequence(seq_key));
             }
         }
         self.name_lookup.insert(coll_key, name_map);
@@ -1146,11 +1726,16 @@ impl ReadonlyRefgetStore {
     }
 
     /// Get a sequence by collection digest and name.
+    ///
+    /// The returned record carries THIS collection's name and description for
+    /// the sequence, not the first-imported label of a sequence shared across
+    /// collections. Bytes (and `fai`, if the collection record lacks it) come
+    /// from the global store; the clone is an `Arc` bump, not a copy of the bases.
     pub fn get_sequence_by_name<K: AsRef<[u8]>>(
         &self,
         collection_digest: K,
         sequence_name: &str,
-    ) -> Result<&SequenceRecord> {
+    ) -> Result<SequenceRecord> {
         let collection_key = collection_digest.to_key();
 
         if !self.name_lookup.contains_key(&collection_key) {
@@ -1163,11 +1748,27 @@ impl ReadonlyRefgetStore {
             .and_then(|name_map| name_map.get(sequence_name).cloned())
             .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
 
-        let record = self.sequence_store.get(&digest_key).ok_or_else(|| {
+        let coll_record = self
+            .collection_sequence_metadata(&collection_key)?
+            .iter()
+            .find(|r| r.metadata().sha512t24u.to_key() == digest_key)
+            .ok_or_else(|| anyhow!("Sequence '{}' not found in collection", sequence_name))?;
+
+        let mut meta = coll_record.metadata().clone();
+        let global = self.sequence_store.get(&digest_key).ok_or_else(|| {
             anyhow!("Sequence record not found for '{}'. Call load_sequence() first.", sequence_name)
         })?;
+        if meta.fai.is_none() {
+            meta.fai = global.metadata().fai.clone();
+        }
 
-        Ok(record)
+        Ok(match global.sequence_arc() {
+            Some(seq) => SequenceRecord::Full {
+                metadata: meta,
+                sequence: seq,
+            },
+            None => SequenceRecord::Stub(meta),
+        })
     }
 
     // =========================================================================
@@ -1332,13 +1933,18 @@ impl ReadonlyRefgetStore {
             SequenceRecord::Stub(meta) => {
                 // Partial-read resolution for a non-resident sequence:
                 //   local `.seq` (if present) -> remote byte-range (if configured).
-                // A missing local file falls through to the remote fallback
-                // rather than erroring.
-                if self.seqdata_path_template.is_some() {
-                    if let Some(path) = self.sequence_file_path(&meta.sha512t24u) {
-                        if path.exists() {
-                            return self.get_substring_from_disk(meta, start, end);
-                        }
+                // Attempt the disk read directly rather than `path.exists()`-ing
+                // first: the fd cache already amortizes opens across queries, so
+                // the pre-check was a pure-overhead `statx` on the overwhelmingly
+                // common case (the file exists). A missing local file still
+                // falls through to the remote fallback rather than erroring --
+                // detected from the open failing with `NotFound`, not from a
+                // stat beforehand.
+                if self.local_path.is_some() && self.seqdata_path_template.is_some() {
+                    match self.get_substring_from_disk(meta, start, end) {
+                        Ok(s) => return Ok(s),
+                        Err(e) if is_missing_seq_file(&e) => {} // fall through to remote below
+                        Err(e) => return Err(e),
                     }
                 }
                 if self.remote_source.is_some() {
@@ -1455,17 +2061,46 @@ impl ReadonlyRefgetStore {
             }
             SequenceRecord::Stub(meta) => {
                 // Resolve once for the whole batch: local `.seq` (if present) ->
-                // remote byte-range (if configured). A missing local file falls
-                // through to the remote fallback rather than erroring.
-                let local_seq_exists = self.seqdata_path_template.is_some()
+                // remote byte-range (if configured). Whether the local file
+                // exists is determined lazily below from an actual open/read
+                // attempt rather than a `path.exists()` stat here -- the fd
+                // cache already amortizes opens, so pre-checking existence is
+                // pure overhead on the common (file present) case. A missing
+                // local file still falls through to the remote fallback rather
+                // than erroring.
+                let has_local_path = self.local_path.is_some() && self.seqdata_path_template.is_some();
+                let has_remote = self.remote_source.is_some();
+                if !has_local_path && !has_remote {
+                    return Err(anyhow!("Sequence data not loaded (stub only)"));
+                }
+
+                // No remote fallback configured: there is nothing to branch on,
+                // so read every range straight from disk without ever stat-ing
+                // for existence -- an open failure has nowhere else to fall
+                // back to anyway and simply propagates. This is the common path
+                // for local (non-remote) batch extraction.
+                if !has_remote {
+                    let mut out = Vec::with_capacity(ranges.len());
+                    for &(start, end) in ranges {
+                        if start == end {
+                            out.push(String::new());
+                        } else {
+                            out.push(self.get_substring_from_disk(meta, start, end)?);
+                        }
+                    }
+                    return Ok(out);
+                }
+
+                // A remote fallback exists, so we do need to know up front
+                // whether the file is already cached locally in order to pick
+                // between the on-disk and (possibly bulk-downloaded) remote
+                // path below. This stat is paid once per batch call for this
+                // sequence, not once per range.
+                let local_seq_exists = has_local_path
                     && self
                         .sequence_file_path(&meta.sha512t24u)
                         .map(|p| p.exists())
                         .unwrap_or(false);
-                let has_remote = self.remote_source.is_some();
-                if !local_seq_exists && !has_remote {
-                    return Err(anyhow!("Sequence data not loaded (stub only)"));
-                }
 
                 // Bulk remote extraction: one HTTP round-trip per range is slow
                 // for large batches. Past REMOTE_BULK_FETCH_THRESHOLD, download and
@@ -1473,7 +2108,6 @@ impl ReadonlyRefgetStore {
                 // template to write into), then read every range from the local
                 // file. Single / small-batch reads fall through to pure byte-range.
                 if !local_seq_exists
-                    && has_remote
                     && self.local_path.is_some()
                     && self.seqdata_path_template.is_some()
                     && ranges.len() >= REMOTE_BULK_FETCH_THRESHOLD
@@ -2194,16 +2828,19 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
-    /// Returns statistics about the store
+    /// Returns statistics about the store.
+    ///
+    /// The `*_in_memory` fields are a RAM-residency snapshot, not a record of
+    /// what any import run did; see [`StoreStats`].
     pub fn stats(&self) -> StoreStats {
         let n_sequences = self.sequence_store.len();
-        let n_sequences_loaded = self
+        let n_sequences_in_memory = self
             .sequence_store
             .values()
             .filter(|record| record.is_loaded())
             .count();
         let n_collections = self.collections.len();
-        let n_collections_loaded = self
+        let n_collections_in_memory = self
             .collections
             .values()
             .filter(|record| record.has_sequences())
@@ -2214,10 +2851,11 @@ impl ReadonlyRefgetStore {
         };
         StoreStats {
             n_sequences,
-            n_sequences_loaded,
+            n_sequences_in_memory,
             n_collections,
-            n_collections_loaded,
+            n_collections_in_memory,
             storage_mode: mode_str.to_string(),
+            logical_sequence_bytes: self.logical_sequence_bytes() as u64,
         }
     }
 
@@ -2232,7 +2870,7 @@ impl ReadonlyRefgetStore {
 
 impl Display for ReadonlyRefgetStore {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let total_size = self.total_disk_size();
+        let total_size = self.logical_sequence_bytes();
         let size_str = format_bytes(total_size);
         writeln!(f, "ReadonlyRefgetStore object:")?;
         writeln!(f, "  Mode: {:?}", self.mode)?;

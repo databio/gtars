@@ -108,22 +108,29 @@ class TestRefget:
     def test_store_import_multiple_fastas_list(self):
         """Import several FASTAs at once via an explicit list."""
         store = RefgetStore.in_memory()
-        results = store.add_sequence_collections_from_fastas(
+        report = store.add_sequence_collections_from_fastas(
             ["../tests/data/fasta/base.fa", "../tests/data/fasta/different_order.fa"],
             jobs=1,
         )
-        assert len(results) == 2
-        for meta, was_new in results:
+        assert len(report.collections) == 2
+        for meta, was_new in report.collections:
             assert hasattr(meta, "digest")
             assert isinstance(was_new, bool)
+
+        # Per-run ingest counters (not the RAM-residency numbers from stats()).
+        assert report.n_collections_new == 2
+        assert report.n_sequences_written > 0
+        assert report.n_sequences_written + report.n_sequences_deduped == sum(
+            meta.n_sequences for meta, _ in report.collections
+        )
 
     def test_store_import_multiple_fastas_glob(self):
         """Glob form expands to lexicographically sorted, deterministic order."""
         store = RefgetStore.in_memory()
-        results = store.add_sequence_collections_from_fastas(
+        report = store.add_sequence_collections_from_fastas(
             "../tests/data/fasta/*.fa.gz"
         )
-        assert len(results) >= 1
+        assert len(report.collections) >= 1
 
     def test_store_import_multiple_fastas_file_list(self):
         """file_list (fofn) form, with blank lines and comments ignored."""
@@ -134,8 +141,8 @@ class TestRefget:
             f.write("  ../tests/data/fasta/different_order.fa  \n")
             fofn = f.name
         try:
-            results = store.add_sequence_collections_from_fastas([], file_list=fofn)
-            assert len(results) == 2
+            report = store.add_sequence_collections_from_fastas([], file_list=fofn)
+            assert len(report.collections) == 2
         finally:
             os.unlink(fofn)
 

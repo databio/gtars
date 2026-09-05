@@ -9,6 +9,7 @@ use crate::digest::types::{
 use crate::digest::{AlphabetType, md5, sha512t24u};
 use crate::hashkeyable::{DigestKey, HashKeyable};
 use std::fs;
+use std::path::PathBuf;
 use tempfile::tempdir;
 
 // =========================================================================
@@ -848,7 +849,8 @@ GGGGAAAACCCCTTTTGGGGAAAACCCCTTTTGGGG
         let seq1 = store.get_sequence_by_name(&collection_digest, name1);
         assert!(seq1.is_ok());
 
-        let seq1_meta = seq1.unwrap().metadata();
+        let seq1_record = seq1.unwrap();
+        let seq1_meta = seq1_record.metadata();
         assert_eq!(seq1_meta.name, "JAHKSE010000016.1");
         assert_eq!(
             seq1_meta.description,
@@ -919,7 +921,7 @@ fn test_disk_size_calculation() {
         .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa.gz", FastaImportOptions::new())
         .unwrap();
 
-    let disk_size = store.total_disk_size();
+    let disk_size = store.logical_sequence_bytes();
     assert!(disk_size > 0);
 
     let manual: usize = store
@@ -1022,7 +1024,7 @@ fn test_collection_metadata_methods() {
 
     let stats = store.stats();
     assert_eq!(stats.n_collections, 1);
-    assert_eq!(stats.n_collections_loaded, 1);
+    assert_eq!(stats.n_collections_in_memory, 1);
     assert_eq!(stats.n_sequences, 3);
 }
 
@@ -1049,7 +1051,7 @@ fn test_collection_explicit_loading() {
 
     let stats_before = loaded_store.stats();
     assert_eq!(stats_before.n_collections, 1);
-    assert_eq!(stats_before.n_collections_loaded, 0);
+    assert_eq!(stats_before.n_collections_in_memory, 0);
 
     let seq = loaded_store.get_sequence_by_name(&digest, "chr1");
     assert!(seq.is_err());
@@ -1063,7 +1065,7 @@ fn test_collection_explicit_loading() {
     assert!(loaded_store.is_collection_loaded(&digest));
 
     let stats_after = loaded_store.stats();
-    assert_eq!(stats_after.n_collections_loaded, 1);
+    assert_eq!(stats_after.n_collections_in_memory, 1);
 }
 
 #[test]
@@ -1096,8 +1098,12 @@ fn test_get_collection() {
     assert_eq!(collection.sequences.len(), 3);
 
     let stats_after = loaded_store.stats();
-    assert_eq!(stats_after.n_sequences_loaded, 0);
-    assert_eq!(stats_after.n_collections_loaded, 1);
+    // RESIDENCY INVARIANT: on a disk-backed store no sequence bytes are ever
+    // held in RAM by loading a collection — records are Stubs. This is 0 even
+    // right after an import, which is why the field is named `_in_memory` and
+    // not `_loaded`: it is not an ingest counter.
+    assert_eq!(stats_after.n_sequences_in_memory, 0);
+    assert_eq!(stats_after.n_collections_in_memory, 1);
 
     for record in loaded_store.sequence_store.values() {
         assert!(!record.is_loaded());
@@ -1167,7 +1173,7 @@ fn test_get_collection_idempotent() {
     let result2 = loaded_store.get_collection(&digest);
     assert!(result2.is_ok());
 
-    assert_eq!(loaded_store.stats().n_collections_loaded, 1);
+    assert_eq!(loaded_store.stats().n_collections_in_memory, 1);
 }
 
 // =========================================================================
@@ -1209,6 +1215,34 @@ fn test_add_sequence_record_standalone() {
 
     let retrieved = store.get_sequence(digest.as_bytes()).unwrap();
     assert_eq!(retrieved.metadata().length, 4);
+}
+
+#[test]
+fn test_add_sequence_record_packed_bytes_in_encoded_mode() {
+    // Mirrors panget's pre-packing insert pattern: digest the ASCII sequence,
+    // then pack it to the alphabet's encoded byte size before inserting into
+    // an Encoded-mode store. This must be accepted (not just raw ASCII).
+    use crate::digest::{digest_sequence, encode_sequence, lookup_alphabet};
+
+    let mut store = RefgetStore::in_memory();
+    store.set_encoding_mode(StorageMode::Encoded);
+
+    let record = digest_sequence("test", b"ACGTACGT");
+    let digest = record.metadata().sha512t24u.clone();
+
+    let packed_record = match record {
+        SequenceRecord::Full { metadata, sequence } => {
+            let alphabet = lookup_alphabet(&metadata.alphabet);
+            let encoded = encode_sequence(&*sequence, alphabet);
+            SequenceRecord::Full { metadata, sequence: encoded.into() }
+        }
+        other => other,
+    };
+
+    store.add_sequence_record(packed_record, false).unwrap();
+
+    let substring = store.get_substring(digest.as_bytes(), 0, 8).unwrap();
+    assert_eq!(substring, "ACGTACGT");
 }
 
 // =========================================================================
@@ -1369,6 +1403,58 @@ fn test_remove_with_orphan_cleanup_retains_shared_sequences() {
 }
 
 #[test]
+fn test_remove_with_orphan_cleanup_clears_md5_lookup() {
+    let (mut store, digest) = store_with_one_collection(">chr1\nACGT\n>chr2\nTTTT\n");
+
+    assert_eq!(store.list_sequences().len(), 2);
+    assert_eq!(store.md5_lookup.len(), 2);
+
+    store.remove_collection(&digest, true).unwrap();
+
+    assert_eq!(store.list_sequences().len(), 0);
+    // Regression: md5_lookup must be emptied along with the sequences.
+    assert_eq!(store.md5_lookup.len(), 0);
+}
+
+#[test]
+fn test_remove_with_orphan_cleanup_md5_lookup_retains_shared_sequences() {
+    let dir = tempdir().unwrap();
+    let fasta1 = dir.path().join("a.fa");
+    let fasta2 = dir.path().join("b.fa");
+    // chr1/ACGT is shared; TTTT is unique to coll1; GGGG is unique to coll2.
+    fs::write(&fasta1, ">chr1\nACGT\n>chr2\nTTTT\n").unwrap();
+    fs::write(&fasta2, ">chr1\nACGT\n>chr3\nGGGG\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta1, _) = store
+        .add_sequence_collection_from_fasta(&fasta1, FastaImportOptions::new())
+        .unwrap();
+    let (meta2, _) = store
+        .add_sequence_collection_from_fasta(&fasta2, FastaImportOptions::new())
+        .unwrap();
+
+    let md5_shared = md5(b"ACGT").to_key(); // retained (shared)
+    let md5_orphan = md5(b"TTTT").to_key(); // reclaimed (unique to coll1)
+    let md5_other = md5(b"GGGG").to_key(); // retained (unique to coll2)
+
+    assert_eq!(store.md5_lookup.len(), 3);
+
+    store.remove_collection(&meta1.digest, true).unwrap();
+
+    // Reclaimed sequence's md5 entry is gone...
+    assert!(!store.md5_lookup.contains_key(&md5_orphan));
+    // ...but retained sequences' md5 entries survive.
+    assert!(store.md5_lookup.contains_key(&md5_shared));
+    assert!(store.md5_lookup.contains_key(&md5_other));
+    assert_eq!(store.md5_lookup.len(), 2);
+
+    // And the surviving collection is still fully readable.
+    let coll = store.get_collection(&meta2.digest).unwrap();
+    assert_eq!(coll.sequences.len(), 2);
+    assert_eq!(store.list_sequences().len(), 2);
+}
+
+#[test]
 fn test_remove_collection_on_disk() {
     let dir = tempdir().unwrap();
     let store_path = dir.path().join("store");
@@ -1426,6 +1512,60 @@ fn test_remove_collection_on_disk_with_orphan_sequences() {
     let rgsi_content = fs::read_to_string(store_path.join("sequences.rgsi")).unwrap();
     let non_comment_lines: Vec<_> = rgsi_content.lines().filter(|l| !l.starts_with('#')).collect();
     assert!(non_comment_lines.is_empty());
+}
+
+#[test]
+fn test_remove_collection_on_disk_cleans_up_empty_shard_dirs() {
+    // The rmdir of the two-char shard directories is hoisted OUT of the
+    // per-file unlink loop (see `remove_collection` in readonly.rs). This test
+    // pins that the hoisted pass actually runs: every orphan `.seq` file is
+    // unlinked AND every shard dir it emptied is removed.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let fasta = dir.path().join("test.fa");
+    fs::write(&fasta, ">chr1\nACGT\n>chr2\nTTTT\n>chr3\nGGGG\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    let digest = meta.digest.clone();
+
+    let seq_files: Vec<PathBuf> = [b"ACGT".as_slice(), b"TTTT".as_slice(), b"GGGG".as_slice()]
+        .iter()
+        .map(|seq| {
+            let d = sha512t24u(seq);
+            store_path.join(format!("sequences/{}/{}.seq", &d[..2], d))
+        })
+        .collect();
+
+    for f in &seq_files {
+        assert!(f.exists(), "expected seq file to exist before removal: {:?}", f);
+    }
+    // Distinct shard dirs (dedup via the set) that should be emptied by removal.
+    let shard_dirs: std::collections::HashSet<PathBuf> = seq_files
+        .iter()
+        .map(|f| f.parent().unwrap().to_path_buf())
+        .collect();
+    for d in &shard_dirs {
+        assert!(d.is_dir(), "expected shard dir to exist before removal: {:?}", d);
+    }
+
+    store.remove_collection(&digest, true).unwrap();
+
+    for f in &seq_files {
+        assert!(!f.exists(), "orphan seq file was not removed: {:?}", f);
+    }
+    for d in &shard_dirs {
+        assert!(
+            !d.exists(),
+            "emptied shard dir was not cleaned up (hoisted rmdir pass did not run): {:?}",
+            d
+        );
+    }
+    // The `sequences/` root itself is part of the store layout and stays put.
+    assert!(store_path.join("sequences").is_dir());
 }
 
 // =========================================================================
@@ -1553,6 +1693,62 @@ fn test_aliases_digest_changes_on_alias_add() {
 
     let meta2 = store.store_metadata().unwrap();
     assert!(meta2.get("aliases_digest").is_some(), "aliases_digest should appear after alias + index rewrite");
+}
+
+#[test]
+fn test_logical_sequence_bytes_persisted_in_manifest() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let expected = store.logical_sequence_bytes() as u64;
+    assert!(expected > 0);
+
+    // Read the raw rgstore.json and confirm the cached value matches.
+    let json = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        manifest.get("logical_sequence_bytes").and_then(|v| v.as_u64()),
+        Some(expected),
+        "manifest should cache logical_sequence_bytes matching the store"
+    );
+
+    // store_metadata() should surface it too.
+    let meta = store.store_metadata().unwrap();
+    assert_eq!(
+        meta.get("logical_sequence_bytes").map(|s| s.as_str()),
+        Some(expected.to_string().as_str())
+    );
+}
+
+#[test]
+fn test_logical_sequence_bytes_survives_alias_refresh() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta("../tests/data/fasta/base.fa", FastaImportOptions::new())
+        .unwrap();
+
+    let expected = store.logical_sequence_bytes() as u64;
+    assert!(expected > 0);
+
+    // Alias-only mutation goes through the cheap manifest-refresh path, which must
+    // preserve the cached logical_sequence_bytes untouched.
+    store.add_sequence_alias("test_ns", "my_alias", &meta.sequences_digest).unwrap();
+
+    let json = fs::read_to_string(store_path.join("rgstore.json")).unwrap();
+    let manifest: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        manifest.get("logical_sequence_bytes").and_then(|v| v.as_u64()),
+        Some(expected),
+        "logical_sequence_bytes should survive an alias-only refresh"
+    );
 }
 
 #[test]
@@ -2477,9 +2673,79 @@ fn build_multi(
     store
         .add_sequence_collections_from_fastas(files, opts)
         .unwrap()
+        .collections
         .into_iter()
         .map(|(m, _)| m.digest)
         .collect()
+}
+
+/// The per-run `ImportReport` counters must reflect what an import ACTUALLY
+/// did, unlike `stats()`, which is a RAM-residency snapshot.
+#[test]
+fn test_import_report_per_run_counters() {
+    let work = tempdir().unwrap();
+
+    // Same fixture shape as the parallel-equals-serial test: file "c" shares
+    // the chr1 sequence content with file "a", so 6 records are seen but only
+    // 5 distinct digests exist.
+    let fa_a = work.path().join("a.fa");
+    let fa_b = work.path().join("b.fa");
+    let fa_c = work.path().join("c.fa");
+    fs::write(&fa_a, ">chr1\nGGAATTCCGGAATTCC\n>chr2\nACGTACGTACGTACGT\n").unwrap();
+    fs::write(&fa_b, ">chrX\nTTGGGGAACCCCTTTT\n>chrM\nGGGGCCCCAAAATTTT\n").unwrap();
+    fs::write(&fa_c, ">altchr1\nGGAATTCCGGAATTCC\n>chr9\nTACGTACGTACGTACG\n").unwrap();
+    let files = vec![fa_a, fa_b, fa_c];
+
+    let store_dir = tempdir().unwrap();
+    let mut store = RefgetStore::on_disk(store_dir.path()).unwrap();
+    store.set_quiet(true);
+
+    let report = store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+
+    assert_eq!(report.collections.len(), 3);
+    assert_eq!(report.n_collections_new, 3);
+    // Each distinct digest is written exactly once; the shared chr1 content is
+    // seen twice, so exactly one record is deduped.
+    assert_eq!(report.n_sequences_written, 5);
+    assert_eq!(report.n_sequences_deduped, 1);
+    // Every record seen across all processed files is accounted for.
+    assert_eq!(
+        report.n_sequences_written + report.n_sequences_deduped,
+        6,
+        "written + deduped must equal the records seen"
+    );
+    assert_eq!(collect_seq_files(store_dir.path()).len(), 5);
+
+    // Re-importing the same files into the same store adds nothing. Whether the
+    // records are counted as deduped or not seen at all depends on the `.rgsi`
+    // sidecar short-circuit (which skips a present collection before its FASTA
+    // is ever opened), so only the "nothing new" half is pinned here.
+    let report2 = store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert_eq!(report2.collections.len(), 3);
+    assert_eq!(report2.n_collections_new, 0);
+    assert_eq!(
+        report2.n_sequences_written, 0,
+        "a re-import must write no sequence bytes"
+    );
+    assert!(report2.collections.iter().all(|(_, was_new)| !*was_new));
+
+    // Contrast: the residency gauge says nothing about either run.
+    assert_eq!(store.stats().n_sequences_in_memory, 0);
+
+    // An in-memory store dispatches no disk writes at all, so it is classified
+    // by a separate branch; it must produce the same counts.
+    let mut mem_store = RefgetStore::in_memory();
+    mem_store.set_quiet(true);
+    let mem_report = mem_store
+        .add_sequence_collections_from_fastas(&files, FastaImportOptions::new().jobs(4))
+        .unwrap();
+    assert_eq!(mem_report.n_collections_new, 3);
+    assert_eq!(mem_report.n_sequences_written, 5);
+    assert_eq!(mem_report.n_sequences_deduped, 1);
 }
 
 #[test]
@@ -3465,4 +3731,1253 @@ fn test_get_substrings_matches_encoded() {
 #[test]
 fn test_get_substrings_matches_raw() {
     run_get_substrings_matches_for_mode(true);
+}
+
+// =========================================================================
+// Import-time collection alias tests
+// =========================================================================
+
+/// REQUIRED REGRESSION GUARD: omitting `.collection_alias(..)` must change
+/// nothing. An import with plain options registers no collection alias at all.
+#[test]
+fn test_import_without_collection_alias_registers_none() {
+    let dir = tempdir().unwrap();
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+
+    assert!(
+        store.list_collection_alias_namespaces().is_empty(),
+        "plain import must not create any collection alias namespace"
+    );
+    assert!(
+        store.get_aliases_for_collection(&meta.digest).is_empty(),
+        "plain import must not name the collection"
+    );
+}
+
+/// `namespaces` feeds the SEQUENCE index only; it must never name the
+/// collection. Proves the two alias indexes stay decoupled.
+#[test]
+fn test_import_without_collection_alias_but_with_namespaces() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("ns.fa");
+    fs::write(&fasta, ">chr1 ucsc:chr1\nAAAACCCC\n>chr2 ucsc:chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new().namespaces(&["ucsc"]))
+        .unwrap();
+
+    let seq_aliases = store
+        .list_sequence_aliases("ucsc")
+        .expect("ucsc sequence alias namespace should exist");
+    assert!(!seq_aliases.is_empty(), "header aliases should be registered");
+
+    assert!(
+        store.list_collection_alias_namespaces().is_empty(),
+        "namespaces must not leak into the collection alias index"
+    );
+    assert!(store.get_aliases_for_collection(&meta.digest).is_empty());
+}
+
+#[test]
+fn test_import_with_collection_alias_registers_collection_alias() {
+    let dir = tempdir().unwrap();
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::in_memory();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let resolved = store
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("ucsc:hg38 should resolve");
+    assert_eq!(resolved.digest, meta.digest);
+
+    assert!(
+        store.list_sequence_alias_namespaces().is_empty(),
+        "collection alias must not leak into the sequence alias index"
+    );
+}
+
+/// The collection alias works with `namespaces` unset (decision 1: the option is
+/// explicit, not derived from the namespaces list).
+#[test]
+fn test_collection_alias_without_namespaces() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("bare.fa");
+    // Bare headers: no `ns:value` tokens anywhere in the file.
+    fs::write(&fasta, ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let opts = FastaImportOptions::new().collection_alias("ucsc", "hg38");
+    assert!(opts.namespaces.is_empty(), "namespaces deliberately unset");
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, opts)
+        .unwrap();
+
+    let resolved = store
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("ucsc:hg38 should resolve without namespaces set");
+    assert_eq!(resolved.digest, meta.digest);
+}
+
+#[test]
+fn test_collection_alias_persists_to_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    let tsv = store_path.join("aliases").join("collections").join("ucsc.tsv");
+    assert!(tsv.exists(), "collection alias TSV should be written");
+    let contents = fs::read_to_string(&tsv).unwrap();
+    assert!(
+        contents.contains(&format!("hg38\t{}", meta.digest)),
+        "TSV should map hg38 to the collection digest, got: {}",
+        contents
+    );
+
+    // `store_metadata()` only surfaces the state digests, so read rgstore.json
+    // directly for the advertised namespace list.
+    let manifest_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(store_path.join("rgstore.json")).unwrap()).unwrap();
+    let coll_ns = manifest_json
+        .get("collection_alias_namespaces")
+        .and_then(|v| v.as_array())
+        .expect("rgstore.json should carry collection_alias_namespaces");
+    assert!(
+        coll_ns.iter().any(|v| v.as_str() == Some("ucsc")),
+        "rgstore.json should advertise the ucsc collection alias namespace, got {:?}",
+        coll_ns
+    );
+    assert!(
+        manifest_json
+            .get("sequence_alias_namespaces")
+            .and_then(|v| v.as_array())
+            .map(|a| a.is_empty())
+            .unwrap_or(true),
+        "no sequence alias namespaces should be advertised"
+    );
+
+    let manifest = store.store_metadata().unwrap();
+    assert!(
+        manifest.get("aliases_digest").is_some(),
+        "rgstore.json should carry an aliases_digest"
+    );
+
+    // Round-trip through a fresh open.
+    let reopened = RefgetStore::open_local(&store_path).unwrap();
+    let resolved = reopened
+        .get_collection_metadata_by_alias("ucsc", "hg38")
+        .expect("alias should survive a reopen");
+    assert_eq!(resolved.digest, meta.digest);
+}
+
+/// Re-importing the same FASTA with the same alias is a no-op, on both the
+/// in-run duplicate path and the build-side `Skip` path (fresh store from disk).
+#[test]
+fn test_collection_alias_idempotent_on_reimport() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta1, was_new1) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(was_new1);
+
+    // In-run duplicate path: same store, same file again.
+    let (meta2, was_new2) = store
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new2, "second import of the same FASTA is not new");
+    assert_eq!(meta2.digest, meta1.digest);
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta1.digest
+    );
+    store.write().unwrap();
+
+    // Build-side Skip path: reopen from disk so the collection is in
+    // `present_collections` before any decode happens.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (meta3, was_new3) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new3, "already-present collection should be skipped");
+    assert_eq!(meta3.digest, meta1.digest);
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta1.digest
+    );
+}
+
+/// A previously-imported collection that was NOT named still gets its name on a
+/// later re-import via the build-side Skip path. This is the silent-drop bug.
+#[test]
+fn test_collection_alias_registered_on_build_side_skip() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta = copy_test_fasta(dir.path(), "base.fa");
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+    assert!(store.list_collection_alias_namespaces().is_empty());
+
+    // Reopen: the collection is already present, so the builder emits Skip and
+    // finalize_collection is never reached. The alias must still land.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (_, was_new) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert!(!was_new, "collection was already present");
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .expect("alias must be registered even on the skip path")
+            .digest,
+        meta.digest
+    );
+}
+
+#[test]
+fn test_collection_alias_conflict_errors() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let err = store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+    let msg = format!("{}", err);
+    assert!(msg.contains("ucsc"), "error should name the namespace: {}", msg);
+    assert!(msg.contains("hg38"), "error should name the alias: {}", msg);
+
+    // The failed import must not have remapped the alias.
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_a.digest
+    );
+}
+
+/// A failed conflicting-alias import must not leave the collection behind.
+///
+/// The alias conflict is validated up front, before any part of the import is
+/// committed, so a rejected import is a true no-op: the store must hold exactly
+/// the one collection that succeeded. Previously the collection was inserted
+/// first and the alias checked afterwards, so a "failed" import still added a
+/// second collection to `store.collections`.
+#[test]
+fn test_collection_alias_conflict_does_not_leak_collection() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    assert_eq!(store.collections.len(), 1);
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // The rejected import must not have been committed.
+    assert_eq!(
+        store.collections.len(),
+        1,
+        "a failed import must not leave its collection in the store"
+    );
+    assert!(
+        store.collections.contains_key(&meta_a.digest.to_key()),
+        "the surviving collection should be the one that imported successfully"
+    );
+    assert!(
+        store.name_lookup.len() <= 1,
+        "no name_lookup entry should be installed for the rejected collection"
+    );
+}
+
+/// Disk-backed counterpart: a rejected conflicting-alias import must not leave
+/// an orphaned `collections/<digest>.rgsi` that the top-level index never
+/// references. The per-collection `.rgsi` is written immediately, but
+/// `collections.rgci` is only written at the end of a successful import, so
+/// erroring after the collection write used to strand a file on disk.
+#[test]
+fn test_collection_alias_conflict_leaves_no_orphan_on_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // Exactly one per-collection index file, and it belongs to the collection
+    // that actually imported.
+    let coll_dir = store_path.join("collections");
+    let mut rgsi: Vec<String> = fs::read_dir(&coll_dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".rgsi"))
+        .collect();
+    rgsi.sort();
+    assert_eq!(
+        rgsi,
+        vec![format!("{}.rgsi", meta_a.digest)],
+        "failed import must not leave an orphaned collection .rgsi on disk"
+    );
+
+    assert_eq!(store.collections.len(), 1);
+
+    // The store on disk is still coherent: reopening sees exactly the one
+    // collection, still reachable through the alias.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(reopened.collections.len(), 1);
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .expect("alias should still resolve after the failed import")
+            .digest,
+        meta_a.digest
+    );
+    // And the surviving collection is fully readable, not a dangling index row.
+    reopened
+        .get_collection(&meta_a.digest)
+        .expect("the committed collection must still load");
+}
+
+#[test]
+fn test_collection_alias_conflict_force_overwrites() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+
+    let (meta_b, _) = store
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new()
+                .collection_alias("ucsc", "hg38")
+                .force(true),
+        )
+        .unwrap();
+
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_b.digest,
+        "force should remap the alias to the new collection"
+    );
+}
+
+/// Disk-backed counterpart of the force test. The on-disk conflict check in
+/// `commit_alias_namespace` used to consult only the handle-wide `force_alias`
+/// flag, so `.force(true)` remapped the alias in memory and then errored at
+/// commit against the TSV already on disk.
+#[test]
+fn test_collection_alias_conflict_force_overwrites_on_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (meta_b, _) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new()
+                .collection_alias("ucsc", "hg38")
+                .force(true),
+        )
+        .expect("force must override the alias published on disk");
+
+    let fresh = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(
+        fresh
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_b.digest,
+        "the remapped alias must be what is on disk"
+    );
+}
+
+/// Cleanup after a failed import must only touch what that import staged.
+/// It used to compute orphans as "in `sequence_store` but not in
+/// `name_lookup`", which on a reopened store (stub collections, empty
+/// `name_lookup`) is every pre-existing sequence -- and unlinked them all.
+#[test]
+fn test_failed_import_cleanup_preserves_existing_sequences() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(&fasta_a, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+    drop(store);
+
+    // A reopened handle: sequences are loaded as stubs, name_lookup is empty.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    assert!(reopened.name_lookup.is_empty());
+
+    // Force a failure: a conflicting collection alias is rejected after the
+    // import has already staged the new collection's sequences.
+    reopened
+        .add_collection_alias("ucsc", "hg38", &meta_a.digest)
+        .unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chrX\nCCCCAAAA\n").unwrap();
+    reopened
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // Every pre-existing sequence is still readable from disk.
+    let mut fresh = RefgetStore::open_local(&store_path).unwrap();
+    let coll = fresh.get_collection(&meta_a.digest).unwrap();
+    for rec in &coll.sequences {
+        let digest = rec.metadata().sha512t24u.clone();
+        fresh
+            .get_substring(digest.as_str(), 0, rec.metadata().length as usize)
+            .unwrap_or_else(|e| {
+                panic!("sequence {} vanished after a failed import: {}", digest, e)
+            });
+    }
+}
+
+#[test]
+fn test_collection_alias_rejected_for_multiple_files() {
+    let dir = tempdir().unwrap();
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let err = store
+        .add_sequence_collections_from_fastas(
+            &[fasta_a, fasta_b],
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("collection_alias with multiple files must error");
+    let msg = format!("{}", err);
+    assert!(
+        msg.contains("add_collection_alias"),
+        "error should teach the per-file workaround: {}",
+        msg
+    );
+
+    // The guard runs before any thread spawns, so the store must be untouched.
+    assert!(store.sequence_store.is_empty(), "no sequences imported");
+    assert!(store.collections.is_empty(), "no collections imported");
+    assert!(store.list_collection_alias_namespaces().is_empty());
+    assert!(store.list_sequence_alias_namespaces().is_empty());
+}
+
+/// The multi-file guard must be a `> 1` check, not a `!= 1` check -- the
+/// single-file wrapper goes through this same entry point with a 1-element slice.
+#[test]
+fn test_collection_alias_single_element_slice_ok() {
+    let dir = tempdir().unwrap();
+    let fasta = dir.path().join("one.fa");
+    fs::write(&fasta, ">chr1\nAAAACCCC\n").unwrap();
+
+    let mut store = RefgetStore::in_memory();
+    let report = store
+        .add_sequence_collections_from_fastas(
+            &[fasta],
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect("one-element slice with an alias must succeed");
+    assert_eq!(report.collections.len(), 1);
+    assert_eq!(
+        store
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        report.collections[0].0.digest
+    );
+}
+
+// =========================================================================
+// Concurrent-writer safety
+//
+// These are the regression tests for the 2026-07-23 incident, where four
+// concurrent `genome_init` jobs wrote one store directory and one genome's
+// collection was written to disk but dropped from both indexes -- its alias
+// stopped resolving and the nightly build failed. Neither writer errored.
+// =========================================================================
+
+/// Build a one-collection store at `path` from an inline FASTA.
+fn add_collection_to_store(store: &mut RefgetStore, dir: &std::path::Path, name: &str, fasta: &str) -> String {
+    let fasta_path = dir.join(format!("{}.fa", name));
+    fs::write(&fasta_path, fasta).unwrap();
+    let (meta, _) = store
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    meta.digest
+}
+
+/// THE incident, reproduced: two handles open the same store, each adds a
+/// different collection, and they commit in an interleaved order. Before the
+/// merge, whoever committed last rewrote the index from its own open-time
+/// snapshot and the other's collection vanished.
+#[test]
+fn test_interleaved_writers_both_survive() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    // Seed the store so both writers have something to load at open time.
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    // Both writers snapshot the store at the same moment.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    // A stages its collection first...
+    let digest_a = add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    // ...B stages and commits while A is still holding a stale snapshot...
+    let digest_b = add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    // ...and only then does A commit, from the snapshot that predates B.
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    for (label, digest) in [("seed", &seed_digest), ("A", &digest_a), ("B", &digest_b)] {
+        assert!(
+            reopened.get_collection_metadata(digest).is_some(),
+            "collection {} ({}) was dropped from the index by the other writer",
+            label,
+            digest
+        );
+    }
+}
+
+/// The same shape at the sequence level: rows another writer published must not
+/// be dropped by a commit from a stale snapshot.
+#[test]
+fn test_interleaved_writers_preserve_sequence_rows() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let names: std::collections::HashSet<String> = reopened
+        .list_sequences()
+        .iter()
+        .map(|m| m.name.clone())
+        .collect();
+    for expected in ["chrS", "chrA", "chrB"] {
+        assert!(names.contains(expected), "sequence {} was dropped; have {:?}", expected, names);
+    }
+}
+
+/// An alias namespace one writer creates must not be dropped from the manifest
+/// (or deleted from disk) by another writer that never loaded it. The manifest
+/// is the only discovery mechanism over HTTP, so an unadvertised TSV is
+/// unreachable.
+#[test]
+fn test_alias_namespace_from_other_writer_survives_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    // A opens the store BEFORE the namespace exists, so it will never load it.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+    writer_b
+        .add_collection_alias("refgenie", "athaliana", &seed_digest)
+        .unwrap();
+    drop(writer_b);
+
+    // A commits from its stale snapshot.
+    add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    writer_a.write().unwrap();
+    drop(writer_a);
+
+    assert!(
+        store_dir.join("aliases/collections/refgenie.tsv").exists(),
+        "the other writer's alias TSV was deleted"
+    );
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "athaliana")
+            .is_some(),
+        "alias stopped resolving after another writer committed"
+    );
+}
+
+/// Removal must still work: a blind union would resurrect whatever
+/// `remove_collection` deleted.
+#[test]
+fn test_removal_is_not_resurrected_by_the_merge() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let keep = add_collection_to_store(&mut store, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let drop_me = add_collection_to_store(&mut store, work.path(), "drop", ">chrD\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    assert!(store.remove_collection(&drop_me, true).unwrap());
+    drop(store);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(reopened.get_collection_metadata(&keep).is_some());
+    assert!(
+        reopened.get_collection_metadata(&drop_me).is_none(),
+        "removed collection came back through the merge"
+    );
+}
+
+/// Orphan GC on a freshly-opened store. `open_local` loads collection STUBS and
+/// never populates `name_lookup`, so the old `name_lookup`-derived live set was
+/// empty here and unlinked sequences the surviving collection still needs.
+/// This test fails against the pre-merge implementation.
+#[test]
+fn test_orphan_gc_keeps_sequences_shared_with_another_collection() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    // Two collections that SHARE chrShared, plus one sequence unique to each.
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "a",
+        ">chrShared\nAAAACCCCGGGGTTTT\n>chrOnlyA\nACACACAC\n",
+    );
+    let coll_b = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "b",
+        ">chrShared\nAAAACCCCGGGGTTTT\n>chrOnlyB\nGTGTGTGT\n",
+    );
+    store.write().unwrap();
+    drop(store);
+
+    // Reopen fresh: stub load, so name_lookup is empty.
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        store.name_lookup.is_empty(),
+        "precondition: a fresh open must not populate name_lookup"
+    );
+
+    // The dry-run must agree with what actually happens.
+    let planned = store.plan_orphan_removal(&coll_a).unwrap();
+    assert_eq!(
+        planned.len(),
+        1,
+        "only chrOnlyA is an orphan; planned {:?}",
+        planned
+    );
+
+    assert!(store.remove_collection(&coll_a, true).unwrap());
+    drop(store);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    reopened.load_collection(&coll_b).unwrap();
+    let collection = reopened.get_collection(&coll_b).unwrap();
+    assert_eq!(collection.sequences.len(), 2);
+    for seq in &collection.sequences {
+        let digest = &seq.metadata().sha512t24u;
+        assert!(
+            reopened.get_sequence_metadata(digest).is_some(),
+            "sequence {} ({}) survived in the index but not in the store",
+            seq.metadata().name,
+            digest
+        );
+        assert!(
+            reopened.get_sequence(digest).is_ok(),
+            "sequence {} ({}) was unlinked from disk by the orphan GC",
+            seq.metadata().name,
+            digest
+        );
+    }
+}
+
+/// Orphan GC must fail closed. If a collection listed in the index has no
+/// readable `.rgsi`, the live set is unknowable and nothing may be deleted --
+/// treating a missing input as "references nothing" is how live data gets
+/// unlinked.
+#[test]
+fn test_orphan_gc_refuses_when_a_collection_rgsi_is_missing() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+    drop(store);
+
+    fs::remove_file(store_dir.join(format!("collections/{}.rgsi", coll_b))).unwrap();
+
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    let err = store.remove_collection(&coll_a, true).unwrap_err();
+    assert!(
+        err.to_string().contains("refusing to remove orphan sequences"),
+        "expected a fail-closed error, got: {}",
+        err
+    );
+}
+
+/// Conflicting alias bindings are a semantic conflict, not a merge detail.
+/// Error by default; `--force-alias` takes the in-memory value.
+#[test]
+fn test_conflicting_alias_errors_unless_forced() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.add_collection_alias("ucsc", "hg38", &coll_a).unwrap();
+    store.write().unwrap();
+    drop(store);
+
+    // Another writer rebinds the same alias to a different collection.
+    let mut other = RefgetStore::open_local(&store_dir).unwrap();
+    let err = other
+        .add_collection_alias("ucsc", "hg38", &coll_b)
+        .expect_err("a conflicting alias binding must not be silently resolved");
+    assert!(err.to_string().contains("alias conflict"), "got: {}", err);
+    // The published binding is untouched by the failed commit.
+    assert_eq!(
+        fs::read_to_string(store_dir.join("aliases/collections/ucsc.tsv")).unwrap(),
+        format!("hg38\t{}\n", coll_a)
+    );
+
+    other.set_force_alias(true);
+    other
+        .add_collection_alias("ucsc", "hg38", &coll_b)
+        .expect("force-alias must overwrite the published binding");
+    drop(other);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert_eq!(
+        reopened
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        coll_b
+    );
+}
+
+/// `rgstore.json` is published LAST, so the digests it advertises always
+/// describe files that are already on disk.
+#[test]
+fn test_manifest_digests_match_published_indexes() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    let metadata = store.store_metadata().unwrap();
+    let sha = |name: &str| {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(fs::read(store_dir.join(name)).unwrap()))
+    };
+    assert_eq!(metadata.get("sequences_digest").unwrap(), &sha("sequences.rgsi"));
+    assert_eq!(metadata.get("collections_digest").unwrap(), &sha("collections.rgci"));
+}
+
+/// `created_at` now means what it says. It used to be stamped with `now()` on
+/// every commit, making it a duplicate of `modified`.
+#[test]
+fn test_created_at_survives_subsequent_commits() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    let read_created_at = || -> String {
+        let json = fs::read_to_string(store_dir.join("rgstore.json")).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        v["created_at"].as_str().unwrap().to_string()
+    };
+    let first = read_created_at();
+
+    add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    assert_eq!(read_created_at(), first, "created_at was overwritten by a later commit");
+}
+
+/// The lock serializes writers, and a store that already holds a batch lock
+/// must not deadlock against the commit each mutation triggers.
+#[test]
+fn test_batch_lock_is_reentrant_and_exclusive() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+
+    store.lock_for_batch("test-batch").unwrap();
+    assert!(store.holds_batch_lock());
+
+    // Nested commits must not block on the lock this store already holds.
+    add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    store.write().unwrap();
+
+    // Meanwhile another process would be locked out.
+    assert!(
+        super::lock_status(&store_dir).unwrap().is_some(),
+        "the batch lock should be visible on disk"
+    );
+
+    store.release_batch_lock();
+    assert!(super::lock_status(&store_dir).unwrap().is_none());
+}
+
+/// Transient lock/temp files must be recognizable so anything mirroring a store
+/// directory (`aws s3 sync`, integrity checkers) can skip them.
+#[test]
+fn test_commit_leaves_no_transient_files_behind() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+    drop(store);
+
+    let leftovers: Vec<String> = fs::read_dir(&store_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.file_name().to_str().map(String::from))
+        .filter(|n| super::is_transient_store_file(n))
+        .collect();
+    assert!(leftovers.is_empty(), "transient files left behind: {:?}", leftovers);
+}
+
+// =========================================================================
+// Delta-at-commit: a stale handle must not resurrect another writer's removal
+//
+// These are the regression tests for the 2026-07-28 finding. Merge-at-commit
+// wrote back EVERYTHING a handle had in memory, and `open_local` loads a stub
+// for every collection in the index purely so it can be read. A handle that
+// opened before a removal therefore re-added the removed rows on its next
+// commit -- after the `.seq` files were already unlinked. Not a lock race: the
+// removal completes entirely before the offending commit begins.
+// =========================================================================
+
+/// Sequence digests of one collection, read from its on-disk `.rgsi`.
+fn sequence_digests_of(store: &mut RefgetStore, digest: &str) -> Vec<String> {
+    store.load_collection(digest).unwrap();
+    store
+        .get_collection(digest)
+        .unwrap()
+        .sequences
+        .iter()
+        .map(|s| s.metadata().sha512t24u.clone())
+        .collect()
+}
+
+fn index_contains(store_dir: &std::path::Path, file: &str, needle: &str) -> bool {
+    fs::read_to_string(store_dir.join(file))
+        .unwrap()
+        .lines()
+        .any(|l| l.contains(needle))
+}
+
+/// THE resurrection bug. W opens the store, R removes a collection and its
+/// orphan sequences and commits, then W commits an unrelated addition. W's
+/// commit must not bring the removed collection, its sequences, or its alias
+/// back.
+///
+/// Fails against merge-at-commit with dangling index rows: the `.seq` files are
+/// gone but the rows point at them.
+#[test]
+fn test_stale_handle_does_not_resurrect_a_removed_collection() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let keep = add_collection_to_store(&mut seed, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let victim = add_collection_to_store(
+        &mut seed,
+        work.path(),
+        "victim",
+        ">chrV1\nGGGGTTTT\n>chrV2\nTTTTGGGG\n",
+    );
+    seed.add_collection_alias("refgenie", "oluc", &victim).unwrap();
+    seed.write().unwrap();
+    let victim_sequences = sequence_digests_of(&mut seed, &victim);
+    drop(seed);
+
+    // W opens BEFORE the removal. Its snapshot contains the victim.
+    let mut writer = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(writer.get_collection_metadata(&victim).is_some());
+
+    // R removes the victim and commits. Disk is correct at this point.
+    let mut remover = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(remover.remove_collection(&victim, true).unwrap());
+    drop(remover);
+    assert!(!index_contains(&store_dir, "collections.rgci", &victim));
+
+    // W now commits an unrelated addition from its stale snapshot.
+    let added = add_collection_to_store(&mut writer, work.path(), "added", ">chrN\nACACACAC\n");
+    writer.write().unwrap();
+    drop(writer);
+
+    assert!(
+        !index_contains(&store_dir, "collections.rgci", &victim),
+        "the removed collection came back into collections.rgci"
+    );
+    for seq in &victim_sequences {
+        assert!(
+            !index_contains(&store_dir, "sequences.rgsi", seq),
+            "orphan sequence {} came back into sequences.rgsi -- its .seq file is gone",
+            seq
+        );
+    }
+    assert!(
+        !store_dir.join("aliases/collections/refgenie.tsv").exists(),
+        "the removed collection's alias namespace came back"
+    );
+
+    // ...and the concurrent addition is not collateral damage.
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(reopened.get_collection_metadata(&keep).is_some());
+    assert!(reopened.get_collection_metadata(&added).is_some());
+    assert!(reopened.get_collection_metadata(&victim).is_none());
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "oluc")
+            .is_none(),
+        "the alias still resolves to a collection that no longer exists"
+    );
+}
+
+/// Every index row a delta commit publishes must have its `.seq` file on disk.
+/// The observable symptom of the resurrection bug was not a missing row but a
+/// present one that could not be read.
+#[test]
+fn test_no_dangling_sequence_rows_after_a_stale_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    add_collection_to_store(&mut seed, work.path(), "keep", ">chrK\nAAAACCCC\n");
+    let victim = add_collection_to_store(&mut seed, work.path(), "victim", ">chrV\nGGGGTTTT\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer = RefgetStore::open_local(&store_dir).unwrap();
+
+    let mut remover = RefgetStore::open_local(&store_dir).unwrap();
+    remover.remove_collection(&victim, true).unwrap();
+    drop(remover);
+
+    add_collection_to_store(&mut writer, work.path(), "added", ">chrN\nACACACAC\n");
+    writer.write().unwrap();
+    drop(writer);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let digests: Vec<String> = reopened
+        .list_sequences()
+        .iter()
+        .map(|m| m.sha512t24u.clone())
+        .collect();
+    for digest in &digests {
+        // `load_sequence` reads the `.seq` file, so this fails on a row whose
+        // bytes were unlinked. `get_sequence` would NOT: it happily returns the
+        // Stub built from the index row, which is why the corruption was
+        // invisible until someone actually asked for bases.
+        assert!(
+            reopened.load_sequence(digest).is_ok(),
+            "sequences.rgsi lists {} but its .seq file is gone",
+            digest
+        );
+    }
+}
+
+/// The lost-update case merge-at-commit existed to prevent must not regress:
+/// two handles open together, one commits, the other commits after, and both
+/// additions survive.
+#[test]
+fn test_delta_commit_still_preserves_a_concurrent_addition() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let seed_digest = add_collection_to_store(&mut seed, work.path(), "seed", ">chrS\nAAAACCCC\n");
+    seed.write().unwrap();
+    drop(seed);
+
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+
+    let digest_a = add_collection_to_store(&mut writer_a, work.path(), "a", ">chrA\nGGGGTTTT\n");
+    let digest_b = add_collection_to_store(&mut writer_b, work.path(), "b", ">chrB\nTTTTGGGG\n");
+    writer_b.write().unwrap();
+    writer_a.write().unwrap();
+    drop(writer_a);
+    drop(writer_b);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    for (label, digest) in [("seed", &seed_digest), ("A", &digest_a), ("B", &digest_b)] {
+        assert!(
+            reopened.get_collection_metadata(digest).is_some(),
+            "collection {} ({}) was dropped by the other writer's commit",
+            label,
+            digest
+        );
+    }
+}
+
+/// Removing one of two collections that share sequences reclaims exactly the
+/// unshared digests, and the shared ones stay readable byte-for-byte.
+#[test]
+fn test_removal_reclaims_only_unshared_sequences() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    const SHARED: &str = "AAAACCCCGGGGTTTT";
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "a",
+        &format!(">chrShared\n{}\n>chrOnlyA\nACACACAC\n", SHARED),
+    );
+    let coll_b = add_collection_to_store(
+        &mut store,
+        work.path(),
+        "b",
+        &format!(">chrShared\n{}\n>chrOnlyB\nGTGTGTGT\n", SHARED),
+    );
+    store.write().unwrap();
+    let a_sequences = sequence_digests_of(&mut store, &coll_a);
+    let b_sequences = sequence_digests_of(&mut store, &coll_b);
+    drop(store);
+
+    let shared: Vec<&String> = a_sequences.iter().filter(|d| b_sequences.contains(d)).collect();
+    assert_eq!(shared.len(), 1, "precondition: exactly one shared sequence");
+    let only_a: Vec<&String> = a_sequences.iter().filter(|d| !b_sequences.contains(d)).collect();
+    assert_eq!(only_a.len(), 1);
+
+    let mut store = RefgetStore::open_local(&store_dir).unwrap();
+    let planned = store.plan_orphan_removal(&coll_a).unwrap();
+    assert_eq!(planned, vec![only_a[0].clone()], "the dry-run must name exactly chrOnlyA");
+    assert!(store.remove_collection(&coll_a, true).unwrap());
+    drop(store);
+
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened.get_sequence_metadata(only_a[0]).is_none(),
+        "the unshared sequence was not reclaimed"
+    );
+    reopened.load_sequence(shared[0]).unwrap();
+    assert_eq!(
+        reopened.get_substring(shared[0], 0, SHARED.len()).unwrap(),
+        SHARED,
+        "the shared sequence did not survive intact"
+    );
+}
+
+/// A namespace this handle empties must still not be deleted when another writer
+/// has added an alias to it. Intent is not the deciding factor; the merged
+/// result is.
+#[test]
+fn test_emptying_a_namespace_spares_another_writers_alias() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut seed = RefgetStore::on_disk(&store_dir).unwrap();
+    let coll_a = add_collection_to_store(&mut seed, work.path(), "a", ">chrA\nAAAACCCC\n");
+    let coll_b = add_collection_to_store(&mut seed, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    seed.add_collection_alias("refgenie", "mine", &coll_a).unwrap();
+    seed.write().unwrap();
+    drop(seed);
+
+    // A opens with only `mine` in the namespace.
+    let mut writer_a = RefgetStore::open_local(&store_dir).unwrap();
+
+    // B adds a second alias to the same namespace and commits.
+    let mut writer_b = RefgetStore::open_local(&store_dir).unwrap();
+    writer_b.add_collection_alias("refgenie", "theirs", &coll_b).unwrap();
+    drop(writer_b);
+
+    // A removes its only alias -- emptying the namespace as far as A can see.
+    assert!(writer_a.remove_collection_alias("refgenie", "mine").unwrap());
+    drop(writer_a);
+
+    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "theirs")
+            .is_some(),
+        "the other writer's alias was deleted with the namespace"
+    );
+    assert!(
+        reopened
+            .get_collection_metadata_by_alias("refgenie", "mine")
+            .is_none(),
+        "the removed alias came back"
+    );
+}
+
+/// Uncommitted work is visible to callers, so a caller that must not lose a
+/// removal can check before dropping the handle.
+#[test]
+fn test_has_uncommitted_changes_tracks_the_commit() {
+    let work = tempdir().unwrap();
+    let store_dir = work.path().join("store");
+
+    let mut store = RefgetStore::on_disk(&store_dir).unwrap();
+    // on_disk commits after each add, so the store starts clean.
+    add_collection_to_store(&mut store, work.path(), "a", ">chrA\nAAAACCCC\n");
+    store.write().unwrap();
+    assert!(!store.has_uncommitted_changes());
+
+    store.lock_for_batch("test-batch").unwrap();
+    let digest = add_collection_to_store(&mut store, work.path(), "b", ">chrB\nGGGGTTTT\n");
+    assert!(store.get_collection_metadata(&digest).is_some());
+    store.write().unwrap();
+    assert!(
+        !store.has_uncommitted_changes(),
+        "a successful commit must clear the pending set"
+    );
+    store.release_batch_lock();
 }

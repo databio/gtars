@@ -3,14 +3,52 @@ use std::time::Instant;
 use anyhow::Result;
 use clap::ArgMatches;
 
-use gtars_refget::store::{FastaImportOptions, RefgetStore, StorageMode};
+use gtars_refget::store::{
+    FastaImportOptions, LockOptions, RefgetStore, StorageMode, force_unlock, lock_status,
+};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 
 pub fn run_refget(matches: &ArgMatches) -> Result<()> {
     match matches.subcommand() {
         Some((super::cli::REFGET_BUILD, sub)) => run_build(sub),
+        Some((super::cli::REFGET_EXPORT, sub)) => run_export(sub),
+        Some((super::cli::REFGET_LOCK_STATUS, sub)) => run_lock_status(sub),
         _ => unreachable!("refget subcommand not found"),
     }
+}
+
+fn run_lock_status(matches: &ArgMatches) -> Result<()> {
+    let store = matches.get_one::<String>("store").expect("store is required");
+    let path = std::path::Path::new(store);
+
+    match lock_status(path)? {
+        Some(info) => {
+            println!("RefgetStore write lock HELD at {}", store);
+            println!("  holder:        {}", info.describe());
+            println!("  last heartbeat: {}", info.heartbeat_at);
+        }
+        None => println!("RefgetStore write lock is free at {}", store),
+    }
+
+    if matches.get_flag("force_unlock") {
+        if force_unlock(path)? {
+            println!("Lock forcibly cleared.");
+        } else {
+            println!("Nothing to clear.");
+        }
+    }
+
+    Ok(())
+}
+
+/// Build [`LockOptions`] from the shared `--lock-timeout` / `--force-unlock`
+/// flags, falling back to the environment-driven defaults.
+fn lock_options_from(matches: &ArgMatches) -> LockOptions {
+    let mut opts = LockOptions::default();
+    if let Some(secs) = matches.get_one::<u64>("lock_timeout") {
+        opts = opts.timeout_secs(*secs);
+    }
+    opts.force(matches.get_flag("force_unlock"))
 }
 
 fn run_build(matches: &ArgMatches) -> Result<()> {
@@ -33,8 +71,32 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let raw = matches.get_flag("raw");
     let force = matches.get_flag("force");
 
+    // Parse --collection-alias NAMESPACE:ALIAS. Owned up front so the borrows
+    // in FastaImportOptions outlive the builder chain.
+    let collection_alias: Option<(String, String)> = matches
+        .get_one::<String>("collection_alias")
+        .map(|raw| {
+            let (ns, alias) = raw.split_once(':').ok_or_else(|| {
+                anyhow::anyhow!(
+                    "--collection-alias expects NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                    raw
+                )
+            })?;
+            if ns.is_empty() || alias.is_empty() {
+                return Err(anyhow::anyhow!(
+                    "--collection-alias expects a non-empty namespace and alias in \
+                     NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                    raw
+                ));
+            }
+            Ok((ns.to_string(), alias.to_string()))
+        })
+        .transpose()?;
+
     let mut store = RefgetStore::on_disk(output)
         .map_err(|e| anyhow::anyhow!("Failed to create store at {}: {}", output, e))?;
+    store.set_lock_options(lock_options_from(matches));
+    store.set_force_alias(matches.get_flag("force_alias"));
     if raw {
         store.set_encoding_mode(StorageMode::Raw);
     } else {
@@ -54,14 +116,17 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let mut total_seqs: usize = 0;
     let start = Instant::now();
 
-    let opts = FastaImportOptions::new()
+    let mut opts = FastaImportOptions::new()
         .force(force)
         .jobs(jobs);
-    let results = store
+    if let Some((ns, alias)) = collection_alias.as_ref() {
+        opts = opts.collection_alias(ns, alias);
+    }
+    let report = store
         .add_sequence_collections_from_fastas(&fastas, opts)
         .map_err(|e| anyhow::anyhow!("Failed to import FASTA files: {}", e))?;
 
-    for (fa, (metadata, was_new)) in fastas.iter().zip(results.iter()) {
+    for (fa, (metadata, was_new)) in fastas.iter().zip(report.collections.iter()) {
         total_seqs += metadata.n_sequences;
         eprintln!(
             "  {} {}: {} ({} sequences)",
@@ -95,6 +160,170 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         elapsed,
         mbps,
         fmt_auto(jobs),
+    );
+    // Per-run ingest counters: what THIS run actually added, as opposed to the
+    // store-wide residency numbers reported by `store stats`.
+    eprintln!(
+        "Ingested this run: {} collection(s) new, {} sequence(s) written, {} sequence(s) deduped",
+        report.n_collections_new, report.n_sequences_written, report.n_sequences_deduped,
+    );
+
+    Ok(())
+}
+
+/// Resolve `-c` to a collection digest. Accepts a bare digest or
+/// `NAMESPACE:ALIAS` (same syntax as `build --collection-alias`).
+fn resolve_collection_arg(store: &RefgetStore, raw: &str) -> Result<String> {
+    if let Some((ns, alias)) = raw.split_once(':') {
+        if ns.is_empty() || alias.is_empty() {
+            return Err(anyhow::anyhow!(
+                "--collection expects a digest or NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                raw
+            ));
+        }
+        return store
+            .get_collection_metadata_by_alias(ns, alias)
+            .map(|m| m.digest.clone())
+            .ok_or_else(|| {
+                let known = known_collection_aliases(store);
+                anyhow::anyhow!(
+                    "Collection alias '{}' not found in store. Known aliases: {}",
+                    raw,
+                    if known.is_empty() { "(none)".to_string() } else { known.join(", ") }
+                )
+            });
+    }
+    Ok(raw.to_string())
+}
+
+/// All registered collection aliases as `NAMESPACE:ALIAS` strings, for error messages.
+fn known_collection_aliases(store: &RefgetStore) -> Vec<String> {
+    store
+        .list_collection_alias_namespaces()
+        .into_iter()
+        .flat_map(|ns| {
+            let aliases = store.list_collection_aliases(&ns).unwrap_or_default();
+            aliases
+                .into_iter()
+                .map(move |alias| format!("{}:{}", ns, alias))
+        })
+        .collect()
+}
+
+/// Format a collection digest for an "available collections" listing, appending
+/// its aliases (if any) so the alias path is discoverable from the error.
+fn describe_collection(store: &RefgetStore, digest: &str) -> String {
+    let aliases = store.get_aliases_for_collection(digest);
+    if aliases.is_empty() {
+        digest.to_string()
+    } else {
+        let alias_list: Vec<String> = aliases
+            .iter()
+            .map(|(ns, alias)| format!("{}:{}", ns, alias))
+            .collect();
+        format!("{} ({})", digest, alias_list.join(", "))
+    }
+}
+
+fn run_export(matches: &ArgMatches) -> Result<()> {
+    let store_path = matches
+        .get_one::<String>("store")
+        .expect("store is required");
+    let output = matches
+        .get_one::<String>("output")
+        .expect("output is required");
+    let requested_collection = matches.get_one::<String>("collection");
+    let names: Option<Vec<&str>> = matches
+        .get_many::<String>("names")
+        .map(|vals| vals.map(|s| s.as_str()).collect());
+    let line_width = *matches.get_one::<usize>("line_width").unwrap_or(&80);
+
+    // Open the store. The manifest gives a stub (metadata) for every
+    // collection, which is all that resolving the digest below needs; the one
+    // collection being exported is loaded lazily by `get_collection`, and its
+    // sequence BYTES only after that, for what this export actually needs.
+    let mut store = RefgetStore::open_local(store_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+
+    // Resolve the collection digest.
+    let collections = store
+        .list_collections(0, usize::MAX, &[])
+        .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
+    let digest = match requested_collection {
+        Some(c) => {
+            let resolved = resolve_collection_arg(&store, c)?;
+            if !collections.results.iter().any(|m| m.digest == resolved) {
+                let available: Vec<String> = collections
+                    .results
+                    .iter()
+                    .map(|m| describe_collection(&store, &m.digest))
+                    .collect();
+                return Err(anyhow::anyhow!(
+                    "Collection '{}' not found in store. Available: {}",
+                    c,
+                    available.join(", ")
+                ));
+            }
+            resolved
+        }
+        None => match collections.results.len() {
+            0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
+            1 => collections.results[0].digest.clone(),
+            _ => {
+                let available: Vec<String> = collections
+                    .results
+                    .iter()
+                    .map(|m| describe_collection(&store, &m.digest))
+                    .collect();
+                return Err(anyhow::anyhow!(
+                    "Store contains multiple collections; specify one with --collection. Available: {}",
+                    available.join(", ")
+                ));
+            }
+        },
+    };
+
+    // Load ONLY the sequence bytes this export needs. `load_all_sequences()`
+    // would pull EVERY sequence in the store into RAM, not just this
+    // collection's -- fatal on a large store (the vgp store holds ~384k
+    // sequences / hundreds of GB) and wasteful even when it fits. With
+    // `--names`, narrow further to just the requested sequences.
+    let collection = store
+        .get_collection(&digest)
+        .map_err(|e| anyhow::anyhow!("Failed to load collection {}: {}", digest, e))?;
+    let wanted: Option<std::collections::HashSet<&str>> =
+        names.as_ref().map(|v| v.iter().copied().collect());
+    for record in &collection.sequences {
+        let meta = record.metadata();
+        if wanted
+            .as_ref()
+            .is_some_and(|wanted| !wanted.contains(meta.name.as_str()))
+        {
+            continue;
+        }
+        store.load_sequence(&meta.sha512t24u).map_err(|e| {
+            anyhow::anyhow!("Failed to load sequence '{}': {}", meta.name, e)
+        })?;
+    }
+    let store = store.into_readonly();
+
+    let n_names = names.as_ref().map(|v| v.len());
+    store
+        .export_fasta(&digest, output, names, Some(line_width))
+        .map_err(|e| anyhow::anyhow!("Failed to export FASTA: {}", e))?;
+
+    let wrap_desc = if line_width == 0 {
+        "unwrapped (one sequence per line)".to_string()
+    } else {
+        format!("wrapped at {} bases/line", line_width)
+    };
+    let seq_desc = match n_names {
+        Some(n) => format!("{} named sequence(s)", n),
+        None => "all sequences".to_string(),
+    };
+    eprintln!(
+        "Exported collection {} ({}) to {} [{}]",
+        digest, seq_desc, output, wrap_desc
     );
 
     Ok(())

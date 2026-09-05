@@ -147,7 +147,9 @@ pub use store::{FhrAuthor, FhrIdentifier, FhrMetadata, FhrTaxon, FhrVitalStats};
 pub use seqcol::SeqColService;
 #[cfg(feature = "filesystem")]
 pub use inputs::{expand_fasta_inputs, FastaInputs, FASTA_EXTENSIONS};
-pub use store::{AvailableAliases, PagedResult, Pagination, PullResult, SyncStrategy};
+pub use store::{
+    AvailableAliases, ImportReport, PagedResult, Pagination, PullResult, StoreStats, SyncStrategy,
+};
 
 // ============================================================================
 // Tests

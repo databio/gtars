@@ -644,7 +644,11 @@ impl ReadonlyRefgetStore {
     /// content/collection digest), guaranteeing a byte-identical store to a serial
     /// build regardless of build/arrival order.
     ///
-    /// Returns per-file `(collection_metadata, was_new)` results in input order.
+    /// Returns an [`ImportReport`]: per-file `(collection_metadata, was_new)`
+    /// results in input order, plus genuine per-run ingest counters
+    /// (`n_sequences_written`, `n_sequences_deduped`, `n_collections_new`).
+    /// Note these are per-RUN counts, unlike [`StoreStats`], which is a
+    /// RAM-residency snapshot.
     ///
     /// ## Error handling / non-transactional semantics
     ///
@@ -664,9 +668,29 @@ impl ReadonlyRefgetStore {
         &mut self,
         files: &[PathBuf],
         opts: FastaImportOptions<'_>,
-    ) -> Result<Vec<(SequenceCollectionMetadata, bool)>> {
+    ) -> Result<ImportReport> {
         if files.is_empty() {
-            return Ok(Vec::new());
+            return Ok(ImportReport {
+                collections: Vec::new(),
+                n_sequences_written: 0,
+                n_sequences_deduped: 0,
+                n_collections_new: 0,
+            });
+        }
+
+        // One collection alias cannot name N collections. Reject BEFORE any
+        // thread spawns or any file is opened, so a rejected call leaves the
+        // store completely untouched. Applying the alias to every collection
+        // would let an arbitrary one win (finalize order across builder threads
+        // is non-deterministic), which is a worse version of the silent
+        // misnaming this option exists to eliminate.
+        if opts.collection_alias.is_some() && files.len() > 1 {
+            return Err(anyhow!(
+                "collection_alias names a single collection but {} FASTA files were given; \
+                 import them without collection_alias and call add_collection_alias() per \
+                 returned collection metadata (results are in input order)",
+                files.len(),
+            ));
         }
 
         // Resolve concurrency: 0 = auto (available_parallelism). Has no effect
@@ -729,6 +753,13 @@ impl ReadonlyRefgetStore {
         let created_shards_ref = &created_shards;
         let write_err: Mutex<Option<anyhow::Error>> = Mutex::new(None);
         let write_err_ref = &write_err;
+
+        // --- Per-run ingest counters ----------------------------------------
+        // Plain locals, not atomics: the inserter loop runs on THIS thread
+        // (inside the scope closure), so these are ordinary register/stack
+        // increments with no synchronization in the per-sequence hot path.
+        let mut n_seqs_written: usize = 0;
+        let mut n_seqs_deduped: usize = 0;
 
         let scope_result = std::thread::scope(|scope| -> Result<()> {
             // Spawn the writer pool. Each writer drains `WriteJob`s and writes
@@ -828,6 +859,19 @@ impl ReadonlyRefgetStore {
                     InsertMsg::Skip { file_idx, metadata } => {
                         // Already-present collection skipped before any decode.
                         // No scratch was created (no Begin), nothing to persist.
+                        // This path never reaches finalize_collection, so the
+                        // requested collection alias must be registered HERE --
+                        // otherwise re-importing an already-imported FASTA would
+                        // silently drop the name the caller asked for.
+                        if let Err(e) = self.register_import_collection_alias(
+                            opts.collection_alias,
+                            &metadata.digest,
+                            opts.force,
+                        ) {
+                            let mut slot = build_err_ref.lock().unwrap();
+                            if slot.is_none() { *slot = Some(e); }
+                            break;
+                        }
                         results[file_idx] = Some((metadata, false));
                     }
                     InsertMsg::Seq { file_idx, ready } => {
@@ -877,31 +921,56 @@ impl ReadonlyRefgetStore {
                             Some(_) => {
                                 // Lower-or-equal file index already owns the name;
                                 // skip (still deduped, no re-write).
+                                n_seqs_deduped += 1;
                                 continue;
                             }
                         };
                         // A forced overwrite only changes in-memory name metadata
                         // (identical bytes); skip dispatching a redundant write.
                         let already_written = force;
-                        if let Some((full_path, bytes)) = self
-                            .add_sequence_record_deferred_write(
-                                SequenceRecord::Full {
-                                    metadata,
-                                    sequence: std::sync::Arc::new(sequence_data),
-                                },
-                                force,
-                            )?
-                        {
-                            if !already_written {
-                                // BOUNDED send: blocks (back-pressure) when the
-                                // writer pool is saturated, capping in-flight RAM.
-                                if write_tx
-                                    .send(WriteJob { full_path, bytes })
-                                    .is_err()
-                                {
-                                    // Writers all hung up (an earlier write error);
-                                    // stop feeding and let the error propagate.
-                                    break;
+                        // Per-run counter classification costs NOTHING on the
+                        // disk-backed (throughput-critical) path: it is derived
+                        // from `force` plus whether a write was dispatched, both
+                        // of which we already have. Only an in-memory store is
+                        // ambiguous -- there a `None` return means either a dedup
+                        // hit or a fresh insert -- so it alone pays for a lookup,
+                        // and the `!writer_disk_backed` short-circuit keeps that
+                        // lookup out of the disk path entirely.
+                        let mem_is_new =
+                            !writer_disk_backed && !self.sequence_store.contains_key(&seq_key);
+                        match self.add_sequence_record_deferred_write(
+                            SequenceRecord::Full {
+                                metadata,
+                                sequence: std::sync::Arc::new(sequence_data),
+                            },
+                            force,
+                        )? {
+                            Some((full_path, bytes)) => {
+                                if !already_written {
+                                    n_seqs_written += 1;
+                                    // BOUNDED send: blocks (back-pressure) when the
+                                    // writer pool is saturated, capping in-flight RAM.
+                                    if write_tx
+                                        .send(WriteJob { full_path, bytes })
+                                        .is_err()
+                                    {
+                                        // Writers all hung up (an earlier write error);
+                                        // stop feeding and let the error propagate.
+                                        break;
+                                    }
+                                } else {
+                                    // `force` name-overwrite: identical bytes are
+                                    // already on disk, so nothing was written.
+                                    n_seqs_deduped += 1;
+                                }
+                            }
+                            // Disk-backed: `None` is always a dedup hit. In-memory:
+                            // the pre-check above decided it.
+                            None => {
+                                if !writer_disk_backed && mem_is_new {
+                                    n_seqs_written += 1;
+                                } else {
+                                    n_seqs_deduped += 1;
                                 }
                             }
                         }
@@ -925,6 +994,7 @@ impl ReadonlyRefgetStore {
                             &source_path,
                             seq_count,
                             opts.force,
+                            opts.collection_alias,
                         ) {
                             Ok((meta, was_new)) => results[file_idx] = Some((meta, was_new)),
                             Err(e) => {
@@ -983,10 +1053,23 @@ impl ReadonlyRefgetStore {
             return Err(e);
         }
 
-        // Finalize ALL indexes ONCE, after every collection is persisted. This
-        // is what makes parallel == serial byte-identical: sequences.rgsi sorts
-        // by sha512t24u and collections.rgci sorts by collection digest, so the
-        // arrival/build order is irrelevant.
+        // Finalize ALL indexes ONCE, after every collection is persisted -- and
+        // therefore take the store write lock ONCE, for the length of a delta
+        // commit rather than the length of the import.
+        //
+        // WITHIN ONE PROCESS this is byte-identical to a serial import:
+        // sequences.rgsi sorts by sha512t24u and collections.rgci sorts by
+        // collection digest, so arrival/build order is irrelevant.
+        //
+        // ACROSS PROCESSES that guarantee does not hold, and the reason is worth
+        // knowing. The commit starts from whatever is on disk and does not
+        // overwrite an already-published row for a sequence digest, so the `name`
+        // column is first-committer-wins: if another process publishes the same
+        // sequence as `1` before we publish it as `chr1`, `1` is what stays in
+        // the index. Every content-derived column (length, alphabet, md5, and all
+        // the collection digests) is unaffected -- only `name`/`description`,
+        // which are advisory in this file. The authoritative per-collection names
+        // live in each collections/<digest>.rgsi.
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }
@@ -1000,14 +1083,21 @@ impl ReadonlyRefgetStore {
             );
         }
 
-        let results: Vec<(SequenceCollectionMetadata, bool)> = results
+        let collections: Vec<(SequenceCollectionMetadata, bool)> = results
             .into_iter()
             .map(|slot| {
                 slot.ok_or_else(|| anyhow!("internal error: a file index was not finalized"))
             })
             .collect::<Result<_>>()?;
 
-        Ok(results)
+        let n_collections_new = collections.iter().filter(|(_, was_new)| *was_new).count();
+
+        Ok(ImportReport {
+            collections,
+            n_sequences_written: n_seqs_written,
+            n_sequences_deduped: n_seqs_deduped,
+            n_collections_new,
+        })
     }
 
     /// Import a single FASTA file. Thin wrapper over the multi-file path.
@@ -1017,8 +1107,9 @@ impl ReadonlyRefgetStore {
         opts: FastaImportOptions<'_>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         let files = [file_path.as_ref().to_path_buf()];
-        let mut results = self.add_sequence_collections_from_fastas(&files, opts)?;
-        results
+        let mut report = self.add_sequence_collections_from_fastas(&files, opts)?;
+        report
+            .collections
             .pop()
             .ok_or_else(|| anyhow!("internal error: importing one file yielded no result"))
     }
@@ -1037,11 +1128,30 @@ impl ReadonlyRefgetStore {
         source_path: &Path,
         seq_count: usize,
         force: bool,
+        collection_alias: Option<(&str, &str)>,
     ) -> Result<(SequenceCollectionMetadata, bool)> {
         let coll_key = metadata.digest.to_key();
         let coll_digest_display = metadata.digest.clone();
 
+        // Validate the requested collection alias BEFORE touching any state.
+        // A conflicting alias is a hard error, and it must be raised while the
+        // store is still untouched: everything below this point (the collection
+        // record, its on-disk `.rgsi`, name_lookup, sequence aliases) is
+        // committed immediately, but the top-level index is only written once
+        // at the very end of the import. Erroring after those mutations would
+        // report a failed import while leaving the collection in the store --
+        // and, on disk, an orphaned `collections/<digest>.rgsi` that no index
+        // ever references. The actual alias registration still happens below,
+        // once the collection is registered, and is published with it.
+        self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
+
         if !force && self.collections.contains_key(&coll_key) {
+            // Register the name even on the in-run duplicate path: the
+            // collection IS in the store and the caller DID ask for it to be
+            // named. Skipping here would mean a re-import silently drops the
+            // alias. The helper is idempotent, so a second registration of the
+            // same digest is a no-op.
+            self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
             if !self.quiet {
                 println!("Skipped {} (already exists)", coll_digest_display);
             }
@@ -1072,14 +1182,22 @@ impl ReadonlyRefgetStore {
             self.write_collection_to_disk_single(&record)?;
         }
         self.collections.insert(coll_key, record);
+        self.record(|p| p.add_collection(coll_key));
 
         // Install the buffered name_lookup in FASTA order.
         self.name_lookup.insert(coll_key, scratch.name_to_digest);
 
-        // Register aliases in FASTA order.
+        // Register aliases in FASTA order. Pending only: they are published
+        // with the indexes in the final commit, not one TSV rewrite per header.
         for (ns, alias_value, sha512t24u) in &scratch.aliases {
-            self.add_sequence_alias(ns, alias_value, sha512t24u)?;
+            self.add_sequence_alias_pending(ns, alias_value, sha512t24u);
         }
+
+        // Register the collection alias (if requested). Conflicts were already
+        // rejected up front, while nothing had been mutated; this records the
+        // alias as pending so it lands on disk in the same commit as the
+        // collection index that makes its target resolvable.
+        self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
 
         if !self.quiet {
             println!(

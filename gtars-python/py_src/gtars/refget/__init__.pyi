@@ -171,6 +171,36 @@ class SequenceCollectionMetadata:
     def __repr__(self) -> str: ...
     def __str__(self) -> str: ...
 
+class ImportReport:
+    """Result of importing one or more FASTA files.
+
+    These are genuine per-run counters describing what the import actually did,
+    unlike :meth:`RefgetStore.stats`, which is a snapshot of current RAM
+    residency.
+
+    ``n_sequences_written + n_sequences_deduped`` equals the total number of
+    sequence records seen across all *processed* files. Files short-circuited as
+    already-present collections (before their FASTA is ever opened) contribute
+    nothing to either counter.
+
+    Attributes:
+        collections: Per-file ``(SequenceCollectionMetadata, was_new)`` results
+            in expanded-input order.
+        n_sequences_written: Sequences whose bytes were written this run
+            (genuinely new content).
+        n_sequences_deduped: Sequences already present by content digest, so no
+            bytes were written.
+        n_collections_new: Number of collections newly added this run.
+    """
+
+    collections: List[tuple[SequenceCollectionMetadata, bool]]
+    n_sequences_written: int
+    n_sequences_deduped: int
+    n_collections_new: int
+
+    def __repr__(self) -> str: ...
+    def __len__(self) -> int: ...
+
 class SequenceCollection:
     """A collection of biological sequences (e.g., a genome assembly).
 
@@ -618,6 +648,7 @@ class RefgetStore:
         file_path: Union[str, PathLike],
         force: bool = False,
         namespaces: Optional[List[str]] = None,
+        collection_alias: Optional[str] = None,
     ) -> tuple[SequenceCollectionMetadata, bool]:
         """Add a sequence collection from a FASTA file.
 
@@ -631,6 +662,11 @@ class RefgetStore:
             namespaces: Optional list of namespace prefixes to extract aliases from
                 FASTA headers. For example, ["ncbi", "refseq"] will scan headers
                 for tokens like ``ncbi:NC_000001.11`` and register them as aliases.
+            collection_alias: Register the imported collection under this
+                collection alias, as ``"NAMESPACE:ALIAS"`` (e.g. ``"ucsc:hg38"``).
+                This names the collection as a whole and is distinct from
+                ``namespaces``. Errors if the alias already names a different
+                collection, unless ``force`` is set.
 
         Returns:
             A tuple containing:
@@ -660,7 +696,7 @@ class RefgetStore:
         jobs: int = 0,
         force: bool = False,
         namespaces: Optional[List[str]] = None,
-    ) -> List[tuple[SequenceCollectionMetadata, bool]]:
+    ) -> ImportReport:
         """Import multiple FASTA files into the store.
 
         ``fastas`` accepts a single path, a glob pattern (e.g. "fasta/*.fa.gz"),
@@ -680,8 +716,12 @@ class RefgetStore:
             namespaces: Optional namespace prefixes to extract aliases from headers.
 
         Returns:
-            A list of ``(SequenceCollectionMetadata, bool)`` tuples in
-            expanded-input order; the bool is True if newly added.
+            An :class:`ImportReport`. ``report.collections`` is a list of
+            ``(SequenceCollectionMetadata, bool)`` tuples in expanded-input
+            order (the bool is True if newly added);
+            ``report.n_sequences_written``, ``report.n_sequences_deduped``, and
+            ``report.n_collections_new`` are per-run ingest counters. Use these
+            — not ``store.stats()`` — to report what an import actually added.
 
         Raises:
             ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
@@ -690,7 +730,8 @@ class RefgetStore:
         Example::
 
             store = RefgetStore.in_memory()
-            results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+            report = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+            print(report.n_collections_new, report.n_sequences_written)
         """
         ...
 
@@ -1043,20 +1084,29 @@ class RefgetStore:
         Returns:
             dict with keys:
                 - 'n_sequences': Total number of sequences (Stub + Full)
-                - 'n_sequences_loaded': Number of sequences with data loaded (Full)
+                - 'n_sequences_in_memory': Number of sequences whose bytes are
+                  currently held in RAM (Full)
                 - 'n_collections': Total number of collections (Stub + Full)
-                - 'n_collections_loaded': Number of collections with sequences loaded (Full)
+                - 'n_collections_in_memory': Number of collections whose
+                  sequence list is currently held in RAM (Full)
                 - 'storage_mode': Storage mode ('Raw' or 'Encoded')
 
         Note:
-            n_collections_loaded only reflects collections fully loaded in memory.
-            For remote stores, collections are loaded on-demand when accessed.
+            These are a snapshot of CURRENT RAM residency, not a record of what
+            an import run did. n_sequences_in_memory is structurally always 0
+            for a disk-backed store: importing writes bytes to disk and keeps
+            only a stub in memory. n_collections_in_memory only reflects
+            collections fully loaded in memory; it resets on process start and
+            also counts collections merely touched by a read, so it is not a
+            count of collections ingested. For remote stores, collections are
+            loaded on-demand when accessed. For per-run ingest counts, use the
+            ImportReport returned by add_sequence_collections_from_fastas.
 
         Example::
 
             stats = store.stats()
             print(f"Store has {stats['n_sequences']} sequences")
-            print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
+            print(f"Collections: {stats['n_collections']} total, {stats['n_collections_in_memory']} in memory")
         """
         ...
 

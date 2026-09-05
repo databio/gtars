@@ -317,7 +317,7 @@ pub fn get_sequence_by_name_store(
     with_store!(store_ptr, store, {
         let result = store.get_sequence_by_name(collection_digest, sequence_name);
         if let Ok(record) = result {
-            Ok(record_to_list(record.clone()).into())
+            Ok(record_to_list(record).into())
         } else {
             Ok(Robj::from(())) // NULL
         }
@@ -543,10 +543,11 @@ pub fn stats_store(store_ptr: Robj) -> extendr_api::Result<List> {
         let stats = store.stats();
         Ok(list!(
             n_sequences = stats.n_sequences as i32,
-            n_sequences_loaded = stats.n_sequences_loaded as i32,
+            n_sequences_in_memory = stats.n_sequences_in_memory as i32,
             n_collections = stats.n_collections as i32,
-            n_collections_loaded = stats.n_collections_loaded as i32,
-            storage_mode = stats.storage_mode
+            n_collections_in_memory = stats.n_collections_in_memory as i32,
+            storage_mode = stats.storage_mode,
+            logical_sequence_bytes = stats.logical_sequence_bytes as f64
         ))
     })
 }

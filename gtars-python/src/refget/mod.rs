@@ -16,7 +16,7 @@ use gtars_refget::digest::{
 };
 use gtars_refget::digest::{md5, sha512t24u, AlphabetType};
 use gtars_refget::fasta::FaiRecord;
-use gtars_refget::store::{FastaImportOptions, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
+use gtars_refget::store::{FastaImportOptions, ImportReport, ReadonlyRefgetStore, RefgetStore, StorageMode, SyncStrategy};
 use gtars_refget::{expand_fasta_inputs, FastaInputs};
 // use gtars::refget::store::RetrievedSequence; // This is the Rust-native struct
 
@@ -322,6 +322,73 @@ impl From<SequenceCollectionMetadata> for PySequenceCollectionMetadata {
             name_length_pairs_digest: value.name_length_pairs_digest,
             sorted_name_length_pairs_digest: value.sorted_name_length_pairs_digest,
             sorted_sequences_digest: value.sorted_sequences_digest,
+        }
+    }
+}
+
+/// Result of importing one or more FASTA files.
+///
+/// These are genuine per-run counters describing what the import actually did,
+/// unlike `RefgetStore.stats()`, which is a snapshot of current RAM residency.
+///
+/// `n_sequences_written + n_sequences_deduped` equals the total number of
+/// sequence records seen across all *processed* files. Files short-circuited as
+/// already-present collections (before their FASTA is ever opened) contribute
+/// nothing to either counter.
+///
+/// Attributes:
+///     collections (list[tuple[SequenceCollectionMetadata, bool]]): Per-file
+///         results in expanded-input order; the bool is True if the collection
+///         was newly added.
+///     n_sequences_written (int): Sequences whose bytes were written this run
+///         (genuinely new content).
+///     n_sequences_deduped (int): Sequences already present by content digest,
+///         so no bytes were written.
+///     n_collections_new (int): Number of collections newly added this run.
+#[pyclass(name = "ImportReport", module = "gtars.refget")]
+#[derive(Clone)]
+pub struct PyImportReport {
+    #[pyo3(get)]
+    pub collections: Vec<(PySequenceCollectionMetadata, bool)>,
+    #[pyo3(get)]
+    pub n_sequences_written: usize,
+    #[pyo3(get)]
+    pub n_sequences_deduped: usize,
+    #[pyo3(get)]
+    pub n_collections_new: usize,
+}
+
+#[pymethods]
+impl PyImportReport {
+    fn __repr__(&self) -> String {
+        format!(
+            "ImportReport(n_files={}, n_collections_new={}, n_sequences_written={}, n_sequences_deduped={})",
+            self.collections.len(),
+            self.n_collections_new,
+            self.n_sequences_written,
+            self.n_sequences_deduped
+        )
+    }
+
+    /// Number of files processed (length of `collections`).
+    fn __len__(&self) -> usize {
+        self.collections.len()
+    }
+}
+
+impl From<ImportReport> for PyImportReport {
+    fn from(value: ImportReport) -> Self {
+        PyImportReport {
+            collections: value
+                .collections
+                .into_iter()
+                .map(|(metadata, was_new)| {
+                    (PySequenceCollectionMetadata::from(metadata), was_new)
+                })
+                .collect(),
+            n_sequences_written: value.n_sequences_written,
+            n_sequences_deduped: value.n_sequences_deduped,
+            n_collections_new: value.n_collections_new,
         }
     }
 }
@@ -1395,6 +1462,11 @@ impl PyRefgetStore {
     ///     file_path (str or Path): Path to the FASTA file to import.
     ///     force (bool, optional): If True, overwrite existing collections/sequences.
     ///                            If False (default), skip duplicates.
+    ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
+    ///     collection_alias (str, optional): Register the imported collection under
+    ///         this collection alias, as "NAMESPACE:ALIAS" (e.g. "ucsc:hg38").
+    ///         Errors if the alias already names a different collection, unless
+    ///         ``force`` is set.
     ///
     /// Returns:
     ///     tuple[SequenceCollectionMetadata, bool]: A tuple containing:
@@ -1408,21 +1480,37 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> metadata, was_new = store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"{'Added' if was_new else 'Skipped'}: {metadata.digest} ({metadata.n_sequences} seqs)")
-    #[pyo3(signature = (file_path, force=false, namespaces=None))]
+    #[pyo3(signature = (file_path, force=false, namespaces=None, collection_alias=None))]
     fn add_sequence_collection_from_fasta(
         &mut self,
         file_path: &Bound<'_, PyAny>,
         force: bool,
         namespaces: Option<Vec<String>>,
+        collection_alias: Option<String>,
     ) -> PyResult<(PySequenceCollectionMetadata, bool)> {
         let file_path = file_path.to_string();
         let ns_refs: Vec<&str> = namespaces
             .as_ref()
             .map(|v| v.iter().map(|s| s.as_str()).collect())
             .unwrap_or_default();
-        let opts = FastaImportOptions::new()
+        let alias_parts: Option<(&str, &str)> = match collection_alias.as_deref() {
+            None => None,
+            Some(raw) => match raw.split_once(':') {
+                Some((ns, alias)) if !ns.is_empty() && !alias.is_empty() => Some((ns, alias)),
+                _ => {
+                    return Err(PyErr::new::<pyo3::exceptions::PyValueError, _>(format!(
+                        "collection_alias expects 'NAMESPACE:ALIAS' (e.g. 'ucsc:hg38'), got '{}'",
+                        raw
+                    )))
+                }
+            },
+        };
+        let mut opts = FastaImportOptions::new()
             .force(force)
             .namespaces(&ns_refs);
+        if let Some((ns, alias)) = alias_parts {
+            opts = opts.collection_alias(ns, alias);
+        }
         let result = self.inner
             .add_sequence_collection_from_fasta(file_path, opts);
         result
@@ -1454,8 +1542,12 @@ impl PyRefgetStore {
     ///     namespaces (list[str], optional): Namespace prefixes to extract aliases from headers.
     ///
     /// Returns:
-    ///     list[tuple[SequenceCollectionMetadata, bool]]: per-file results in
-    ///         expanded-input order.
+    ///     ImportReport: `.collections` holds the per-file
+    ///         `(SequenceCollectionMetadata, was_new)` results in
+    ///         expanded-input order; `.n_sequences_written`,
+    ///         `.n_sequences_deduped`, and `.n_collections_new` are per-run
+    ///         ingest counters. Use these — not `store.stats()` — to report
+    ///         what an import actually added.
     ///
     /// Raises:
     ///     ValueError: If the inputs cannot be expanded (e.g. glob matches nothing).
@@ -1463,7 +1555,8 @@ impl PyRefgetStore {
     ///
     /// Example:
     ///     >>> store = RefgetStore.in_memory()
-    ///     >>> results = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    ///     >>> report = store.add_sequence_collections_from_fastas("data/*.fa.gz", jobs=4)
+    ///     >>> print(report.n_collections_new, report.n_sequences_written)
     #[pyo3(signature = (fastas, file_list=None, jobs=0, force=false, namespaces=None))]
     fn add_sequence_collections_from_fastas(
         &mut self,
@@ -1472,7 +1565,7 @@ impl PyRefgetStore {
         jobs: usize,
         force: bool,
         namespaces: Option<Vec<String>>,
-    ) -> PyResult<Vec<(PySequenceCollectionMetadata, bool)>> {
+    ) -> PyResult<PyImportReport> {
         // Normalize `fastas` into a Vec<PathBuf>. Accept a single str/PathLike
         // or a list/tuple of them. `expand_fasta_inputs` handles glob/dir/file
         // classification, so we just stringify each entry here.
@@ -1514,14 +1607,7 @@ impl PyRefgetStore {
 
         self.inner
             .add_sequence_collections_from_fastas(&expanded, opts)
-            .map(|results| {
-                results
-                    .into_iter()
-                    .map(|(metadata, was_new)| {
-                        (PySequenceCollectionMetadata::from(metadata), was_new)
-                    })
-                    .collect()
-            })
+            .map(PyImportReport::from)
             .map_err(|e| {
                 PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
                     "Error importing FASTA files: {}",
@@ -1625,7 +1711,7 @@ impl PyRefgetStore {
         let collection_digest = strip_sq_prefix(collection_digest);
         self.inner
             .get_sequence_by_name(collection_digest, sequence_name)
-            .map(|record| PySequenceRecord::from(record.clone()))
+            .map(PySequenceRecord::from)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!(
                     "Sequence '{}' not found in collection {} ({})",
@@ -1967,6 +2053,87 @@ impl PyRefgetStore {
             })
     }
 
+    /// Preview which sequences remove_collection would delete, without deleting.
+    ///
+    /// Uses the same disk-derived live set as the real removal, so it raises the
+    /// same error if the store is not in a state where orphan cleanup is safe
+    /// (e.g. a collection listed in the index whose .rgsi file is unreadable).
+    ///
+    /// ADVISORY. This takes no lock -- it is meant for confirmation prompts, and
+    /// blocking every concurrent writer for the length of a full-store scan to
+    /// answer a question the user may decline would be absurd. The authoritative
+    /// scan runs again inside remove_collection() under the lock, and the two may
+    /// legitimately differ: a collection committed in between makes some planned
+    /// orphan live again, and the real removal correctly spares it. Treat a
+    /// shortfall as ordinary concurrency, not corruption.
+    ///
+    /// Args:
+    ///     digest: The collection's SHA-512/24u digest string.
+    ///
+    /// Returns:
+    ///     list[str]: Sequence digests that would be unlinked.
+    ///
+    /// Example:
+    ///     >>> doomed = store.plan_orphan_removal("abc123")
+    ///     >>> print(f"{len(doomed)} sequences would be deleted")
+    fn plan_orphan_removal(&self, digest: &str) -> PyResult<Vec<String>> {
+        self.inner.plan_orphan_removal(digest).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!(
+                "Error planning orphan removal: {}",
+                e
+            ))
+        })
+    }
+
+    /// Hold this store's exclusive writer lock across several mutations.
+    ///
+    /// Individual mutations already commit under the lock, so this is only needed
+    /// when a sequence of them must be atomic with respect to other processes
+    /// writing the same store directory.
+    ///
+    /// Args:
+    ///     operation: A short label recorded in the lock file, shown to whoever
+    ///         is blocked waiting for it (e.g. "build_aliases").
+    ///
+    /// Example:
+    ///     >>> store.lock_for_batch("build_aliases")
+    ///     >>> try:
+    ///     ...     for ns, alias, digest in rows:
+    ///     ...         store.add_collection_alias(ns, alias, digest)
+    ///     ... finally:
+    ///     ...     store.release_batch_lock()
+    #[pyo3(signature = (operation="batch"))]
+    fn lock_for_batch(&mut self, operation: &str) -> PyResult<()> {
+        self.inner.lock_for_batch(operation).map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error acquiring store lock: {}", e))
+        })
+    }
+
+    /// Release a lock taken by lock_for_batch().
+    fn release_batch_lock(&mut self) {
+        self.inner.release_batch_lock();
+    }
+
+    /// Whether this store currently holds a batch write lock.
+    fn holds_batch_lock(&self) -> bool {
+        self.inner.holds_batch_lock()
+    }
+
+    /// Set how long commits wait for another process's write lock.
+    ///
+    /// Args:
+    ///     timeout_seconds: Seconds to wait before giving up. 0 = wait forever.
+    fn set_lock_timeout(&mut self, timeout_seconds: u64) {
+        let opts = gtars_refget::store::LockOptions::default().timeout_secs(timeout_seconds);
+        self.inner.set_lock_options(opts);
+    }
+
+    /// Allow a commit to overwrite an alias another writer already published
+    /// under a different digest, instead of raising on the conflict.
+    fn set_force_alias(&mut self, force: bool) {
+        self.inner.set_force_alias(force);
+    }
+
     /// Import a collection from another store, including sequences, aliases, and FHR metadata.
     ///
     /// Args:
@@ -2064,17 +2231,26 @@ impl PyRefgetStore {
     /// Returns statistics about the store.
     ///
     /// Returns:
-    ///     dict: Dictionary with keys 'n_sequences', 'n_collections', 'n_collections_loaded', 'storage_mode'
+    ///     dict: Dictionary with keys 'n_sequences', 'n_sequences_in_memory',
+    ///         'n_collections', 'n_collections_in_memory', 'storage_mode',
+    ///         'logical_sequence_bytes'.
     ///
     /// Note:
-    ///     n_collections is the total number of collections (both loaded and stubs).
-    ///     n_collections_loaded only reflects collections fully loaded in memory.
-    ///     For remote stores, collections are loaded on-demand when accessed.
+    ///     These are a snapshot of CURRENT RAM residency, not a record of what
+    ///     an import run did. n_sequences and n_collections are the totals
+    ///     (stubs included). n_sequences_in_memory counts only sequences whose
+    ///     bytes are held in RAM; it is structurally always 0 for a disk-backed
+    ///     store, because importing writes bytes to disk and keeps only a stub.
+    ///     n_collections_in_memory counts collections whose sequence list is in
+    ///     RAM; it resets on process start and also counts collections merely
+    ///     touched by a read, so it is NOT a count of collections ingested.
+    ///     For per-run ingest counts, use the report returned by
+    ///     add_sequence_collections_from_fastas.
     ///
     /// Example:
     ///     >>> stats = store.stats()
     ///     >>> print(f"Store has {stats['n_sequences']} sequences")
-    ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_loaded']} loaded")
+    ///     >>> print(f"Collections: {stats['n_collections']} total, {stats['n_collections_in_memory']} in memory")
     fn stats(&self) -> std::collections::HashMap<String, String> {
         let extended_stats = self.inner.stats();
         let mut stats = std::collections::HashMap::new();
@@ -2083,18 +2259,22 @@ impl PyRefgetStore {
             extended_stats.n_sequences.to_string(),
         );
         stats.insert(
-            "n_sequences_loaded".to_string(),
-            extended_stats.n_sequences_loaded.to_string(),
+            "n_sequences_in_memory".to_string(),
+            extended_stats.n_sequences_in_memory.to_string(),
         );
         stats.insert(
             "n_collections".to_string(),
             extended_stats.n_collections.to_string(),
         );
         stats.insert(
-            "n_collections_loaded".to_string(),
-            extended_stats.n_collections_loaded.to_string(),
+            "n_collections_in_memory".to_string(),
+            extended_stats.n_collections_in_memory.to_string(),
         );
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats.insert(
+            "logical_sequence_bytes".to_string(),
+            extended_stats.logical_sequence_bytes.to_string(),
+        );
         stats
     }
 
@@ -2879,8 +3059,8 @@ impl PyRefgetStore {
         };
 
         format!(
-            "RefgetStore(n_sequences={}, n_sequences_loaded={}, n_collections={}, n_collections_loaded={}, mode={}, {}, {}, {})",
-            stats.n_sequences, stats.n_sequences_loaded, stats.n_collections, stats.n_collections_loaded, stats.storage_mode, persist_str, quiet_str, location
+            "RefgetStore(n_sequences={}, n_sequences_in_memory={}, n_collections={}, n_collections_in_memory={}, mode={}, {}, {}, {})",
+            stats.n_sequences, stats.n_sequences_in_memory, stats.n_collections, stats.n_collections_in_memory, stats.storage_mode, persist_str, quiet_str, location
         )
     }
 
@@ -3216,14 +3396,21 @@ impl PyReadonlyRefgetStore {
     }
 
     /// Returns statistics about the store.
+    ///
+    /// The `*_in_memory` keys are a RAM-residency snapshot, not per-run ingest
+    /// counts; see `RefgetStore.stats`.
     fn stats(&self) -> std::collections::HashMap<String, String> {
         let extended_stats = self.store.stats();
         let mut stats = std::collections::HashMap::new();
         stats.insert("n_sequences".to_string(), extended_stats.n_sequences.to_string());
-        stats.insert("n_sequences_loaded".to_string(), extended_stats.n_sequences_loaded.to_string());
+        stats.insert("n_sequences_in_memory".to_string(), extended_stats.n_sequences_in_memory.to_string());
         stats.insert("n_collections".to_string(), extended_stats.n_collections.to_string());
-        stats.insert("n_collections_loaded".to_string(), extended_stats.n_collections_loaded.to_string());
+        stats.insert("n_collections_in_memory".to_string(), extended_stats.n_collections_in_memory.to_string());
         stats.insert("storage_mode".to_string(), extended_stats.storage_mode);
+        stats.insert(
+            "logical_sequence_bytes".to_string(),
+            extended_stats.logical_sequence_bytes.to_string(),
+        );
         stats
     }
 
@@ -3254,7 +3441,7 @@ impl PyReadonlyRefgetStore {
         let collection_digest = strip_sq_prefix(collection_digest);
         self.store
             .get_sequence_by_name(collection_digest, sequence_name)
-            .map(|record| PySequenceRecord::from(record.clone()))
+            .map(PySequenceRecord::from)
             .map_err(|e| {
                 pyo3::exceptions::PyKeyError::new_err(format!(
                     "Sequence '{}' not found in collection {} ({})",
@@ -3419,8 +3606,8 @@ impl PyReadonlyRefgetStore {
     fn __repr__(&self) -> String {
         let stats = self.store.stats();
         format!(
-            "ReadonlyRefgetStore(n_sequences={}, n_collections={}, n_collections_loaded={}, mode={})",
-            stats.n_sequences, stats.n_collections, stats.n_collections_loaded, stats.storage_mode
+            "ReadonlyRefgetStore(n_sequences={}, n_collections={}, n_collections_in_memory={}, mode={})",
+            stats.n_sequences, stats.n_collections, stats.n_collections_in_memory, stats.storage_mode
         )
     }
 
@@ -3454,9 +3641,59 @@ fn pull_result_to_pyobject(result: gtars_refget::PullResult) -> PyResult<Py<PyAn
     })
 }
 
+/// Report who holds a RefgetStore's exclusive writer lock.
+///
+/// Args:
+///     store_path: Path to the RefgetStore directory.
+///
+/// Returns:
+///     dict | None: None if the lock is free. Otherwise a dict with keys
+///     pid, hostname, started_at, heartbeat_at, operation, gtars_version.
+///
+/// Example:
+///     >>> from gtars.refget import store_lock_status
+///     >>> info = store_lock_status("/data/stores/demo")
+///     >>> if info:
+///     ...     print(f"held by pid {info['pid']} on {info['hostname']}")
+#[pyfunction]
+fn store_lock_status(store_path: &str) -> PyResult<Option<Py<PyAny>>> {
+    let info = gtars_refget::store::lock_status(std::path::Path::new(store_path))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))?;
+    let Some(info) = info else { return Ok(None) };
+    Python::attach(|py| {
+        let dict = pyo3::types::PyDict::new(py);
+        dict.set_item("pid", info.pid)?;
+        dict.set_item("hostname", info.hostname)?;
+        dict.set_item("started_at", info.started_at)?;
+        dict.set_item("heartbeat_at", info.heartbeat_at)?;
+        dict.set_item("operation", info.operation)?;
+        dict.set_item("gtars_version", info.gtars_version)?;
+        Ok(Some(dict.into()))
+    })
+}
+
+/// Forcibly clear a RefgetStore's exclusive writer lock.
+///
+/// Operator escape hatch for a lock left behind by a killed job. Check
+/// `store_lock_status()` first: clearing a lock a LIVE writer holds lets two
+/// processes commit at once, which is the failure this lock exists to prevent.
+///
+/// Args:
+///     store_path: Path to the RefgetStore directory.
+///
+/// Returns:
+///     bool: True if a lock was present and cleared.
+#[pyfunction]
+fn force_unlock_store(store_path: &str) -> PyResult<bool> {
+    gtars_refget::store::force_unlock(std::path::Path::new(store_path))
+        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
+}
+
 // This represents the Python module to be created
 #[pymodule]
 pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(store_lock_status, m)?)?;
+    m.add_function(wrap_pyfunction!(force_unlock_store, m)?)?;
     m.add_function(wrap_pyfunction!(sha512t24u_digest, m)?)?;
     m.add_function(wrap_pyfunction!(md5_digest, m)?)?;
     m.add_function(wrap_pyfunction!(digest_fasta, m)?)?;
@@ -3470,6 +3707,7 @@ pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PySequenceRecord>()?;
     m.add_class::<PySeqColDigestLvl1>()?;
     m.add_class::<PySequenceCollectionMetadata>()?;
+    m.add_class::<PyImportReport>()?;
     m.add_class::<PySequenceCollection>()?;
     m.add_class::<PyStorageMode>()?;
     m.add_class::<PyRefgetStore>()?;
