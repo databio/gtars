@@ -54,3 +54,6 @@ jobs:
         with:
           executable-name: gtars
           target: ${{ matrix.platform.target }}
+          # The changelog lives in the bedbase docs repo (docs/gtars/changelog.md),
+          # so do not look for a Changes.md here.
+          changes-file: ""
