@@ -406,6 +406,10 @@ pub struct PendingChanges {
     /// commit visits the namespace at all; whether the TSV is actually deleted
     /// depends on the MERGED result being empty, not on this handle's intent.
     pub(crate) emptied_alias_namespaces: HashSet<(AliasKind, String)>,
+    /// Subset of `aliases` the caller asked to force: on commit these overwrite
+    /// a conflicting binding another writer already published, as if
+    /// `force_alias` were set for that one entry.
+    pub(crate) forced_aliases: HashSet<(AliasKind, String, String)>,
 }
 
 impl PendingChanges {
@@ -458,9 +462,21 @@ impl PendingChanges {
         self.aliases.insert(entry);
     }
 
+    pub(crate) fn add_forced_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
+        self.add_alias(kind, namespace, alias);
+        self.forced_aliases
+            .insert((kind, namespace.to_string(), alias.to_string()));
+    }
+
+    pub(crate) fn is_forced(&self, kind: AliasKind, namespace: &str, alias: &str) -> bool {
+        self.forced_aliases
+            .contains(&(kind, namespace.to_string(), alias.to_string()))
+    }
+
     pub(crate) fn remove_alias(&mut self, kind: AliasKind, namespace: &str, alias: &str) {
         let entry = (kind, namespace.to_string(), alias.to_string());
         self.aliases.remove(&entry);
+        self.forced_aliases.remove(&entry);
         self.removed_aliases.insert(entry);
     }
 
@@ -489,6 +505,7 @@ impl PendingChanges {
         self.collections.retain(|k| !applied.collections.contains(k));
         self.sequences.retain(|k| !applied.sequences.contains(k));
         self.aliases.retain(|k| !applied.aliases.contains(k));
+        self.forced_aliases.retain(|k| !applied.aliases.contains(k));
         self.removed_collections
             .retain(|k| !applied.removed_collections.contains(k));
         self.removed_sequences
@@ -503,6 +520,8 @@ impl PendingChanges {
     /// single-namespace commit path published it.
     pub(crate) fn clear_alias_namespace(&mut self, kind: AliasKind, namespace: &str) {
         self.aliases
+            .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
+        self.forced_aliases
             .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
         self.removed_aliases
             .retain(|(k, ns, _)| !(*k == kind && ns == namespace));
@@ -1246,8 +1265,35 @@ impl ReadonlyRefgetStore {
         self.fhr_metadata.remove(&key);
         self.record(|p| p.remove_collection(key));
 
-        // Remove collection aliases pointing to this digest
-        let alias_pairs = self.aliases.reverse_lookup_collection(digest);
+        // Remove collection aliases pointing to this digest. The in-memory
+        // alias table is an open-time snapshot; an alias another process
+        // published for this collection since then is only on disk, and
+        // leaving it behind makes it resolve to nothing. Under the lock, also
+        // scan the published TSVs for every entry targeting this digest.
+        let mut alias_pairs = self.aliases.reverse_lookup_collection(digest);
+        if self.persist_to_disk {
+            if let Some(local_path) = &self.local_path {
+                let dir = local_path.join("aliases").join(AliasKind::Collection.subdir());
+                if let Ok(entries) = fs::read_dir(&dir) {
+                    for entry in entries.filter_map(|e| e.ok()) {
+                        let path = entry.path();
+                        if path.extension().map_or(true, |e| e != "tsv") {
+                            continue;
+                        }
+                        let Some(ns) = path.file_stem().and_then(|s| s.to_str()) else {
+                            continue;
+                        };
+                        for (alias, target) in super::persistence::read_alias_tsv(&path)? {
+                            if target == key {
+                                alias_pairs.push((ns.to_string(), alias));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        alias_pairs.sort();
+        alias_pairs.dedup();
         let affected_namespaces: HashSet<String> = alias_pairs
             .iter()
             .map(|(ns, _)| ns.clone())
@@ -1351,6 +1397,14 @@ impl ReadonlyRefgetStore {
     /// `md5_lookup` is scanned exactly once, not once per orphan.
     ///
     /// Sequences shared with a successfully-finalized collection are preserved.
+    ///
+    /// Only sequences THIS import staged (still pending, never committed) are
+    /// candidates. Anything already in the on-disk index is out of bounds:
+    /// `open_local` loads every global sequence stub but leaves `name_lookup`
+    /// empty for stub collections, so "in `sequence_store` but not in
+    /// `name_lookup`" describes the entire pre-existing store, not an orphan.
+    /// Deriving candidates from that would unlink every published `.seq` file
+    /// after one failed import into a reopened store.
     #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
     pub(crate) fn remove_orphan_seq_files(&mut self) {
         // Build the set of all sequence digest keys that are referenced by at
@@ -1363,12 +1417,20 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        // Collect the orphan keys (present in sequence_store but not referenced).
-        let orphans: Vec<DigestKey> = self
-            .sequence_store
-            .keys()
-            .filter(|k| !referenced.contains(*k))
+        // Candidates: staged by this handle and not yet published.
+        let staged: Vec<DigestKey> = self
+            .pending
+            .lock()
+            .unwrap()
+            .sequences
+            .iter()
             .copied()
+            .collect();
+
+        // Collect the orphan keys (staged but not referenced).
+        let orphans: Vec<DigestKey> = staged
+            .into_iter()
+            .filter(|k| !referenced.contains(k))
             .collect();
 
         if orphans.is_empty() {

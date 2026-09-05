@@ -4161,6 +4161,98 @@ fn test_collection_alias_conflict_force_overwrites() {
     );
 }
 
+/// Disk-backed counterpart of the force test. The on-disk conflict check in
+/// `commit_alias_namespace` used to consult only the handle-wide `force_alias`
+/// flag, so `.force(true)` remapped the alias in memory and then errored at
+/// commit against the TSV already on disk.
+#[test]
+fn test_collection_alias_conflict_force_overwrites_on_disk() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n").unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chr1\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store
+        .add_sequence_collection_from_fasta(
+            &fasta_a,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .unwrap();
+    store.write().unwrap();
+
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    let (meta_b, _) = reopened
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new()
+                .collection_alias("ucsc", "hg38")
+                .force(true),
+        )
+        .expect("force must override the alias published on disk");
+
+    let fresh = RefgetStore::open_local(&store_path).unwrap();
+    assert_eq!(
+        fresh
+            .get_collection_metadata_by_alias("ucsc", "hg38")
+            .unwrap()
+            .digest,
+        meta_b.digest,
+        "the remapped alias must be what is on disk"
+    );
+}
+
+/// Cleanup after a failed import must only touch what that import staged.
+/// It used to compute orphans as "in `sequence_store` but not in
+/// `name_lookup`", which on a reopened store (stub collections, empty
+/// `name_lookup`) is every pre-existing sequence -- and unlinked them all.
+#[test]
+fn test_failed_import_cleanup_preserves_existing_sequences() {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_a = dir.path().join("a.fa");
+    fs::write(&fasta_a, ">chr1\nAAAACCCC\n>chr2\nGGGGTTTT\n").unwrap();
+
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    let (meta_a, _) = store
+        .add_sequence_collection_from_fasta(&fasta_a, FastaImportOptions::new())
+        .unwrap();
+    store.write().unwrap();
+    drop(store);
+
+    // A reopened handle: sequences are loaded as stubs, name_lookup is empty.
+    let mut reopened = RefgetStore::open_local(&store_path).unwrap();
+    assert!(reopened.name_lookup.is_empty());
+
+    // Force a failure: a conflicting collection alias is rejected after the
+    // import has already staged the new collection's sequences.
+    reopened
+        .add_collection_alias("ucsc", "hg38", &meta_a.digest)
+        .unwrap();
+    let fasta_b = dir.path().join("b.fa");
+    fs::write(&fasta_b, ">chrX\nCCCCAAAA\n").unwrap();
+    reopened
+        .add_sequence_collection_from_fasta(
+            &fasta_b,
+            FastaImportOptions::new().collection_alias("ucsc", "hg38"),
+        )
+        .expect_err("conflicting alias must error");
+
+    // Every pre-existing sequence is still readable from disk.
+    let mut fresh = RefgetStore::open_local(&store_path).unwrap();
+    let coll = fresh.get_collection(&meta_a.digest).unwrap();
+    for rec in &coll.sequences {
+        let digest = rec.metadata().sha512t24u.clone();
+        fresh
+            .get_substring(digest.as_str(), 0, rec.metadata().length as usize)
+            .unwrap_or_else(|e| {
+                panic!("sequence {} vanished after a failed import: {}", digest, e)
+            });
+    }
+}
+
 #[test]
 fn test_collection_alias_rejected_for_multiple_files() {
     let dir = tempdir().unwrap();

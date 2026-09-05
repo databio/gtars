@@ -1141,8 +1141,8 @@ impl ReadonlyRefgetStore {
         // at the very end of the import. Erroring after those mutations would
         // report a failed import while leaving the collection in the store --
         // and, on disk, an orphaned `collections/<digest>.rgsi` that no index
-        // ever references. The actual alias write still happens below, after
-        // the collection is committed.
+        // ever references. The actual alias registration still happens below,
+        // once the collection is registered, and is published with it.
         self.check_import_collection_alias(collection_alias, &metadata.digest, force)?;
 
         if !force && self.collections.contains_key(&coll_key) {
@@ -1187,14 +1187,16 @@ impl ReadonlyRefgetStore {
         // Install the buffered name_lookup in FASTA order.
         self.name_lookup.insert(coll_key, scratch.name_to_digest);
 
-        // Register aliases in FASTA order.
+        // Register aliases in FASTA order. Pending only: they are published
+        // with the indexes in the final commit, not one TSV rewrite per header.
         for (ns, alias_value, sha512t24u) in &scratch.aliases {
-            self.add_sequence_alias(ns, alias_value, sha512t24u)?;
+            self.add_sequence_alias_pending(ns, alias_value, sha512t24u);
         }
 
         // Register the collection alias (if requested). Conflicts were already
-        // rejected up front, while nothing had been mutated; this is the write
-        // half, and it runs only once the collection itself is committed.
+        // rejected up front, while nothing had been mutated; this records the
+        // alias as pending so it lands on disk in the same commit as the
+        // collection index that makes its target resolvable.
         self.register_import_collection_alias(collection_alias, &metadata.digest, force)?;
 
         if !self.quiet {

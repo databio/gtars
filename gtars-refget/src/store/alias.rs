@@ -433,8 +433,8 @@ impl ReadonlyRefgetStore {
     /// because silently remapping a name like `ucsc:hg38` from one assembly to
     /// another is exactly the misdirection this option exists to prevent.
     ///
-    /// Routes through [`Self::add_collection_alias`] so it inherits TSV
-    /// persistence and the `rgstore.json` manifest refresh.
+    /// The alias is recorded as pending and published by the import's final
+    /// `write_index_files`, together with the collection it names.
     pub(crate) fn register_import_collection_alias(
         &mut self,
         spec: Option<(&str, &str)>,
@@ -466,7 +466,31 @@ impl ReadonlyRefgetStore {
             None => {}
         }
 
-        self.add_collection_alias(namespace, alias, collection_digest)
+        // Deferred, not published here: the collection itself only reaches
+        // `collections.rgci` in the import's final `write_index_files`, and an
+        // alias visible on disk before its target is a dangling alias to every
+        // concurrent reader (permanently so, if that final commit fails).
+        // Publishing both in the same commit closes that window. `force` is
+        // carried along so the on-disk conflict check honors it too, instead
+        // of only the handle-wide `force_alias` flag.
+        self.aliases.add_collection(namespace, alias, collection_digest);
+        self.record(|p| {
+            if force {
+                p.add_forced_alias(AliasKind::Collection, namespace, alias);
+            } else {
+                p.add_alias(AliasKind::Collection, namespace, alias);
+            }
+        });
+        Ok(())
+    }
+
+    /// Register a sequence alias in memory and mark it pending, WITHOUT
+    /// publishing the namespace TSV. Used by the FASTA import path, which
+    /// commits all of its changes together at the end; publishing per alias
+    /// would rewrite the TSV (and the manifest) once per header.
+    pub(crate) fn add_sequence_alias_pending(&mut self, namespace: &str, alias: &str, digest: &str) {
+        self.aliases.add_sequence(namespace, alias, digest);
+        self.record(|p| p.add_alias(AliasKind::Sequence, namespace, alias));
     }
 
     /// Resolve a collection alias to collection metadata.

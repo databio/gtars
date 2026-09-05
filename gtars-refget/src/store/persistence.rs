@@ -53,7 +53,7 @@ use std::ffi::OsStr;
 
 use indexmap::IndexMap;
 use std::fs::{self, File, create_dir_all};
-use std::io::{BufRead, Write};
+use std::io::BufRead;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -101,10 +101,7 @@ impl ReadonlyRefgetStore {
             create_dir_all(parent)?;
         }
 
-        let mut file = File::create(&full_path)?;
-        file.write_all(sequence)?;
-
-        Ok(())
+        super::atomic::publish_bytes_nosync(&full_path, sequence)
     }
 
     /// Write a `.seq` file for a single sequence, given an already-expanded full
@@ -134,9 +131,10 @@ impl ReadonlyRefgetStore {
             }
         }
 
-        let mut file = File::create(full_path)?;
-        file.write_all(sequence)?;
-        Ok(())
+        // Temp + rename, never an in-place `File::create`: the same digest can
+        // be written by a concurrent process, and truncating a file it already
+        // published (or letting a reader see a partial write) corrupts live data.
+        super::atomic::publish_bytes_nosync(full_path, sequence)
     }
 
     /// Write a single collection RGSI file to disk.
@@ -220,6 +218,26 @@ impl ReadonlyRefgetStore {
         self.apply_pending_sequence_rows(&mut sequences, &pending);
         let mut collections = read_collections_rgci_rows(&collection_index_path)?;
         self.apply_pending_collection_rows(&mut collections, &pending);
+
+        // (1b) Refuse to publish a collection whose sequences are not all in
+        // the index we are about to write. Import dedups against rows loaded at
+        // open time and never re-stages those, so if another writer's orphan
+        // GC removed such a row (and its `.seq`) while this import was running,
+        // committing now would publish a collection pointing at missing data.
+        // Under the lock, "row present" implies "file present" (removal drops
+        // both, index first, under this same lock), so this check is enough.
+        for coll_key in &pending.collections {
+            let Some(name_map) = self.name_lookup.get(coll_key) else {
+                continue;
+            };
+            if let Some(missing) = name_map.values().find(|k| !sequences.contains_key(*k)) {
+                anyhow::bail!(
+                    "cannot commit collection {}: its sequence {} is no longer in the                      store index. Another writer removed it while this import was in                      progress. Re-run the import.",
+                    key_to_digest_string(coll_key),
+                    key_to_digest_string(missing),
+                );
+            }
+        }
 
         // (2) Publish the indexes atomically.
         write_sequences_rgsi_rows(&sequence_index_path, &sequences)?;
@@ -516,7 +534,7 @@ impl ReadonlyRefgetStore {
                     // A genuine semantic conflict: two writers bound the same
                     // human-readable name to different content. Silently picking
                     // one is the failure class that lost a genome in July.
-                    if !self.force_alias {
+                    if !self.force_alias && !pending.is_forced(kind, namespace, alias) {
                         return Err(anyhow::anyhow!(
                             "alias conflict in {} namespace '{}': '{}' is already published as {} \
                              on disk but this writer has it as {}. Another writer bound it first. \
@@ -710,9 +728,17 @@ impl ReadonlyRefgetStore {
         let fhr_dir = local_path.join("fhr");
         if !fhr_dir.exists() { return None; }
 
+        // Only real sidecars count: a concurrent atomic_write leaves
+        // `.rgstore.tmp.*` files in this directory for a moment, and one left
+        // behind by a crash must not poison every later digest.
         let mut paths: Vec<_> = fs::read_dir(&fhr_dir).ok()?
             .filter_map(|e| e.ok())
             .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map_or(false, |n| n.ends_with(super::fhr_metadata::SIDECAR_EXTENSION))
+            })
             .collect();
         if paths.is_empty() { return None; }
         paths.sort();
