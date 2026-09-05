@@ -32,11 +32,17 @@
 //!   older than `stale_after` (default 120s = 8 missed heartbeats). Break, but
 //!   warn loudly naming host, pid, and age.
 //!
-//! Breaking is itself race-safe: contenders do NOT `remove_file` then re-create
+//! Breaking is itself serialized. Contenders do NOT `remove_file` then re-create
 //! (two of them would both observe staleness, both unlink, both create, both
-//! proceed). They steal by `rename(2)` to `.rgstore.lock.stale.<pid>.<nanos>` —
-//! a rename from a specific source path succeeds for exactly one contender; the
-//! losers get `ENOENT` and simply retry acquisition.
+//! proceed). Nor is a bare `rename(2)` of the lock enough: rename acts on the
+//! current pathname, not the inode a contender inspected, so if A steals and
+//! re-acquires before B's rename runs, B renames A's fresh lock away and both
+//! proceed. Instead a contender first claims `.rgstore.lock.break` with
+//! `O_EXCL`; only the claimant re-reads the lock, confirms it is still the very
+//! instance it judged stale (pid, host, `started_at`), and renames it to
+//! `.rgstore.lock.stale.<pid>.<nanos>`. Everyone else retries acquisition. A
+//! break marker whose claimant died is itself stolen once its mtime passes
+//! `BREAK_STALE_AFTER`.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -56,6 +62,13 @@ pub const LOCK_FILENAME: &str = ".rgstore.lock";
 
 /// Prefix of a stolen (stale) lockfile awaiting cleanup.
 pub const STALE_LOCK_PREFIX: &str = ".rgstore.lock.stale.";
+
+/// Marker claimed (`O_EXCL`) by the one contender allowed to break a stale lock.
+pub const BREAK_FILENAME: &str = ".rgstore.lock.break";
+
+/// A break marker older than this belongs to a claimant that died mid-break and
+/// may be taken over. Breaking is a handful of syscalls, so this is generous.
+const BREAK_STALE_AFTER: Duration = Duration::from_secs(60);
 
 /// How often the heartbeat thread refreshes the payload.
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(15);
@@ -229,8 +242,9 @@ impl StoreLock {
                             holder.describe(),
                             reason
                         );
-                        // Race-safe: exactly one contender wins the rename.
-                        let _ = steal(&path);
+                        // Serialized through the break marker; whoever does
+                        // not get it just retries and finds the lock gone.
+                        let _ = break_stale(&path, &holder);
                         continue;
                     }
                     if deadline.is_some_and(|d| SystemTime::now() >= d) {
@@ -253,7 +267,7 @@ impl StoreLock {
                             "warning: breaking unreadable RefgetStore lock {:?} (no valid payload)",
                             path
                         );
-                        let _ = steal(&path);
+                        let _ = break_unreadable(&path, opts.stale_after);
                         continue;
                     }
                     if deadline.is_some_and(|d| SystemTime::now() >= d) {
@@ -320,13 +334,13 @@ pub fn force_unlock(store_dir: &Path) -> Result<bool> {
     if existed {
         steal(&path)?;
     }
-    // Sweep any stolen-lock leftovers from earlier breaks.
+    // Sweep any stolen-lock leftovers (and a dead break marker) from earlier breaks.
     if let Ok(entries) = fs::read_dir(store_dir) {
         for entry in entries.filter_map(|e| e.ok()) {
             if entry
                 .file_name()
                 .to_str()
-                .is_some_and(|n| n.starts_with(STALE_LOCK_PREFIX))
+                .is_some_and(|n| n.starts_with(STALE_LOCK_PREFIX) || n == BREAK_FILENAME)
             {
                 let _ = fs::remove_file(entry.path());
             }
@@ -365,12 +379,14 @@ fn read_info(path: &Path) -> Result<Option<LockInfo>> {
     }
 }
 
-/// Take a held lock away, race-safely.
+/// Take a held lock away by rename.
 ///
-/// `rename(2)` from a specific source path succeeds for exactly one caller; every
-/// other concurrent stealer gets `ENOENT` and must retry acquisition from the
-/// top. Do NOT replace this with `remove_file` + `create_new`: that lets two
-/// contenders both unlink, both create, and both proceed.
+/// Callers breaking a STALE lock must hold the break claim (see
+/// [`break_stale`]); the rename alone is not race-safe, because it acts on
+/// whatever currently sits at `path`. Do NOT replace this with `remove_file` +
+/// `create_new` either: that lets two contenders both unlink, both create, and
+/// both proceed. The unguarded callers are the operator escape hatches
+/// (`--force-unlock`), which by definition assert no live holder exists.
 fn steal(path: &Path) -> Result<()> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let stolen = dir.join(format!(
@@ -388,6 +404,80 @@ fn steal(path: &Path) -> Result<()> {
         // is no longer the file we saw; the caller retries.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(e) => Err(e).with_context(|| format!("stealing stale lockfile {:?}", path)),
+    }
+}
+
+/// Exclusive right to break the lock at `path`. Removes the marker on drop.
+struct BreakClaim(PathBuf);
+
+impl Drop for BreakClaim {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+/// Claim the break marker next to `path`. `Ok(None)` means another contender
+/// holds it (and is, or was, breaking the lock): back off and retry acquisition.
+///
+/// A marker left by a claimant that died is taken over by rename, which again
+/// succeeds for exactly one contender; that one then claims afresh.
+fn claim_break(path: &Path) -> Result<Option<BreakClaim>> {
+    let dir = path.parent().unwrap_or_else(|| Path::new("."));
+    let marker = dir.join(BREAK_FILENAME);
+    match OpenOptions::new().write(true).create_new(true).open(&marker) {
+        Ok(mut f) => {
+            let _ = write!(f, "{} {}", std::process::id(), hostname());
+            Ok(Some(BreakClaim(marker)))
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            if mtime_age(&marker).is_some_and(|age| age > BREAK_STALE_AFTER) {
+                let dead = dir.join(format!("{}break.{}.{}", STALE_LOCK_PREFIX, std::process::id(), nanos()));
+                if fs::rename(&marker, &dead).is_ok() {
+                    let _ = fs::remove_file(&dead);
+                }
+            }
+            Ok(None)
+        }
+        Err(e) => Err(e).with_context(|| format!("creating break marker {:?}", marker)),
+    }
+}
+
+/// Break the lock at `path`, but only if it is still the exact instance judged
+/// stale. Under the claim nobody else steals, so the only way the lock can be a
+/// different instance is that the stale holder released and a live writer
+/// acquired in between; in that case leave it alone.
+fn break_stale(path: &Path, judged: &LockInfo) -> Result<()> {
+    let Some(_claim) = claim_break(path)? else {
+        return Ok(());
+    };
+    match read_info(path)? {
+        Some(current)
+            if current.pid == judged.pid
+                && current.hostname == judged.hostname
+                && current.started_at == judged.started_at =>
+        {
+            steal(path)
+        }
+        // Gone, or already a different holder. Nothing to break.
+        _ => Ok(()),
+    }
+}
+
+/// Break a lock with no readable payload, re-checking its age under the claim so
+/// a marker holder never removes a lock that was rewritten in the meantime.
+fn break_unreadable(path: &Path, stale_after: Duration) -> Result<()> {
+    let Some(_claim) = claim_break(path)? else {
+        return Ok(());
+    };
+    match read_info(path)? {
+        Some(_) => Ok(()), // readable now: a live writer owns it
+        None => {
+            if mtime_age(path).is_none_or(|age| age > stale_after) {
+                steal(path)
+            } else {
+                Ok(())
+            }
+        }
     }
 }
 

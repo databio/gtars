@@ -151,6 +151,10 @@ fn main() {
             "concurrent_processes_all_land_in_the_index",
             concurrent_processes_all_land_in_the_index,
         ),
+        // Tier-1 (same host, dead pid) staleness needs /proc; elsewhere the
+        // lock only expires via the 120s heartbeat threshold, which this test
+        // deliberately does not wait for.
+        #[cfg(target_os = "linux")]
         (
             "abandoned_lock_from_a_dead_process_is_broken",
             abandoned_lock_from_a_dead_process_is_broken,
@@ -160,8 +164,8 @@ fn main() {
             reader_never_observes_a_torn_store,
         ),
         (
-            "another_processs_removal_is_not_resurrected",
-            another_processs_removal_is_not_resurrected,
+            "another_process_removal_is_not_resurrected",
+            another_process_removal_is_not_resurrected,
         ),
     ];
 
@@ -254,6 +258,7 @@ fn concurrent_processes_all_land_in_the_index() {
 
 /// A writer killed while holding the lock must not wedge the store: the next
 /// writer detects the dead pid on this host and breaks the lock immediately.
+#[cfg(target_os = "linux")]
 fn abandoned_lock_from_a_dead_process_is_broken() {
     let work = tempfile::tempdir().unwrap();
     let store_dir = work.path().join("store");
@@ -378,7 +383,7 @@ fn reader_never_observes_a_torn_store() {
 /// the lock never even contends. Merge-at-commit still lost it, because the
 /// writer wrote back the collection stub `open_local` had loaded for reading —
 /// re-adding index rows for `.seq` files the remover had already unlinked.
-fn another_processs_removal_is_not_resurrected() {
+fn another_process_removal_is_not_resurrected() {
     let work = tempfile::tempdir().unwrap();
     let store_dir = work.path().join("store");
 

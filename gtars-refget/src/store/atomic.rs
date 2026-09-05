@@ -81,6 +81,32 @@ pub(crate) fn atomic_write_bytes(dest: &Path, bytes: &[u8]) -> Result<()> {
     })
 }
 
+/// Publish a content-addressed payload (a `.seq` file) via temp-file + rename,
+/// WITHOUT an fsync.
+///
+/// Per-item payloads get the rename discipline but not the durability step:
+/// a transcriptome import writes hundreds of thousands of tiny files, and an
+/// fsync per file would dominate its runtime. The rename is what matters for
+/// correctness under concurrency -- a reader never sees a half-written file,
+/// and a slow writer re-publishing the same digest replaces a live file with
+/// identical bytes instead of truncating it in place. Durability of the
+/// payloads across a power loss is provided by the index commit that
+/// references them, which does fsync, so the window is the same as before.
+pub(crate) fn publish_bytes_nosync(dest: &Path, bytes: &[u8]) -> Result<()> {
+    let dir = parent_dir(dest);
+    let (mut file, tmp_path) = create_temp_in(&dir)?;
+    if let Err(e) = file.write_all(bytes) {
+        drop(file);
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e).with_context(|| format!("writing temp file {:?}", tmp_path));
+    }
+    drop(file);
+    fs::rename(&tmp_path, dest).with_context(|| {
+        format!("publishing {:?} (temp file {:?})", dest, tmp_path)
+    })?;
+    Ok(())
+}
+
 /// The directory a temp file must be created in for the rename to be atomic.
 fn parent_dir(dest: &Path) -> PathBuf {
     match dest.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -138,6 +164,7 @@ fn sync_dir(dir: &Path) {
 pub fn is_transient_store_file(name: &str) -> bool {
     name.starts_with(".rgstore.tmp.")
         || name == ".rgstore.lock"
+        || name == ".rgstore.lock.break"
         || name.starts_with(".rgstore.lock.stale.")
 }
 
