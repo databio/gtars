@@ -113,7 +113,7 @@ pub fn create_refget_cli() -> Command {
                     Arg::new("collection")
                         .long("collection")
                         .short('c')
-                        .help("Collection digest to export. If omitted and the store holds exactly one collection, that collection is used; otherwise the available digests are listed."),
+                        .help("Collection to export: a digest, or NAMESPACE:ALIAS as given to `build --collection-alias`. If omitted and the store holds exactly one collection, that one is used."),
                 )
                 .arg(
                     Arg::new("names")

@@ -171,6 +171,60 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     Ok(())
 }
 
+/// Resolve `-c` to a collection digest. Accepts a bare digest or
+/// `NAMESPACE:ALIAS` (same syntax as `build --collection-alias`).
+fn resolve_collection_arg(store: &RefgetStore, raw: &str) -> Result<String> {
+    if let Some((ns, alias)) = raw.split_once(':') {
+        if ns.is_empty() || alias.is_empty() {
+            return Err(anyhow::anyhow!(
+                "--collection expects a digest or NAMESPACE:ALIAS (e.g. 'ucsc:hg38'), got '{}'",
+                raw
+            ));
+        }
+        return store
+            .get_collection_metadata_by_alias(ns, alias)
+            .map(|m| m.digest.clone())
+            .ok_or_else(|| {
+                let known = known_collection_aliases(store);
+                anyhow::anyhow!(
+                    "Collection alias '{}' not found in store. Known aliases: {}",
+                    raw,
+                    if known.is_empty() { "(none)".to_string() } else { known.join(", ") }
+                )
+            });
+    }
+    Ok(raw.to_string())
+}
+
+/// All registered collection aliases as `NAMESPACE:ALIAS` strings, for error messages.
+fn known_collection_aliases(store: &RefgetStore) -> Vec<String> {
+    store
+        .list_collection_alias_namespaces()
+        .into_iter()
+        .flat_map(|ns| {
+            let aliases = store.list_collection_aliases(&ns).unwrap_or_default();
+            aliases
+                .into_iter()
+                .map(move |alias| format!("{}:{}", ns, alias))
+        })
+        .collect()
+}
+
+/// Format a collection digest for an "available collections" listing, appending
+/// its aliases (if any) so the alias path is discoverable from the error.
+fn describe_collection(store: &RefgetStore, digest: &str) -> String {
+    let aliases = store.get_aliases_for_collection(digest);
+    if aliases.is_empty() {
+        digest.to_string()
+    } else {
+        let alias_list: Vec<String> = aliases
+            .iter()
+            .map(|(ns, alias)| format!("{}:{}", ns, alias))
+            .collect();
+        format!("{} ({})", digest, alias_list.join(", "))
+    }
+}
+
 fn run_export(matches: &ArgMatches) -> Result<()> {
     let store_path = matches
         .get_one::<String>("store")
@@ -199,23 +253,30 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Failed to list collections: {}", e))?;
     let digest = match requested_collection {
         Some(c) => {
-            if !collections.results.iter().any(|m| &m.digest == c) {
-                let available: Vec<String> =
-                    collections.results.iter().map(|m| m.digest.clone()).collect();
+            let resolved = resolve_collection_arg(&store, c)?;
+            if !collections.results.iter().any(|m| m.digest == resolved) {
+                let available: Vec<String> = collections
+                    .results
+                    .iter()
+                    .map(|m| describe_collection(&store, &m.digest))
+                    .collect();
                 return Err(anyhow::anyhow!(
                     "Collection '{}' not found in store. Available: {}",
                     c,
                     available.join(", ")
                 ));
             }
-            c.clone()
+            resolved
         }
         None => match collections.results.len() {
             0 => return Err(anyhow::anyhow!("Store contains no collections to export")),
             1 => collections.results[0].digest.clone(),
             _ => {
-                let available: Vec<String> =
-                    collections.results.iter().map(|m| m.digest.clone()).collect();
+                let available: Vec<String> = collections
+                    .results
+                    .iter()
+                    .map(|m| describe_collection(&store, &m.digest))
+                    .collect();
                 return Err(anyhow::anyhow!(
                     "Store contains multiple collections; specify one with --collection. Available: {}",
                     available.join(", ")
