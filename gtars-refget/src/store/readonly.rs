@@ -25,7 +25,7 @@ use crate::seqcol::metadata_matches_attribute;
 
 use std::fs::{self, create_dir_all, File};
 use std::io::{BufReader, Read, Seek, SeekFrom};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Fallback capacity for the per-store open-file-descriptor cache, used when
 /// the process's soft `RLIMIT_NOFILE` cannot be read at all (non-unix
@@ -344,6 +344,19 @@ pub struct ReadonlyRefgetStore {
     /// behind a `Mutex` because `get_substring` takes `&self`. Avoids re-opening
     /// the same chromosome file on every per-region `get_substring` call.
     seq_fd_cache: Mutex<FdCache>,
+    /// `&self` resident overlay: whole, on-disk-packed `.seq` byte arrays keyed by
+    /// SHA512t24u digest. Populated via [`Self::load_resident`] to promote a
+    /// `Stub` sequence to RAM-served without taking `&mut self` (the store is
+    /// `Arc`-shared behind a readonly handle). Consulted in `get_substring` /
+    /// `get_substrings` *before* the on-disk partial-read path: on a hit the
+    /// covering span is decoded from these bytes exactly like the `Full` arm, so
+    /// output is byte-identical to the disk path but every region query becomes an
+    /// in-memory decode instead of a positioned read. The bytes are the raw file
+    /// contents (2-bit packed in `Encoded` mode, one byte/base in `Raw`), so a hit
+    /// is mode-agnostic and only the sliced span is ever decoded. `RwLock` so many
+    /// readers proceed concurrently; the `Arc` is cloned out under a brief read
+    /// lock and decoded after the lock is dropped, so decodes never serialize.
+    resident: RwLock<HashMap<DigestKey, Arc<Vec<u8>>>>,
     /// Whether the sequence index (sequences.rgsi) has been loaded.
     /// For remote stores, this starts as `false` and is lazily loaded on first
     /// sequence access, avoiding the costly download when only browsing collections.
@@ -552,6 +565,7 @@ impl ReadonlyRefgetStore {
             available_sequence_alias_namespaces: Vec::new(),
             available_collection_alias_namespaces: Vec::new(),
             seq_fd_cache: Mutex::new(FdCache::new(default_fd_cache_cap())),
+            resident: RwLock::new(HashMap::new()),
             sequence_index_loaded: true,
             sequence_index_path: None,
             pending: Mutex::new(PendingChanges::default()),
@@ -1841,6 +1855,242 @@ impl ReadonlyRefgetStore {
         self.ensure_sequence_loaded(&key)
     }
 
+    // =========================================================================
+    // Resident overlay (&self): promote whole `.seq` files to RAM without &mut
+    // =========================================================================
+
+    /// Promote a set of sequences to the `&self` resident overlay, reading each
+    /// whole `.seq` file into RAM as its raw on-disk (packed) bytes.
+    ///
+    /// Unlike [`load_sequence`](Self::load_sequence) / [`load_all_sequences`](
+    /// Self::load_all_sequences) — which take `&mut self` and are therefore
+    /// unusable once the store is wrapped in an `Arc` — this takes `&self` and
+    /// stores into an `RwLock`-guarded overlay consulted by `get_substring` /
+    /// `get_substrings` before the on-disk partial-read path.
+    ///
+    /// The loads are made cheap and predictable: digests are deduped (md5 aliases
+    /// resolved), any already `Full` or already resident are skipped, and the rest
+    /// are **sorted by `.seq` path** so the reads walk the sequence directory in
+    /// order rather than in `HashMap` hash order (the pathology of
+    /// [`load_all_sequences`](Self::load_all_sequences)). Each file is one
+    /// `File::open` + `read_to_end` (a few large sequential reads), not a scatter
+    /// of positioned reads.
+    ///
+    /// Returns the number of bytes newly loaded into the overlay by this call
+    /// (already-resident/`Full` skips contribute 0), for RAM-budget accounting.
+    pub fn load_resident(&self, digests: &[String]) -> Result<u64> {
+        let template = self.seqdata_path_template.as_ref().ok_or_else(|| {
+            anyhow!("Resident load requires a sequence data path template")
+        })?;
+
+        // Plan: resolve to canonical keys, skip Full / already-resident, dedupe.
+        let mut plan: Vec<(DigestKey, String, String)> = Vec::new();
+        let mut seen: HashSet<DigestKey> = HashSet::new();
+        {
+            let resident = self
+                .resident
+                .read()
+                .map_err(|_| anyhow!("resident overlay lock poisoned"))?;
+            for d in digests {
+                let dk = d.to_key();
+                let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
+                if !seen.insert(key) {
+                    continue; // duplicate in this request
+                }
+                if resident.contains_key(&key) {
+                    continue; // already resident
+                }
+                match self.sequence_store.get(&key) {
+                    Some(rec) if rec.is_loaded() => continue, // already Full in the store
+                    Some(rec) => {
+                        let digest_str = rec.metadata().sha512t24u.clone();
+                        let relpath = Self::expand_template(&digest_str, template)
+                            .to_string_lossy()
+                            .into_owned();
+                        plan.push((key, digest_str, relpath));
+                    }
+                    None => {
+                        return Err(anyhow!(
+                            "Cannot load resident: sequence not found: {}",
+                            d
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Ordered, coalesced whole-file reads: sort by on-disk path so the
+        // directory is walked in order, not in hash order.
+        plan.sort_by(|a, b| a.2.cmp(&b.2));
+
+        let mut loaded: Vec<(DigestKey, Arc<Vec<u8>>)> = Vec::with_capacity(plan.len());
+        let mut total: u64 = 0;
+        for (key, _digest_str, relpath) in plan {
+            // Prefer a direct local read (one open + sequential read_to_end);
+            // fall back to the remote fetch only when the local file is absent.
+            let data: Vec<u8> = if let Some(lp) = self.local_path.as_ref() {
+                let full = lp.join(&relpath);
+                match File::open(&full) {
+                    Ok(f) => {
+                        let mut buf = Vec::new();
+                        BufReader::new(f).read_to_end(&mut buf).with_context(|| {
+                            format!("Failed to read seq file {}", full.display())
+                        })?;
+                        buf
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound
+                        && self.remote_source.is_some() =>
+                    {
+                        Self::fetch_file(
+                            &self.local_path,
+                            &self.remote_source,
+                            &relpath,
+                            self.persist_to_disk,
+                            false,
+                        )?
+                    }
+                    Err(e) => {
+                        return Err(anyhow!(
+                            "Failed to open seq file {}: {}",
+                            full.display(),
+                            e
+                        ));
+                    }
+                }
+            } else {
+                Self::fetch_file(
+                    &self.local_path,
+                    &self.remote_source,
+                    &relpath,
+                    self.persist_to_disk,
+                    false,
+                )?
+            };
+            total += data.len() as u64;
+            loaded.push((key, Arc::new(data)));
+        }
+
+        // Publish into the overlay under a single write lock.
+        {
+            let mut resident = self
+                .resident
+                .write()
+                .map_err(|_| anyhow!("resident overlay lock poisoned"))?;
+            for (key, arc) in loaded {
+                resident.insert(key, arc);
+            }
+        }
+
+        Ok(total)
+    }
+
+    /// Drop the given digests from the resident overlay. Subsequent queries for
+    /// them fall back to the on-disk partial-read path. Unknown / non-resident
+    /// digests are ignored.
+    pub fn evict_resident(&self, digests: &[String]) {
+        if let Ok(mut resident) = self.resident.write() {
+            for d in digests {
+                let dk = d.to_key();
+                let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
+                resident.remove(&key);
+            }
+        }
+    }
+
+    /// Drop the entire resident overlay.
+    pub fn evict_all_resident(&self) {
+        if let Ok(mut resident) = self.resident.write() {
+            resident.clear();
+        }
+    }
+
+    /// Total bytes currently held in the resident overlay (sum of the packed
+    /// `.seq` byte arrays). Used for RAM-budget accounting.
+    pub fn resident_bytes(&self) -> u64 {
+        self.resident
+            .read()
+            .map(|r| r.values().map(|b| b.len() as u64).sum())
+            .unwrap_or(0)
+    }
+
+    /// Number of sequences currently resident.
+    pub fn resident_len(&self) -> usize {
+        self.resident.read().map(|r| r.len()).unwrap_or(0)
+    }
+
+    /// Estimate, from in-memory metadata only (no I/O), the additional bytes
+    /// [`load_resident`](Self::load_resident) would pull into RAM for `digests`.
+    /// Already-`Full` or already-resident digests, and duplicates, contribute 0.
+    /// Used for RAM-budget planning before committing to a load.
+    pub fn resident_estimate_bytes(&self, digests: &[String]) -> u64 {
+        let resident = self.resident.read().ok();
+        let mut seen: HashSet<DigestKey> = HashSet::new();
+        let mut total: u64 = 0;
+        for d in digests {
+            let dk = d.to_key();
+            let key = self.md5_lookup.get(&dk).copied().unwrap_or(dk);
+            if !seen.insert(key) {
+                continue;
+            }
+            if let Some(r) = &resident {
+                if r.contains_key(&key) {
+                    continue;
+                }
+            }
+            if let Some(rec) = self.sequence_store.get(&key) {
+                if rec.is_loaded() {
+                    continue;
+                }
+                let meta = rec.metadata();
+                let bytes = match self.mode {
+                    StorageMode::Encoded => {
+                        let bps = lookup_alphabet(&meta.alphabet).bits_per_symbol as u64;
+                        (meta.length as u64 * bps + 7) / 8
+                    }
+                    StorageMode::Raw => meta.length as u64,
+                };
+                total += bytes;
+            }
+        }
+        total
+    }
+
+    /// Clone the resident packed bytes for `key`, if present. The `Arc` is cloned
+    /// out under a brief read lock so the lock is released before the caller
+    /// decodes -- decodes therefore never serialize against each other.
+    fn resident_lookup(&self, key: &DigestKey) -> Option<Arc<Vec<u8>>> {
+        self.resident.read().ok().and_then(|r| r.get(key).cloned())
+    }
+
+    /// Decode `[start, end)` from a whole packed `.seq` byte buffer, applying the
+    /// same bounds check and per-mode decode as the resident `Full` arm of
+    /// [`get_substring`](Self::get_substring). Factored out so the resident-overlay
+    /// hit produces output byte-identical to a `Full` record.
+    fn decode_full_span(
+        &self,
+        metadata: &SequenceMetadata,
+        sequence: &[u8],
+        start: usize,
+        end: usize,
+    ) -> Result<String> {
+        if start >= metadata.length || end > metadata.length || start >= end {
+            return Err(anyhow!(
+                "Invalid substring range: start={}, end={}, sequence length={}",
+                start,
+                end,
+                metadata.length
+            ));
+        }
+        match self.mode {
+            StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                let decoded = decode_substring_from_bytes(sequence, start, end, alphabet);
+                Ok(decoded_sequence_to_string(decoded))
+            }
+            StorageMode::Raw => Ok(decoded_sequence_to_string(sequence[start..end].to_vec())),
+        }
+    }
+
     /// Iterate over all collections with their sequences loaded.
     pub fn iter_collections(&self) -> impl Iterator<Item = crate::digest::SequenceCollection> + '_ {
         let mut digests: Vec<String> = self
@@ -1931,6 +2181,14 @@ impl ReadonlyRefgetStore {
             // so a per-query partial read avoids the cost of `load_sequence`
             // pulling entire chromosomes into memory.
             SequenceRecord::Stub(meta) => {
+                // Resident overlay first: if the whole `.seq` has been promoted to
+                // RAM (via `load_resident`), decode the covering span from those
+                // packed bytes exactly like the `Full` arm -- byte-identical
+                // output, no disk read. Consulted BEFORE the on-disk partial-read
+                // path so a resident hit never touches the filesystem.
+                if let Some(bytes) = self.resident_lookup(&actual_key) {
+                    return self.decode_full_span(meta, &bytes, start, end);
+                }
                 // Partial-read resolution for a non-resident sequence:
                 //   local `.seq` (if present) -> remote byte-range (if configured).
                 // Attempt the disk read directly rather than `path.exists()`-ing
@@ -2060,6 +2318,30 @@ impl ReadonlyRefgetStore {
                 Ok(out)
             }
             SequenceRecord::Stub(meta) => {
+                // Resident overlay first: if the whole `.seq` is RAM-resident
+                // (via `load_resident`), decode every range from those packed
+                // bytes exactly like the `Full` arm above -- byte-identical, no
+                // disk read. Consulted BEFORE the on-disk partial-read path.
+                if let Some(bytes) = self.resident_lookup(&actual_key) {
+                    let seq: &[u8] = bytes.as_slice();
+                    let mut out = Vec::with_capacity(ranges.len());
+                    match self.mode {
+                        StorageMode::Encoded => {
+                            let alphabet = lookup_alphabet(&meta.alphabet);
+                            for &(start, end) in ranges {
+                                let decoded =
+                                    decode_substring_from_bytes(seq, start, end, alphabet);
+                                out.push(decoded_sequence_to_string(decoded));
+                            }
+                        }
+                        StorageMode::Raw => {
+                            for &(start, end) in ranges {
+                                out.push(decoded_sequence_to_string(seq[start..end].to_vec()));
+                            }
+                        }
+                    }
+                    return Ok(out);
+                }
                 // Resolve once for the whole batch: local `.seq` (if present) ->
                 // remote byte-range (if configured). Whether the local file
                 // exists is determined lazily below from an actual open/read

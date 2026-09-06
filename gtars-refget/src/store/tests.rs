@@ -563,6 +563,139 @@ fn test_get_substring_zero_length_range() {
 }
 
 #[test]
+fn test_resident_overlay_byte_identical_and_evicts() {
+    // The `&self` resident overlay (load_resident) must produce output
+    // BYTE-IDENTICAL to the on-disk partial-read path, for both get_substring
+    // and get_substrings, and eviction must fall back to disk correctly.
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+    let temp_fasta = copy_test_fasta(temp_path, "base.fa.gz");
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
+        .unwrap();
+    store
+        .write_store_to_dir(temp_path, Some("sequences/%s2/%s.seq"))
+        .unwrap();
+    let disk_store = RefgetStore::open_local(temp_path).unwrap();
+
+    let (digest, length) = disk_store
+        .sequence_metadata()
+        .find(|m| m.length > 5)
+        .map(|m| (m.sha512t24u.clone(), m.length))
+        .expect("expected a non-trivial sequence");
+
+    // Ranges within bounds (single + batch), including an interior empty range.
+    let ranges: Vec<(usize, usize)> = vec![
+        (0, length.min(4)),
+        (1, length.min(5)),
+        (length / 2, (length / 2 + 2).min(length)),
+        (2, 2),
+        (length - 1, length),
+    ];
+
+    // 1. Reference: pure disk path (sequence is a Stub, not resident).
+    assert!(!disk_store.is_sequence_loaded(&digest));
+    assert_eq!(disk_store.resident_bytes(), 0);
+    let disk_single: Vec<String> = ranges
+        .iter()
+        .map(|&(s, e)| disk_store.get_substring(&digest, s, e).unwrap())
+        .collect();
+    let disk_batch = disk_store.get_substrings(&digest, &ranges).unwrap();
+
+    // 2. Promote to resident. Bytes loaded should be > 0 and match resident_bytes.
+    let loaded = disk_store.load_resident(&[digest.clone()]).unwrap();
+    assert!(loaded > 0, "load_resident should report bytes loaded");
+    assert_eq!(disk_store.resident_len(), 1);
+    assert_eq!(disk_store.resident_bytes(), loaded);
+    // The record itself is still a Stub -- the overlay is separate from `Full`.
+    assert!(!disk_store.is_sequence_loaded(&digest));
+
+    // 3. Overlay path must be byte-identical to the disk path.
+    let res_single: Vec<String> = ranges
+        .iter()
+        .map(|&(s, e)| disk_store.get_substring(&digest, s, e).unwrap())
+        .collect();
+    let res_batch = disk_store.get_substrings(&digest, &ranges).unwrap();
+    assert_eq!(res_single, disk_single, "overlay get_substring must match disk");
+    assert_eq!(res_batch, disk_batch, "overlay get_substrings must match disk");
+
+    // 4. Re-loading is idempotent and reports 0 new bytes.
+    let reloaded = disk_store.load_resident(&[digest.clone()]).unwrap();
+    assert_eq!(reloaded, 0, "already-resident digest loads 0 new bytes");
+
+    // 5. Eviction falls back to disk, still byte-identical.
+    disk_store.evict_resident(&[digest.clone()]);
+    assert_eq!(disk_store.resident_bytes(), 0);
+    assert_eq!(disk_store.resident_len(), 0);
+    let after_evict: Vec<String> = ranges
+        .iter()
+        .map(|&(s, e)| disk_store.get_substring(&digest, s, e).unwrap())
+        .collect();
+    assert_eq!(after_evict, disk_single, "post-evict disk path must match");
+
+    // 6. evict_all_resident clears everything.
+    disk_store.load_resident(&[digest.clone()]).unwrap();
+    assert_eq!(disk_store.resident_len(), 1);
+    disk_store.evict_all_resident();
+    assert_eq!(disk_store.resident_len(), 0);
+}
+
+#[test]
+fn test_resident_overlay_concurrent_readers() {
+    // Readers must see correct output while another thread promotes/evicts the
+    // resident overlay concurrently (the RwLock + clone-Arc-then-decode design).
+    use std::sync::Arc;
+    use std::thread;
+
+    let temp_dir = tempdir().unwrap();
+    let temp_path = temp_dir.path();
+    let temp_fasta = copy_test_fasta(temp_path, "base.fa.gz");
+
+    let mut store = RefgetStore::in_memory();
+    store
+        .add_sequence_collection_from_fasta(&temp_fasta, FastaImportOptions::new())
+        .unwrap();
+    store
+        .write_store_to_dir(temp_path, Some("sequences/%s2/%s.seq"))
+        .unwrap();
+
+    let disk_store = RefgetStore::open_local(temp_path).unwrap();
+    let (digest, length) = disk_store
+        .sequence_metadata()
+        .find(|m| m.length > 5)
+        .map(|m| (m.sha512t24u.clone(), m.length))
+        .expect("expected a non-trivial sequence");
+    // Expected value from the disk path before any resident load.
+    let expected = disk_store.get_substring(&digest, 0, length.min(6)).unwrap();
+
+    let shared = Arc::new(disk_store.into_readonly());
+    let end = length.min(6);
+
+    let mut handles = Vec::new();
+    for _ in 0..4 {
+        let s = Arc::clone(&shared);
+        let d = digest.clone();
+        let exp = expected.clone();
+        handles.push(thread::spawn(move || {
+            for _ in 0..500 {
+                let got = s.get_substring(&d, 0, end).unwrap();
+                assert_eq!(got, exp, "reader saw wrong bytes during concurrent load/evict");
+            }
+        }));
+    }
+    // Churn the overlay concurrently with the readers.
+    for _ in 0..50 {
+        shared.load_resident(&[digest.clone()]).unwrap();
+        shared.evict_resident(&[digest.clone()]);
+    }
+    for h in handles {
+        h.join().unwrap();
+    }
+}
+
+#[test]
 fn test_import_fasta() {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let temp_path = temp_dir.path();
