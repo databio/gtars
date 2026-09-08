@@ -47,7 +47,7 @@ use std::sync::Mutex;
 use std::thread::available_parallelism;
 use std::time::Instant;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{bounded, Receiver, Sender};
 use indexmap::IndexMap;
 
@@ -75,12 +75,178 @@ const CHANNEL_DEPTH: usize = 4;
 /// depth x avg encoded seq size), independent of collection size).
 const WRITER_CHANNEL_DEPTH: usize = 8;
 
-/// A unit of work for the writer pool: write `bytes` to `full_path` (a `.seq`
-/// file). The inserter has already committed the dedup decision + in-memory
-/// metadata; only the (race-free, per-digest) byte write is offloaded here.
-struct WriteJob {
-    full_path: PathBuf,
-    bytes: Vec<u8>,
+/// A unit of work for the writer pool. The inserter has already committed the
+/// dedup decision + in-memory metadata (and, for packs, the deterministic
+/// `(ordinal, offset)` assignment); only the byte write is offloaded here.
+///
+/// `Standalone` writes a per-digest `.seq` file (race-free by content address).
+/// `PackChunk` does a positional write into a disjoint range of a temp pack
+/// file — also race-free, since the inserter chose non-overlapping ranges.
+enum WriteJob {
+    Standalone { full_path: PathBuf, bytes: Vec<u8> },
+    PackChunk { ordinal: usize, offset: u64, bytes: Vec<u8> },
+}
+
+/// A pending sidecar row recorded by the inserter for one new packed sequence,
+/// carrying the pack ORDINAL (mapped to the final content-hash name at seal).
+struct PendingPackRow {
+    key: DigestKey,
+    ordinal: usize,
+    offset: u64,
+    len: u64,
+}
+
+/// The currently-open pack being filled by the inserter.
+struct OpenPack {
+    ordinal: usize,
+    len: u64,
+    hasher: sha2::Sha256,
+}
+
+/// A sealed pack: its final 32-hex content-hash name and byte length.
+#[derive(Clone)]
+struct SealedPack {
+    ordinal: usize,
+    #[allow(dead_code)]
+    len: u64,
+    hash32: String,
+}
+
+/// Deterministic pack assignment, run ONLY on the single inserter thread.
+///
+/// `assign` returns `(ordinal, offset)` for a sequence's bytes in arrival order
+/// — the same order the existing machinery already makes deterministic — so
+/// parallel and serial imports produce identical packs (names + content),
+/// identical offsets, and an identical sidecar. Writers only ever do positional
+/// writes into ranges this chooses; writer completion order affects no byte.
+struct PackAssigner {
+    cap: u64,
+    next_ordinal: usize,
+    open: Option<OpenPack>,
+    sealed: Vec<SealedPack>,
+}
+
+impl PackAssigner {
+    fn new(cap: u64) -> Self {
+        PackAssigner {
+            cap: cap.max(1),
+            next_ordinal: 0,
+            open: None,
+            sealed: Vec::new(),
+        }
+    }
+
+    /// Seal-before-place: if the open pack is non-empty and cannot fit `bytes`,
+    /// seal it first. A sequence never straddles two packs; one larger than the
+    /// cap lands alone at offset 0 of its own pack.
+    fn assign(&mut self, bytes: &[u8]) -> (usize, u64) {
+        use sha2::Digest;
+        let len = bytes.len() as u64;
+        if matches!(&self.open, Some(o) if o.len > 0 && o.len + len > self.cap) {
+            self.seal_open();
+        }
+        if self.open.is_none() {
+            self.open = Some(OpenPack {
+                ordinal: self.next_ordinal,
+                len: 0,
+                hasher: sha2::Sha256::new(),
+            });
+            self.next_ordinal += 1;
+        }
+        let open = self.open.as_mut().unwrap();
+        let offset = open.len;
+        // Assignment order == byte order, so the content hash costs no extra I/O.
+        open.hasher.update(bytes);
+        open.len += len;
+        (open.ordinal, offset)
+    }
+
+    fn seal_open(&mut self) {
+        use sha2::Digest;
+        if let Some(open) = self.open.take() {
+            let digest = open.hasher.finalize();
+            // 32-hex-char prefix of the sha256 (16 bytes).
+            let hash32 = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+            self.sealed.push(SealedPack {
+                ordinal: open.ordinal,
+                len: open.len,
+                hash32,
+            });
+        }
+    }
+
+    fn finish(&mut self) -> Vec<SealedPack> {
+        self.seal_open();
+        std::mem::take(&mut self.sealed)
+    }
+}
+
+/// Shared temp-pack file handles for the writer pool, keyed by pack ordinal.
+/// Positional writes into disjoint ranges of the same file are race-free, so a
+/// single shared handle per ordinal is enough.
+struct PackWriters {
+    packs_dir: PathBuf,
+    pid: u32,
+    files: Mutex<HashMap<usize, std::sync::Arc<std::fs::File>>>,
+}
+
+impl PackWriters {
+    fn new(packs_dir: PathBuf) -> Self {
+        PackWriters {
+            packs_dir,
+            pid: std::process::id(),
+            files: Mutex::new(HashMap::new()),
+        }
+    }
+
+    fn tmp_path(&self, ordinal: usize) -> PathBuf {
+        self.packs_dir
+            .join(format!(".rgstore.tmp.pack.{}.{}", self.pid, ordinal))
+    }
+
+    fn get_or_create(&self, ordinal: usize) -> Result<std::sync::Arc<std::fs::File>> {
+        {
+            let g = self.files.lock().unwrap();
+            if let Some(f) = g.get(&ordinal) {
+                return Ok(std::sync::Arc::clone(f));
+            }
+        }
+        std::fs::create_dir_all(&self.packs_dir)?;
+        let path = self.tmp_path(ordinal);
+        let file = std::sync::Arc::new(
+            std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(&path)?,
+        );
+        let mut g = self.files.lock().unwrap();
+        if let Some(existing) = g.get(&ordinal) {
+            return Ok(std::sync::Arc::clone(existing));
+        }
+        g.insert(ordinal, std::sync::Arc::clone(&file));
+        Ok(file)
+    }
+
+    /// Positional write of `bytes` at `offset` into the temp pack for `ordinal`.
+    fn write_at(&self, ordinal: usize, offset: u64, bytes: &[u8]) -> Result<()> {
+        let file = self.get_or_create(ordinal)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::FileExt;
+            file.write_all_at(bytes, offset)?;
+        }
+        #[cfg(not(unix))]
+        {
+            use std::io::{Seek, SeekFrom, Write};
+            // No pwrite in stable std off-unix: clone for an independent cursor.
+            let mut handle = file.try_clone()?;
+            handle.seek(SeekFrom::Start(offset))?;
+            handle.write_all(bytes)?;
+        }
+        Ok(())
+    }
 }
 
 /// A fully-built sequence ready for the single inserter, in FASTA order.
@@ -603,6 +769,42 @@ fn build_collection_from_cached_metadata(
     Ok(())
 }
 
+/// Count FASTA records (`>` header lines) in a possibly-gzipped file, without
+/// digesting or encoding. Used by the standalone pre-flight count gate.
+fn count_fasta_records(path: &Path) -> Result<usize> {
+    use std::io::BufRead;
+    let mut reader = gtars_core::utils::get_dynamic_reader(path)
+        .with_context(|| format!("opening {} for a pre-flight count", path.display()))?;
+    let mut n = 0usize;
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        let read = reader.read_until(b'\n', &mut buf)?;
+        if read == 0 {
+            break;
+        }
+        if buf.first() == Some(&b'>') {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
+/// Count data rows (non-comment, non-blank) in an `.rgsi` sidecar — the cached
+/// per-file sequence count, reused for free by the pre-flight count gate.
+fn count_rgsi_rows(path: &Path) -> Result<usize> {
+    use std::io::BufRead;
+    let file = std::fs::File::open(path)?;
+    let mut n = 0usize;
+    for line in std::io::BufReader::new(file).lines() {
+        let line = line?;
+        if !line.starts_with('#') && !line.trim().is_empty() {
+            n += 1;
+        }
+    }
+    Ok(n)
+}
+
 // ============================================================================
 // Per-in-flight collection scratch held by the inserter
 // ============================================================================
@@ -701,6 +903,39 @@ impl ReadonlyRefgetStore {
         };
         let jobs = jobs.min(files.len()).max(1);
 
+        // Pre-flight count gate (STANDALONE disk imports only). Packed stores
+        // bypass it; `force` overrides it. Checked BEFORE any bytes are written,
+        // via a cheap counting pass (no digesting, no encoding).
+        if self.persist_to_disk
+            && self.layout == Layout::Standalone
+            && !opts.force
+        {
+            use crate::utils::PathExtension;
+            let existing = self.sequence_store.len();
+            let limit = opts.standalone_file_limit;
+            let mut counted = 0usize;
+            for file in files {
+                let rgsi = file.replace_exts_with("rgsi");
+                let n = if self.local_path.is_some() && rgsi.exists() {
+                    count_rgsi_rows(&rgsi).unwrap_or(0)
+                } else {
+                    count_fasta_records(file)?
+                };
+                counted += n;
+                if existing + counted > limit {
+                    return Err(anyhow!(
+                        "importing {} sequences would put the store at {} standalone .seq \
+                         files, over the limit of {}. Re-create the store with --packed \
+                         (RefgetStore::on_disk_packed) for a packed layout, or pass force \
+                         to override.",
+                        counted,
+                        existing + counted,
+                        limit
+                    ));
+                }
+            }
+        }
+
         // Snapshot the digest keys of collections already present in the store,
         // taken ONCE here (before any builder spawns). The build half has no
         // `&self`, so this read-only set is how it learns which collections can
@@ -748,11 +983,27 @@ impl ReadonlyRefgetStore {
         // never dispatches (the writer pool is effectively unused). The shard-dir
         // cache lets writers skip a `create_dir_all` syscall per (tiny) sequence.
         let writer_disk_backed = self.persist_to_disk && self.local_path.is_some();
+        let packed = self.layout == Layout::Packed;
         let (write_tx, write_rx) = bounded::<WriteJob>(jobs * WRITER_CHANNEL_DEPTH);
         let created_shards: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
         let created_shards_ref = &created_shards;
         let write_err: Mutex<Option<anyhow::Error>> = Mutex::new(None);
         let write_err_ref = &write_err;
+
+        // Packed layout: shared temp-pack writer handles, plus the inserter-side
+        // deterministic assigner and the sidecar rows it records.
+        let pack_writers: Option<PackWriters> = if packed && writer_disk_backed {
+            Some(PackWriters::new(
+                self.local_path.as_ref().unwrap().join("packs"),
+            ))
+        } else {
+            None
+        };
+        let pack_writers_ref = pack_writers.as_ref();
+        let mut assigner = PackAssigner::new(self.pack_cap_bytes);
+        let mut pending_pack_rows: Vec<PendingPackRow> = Vec::new();
+        // Filled after the writer barrier (below), read after the scope closes.
+        let mut sealed_packs: Vec<SealedPack> = Vec::new();
 
         // --- Per-run ingest counters ----------------------------------------
         // Plain locals, not atomics: the inserter loop runs on THIS thread
@@ -770,11 +1021,26 @@ impl ReadonlyRefgetStore {
                     let write_rx: Receiver<WriteJob> = write_rx.clone();
                     let handle = scope.spawn(move || {
                         for job in write_rx.iter() {
-                            if let Err(e) = ReadonlyRefgetStore::write_seq_bytes_to_full_path(
-                                &job.full_path,
-                                &job.bytes,
-                                created_shards_ref,
-                            ) {
+                            let result = match job {
+                                WriteJob::Standalone { full_path, bytes } => {
+                                    ReadonlyRefgetStore::write_seq_bytes_to_full_path(
+                                        &full_path,
+                                        &bytes,
+                                        created_shards_ref,
+                                    )
+                                }
+                                WriteJob::PackChunk {
+                                    ordinal,
+                                    offset,
+                                    bytes,
+                                } => match pack_writers_ref {
+                                    Some(pw) => pw.write_at(ordinal, offset, &bytes),
+                                    None => Err(anyhow!(
+                                        "internal: PackChunk dispatched without a pack writer"
+                                    )),
+                                },
+                            };
+                            if let Err(e) = result {
                                 let mut slot = write_err_ref.lock().unwrap();
                                 if slot.is_none() {
                                     *slot = Some(e);
@@ -948,12 +1214,25 @@ impl ReadonlyRefgetStore {
                             Some((full_path, bytes)) => {
                                 if !already_written {
                                     n_seqs_written += 1;
+                                    let job = if packed {
+                                        // Deterministic pack assignment on THIS
+                                        // (single) inserter thread, in arrival
+                                        // order, then a positional-write job.
+                                        let len = bytes.len() as u64;
+                                        let (ordinal, offset) = assigner.assign(&bytes);
+                                        pending_pack_rows.push(PendingPackRow {
+                                            key: seq_key,
+                                            ordinal,
+                                            offset,
+                                            len,
+                                        });
+                                        WriteJob::PackChunk { ordinal, offset, bytes }
+                                    } else {
+                                        WriteJob::Standalone { full_path, bytes }
+                                    };
                                     // BOUNDED send: blocks (back-pressure) when the
                                     // writer pool is saturated, capping in-flight RAM.
-                                    if write_tx
-                                        .send(WriteJob { full_path, bytes })
-                                        .is_err()
-                                    {
+                                    if write_tx.send(job).is_err() {
                                         // Writers all hung up (an earlier write error);
                                         // stop feeding and let the error propagate.
                                         break;
@@ -1026,12 +1305,44 @@ impl ReadonlyRefgetStore {
                     .join()
                     .map_err(|e| anyhow!("Writer thread panicked: {:?}", e))?;
             }
+
+            // SEAL the packs (packed layout): every dispatched positional write
+            // has landed. Seal each open/filled pack to its final content-hash
+            // name. Writer-completion order affected no byte, so this is
+            // deterministic.
+            if packed {
+                sealed_packs = assigner.finish();
+                if let Some(pw) = pack_writers_ref {
+                    for sp in &sealed_packs {
+                        let tmp = pw.tmp_path(sp.ordinal);
+                        let final_path = pw.packs_dir.join(format!("{}.pack", sp.hash32));
+                        if final_path.exists() {
+                            // Content is identical by construction (content-hash
+                            // name); drop the redundant temp.
+                            let _ = std::fs::remove_file(&tmp);
+                        } else {
+                            if let Some(f) = pw.files.lock().unwrap().get(&sp.ordinal) {
+                                let _ = f.sync_all();
+                            }
+                            std::fs::rename(&tmp, &final_path).with_context(|| {
+                                format!("sealing pack {}", final_path.display())
+                            })?;
+                        }
+                    }
+                    if let Ok(dir) = std::fs::File::open(&pw.packs_dir) {
+                        let _ = dir.sync_all();
+                    }
+                }
+            }
             Ok(())
         });
 
-        // Helper: clean up orphan sequences on any failure path below.
+        // Helper: clean up orphan sequences (and temp packs) on any failure path.
         let cleanup_on_err = |store: &mut ReadonlyRefgetStore| {
             store.remove_orphan_seq_files();
+            if packed {
+                store.remove_orphan_temp_packs();
+            }
         };
 
         // Surface scope errors (e.g. feeder/writer panics), then builder/writer errors.
@@ -1070,6 +1381,30 @@ impl ReadonlyRefgetStore {
         // the collection digests) is unaffected -- only `name`/`description`,
         // which are advisory in this file. The authoritative per-collection names
         // live in each collections/<digest>.rgsi.
+        // Packed layout: convert the inserter's recorded pack rows into sidecar
+        // rows (ordinal -> final content-hash name) and stage them so the commit
+        // publishes `sequences.pack.idx` alongside the other indexes.
+        if packed && !pending_pack_rows.is_empty() {
+            let mut ord_to_name: HashMap<usize, std::sync::Arc<str>> = HashMap::new();
+            for sp in &sealed_packs {
+                ord_to_name.insert(sp.ordinal, std::sync::Arc::from(sp.hash32.as_str()));
+            }
+            let mut pending = self.pending.lock().unwrap();
+            for row in &pending_pack_rows {
+                let name = ord_to_name
+                    .get(&row.ordinal)
+                    .ok_or_else(|| anyhow!("internal: pack ordinal {} not sealed", row.ordinal))?;
+                pending.pack_rows.insert(
+                    row.key,
+                    super::packidx::PackRow {
+                        pack: std::sync::Arc::clone(name),
+                        offset: row.offset,
+                        len: row.len,
+                    },
+                );
+            }
+        }
+
         if self.persist_to_disk && self.local_path.is_some() {
             self.write_index_files()?;
         }

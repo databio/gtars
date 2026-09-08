@@ -68,6 +68,48 @@ impl RefgetStore {
         }
     }
 
+    /// Create a disk-backed RefgetStore with the PACKED sequence layout.
+    ///
+    /// Sequences are concatenated into sealed, size-capped pack files under
+    /// `packs/`, resolved via the `sequences.pack.idx` sidecar, instead of one
+    /// `.seq` file per digest. Mirrors [`Self::on_disk`] but sets
+    /// `layout = Packed` and creates `packs/`.
+    ///
+    /// Opening an EXISTING store: the layout always comes from its manifest.
+    /// Calling `on_disk_packed` on an existing STANDALONE store is an error —
+    /// there is no in-place conversion in Phase 1 (export a standalone image
+    /// instead). Calling it on an existing packed store just opens it.
+    pub fn on_disk_packed<P: AsRef<Path>>(cache_path: P) -> Result<Self> {
+        let cache_path = cache_path.as_ref();
+        let index_path = cache_path.join("rgstore.json");
+
+        if index_path.exists() {
+            let store = Self::open_local(cache_path)?;
+            if store.inner.layout != Layout::Packed {
+                return Err(anyhow::anyhow!(
+                    "store at {} already exists with a standalone layout; \
+                     on_disk_packed cannot convert it in place. Create a fresh \
+                     packed store and export/re-import, or open it with on_disk.",
+                    cache_path.display()
+                ));
+            }
+            Ok(store)
+        } else {
+            let mode = StorageMode::Encoded;
+            create_dir_all(cache_path)?;
+            let mut inner = ReadonlyRefgetStore::new(mode);
+            inner.local_path = Some(cache_path.to_path_buf());
+            inner.seqdata_path_template = Some(DEFAULT_SEQDATA_PATH_TEMPLATE.to_string());
+            inner.persist_to_disk = true;
+            inner.layout = Layout::Packed;
+            create_dir_all(cache_path.join("sequences"))?;
+            create_dir_all(cache_path.join("collections"))?;
+            create_dir_all(cache_path.join("fhr"))?;
+            create_dir_all(cache_path.join("packs"))?;
+            Ok(Self { inner })
+        }
+    }
+
     /// Create an in-memory RefgetStore.
     pub fn in_memory() -> Self {
         Self {
@@ -190,6 +232,17 @@ impl RefgetStore {
     /// Change the storage mode.
     pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
         self.inner.set_encoding_mode(new_mode);
+    }
+
+    /// Set the per-pack size cap in bytes (packed layout).
+    pub fn set_pack_cap_bytes(&mut self, cap: u64) {
+        self.inner.set_pack_cap_bytes(cap);
+    }
+
+    /// Reclaim dead bytes in a packed store by rewriting live spans into fresh
+    /// sealed packs. Byte-identical retrieval before and after.
+    pub fn compact(&mut self) -> Result<super::CompactReport> {
+        self.inner.compact()
     }
 
     /// Enable 2-bit encoding for space efficiency.

@@ -13,8 +13,28 @@ pub fn run_refget(matches: &ArgMatches) -> Result<()> {
         Some((super::cli::REFGET_BUILD, sub)) => run_build(sub),
         Some((super::cli::REFGET_EXPORT, sub)) => run_export(sub),
         Some((super::cli::REFGET_LOCK_STATUS, sub)) => run_lock_status(sub),
+        Some((super::cli::REFGET_COMPACT, sub)) => run_compact(sub),
         _ => unreachable!("refget subcommand not found"),
     }
+}
+
+fn run_compact(matches: &ArgMatches) -> Result<()> {
+    let store_path = matches.get_one::<String>("store").expect("store is required");
+    let mut store = RefgetStore::on_disk(store_path)
+        .map_err(|e| anyhow::anyhow!("Failed to open store at {}: {}", store_path, e))?;
+    let dead_before = store.packed_dead_bytes().unwrap_or(0);
+    let report = store
+        .compact()
+        .map_err(|e| anyhow::anyhow!("Failed to compact store: {}", e))?;
+    eprintln!(
+        "Compacted {}: packs {} -> {}, reclaimed {} dead byte(s) (was {}).",
+        store_path,
+        report.packs_before,
+        report.packs_after,
+        report.bytes_reclaimed,
+        dead_before,
+    );
+    Ok(())
 }
 
 fn run_lock_status(matches: &ArgMatches) -> Result<()> {
@@ -70,6 +90,8 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let jobs = *matches.get_one::<usize>("jobs").unwrap_or(&0);
     let raw = matches.get_flag("raw");
     let force = matches.get_flag("force");
+    let packed = matches.get_flag("packed");
+    let pack_cap = matches.get_one::<u64>("pack_cap").copied();
 
     // Parse --collection-alias NAMESPACE:ALIAS. Owned up front so the borrows
     // in FastaImportOptions outlive the builder chain.
@@ -93,10 +115,20 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
         })
         .transpose()?;
 
-    let mut store = RefgetStore::on_disk(output)
-        .map_err(|e| anyhow::anyhow!("Failed to create store at {}: {}", output, e))?;
+    let mut store = if packed {
+        RefgetStore::on_disk_packed(output)
+            .map_err(|e| anyhow::anyhow!("Failed to create packed store at {}: {}", output, e))?
+    } else {
+        RefgetStore::on_disk(output)
+            .map_err(|e| anyhow::anyhow!("Failed to create store at {}: {}", output, e))?
+    };
     store.set_lock_options(lock_options_from(matches));
     store.set_force_alias(matches.get_flag("force_alias"));
+    if let Some(cap) = pack_cap {
+        store.set_pack_cap_bytes(cap);
+    }
+    // Mode must be set before any bytes are written (a no-op guard protects a
+    // populated packed store from re-encoding — see set_encoding_mode).
     if raw {
         store.set_encoding_mode(StorageMode::Raw);
     } else {
@@ -104,6 +136,8 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     }
 
     let mode = if raw { "Raw" } else { "Encoded" };
+    let layout = if packed { "packed" } else { "standalone" };
+    eprintln!("Layout: {}", layout);
     let fmt_auto = |n: usize| if n == 0 { "auto".to_string() } else { n.to_string() };
     eprintln!(
         "Building RefgetStore at {} (mode={}, jobs={})",

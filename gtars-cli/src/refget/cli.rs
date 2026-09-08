@@ -4,6 +4,7 @@ pub const REFGET_CMD: &str = "refget";
 pub const REFGET_BUILD: &str = "build";
 pub const REFGET_EXPORT: &str = "export";
 pub const REFGET_LOCK_STATUS: &str = "lock-status";
+pub const REFGET_COMPACT: &str = "compact";
 
 pub fn create_refget_cli() -> Command {
     Command::new(REFGET_CMD)
@@ -90,6 +91,28 @@ pub fn create_refget_cli() -> Command {
                         .long("force-alias")
                         .action(ArgAction::SetTrue)
                         .help("On commit, overwrite an alias another writer already published under a different collection digest. Without this, such a conflict is an error -- silently picking a winner is how aliases stop resolving."),
+                )
+                .arg(
+                    Arg::new("packed")
+                        .long("packed")
+                        .action(ArgAction::SetTrue)
+                        .help("Use the PACKED sequence layout: sequences are concatenated into sealed, size-capped pack files under packs/ plus a sequences.pack.idx sidecar, instead of one .seq file per digest. Best for genome-scale stores on network filesystems. Only applies when creating a new store."),
+                )
+                .arg(
+                    Arg::new("pack_cap")
+                        .long("pack-cap")
+                        .value_name("BYTES")
+                        .value_parser(clap::value_parser!(u64))
+                        .help("Per-pack size cap in bytes for the packed layout (default 256 MiB). A sequence larger than the cap gets its own pack."),
+                ),
+        )
+        .subcommand(
+            Command::new(REFGET_COMPACT)
+                .about("Reclaim dead bytes in a PACKED RefgetStore by rewriting live spans into fresh sealed packs.")
+                .arg(
+                    Arg::new("store")
+                        .required(true)
+                        .help("Path to an existing packed RefgetStore directory"),
                 ),
         )
         .subcommand(

@@ -153,8 +153,10 @@ fn decoded_sequence_to_string(bytes: Vec<u8>) -> String {
 struct FdCache {
     cap: usize,
     tick: u64,
-    /// digest key -> (shared file handle, last-use stamp)
-    entries: HashMap<DigestKey, (Arc<File>, u64)>,
+    /// relative-or-absolute file path -> (shared file handle, last-use stamp).
+    /// Keyed by PATH (not digest) so pack files and `.seq` files share one
+    /// bounded LRU of open handles.
+    entries: HashMap<PathBuf, (Arc<File>, u64)>,
 }
 
 impl FdCache {
@@ -167,7 +169,7 @@ impl FdCache {
     }
 
     /// Return a cloned handle on hit, bumping recency. `None` on miss.
-    fn get(&mut self, key: &DigestKey) -> Option<Arc<File>> {
+    fn get(&mut self, key: &Path) -> Option<Arc<File>> {
         self.tick += 1;
         let tick = self.tick;
         if let Some(slot) = self.entries.get_mut(key) {
@@ -179,7 +181,7 @@ impl FdCache {
     }
 
     /// Insert a freshly opened handle, evicting (closing) the LRU entry if full.
-    fn insert(&mut self, key: DigestKey, file: Arc<File>) {
+    fn insert(&mut self, key: PathBuf, file: Arc<File>) {
         self.tick += 1;
         let tick = self.tick;
         if !self.entries.contains_key(&key) && self.entries.len() >= self.cap {
@@ -189,7 +191,7 @@ impl FdCache {
                 .entries
                 .iter()
                 .min_by_key(|(_, (_, stamp))| *stamp)
-                .map(|(k, _)| *k)
+                .map(|(k, _)| k.clone())
             {
                 self.entries.remove(&lru_key);
             }
@@ -367,6 +369,100 @@ pub struct ReadonlyRefgetStore {
     /// one human-readable name to different content is a semantic conflict, not
     /// a merge detail.
     pub(crate) force_alias: bool,
+
+    // --- Packed layout (Goal 2) ---------------------------------------------
+    /// Physical layout of THIS store's sequence bytes. Invariant:
+    /// `layout == Packed` implies `remote_source == None` (the local cache of a
+    /// remote-backed store is always standalone).
+    pub(crate) layout: Layout,
+    /// Layout of the REMOTE this store caches from (if any). A remote packed
+    /// store is read through its sidecar while the local cache stays standalone.
+    pub(crate) remote_layout: Layout,
+    /// Per-pack size cap in bytes for new packs (default 256 MiB).
+    pub(crate) pack_cap_bytes: u64,
+    /// Aligned block size for the pack block cache. A store field (defaulting to
+    /// [`packcache::PACK_BLOCK_SIZE`]) so tests can shrink it.
+    pub(crate) pack_block_size: u64,
+    /// Coalescing block cache shared across all packs of this store.
+    pub(crate) pack_cache: super::packcache::PackBlockCache,
+    /// Lazily-loaded in-memory pack index for the LOCAL side. `None` until the
+    /// first packed read, and invalidated (set to `None`) whenever a commit
+    /// changes the sidecar.
+    pub(crate) pack_index:
+        Mutex<Option<Arc<super::packidx::PackIndex<super::packidx::InMemory>>>>,
+    /// Lazily-loaded in-memory pack index for the REMOTE side.
+    pub(crate) remote_pack_index:
+        Mutex<Option<Arc<super::packidx::PackIndex<super::packidx::InMemory>>>>,
+    /// Cache of pack file byte lengths (needed to clamp the final block of a
+    /// local block-cache read), keyed by content-hash pack name.
+    pub(crate) pack_lengths: Mutex<HashMap<Arc<str>, u64>>,
+    /// The open, not-yet-sealed pack for an incremental (`add_sequence_record`)
+    /// build session on a packed store. Sealed at cap and always at commit.
+    pub(crate) open_session_pack: Mutex<Option<SessionPack>>,
+}
+
+/// A sealed pack produced by an incremental build session: its final
+/// content-hash name plus the sidecar rows it carries.
+#[derive(Debug)]
+pub(crate) struct SessionSealed {
+    pub(crate) name: Arc<str>,
+    /// `(digest, offset, len)` rows for sequences that landed in this pack.
+    pub(crate) rows: Vec<(String, u64, u64)>,
+}
+
+/// An open, not-yet-sealed pack file for an incremental build session on a
+/// packed store. Bytes are appended sequentially (single-threaded here), the
+/// content hash is fed the same bytes in the same order, and the pack is sealed
+/// (fsync + rename to its content-hash name) at cap and at commit.
+#[derive(Debug)]
+pub(crate) struct SessionPack {
+    /// Directory `packs/` under the store.
+    pub(crate) packs_dir: PathBuf,
+    /// Ordinal of the current open sub-pack (for temp-file naming).
+    pub(crate) ordinal: usize,
+    /// Temp file path `packs/.rgstore.tmp.pack.session.<pid>.<ordinal>`.
+    pub(crate) tmp_path: PathBuf,
+    /// Open handle to the temp pack.
+    pub(crate) file: File,
+    /// Running byte length == next offset.
+    pub(crate) len: u64,
+    /// Running content hash of the bytes appended so far.
+    pub(crate) hasher: sha2::Sha256,
+    /// `(digest, offset, len)` rows for sequences appended to THIS open pack.
+    pub(crate) rows: Vec<(String, u64, u64)>,
+    /// Packs already sealed earlier in this session (cap reached mid-session).
+    pub(crate) sealed: Vec<SessionSealed>,
+}
+
+/// Which side of a (possibly remote-backed) store a resolution targets. The
+/// local cache of a remote packed store is standalone — sealed packs cannot be
+/// appended to — so the two sides can have different layouts.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum StoreSide {
+    Local,
+    Remote,
+}
+
+/// Where a sequence's bytes physically live. THE result type of
+/// [`ReadonlyRefgetStore::resolve_location`]; the read path branches on this,
+/// never on `layout` directly.
+#[derive(Debug)]
+pub(crate) enum Location {
+    /// Template-path `.seq` file (relative path, local or remote).
+    Standalone { relpath: PathBuf },
+    /// A byte span inside a sealed pack file `packs/<pack>.pack`.
+    Packed { pack: Arc<str>, offset: u64, len: u64 },
+}
+
+/// Result of [`ReadonlyRefgetStore::compact`].
+#[derive(Debug, Clone)]
+pub struct CompactReport {
+    /// Pack files on disk before compaction.
+    pub packs_before: usize,
+    /// Pack files after compaction.
+    pub packs_after: usize,
+    /// Dead bytes reclaimed.
+    pub bytes_reclaimed: u64,
 }
 
 /// What this handle has actually created, modified, or deleted since its last
@@ -410,6 +506,10 @@ pub struct PendingChanges {
     /// a conflicting binding another writer already published, as if
     /// `force_alias` were set for that one entry.
     pub(crate) forced_aliases: HashSet<(AliasKind, String, String)>,
+    /// Sidecar rows to publish into `sequences.pack.idx` (packed layout only):
+    /// digest key -> its `(pack, offset, len)` span. Merged and republished
+    /// under the store lock in `write_index_files`.
+    pub(crate) pack_rows: HashMap<DigestKey, super::packidx::PackRow>,
 }
 
 impl PendingChanges {
@@ -421,6 +521,7 @@ impl PendingChanges {
             && self.removed_sequences.is_empty()
             && self.removed_aliases.is_empty()
             && self.emptied_alias_namespaces.is_empty()
+            && self.pack_rows.is_empty()
     }
 
     /// Record a collection this handle added. An add supersedes a pending
@@ -514,6 +615,8 @@ impl PendingChanges {
             .retain(|k| !applied.removed_aliases.contains(k));
         self.emptied_alias_namespaces
             .retain(|k| !applied.emptied_alias_namespaces.contains(k));
+        self.pack_rows
+            .retain(|k, _| !applied.pack_rows.contains_key(k));
     }
 
     /// Drop the alias changes for one namespace, after the cheap
@@ -558,6 +661,18 @@ impl ReadonlyRefgetStore {
             commit_lock: None,
             lock_options: LockOptions::default(),
             force_alias: false,
+            layout: Layout::Standalone,
+            remote_layout: Layout::Standalone,
+            pack_cap_bytes: 256 * 1024 * 1024,
+            pack_block_size: super::packcache::PACK_BLOCK_SIZE,
+            pack_cache: super::packcache::PackBlockCache::new(
+                super::packcache::DEFAULT_PACK_CACHE_BLOCKS,
+                super::packcache::PACK_BLOCK_SIZE,
+            ),
+            pack_index: Mutex::new(None),
+            remote_pack_index: Mutex::new(None),
+            pack_lengths: Mutex::new(HashMap::new()),
+            open_session_pack: Mutex::new(None),
         }
     }
 
@@ -649,8 +764,34 @@ impl ReadonlyRefgetStore {
     }
 
     /// Change the storage mode, re-encoding/decoding existing sequences as needed.
+    ///
+    /// For a disk-backed PACKED store that already holds sequences, changing the
+    /// mode is REFUSED (a no-op with a warning): the packed bytes on disk are in
+    /// the current mode, and re-encoding only the resident records would desync
+    /// them from the packs. Mode is fixed at creation for a populated packed
+    /// store. (An empty packed store — before any import — may still switch,
+    /// since there are no packed bytes to desync.)
+    ///
+    /// NOTE (Phase 1 deviation): the plan specified returning `Result<()>` here.
+    /// To avoid a signature change rippling into the untestable `gtars-python` /
+    /// `gtars-node` bindings, the guard is enforced as an infallible no-op
+    /// instead. See the implementation report.
     pub fn set_encoding_mode(&mut self, new_mode: StorageMode) {
         if self.mode == new_mode {
+            return;
+        }
+
+        if self.persist_to_disk
+            && self.layout == Layout::Packed
+            && !self.sequence_store.is_empty()
+        {
+            if !self.quiet {
+                eprintln!(
+                    "warning: refusing to change storage mode on a populated packed store \
+                     (would desync the packs); mode stays {:?}",
+                    self.mode
+                );
+            }
             return;
         }
 
@@ -866,14 +1007,20 @@ impl ReadonlyRefgetStore {
         self.record(|p| p.add_sequence(key));
 
         if self.persist_to_disk && self.local_path.is_some() {
-            match &sr {
-                SequenceRecord::Full { metadata, sequence } => {
-                    self.write_sequence_to_disk_single(metadata, sequence)?;
-                    let stub = SequenceRecord::Stub(metadata.clone());
-                    self.sequence_store.insert(key, stub);
+            if let SequenceRecord::Full { metadata, sequence } = &sr {
+                if self.layout == Layout::Packed {
+                    // Packed incremental write (panget's path): append to the
+                    // open session pack. The record stays resident (Full) so
+                    // mid-session reads are served from RAM; on reopen it is a
+                    // Stub resolved through the sidecar.
+                    self.session_pack_append(&metadata.sha512t24u, sequence)?;
+                    self.sequence_store.insert(key, sr);
                     return Ok(());
                 }
-                SequenceRecord::Stub(_) => {}
+                self.write_sequence_to_disk_single(metadata, sequence)?;
+                let stub = SequenceRecord::Stub(metadata.clone());
+                self.sequence_store.insert(key, stub);
+                return Ok(());
             }
         }
 
@@ -1346,7 +1493,14 @@ impl ReadonlyRefgetStore {
         if self.persist_to_disk {
             self.write_index_files()?;
 
-            if let (Some(local_path), Some(template)) =
+            if self.layout == Layout::Packed {
+                // Packed: no per-`.seq` unlink. Orphan rows were already dropped
+                // from the sidecar by the commit above; here we eagerly unlink
+                // any pack file that no live sidecar row references any more.
+                if let Some(local_path) = self.local_path.clone() {
+                    self.remove_fully_dead_packs(&local_path)?;
+                }
+            } else if let (Some(local_path), Some(template)) =
                 (self.local_path.clone(), self.seqdata_path_template.clone())
             {
                 // Collect parent shard dirs while unlinking, then rmdir them
@@ -1485,6 +1639,26 @@ impl ReadonlyRefgetStore {
         }
     }
 
+    /// Remove leftover temp pack files (`packs/.rgstore.tmp.pack.<pid>.*`) from
+    /// THIS process, used on a failed packed import so no partial pack survives.
+    #[cfg_attr(not(feature = "filesystem"), allow(dead_code))]
+    pub(crate) fn remove_orphan_temp_packs(&self) {
+        let Some(local_path) = &self.local_path else {
+            return;
+        };
+        let packs_dir = local_path.join("packs");
+        let prefix = format!(".rgstore.tmp.pack.{}.", std::process::id());
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.starts_with(&prefix) {
+                        let _ = fs::remove_file(entry.path());
+                    }
+                }
+            }
+        }
+    }
+
     // =========================================================================
     // Import from another store
     // =========================================================================
@@ -1496,6 +1670,13 @@ impl ReadonlyRefgetStore {
     /// The source store must have the collection loaded (call
     /// `load_collection()` or `load_all_collections()` first).
     pub fn import_collection(&mut self, source: &ReadonlyRefgetStore, digest: &str) -> Result<()> {
+        // Store-to-store copy of packed stores is out of scope for Phase 1.
+        if self.layout == Layout::Packed || source.layout == Layout::Packed {
+            return Err(anyhow!(
+                "import_collection does not support packed stores in Phase 1 \
+                 (store-to-store copy of packed layouts is not implemented)"
+            ));
+        }
         // Both stores must be disk-backed with same mode
         if source.local_path.is_none() || self.local_path.is_none() || !self.persist_to_disk {
             return Err(anyhow!("import_collection requires both stores to be disk-backed"));
@@ -2174,13 +2355,9 @@ impl ReadonlyRefgetStore {
             ));
         }
 
-        // Fetch (or open + cache) the shared `.seq` file handle. The critical
-        // section is kept tiny: lock -> get-or-open -> clone Arc -> unlock. The
-        // actual positioned read happens OUTSIDE the lock, so concurrent reads
-        // are never serialized by the cache.
-        let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
-
-        // Compute the covering byte window, then read it with a positioned read.
+        // Compute the covering byte window (identity under Raw). This math is
+        // layout-independent; narrowing falls out of adding the pack offset to
+        // an already-narrow window.
         let (byte_start, byte_end) = match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
@@ -2188,7 +2365,24 @@ impl ReadonlyRefgetStore {
             }
             StorageMode::Raw => (start, end),
         };
-        let buf = crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?;
+
+        // Resolve where the bytes live and read only the covering window.
+        let buf = match self.resolve_location(&metadata.sha512t24u, StoreSide::Local)? {
+            Location::Standalone { .. } => {
+                // Fetch (or open + cache) the shared `.seq` file handle. The
+                // critical section is tiny; the positioned read is outside the
+                // lock, so concurrent reads are never serialized by the cache.
+                let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
+                crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?
+            }
+            Location::Packed { pack, offset, .. } => {
+                // Add the pack offset to the already-narrow window; block-cache
+                // read of the absolute range.
+                let abs_start = offset + byte_start as u64;
+                let abs_end = offset + byte_end as u64;
+                self.read_pack_bytes_local(&pack, abs_start, abs_end)?
+            }
+        };
 
         let decoded: Vec<u8> = match self.mode {
             StorageMode::Encoded => {
@@ -2205,21 +2399,6 @@ impl ReadonlyRefgetStore {
     /// caching it on a miss. Bounded LRU; the LRU handle is evicted (closed)
     /// when the cache is full.
     fn get_cached_seq_file(&self, digest: &str) -> Result<Arc<File>> {
-        let key = digest.to_key();
-
-        // Fast path: hit. Hold the lock only for the tiny map op.
-        {
-            let mut cache = self
-                .seq_fd_cache
-                .lock()
-                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
-            if let Some(f) = cache.get(&key) {
-                return Ok(f);
-            }
-        }
-
-        // Miss: build the path and open OUTSIDE the lock (the open syscall must
-        // not serialize other readers).
         let local_path = self
             .local_path
             .as_ref()
@@ -2229,22 +2408,42 @@ impl ReadonlyRefgetStore {
             .as_ref()
             .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
         let full_path = local_path.join(Self::expand_template(digest, template));
+        self.get_cached_file(&full_path)
+    }
+
+    /// Return a shared handle to the file at `full_path`, opening and caching it
+    /// on a miss. The bounded LRU is keyed by path, so pack files and `.seq`
+    /// files share one pool of open handles.
+    pub(crate) fn get_cached_file(&self, full_path: &Path) -> Result<Arc<File>> {
+        // Fast path: hit. Hold the lock only for the tiny map op.
+        {
+            let mut cache = self
+                .seq_fd_cache
+                .lock()
+                .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
+            if let Some(f) = cache.get(full_path) {
+                return Ok(f);
+            }
+        }
+
+        // Miss: open OUTSIDE the lock (the open syscall must not serialize
+        // other readers).
         let file = Arc::new(
-            File::open(&full_path)
-                .with_context(|| format!("Failed to open seq file {}", full_path.display()))?,
+            File::open(full_path)
+                .with_context(|| format!("Failed to open file {}", full_path.display()))?,
         );
 
         // Insert under the lock. A concurrent miss may have inserted the same
-        // digest meanwhile; that is harmless (both handles read the same
-        // immutable file) -- prefer the already-cached one to avoid duplicating.
+        // path meanwhile; that is harmless (both handles read the same immutable
+        // file) -- prefer the already-cached one to avoid duplicating.
         let mut cache = self
             .seq_fd_cache
             .lock()
             .map_err(|_| anyhow!("seq fd cache mutex poisoned"))?;
-        if let Some(existing) = cache.get(&key) {
+        if let Some(existing) = cache.get(full_path) {
             return Ok(existing);
         }
-        cache.insert(key, Arc::clone(&file));
+        cache.insert(full_path.to_path_buf(), Arc::clone(&file));
         Ok(file)
     }
 
@@ -2286,10 +2485,8 @@ impl ReadonlyRefgetStore {
             .as_ref()
             .ok_or_else(|| anyhow!("Remote partial read requires a remote source"))?;
 
-        let relpath = self.resolve_seq_file_relpath(&metadata.sha512t24u)?;
-
-        // Compute the covering byte window. `.seq` files are headerless raw byte
-        // arrays, so byte offsets map directly to base positions.
+        // Compute the covering byte window. Sequence bytes are headerless raw
+        // byte arrays, so byte offsets map directly to base positions.
         let (byte_start, byte_end) = match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
@@ -2298,8 +2495,26 @@ impl ReadonlyRefgetStore {
             StorageMode::Raw => (start, end),
         };
 
-        let mut reader =
-            open_remote_range(remote, &relpath, byte_start as u64, byte_end as u64)?;
+        // Resolve where the bytes live on the REMOTE, then range-fetch the
+        // covering window. Packed reads go through packs/<pack>.pack; standalone
+        // reads through the templated `.seq` path.
+        //
+        // NOTE (Phase 1): the remote packed path issues one direct HTTP range
+        // per read (no ranged block cache and no ranged sidecar binary search;
+        // the sidecar is fetched whole and cached in memory). See the report.
+        let (relpath, abs_start, abs_end) =
+            match self.resolve_location(&metadata.sha512t24u, StoreSide::Remote)? {
+                Location::Standalone { relpath } => {
+                    (relpath, byte_start as u64, byte_end as u64)
+                }
+                Location::Packed { pack, offset, .. } => (
+                    PathBuf::from(format!("packs/{}.pack", pack)),
+                    offset + byte_start as u64,
+                    offset + byte_end as u64,
+                ),
+            };
+
+        let mut reader = open_remote_range(remote, &relpath, abs_start, abs_end)?;
         let mut buf = Vec::with_capacity(byte_end - byte_start);
         reader
             .read_to_end(&mut buf)
@@ -2338,6 +2553,453 @@ impl ReadonlyRefgetStore {
             .ok_or_else(|| anyhow!("Non-UTF8 sequence path"))?;
         Self::sanitize_relative_path(relpath_str)?;
         Ok(relpath)
+    }
+
+    // =====================================================================
+    // Packed layout: the single point of location resolution
+    // =====================================================================
+
+    /// THE single point where a digest becomes a byte location. All read-path
+    /// call sites go through here and branch on the returned [`Location`], never
+    /// on `layout`. Phase 2 (hybrid stores) will change ONLY this body.
+    pub(crate) fn resolve_location(&self, digest: &str, side: StoreSide) -> Result<Location> {
+        let layout = match side {
+            StoreSide::Local => self.layout,
+            StoreSide::Remote => self.remote_layout,
+        };
+        match layout {
+            Layout::Standalone => Ok(Location::Standalone {
+                relpath: self.resolve_seq_file_relpath(digest)?,
+            }),
+            Layout::Packed => {
+                let row = self
+                    .pack_index_lookup(digest, side)?
+                    .ok_or_else(|| anyhow!("sequence {} not in pack index", digest))?;
+                Ok(Location::Packed {
+                    pack: row.pack,
+                    offset: row.offset,
+                    len: row.len,
+                })
+            }
+        }
+    }
+
+    /// Look up a digest in the (lazily loaded) pack index for `side`.
+    fn pack_index_lookup(
+        &self,
+        digest: &str,
+        side: StoreSide,
+    ) -> Result<Option<super::packidx::PackRow>> {
+        let handle = self.pack_index_handle(side)?;
+        handle.lookup(digest)
+    }
+
+    /// Return the (lazily-loaded) in-memory pack index for `side`, loading the
+    /// `sequences.pack.idx` sidecar on first access.
+    fn pack_index_handle(
+        &self,
+        side: StoreSide,
+    ) -> Result<Arc<super::packidx::PackIndex<super::packidx::InMemory>>> {
+        let slot = match side {
+            StoreSide::Local => &self.pack_index,
+            StoreSide::Remote => &self.remote_pack_index,
+        };
+        {
+            let g = slot.lock().unwrap();
+            if let Some(h) = g.as_ref() {
+                return Ok(Arc::clone(h));
+            }
+        }
+        // Load the sidecar bytes. For the local side, read the file directly;
+        // for the remote side fetch it (whole) via fetch_file and cache it.
+        let bytes = match side {
+            StoreSide::Local => {
+                let local_path = self
+                    .local_path
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("packed store requires a local path"))?;
+                let idx_path = local_path.join("sequences.pack.idx");
+                match std::fs::read(&idx_path) {
+                    Ok(b) => b,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+                    Err(e) => {
+                        return Err(e).with_context(|| format!("reading {}", idx_path.display()))
+                    }
+                }
+            }
+            StoreSide::Remote => Self::fetch_file(
+                &self.local_path,
+                &self.remote_source,
+                "sequences.pack.idx",
+                false,
+                false,
+            )?,
+        };
+        let handle = Arc::new(super::packidx::in_memory_index(bytes)?);
+        let mut g = slot.lock().unwrap();
+        if let Some(existing) = g.as_ref() {
+            return Ok(Arc::clone(existing));
+        }
+        *g = Some(Arc::clone(&handle));
+        Ok(handle)
+    }
+
+    /// Invalidate the cached local pack index (call after a commit that changed
+    /// the sidecar). The next resolution reloads from disk.
+    pub(crate) fn invalidate_pack_index(&self) {
+        *self.pack_index.lock().unwrap() = None;
+        self.pack_lengths.lock().unwrap().clear();
+    }
+
+    /// The byte length of a pack file, cached (needed to clamp the final block
+    /// of a local block-cache read).
+    fn pack_file_len(&self, pack: &Arc<str>) -> Result<u64> {
+        if let Some(len) = self.pack_lengths.lock().unwrap().get(pack).copied() {
+            return Ok(len);
+        }
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed read requires a local path"))?;
+        let path = local_path.join("packs").join(format!("{}.pack", pack));
+        let len = std::fs::metadata(&path)
+            .with_context(|| format!("stat {}", path.display()))?
+            .len();
+        self.pack_lengths.lock().unwrap().insert(Arc::clone(pack), len);
+        Ok(len)
+    }
+
+    /// Read `[abs_start, abs_end)` from a LOCAL pack file, through the coalescing
+    /// block cache. A span larger than the cache bypasses it (direct read).
+    fn read_pack_bytes_local(&self, pack: &Arc<str>, abs_start: u64, abs_end: u64) -> Result<Vec<u8>> {
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed read requires a local path"))?;
+        let pack_path = local_path.join("packs").join(format!("{}.pack", pack));
+        let pack_len = self.pack_file_len(pack)?;
+        let file = self.get_cached_file(&pack_path)?;
+        let fetch = |off: u64, len: u64| -> Result<Vec<u8>> {
+            crate::posread::read_exact_window(&file, off as usize, len as usize)
+        };
+        self.pack_cache
+            .read_range(pack, pack_len, abs_start, abs_end, &fetch)
+    }
+
+    /// Set the per-pack size cap in bytes for new packs.
+    pub fn set_pack_cap_bytes(&mut self, cap: u64) {
+        self.pack_cap_bytes = cap.max(1);
+    }
+
+    /// Reconfigure the pack block cache capacity (in blocks).
+    pub fn set_pack_cache_blocks(&mut self, n: usize) {
+        self.pack_cache = super::packcache::PackBlockCache::new(n, self.pack_block_size);
+    }
+
+    /// Test-only: shrink the pack block size so coalescing/narrowing is
+    /// exercised with tiny fixtures.
+    #[cfg(all(test, feature = "filesystem"))]
+    pub(crate) fn set_pack_block_size_for_test(&mut self, block_size: u64) {
+        self.pack_block_size = block_size.max(1);
+        self.pack_cache = super::packcache::PackBlockCache::new(
+            super::packcache::DEFAULT_PACK_CACHE_BLOCKS,
+            self.pack_block_size,
+        );
+    }
+
+    // =====================================================================
+    // Packed incremental session pack (add_sequence_record path)
+    // =====================================================================
+
+    /// Append `bytes` (already in store-mode encoding) to the open session pack,
+    /// sealing the current pack first if it would exceed the cap.
+    fn session_pack_append(&self, digest: &str, bytes: &[u8]) -> Result<()> {
+        use sha2::Digest as _;
+        use std::io::Write as _;
+
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed write requires a local path"))?;
+        let packs_dir = local_path.join("packs");
+
+        let mut guard = self.open_session_pack.lock().unwrap();
+        if guard.is_none() {
+            std::fs::create_dir_all(&packs_dir)?;
+            let ordinal = 0usize;
+            let tmp_path = packs_dir.join(format!(
+                ".rgstore.tmp.pack.session.{}.{}",
+                std::process::id(),
+                ordinal
+            ));
+            let file = std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .read(true)
+                .write(true)
+                .open(&tmp_path)?;
+            *guard = Some(SessionPack {
+                packs_dir: packs_dir.clone(),
+                ordinal,
+                tmp_path,
+                file,
+                len: 0,
+                hasher: sha2::Sha256::new(),
+                rows: Vec::new(),
+                sealed: Vec::new(),
+            });
+        }
+
+        let session = guard.as_mut().unwrap();
+        let len = bytes.len() as u64;
+        // Seal-before-place at cap (a sequence never straddles two packs).
+        if session.len > 0 && session.len + len > self.pack_cap_bytes {
+            Self::seal_session_current(session)?;
+        }
+        let offset = session.len;
+        session.file.write_all(bytes)?;
+        session.hasher.update(bytes);
+        session.len += len;
+        session.rows.push((digest.to_string(), offset, len));
+        Ok(())
+    }
+
+    /// Seal the currently-open session sub-pack to its content-hash name and
+    /// open a fresh empty temp for continued writing. No-op on an empty pack.
+    fn seal_session_current(session: &mut SessionPack) -> Result<()> {
+        use sha2::Digest as _;
+        if session.len == 0 {
+            return Ok(());
+        }
+        let _ = session.file.sync_all();
+        let hasher = std::mem::replace(&mut session.hasher, sha2::Sha256::new());
+        let digest = hasher.finalize();
+        let name: String = digest[..16].iter().map(|b| format!("{:02x}", b)).collect();
+        let final_path = session.packs_dir.join(format!("{}.pack", name));
+        if final_path.exists() {
+            let _ = std::fs::remove_file(&session.tmp_path);
+        } else {
+            std::fs::rename(&session.tmp_path, &final_path)
+                .with_context(|| format!("sealing session pack {}", final_path.display()))?;
+        }
+        if let Ok(dir) = File::open(&session.packs_dir) {
+            let _ = dir.sync_all();
+        }
+        let name_arc: Arc<str> = Arc::from(name.as_str());
+        let rows = std::mem::take(&mut session.rows);
+        session.sealed.push(SessionSealed { name: name_arc, rows });
+
+        // Open a fresh temp for any further writes in this session.
+        session.ordinal += 1;
+        let tmp_path = session.packs_dir.join(format!(
+            ".rgstore.tmp.pack.session.{}.{}",
+            std::process::id(),
+            session.ordinal
+        ));
+        let file = std::fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .read(true)
+            .write(true)
+            .open(&tmp_path)?;
+        session.file = file;
+        session.tmp_path = tmp_path;
+        session.len = 0;
+        Ok(())
+    }
+
+    /// Seal any open incremental session pack and return its `(digest, PackRow)`
+    /// rows for the sidecar merge. Called by the commit path under the lock.
+    pub(crate) fn seal_open_session_pack(
+        &self,
+    ) -> Result<Vec<(String, super::packidx::PackRow)>> {
+        let mut guard = self.open_session_pack.lock().unwrap();
+        let Some(mut session) = guard.take() else {
+            return Ok(Vec::new());
+        };
+        if session.len > 0 {
+            Self::seal_session_current(&mut session)?;
+        }
+        let mut out = Vec::new();
+        for sealed in &session.sealed {
+            for (digest, offset, len) in &sealed.rows {
+                out.push((
+                    digest.clone(),
+                    super::packidx::PackRow {
+                        pack: Arc::clone(&sealed.name),
+                        offset: *offset,
+                        len: *len,
+                    },
+                ));
+            }
+        }
+        // Drop the trailing empty temp left open by the last seal/reopen.
+        let _ = std::fs::remove_file(&session.tmp_path);
+        Ok(out)
+    }
+
+    // =====================================================================
+    // Packed deletion accounting + compaction
+    // =====================================================================
+
+    /// Dead (unreferenced) bytes inside pack files:
+    /// `sum(pack sizes) - sum(live sidecar lengths)`. `Ok(0)` for a store with
+    /// no packs. Computed, not tracked.
+    pub fn packed_dead_bytes(&self) -> Result<u64> {
+        let local_path = self
+            .local_path
+            .as_ref()
+            .ok_or_else(|| anyhow!("packed_dead_bytes requires a local path"))?;
+        let packs_dir = local_path.join("packs");
+        let mut total_pack_bytes: u64 = 0;
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".pack") {
+                        total_pack_bytes += entry.metadata().map(|m| m.len()).unwrap_or(0);
+                    }
+                }
+            }
+        }
+        let idx_path = local_path.join("sequences.pack.idx");
+        let live: u64 = match fs::read(&idx_path) {
+            Ok(bytes) => super::packidx::read_pack_idx_rows(&bytes)?
+                .values()
+                .map(|r| r.len)
+                .sum(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => 0,
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+        Ok(total_pack_bytes.saturating_sub(live))
+    }
+
+    /// Rewrite the live spans of a packed store into fresh sealed packs,
+    /// reclaiming dead bytes. Deterministic and locality-preserving (packs
+    /// visited by name, rows by offset). Retrieval is byte-identical before and
+    /// after.
+    pub fn compact(&mut self) -> Result<CompactReport> {
+        if self.layout != Layout::Packed {
+            return Err(anyhow!("compact() only applies to a packed store"));
+        }
+        let local_path = self
+            .local_path
+            .clone()
+            .ok_or_else(|| anyhow!("compact requires a local disk-backed store"))?;
+        self.lock_for_batch("compact")?;
+        let result = self.compact_inner(&local_path);
+        self.release_batch_lock();
+        result
+    }
+
+    fn compact_inner(&self, local_path: &Path) -> Result<CompactReport> {
+        use super::packidx::{read_pack_idx_rows, write_pack_idx, PackRow};
+        use std::collections::BTreeMap;
+
+        let packs_dir = local_path.join("packs");
+        let idx_path = local_path.join("sequences.pack.idx");
+
+        let old_rows: BTreeMap<String, PackRow> = match fs::read(&idx_path) {
+            Ok(bytes) => read_pack_idx_rows(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+
+        let packs_before = Self::count_pack_files(&packs_dir);
+        let dead_before = self.packed_dead_bytes()?;
+
+        // Deterministic, locality-preserving order: packs by name, rows by offset.
+        let mut by_pack: BTreeMap<Arc<str>, Vec<(String, u64, u64)>> = BTreeMap::new();
+        for (digest, row) in &old_rows {
+            by_pack
+                .entry(Arc::clone(&row.pack))
+                .or_default()
+                .push((digest.clone(), row.offset, row.len));
+        }
+        for v in by_pack.values_mut() {
+            v.sort_by_key(|(_, off, _)| *off);
+        }
+
+        // Stream every live span through the session-pack builder into fresh
+        // sealed packs (reusing the incremental writer machinery).
+        for (pack_name, rows) in &by_pack {
+            let src_path = packs_dir.join(format!("{}.pack", pack_name));
+            let src = File::open(&src_path)
+                .with_context(|| format!("opening source pack {}", src_path.display()))?;
+            for (digest, offset, len) in rows {
+                let bytes =
+                    crate::posread::read_exact_window(&src, *offset as usize, *len as usize)?;
+                self.session_pack_append(digest, &bytes)?;
+            }
+        }
+        let new_rows: BTreeMap<String, PackRow> =
+            self.seal_open_session_pack()?.into_iter().collect();
+
+        // Publish the replacement sidecar, then drop old packs no longer used.
+        write_pack_idx(&idx_path, &new_rows)?;
+        self.invalidate_pack_index();
+
+        let new_pack_names: HashSet<String> =
+            new_rows.values().map(|r| r.pack.to_string()).collect();
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(stem) = name.strip_suffix(".pack") {
+                        if !new_pack_names.contains(stem) {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+
+        let dead_after = self.packed_dead_bytes()?;
+        Ok(CompactReport {
+            packs_before,
+            packs_after: new_pack_names.len(),
+            bytes_reclaimed: dead_before.saturating_sub(dead_after),
+        })
+    }
+
+    /// Unlink any `packs/*.pack` file no live sidecar row references. Called
+    /// after a deletion commit; the sidecar is the current on-disk one.
+    fn remove_fully_dead_packs(&self, local_path: &Path) -> Result<()> {
+        let packs_dir = local_path.join("packs");
+        let idx_path = local_path.join("sequences.pack.idx");
+        let live: HashSet<String> = match fs::read(&idx_path) {
+            Ok(bytes) => super::packidx::read_pack_idx_rows(&bytes)?
+                .values()
+                .map(|r| r.pack.to_string())
+                .collect(),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => HashSet::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+        if let Ok(entries) = fs::read_dir(&packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if let Some(stem) = name.strip_suffix(".pack") {
+                        if !live.contains(stem) {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Count `*.pack` files (excluding temp files) in a `packs/` directory.
+    fn count_pack_files(packs_dir: &Path) -> usize {
+        let mut n = 0;
+        if let Ok(entries) = fs::read_dir(packs_dir) {
+            for entry in entries.filter_map(|e| e.ok()) {
+                if let Some(name) = entry.file_name().to_str() {
+                    if name.ends_with(".pack") {
+                        n += 1;
+                    }
+                }
+            }
+        }
+        n
     }
 
     /// Stream a (sub)sequence as decoded ASCII bases without loading the full
@@ -2436,37 +3098,64 @@ impl ReadonlyRefgetStore {
             };
         }
 
-        let relpath = self.resolve_seq_file_relpath(&sha)?;
-
-        let source: Box<dyn Read + Send> = if let Some(local) = self.local_path.as_ref() {
-            let full = local.join(&relpath);
-            if full.exists() {
-                let mut file = File::open(&full)
-                    .with_context(|| format!("Failed to open local seq file: {}", full.display()))?;
-                file.seek(SeekFrom::Start(byte_start))
-                    .context("Failed to seek in local seq file")?;
-                let file_len = file.metadata()
-                    .with_context(|| format!("Failed to stat local seq file: {}", full.display()))?.len();
-                if file_len < byte_start + byte_len {
+        // Open a bounded window on a local file (seek + take), verifying it is
+        // long enough. Shared by the standalone `.seq` and packed-pack paths.
+        let open_local_window =
+            |full: &Path, at: u64| -> Result<Box<dyn Read + Send>> {
+                let mut file = File::open(full)
+                    .with_context(|| format!("Failed to open local file: {}", full.display()))?;
+                file.seek(SeekFrom::Start(at))
+                    .context("Failed to seek in local file")?;
+                let file_len = file
+                    .metadata()
+                    .with_context(|| format!("Failed to stat local file: {}", full.display()))?
+                    .len();
+                if file_len < at + byte_len {
                     return Err(anyhow!(
-                        "Local seq file is too short to satisfy the requested byte range \
+                        "Local file is too short to satisfy the requested byte range \
                          [{}..{}) (file has {} bytes): {}",
-                        byte_start, byte_start + byte_len,
+                        at,
+                        at + byte_len,
                         file_len,
                         full.display()
                     ));
                 }
-                Box::new(BufReader::new(file).take(byte_len))
-            } else if let Some(remote) = self.remote_source.as_ref() {
-                open_remote_range(remote, &relpath, byte_start, byte_end)?
-            } else {
-                return Err(anyhow!(
-                    "Sequence file missing locally and no remote source: {}",
-                    full.display()
-                ));
+                Ok(Box::new(BufReader::new(file).take(byte_len)))
+            };
+
+        // Prefer a locally-present file; the local side of a remote packed store
+        // is standalone, so its cached `.seq` is used when present.
+        let local_source: Option<Box<dyn Read + Send>> = if let Some(local) = self.local_path.as_ref() {
+            match self.resolve_location(&sha, StoreSide::Local)? {
+                Location::Standalone { relpath } => {
+                    let full = local.join(&relpath);
+                    if full.exists() {
+                        Some(open_local_window(&full, byte_start)?)
+                    } else {
+                        None
+                    }
+                }
+                Location::Packed { pack, offset, .. } => {
+                    let full = local.join("packs").join(format!("{}.pack", pack));
+                    Some(open_local_window(&full, offset + byte_start)?)
+                }
             }
+        } else {
+            None
+        };
+
+        let source: Box<dyn Read + Send> = if let Some(s) = local_source {
+            s
         } else if let Some(remote) = self.remote_source.as_ref() {
-            open_remote_range(remote, &relpath, byte_start, byte_end)?
+            match self.resolve_location(&sha, StoreSide::Remote)? {
+                Location::Standalone { relpath } => {
+                    open_remote_range(remote, &relpath, byte_start, byte_end)?
+                }
+                Location::Packed { pack, offset, .. } => {
+                    let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                    open_remote_range(remote, &relpath, offset + byte_start, offset + byte_end)?
+                }
+            }
         } else {
             return Err(anyhow!("No backing source configured for sequence {}", sha));
         };
@@ -2717,32 +3406,69 @@ impl ReadonlyRefgetStore {
             return Ok(());
         }
 
-        let digest_str = &record.metadata().sha512t24u;
-        let template = self
-            .seqdata_path_template
-            .as_ref()
-            .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+        let meta = record.metadata().clone();
+        let sha = meta.sha512t24u.clone();
 
-        let relative_path = Self::expand_template(digest_str, template)
-            .to_string_lossy()
-            .into_owned();
-
-        if !self.quiet {
-            let cached = self
-                .local_path
+        // Whole-sequence bytes, resolved by layout. The write-through cache of a
+        // remote store stays STANDALONE (cache-asymmetry rule).
+        let data: Vec<u8> = if self.layout == Layout::Packed {
+            // Purely-local packed store: read the whole span from its pack.
+            match self.resolve_location(&sha, StoreSide::Local)? {
+                Location::Packed { pack, offset, len } => {
+                    self.read_pack_bytes_local(&pack, offset, offset + len)?
+                }
+                Location::Standalone { .. } => {
+                    unreachable!("packed local store resolved standalone")
+                }
+            }
+        } else if self.remote_layout == Layout::Packed && self.remote_source.is_some() {
+            // Remote packed store: fetch the whole span from the remote pack,
+            // then write-through cache it as a STANDALONE `.seq`.
+            let bytes = match self.resolve_location(&sha, StoreSide::Remote)? {
+                Location::Packed { pack, offset, len } => {
+                    let remote = self.remote_source.as_ref().unwrap();
+                    let relpath = PathBuf::from(format!("packs/{}.pack", pack));
+                    let mut reader = open_remote_range(remote, &relpath, offset, offset + len)?;
+                    let mut buf = Vec::with_capacity(len as usize);
+                    reader
+                        .read_to_end(&mut buf)
+                        .context("Failed to read remote pack byte range")?;
+                    buf
+                }
+                Location::Standalone { .. } => {
+                    unreachable!("packed remote store resolved standalone")
+                }
+            };
+            if self.persist_to_disk {
+                self.write_sequence_to_disk_single(&meta, &bytes)?;
+            }
+            bytes
+        } else {
+            // Standalone: whole-file fetch (local read, or remote download+cache).
+            let template = self
+                .seqdata_path_template
                 .as_ref()
-                .map(|p| p.join(&relative_path).exists())
-                .unwrap_or(false);
-            let verb = if cached { "Loading" } else { "Downloading" };
-            eprintln!("{} sequence {}...", verb, digest_str);
-        }
-        let data = Self::fetch_file(
-            &self.local_path,
-            &self.remote_source,
-            &relative_path,
-            self.persist_to_disk,
-            false,
-        )?;
+                .ok_or_else(|| anyhow!("No sequence data path template configured"))?;
+            let relative_path = Self::expand_template(&sha, template)
+                .to_string_lossy()
+                .into_owned();
+            if !self.quiet {
+                let cached = self
+                    .local_path
+                    .as_ref()
+                    .map(|p| p.join(&relative_path).exists())
+                    .unwrap_or(false);
+                let verb = if cached { "Loading" } else { "Downloading" };
+                eprintln!("{} sequence {}...", verb, sha);
+            }
+            Self::fetch_file(
+                &self.local_path,
+                &self.remote_source,
+                &relative_path,
+                self.persist_to_disk,
+                false,
+            )?
+        };
 
         self.sequence_store.entry(*digest).and_modify(|r| {
             r.load_data(data);
@@ -2800,8 +3526,31 @@ impl ReadonlyRefgetStore {
                     let full_path = root_path.join(&rel_path);
                     record.to_file(full_path)?;
                 }
-                SequenceRecord::Stub(_) => {
-                    continue;
+                SequenceRecord::Stub(metadata) => {
+                    // A PACKED source has no resident bytes; export each sequence
+                    // as a STANDALONE `.seq` by reading its whole span from the
+                    // pack via `resolve_location`. This is also the practical
+                    // "convert a packed store" escape hatch.
+                    if self.layout == Layout::Packed && self.local_path.is_some() {
+                        let bytes = match self
+                            .resolve_location(&metadata.sha512t24u, StoreSide::Local)?
+                        {
+                            Location::Packed { pack, offset, len } => {
+                                self.read_pack_bytes_local(&pack, offset, offset + len)?
+                            }
+                            Location::Standalone { .. } => {
+                                unreachable!("packed store resolved standalone on export")
+                            }
+                        };
+                        let rel_path = Self::expand_template(&metadata.sha512t24u, template);
+                        let full_path = root_path.join(&rel_path);
+                        if let Some(parent) = full_path.parent() {
+                            fs::create_dir_all(parent)?;
+                        }
+                        super::atomic::publish_bytes_nosync(&full_path, &bytes)?;
+                    } else {
+                        continue;
+                    }
                 }
             }
         }
@@ -2849,6 +3598,11 @@ impl ReadonlyRefgetStore {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
         };
+        let packed_dead_bytes = if self.layout == Layout::Packed {
+            self.packed_dead_bytes().ok()
+        } else {
+            None
+        };
         StoreStats {
             n_sequences,
             n_sequences_in_memory,
@@ -2856,6 +3610,7 @@ impl ReadonlyRefgetStore {
             n_collections_in_memory,
             storage_mode: mode_str.to_string(),
             logical_sequence_bytes: self.logical_sequence_bytes() as u64,
+            packed_dead_bytes,
         }
     }
 

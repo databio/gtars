@@ -90,6 +90,8 @@ mod readonly;
 mod core;
 mod alias;
 pub(crate) mod atomic;
+mod packidx;
+mod packcache;
 mod fhr_metadata;
 mod lock;
 // FASTA import (crossbeam-channel) and export (gtars-core) are filesystem-only.
@@ -162,6 +164,7 @@ mod nofs_tests {
 
 // Re-export public types from submodules
 pub use self::readonly::{PendingChanges, ReadonlyRefgetStore};
+pub use self::readonly::CompactReport;
 pub use self::core::RefgetStore;
 pub use self::alias::{AliasKind, AliasManager};
 pub use self::atomic::is_transient_store_file;
@@ -214,6 +217,23 @@ pub enum StorageMode {
     Encoded,
 }
 
+/// Store-level physical layout of sequence bytes. A sibling axis to
+/// [`StorageMode`] (encoding): all four mode x layout combinations are legal.
+///
+/// Store-level, not per-sequence, because a pack offset is only meaningful
+/// relative to a shared pack file — unlike encoding, which is computable per
+/// sequence. One store is uniformly packed or uniformly standalone.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Layout {
+    /// One `.seq` file per digest via the path template (the default).
+    #[default]
+    Standalone,
+    /// Sequences concatenated into sealed, size-capped pack files under
+    /// `packs/`, resolved via the `sequences.pack.idx` sidecar.
+    Packed,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RetrievedSequence {
     pub sequence: String,
@@ -263,6 +283,11 @@ pub struct FastaImportOptions<'a> {
     /// alias cannot name N collections. When unset, nothing is registered and
     /// nothing is derived from the filename.
     pub(crate) collection_alias: Option<(&'a str, &'a str)>,
+    /// Pre-flight ceiling on the number of `.seq` files a STANDALONE store may
+    /// hold after this import. Checked before any bytes are written; a store
+    /// that would exceed it errors, pointing the caller at the packed layout.
+    /// Packed stores bypass the gate; `force` overrides it. Default 500,000.
+    pub(crate) standalone_file_limit: usize,
 }
 
 impl<'a> Default for FastaImportOptions<'a> {
@@ -272,6 +297,7 @@ impl<'a> Default for FastaImportOptions<'a> {
             namespaces: &[],
             jobs: 0,
             collection_alias: None,
+            standalone_file_limit: 500_000,
         }
     }
 }
@@ -324,6 +350,14 @@ impl<'a> FastaImportOptions<'a> {
         self.collection_alias = Some((namespace, alias));
         self
     }
+
+    /// Set the pre-flight ceiling on `.seq` file count for STANDALONE imports.
+    /// Packed stores bypass this gate; `force` overrides it.
+    #[must_use]
+    pub fn standalone_file_limit(mut self, limit: usize) -> Self {
+        self.standalone_file_limit = limit;
+        self
+    }
 }
 
 /// Metadata for the entire store.
@@ -343,6 +377,11 @@ pub(crate) struct StoreMetadata {
     pub(crate) collection_index: Option<String>,
     /// Storage mode (Raw or Encoded)
     pub(crate) mode: StorageMode,
+    /// Physical layout of sequence bytes (Standalone or Packed). Old manifests
+    /// without this field deserialize as `Standalone` — the entire migration
+    /// story.
+    #[serde(default)]
+    pub(crate) layout: Layout,
     /// Creation timestamp
     pub(crate) created_at: String,
     /// Whether ancillary digests are computed and stored
@@ -414,6 +453,10 @@ pub struct StoreStats {
     /// encoding). Excludes index/sidecar/manifest overhead. For the exact full
     /// on-disk footprint use `ReadonlyRefgetStore::actual_disk_usage()`.
     pub logical_sequence_bytes: u64,
+    /// Dead (unreferenced) bytes inside pack files for a PACKED store:
+    /// `sum(pack sizes) - sum(live sidecar lengths)`. `None` for a standalone
+    /// store, where per-sequence `.seq` files are unlinked eagerly.
+    pub packed_dead_bytes: Option<u64>,
 }
 
 /// Result of importing one or more FASTA files.

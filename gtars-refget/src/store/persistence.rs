@@ -243,6 +243,14 @@ impl ReadonlyRefgetStore {
         write_sequences_rgsi_rows(&sequence_index_path, &sequences)?;
         write_collections_rgci_rows(&collection_index_path, &collections)?;
 
+        // (2b) Publish the pack sidecar (packed layout only), merging this
+        // handle's pack rows and removals into whatever is on disk now — the
+        // same delta discipline as `sequences.rgsi`.
+        if self.layout == Layout::Packed {
+            self.commit_pack_idx(&local_path, &pending)?;
+            self.invalidate_pack_index();
+        }
+
         // (3) Publish the alias TSVs this handle touched (same delta rule).
         self.commit_all_alias_namespaces(&local_path, &pending)?;
 
@@ -270,6 +278,42 @@ impl ReadonlyRefgetStore {
         self.pending.lock().unwrap().clear_matching(&pending);
 
         Ok(())
+    }
+
+    /// Merge and publish `sequences.pack.idx` under the commit lock.
+    ///
+    /// Seals any open incremental session pack first (so its rows are included),
+    /// then applies this handle's `pack_rows` additions and
+    /// `removed_sequences` removals to whatever is on disk now, and republishes
+    /// the sorted sidecar. Mirrors `write_sequences_rgsi_rows`' determinism: the
+    /// same input rows always produce byte-identical output.
+    pub(crate) fn commit_pack_idx(&self, local_path: &Path, pending: &PendingChanges) -> Result<()> {
+        use super::packidx::{read_pack_idx_rows, write_pack_idx, PackRow};
+
+        let idx_path = local_path.join("sequences.pack.idx");
+
+        // Start from the CURRENT on-disk sidecar.
+        let mut rows: BTreeMap<String, PackRow> = match fs::read(&idx_path) {
+            Ok(bytes) => read_pack_idx_rows(&bytes)?,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => BTreeMap::new(),
+            Err(e) => return Err(e).with_context(|| format!("reading {}", idx_path.display())),
+        };
+
+        // Seal any open incremental session pack and fold in its rows.
+        for (digest, row) in self.seal_open_session_pack()? {
+            rows.insert(digest, row);
+        }
+
+        // Apply this handle's additions.
+        for (key, row) in &pending.pack_rows {
+            rows.insert(key_to_digest_string(key), row.clone());
+        }
+        // Apply this handle's removals.
+        for key in &pending.removed_sequences {
+            rows.remove(&key_to_digest_string(key));
+        }
+
+        write_pack_idx(&idx_path, &rows)
     }
 
     /// Apply this handle's pending sequence additions and removals to rows read
@@ -362,6 +406,7 @@ impl ReadonlyRefgetStore {
             sequence_index: "sequences.rgsi".to_string(),
             collection_index: Some("collections.rgci".to_string()),
             mode: self.mode,
+            layout: self.layout,
             created_at,
             ancillary_digests: self.ancillary_digests,
             attribute_index: self.attribute_index,
@@ -388,6 +433,9 @@ impl ReadonlyRefgetStore {
             sequence_index: "sequences.rgsi".to_string(),
             collection_index: Some("collections.rgci".to_string()),
             mode: self.mode,
+            // Export always produces a STANDALONE store image (see
+            // `write_store_to_dir`), regardless of the source store's layout.
+            layout: Layout::Standalone,
             created_at: now.clone(),
             ancillary_digests: self.ancillary_digests,
             attribute_index: self.attribute_index,
@@ -777,8 +825,12 @@ impl ReadonlyRefgetStore {
         store.local_path = Some(root_path.to_path_buf());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
         store.persist_to_disk = true;
+        store.layout = metadata.layout;
         store.ancillary_digests = metadata.ancillary_digests;
         store.attribute_index = metadata.attribute_index;
+
+        // Invariant: a packed store is never remote-backed.
+        debug_assert!(!(store.layout == Layout::Packed && store.remote_source.is_some()));
 
         let sequence_index_path = root_path.join(&metadata.sequence_index);
         if sequence_index_path.exists() {
@@ -853,6 +905,10 @@ impl ReadonlyRefgetStore {
         store.remote_source = Some(remote_url.clone());
         store.seqdata_path_template = Some(metadata.seqdata_path_template.clone());
         store.persist_to_disk = true;
+        // Cache-asymmetry rule: the remote's layout is recorded separately; the
+        // local cache stays STANDALONE (sealed packs cannot be appended to).
+        store.remote_layout = metadata.layout;
+        store.layout = Layout::Standalone;
         store.ancillary_digests = metadata.ancillary_digests;
         store.attribute_index = metadata.attribute_index;
         store.available_sequence_alias_namespaces = metadata.sequence_alias_namespaces;
