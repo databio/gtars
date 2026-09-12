@@ -31,6 +31,7 @@ memmap2 = { version = "0.9", optional = true }  # native-only transcript mmap ba
 tempfile = { version = "3.8.1", optional = true }  # native-only atomic .reftx publish (via `filesystem`)
 thiserror = { workspace = true }                  # transcript mapper error types
 libc = "0.2"  # getrlimit(RLIMIT_NOFILE) to size the seq fd cache (unix only; no-op elsewhere)
+zstd = "0.13"  # whole-record compression for StorageMode::Zstd (novel/unplaced sequence store)
 
 # shared workspace dependencies
 anyhow = { workspace = true }

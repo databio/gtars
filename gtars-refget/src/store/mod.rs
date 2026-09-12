@@ -189,6 +189,12 @@ use crate::digest::SequenceCollectionMetadata;
 
 pub(crate) const DEFAULT_SEQDATA_PATH_TEMPLATE: &str = "sequences/%s2/%s.seq";
 
+/// zstd compression level used by [`StorageMode::Zstd`] records. High enough to
+/// wring out the internal repeat structure of satellite/segmental-dup/acrocentric
+/// novel content that 2-bit packing leaves on the table; the records are small
+/// (CDC chunks), so encode cost is negligible against a whole-genome build.
+pub(crate) const ZSTD_STORAGE_LEVEL: i32 = 19;
+
 // =========================================================================
 // Shared types used across multiple submodules
 // =========================================================================
@@ -207,11 +213,24 @@ pub struct Pagination {
     pub total: usize,
 }
 
-/// Enum storing whether sequences will be stored in Raw or Encoded form
+/// Enum storing whether sequences will be stored in Raw, Encoded, or Zstd form.
+///
+/// - `Raw`: one ASCII byte per residue. Byte offsets map 1:1 to base positions,
+///   so partial byte-window reads are possible.
+/// - `Encoded`: 2/3-bit packed to the alphabet's bits-per-symbol. Byte offsets
+///   map to base positions via the packing, so partial byte-window reads work.
+/// - `Zstd`: the whole ASCII record body compressed with zstd. There is no
+///   base->byte mapping into a compressed frame, so reads decompress the whole
+///   record once and slice `[start, end)` from the ASCII. Intended for
+///   digest-addressed novel/unplaced content whose records are small (CDC
+///   chunks, <=256 KiB), where a whole-frame decompress is microseconds. See
+///   `refgenie/panget_novel_unplaced_sequence_plan_v1.md` and
+///   `refgenie/zstd_block_sequences_project_idea.md`.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
 pub enum StorageMode {
     Raw,
     Encoded,
+    Zstd,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
