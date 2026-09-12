@@ -670,6 +670,39 @@ impl ReadonlyRefgetStore {
                                 alphabet,
                             ));
                         }
+                        // Zstd conversions: normalize through ASCII. The stored
+                        // body for Zstd is the whole-record zstd frame.
+                        (StorageMode::Raw, StorageMode::Zstd) => {
+                            *sequence = std::sync::Arc::new(
+                                zstd::encode_all(&sequence[..], super::ZSTD_STORAGE_LEVEL)
+                                    .expect("zstd encode during mode switch"),
+                            );
+                        }
+                        (StorageMode::Zstd, StorageMode::Raw) => {
+                            *sequence = std::sync::Arc::new(
+                                zstd::decode_all(&sequence[..])
+                                    .expect("zstd decode during mode switch"),
+                            );
+                        }
+                        (StorageMode::Encoded, StorageMode::Zstd) => {
+                            let alphabet = lookup_alphabet(&metadata.alphabet);
+                            let ascii = decode_string_from_bytes(
+                                &sequence[..],
+                                metadata.length,
+                                alphabet,
+                            );
+                            *sequence = std::sync::Arc::new(
+                                zstd::encode_all(&ascii[..], super::ZSTD_STORAGE_LEVEL)
+                                    .expect("zstd encode during mode switch"),
+                            );
+                        }
+                        (StorageMode::Zstd, StorageMode::Encoded) => {
+                            let alphabet = lookup_alphabet(&metadata.alphabet);
+                            let ascii = zstd::decode_all(&sequence[..])
+                                .expect("zstd decode during mode switch");
+                            *sequence =
+                                std::sync::Arc::new(encode_sequence(&ascii[..], alphabet));
+                        }
                         _ => {}
                     }
                 }
@@ -865,6 +898,12 @@ impl ReadonlyRefgetStore {
             .insert(metadata.md5.to_key(), metadata.sha512t24u.to_key());
         self.record(|p| p.add_sequence(key));
 
+        // In Zstd mode the caller passes the ASCII record body (per contract,
+        // "do not 2-bit pre-pack, let zstd own the entropy"); the store owns the
+        // whole-record zstd compression here so the on-disk / in-memory body is
+        // the compressed frame. Reads decompress the whole frame and slice.
+        let sr = self.compress_record_for_storage(sr)?;
+
         if self.persist_to_disk && self.local_path.is_some() {
             match &sr {
                 SequenceRecord::Full { metadata, sequence } => {
@@ -879,6 +918,26 @@ impl ReadonlyRefgetStore {
 
         self.sequence_store.insert(key, sr);
         Ok(())
+    }
+
+    /// For a `Zstd`-mode store, compress a `Full` record's ASCII body into a zstd
+    /// frame (the stored representation). A no-op for every other mode and for
+    /// `Stub` records. `metadata.length` stays the logical (ASCII) base count.
+    fn compress_record_for_storage(&self, sr: SequenceRecord) -> Result<SequenceRecord> {
+        if self.mode != StorageMode::Zstd {
+            return Ok(sr);
+        }
+        match sr {
+            SequenceRecord::Full { metadata, sequence } => {
+                let compressed = zstd::encode_all(&sequence[..], super::ZSTD_STORAGE_LEVEL)
+                    .context("zstd compression of sequence record failed")?;
+                Ok(SequenceRecord::Full {
+                    metadata,
+                    sequence: std::sync::Arc::new(compressed),
+                })
+            }
+            other => Ok(other),
+        }
     }
 
     /// Inserter-side half of [`add_sequence_record`](Self::add_sequence_record)
@@ -936,6 +995,14 @@ impl ReadonlyRefgetStore {
                     );
                     let bytes = std::sync::Arc::try_unwrap(sequence)
                         .unwrap_or_else(|arc| (*arc).clone());
+                    // Zstd mode: the caller handed us the ASCII body; compress the
+                    // whole record so the writer pool persists the zstd frame.
+                    let bytes = if self.mode == StorageMode::Zstd {
+                        zstd::encode_all(&bytes[..], super::ZSTD_STORAGE_LEVEL)
+                            .context("zstd compression of sequence record failed")?
+                    } else {
+                        bytes
+                    };
                     return Ok(Some((full_path, bytes)));
                 }
                 SequenceRecord::Stub(s) => {
@@ -945,6 +1012,10 @@ impl ReadonlyRefgetStore {
             }
         }
 
+        // In-memory (non-disk-backed): keep the resident body in the store's
+        // native form, so a Zstd store holds the compressed frame just like the
+        // disk-backed path returns compressed bytes above.
+        let sr = self.compress_record_for_storage(sr)?;
         self.sequence_store.insert(key, sr);
         Ok(None)
     }
@@ -1974,6 +2045,14 @@ impl ReadonlyRefgetStore {
                 let raw_slice: &[u8] = &sequence[start..end];
                 Ok(decoded_sequence_to_string(raw_slice.to_vec()))
             }
+            StorageMode::Zstd => {
+                // `sequence` is the whole-record zstd frame; decompress it, then
+                // slice the ASCII. Record bodies are small (CDC chunks), so this
+                // is microseconds.
+                let ascii = zstd::decode_all(sequence)
+                    .context("zstd decompression of sequence record failed")?;
+                Ok(decoded_sequence_to_string(ascii[start..end].to_vec()))
+            }
         }
     }
 
@@ -2054,6 +2133,14 @@ impl ReadonlyRefgetStore {
                     StorageMode::Raw => {
                         for &(start, end) in ranges {
                             out.push(decoded_sequence_to_string(seq[start..end].to_vec()));
+                        }
+                    }
+                    StorageMode::Zstd => {
+                        // Decompress the whole record once, slice every range.
+                        let ascii = zstd::decode_all(seq)
+                            .context("zstd decompression of sequence record failed")?;
+                        for &(start, end) in ranges {
+                            out.push(decoded_sequence_to_string(ascii[start..end].to_vec()));
                         }
                     }
                 }
@@ -2180,6 +2267,20 @@ impl ReadonlyRefgetStore {
         // are never serialized by the cache.
         let file = self.get_cached_seq_file(&metadata.sha512t24u)?;
 
+        // Zstd: there is no base->byte mapping into a compressed frame, so read
+        // the whole `.seq` (a small CDC chunk), decompress once, and slice the
+        // ASCII. Whole-frame decompress of a <=256 KiB chunk is microseconds.
+        if self.mode == StorageMode::Zstd {
+            let file_len = file
+                .metadata()
+                .context("failed to stat zstd seq file")?
+                .len() as usize;
+            let compressed = crate::posread::read_exact_window(&file, 0, file_len)?;
+            let ascii = zstd::decode_all(&compressed[..])
+                .context("zstd decompression of seq file failed")?;
+            return Ok(decoded_sequence_to_string(ascii[start..end].to_vec()));
+        }
+
         // Compute the covering byte window, then read it with a positioned read.
         let (byte_start, byte_end) = match self.mode {
             StorageMode::Encoded => {
@@ -2187,6 +2288,7 @@ impl ReadonlyRefgetStore {
                 byte_range_for_bases(start, end, alphabet.bits_per_symbol)
             }
             StorageMode::Raw => (start, end),
+            StorageMode::Zstd => unreachable!("handled above"),
         };
         let buf = crate::posread::read_exact_window(&file, byte_start, byte_end - byte_start)?;
 
@@ -2196,6 +2298,7 @@ impl ReadonlyRefgetStore {
                 decode_substring_from_bytes_at_offset(&buf, byte_start, start, end, alphabet)
             }
             StorageMode::Raw => buf,
+            StorageMode::Zstd => unreachable!("handled above"),
         };
 
         Ok(decoded_sequence_to_string(decoded))
@@ -2281,6 +2384,17 @@ impl ReadonlyRefgetStore {
             ));
         }
 
+        // Zstd records are whole-frame compressed with no base->byte mapping, so
+        // a covering byte window cannot be computed for a remote range request.
+        // The novel/unplaced store this mode serves is always local, so this
+        // path is unreachable in practice; fail loudly rather than fetch garbage.
+        if self.mode == StorageMode::Zstd {
+            return Err(anyhow!(
+                "remote partial read is not supported for Zstd-mode stores; \
+                 fetch and cache the whole compressed record first"
+            ));
+        }
+
         let remote = self
             .remote_source
             .as_ref()
@@ -2296,6 +2410,7 @@ impl ReadonlyRefgetStore {
                 byte_range_for_bases(start, end, alphabet.bits_per_symbol)
             }
             StorageMode::Raw => (start, end),
+            StorageMode::Zstd => unreachable!("guarded above"),
         };
 
         let mut reader =
@@ -2311,6 +2426,7 @@ impl ReadonlyRefgetStore {
                 decode_substring_from_bytes_at_offset(&buf, byte_start, start, end, alphabet)
             }
             StorageMode::Raw => buf,
+            StorageMode::Zstd => unreachable!("guarded above"),
         };
 
         // The Encoded decoder emits only ASCII alphabet bytes and Raw stores
@@ -2386,11 +2502,35 @@ impl ReadonlyRefgetStore {
             ));
         }
 
+        // 3b. Zstd: no base->byte mapping into a compressed frame, so the byte-
+        // window streaming machinery below does not apply. Decompress the whole
+        // record (small CDC chunk) once and stream the requested ASCII slice.
+        if self.mode == StorageMode::Zstd {
+            let (s, e) = (start as usize, end as usize);
+            let ascii: Vec<u8> = match record {
+                SequenceRecord::Full { sequence, .. } => zstd::decode_all(&sequence[..])
+                    .context("zstd decompression of resident record failed")?,
+                SequenceRecord::Stub(meta) => {
+                    let relpath = self.resolve_seq_file_relpath(&meta.sha512t24u)?;
+                    let local = self.local_path.as_ref().ok_or_else(|| {
+                        anyhow!("streaming a Zstd stub requires a local disk-backed store")
+                    })?;
+                    let full = local.join(&relpath);
+                    let compressed = std::fs::read(&full)
+                        .with_context(|| format!("failed to read zstd seq file: {}", full.display()))?;
+                    zstd::decode_all(&compressed[..])
+                        .context("zstd decompression of seq file failed")?
+                }
+            };
+            return Ok(Box::new(std::io::Cursor::new(ascii[s..e].to_vec())));
+        }
+
         // 4. Look up alphabet and compute bits-per-base.
         let alphabet = crate::digest::lookup_alphabet(&metadata.alphabet);
         let bps = match self.mode {
             StorageMode::Encoded => alphabet.bits_per_symbol as u64,
             StorageMode::Raw => 8,
+            StorageMode::Zstd => unreachable!("handled above"),
         };
 
         // 5. Compute byte range + leading-skip bits.
@@ -2433,6 +2573,7 @@ impl ReadonlyRefgetStore {
                     debug_assert_eq!(leading_skip_bits, 0);
                     Ok(source)
                 }
+                StorageMode::Zstd => unreachable!("handled above"),
             };
         }
 
@@ -2483,6 +2624,7 @@ impl ReadonlyRefgetStore {
                 debug_assert_eq!(leading_skip_bits, 0);
                 Ok(source)
             }
+            StorageMode::Zstd => unreachable!("handled above"),
         }
     }
 
@@ -2848,6 +2990,7 @@ impl ReadonlyRefgetStore {
         let mode_str = match self.mode {
             StorageMode::Raw => "Raw",
             StorageMode::Encoded => "Encoded",
+            StorageMode::Zstd => "Zstd",
         };
         StoreStats {
             n_sequences,
@@ -2898,6 +3041,12 @@ impl Display for ReadonlyRefgetStore {
                         }
                         StorageMode::Raw => String::from_utf8(seq[0..8.min(seq.len())].to_vec())
                             .unwrap_or_else(|_| "???".to_string()),
+                        StorageMode::Zstd => zstd::decode_all(&seq[..])
+                            .ok()
+                            .and_then(|ascii| {
+                                String::from_utf8(ascii[0..8.min(ascii.len())].to_vec()).ok()
+                            })
+                            .unwrap_or_else(|| "???".to_string()),
                     }
                 }
             };

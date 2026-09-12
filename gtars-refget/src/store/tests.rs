@@ -3108,6 +3108,129 @@ fn test_stream_sequence_local_substring() {
 }
 
 // =========================================================================
+// StorageMode::Zstd round-trip tests
+// =========================================================================
+
+/// A non-trivial sequence with real repeat structure (so zstd has something to
+/// compress) plus varied bases, long enough to exercise multi-window slicing.
+fn zstd_test_sequence() -> Vec<u8> {
+    let mut s = Vec::new();
+    // Repetitive satellite-like block (compresses well).
+    for _ in 0..2000 {
+        s.extend_from_slice(b"ACGTAACCGGTT");
+    }
+    // A less regular tail so windows near the end differ from the head.
+    let motifs: [&[u8]; 4] = [b"GATTACA", b"TTAGGGTT", b"CCCGGGAAA", b"ACGTN"];
+    for i in 0..1000 {
+        s.extend_from_slice(motifs[i % motifs.len()]);
+    }
+    s
+}
+
+/// Build a disk-backed store in `mode` holding one record with the given ASCII
+/// bytes (added directly via `add_sequence_record`, the seam the novel/unplaced
+/// store uses -- NOT the FASTA import path).
+fn build_zstd_roundtrip_store(
+    mode: StorageMode,
+    name: &str,
+    ascii: &[u8],
+) -> (tempfile::TempDir, RefgetStore, String) {
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let mut store = RefgetStore::on_disk(&store_path).unwrap();
+    store.set_encoding_mode(mode);
+    // digest_sequence builds the ASCII SequenceRecord (metadata + raw bytes);
+    // for Encoded we must 2-bit pre-pack, for Raw/Zstd we pass ASCII through
+    // (the store owns zstd compression). This mirrors panget's store_fill_chunk.
+    let record = crate::digest::digest_sequence(name, ascii);
+    let digest = record.metadata().sha512t24u.clone();
+    let record = if mode == StorageMode::Encoded {
+        match record {
+            SequenceRecord::Full { metadata, sequence } => {
+                let alphabet = crate::digest::lookup_alphabet(&metadata.alphabet);
+                let packed = crate::digest::encode_sequence(&sequence[..], alphabet);
+                SequenceRecord::Full { metadata, sequence: packed.into() }
+            }
+            other => other,
+        }
+    } else {
+        record
+    };
+    store.add_sequence_record(record, false).unwrap();
+    store.write().unwrap();
+    (dir, store, digest)
+}
+
+#[test]
+fn test_zstd_roundtrip_matches_encoded() {
+    let ascii = zstd_test_sequence();
+    let len = ascii.len();
+    let (_zdir, zstore, zdigest) =
+        build_zstd_roundtrip_store(StorageMode::Zstd, "chrZ", &ascii);
+    let (_edir, estore, edigest) =
+        build_zstd_roundtrip_store(StorageMode::Encoded, "chrZ", &ascii);
+    // Same ASCII -> same sha512t24u regardless of storage mode.
+    assert_eq!(zdigest, edigest, "digest must be mode-independent");
+
+    // A spread of windows: head, tail, boundaries, whole, empty.
+    let windows: Vec<(usize, usize)> = vec![
+        (0, 1),
+        (0, 12),
+        (5, 37),
+        (11, 24),
+        (100, 1000),
+        (len / 2, len / 2 + 4321),
+        (len - 1, len),
+        (len - 500, len),
+        (0, len),
+        (7, 7), // empty
+    ];
+
+    // Disk-backed (Stub) path: get_substring reads/decompresses from the .seq.
+    for &(s, e) in &windows {
+        let z = zstore.get_substring(&zdigest, s, e).unwrap();
+        let expect = std::str::from_utf8(&ascii[s..e]).unwrap();
+        assert_eq!(z, expect, "zstd disk get_substring mismatch at {}..{}", s, e);
+        let en = estore.get_substring(&edigest, s, e).unwrap();
+        assert_eq!(z, en, "zstd vs encoded mismatch at {}..{}", s, e);
+    }
+
+    // get_substrings batch on the disk-backed store.
+    let batch: Vec<(usize, usize)> = windows.iter().copied().filter(|&(s, e)| s != e).collect();
+    let zb = zstore.get_substrings(&zdigest, &batch).unwrap();
+    for (i, &(s, e)) in batch.iter().enumerate() {
+        assert_eq!(zb[i], std::str::from_utf8(&ascii[s..e]).unwrap());
+    }
+}
+
+#[test]
+fn test_zstd_roundtrip_resident_and_stream() {
+    use std::io::Read;
+    let ascii = zstd_test_sequence();
+    let len = ascii.len();
+    let (_zdir, mut zstore, zdigest) =
+        build_zstd_roundtrip_store(StorageMode::Zstd, "chrZ", &ascii);
+
+    // Resident (Full) path: load the compressed frame into memory, then read.
+    zstore.load_sequence(&zdigest).unwrap();
+    let windows: Vec<(usize, usize)> = vec![(0, 12), (11, 5000), (len - 3, len), (0, len)];
+    for &(s, e) in &windows {
+        let got = zstore.get_substring(&zdigest, s, e).unwrap();
+        assert_eq!(got, std::str::from_utf8(&ascii[s..e]).unwrap());
+    }
+
+    // Streaming from the resident record.
+    for &(s, e) in &windows {
+        let mut reader = zstore
+            .stream_sequence(&zdigest, Some(s as u64), Some(e as u64))
+            .unwrap();
+        let mut out = Vec::new();
+        reader.read_to_end(&mut out).unwrap();
+        assert_eq!(&out[..], &ascii[s..e], "zstd stream mismatch at {}..{}", s, e);
+    }
+}
+
+// =========================================================================
 // Partial-read fd-cache eviction test
 // =========================================================================
 
