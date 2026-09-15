@@ -1,15 +1,16 @@
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fs::File;
 use std::io::prelude::*;
 #[cfg(feature = "http")]
 use std::io::Cursor;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use flate2::read::MultiGzDecoder;
+
+const GZIP_MAGIC: [u8; 2] = [0x1f, 0x8b];
 #[cfg(feature = "http")]
 use std::error::Error;
 #[cfg(feature = "http")]
@@ -108,13 +109,22 @@ pub fn parse_bedlike_file(line: &str) -> Option<(String, i32, i32)> {
 ///
 /// Get a reader for either a gzip'd or non-gzip'd file.
 ///
+/// Compression is detected by magic bytes (`0x1f 0x8b`), not file extension,
+/// so a gzipped file named `.fa` is handled correctly.
+///
 /// # Arguments
 ///
 /// - path: path to the file to read
 ///
 pub fn get_dynamic_reader(path: &Path) -> Result<BufReader<Box<dyn Read>>> {
-    let is_gzipped = path.extension() == Some(OsStr::new("gz"));
-    let file = File::open(path).with_context(|| format!("Failed to open file: {:?}", path))?;
+    let mut file = File::open(path).with_context(|| format!("Failed to open file: {:?}", path))?;
+
+    // Detect gzip by magic bytes
+    let mut magic = [0u8; 2];
+    let is_gzipped = file.read(&mut magic).unwrap_or(0) == 2 && magic == GZIP_MAGIC;
+    file.seek(SeekFrom::Start(0))
+        .with_context(|| format!("Failed to seek in file: {:?}", path))?;
+
     let file: Box<dyn Read> = match is_gzipped {
         true => Box::new(MultiGzDecoder::new(file)),
         false => Box::new(file),
@@ -164,9 +174,10 @@ pub fn get_dynamic_reader_from_url(
         .read_to_end(&mut bytes)
         .map_err(|e| format!("Failed reading response body from {}: {}", url_str, e))?;
 
-    let cursor = Cursor::new(bytes);
+    // Detect gzip by magic bytes
+    let is_gzipped = bytes.len() >= 2 && bytes[0..2] == GZIP_MAGIC;
 
-    let is_gzipped = url_str.ends_with(".gz");
+    let cursor = Cursor::new(bytes);
 
     let reader: Box<dyn std::io::Read> = match is_gzipped {
         true => Box::new(MultiGzDecoder::new(cursor)),
