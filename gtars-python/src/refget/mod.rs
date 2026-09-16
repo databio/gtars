@@ -1110,35 +1110,6 @@ fn strip_sq_prefix(digest: &str) -> &str {
     digest
 }
 
-/// A global store for GA4GH refget sequences with lazy-loading support.
-///
-/// RefgetStore provides content-addressable storage for reference genome
-/// sequences following the GA4GH refget specification. Supports both local and
-/// remote stores with on-demand sequence loading.
-///
-/// Attributes:
-///     cache_path (str | None): Local directory path where the store is located or cached.
-///         None for in-memory stores.
-///     remote_url (str | None): Remote URL of the store if loaded remotely, None otherwise.
-///
-/// Examples:
-///     Create a new in-memory store and import sequences::
-///
-///         from gtars.refget import RefgetStore
-///         store = RefgetStore.in_memory()
-///         store.add_sequence_collection_from_fasta("genome.fa")
-///
-///     Load an existing local store::
-///
-///         store = RefgetStore.load_local("/data/hg38")
-///         seq = store.get_substring("chr1_digest", 0, 1000)
-///
-///     Load a remote store with caching::
-///
-///         store = RefgetStore.load_remote(
-///             "/local/cache",
-///             "https://example.com/hg38"
-///         )
 /// Lazy, O(1)-memory stream over a (sub)sequence's decoded ASCII bases (flow 2).
 ///
 /// Produced by `RefgetStore.stream_sequence()` / `ReadonlyRefgetStore.stream_sequence()`.
@@ -1214,6 +1185,41 @@ impl PySequenceStream {
     }
 }
 
+/// A global store for GA4GH refget sequences with lazy-loading support.
+///
+/// RefgetStore provides content-addressable storage for reference genome
+/// sequences following the GA4GH refget specification. Supports both local and
+/// remote stores with on-demand sequence loading.
+///
+/// Attributes:
+///     cache_path (str | None): Local directory path where the store is located or cached.
+///         None for in-memory stores.
+///     remote_url (str | None): Remote URL of the store if loaded remotely, None otherwise.
+///     quiet (bool): Whether the store suppresses progress output.
+///     storage_mode (StorageMode): Current storage mode (Raw or Encoded).
+///
+/// Note:
+///     Boolean evaluation follows Python container semantics: an empty store is
+///     false. Use `store is not None` to test whether a variable is initialized.
+///
+/// Examples:
+///     Create a new in-memory store and import sequences::
+///
+///         from gtars.refget import RefgetStore
+///         store = RefgetStore.in_memory()
+///         store.add_sequence_collection_from_fasta("genome.fa")
+///
+///     Open an existing local store::
+///
+///         store = RefgetStore.open_local("/data/hg38")
+///         seq = store.get_substring("chr1_digest", 0, 1000)
+///
+///     Open a remote store with caching::
+///
+///         store = RefgetStore.open_remote(
+///             "/local/cache",
+///             "https://example.com/hg38"
+///         )
 #[pyclass(name = "RefgetStore", module = "gtars.refget")]
 pub struct PyRefgetStore {
     pub(crate) inner: RefgetStore,
@@ -1851,16 +1857,19 @@ impl PyRefgetStore {
         })
     }
 
+    /// Local directory where the store is located or cached.
     #[getter]
     fn cache_path(&self) -> Option<String> {
         self.inner.local_path().map(|p| p.display().to_string())
     }
 
+    /// Remote store URL, or None when the store has no remote source.
     #[getter]
     fn remote_url(&self) -> Option<String> {
         self.inner.remote_source().map(|s| s.to_string())
     }
 
+    /// Current storage mode (Raw or Encoded).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.inner.storage_mode().into()
@@ -2449,6 +2458,19 @@ impl PyRefgetStore {
         })
     }
 
+    /// Write the store to a directory on disk.
+    ///
+    /// Persists all sequences and metadata using the RefgetStore directory
+    /// format.
+    ///
+    /// Args:
+    ///     root_path (str or Path): Directory path to write the store to.
+    ///     seqdata_path_template (str, optional): Path template for sequence
+    ///         files. Uses the default template when omitted.
+    ///
+    /// Example:
+    ///     >>> store.write_store_to_dir("/data/my_store")
+    ///     >>> store.write_store_to_dir("/data/my_store", "sequences/%s2/%s.seq")
     #[pyo3(signature = (root_path, seqdata_path_template=None))]
     fn write_store_to_dir(
         &self,
