@@ -1011,12 +1011,14 @@ impl PyFhrMetadata {
         Ok(Self { inner: metadata })
     }
 
+    /// Return the metadata as a dictionary.
     fn to_dict(&self, py: Python<'_>) -> PyResult<Py<PyAny>> {
         let json_str = serde_json::to_string(&self.inner)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
         json_string_to_py(py, &json_str)
     }
 
+    /// Write the metadata to a JSON file.
     fn to_json(&self, path: &str) -> PyResult<()> {
         let json = serde_json::to_string_pretty(&self.inner)
             .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(e.to_string()))?;
@@ -3606,16 +3608,19 @@ impl PyReadonlyRefgetStore {
         self.store.list_fhr_metadata()
     }
 
+    /// Local directory where the store is located or cached.
     #[getter]
     fn cache_path(&self) -> Option<String> {
         self.store.local_path().map(|p| p.display().to_string())
     }
 
+    /// Remote store URL, or None when the store has no remote source.
     #[getter]
     fn remote_url(&self) -> Option<String> {
         self.store.remote_source().map(|s| s.to_string())
     }
 
+    /// Current storage mode (Raw or Encoded).
     #[getter]
     fn storage_mode(&self) -> PyStorageMode {
         self.store.storage_mode().into()
@@ -3711,7 +3716,7 @@ fn force_unlock_store(store_path: &str) -> PyResult<bool> {
         .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("{}", e)))
 }
 
-// This represents the Python module to be created
+/// Tools for computing refget digests and managing reference sequence stores.
 #[pymodule]
 pub fn refget(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(store_lock_status, m)?)?;
