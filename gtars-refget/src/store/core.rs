@@ -222,6 +222,15 @@ impl RefgetStore {
         self.inner.add_sequence(sequence_record, collection_digest, force)
     }
 
+    /// Digest and insert raw sequence bytes without a collection association.
+    ///
+    /// Unlike `add_sequence_record`, this method can reliably encode a
+    /// single-base sequence because its input is known to be raw bytes.
+    /// Returns the sequence's sha512t24u digest.
+    pub fn ingest_sequence(&mut self, name: &str, bytes: &[u8]) -> Result<String> {
+        self.inner.ingest_sequence(name, bytes)
+    }
+
     /// Add a collection and all sequences in it to the store.
     pub fn add_sequence_collection(&mut self, collection: SequenceCollection) -> Result<()> {
         self.inner.add_sequence_collection(collection)

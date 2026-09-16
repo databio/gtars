@@ -120,11 +120,8 @@ const REMOTE_BULK_FETCH_THRESHOLD: usize = 16;
 /// decode-and-convert time — roughly 10–20 ms per 250 Mbp chromosome. That is a
 /// real, repeatable cost on the whole-genome read hot path, so we skip it here.
 ///
-/// This is the *only* `from_utf8_unchecked` in the crate: the local and resident
-/// whole/partial reads route through here, while the remote byte-range path
-/// (`get_substring_from_remote`) deliberately keeps the checked conversion —
-/// there the bytes are untrusted (an HTTP server we don't control) and the
-/// network fetch dwarfs the validation cost anyway.
+/// This is the crate's only `from_utf8_unchecked`. Remote data is validated in
+/// `get_substring_from_remote` before it reaches this conversion.
 ///
 /// The `debug_assert` re-validates the ASCII invariant in debug and test builds,
 /// so any future break (a non-ASCII alphabet, an offset bug) fails loudly under
@@ -845,27 +842,86 @@ impl ReadonlyRefgetStore {
         Ok(())
     }
 
+    /// Pack a raw ASCII record when the store uses encoded storage.
+    ///
+    /// Raw and packed forms are distinguished by their expected lengths, so a
+    /// single-base sequence is ambiguous. Use [`ingest_sequence`](Self::ingest_sequence)
+    /// when the input is known to be raw; it handles that case explicitly.
+    fn pack_raw_ascii_for_encoded_mode(&self, sr: SequenceRecord) -> SequenceRecord {
+        if self.mode != StorageMode::Encoded {
+            return sr;
+        }
+        match sr {
+            SequenceRecord::Full { metadata, sequence } => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                let bps = alphabet.bits_per_symbol;
+                let expected_encoded = metadata.length.saturating_mul(bps).div_ceil(8);
+                let looks_raw = sequence.len() == metadata.length
+                    && sequence.len() != expected_encoded
+                    && sequence.is_ascii();
+                if looks_raw {
+                    let packed = encode_sequence(&sequence[..], alphabet);
+                    SequenceRecord::Full {
+                        metadata,
+                        sequence: std::sync::Arc::new(packed),
+                    }
+                } else {
+                    SequenceRecord::Full { metadata, sequence }
+                }
+            }
+            stub @ SequenceRecord::Stub(_) => stub,
+        }
+    }
+
+    /// Digest and insert raw bytes using the store's native encoding.
+    ///
+    /// Because the input is known to be raw, this method also handles
+    /// single-base sequences, whose raw and packed lengths are identical.
+    /// Input is normalized in the same way as `digest_sequence`.
+    pub fn ingest_sequence(&mut self, name: &str, bytes: &[u8]) -> Result<String> {
+        let record = crate::digest::digest_sequence(name, bytes);
+        let digest = record.metadata().sha512t24u.clone();
+
+        let record = match record {
+            SequenceRecord::Full { metadata, sequence } if self.mode == StorageMode::Encoded => {
+                let alphabet = lookup_alphabet(&metadata.alphabet);
+                let packed = encode_sequence(&sequence[..], alphabet);
+                SequenceRecord::Full {
+                    metadata,
+                    sequence: std::sync::Arc::new(packed),
+                }
+            }
+            other => other,
+        };
+
+        self.add_sequence_record(record, false)?;
+        Ok(digest)
+    }
+
     /// Adds a SequenceRecord directly to the store without collection association.
+    ///
+    /// Raw ASCII records are packed when the store uses encoded storage.
+    /// Already-packed records are stored unchanged.
     pub fn add_sequence_record(&mut self, sr: SequenceRecord, force: bool) -> Result<()> {
+        let sr = self.pack_raw_ascii_for_encoded_mode(sr);
+
         let metadata = sr.metadata();
         let key = metadata.sha512t24u.to_key();
 
-        // CONTRACT: ingested sequence bytes are ASCII (one byte == one residue),
-        // OR, for an Encoded-mode store, already packed to the alphabet's
-        // bits-per-symbol encoded size. Enforced in debug builds only to keep
-        // the ingestion hot path allocation/branch free in release.
+        // Records must now match the store's native representation: ASCII in
+        // Raw mode or the alphabet's packed size in Encoded mode.
         debug_assert!(
             match &sr {
-                SequenceRecord::Full { metadata, sequence } => {
-                    sequence.is_ascii()
-                        || (self.mode == StorageMode::Encoded && {
-                            let bps = lookup_alphabet(&metadata.alphabet).bits_per_symbol;
-                            sequence.len() == metadata.length.saturating_mul(bps).div_ceil(8)
-                        })
-                }
+                SequenceRecord::Full { metadata, sequence } => match self.mode {
+                    StorageMode::Raw => sequence.is_ascii(),
+                    StorageMode::Encoded => {
+                        let bps = lookup_alphabet(&metadata.alphabet).bits_per_symbol;
+                        sequence.len() == metadata.length.saturating_mul(bps).div_ceil(8)
+                    }
+                },
                 SequenceRecord::Stub(_) => true,
             },
-            "add_sequence_record: sequence bytes must be ASCII, or packed to the alphabet's encoded size in an Encoded-mode store"
+            "add_sequence_record: sequence bytes must be stored in the store's native encoding (ASCII in Raw mode, packed to the alphabet's encoded size in Encoded mode)"
         );
 
         // A dedup hit records NOTHING: the row is already in memory, which for a
@@ -2072,7 +2128,7 @@ impl ReadonlyRefgetStore {
         sequence: &[u8],
         start: usize,
         end: usize,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         if start >= metadata.length || end > metadata.length || start >= end {
             return Err(anyhow!(
                 "Invalid substring range: start={}, end={}, sequence length={}",
@@ -2084,10 +2140,9 @@ impl ReadonlyRefgetStore {
         match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
-                let decoded = decode_substring_from_bytes(sequence, start, end, alphabet);
-                Ok(decoded_sequence_to_string(decoded))
+                Ok(decode_substring_from_bytes(sequence, start, end, alphabet))
             }
-            StorageMode::Raw => Ok(decoded_sequence_to_string(sequence[start..end].to_vec())),
+            StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         }
     }
 
@@ -2140,12 +2195,27 @@ impl ReadonlyRefgetStore {
     // =========================================================================
 
     /// Retrieves a substring from an encoded sequence by its SHA512t24u digest.
+    ///
+    /// Thin `String` wrapper over [`get_substring_bytes`](Self::get_substring_bytes);
+    /// see it for the actual retrieval logic.
     pub fn get_substring<K: AsRef<[u8]>>(
         &self,
         sha512_digest: K,
         start: usize,
         end: usize,
     ) -> Result<String> {
+        self.get_substring_bytes(sha512_digest, start, end)
+            .map(decoded_sequence_to_string)
+    }
+
+    /// Retrieves a substring from an encoded sequence by its SHA512t24u digest,
+    /// as raw bytes rather than a `String`.
+    pub fn get_substring_bytes<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        start: usize,
+        end: usize,
+    ) -> Result<Vec<u8>> {
         let digest_key = sha512_digest.to_key();
         let actual_key = self
             .md5_lookup
@@ -2161,16 +2231,15 @@ impl ReadonlyRefgetStore {
         })?;
 
         // Zero-length range: a request for `[start, start)` is a well-formed
-        // empty interval, so return the empty string instead of erroring. This
+        // empty interval, so return an empty result instead of erroring. This
         // is the natural substring semantics, matches the wasm/JS
         // `RemoteRefgetStore.getSubstring` contract, and is what bulk/region
         // callers expect for an empty interval. Handling it here, before record
         // resolution, means every downstream path (resident `Full`, on-disk
         // `Stub`, remote `Stub`) agrees without each needing its own guard.
-        // An inverted range (`start > end`) is still rejected by the bounds
-        // checks below / in the partial-read paths.
+        // Inverted ranges are rejected by the bounds checks below.
         if start == end {
-            return Ok(String::new());
+            return Ok(Vec::new());
         }
 
         let (metadata, sequence): (&SequenceMetadata, &[u8]) = match record {
@@ -2225,13 +2294,9 @@ impl ReadonlyRefgetStore {
         match self.mode {
             StorageMode::Encoded => {
                 let alphabet = lookup_alphabet(&metadata.alphabet);
-                let decoded_sequence = decode_substring_from_bytes(sequence, start, end, alphabet);
-                Ok(decoded_sequence_to_string(decoded_sequence))
+                Ok(decode_substring_from_bytes(sequence, start, end, alphabet))
             }
-            StorageMode::Raw => {
-                let raw_slice: &[u8] = &sequence[start..end];
-                Ok(decoded_sequence_to_string(raw_slice.to_vec()))
-            }
+            StorageMode::Raw => Ok(sequence[start..end].to_vec()),
         }
     }
 
@@ -2257,11 +2322,28 @@ impl ReadonlyRefgetStore {
     ///
     /// Output strings are byte-identical to a loop of
     /// [`get_substring`](Self::get_substring).
+    ///
+    /// Thin `String` wrapper over
+    /// [`get_substrings_bytes`](Self::get_substrings_bytes); see it for the
+    /// actual retrieval logic.
     pub fn get_substrings<K: AsRef<[u8]>>(
         &self,
         sha512_digest: K,
         ranges: &[(usize, usize)],
     ) -> Result<Vec<String>> {
+        self.get_substrings_bytes(sha512_digest, ranges).map(|v| {
+            v.into_iter().map(decoded_sequence_to_string).collect()
+        })
+    }
+
+    /// Batch substring retrieval for many ranges of ONE sequence, as raw bytes
+    /// rather than `String`s. See [`get_substrings`](Self::get_substrings) for
+    /// the full behavior description.
+    pub fn get_substrings_bytes<K: AsRef<[u8]>>(
+        &self,
+        sha512_digest: K,
+        ranges: &[(usize, usize)],
+    ) -> Result<Vec<Vec<u8>>> {
         let digest_key = sha512_digest.to_key();
         let actual_key = self
             .md5_lookup
@@ -2304,14 +2386,12 @@ impl ReadonlyRefgetStore {
                     StorageMode::Encoded => {
                         let alphabet = lookup_alphabet(&metadata.alphabet);
                         for &(start, end) in ranges {
-                            let decoded =
-                                decode_substring_from_bytes(seq, start, end, alphabet);
-                            out.push(decoded_sequence_to_string(decoded));
+                            out.push(decode_substring_from_bytes(seq, start, end, alphabet));
                         }
                     }
                     StorageMode::Raw => {
                         for &(start, end) in ranges {
-                            out.push(decoded_sequence_to_string(seq[start..end].to_vec()));
+                            out.push(seq[start..end].to_vec());
                         }
                     }
                 }
@@ -2329,14 +2409,12 @@ impl ReadonlyRefgetStore {
                         StorageMode::Encoded => {
                             let alphabet = lookup_alphabet(&meta.alphabet);
                             for &(start, end) in ranges {
-                                let decoded =
-                                    decode_substring_from_bytes(seq, start, end, alphabet);
-                                out.push(decoded_sequence_to_string(decoded));
+                                out.push(decode_substring_from_bytes(seq, start, end, alphabet));
                             }
                         }
                         StorageMode::Raw => {
                             for &(start, end) in ranges {
-                                out.push(decoded_sequence_to_string(seq[start..end].to_vec()));
+                                out.push(seq[start..end].to_vec());
                             }
                         }
                     }
@@ -2365,7 +2443,7 @@ impl ReadonlyRefgetStore {
                     let mut out = Vec::with_capacity(ranges.len());
                     for &(start, end) in ranges {
                         if start == end {
-                            out.push(String::new());
+                            out.push(Vec::new());
                         } else {
                             out.push(self.get_substring_from_disk(meta, start, end)?);
                         }
@@ -2406,7 +2484,7 @@ impl ReadonlyRefgetStore {
                         // Zero-length range -> "" (see get_substring). Short-circuit
                         // before the partial-read path, which rejects start == end.
                         if start == end {
-                            out.push(String::new());
+                            out.push(Vec::new());
                         } else {
                             out.push(self.get_substring_from_disk(meta, start, end)?);
                         }
@@ -2419,7 +2497,7 @@ impl ReadonlyRefgetStore {
                     // Zero-length range -> "" (see get_substring). Short-circuit
                     // before the partial-read paths, which reject start == end.
                     if start == end {
-                        out.push(String::new());
+                        out.push(Vec::new());
                     } else if local_seq_exists {
                         out.push(self.get_substring_from_disk(meta, start, end)?);
                     } else {
@@ -2446,7 +2524,7 @@ impl ReadonlyRefgetStore {
         metadata: &SequenceMetadata,
         start: usize,
         end: usize,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         if start >= metadata.length || end > metadata.length || start >= end {
             return Err(anyhow!(
                 "Invalid substring range: start={}, end={}, sequence length={}",
@@ -2480,7 +2558,7 @@ impl ReadonlyRefgetStore {
             StorageMode::Raw => buf,
         };
 
-        Ok(decoded_sequence_to_string(decoded))
+        Ok(decoded)
     }
 
     /// Return a shared handle to the `.seq` file for `digest`, opening and
@@ -2553,7 +2631,7 @@ impl ReadonlyRefgetStore {
         metadata: &SequenceMetadata,
         start: usize,
         end: usize,
-    ) -> Result<String> {
+    ) -> Result<Vec<u8>> {
         if start >= metadata.length || end > metadata.length || start >= end {
             return Err(anyhow!(
                 "Invalid substring range: start={}, end={}, sequence length={}",
@@ -2597,10 +2675,12 @@ impl ReadonlyRefgetStore {
 
         // The Encoded decoder emits only ASCII alphabet bytes and Raw stores
         // ASCII sequence bytes, so this validation always passes; we keep it
-        // checked (rather than `from_utf8_unchecked`) because this is the
+        // checked (rather than skipping straight to bytes) because this is the
         // untrusted-remote path — bytes come from an HTTP server we don't
         // control — and the validation cost is nil against the network fetch.
+        // Reuse the validated String buffer when returning bytes.
         String::from_utf8(decoded)
+            .map(String::into_bytes)
             .map_err(|e| anyhow!("decoded remote sequence was not valid UTF-8: {}", e))
     }
 

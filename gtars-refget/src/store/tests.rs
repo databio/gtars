@@ -402,7 +402,11 @@ fn test_global_refget_store() {
     assert!(retrieved_by_name_str.is_ok());
     let retrieved_record = retrieved_by_name_str.unwrap();
     assert_eq!(retrieved_record.metadata().name, name);
-    assert_eq!(retrieved_record.sequence().unwrap(), sequence);
+    // Encoded stores pack the hand-built ASCII record on insertion.
+    let decoded = store
+        .get_substring(&seq_metadata.sha512t24u, 0, sequence.len())
+        .unwrap();
+    assert_eq!(decoded.as_bytes(), sequence);
 
     let retrieved_by_name_key =
         store.get_sequence_by_name(collection.metadata.digest.to_key(), name);
@@ -1376,6 +1380,91 @@ fn test_add_sequence_record_packed_bytes_in_encoded_mode() {
 
     let substring = store.get_substring(digest.as_bytes(), 0, 8).unwrap();
     assert_eq!(substring, "ACGTACGT");
+}
+
+#[test]
+fn test_add_sequence_record_raw_ascii_auto_packed_in_encoded_mode() {
+    // digest_sequence() returns raw ASCII, which an Encoded store must pack.
+    use crate::digest::digest_sequence;
+
+    let mut store = RefgetStore::in_memory();
+    assert_eq!(store.storage_mode(), StorageMode::Encoded);
+
+    let record = digest_sequence("chr1", b"ACGTACGT");
+    let digest = record.metadata().sha512t24u.clone();
+
+    store.add_sequence_record(record, false).unwrap();
+
+    let substring = store.get_substring(digest.as_bytes(), 2, 6).unwrap();
+    assert_eq!(substring, "GTAC");
+}
+
+#[test]
+fn test_ingest_sequence_round_trip() {
+    // ingest_sequence handles the one-base case where raw and packed lengths match.
+    let mut store = RefgetStore::in_memory();
+
+    let digest = store.ingest_sequence("chr1", b"ACGTACGT").unwrap();
+    let substring = store.get_substring(digest.as_bytes(), 2, 6).unwrap();
+    assert_eq!(substring, "GTAC");
+
+    // 1-base edge case.
+    let digest1 = store.ingest_sequence("chr2", b"A").unwrap();
+    let substring1 = store.get_substring(digest1.as_bytes(), 0, 1).unwrap();
+    assert_eq!(substring1, "A");
+}
+
+#[test]
+fn test_ingest_sequence_disk_backed_round_trip() {
+    // Disk-backed stores persist the packed representation.
+    let temp_dir = tempdir().unwrap();
+    let mut store = RefgetStore::on_disk(temp_dir.path()).unwrap();
+
+    let digest = store.ingest_sequence("chr1", b"ACGTACGT").unwrap();
+    let substring = store.get_substring(digest.as_bytes(), 2, 6).unwrap();
+    assert_eq!(substring, "GTAC");
+}
+
+#[test]
+fn test_ingest_sequence_case_parity_with_digest_sequence() {
+    // Raw ingestion uses the same case normalization as digest_sequence.
+    use crate::digest::digest_sequence;
+
+    let mut store = RefgetStore::in_memory();
+
+    let digest = store.ingest_sequence("chr1", b"acgt").unwrap();
+    let expected_digest = digest_sequence("chr1", b"ACGT").metadata().sha512t24u.clone();
+    assert_eq!(digest, expected_digest);
+
+    let substring = store.get_substring(digest.as_bytes(), 0, 4).unwrap();
+    assert_eq!(substring, "ACGT");
+}
+
+#[test]
+fn test_get_substring_bytes_matches_get_substring() {
+    let mut store = RefgetStore::in_memory();
+    let digest = store.ingest_sequence("chr1", b"ACGTACGT").unwrap();
+
+    let bytes = store.get_substring_bytes(digest.as_bytes(), 0, 8).unwrap();
+    assert_eq!(bytes, b"ACGTACGT".to_vec());
+
+    let string = store.get_substring(digest.as_bytes(), 0, 8).unwrap();
+    assert_eq!(String::from_utf8(bytes).unwrap(), string);
+}
+
+#[test]
+fn test_get_substrings_bytes_matches_get_substrings() {
+    let mut store = RefgetStore::in_memory();
+    let digest = store.ingest_sequence("chr1", b"ACGTACGTACGT").unwrap();
+
+    let ranges = [(0usize, 4usize), (4, 8), (8, 12)];
+    let bytes = store.get_substrings_bytes(digest.as_bytes(), &ranges).unwrap();
+    let strings = store.get_substrings(digest.as_bytes(), &ranges).unwrap();
+
+    assert_eq!(bytes.len(), strings.len());
+    for (b, s) in bytes.into_iter().zip(strings.into_iter()) {
+        assert_eq!(String::from_utf8(b).unwrap(), s);
+    }
 }
 
 // =========================================================================
