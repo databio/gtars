@@ -253,7 +253,8 @@ impl RefgetStore {
         &self,
         digest: String,
     ) -> Result<Option<SequenceMetadataJs>> {
-        let store = self.inner.lock().map_err(lock_err)?;
+        let mut store = self.inner.lock().map_err(lock_err)?;
+        store.load_sequence_index().map_err(to_napi_err)?;
         Ok(store.get_sequence_metadata(&digest).map(|m| {
             SequenceMetadataJs {
                 name: m.name.clone(),

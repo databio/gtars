@@ -330,7 +330,10 @@ pub fn get_sequence_by_name_store(
 #[extendr]
 pub fn get_sequence_metadata_store(store_ptr: Robj, digest: &str) -> extendr_api::Result<Robj> {
     let digest = strip_sq_prefix(digest);
-    with_store_ref!(store_ptr, store, {
+    with_store!(store_ptr, store, {
+        store
+            .load_sequence_index()
+            .map_err(|e| extendr_api::Error::Other(format!("{}", e)))?;
         Ok(store
             .get_sequence_metadata(digest.as_bytes())
             .map(|meta| metadata_to_list(meta.clone()).into())
