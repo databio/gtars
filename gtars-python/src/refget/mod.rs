@@ -2709,11 +2709,21 @@ impl PyRefgetStore {
     ///     >>> for seq in sequences:
     ///     ...     print(f"{seq.chrom_name}:{seq.start}-{seq.end}")
     fn substrings_from_regions(
-        &self,
+        &mut self,
         collection_digest: &str,
         bed_file_path: &Bound<'_, PyAny>,
     ) -> PyResult<Vec<PyRetrievedSequence>> {
         let bed_file_path = bed_file_path.to_string();
+        // Load the collection and the sequence index (metadata stubs) so each
+        // region resolves; bodies stay lazy because get_substring reads ranges.
+        if !self.inner.is_collection_loaded(collection_digest) {
+            self.inner.load_collection(collection_digest).map_err(|e| {
+                pyo3::exceptions::PyKeyError::new_err(format!("{}", e))
+            })?;
+        }
+        self.inner.load_sequence_index().map_err(|e| {
+            PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Error loading index: {}", e))
+        })?;
         // Get iterator and collect results
         let iter = self
             .inner
