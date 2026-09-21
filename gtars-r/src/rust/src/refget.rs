@@ -465,9 +465,10 @@ pub fn list_collections_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
 /// @param store_ptr External pointer to RefgetStore
 #[extendr]
 pub fn list_sequences_store(store_ptr: Robj) -> extendr_api::Result<Robj> {
-    with_store_ref!(store_ptr, store, {
-        let sequences: Vec<Robj> = std::ops::Deref::deref(store)
+    with_store!(store_ptr, store, {
+        let sequences: Vec<Robj> = store
             .list_sequences()
+            .map_err(|e| extendr_api::Error::Other(format!("Error listing sequences: {}", e)))?
             .into_iter()
             .map(|meta| metadata_to_list(meta).into())
             .collect();

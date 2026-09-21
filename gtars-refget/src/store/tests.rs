@@ -3937,6 +3937,28 @@ fn test_export_fasta_lazy_loads_only_requested_sequence() {
 }
 
 #[test]
+fn test_export_fasta_lazy_loads_duplicate_named_sequences() {
+    // Two records share a name; export must load whichever one it writes.
+    let dir = tempdir().unwrap();
+    let store_path = dir.path().join("store");
+    let fasta_path = dir.path().join("dup.fa");
+    fs::write(&fasta_path, ">dup\nAAAA\n>dup\nCCCC\n").unwrap();
+
+    let mut writer = RefgetStore::on_disk(&store_path).unwrap();
+    let (collection, _) = writer
+        .add_sequence_collection_from_fasta(&fasta_path, FastaImportOptions::new())
+        .unwrap();
+    drop(writer);
+
+    let mut store = RefgetStore::open_local(&store_path).unwrap();
+    let output_path = dir.path().join("dup_out.fa");
+    store
+        .export_fasta(&collection.digest, &output_path, Some(vec!["dup"]), None)
+        .expect("export should load the sequence it writes");
+    assert!(fs::read_to_string(&output_path).unwrap().starts_with(">dup\n"));
+}
+
+#[test]
 fn test_open_remote_uses_cached_manifest_when_offline() {
     // Port 1 refuses connections, so the manifest refresh always fails.
     let remote_url = "http://127.0.0.1:1/store";
@@ -4741,9 +4763,10 @@ fn test_interleaved_writers_preserve_sequence_rows() {
     drop(writer_a);
     drop(writer_b);
 
-    let reopened = RefgetStore::open_local(&store_dir).unwrap();
-    let names: std::collections::HashSet<String> = std::ops::Deref::deref(&reopened)
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let names: std::collections::HashSet<String> = reopened
         .list_sequences()
+        .unwrap()
         .iter()
         .map(|m| m.name.clone())
         .collect();

@@ -3144,8 +3144,8 @@ impl PyRefgetStore {
     ///     >>> store = RefgetStore.in_memory()
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> print(f"Store contains {len(store)} sequences")
-    fn __len__(&self) -> usize {
-        self.inner.sequence_digests().count()
+    fn __len__(&mut self) -> PyResult<usize> {
+        Ok(self.list_sequences()?.len())
     }
 
     /// Clear sequence data from the store to free memory.
@@ -3174,12 +3174,8 @@ impl PyRefgetStore {
     ///     >>> store.add_sequence_collection_from_fasta("genome.fa")
     ///     >>> for seq_meta in store:
     ///     ...     print(f"{seq_meta.name}: {seq_meta.length} bp")
-    fn __iter__(slf: PyRef<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
-        let sequences = std::ops::Deref::deref(&slf.inner)
-            .list_sequences()
-            .into_iter()
-            .map(|meta| PySequenceMetadata::from(meta))
-            .collect();
+    fn __iter__(mut slf: PyRefMut<'_, Self>) -> PyResult<PyRefgetStoreIterator> {
+        let sequences = slf.list_sequences()?;
         Ok(PyRefgetStoreIterator {
             sequences,
             index: 0,

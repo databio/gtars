@@ -1318,3 +1318,32 @@ def test_remote_three_flows(tmp_path):
     store.load_sequence(digest)
     assert store.get_substring(digest, 1_000_000, 1_000_060) == sub
     assert len(seq_files()) == 1, "flow 3 should persist the sequence to cache"
+
+
+def test_remote_store_len_and_iter_see_every_sequence(tmp_path):
+    """len() and iteration must load a remote store's deferred sequence index."""
+    import re
+    import subprocess
+    import sys
+
+    served = tmp_path / "served"
+    fasta = tmp_path / "a.fa"
+    fasta.write_text(">chr1\nACGT\n>chr2\nGGCC\n")
+    writer = RefgetStore.on_disk(str(served))
+    writer.add_sequence_collection_from_fasta(str(fasta))
+    writer.write()
+
+    # A separate process: the binding holds the GIL during HTTP fetches.
+    server = subprocess.Popen(
+        [sys.executable, "-u", "-m", "http.server", "0", "--bind", "127.0.0.1",
+         "--directory", str(served)],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+    )
+    try:
+        port = re.search(r"port (\d+)", server.stdout.readline())[1]
+        url = f"http://127.0.0.1:{port}"
+        assert len(RefgetStore.open_remote(str(tmp_path / "c1"), url)) == 2
+        names = [m.name for m in RefgetStore.open_remote(str(tmp_path / "c2"), url)]
+        assert sorted(names) == ["chr1", "chr2"]
+    finally:
+        server.kill()

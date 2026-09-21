@@ -231,9 +231,10 @@ fn concurrent_processes_all_land_in_the_index() {
 
     // The store must still open, and the sequence index must carry one row per
     // writer's unique chromosome.
-    let reopened = RefgetStore::open_local(&store_dir).unwrap();
-    let names: std::collections::HashSet<String> = std::ops::Deref::deref(&reopened)
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let names: std::collections::HashSet<String> = reopened
         .list_sequences()
+        .unwrap()
         .iter()
         .map(|m| m.name.clone())
         .collect();
@@ -295,10 +296,11 @@ fn abandoned_lock_from_a_dead_process_is_broken() {
     let digests = collection_digests_on_disk(&store_dir);
     assert!(digests.contains(&seed), "the store lost data across the abort");
     assert!(lock_status(&store_dir).unwrap().is_none());
-    let reopened = RefgetStore::open_local(&store_dir).unwrap();
+    let mut reopened = RefgetStore::open_local(&store_dir).unwrap();
     assert!(
-        std::ops::Deref::deref(&reopened)
+        reopened
             .list_sequences()
+            .unwrap()
             .iter()
             .any(|m| m.name == "chr_after"),
         "the recovering writer's commit did not land"

@@ -144,7 +144,7 @@ fn run_build(matches: &ArgMatches) -> Result<()> {
     let elapsed = start.elapsed().as_secs_f64();
 
     // Best-effort base count from the loaded sequence index (for throughput).
-    for meta in std::ops::Deref::deref(&store).list_sequences() {
+    for meta in store.list_sequences()? {
         total_bases += meta.length as u64;
     }
 
@@ -283,30 +283,8 @@ fn run_export(matches: &ArgMatches) -> Result<()> {
         },
     };
 
-    // Load ONLY the sequence bytes this export needs. `load_all_sequences()`
-    // would pull EVERY sequence in the store into RAM, not just this
-    // collection's -- fatal on a large store (the vgp store holds ~384k
-    // sequences / hundreds of GB) and wasteful even when it fits. With
-    // `--names`, narrow further to just the requested sequences.
-    let collection = store
-        .get_collection(&digest)
-        .map_err(|e| anyhow::anyhow!("Failed to load collection {}: {}", digest, e))?;
-    let wanted: Option<std::collections::HashSet<&str>> =
-        names.as_ref().map(|v| v.iter().copied().collect());
-    for record in &collection.sequences {
-        let meta = record.metadata();
-        if wanted
-            .as_ref()
-            .is_some_and(|wanted| !wanted.contains(meta.name.as_str()))
-        {
-            continue;
-        }
-        store.load_sequence(&meta.sha512t24u).map_err(|e| {
-            anyhow::anyhow!("Failed to load sequence '{}': {}", meta.name, e)
-        })?;
-    }
-    let store = store.into_readonly();
-
+    // export_fasta loads only the sequences it writes, never the whole store
+    // (the vgp store holds ~384k sequences / hundreds of GB).
     let n_names = names.as_ref().map(|v| v.len());
     store
         .export_fasta(&digest, output, names, Some(line_width))
